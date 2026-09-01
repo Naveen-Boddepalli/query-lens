@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { runQuery } from '../runQuery.ts';
 import { createSeedDatabase } from '../seed.ts';
-import { IMPLEMENTED_STAGES } from '../types.ts';
+import { DEFAULT_ENGINE_OPTIONS, IMPLEMENTED_STAGES } from '../types.ts';
 import type { StepEvent } from '../types.ts';
 
 const db = createSeedDatabase();
@@ -57,11 +57,26 @@ describe('runQuery', () => {
     expect(optimize?.label).toMatch(/no rewrite/i);
   });
 
-  it('produces a longer trace for the indexed query than the scan', () => {
+  it('gives the indexed query one more optimizer step than the scan', () => {
     // plan.md §9: the two queries are meant to be contrasted side by side.
-    const indexed = run('SELECT * FROM users WHERE id = 5').events.length;
-    const scan = run('SELECT * FROM users WHERE age > 30').events.length;
-    expect(indexed).toBeGreaterThan(scan);
+    expect(rules(run('SELECT * FROM users WHERE id = 5').events)).toHaveLength(2);
+    expect(rules(run('SELECT * FROM users WHERE age > 30').events)).toHaveLength(1);
+  });
+
+  it('makes the scan read every page, and evict', () => {
+    const { events } = run('SELECT * FROM users WHERE age > 30');
+    const loads = events.filter((e) => e.stage === 'buffer' && e.action === 'load');
+    const evictions = events.filter((e) => e.stage === 'buffer' && e.action === 'evict');
+    const pages = Math.ceil(db.tables.users!.rows.length / DEFAULT_ENGINE_OPTIONS.rowsPerPage);
+
+    expect(loads).toHaveLength(pages);
+    expect(evictions).toHaveLength(pages - DEFAULT_ENGINE_OPTIONS.bufferFrames);
+  });
+
+  it('does no page I/O for an IndexScan yet — the B+Tree is M4', () => {
+    // Reading every page here and calling it an index scan would be a lie.
+    const { events } = run('SELECT * FROM users WHERE id = 5');
+    expect(events.filter((e) => e.stage === 'buffer')).toHaveLength(0);
   });
 });
 

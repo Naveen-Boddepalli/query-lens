@@ -91,6 +91,12 @@ interface StepEventBase {
   id: number;
   /** Human-readable narration. This is what turns an animation into a lesson. */
   label: string;
+  /**
+   * Playback pacing weight, default 1. A disk read should *feel* slower than a
+   * buffer hit. This is a presentation hint, not a latency claim — the engine
+   * makes no measurement it could honestly report.
+   */
+  dwell?: number;
   predictable?: PredictionPrompt;
 }
 
@@ -100,7 +106,15 @@ export type StepEventBody =
   | { stage: 'optimize'; rule: string; before: PlanNode; after: PlanNode }
   | { stage: 'execute'; op: string; rowsProduced: number }
   | { stage: 'buffer'; action: 'hit' | 'miss' | 'load'; pageId: number; frameId: number }
-  | { stage: 'buffer'; action: 'evict'; frameId: number; victimPageId: number; pageId: number }
+  | {
+      stage: 'buffer';
+      action: 'evict';
+      frameId: number;
+      victimPageId: number;
+      pageId: number;
+      /** Where the clock hand ended up. Absent under LRU, which has no hand. */
+      clockHand?: number;
+    }
   /**
    * One tick of the clock-sweep hand. Emitted only by the `clock` policy, so
    * the decrement walk is visible rather than hidden inside the eviction.
@@ -184,4 +198,9 @@ export interface RunResult {
  * honesty about ground truth a top-line goal, and a pipeline that looks
  * complete when it is not breaks that. Grows one milestone at a time.
  */
-export const IMPLEMENTED_STAGES: readonly Stage[] = ['parse', 'plan', 'optimize'] as const;
+export const IMPLEMENTED_STAGES: readonly Stage[] = [
+  'parse',
+  'plan',
+  'optimize',
+  'buffer',
+] as const;

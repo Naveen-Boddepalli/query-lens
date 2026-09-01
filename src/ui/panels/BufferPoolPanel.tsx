@@ -1,59 +1,149 @@
-import type { BufferFrame, StepEvent } from '../../engine/index.ts';
+import { USAGE_COUNT_CAP } from '../../engine/index.ts';
+import type { BufferFrame, ReplacementPolicyName, StepEvent } from '../../engine/index.ts';
 
 export interface BufferPoolPanelProps {
   frames: BufferFrame[];
   stats: { hits: number; misses: number; evictions: number };
   clockHand: number;
-  policy: 'lru' | 'clock';
+  policy: ReplacementPolicyName;
   lastEvent: StepEvent | null;
 }
 
-function frameTone(frame: BufferFrame, lastEvent: StepEvent | null): string {
-  if (lastEvent?.stage === 'buffer' && lastEvent.frameId === frame.frameId) {
-    if (lastEvent.action === 'hit') return 'border-hit bg-hit/15';
-    if (lastEvent.action === 'load') return 'border-miss bg-miss/15';
-    if (lastEvent.action === 'evict') return 'border-evict bg-evict/15';
-    if (lastEvent.action === 'sweep') return 'border-accent bg-accent/10';
-  }
-  return frame.pageId === null ? 'border-edge/60 bg-transparent' : 'border-edge bg-surface-3';
+type FrameMood = 'hit' | 'load' | 'evict' | 'sweep' | null;
+
+function moodOf(frame: BufferFrame, lastEvent: StepEvent | null): FrameMood {
+  if (lastEvent?.stage !== 'buffer') return null;
+  if (lastEvent.action === 'miss') return null;
+  return lastEvent.frameId === frame.frameId ? lastEvent.action : null;
 }
 
-export function BufferPoolPanel({ frames, stats, clockHand, policy, lastEvent }: BufferPoolPanelProps) {
-  const total = stats.hits + stats.misses;
-  const hitRate = total === 0 ? '—' : `${Math.round((stats.hits / total) * 100)}%`;
+const MOOD_CLASS: Record<Exclude<FrameMood, null>, string> = {
+  hit: 'border-hit bg-hit/15 shadow-[0_0_18px_-4px_var(--color-hit)]',
+  load: 'border-miss bg-miss/15 shadow-[0_0_18px_-4px_var(--color-miss)]',
+  evict: 'border-evict bg-evict/20 shadow-[0_0_18px_-4px_var(--color-evict)]',
+  sweep: 'border-accent bg-accent/10',
+};
+
+const MOOD_TAG: Record<Exclude<FrameMood, null>, string> = {
+  hit: 'hit',
+  load: 'disk read',
+  evict: 'evicted',
+  sweep: 'swept',
+};
+
+export function BufferPoolPanel({
+  frames,
+  stats,
+  clockHand,
+  policy,
+  lastEvent,
+}: BufferPoolPanelProps) {
+  const reads = stats.hits + stats.misses;
+  const hitRate = reads === 0 ? '—' : `${Math.round((stats.hits / reads) * 100)}%`;
 
   return (
-    <div className="space-y-4">
+    <div className="flex h-full flex-col gap-3">
       <div className="grid grid-cols-4 gap-2">
-        {frames.map((frame) => (
-          <div
-            key={frame.frameId}
-            className={`rounded-lg border p-2.5 transition-colors ${frameTone(frame, lastEvent)}`}
-          >
-            <div className="flex items-baseline justify-between text-[10px] text-ink-dim">
-              <span>frame {frame.frameId}</span>
-              {policy === 'clock' && clockHand === frame.frameId && <span title="clock hand">🕐</span>}
-            </div>
-            <div className="mt-1 font-mono text-sm">
-              {frame.pageId === null ? (
-                <span className="text-ink-dim/60">empty</span>
-              ) : (
-                <span>page {frame.pageId}</span>
+        {frames.map((frame) => {
+          const mood = moodOf(frame, lastEvent);
+          const empty = frame.pageId === null;
+          return (
+            <div
+              key={frame.frameId}
+              className={[
+                'relative rounded-lg border p-2.5 transition-all duration-200',
+                mood
+                  ? MOOD_CLASS[mood]
+                  : empty
+                    ? 'border-dashed border-edge/60'
+                    : 'border-edge bg-surface-3',
+              ].join(' ')}
+            >
+              <div className="flex items-baseline justify-between text-[10px] text-ink-dim">
+                <span>frame {frame.frameId}</span>
+                {policy === 'clock' && clockHand === frame.frameId && (
+                  <span title="clock hand is here" aria-label="clock hand">
+                    👉
+                  </span>
+                )}
+              </div>
+
+              <div className="mt-0.5 font-mono text-sm">
+                {empty ? (
+                  <span className="text-ink-dim/50">empty</span>
+                ) : (
+                  <span>page {frame.pageId}</span>
+                )}
+              </div>
+
+              {policy === 'clock' && !empty && (
+                <div
+                  className="mt-1 flex gap-0.5"
+                  title={`usage count ${frame.usageCount} of ${USAGE_COUNT_CAP}`}
+                >
+                  {Array.from({ length: USAGE_COUNT_CAP }, (_, i) => (
+                    <span
+                      key={i}
+                      className={`h-1 flex-1 rounded-full ${
+                        i < frame.usageCount ? 'bg-accent' : 'bg-edge'
+                      }`}
+                    />
+                  ))}
+                </div>
+              )}
+
+              {mood && (
+                <div className="mt-1 text-[9px] tracking-wide uppercase opacity-80">
+                  {MOOD_TAG[mood]}
+                </div>
               )}
             </div>
-            {policy === 'clock' && frame.pageId !== null && (
-              <div className="mt-1 text-[10px] text-ink-dim">usage {frame.usageCount}/5</div>
-            )}
-          </div>
-        ))}
+          );
+        })}
       </div>
 
-      <dl className="flex gap-5 text-xs">
-        <div><dt className="text-ink-dim">hits</dt><dd className="font-mono text-hit">{stats.hits}</dd></div>
-        <div><dt className="text-ink-dim">misses</dt><dd className="font-mono text-miss">{stats.misses}</dd></div>
-        <div><dt className="text-ink-dim">evictions</dt><dd className="font-mono text-evict">{stats.evictions}</dd></div>
-        <div><dt className="text-ink-dim">hit rate</dt><dd className="font-mono">{hitRate}</dd></div>
+      <dl className="flex flex-wrap gap-x-5 gap-y-1 text-xs">
+        <div>
+          <dt className="text-ink-dim">hits</dt>
+          <dd className="font-mono text-hit">{stats.hits}</dd>
+        </div>
+        <div>
+          <dt className="text-ink-dim">misses</dt>
+          <dd className="font-mono text-miss">{stats.misses}</dd>
+        </div>
+        <div>
+          <dt className="text-ink-dim">disk reads</dt>
+          <dd className="font-mono text-miss">{stats.misses}</dd>
+        </div>
+        <div>
+          <dt className="text-ink-dim">evictions</dt>
+          <dd className="font-mono text-evict">{stats.evictions}</dd>
+        </div>
+        <div>
+          <dt className="text-ink-dim">hit rate</dt>
+          <dd className="font-mono">{hitRate}</dd>
+        </div>
       </dl>
+
+      <p className="mt-auto text-[11px] leading-relaxed text-ink-dim">
+        {policy === 'lru' ? (
+          <>
+            <span className="text-ink">LRU</span> evicts whichever page was used
+            longest ago. It is the policy every course teaches — and the one
+            PostgreSQL deliberately avoids, because maintaining the ordering needs a
+            lock on every single page access.
+          </>
+        ) : (
+          <>
+            <span className="text-ink">Clock sweep</span> is what PostgreSQL actually
+            does. Each frame carries a usage count; the hand walks in a circle,
+            decrementing as it goes, and evicts the first frame it finds at zero. Hot
+            pages survive several passes with no list to maintain. On a uniform scan
+            it picks the same victims as LRU — the two only diverge once some pages
+            are hotter than others.
+          </>
+        )}
+      </p>
     </div>
   );
 }

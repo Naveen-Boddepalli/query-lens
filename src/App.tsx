@@ -15,7 +15,9 @@ import { SqlEditor } from './ui/SqlEditor.tsx';
 import { StageDetail } from './ui/panels/StageDetail.tsx';
 import { usePlayback, usePlaybackShortcuts } from './ui/usePlayback.ts';
 
-const INITIAL_SQL = 'SELECT *\nFROM users\nWHERE id = 5;';
+// The scan, not the point lookup, until M4 builds the B+Tree: this is the
+// query that exercises the newest layer (12 pages through 8 frames).
+const INITIAL_SQL = 'SELECT name, age\nFROM users\nWHERE age > 30;';
 
 export default function App() {
   const [sql, setSql] = useState(INITIAL_SQL);
@@ -31,7 +33,9 @@ export default function App() {
     [result, options],
   );
 
-  const playback = usePlayback(result?.events.length ?? 0);
+  // Disk reads dwell longer than buffer hits during playback.
+  const dwells = useMemo(() => result?.events.map((e) => e.dwell ?? 1) ?? [], [result]);
+  const playback = usePlayback(result?.events.length ?? 0, { dwells });
   usePlaybackShortcuts(playback);
 
   const state = projector?.at(playback.step) ?? null;

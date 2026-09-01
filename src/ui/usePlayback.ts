@@ -26,6 +26,12 @@ export interface PlaybackOptions {
    * the seam for predict-then-reveal, which must halt before revealing.
    */
   onHalt?: (step: number) => boolean;
+  /**
+   * Per-event pacing weights, indexed like the event array. A disk read dwells
+   * longer than a buffer hit. Passed as an array rather than a callback so the
+   * hook stays free of caller-owned refs.
+   */
+  dwells?: readonly number[];
 }
 
 /** Playback is an index into an array we already own — nothing more. */
@@ -73,11 +79,15 @@ export function usePlayback(length: number, options?: PlaybackOptions): Playback
     [length],
   );
 
+  // The weight of the event currently on screen: we linger on what just
+  // happened before moving to the next thing.
+  const dwell = options?.dwells?.[step - 1] ?? 1;
+
   useEffect(() => {
     if (!playing) return;
-    const id = window.setTimeout(advance, BASE_STEP_MS / speed);
+    const id = window.setTimeout(advance, (BASE_STEP_MS * dwell) / speed);
     return () => { window.clearTimeout(id); };
-  }, [playing, speed, advance]);
+  }, [playing, speed, dwell, advance]);
 
   return {
     step, playing, speed, atStart, atEnd,

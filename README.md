@@ -6,9 +6,9 @@ An in-browser toy relational database engine that animates a SQL query as it mov
 A learning tool, not a production DB tool. See [plan.md](plan.md) for scope and
 [RESEARCH.md](RESEARCH.md) for the evidence the plan is built on.
 
-## Status: M2 complete — parser, planner, optimizer
+## Status: M3 complete — parser, planner, optimizer, buffer pool
 
-Three stages of eight are real. `IMPLEMENTED_STAGES` in
+Four stages of eight are real. `IMPLEMENTED_STAGES` in
 [types.ts](src/engine/types.ts) is the single source of truth for that, and the UI reads it: the
 header counts built stages, unbuilt ones are dashed in the pipeline tracker, and selecting one says
 plainly that it is not built yet. plan.md §2 makes honesty about ground truth a top-line goal, and a
@@ -19,8 +19,8 @@ pipeline that *looks* complete when it is not would teach the wrong thing.
 | M0 | Scaffold, event contract, fold, playback, UI shell | ✅ done |
 | M1 | Recursive-descent parser + AST visualization | ✅ done |
 | M2 | Planner + predicate pushdown + plan tree | ✅ done |
-| M3 | Pages, buffer pool, LRU **and** clock sweep | next |
-| M4 | B+Tree index + traversal visualization | |
+| M3 | Pages, buffer pool, LRU **and** clock sweep | ✅ done |
+| M4 | B+Tree index + traversal visualization | next |
 | M5 | Volcano executor wiring it all together | |
 | M6 | Lock manager visual layer | |
 | M6.5 | Predict-then-reveal + editable seed data | |
@@ -101,7 +101,37 @@ something untrue).
 the first gets both rules, the second only pushdown. That is plan.md §9's side-by-side contrast
 beginning to show up.
 
-## Decisions made during M0/M1/M2
+## The storage layer
+
+48 rows at 4 rows/page is **12 pages against 8 frames**, so a full scan evicts four times. That is
+deliberate: a table small enough to never evict would make the buffer pool — the product's best
+differentiator — look inert, and plan.md §9 wants the scan's eviction storm shown next to an index
+lookup that touches almost nothing.
+
+Replacement is pluggable behind one interface with two implementations:
+
+- **LRU** — the textbook policy, and the one PostgreSQL deliberately avoids: maintaining the ordering
+  needs a lock on every page access.
+- **Clock sweep** — what PostgreSQL actually does. `usage_count` capped at 5, a hand that walks in a
+  circle decrementing as it goes, evicting the first frame at zero with `refcount == 0`.
+
+### The toggle does *not* show what plan.md §7.5 claims
+
+§7.5 pitches it as "same access pattern, two policies, different victim". That is only true when
+access is **skewed**. On a uniform sequential scan every page is equally cold, so both policies evict
+exactly the same pages — clock just takes 8 extra sweep steps to reach the same answer (44 events vs
+36). Both facts are pinned by tests, and the panel says so rather than implying a difference that is
+not there. The contrast becomes real in **M4**, where index traversal re-reads the root page
+constantly and clock's usage counts finally earn their keep.
+
+### Simulated latency
+
+plan.md §7.5 asks for latency distinguishing a buffer hit from a disk read. The engine is pure and
+synchronous, so it cannot sleep and has no measurement it could honestly report. Instead a disk read
+carries `dwell: 2.5` — an explicit **playback pacing weight**, not a latency claim — and playback
+lingers on it proportionally.
+
+## Decisions made during M0/M1/M2/M3
 
 - **TypeScript pinned to 6.0.3.** `typescript-eslint@8.69.0` declares `typescript: ">=4.8.4 <6.1.0"`
   — it excludes TS 7. Verified against the registry. Revisit once 7.1 ships a stable compiler API.
@@ -128,3 +158,10 @@ beginning to show up.
   `AstTree` and `PlanTree` are thin wrappers. The B+Tree in M4 should be a third.
 - **Rewrites mark changed nodes by object identity**, not by id bookkeeping that could drift: a rule
   returns the `Plan` objects it produced, and the display conversion highlights exactly those.
+- **The default query is the sequential scan, not the point lookup**, until M4 builds the B+Tree.
+  An `IndexScan` plan emits *no* page I/O today: reading every page and calling it an index scan
+  would be exactly the lie this product exists to avoid. The default flips back after M4.
+- **Buffer events carry `clockHand` on eviction.** The hand also advances past pinned frames and past
+  the victim itself, and those moves emit no event — so the UI could not reconstruct the position.
+  A test folds the emitted events and compares the result against the engine's real buffer state,
+  which is how that gap was found.

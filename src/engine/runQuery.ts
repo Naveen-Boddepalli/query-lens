@@ -10,6 +10,7 @@
 
 import { emitParseEvents, parse } from './parser/index.ts';
 import { emitPlanEvents } from './planner/index.ts';
+import { buildHeap, emitScanEvents } from './storage/index.ts';
 import { createTracer } from './trace.ts';
 import { DEFAULT_ENGINE_OPTIONS } from './types.ts';
 import type { Database, EngineOptions, RunResult } from './types.ts';
@@ -17,7 +18,7 @@ import type { Database, EngineOptions, RunResult } from './types.ts';
 export function runQuery(
   sql: string,
   db: Database,
-  _options: EngineOptions = DEFAULT_ENGINE_OPTIONS,
+  options: EngineOptions = DEFAULT_ENGINE_OPTIONS,
 ): RunResult {
   const { emit, drain } = createTracer();
 
@@ -58,9 +59,12 @@ export function runQuery(
   }
 
   emitParseEvents(emit, parsed.ast);
-  emitPlanEvents(emit, parsed.ast, table);
+  const plan = emitPlanEvents(emit, parsed.ast, table);
 
-  // M3 onward appends the storage, index and execution stages here.
+  const heap = buildHeap(table, options.rowsPerPage);
+  emitScanEvents(emit, plan, heap, options);
+
+  // M4 adds the B+Tree; M5 the executor, which turns these page reads into rows.
   return { events: drain(), rows: [] };
 }
 

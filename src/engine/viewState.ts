@@ -165,6 +165,7 @@ export function applyEvent(state: ViewState, event: StepEvent): ViewState {
             ...state.bufferStats,
             evictions: state.bufferStats.evictions + 1,
           };
+          if (event.clockHand !== undefined) next.clockHand = event.clockHand;
           return next;
         case 'sweep':
           next.frames = touchFrame(state.frames, event.frameId, {

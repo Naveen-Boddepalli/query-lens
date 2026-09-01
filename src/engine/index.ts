@@ -3,6 +3,8 @@ export { createSeedDatabase } from './seed.ts';
 export { createTracer } from './trace.ts';
 export { parse, toDisplayTree, columnsIn } from './parser/index.ts';
 export { buildPlan, exprToSql, optimize, toPlanDisplay } from './planner/index.ts';
+export { buildHeap, createBufferPool, policyFor, USAGE_COUNT_CAP } from './storage/index.ts';
+export type { BufferPool, Frame as BufferPoolFrame, Heap, Page } from './storage/index.ts';
 export type { Plan } from './planner/index.ts';
 export type { Expr, SelectStatement } from './parser/index.ts';
 export {
