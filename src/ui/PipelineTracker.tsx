@@ -1,0 +1,44 @@
+import { STAGES } from '../engine/index.ts';
+import type { Stage } from '../engine/index.ts';
+import { STAGE_META } from './stageMeta.ts';
+
+export interface PipelineTrackerProps {
+  current: Stage | null;
+  visited: ReadonlySet<Stage>;
+  selected: Stage | null;
+  onSelect: (stage: Stage) => void;
+}
+
+export function PipelineTracker({ current, visited, selected, onSelect }: PipelineTrackerProps) {
+  return (
+    <nav aria-label="Query pipeline" className="flex flex-wrap items-center gap-1">
+      {STAGES.map((stage, i) => {
+        const meta = STAGE_META[stage];
+        const isCurrent = stage === current;
+        const isVisited = visited.has(stage);
+        return (
+          <div key={stage} className="flex items-center gap-1">
+            {i > 0 && <span aria-hidden className="text-ink-dim/50">→</span>}
+            <button
+              type="button"
+              onClick={() => { onSelect(stage); }}
+              aria-current={isCurrent ? 'step' : undefined}
+              title={meta.blurb}
+              className={[
+                'rounded-md border px-2.5 py-1 text-xs font-medium transition-colors',
+                isCurrent
+                  ? 'border-accent bg-accent/15 text-ink'
+                  : isVisited
+                    ? `border-edge bg-surface-3 ${meta.tone}`
+                    : 'border-edge/60 bg-transparent text-ink-dim/60',
+                stage === selected ? 'ring-1 ring-accent/70' : '',
+              ].join(' ')}
+            >
+              {meta.title}
+            </button>
+          </div>
+        );
+      })}
+    </nav>
+  );
+}

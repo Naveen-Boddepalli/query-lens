@@ -1,0 +1,5 @@
+# CodeMirror breaks — in types and at runtime — if two copies of
+# @codemirror/state or @codemirror/view are loaded. Force exactly one.
+overrides:
+  '@codemirror/state': 6.7.2
+  '@codemirror/view': 6.43.10
