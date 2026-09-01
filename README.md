@@ -6,18 +6,19 @@ An in-browser toy relational database engine that animates a SQL query as it mov
 A learning tool, not a production DB tool. See [plan.md](plan.md) for scope and
 [RESEARCH.md](RESEARCH.md) for the evidence the plan is built on.
 
-## Status: M0 complete — scaffold + UI shell
+## Status: M1 complete — parser + AST visualization
 
-The pipeline you see running today is driven by a **hand-written canned trace**, not by an engine.
-The UI says so out loud (`synthetic: true` → the amber chip in the header) because plan.md §2 makes
-honesty about ground truth a top-line goal, and a scaffold that silently fakes a trace breaks it.
-That flag goes false for good in M5.
+One stage of eight is real. `IMPLEMENTED_STAGES` in
+[types.ts](src/engine/types.ts) is the single source of truth for that, and the UI reads it: the
+header counts built stages, unbuilt ones are dashed in the pipeline tracker, and selecting one says
+plainly that it is not built yet. plan.md §2 makes honesty about ground truth a top-line goal, and a
+pipeline that *looks* complete when it is not would teach the wrong thing.
 
 | Milestone | Scope | State |
 |---|---|---|
 | M0 | Scaffold, event contract, fold, playback, UI shell | ✅ done |
-| M1 | Recursive-descent parser + AST visualization | next |
-| M2 | Planner + predicate pushdown + plan tree | |
+| M1 | Recursive-descent parser + AST visualization | ✅ done |
+| M2 | Planner + predicate pushdown + plan tree | next |
 | M3 | Pages, buffer pool, LRU **and** clock sweep | |
 | M4 | B+Tree index + traversal visualization | |
 | M5 | Volcano executor wiring it all together | |
@@ -60,7 +61,24 @@ would forfeit the ability to animate the *transition*, which is the entire produ
    a lesson.
 4. Correctness tests come *before* visualization (see plan.md §7.6 for the B+Tree case).
 
-## Decisions made during M0
+## The v0 SQL subset
+
+```
+statement  := select [';'] EOF
+select     := SELECT selectList FROM identifier [WHERE expr]
+selectList := '*' | identifier (',' identifier)*
+expr       := comparison (AND comparison)*
+comparison := operand ('=' | '<' | '>') operand
+operand    := identifier | number | string | NULL | TRUE | FALSE
+```
+
+Anything outside it gets a message naming the scope rather than a token-level complaint —
+`JOIN` says joins arrive in v1, `>=` says v0 handles `=`, `<` and `>`, `a.id` says qualified names
+come with joins. The tokenizer deliberately recognises keywords and operators the parser rejects,
+purely so those messages are possible. Errors carry a character span, which CodeMirror renders as a
+squiggle under the offending text.
+
+## Decisions made during M0/M1
 
 - **TypeScript pinned to 6.0.3.** `typescript-eslint@8.69.0` declares `typescript: ">=4.8.4 <6.1.0"`
   — it excludes TS 7. Verified against the registry. Revisit once 7.1 ships a stable compiler API.
@@ -73,3 +91,13 @@ would forfeit the ability to animate the *transition*, which is the entire produ
   right call — Monaco is 2–5 MB — but the budget is 2–3× what the research assumed.
 - **`@codemirror/state` and `/view` are pinned via `pnpm-workspace.yaml` overrides.** CodeMirror
   breaks, in types and at runtime, if two copies are loaded.
+- **The parser emits the parse stage as a progressive reveal** — SELECT list, then FROM, then WHERE,
+  then a summary. Display-tree node ids are stable across those steps so the tree animates as it
+  grows instead of remounting.
+- **`Mod-Enter` is a CodeMirror keybinding at `Prec.highest`, not a DOM handler.** The default keymap
+  binds it to `insertBlankLine` and consumes the event before React sees it. It re-emits as a DOM
+  `CustomEvent` so the extension array can stay module-scoped — rebuilding it per render would tear
+  the editor down on every keystroke.
+- **React Flow + d3-hierarchy for trees**, as plan.md §6 specifies: d3 does the layout maths,
+  React Flow only draws. Cost is ~62 kB gzip. Bundle is now 250 kB gzip total; if that becomes a
+  problem, these trees are static layouts and could be plain SVG.

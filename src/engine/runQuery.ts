@@ -8,17 +8,70 @@
  * UI holds the whole array a worker boundary buys nothing.
  */
 
-import { buildPlaceholderTrace } from './placeholderTrace.ts';
+import { emitParseEvents, parse } from './parser/index.ts';
+import { createTracer } from './trace.ts';
 import { DEFAULT_ENGINE_OPTIONS } from './types.ts';
 import type { Database, EngineOptions, RunResult } from './types.ts';
 
 export function runQuery(
-  _sql: string,
-  _db: Database,
+  sql: string,
+  db: Database,
   _options: EngineOptions = DEFAULT_ENGINE_OPTIONS,
 ): RunResult {
-  // M0: no parser, no planner, no executor yet — hand back the canned trace so
-  // the playback architecture can be exercised end to end. M1 replaces this
-  // with a real tokenizer + recursive-descent parse of `_sql`.
-  return buildPlaceholderTrace();
+  const { emit, drain } = createTracer();
+
+  const parsed = parse(sql);
+  if (!parsed.ok) {
+    return { events: drain(), rows: [], error: parsed.error };
+  }
+
+  const table = db.tables[parsed.ast.from.name];
+  if (!table) {
+    const known = Object.keys(db.tables);
+    return {
+      events: drain(),
+      rows: [],
+      error: {
+        message: `There is no table called \`${parsed.ast.from.name}\`.`,
+        hint: known.length === 1 ? `The only table is \`${known[0]}\`.` : `Tables: ${known.join(', ')}.`,
+        from: parsed.ast.from.span.from,
+        to: parsed.ast.from.span.to,
+      },
+    };
+  }
+
+  const unknownColumn = referencedColumns(parsed.ast).find(
+    (c) => !table.columns.includes(c.name),
+  );
+  if (unknownColumn) {
+    return {
+      events: drain(),
+      rows: [],
+      error: {
+        message: `\`${table.name}\` has no column called \`${unknownColumn.name}\`.`,
+        hint: `Columns: ${table.columns.join(', ')}.`,
+        from: unknownColumn.span.from,
+        to: unknownColumn.span.to,
+      },
+    };
+  }
+
+  emitParseEvents(emit, parsed.ast);
+
+  // M2 onward appends the planner, optimizer, executor and storage stages here.
+  return { events: drain(), rows: [] };
+}
+
+function referencedColumns(ast: import('./parser/index.ts').SelectStatement) {
+  const refs: { name: string; span: { from: number; to: number } }[] = [];
+  if (ast.select.kind === 'columns') refs.push(...ast.select.names);
+  if (ast.where) {
+    const stack = [ast.where];
+    while (stack.length > 0) {
+      const e = stack.pop()!;
+      if (e.kind === 'column') refs.push({ name: e.name, span: e.span });
+      if (e.kind === 'compare' || e.kind === 'and') stack.push(e.left, e.right);
+    }
+  }
+  return refs;
 }

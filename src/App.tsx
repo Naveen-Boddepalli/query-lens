@@ -3,9 +3,11 @@ import {
   createSeedDatabase,
   createTraceProjector,
   DEFAULT_ENGINE_OPTIONS,
+  IMPLEMENTED_STAGES,
   runQuery,
+  STAGES,
 } from './engine/index.ts';
-import type { ReplacementPolicyName, RunResult, Stage } from './engine/index.ts';
+import type { ReplacementPolicyName, RunResult, Span, Stage } from './engine/index.ts';
 import { DisclaimerBanner } from './ui/DisclaimerBanner.tsx';
 import { PipelineTracker } from './ui/PipelineTracker.tsx';
 import { PlaybackControls } from './ui/PlaybackControls.tsx';
@@ -34,7 +36,6 @@ export default function App() {
 
   const state = projector?.at(playback.step) ?? null;
 
-  // Stages the run has reached so far, for the tracker's "visited" styling.
   const visited = useMemo(() => {
     const seen = new Set<Stage>();
     for (const e of result?.events.slice(0, playback.step) ?? []) seen.add(e.stage);
@@ -42,6 +43,10 @@ export default function App() {
   }, [result, playback.step]);
 
   const activeStage = pinnedStage ?? state?.stage ?? null;
+
+  // The source range the current step is consuming, mirrored into the editor.
+  const activeSpan: Span | undefined =
+    state?.lastEvent?.stage === 'parse' ? state.lastEvent.span : undefined;
 
   function run() {
     setResult(runQuery(sql, db, options));
@@ -56,19 +61,23 @@ export default function App() {
       <header className="flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b border-edge px-4 py-3">
         <h1 className="text-lg font-semibold tracking-tight">QueryLens</h1>
         <p className="text-xs text-ink-dim">see what your SQL actually does</p>
-        {result?.synthetic && (
-          <span
-            className="ml-auto rounded-full border border-miss/60 bg-miss/10 px-2.5 py-0.5 text-[11px] text-miss"
-            title="No engine has run. This trace is hand-written scaffolding for the playback UI."
-          >
-            canned trace · engine not built yet (M0)
-          </span>
-        )}
+        <span
+          className="ml-auto rounded-full border border-edge bg-surface-2 px-2.5 py-0.5 text-[11px] text-ink-dim"
+          title={`Built: ${IMPLEMENTED_STAGES.join(', ')}. The rest of the pipeline is not implemented yet.`}
+        >
+          under construction · {IMPLEMENTED_STAGES.length}/{STAGES.length} stages built
+        </span>
       </header>
 
       <main className="grid flex-1 gap-4 p-4 lg:grid-cols-[minmax(280px,380px)_1fr]">
         <div className="space-y-3">
-          <SqlEditor value={sql} onChange={setSql} onRun={run} />
+          <SqlEditor
+            value={sql}
+            onChange={setSql}
+            onRun={run}
+            error={result?.error}
+            activeSpan={activeSpan}
+          />
           <div className="flex items-center gap-2">
             <button
               type="button"
@@ -108,9 +117,14 @@ export default function App() {
 
           {/* Fixed height on purpose: if the panel resizes with its content, the
               playback controls below it move out from under the cursor mid-step. */}
-          <div className="h-96 overflow-y-auto rounded-lg border border-edge bg-surface-2 p-4">
+          <div className="h-[27rem] overflow-hidden rounded-lg border border-edge bg-surface-2 p-4">
             {activeStage && state ? (
-              <StageDetail stage={activeStage} state={state} policy={policy} />
+              <StageDetail
+                stage={activeStage}
+                state={state}
+                policy={policy}
+                activeSpan={activeSpan}
+              />
             ) : (
               <p className="text-sm text-ink-dim">
                 Nothing has run yet. Press <kbd className="rounded border border-edge px-1">Run</kbd>{' '}

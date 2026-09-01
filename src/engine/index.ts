@@ -1,6 +1,8 @@
 export { runQuery } from './runQuery.ts';
 export { createSeedDatabase } from './seed.ts';
 export { createTracer } from './trace.ts';
+export { parse, toDisplayTree, columnsIn } from './parser/index.ts';
+export type { Expr, SelectStatement } from './parser/index.ts';
 export {
   applyEvent,
   createTraceProjector,
@@ -8,7 +10,7 @@ export {
   stateAt,
 } from './viewState.ts';
 export type { BufferFrame, LockHeld, TraceProjector, ViewState } from './viewState.ts';
-export { DEFAULT_ENGINE_OPTIONS, STAGES } from './types.ts';
+export { DEFAULT_ENGINE_OPTIONS, IMPLEMENTED_STAGES, STAGES } from './types.ts';
 export type {
   ASTNode,
   Database,
@@ -21,6 +23,7 @@ export type {
   ReplacementPolicyName,
   Row,
   RunResult,
+  Span,
   SqlValue,
   Stage,
   StepEvent,

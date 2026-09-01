@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import type { RefObject } from 'react';
 import { EditorState } from '@codemirror/state';
 import type { Extension } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
@@ -9,6 +10,8 @@ export interface CodeMirrorEditorProps {
   extensions: Extension[];
   className?: string;
   ariaLabel?: string;
+  /** Populated with the live view, so callers can dispatch effects into it. */
+  viewRef?: RefObject<EditorView | null>;
 }
 
 /**
@@ -23,9 +26,10 @@ export function CodeMirrorEditor({
   extensions,
   className,
   ariaLabel,
+  viewRef,
 }: CodeMirrorEditorProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
-  const viewRef = useRef<EditorView | null>(null);
+  const ownViewRef = useRef<EditorView | null>(null);
 
   const onChangeRef = useRef(onChange);
   useEffect(() => {
@@ -50,18 +54,20 @@ export function CodeMirrorEditor({
         ],
       }),
     });
-    viewRef.current = view;
+    ownViewRef.current = view;
+    if (viewRef) viewRef.current = view;
 
     return () => {
       view.destroy();
-      viewRef.current = null;
+      ownViewRef.current = null;
+      if (viewRef) viewRef.current = null;
     };
     // `value` is intentionally read only as the initial document.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [extensions]);
+  }, [extensions, viewRef]);
 
   useEffect(() => {
-    const view = viewRef.current;
+    const view = ownViewRef.current;
     if (!view) return;
     const current = view.state.doc.toString();
     if (current === value) return;

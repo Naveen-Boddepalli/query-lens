@@ -1,5 +1,7 @@
-import type { ReplacementPolicyName, Stage, ViewState } from '../../engine/index.ts';
+import { IMPLEMENTED_STAGES } from '../../engine/index.ts';
+import type { ReplacementPolicyName, Span, Stage, ViewState } from '../../engine/index.ts';
 import { STAGE_META } from '../stageMeta.ts';
+import { AstTree } from './AstTree.tsx';
 import { BufferPoolPanel } from './BufferPoolPanel.tsx';
 import { ResultPanel } from './ResultPanel.tsx';
 import { TreePanel } from './TreePanel.tsx';
@@ -8,18 +10,31 @@ export interface StageDetailProps {
   stage: Stage;
   state: ViewState;
   policy: ReplacementPolicyName;
+  activeSpan?: Span | undefined;
 }
 
-function Placeholder({ what, milestone }: { what: string; milestone: string }) {
+/**
+ * Shown for stages the engine does not implement yet. Being explicit about
+ * this is not an apology — a pipeline that looks complete when it is not would
+ * teach the wrong thing (plan.md §2).
+ */
+function NotBuiltYet({ stage }: { stage: Stage }) {
+  const meta = STAGE_META[stage];
   return (
-    <p className="text-sm text-ink-dim">
-      {what} <span className="text-ink-dim/70">Arrives in {milestone}.</span>
-    </p>
+    <div className="flex h-full flex-col items-start justify-center gap-1.5 text-sm">
+      <p className="text-ink-dim">
+        The <span className="text-ink">{meta.title.toLowerCase()}</span> is not built yet.
+      </p>
+      <p className="text-xs text-ink-dim/80">
+        {meta.blurb}. Arrives in <span className="font-mono">{meta.milestone}</span>.
+      </p>
+    </div>
   );
 }
 
-export function StageDetail({ stage, state, policy }: StageDetailProps) {
+export function StageDetail({ stage, state, policy, activeSpan }: StageDetailProps) {
   const meta = STAGE_META[stage];
+  const implemented = IMPLEMENTED_STAGES.includes(stage);
 
   return (
     <section className="flex h-full flex-col gap-3">
@@ -28,16 +43,18 @@ export function StageDetail({ stage, state, policy }: StageDetailProps) {
         <p className="text-xs text-ink-dim">{meta.blurb}</p>
       </header>
 
-      <div className="flex-1">
-        {stage === 'parse' && (
-          <TreePanel root={state.ast} empty="No AST yet — the parser has not run." />
+      <div className="min-h-0 flex-1">
+        {!implemented && <NotBuiltYet stage={stage} />}
+
+        {implemented && stage === 'parse' && (
+          <AstTree root={state.ast} highlight={activeSpan} />
         )}
 
-        {stage === 'plan' && (
+        {implemented && stage === 'plan' && (
           <TreePanel root={state.plan} empty="No plan yet." />
         )}
 
-        {stage === 'optimize' &&
+        {implemented && stage === 'optimize' &&
           (state.planBefore ? (
             <div className="grid gap-4 sm:grid-cols-2">
               <div>
@@ -55,7 +72,7 @@ export function StageDetail({ stage, state, policy }: StageDetailProps) {
             <p className="text-sm text-ink-dim">No rewrite applied yet.</p>
           ))}
 
-        {stage === 'execute' &&
+        {implemented && stage === 'execute' &&
           (state.operators.length === 0 ? (
             <p className="text-sm text-ink-dim">No operator has produced rows yet.</p>
           ) : (
@@ -72,7 +89,7 @@ export function StageDetail({ stage, state, policy }: StageDetailProps) {
             </ul>
           ))}
 
-        {stage === 'buffer' && (
+        {implemented && stage === 'buffer' && (
           <BufferPoolPanel
             frames={state.frames}
             stats={state.bufferStats}
@@ -82,21 +99,18 @@ export function StageDetail({ stage, state, policy }: StageDetailProps) {
           />
         )}
 
-        {stage === 'index' &&
+        {implemented && stage === 'index' &&
           (state.indexPath.length === 0 ? (
-            <Placeholder what="The B+Tree has not been traversed yet." milestone="M4" />
+            <p className="text-sm text-ink-dim">The B+Tree has not been traversed yet.</p>
           ) : (
-            <div className="space-y-2">
-              <p className="font-mono text-xs">
-                {state.indexPath.join(' → ')}{' '}
-                {state.indexOutcome === 'found' && <span className="text-hit">✓ found</span>}
-                {state.indexOutcome === 'not-found' && <span className="text-evict">✗ not found</span>}
-              </p>
-              <Placeholder what="Node-and-pointer diagram pending." milestone="M4" />
-            </div>
+            <p className="font-mono text-xs">
+              {state.indexPath.join(' → ')}{' '}
+              {state.indexOutcome === 'found' && <span className="text-hit">✓ found</span>}
+              {state.indexOutcome === 'not-found' && <span className="text-evict">✗ not found</span>}
+            </p>
           ))}
 
-        {stage === 'lock' &&
+        {implemented && stage === 'lock' &&
           (state.locks.length === 0 ? (
             <p className="text-sm text-ink-dim">No locks held.</p>
           ) : (
@@ -112,7 +126,7 @@ export function StageDetail({ stage, state, policy }: StageDetailProps) {
             </ul>
           ))}
 
-        {stage === 'result' && <ResultPanel rows={state.rows} />}
+        {implemented && stage === 'result' && <ResultPanel rows={state.rows} />}
       </div>
     </section>
   );

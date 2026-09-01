@@ -31,10 +31,21 @@ export const STAGES: readonly Stage[] = [
   'result',
 ] as const;
 
-/** Generic tree shapes. M1 (parser) and M2 (planner) narrow these. */
+/** Character range in the original SQL text. */
+export interface Span {
+  from: number;
+  to: number;
+}
+
+/** Display shape for the AST tree. Produced from the typed AST by `toDisplayTree`. */
 export interface ASTNode {
+  /** Stable across steps, so a progressive reveal animates rather than remounts. */
+  id: string;
   kind: string;
   label: string;
+  detail?: string;
+  /** The source text this node came from, for highlighting in the editor. */
+  span?: Span;
   children?: ASTNode[];
 }
 
@@ -80,7 +91,7 @@ interface StepEventBase {
 }
 
 export type StepEventBody =
-  | { stage: 'parse'; ast: ASTNode; consumed?: string }
+  | { stage: 'parse'; ast: ASTNode; span?: Span }
   | { stage: 'plan'; planTree: PlanNode }
   | { stage: 'optimize'; rule: string; before: PlanNode; after: PlanNode }
   | { stage: 'execute'; op: string; rowsProduced: number }
@@ -150,7 +161,9 @@ export const DEFAULT_ENGINE_OPTIONS: EngineOptions = {
 
 export interface QueryError {
   message: string;
-  /** Character offset into the SQL text, for the CodeMirror squiggle. */
+  /** What to do about it — the error messages are half the teaching value. */
+  hint?: string;
+  /** Character offsets into the SQL text, for the CodeMirror squiggle. */
   from?: number;
   to?: number;
 }
@@ -159,11 +172,12 @@ export interface RunResult {
   events: StepEvent[];
   rows: Row[];
   error?: QueryError;
-  /**
-   * True while the trace is canned rather than produced by a real execution.
-   * The UI surfaces this — plan.md §2 makes honesty about ground truth a
-   * top-line goal, and a scaffold that silently fakes a trace breaks it.
-   * Goes false for good once M5 wires the real pipeline.
-   */
-  synthetic: boolean;
 }
+
+/**
+ * The stages this build of the engine actually executes. Everything else in
+ * `STAGES` is scaffolding the UI must show as unbuilt — plan.md §2 makes
+ * honesty about ground truth a top-line goal, and a pipeline that looks
+ * complete when it is not breaks that. Grows one milestone at a time.
+ */
+export const IMPLEMENTED_STAGES: readonly Stage[] = ['parse'] as const;
