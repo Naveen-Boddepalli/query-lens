@@ -50,9 +50,13 @@ export interface ASTNode {
 }
 
 export interface PlanNode {
+  /** Stable across a rewrite, so before/after trees can be compared. */
+  id: string;
   op: string;
   label: string;
   detail?: string;
+  /** Set on the nodes a rewrite rule produced. */
+  highlight?: boolean;
   children?: PlanNode[];
 }
 
@@ -180,4 +184,4 @@ export interface RunResult {
  * honesty about ground truth a top-line goal, and a pipeline that looks
  * complete when it is not breaks that. Grows one milestone at a time.
  */
-export const IMPLEMENTED_STAGES: readonly Stage[] = ['parse'] as const;
+export const IMPLEMENTED_STAGES: readonly Stage[] = ['parse', 'plan', 'optimize'] as const;

@@ -6,9 +6,9 @@ An in-browser toy relational database engine that animates a SQL query as it mov
 A learning tool, not a production DB tool. See [plan.md](plan.md) for scope and
 [RESEARCH.md](RESEARCH.md) for the evidence the plan is built on.
 
-## Status: M1 complete — parser + AST visualization
+## Status: M2 complete — parser, planner, optimizer
 
-One stage of eight is real. `IMPLEMENTED_STAGES` in
+Three stages of eight are real. `IMPLEMENTED_STAGES` in
 [types.ts](src/engine/types.ts) is the single source of truth for that, and the UI reads it: the
 header counts built stages, unbuilt ones are dashed in the pipeline tracker, and selecting one says
 plainly that it is not built yet. plan.md §2 makes honesty about ground truth a top-line goal, and a
@@ -18,8 +18,8 @@ pipeline that *looks* complete when it is not would teach the wrong thing.
 |---|---|---|
 | M0 | Scaffold, event contract, fold, playback, UI shell | ✅ done |
 | M1 | Recursive-descent parser + AST visualization | ✅ done |
-| M2 | Planner + predicate pushdown + plan tree | next |
-| M3 | Pages, buffer pool, LRU **and** clock sweep | |
+| M2 | Planner + predicate pushdown + plan tree | ✅ done |
+| M3 | Pages, buffer pool, LRU **and** clock sweep | next |
 | M4 | B+Tree index + traversal visualization | |
 | M5 | Volcano executor wiring it all together | |
 | M6 | Lock manager visual layer | |
@@ -78,7 +78,30 @@ come with joins. The tokenizer deliberately recognises keywords and operators th
 purely so those messages are possible. Errors carry a character span, which CodeMirror renders as a
 squiggle under the offending text.
 
-## Decisions made during M0/M1
+## The optimizer
+
+Two rules, applied in order, each producing one `optimize` event with before/after trees and the
+changed node highlighted:
+
+1. **`predicate-pushdown`** — folds `Filter` into the scan beneath it. In a single-table query the
+   filter already sits directly above the scan, so there is nothing to push it *past*; the real move
+   is pushing it *into* the scan, which then discards rows as it reads them.
+2. **`index-selection`** — swaps `SeqScan` for `IndexScan` when a conjunct is an equality on the
+   indexed column. Conjuncts the index cannot answer stay behind as a **recheck**: the index narrows
+   the search, it does not verify the predicate.
+
+When nothing fires, the optimizer says so out loud rather than silently emitting nothing.
+
+Deliberately absent: **cost estimates** (plan.md §7.3 defers them to v1 — inventing costs we cannot
+justify is exactly the plausible-but-false detail §12 warns about) and **projection pushdown**
+(it would not reduce I/O in a page-based row store, so showing it as an optimization would teach
+something untrue).
+
+`SELECT * FROM users WHERE id = 5` and `SELECT * FROM users WHERE age > 30` already diverge here —
+the first gets both rules, the second only pushdown. That is plan.md §9's side-by-side contrast
+beginning to show up.
+
+## Decisions made during M0/M1/M2
 
 - **TypeScript pinned to 6.0.3.** `typescript-eslint@8.69.0` declares `typescript: ">=4.8.4 <6.1.0"`
   — it excludes TS 7. Verified against the registry. Revisit once 7.1 ships a stable compiler API.
@@ -101,3 +124,7 @@ squiggle under the offending text.
 - **React Flow + d3-hierarchy for trees**, as plan.md §6 specifies: d3 does the layout maths,
   React Flow only draws. Cost is ~62 kB gzip. Bundle is now 250 kB gzip total; if that becomes a
   problem, these trees are static layouts and could be plain SVG.
+- **One tree renderer for everything.** `FlowTree` takes a `FlowNode` and a kind→colour map;
+  `AstTree` and `PlanTree` are thin wrappers. The B+Tree in M4 should be a third.
+- **Rewrites mark changed nodes by object identity**, not by id bookkeeping that could drift: a rule
+  returns the `Plan` objects it produced, and the display conversion highlights exactly those.

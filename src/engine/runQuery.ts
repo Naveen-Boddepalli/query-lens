@@ -9,6 +9,7 @@
  */
 
 import { emitParseEvents, parse } from './parser/index.ts';
+import { emitPlanEvents } from './planner/index.ts';
 import { createTracer } from './trace.ts';
 import { DEFAULT_ENGINE_OPTIONS } from './types.ts';
 import type { Database, EngineOptions, RunResult } from './types.ts';
@@ -57,8 +58,9 @@ export function runQuery(
   }
 
   emitParseEvents(emit, parsed.ast);
+  emitPlanEvents(emit, parsed.ast, table);
 
-  // M2 onward appends the planner, optimizer, executor and storage stages here.
+  // M3 onward appends the storage, index and execution stages here.
   return { events: drain(), rows: [] };
 }
 

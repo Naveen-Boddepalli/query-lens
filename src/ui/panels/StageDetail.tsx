@@ -4,7 +4,7 @@ import { STAGE_META } from '../stageMeta.ts';
 import { AstTree } from './AstTree.tsx';
 import { BufferPoolPanel } from './BufferPoolPanel.tsx';
 import { ResultPanel } from './ResultPanel.tsx';
-import { TreePanel } from './TreePanel.tsx';
+import { PlanTree } from './PlanTree.tsx';
 
 export interface StageDetailProps {
   stage: Stage;
@@ -51,21 +51,24 @@ export function StageDetail({ stage, state, policy, activeSpan }: StageDetailPro
         )}
 
         {implemented && stage === 'plan' && (
-          <TreePanel root={state.plan} empty="No plan yet." />
+          <PlanTree root={state.plan} empty="No plan yet — the planner has not run." />
         )}
 
         {implemented && stage === 'optimize' &&
           (state.planBefore ? (
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div>
-                <h3 className="mb-2 text-xs text-ink-dim">before</h3>
-                <TreePanel root={state.planBefore} empty="—" />
+            <div className="grid h-full grid-rows-[auto_1fr] gap-2 sm:grid-cols-2 sm:grid-rows-1">
+              <div className="grid h-full min-h-0 grid-rows-[auto_1fr]">
+                <h3 className="mb-1 text-xs text-ink-dim">before</h3>
+                <PlanTree root={state.planBefore} empty="—" />
               </div>
-              <div>
-                <h3 className="mb-2 text-xs text-ink-dim">
-                  after · {state.appliedRules.join(', ')}
+              <div className="grid h-full min-h-0 grid-rows-[auto_1fr] border-edge sm:border-l sm:pl-3">
+                <h3 className="mb-1 text-xs text-ink-dim">
+                  after ·{' '}
+                  <span className="font-mono text-accent">
+                    {state.appliedRules[state.appliedRules.length - 1]}
+                  </span>
                 </h3>
-                <TreePanel root={state.plan} empty="—" />
+                <PlanTree root={state.plan} empty="—" />
               </div>
             </div>
           ) : (

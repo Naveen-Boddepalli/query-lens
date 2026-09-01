@@ -20,12 +20,12 @@ function ev(id: number, body: StepEventBody): StepEvent {
 function sampleEvents(): StepEvent[] {
   const bodies: StepEventBody[] = [
     { stage: 'parse', ast: { id: 'r', kind: 'SelectStatement', label: 'SELECT' } },
-    { stage: 'plan', planTree: { op: 'SeqScan', label: 'SeqScan users' } },
+    { stage: 'plan', planTree: { id: 'p', op: 'SeqScan', label: 'SeqScan users' } },
     {
       stage: 'optimize',
       rule: 'predicate-pushdown',
-      before: { op: 'Filter', label: 'Filter' },
-      after: { op: 'IndexScan', label: 'IndexScan' },
+      before: { id: 'p', op: 'Filter', label: 'Filter' },
+      after: { id: 'p', op: 'IndexScan', label: 'IndexScan' },
     },
     { stage: 'lock', action: 'acquire', pageId: 0, mode: 'shared' },
     { stage: 'buffer', action: 'miss', pageId: 0, frameId: 0 },
@@ -131,8 +131,8 @@ describe('applyEvent', () => {
   });
 
   it('keeps the pre-optimisation plan so the rewrite can be shown side by side', () => {
-    const before = { op: 'Filter', label: 'Filter' };
-    const after = { op: 'IndexScan', label: 'IndexScan' };
+    const before = { id: 'p', op: 'Filter', label: 'Filter' };
+    const after = { id: 'p', op: 'IndexScan', label: 'IndexScan' };
     const s = applyEvent(
       initialViewState(opts),
       ev(0, { stage: 'optimize', rule: 'predicate-pushdown', before, after }),
