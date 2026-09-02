@@ -13,6 +13,7 @@ import type { Edge, Node, NodeProps } from '@xyflow/react';
 import { hierarchy, tree } from 'd3-hierarchy';
 import '@xyflow/react/dist/style.css';
 import type { Span } from '../../engine/index.ts';
+import { useReducedMotion } from '../useReducedMotion.ts';
 
 /** The display shape every tree in the app renders through. */
 export interface FlowNode {
@@ -169,6 +170,11 @@ function Canvas({
   const paneRef = useRef<HTMLDivElement | null>(null);
   const focusKey = focusIds?.join(',') ?? '';
 
+  // Viewport moves are JavaScript, so the CSS media query cannot reach them:
+  // snap instead of tweening when the viewer asks for reduced motion.
+  const reduced = useReducedMotion();
+  const glide = reduced ? 0 : 1;
+
   /**
    * Centre on the focused nodes, computed from the layout we already hold.
    *
@@ -185,7 +191,7 @@ function Canvas({
       const pane = paneRef.current;
 
       if (targets.length === 0 || !pane) {
-        void fitView({ padding: 0.16, duration: 250 });
+        void fitView({ padding: 0.16, duration: 250 * glide });
         return;
       }
 
@@ -208,14 +214,14 @@ function Canvas({
 
       void setCenter((minX + maxX) / 2, (minY + maxY) / 2, {
         zoom: Math.max(zoom, 0.1),
-        duration: 400,
+        duration: 400 * glide,
       });
     }, 60);
 
     return () => { window.clearTimeout(timer); };
     // `nodes` is read for positions; its length gates a full refit.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nodes.length, focusKey, fitView, setCenter, wide, compact]);
+  }, [nodes.length, focusKey, fitView, setCenter, wide, compact, glide]);
 
   return (
     <div ref={paneRef} className="h-full w-full">

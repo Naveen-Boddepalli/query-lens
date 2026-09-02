@@ -23,9 +23,9 @@
     "@codemirror/language": "6.12.4",
     "@codemirror/state": "6.7.2",
     "@codemirror/view": "6.43.10",
+    "@lezer/highlight": "1.2.3",
     "@xyflow/react": "12.11.6",
     "d3-hierarchy": "3.1.2",
-    "motion": "13.1.1",
     "react": "19.2.8",
     "react-dom": "19.2.8"
   },

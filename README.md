@@ -6,10 +6,14 @@ An in-browser toy relational database engine that animates a SQL query as it mov
 A learning tool, not a production DB tool. See [plan.md](plan.md) for scope and
 [RESEARCH.md](RESEARCH.md) for the evidence the plan is built on.
 
-## Status: M6.5 complete — engine done, engagement layer in
+## Status: MVP complete
 
-All eight stages are real, the run halts to ask you to predict before it reveals, and the seed data
-is editable. What remains is M7: polish, accessibility and deployment. `IMPLEMENTED_STAGES` in
+All eight pipeline stages are real, the run halts to ask you to predict before it reveals, the seed
+data is editable, and the whole thing is keyboard-driven and accessible. Ready to deploy.
+
+**The one thing still outstanding is not code**: plan.md §9 step 4 asks for a post-test against a
+text-explanation control, with 5–10 target users. That experiment decides whether the format works,
+and it needs people, not commits. `IMPLEMENTED_STAGES` in
 [types.ts](src/engine/types.ts) is the single source of truth for that, and the UI reads it: the
 header counts built stages, unbuilt ones are dashed in the pipeline tracker, and selecting one says
 plainly that it is not built yet. plan.md §2 makes honesty about ground truth a top-line goal, and a
@@ -25,7 +29,8 @@ pipeline that *looks* complete when it is not would teach the wrong thing.
 | M5 | Volcano executor wiring it all together | ✅ done |
 | M6 | Lock manager visual layer | ✅ done |
 | M6.5 | Predict-then-reveal + editable seed data | ✅ done |
-| M7 | Polish, a11y, deploy | next |
+| M7 | Polish, a11y, deploy config | ✅ done |
+| — | **Validation post-test with real users (plan.md §9)** | ⬜ your call |
 
 ## Commands
 
@@ -244,7 +249,40 @@ conventional animation in the HalVis studies. Rows can be edited, added and dele
 re-runs the query immediately — so changing the data changes every number downstream. Cell edits
 preserve each column's type, so `42` in a number column stays a number.
 
-## Decisions made during M0/M1/M2/M3/M4/M5/M6/M6.5
+## Accessibility
+
+- **WCAG 2.2.2 (Pause, Stop, Hide)** — satisfied by the Play/Pause controls, which came free with
+  the playback model.
+- **`prefers-reduced-motion`** — CSS transitions are neutralised by a media query, and the viewport
+  animations (which are JavaScript, so no media query can reach them) snap instead of tweening. This
+  does *not* replace the controls; WCAG requires both.
+- **Keyboard throughout** — Space, ←/→, Home, ⌘↵, with the shortcuts shown on screen rather than
+  hidden behind a help modal. The space bar is matched on `code`, so it survives layouts where `key`
+  is `'Spacebar'`. A visible focus ring is defined globally.
+- **Contrast** — every text element is measured against its **fully composited** backdrop (walking
+  the ancestor chain and painting each translucent layer, since a naive parent-colour lookup gives
+  wrong answers) at every pipeline stage. Currently **zero elements below WCAG AA**.
+
+  That sweep found a real bug: CodeMirror's `defaultHighlightStyle` is built for light backgrounds,
+  so SQL keywords were rendering at **1.6:1**. The editor now uses a purpose-built dark highlight
+  style.
+
+## Deploying
+
+Cloudflare Pages, per plan.md §6 — Vercel's Hobby tier is non-commercial-only by ToS and pauses the
+site past 100 GB, which is the wrong failure mode for a teaching tool that might get posted
+somewhere busy.
+
+```
+Build command:            pnpm build
+Build output directory:   dist
+Node version:             pinned to 22 by .node-version
+```
+
+`public/_headers` sets immutable caching for hashed assets and revalidation for the entry document.
+No SPA redirect rule is needed — the app has no client-side routing.
+
+## Decisions made during M0/M1/M2/M3/M4/M5/M6/M6.5/M7
 
 - **TypeScript pinned to 6.0.3.** `typescript-eslint@8.69.0` declares `typescript: ">=4.8.4 <6.1.0"`
   — it excludes TS 7. Verified against the registry. Revisit once 7.1 ships a stable compiler API.
@@ -300,3 +338,7 @@ preserve each column's type, so `42` in a number column stays a number.
   array breaks that cycle without a ref.
 - **Keyboard shortcuts match the space bar on `code`, not `key`**, so they survive layouts where
   `key` is `'Spacebar'`.
+- **React Flow's attribution badge stays.** Their licence asks you not to hide it without a Pro
+  subscription. It was restyled rather than removed, because its default colour sits at ~1.2:1 here.
+- **`motion` was removed from the dependencies.** It was in the plan's stack and never used — the
+  animation that mattered turned out to be viewport movement and CSS transitions.

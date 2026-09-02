@@ -21,6 +21,7 @@ import { PlaybackControls } from './ui/PlaybackControls.tsx';
 import { SqlEditor } from './ui/SqlEditor.tsx';
 import { DataEditor } from './ui/DataEditor.tsx';
 import { PredictionCard } from './ui/PredictionCard.tsx';
+import { ShortcutHints } from './ui/ShortcutHints.tsx';
 import { StageDetail } from './ui/panels/StageDetail.tsx';
 import { usePlayback, usePlaybackShortcuts } from './ui/usePlayback.ts';
 
@@ -185,7 +186,9 @@ export default function App() {
           ) : (
             <div className="rounded-lg border border-edge bg-surface-2 p-3">
               <h2 className="mb-1 text-xs font-medium text-ink-dim">Narration</h2>
-              <p className="min-h-10 text-sm leading-relaxed">
+              {/* Announced as it changes: stepping is the primary interaction,
+                  and a screen reader user needs to hear what each step did. */}
+              <p className="min-h-10 text-sm leading-relaxed" aria-live="polite">
                 {state?.narration || 'Press Run, then step through with ← and →.'}
               </p>
             </div>
@@ -220,6 +223,7 @@ export default function App() {
           </div>
 
           <PlaybackControls playback={playback} length={result?.events.length ?? 0} />
+          <ShortcutHints />
         </div>
       </main>
 

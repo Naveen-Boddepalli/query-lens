@@ -66,7 +66,7 @@ export function BTreePanel({ tree, path, outcome }: BTreePanelProps) {
           <span className="h-px w-4 border-t border-dashed border-[var(--color-node-leaf)]" />
           sibling chain
         </span>
-        <span className="ml-auto text-ink-dim/70">drag to pan · scroll to zoom</span>
+        <span className="ml-auto text-ink-dim">drag to pan · scroll to zoom</span>
         {path.length > 0 && (
           <span className="font-mono">
             {path.join(' → ')}

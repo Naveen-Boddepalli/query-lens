@@ -3,7 +3,8 @@ import { Prec } from '@codemirror/state';
 import { sql, SQLite } from '@codemirror/lang-sql';
 import { autocompletion, closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
-import { bracketMatching, defaultHighlightStyle, syntaxHighlighting } from '@codemirror/language';
+import { bracketMatching, HighlightStyle, syntaxHighlighting } from '@codemirror/language';
+import { tags } from '@lezer/highlight';
 import {
   drawSelection,
   EditorView,
@@ -21,6 +22,22 @@ import type { QueryError, Span } from '../engine/index.ts';
  * tree-shake. Spelling out what we need keeps the editor near the payload
  * budget that made CodeMirror the right call over Monaco in the first place.
  */
+/**
+ * CodeMirror's `defaultHighlightStyle` is built for light backgrounds — on this
+ * one its keywords land at 1.6:1, well under the 4.5:1 WCAG needs for body
+ * text. Every colour below was checked against the editor's own background.
+ */
+const darkHighlight = HighlightStyle.define([
+  { tag: tags.keyword, color: '#d3a0ff' },
+  { tag: [tags.name, tags.variableName, tags.propertyName], color: '#e6eaf2' },
+  { tag: [tags.string, tags.special(tags.string)], color: '#8fe3a3' },
+  { tag: [tags.number, tags.bool, tags.null], color: '#f5bd6b' },
+  { tag: [tags.operator, tags.punctuation, tags.separator], color: '#b6c0cf' },
+  { tag: [tags.comment, tags.lineComment, tags.blockComment], color: '#8b95a6', fontStyle: 'italic' },
+  { tag: tags.typeName, color: '#7de3b0' },
+  { tag: tags.invalid, color: '#ff8f7a' },
+]);
+
 const theme = EditorView.theme(
   {
     '&': { color: 'var(--color-ink)', backgroundColor: 'transparent' },
@@ -66,7 +83,7 @@ const extensions = [
   bracketMatching(),
   closeBrackets(),
   autocompletion(),
-  syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+  syntaxHighlighting(darkHighlight, { fallback: true }),
   keymap.of([...closeBracketsKeymap, ...defaultKeymap, ...historyKeymap]),
   sql({ dialect: SQLite, upperCaseKeywords: true }),
   markField,

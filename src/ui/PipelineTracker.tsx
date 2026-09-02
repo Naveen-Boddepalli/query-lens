@@ -19,7 +19,7 @@ export function PipelineTracker({ current, visited, selected, onSelect }: Pipeli
         const isBuilt = IMPLEMENTED_STAGES.includes(stage);
         return (
           <div key={stage} className="flex items-center gap-1">
-            {i > 0 && <span aria-hidden className="text-ink-dim/50">→</span>}
+            {i > 0 && <span aria-hidden className="text-ink-dim/80">→</span>}
             <button
               type="button"
               onClick={() => { onSelect(stage); }}
@@ -32,8 +32,8 @@ export function PipelineTracker({ current, visited, selected, onSelect }: Pipeli
                   : isVisited
                     ? `border-edge bg-surface-3 ${meta.tone}`
                     : isBuilt
-                      ? 'border-edge/60 bg-transparent text-ink-dim/60'
-                      : 'border-dashed border-edge/50 bg-transparent text-ink-dim/40',
+                      ? 'border-edge/60 bg-transparent text-ink-dim'
+                      : 'border-dashed border-edge/50 bg-transparent text-ink-dim/80',
                 stage === selected ? 'ring-1 ring-accent/70' : '',
               ].join(' ')}
             >

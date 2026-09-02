@@ -70,7 +70,7 @@ export function BufferPoolPanel({
 
               <div className="mt-0.5 font-mono text-sm">
                 {empty ? (
-                  <span className="text-ink-dim/50">empty</span>
+                  <span className="text-ink-dim">empty</span>
                 ) : (
                   <span>page {frame.pageId}</span>
                 )}
