@@ -7,7 +7,8 @@
  * `optimize` event carrying the before and after trees.
  */
 
-import type { Table } from '../types.ts';
+import type { PredictionPrompt, Table } from '../types.ts';
+import { indexSelectionPrompt } from '../predict.ts';
 import type { Expr } from '../parser/index.ts';
 import { conjoin, conjuncts, equalityOn } from './plan.ts';
 import type { Plan } from './plan.ts';
@@ -19,6 +20,8 @@ export interface Rewrite {
   plan: Plan;
   /** The Plan objects this rule produced, for highlighting. */
   changed: Set<Plan>;
+  /** Asked before the rewrite is revealed. */
+  prompt?: PredictionPrompt;
 }
 
 type Rule = (plan: Plan, table: Table) => Rewrite | null;
@@ -86,6 +89,7 @@ const indexSelection: Rule = (plan, table) => {
       : `\`${indexed}\` is indexed and the predicate is an equality on it, so the scan becomes a B+Tree lookup — three pages instead of the whole table.`,
     plan: root,
     changed: new Set<Plan>([indexScan]),
+    prompt: indexSelectionPrompt(indexed, key),
   };
 };
 

@@ -48,12 +48,16 @@ export function emitPlanEvents(emit: Emit, ast: SelectStatement, table: Table): 
   let before = canonical;
 
   for (const step of optimize(canonical, table)) {
-    emit(step.label, {
-      stage: 'optimize',
-      rule: step.rule,
-      before: toPlanDisplay(before),
-      after: toPlanDisplay(step.plan, step.changed),
-    });
+    emit(
+      step.label,
+      {
+        stage: 'optimize',
+        rule: step.rule,
+        before: toPlanDisplay(before),
+        after: toPlanDisplay(step.plan, step.changed),
+      },
+      step.prompt ? { predictable: step.prompt } : undefined,
+    );
     before = step.plan;
     optimised = step.plan;
   }

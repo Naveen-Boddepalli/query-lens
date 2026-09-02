@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 export interface Playback {
   /** Number of events consumed. 0 = before the first step. */
@@ -7,6 +7,8 @@ export interface Playback {
   speed: number;
   atStart: boolean;
   atEnd: boolean;
+  /** True while an unanswered prompt is holding playback. */
+  blocked: boolean;
   play: () => void;
   pause: () => void;
   toggle: () => void;
@@ -22,10 +24,14 @@ const BASE_STEP_MS = 900;
 
 export interface PlaybackOptions {
   /**
-   * Called with the step just reached. Returning true stops playback there —
-   * the seam for predict-then-reveal, which must halt before revealing.
+   * `gates[i]` true means "do not advance past step i yet". Predict-then-reveal
+   * sets it while a prompt is unanswered: the question must be asked *before*
+   * the event that answers it is applied.
+   *
+   * An array rather than a predicate on the current step, because the caller
+   * would need the step to compute one — and the step comes from this hook.
    */
-  onHalt?: (step: number) => boolean;
+  gates?: readonly boolean[];
   /**
    * Per-event pacing weights, indexed like the event array. A disk read dwells
    * longer than a buffer hit. Passed as an array rather than a callback so the
@@ -43,21 +49,15 @@ export function usePlayback(length: number, options?: PlaybackOptions): Playback
   // Derived, not stored: a re-run producing a shorter trace must not leave us
   // parked past the end, and playing must stop at the end on its own.
   const step = Math.min(rawStep, length);
+  const blocked = options?.gates?.[Math.min(rawStep, length)] ?? false;
   const atStart = step === 0;
   const atEnd = step >= length;
-  const playing = wantsToPlay && !atEnd;
-
-  const onHaltRef = useRef(options?.onHalt);
-  useEffect(() => {
-    onHaltRef.current = options?.onHalt;
-  });
+  const playing = wantsToPlay && !atEnd && !blocked;
 
   const advance = useCallback(() => {
-    if (step >= length) return;
-    const next = step + 1;
-    setRawStep(next);
-    if (onHaltRef.current?.(next)) setWantsToPlay(false);
-  }, [step, length]);
+    if (step >= length || blocked) return;
+    setRawStep(step + 1);
+  }, [step, length, blocked]);
 
   const play = useCallback(() => { setWantsToPlay(true); }, []);
   const pause = useCallback(() => { setWantsToPlay(false); }, []);
@@ -68,9 +68,11 @@ export function usePlayback(length: number, options?: PlaybackOptions): Playback
   }, [step]);
   const stepForward = useCallback(() => {
     setWantsToPlay(false);
-    if (step < length) setRawStep(step + 1);
-  }, [step, length]);
+    if (step < length && !blocked) setRawStep(step + 1);
+  }, [step, length, blocked]);
   const reset = useCallback(() => { setWantsToPlay(false); setRawStep(0); }, []);
+  // Scrubbing is deliberately *not* blocked: a prompt should not trap someone
+  // who wants to jump elsewhere in the trace.
   const seek = useCallback(
     (target: number) => {
       setWantsToPlay(false);
@@ -90,7 +92,7 @@ export function usePlayback(length: number, options?: PlaybackOptions): Playback
   }, [playing, speed, dwell, advance]);
 
   return {
-    step, playing, speed, atStart, atEnd,
+    step, playing, speed, atStart, atEnd, blocked,
     play, pause, toggle, stepForward, stepBack, reset, seek, setSpeed,
   };
 }
@@ -114,8 +116,15 @@ export function usePlaybackShortcuts(playback: Playback, enabled = true): void {
     if (!enabled) return;
     const onKey = (e: KeyboardEvent) => {
       if (isTypingTarget(e.target) || e.metaKey || e.ctrlKey || e.altKey) return;
+      // Match on `code` for the space bar: `key` is ' ' on most layouts but
+      // 'Spacebar' on older ones, and matching the physical key is layout-proof.
+      if (e.code === 'Space' || e.key === ' ') {
+        e.preventDefault();
+        playback.toggle();
+        return;
+      }
+
       switch (e.key) {
-        case ' ': e.preventDefault(); playback.toggle(); break;
         case 'ArrowRight': e.preventDefault(); playback.stepForward(); break;
         case 'ArrowLeft': e.preventDefault(); playback.stepBack(); break;
         case 'Home': e.preventDefault(); playback.reset(); break;

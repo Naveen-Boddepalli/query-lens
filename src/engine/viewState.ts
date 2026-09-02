@@ -53,6 +53,8 @@ export interface ViewState {
   indexOutcome: 'searching' | 'found' | 'not-found' | null;
 
   locks: LockHeld[];
+  /** Total acquired so far — held locks alone cannot show the work done. */
+  locksTaken: number;
   operators: { op: string; rowsProduced: number }[];
   rows: Row[];
 }
@@ -79,6 +81,7 @@ export function initialViewState(options: EngineOptions): ViewState {
     indexPath: [],
     indexOutcome: null,
     locks: [],
+    locksTaken: 0,
     operators: [],
     rows: [],
   };
@@ -207,6 +210,7 @@ export function applyEvent(state: ViewState, event: StepEvent): ViewState {
           : state.locks.filter(
               (l) => !(l.pageId === event.pageId && l.mode === event.mode),
             );
+      next.locksTaken = state.locksTaken + (event.action === 'acquire' ? 1 : 0);
       return next;
 
     case 'result':

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
   createSeedDatabase,
   createTraceProjector,
@@ -7,11 +7,20 @@ import {
   runQuery,
   STAGES,
 } from './engine/index.ts';
-import type { ReplacementPolicyName, RunResult, Span, Stage } from './engine/index.ts';
+import type {
+  Database,
+  ReplacementPolicyName,
+  Row,
+  RunResult,
+  Span,
+  Stage,
+} from './engine/index.ts';
 import { DisclaimerBanner } from './ui/DisclaimerBanner.tsx';
 import { PipelineTracker } from './ui/PipelineTracker.tsx';
 import { PlaybackControls } from './ui/PlaybackControls.tsx';
 import { SqlEditor } from './ui/SqlEditor.tsx';
+import { DataEditor } from './ui/DataEditor.tsx';
+import { PredictionCard } from './ui/PredictionCard.tsx';
 import { StageDetail } from './ui/panels/StageDetail.tsx';
 import { usePlayback, usePlaybackShortcuts } from './ui/usePlayback.ts';
 
@@ -19,14 +28,23 @@ import { usePlayback, usePlaybackShortcuts } from './ui/usePlayback.ts';
 // `age > 30` to watch the same table read by a sequential scan instead.
 const INITIAL_SQL = 'SELECT *\nFROM users\nWHERE id = 5;';
 
+const TABLE = 'users';
+
 export default function App() {
   const [sql, setSql] = useState(INITIAL_SQL);
   const [policy, setPolicy] = useState<ReplacementPolicyName>('lru');
   const [pinnedStage, setPinnedStage] = useState<Stage | null>(null);
-  const [db] = useState(createSeedDatabase);
+  const [db, setDb] = useState<Database>(createSeedDatabase);
+  const [editingData, setEditingData] = useState(false);
+  const [result, setResult] = useState<RunResult | null>(null);
+
+  // Prediction is on by default: RESEARCH.md §1 is that the prompts are what
+  // teach. A toggle, not a trap, for anyone who just wants to watch.
+  const [predictOn, setPredictOn] = useState(true);
+  const [answers, setAnswers] = useState<Record<number, string>>({});
 
   const options = useMemo(() => ({ ...DEFAULT_ENGINE_OPTIONS, policy }), [policy]);
-  const [result, setResult] = useState<RunResult | null>(null);
+  const table = db.tables[TABLE];
 
   const projector = useMemo(
     () => (result ? createTraceProjector(result.events, options) : null),
@@ -35,10 +53,24 @@ export default function App() {
 
   // Disk reads dwell longer than buffer hits during playback.
   const dwells = useMemo(() => result?.events.map((e) => e.dwell ?? 1) ?? [], [result]);
-  const playback = usePlayback(result?.events.length ?? 0, { dwells });
+
+  // `gates[i]`: applying event i would reveal an answer nobody has committed to.
+  const gates = useMemo(
+    () =>
+      result?.events.map(
+        (e) => predictOn && e.predictable !== undefined && answers[e.id] === undefined,
+      ) ?? [],
+    [result, predictOn, answers],
+  );
+
+  const playback = usePlayback(result?.events.length ?? 0, { dwells, gates });
   usePlaybackShortcuts(playback);
 
   const state = projector?.at(playback.step) ?? null;
+
+  // The prompt for the step about to run — asked before it is revealed.
+  const upcoming = result?.events[playback.step];
+  const prompt = predictOn ? upcoming?.predictable : undefined;
 
   const visited = useMemo(() => {
     const seen = new Set<Stage>();
@@ -48,14 +80,32 @@ export default function App() {
 
   const activeStage = pinnedStage ?? state?.stage ?? null;
 
-  // The source range the current step is consuming, mirrored into the editor.
   const activeSpan: Span | undefined =
     state?.lastEvent?.stage === 'parse' ? state.lastEvent.span : undefined;
 
-  function run() {
-    setResult(runQuery(sql, db, options));
-    setPinnedStage(null);
-    playback.reset();
+  const run = useCallback(
+    (database: Database = db) => {
+      setResult(runQuery(sql, database, options));
+      setPinnedStage(null);
+      setAnswers({});
+      playback.reset();
+    },
+    [sql, db, options, playback],
+  );
+
+  function applyRows(rows: Row[]) {
+    if (!table) return;
+    const next: Database = { tables: { ...db.tables, [TABLE]: { ...table, rows } } };
+    setDb(next);
+    setEditingData(false);
+    run(next);
+  }
+
+  function resetData() {
+    const fresh = createSeedDatabase();
+    setDb(fresh);
+    setEditingData(false);
+    run(fresh);
   }
 
   return (
@@ -67,13 +117,13 @@ export default function App() {
         <p className="text-xs text-ink-dim">see what your SQL actually does</p>
         <span
           className="ml-auto rounded-full border border-edge bg-surface-2 px-2.5 py-0.5 text-[11px] text-ink-dim"
-          title={`Built: ${IMPLEMENTED_STAGES.join(', ')}. The rest of the pipeline is not implemented yet.`}
+          title={`Built: ${IMPLEMENTED_STAGES.join(', ')}.`}
         >
-          under construction · {IMPLEMENTED_STAGES.length}/{STAGES.length} stages built
+          {IMPLEMENTED_STAGES.length}/{STAGES.length} stages built
         </span>
       </header>
 
-      <main className="grid flex-1 gap-4 p-4 lg:grid-cols-[minmax(280px,380px)_1fr]">
+      <main className="grid flex-1 gap-4 p-4 lg:grid-cols-[minmax(300px,400px)_1fr]">
         <div className="space-y-3">
           <SqlEditor
             value={sql}
@@ -82,13 +132,21 @@ export default function App() {
             error={result?.error}
             activeSpan={activeSpan}
           />
-          <div className="flex items-center gap-2">
+
+          <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
-              onClick={run}
+              onClick={() => { run(); }}
               className="rounded-md border border-accent bg-accent/15 px-4 py-1.5 text-sm font-medium text-ink transition-colors hover:bg-accent/25"
             >
               Run ⌘↵
+            </button>
+            <button
+              type="button"
+              onClick={() => { setEditingData(true); }}
+              className="rounded-md border border-edge px-3 py-1.5 text-sm text-ink-dim transition-colors hover:border-accent/70 hover:text-ink"
+            >
+              Edit data ({table?.rows.length ?? 0})
             </button>
             <label className="ml-auto flex items-center gap-2 text-xs text-ink-dim">
               Eviction
@@ -103,12 +161,35 @@ export default function App() {
             </label>
           </div>
 
-          <div className="rounded-lg border border-edge bg-surface-2 p-3">
-            <h2 className="mb-1 text-xs font-medium text-ink-dim">Narration</h2>
-            <p className="min-h-10 text-sm leading-relaxed">
-              {state?.narration || 'Press Run, then step through with ← and →.'}
-            </p>
-          </div>
+          <label className="flex items-center gap-2 text-xs text-ink-dim">
+            <input
+              type="checkbox"
+              checked={predictOn}
+              onChange={(e) => { setPredictOn(e.target.checked); }}
+              className="accent-[var(--color-accent)]"
+            />
+            Ask me to predict before each reveal
+          </label>
+
+          {prompt && upcoming ? (
+            <PredictionCard
+              prompt={prompt}
+              answer={answers[upcoming.id]}
+              onAnswer={(optionId) => {
+                setAnswers((current) => ({ ...current, [upcoming.id]: optionId }));
+              }}
+              onSkip={() => {
+                setAnswers((current) => ({ ...current, [upcoming.id]: '' }));
+              }}
+            />
+          ) : (
+            <div className="rounded-lg border border-edge bg-surface-2 p-3">
+              <h2 className="mb-1 text-xs font-medium text-ink-dim">Narration</h2>
+              <p className="min-h-10 text-sm leading-relaxed">
+                {state?.narration || 'Press Run, then step through with ← and →.'}
+              </p>
+            </div>
+          )}
         </div>
 
         <div className="space-y-4">
@@ -141,6 +222,15 @@ export default function App() {
           <PlaybackControls playback={playback} length={result?.events.length ?? 0} />
         </div>
       </main>
+
+      {editingData && table && (
+        <DataEditor
+          table={table}
+          onApply={applyRows}
+          onReset={resetData}
+          onClose={() => { setEditingData(false); }}
+        />
+      )}
     </div>
   );
 }

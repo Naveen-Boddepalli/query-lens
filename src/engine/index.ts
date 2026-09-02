@@ -8,6 +8,8 @@ export type { BufferPool, Frame as BufferPoolFrame, Heap, Page } from './storage
 export { buildIndex, DEFAULT_MAX_KEYS, keyList, toIndexDisplay, validate } from './index/index.ts';
 export type { BPlusTree, BTreeNode, RowPointer } from './index/index.ts';
 export { evaluatePredicate, passes } from './exec/index.ts';
+export { createLockManager } from './locks/index.ts';
+export type { HeldLock, LockManager, LockMode } from './locks/index.ts';
 export type { Plan } from './planner/index.ts';
 export type { Expr, SelectStatement } from './parser/index.ts';
 export {

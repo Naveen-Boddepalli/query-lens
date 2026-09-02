@@ -6,10 +6,10 @@ An in-browser toy relational database engine that animates a SQL query as it mov
 A learning tool, not a production DB tool. See [plan.md](plan.md) for scope and
 [RESEARCH.md](RESEARCH.md) for the evidence the plan is built on.
 
-## Status: M5 complete — the pipeline runs end to end
+## Status: M6.5 complete — engine done, engagement layer in
 
-Seven stages of eight are real; only the lock manager is left. QueryLens now answers queries: it
-returns actual rows, and every number the UI shows is one the engine measured. `IMPLEMENTED_STAGES` in
+All eight stages are real, the run halts to ask you to predict before it reveals, and the seed data
+is editable. What remains is M7: polish, accessibility and deployment. `IMPLEMENTED_STAGES` in
 [types.ts](src/engine/types.ts) is the single source of truth for that, and the UI reads it: the
 header counts built stages, unbuilt ones are dashed in the pipeline tracker, and selecting one says
 plainly that it is not built yet. plan.md §2 makes honesty about ground truth a top-line goal, and a
@@ -23,9 +23,9 @@ pipeline that *looks* complete when it is not would teach the wrong thing.
 | M3 | Pages, buffer pool, LRU **and** clock sweep | ✅ done |
 | M4 | B+Tree index + traversal visualization | ✅ done |
 | M5 | Volcano executor wiring it all together | ✅ done |
-| M6 | Lock manager visual layer | next |
-| M6.5 | Predict-then-reveal + editable seed data | |
-| M7 | Polish, a11y, deploy | |
+| M6 | Lock manager visual layer | ✅ done |
+| M6.5 | Predict-then-reveal + editable seed data | ✅ done |
+| M7 | Polish, a11y, deploy | next |
 
 ## Commands
 
@@ -191,7 +191,60 @@ answer must come back regardless of which access method the optimizer picks, whi
 policy is selected, and how pages or frames are sized — so a storage bug cannot hide behind a
 correct-looking result.
 
-## Decisions made during M0/M1/M2/M3/M4/M5
+## Locks
+
+Page-level shared locks, taken before a page is read and released after. A sequential scan holds one
+page at a time. The index descent **crabs**: it takes the child's lock *before* releasing the
+parent's, so the branch cannot be restructured out from under the descent — briefly holding two, and
+that overlap is the technique. Tests assert the peak concurrent count is exactly 1 for a scan and
+exactly 2 for a descent, and that no query ever ends holding anything.
+
+### What this layer does not model
+
+It is **visual only**, as plan.md §7.7 specifies, and the panel says so rather than letting a lock
+icon imply protection from a rival:
+
+- v0 runs exactly one query, so **no lock ever waits on another**. There is no contention, no
+  blocking, no deadlock, and no wait queue.
+- Real engines separate a short **latch** on the buffer frame from a transaction-length **lock** on
+  the data. Both are collapsed here into one page-level read lock held for the duration of the read.
+
+A second, concurrent query is the v1 feature that would make this layer mean something.
+
+## Predict-then-reveal
+
+RESEARCH.md §1: across 24 experiments, passive viewing did not reliably beat reading text *"no
+matter how high the level of their epistemic fidelity"*. Everything from M1 to M6 is the fidelity
+half. This is the other half.
+
+Playback **stops before** an event that would reveal an answer and asks you to commit. Four prompts,
+at the points plan.md §8 identifies, at most once each per run:
+
+| Stage | Question |
+|---|---|
+| `optimize` | Given an index on `id`, what should the optimizer do with `id = 5`? |
+| `index` | Which child pointer does the search follow? |
+| `buffer` | Which frame gets evicted? |
+| `result` | How many rows come back? |
+
+**Every prompt is generated from live engine state**, so the correct answer is whatever the engine
+is about to do — none of it is authored. The child options are built from the node's real separator
+keys; the eviction options are the frames actually occupied; the row-count options always contain
+the true total. Tests assert that each prompt's correct option exists among its options and matches
+the event that follows it, for every supported query.
+
+Prediction is **on by default** — the evidence says it is what teaches — with a checkbox to turn it
+off, and a per-prompt skip. Scrubbing is deliberately never blocked: a prompt should not trap
+someone who wants to jump elsewhere in the trace.
+
+## Editable seed data
+
+"Construct their own input data sets" is named explicitly in the condition that beat both text and a
+conventional animation in the HalVis studies. Rows can be edited, added and deleted, and applying
+re-runs the query immediately — so changing the data changes every number downstream. Cell edits
+preserve each column's type, so `42` in a number column stays a number.
+
+## Decisions made during M0/M1/M2/M3/M4/M5/M6/M6.5
 
 - **TypeScript pinned to 6.0.3.** `typescript-eslint@8.69.0` declares `typescript: ">=4.8.4 <6.1.0"`
   — it excludes TS 7. Verified against the registry. Revisit once 7.1 ships a stable compiler API.
@@ -238,3 +291,12 @@ correct-looking result.
   index lookup's 25) and that length *is* the lesson — it is what the query actually costs.
 - **The ad-hoc scan driver from M3 is gone.** It existed only so the buffer pool could be watched
   before an executor existed; `SeqScan` now does that work as a real operator.
+- **The lock manager is real, not decorative.** It tracks what is held, is re-entrant on the same
+  page and mode, ignores releases of unheld locks, and reports statistics. It has no wait queue,
+  because with one query nothing could ever be queued — building one now would be untested
+  speculation.
+- **Playback gating is an array, not a callback.** `gates[i]` means "do not advance past step i".
+  A predicate over the current step would need the step, and the step comes from the hook — the
+  array breaks that cycle without a ref.
+- **Keyboard shortcuts match the space bar on `code`, not `key`**, so they survive layouts where
+  `key` is `'Spacebar'`.

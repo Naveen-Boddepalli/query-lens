@@ -13,6 +13,7 @@ import type { EngineOptions, Row, SqlValue, Table } from '../types.ts';
 import type { Expr } from '../parser/index.ts';
 import type { Plan, ProjectList } from '../planner/index.ts';
 import type { BufferPool, Heap } from '../storage/index.ts';
+import type { LockManager } from '../locks/index.ts';
 import type { BPlusTree } from '../index/index.ts';
 import { emitIndexLookup } from '../index/index.ts';
 import { passes } from './evaluate.ts';
@@ -27,6 +28,7 @@ export interface Operator {
 export interface ExecContext {
   emit: Emit;
   pool: BufferPool;
+  locks: LockManager;
   heap: Heap;
   tree: BPlusTree | null;
   table: Table;
@@ -48,6 +50,7 @@ function seqScan(plan: Extract<Plan, { op: 'SeqScan' }>, ctx: ExecContext): Oper
   let pageIndex = 0;
   let rowIndex = 0;
   let pinnedFrame: number | null = null;
+  let lockedPage: number | null = null;
   let skipped = 0;
   const produced = counter(ctx, 'SeqScan');
 
@@ -55,6 +58,10 @@ function seqScan(plan: Extract<Plan, { op: 'SeqScan' }>, ctx: ExecContext): Oper
     if (pinnedFrame !== null) {
       ctx.pool.unpin(pinnedFrame);
       pinnedFrame = null;
+    }
+    if (lockedPage !== null) {
+      ctx.locks.release(lockedPage, 'shared');
+      lockedPage = null;
     }
   }
 
@@ -74,6 +81,12 @@ function seqScan(plan: Extract<Plan, { op: 'SeqScan' }>, ctx: ExecContext): Oper
 
         if (rowIndex === 0) {
           releasePage();
+          ctx.locks.acquire(
+            page.pageId,
+            'shared',
+            `Take a shared lock on page ${String(page.pageId)} before reading its rows.`,
+          );
+          lockedPage = page.pageId;
           const fetched = ctx.pool.fetch(page.pageId);
           if (!fetched) return null;
           // Held while its rows are read; released when we move on. Only an
@@ -115,7 +128,14 @@ function indexScan(plan: Extract<Plan, { op: 'IndexScan' }>, ctx: ExecContext): 
     name: 'IndexScan',
     open() {
       if (!ctx.tree) return;
-      const { pointer } = emitIndexLookup(ctx.emit, ctx.tree, plan.key, ctx.pool, plan.column);
+      const { pointer } = emitIndexLookup(
+        ctx.emit,
+        ctx.tree,
+        plan.key,
+        ctx.pool,
+        plan.column,
+        ctx.locks,
+      );
       if (!pointer) return;
 
       const page = ctx.heap.pages.find((p) => p.pageId === pointer.pageId);

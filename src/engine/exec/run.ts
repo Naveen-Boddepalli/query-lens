@@ -1,4 +1,5 @@
 import type { Row } from '../types.ts';
+import { resultPrompt } from '../predict.ts';
 import { buildOperator } from './operators.ts';
 import type { ExecContext } from './operators.ts';
 import type { Plan } from '../planner/index.ts';
@@ -24,6 +25,10 @@ export function execute(plan: Plan, ctx: ExecContext): Row[] {
       evictions === 1 ? '' : 's'
     }.`,
     { stage: 'result', rows },
+    (() => {
+      const prompt = resultPrompt(rows.length, ctx.table.rows.length);
+      return prompt ? { predictable: prompt } : undefined;
+    })(),
   );
 
   return rows;

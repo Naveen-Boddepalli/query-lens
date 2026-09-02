@@ -3,6 +3,7 @@ import type { ReplacementPolicyName, Span, Stage, ViewState } from '../../engine
 import { STAGE_META } from '../stageMeta.ts';
 import { AstTree } from './AstTree.tsx';
 import { BTreePanel } from './BTreePanel.tsx';
+import { LockPanel } from './LockPanel.tsx';
 import { BufferPoolPanel } from './BufferPoolPanel.tsx';
 import { ResultPanel } from './ResultPanel.tsx';
 import { PlanTree } from './PlanTree.tsx';
@@ -131,21 +132,9 @@ export function StageDetail({ stage, state, policy, activeSpan }: StageDetailPro
           />
         )}
 
-        {implemented && stage === 'lock' &&
-          (state.locks.length === 0 ? (
-            <p className="text-sm text-ink-dim">No locks held.</p>
-          ) : (
-            <ul className="space-y-1.5">
-              {state.locks.map((l) => (
-                <li
-                  key={`${l.pageId}-${l.mode}`}
-                  className="rounded-md border border-edge bg-surface-3 px-2.5 py-1.5 font-mono text-xs"
-                >
-                  🔒 page {l.pageId} · {l.mode}
-                </li>
-              ))}
-            </ul>
-          ))}
+        {implemented && stage === 'lock' && (
+          <LockPanel locks={state.locks} taken={state.locksTaken} />
+        )}
 
         {implemented && stage === 'result' && <ResultPanel rows={state.rows} />}
       </div>

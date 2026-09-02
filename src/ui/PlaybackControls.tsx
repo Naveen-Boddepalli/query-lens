@@ -10,7 +10,7 @@ const btn =
   'rounded-md border border-edge bg-surface-3 px-3 py-1.5 text-sm text-ink transition-colors hover:border-accent/70 disabled:cursor-not-allowed disabled:opacity-40';
 
 export function PlaybackControls({ playback, length }: PlaybackControlsProps) {
-  const { step, playing, speed, atStart, atEnd } = playback;
+  const { step, playing, speed, atStart, atEnd, blocked } = playback;
 
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -26,13 +26,18 @@ export function PlaybackControls({ playback, length }: PlaybackControlsProps) {
         type="button"
         className={`${btn} min-w-24 font-medium`}
         onClick={playback.toggle}
-        disabled={length === 0 || (atEnd && !playing)}
-        title="Play / pause (Space)"
+        disabled={length === 0 || blocked || (atEnd && !playing)}
+        title={blocked ? 'Answer the prediction first' : 'Play / pause (Space)'}
       >
         {playing ? '❚❚ Pause' : '▶ Play'}
       </button>
-      <button type="button" className={btn} onClick={playback.stepForward} disabled={atEnd}
-        title="Step forward (→)">
+      <button
+        type="button"
+        className={btn}
+        onClick={playback.stepForward}
+        disabled={atEnd || blocked}
+        title={blocked ? 'Answer the prediction first' : 'Step forward (→)'}
+      >
         ▶│
       </button>
 

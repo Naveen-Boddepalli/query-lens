@@ -222,5 +222,6 @@ export const IMPLEMENTED_STAGES: readonly Stage[] = [
   'buffer',
   'index',
   'execute',
+  'lock',
   'result',
 ] as const;

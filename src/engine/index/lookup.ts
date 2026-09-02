@@ -7,9 +7,11 @@
 import type { Emit } from '../trace.ts';
 import type { SqlValue } from '../types.ts';
 import type { BufferPool } from '../storage/index.ts';
+import type { LockManager } from '../locks/index.ts';
 import { childIndexFor, compareKeys, descend, height, node } from './btree.ts';
 import type { BPlusTree, LeafNode, RowPointer } from './btree.ts';
 import { keyList, toIndexDisplay } from './display.ts';
+import { traversalPrompt } from '../predict.ts';
 
 export interface LookupOutcome {
   pointer: RowPointer | null;
@@ -27,6 +29,7 @@ export function emitIndexLookup(
   key: SqlValue,
   pool: BufferPool,
   column: string,
+  locks: LockManager,
 ): LookupOutcome {
   emit(
     `Open the B+Tree on \`${column}\`: ${height(tree)} levels, so any key is at most ${height(tree)} node reads away — however many rows the table holds.`,
@@ -35,15 +38,41 @@ export function emitIndexLookup(
 
   const path = descend(tree, key);
   const pagesRead: number[] = [];
+  let parentPage: number | null = null;
+  // Ask once, at the first branch. Asking at every level is repetition, not
+  // practice — the rule is the same each time.
+  let traversalAsked = false;
 
   for (const nodeId of path) {
     const n = node(tree, nodeId);
+
+    /**
+     * Latch crabbing: take the child's lock *before* releasing the parent's,
+     * so the subtree cannot be restructured out from under the descent. For a
+     * moment two locks are held at once — that overlap is the whole technique.
+     */
+    locks.acquire(
+      n.pageId,
+      'shared',
+      parentPage === null
+        ? `Lock the root page ${String(n.pageId)} before reading it.`
+        : `Lock child page ${String(n.pageId)} before letting go of page ${String(parentPage)} — "crabbing" down the tree, so the branch cannot move while we are following it.`,
+    );
 
     const fetched = pool.fetch(n.pageId);
     if (fetched) {
       pagesRead.push(n.pageId);
       pool.unpin(fetched.frameId);
     }
+
+    if (parentPage !== null) {
+      locks.release(
+        parentPage,
+        'shared',
+        `Now that page ${String(n.pageId)} is locked, page ${String(parentPage)} can be released. The descent never holds the whole path at once.`,
+      );
+    }
+    parentPage = n.pageId;
 
     if (n.kind === 'internal') {
       const internal = n;
@@ -57,6 +86,13 @@ export function emitIndexLookup(
               : `falls between ${describe(internal.keys[childIndex - 1]!)} and ${describe(internal.keys[childIndex]!)}`
         }, so follow child ${childIndex}.`,
         { stage: 'index', action: 'traverse', nodeId, key, childIndex },
+        traversalAsked
+          ? undefined
+          : (() => {
+              traversalAsked = true;
+              const prompt = traversalPrompt(nodeId, internal.keys, key, childIndex);
+              return prompt ? { predictable: prompt } : undefined;
+            })(),
       );
     } else {
       emit(`Reach leaf ${nodeId}, which holds keys ${keyList(n.keys)}.`, {
@@ -78,6 +114,7 @@ export function emitIndexLookup(
       nodeId: leaf.id,
       key,
     });
+    if (parentPage !== null) locks.release(parentPage, 'shared');
     return { pointer: null, pagesRead };
   }
 
@@ -87,11 +124,20 @@ export function emitIndexLookup(
     { stage: 'index', action: 'found', nodeId: leaf.id, key },
   );
 
+  locks.acquire(
+    pointer.pageId,
+    'shared',
+    `Lock heap page ${String(pointer.pageId)}, where the row itself lives.`,
+  );
+
   const heapFetch = pool.fetch(pointer.pageId);
   if (heapFetch) {
     pagesRead.push(pointer.pageId);
     pool.unpin(heapFetch.frameId);
   }
+
+  if (parentPage !== null) locks.release(parentPage, 'shared');
+  locks.release(pointer.pageId, 'shared');
 
   return { pointer, pagesRead };
 }

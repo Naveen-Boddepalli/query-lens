@@ -8,6 +8,7 @@
 import type { Emit } from '../trace.ts';
 import type { EngineOptions } from '../types.ts';
 import { policyFor } from './policy.ts';
+import { evictionPrompt } from '../predict.ts';
 import type { BufferState, Frame, ReplacementPolicy } from './policy.ts';
 
 /** Playback pacing weight — a disk read should *feel* slower than a hit. */
@@ -53,6 +54,9 @@ export function createBufferPool(
   const state = emptyState(options.bufferFrames);
   const policy: ReplacementPolicy = policyFor(options.policy);
   const stats = { hits: 0, misses: 0, evictions: 0 };
+  // Only the first eviction asks. After that the learner has the rule, and a
+  // prompt on every one of them would be nagging rather than teaching.
+  let evictionAsked = false;
 
   const resident = (pageId: number): Frame | undefined =>
     state.frames.find((f) => f.pageId === pageId);
@@ -90,6 +94,12 @@ export function createBufferPool(
       const evicted = victim.pageId!;
 
       stats.evictions += 1;
+
+      const prompt = evictionAsked
+        ? null
+        : evictionPrompt(state.frames, victimId, pageId, options.policy);
+      evictionAsked = true;
+
       emit(
         `The pool is full, so page ${evicted} is evicted from frame ${victimId} to make room. ${
           options.policy === 'lru'
@@ -104,6 +114,7 @@ export function createBufferPool(
           pageId,
           ...(choice.clockHand === undefined ? {} : { clockHand: choice.clockHand }),
         },
+        prompt ? { predictable: prompt } : undefined,
       );
 
       victim.pageId = null;
