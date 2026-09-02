@@ -81,7 +81,6 @@ export function createBufferPool(
       stage: 'buffer',
       action: 'miss',
       pageId,
-      frameId: -1,
     });
 
     let target = state.frames.find((f) => f.pageId === null);

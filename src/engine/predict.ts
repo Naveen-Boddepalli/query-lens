@@ -79,7 +79,7 @@ export function indexSelectionPrompt(column: string, key: SqlValue): PredictionP
   return {
     question: `There is a B+Tree index on \`${column}\`, and the predicate is \`${column} = ${format(key)}\`. What should the optimizer do?`,
     options: [
-      { id: 'keep', label: 'Leave the filter above a full sequential scan' },
+      { id: 'keep', label: 'Leave it as a full sequential scan' },
       { id: 'push', label: 'Turn the scan into an index lookup on that key' },
       { id: 'drop', label: 'Drop the filter — the index makes it redundant' },
     ],

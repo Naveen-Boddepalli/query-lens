@@ -7,12 +7,15 @@ export function ResultPanel({ rows }: { rows: Row[] }) {
   const columns = Object.keys(rows[0]!);
 
   return (
-    <div className="overflow-x-auto">
+    // Scrolls inside the fixed-height stage panel: a result set can be any
+    // size, and the playback controls below must not move to accommodate it.
+    <div className="h-full overflow-auto">
       <table className="w-full border-collapse text-left font-mono text-xs">
         <thead>
-          <tr className="border-b border-edge text-ink-dim">
+          {/* Sticky, so the columns stay readable while scrolling a long result. */}
+          <tr className="sticky top-0 z-10 border-b border-edge bg-surface-2 text-ink-dim">
             {columns.map((c) => (
-              <th key={c} className="px-2 py-1.5 font-medium">{c}</th>
+              <th key={c} className="bg-surface-2 px-2 py-1.5 font-medium">{c}</th>
             ))}
           </tr>
         </thead>

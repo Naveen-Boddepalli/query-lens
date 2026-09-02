@@ -13,6 +13,7 @@ type FrameMood = 'hit' | 'load' | 'evict' | 'sweep' | null;
 
 function moodOf(frame: BufferFrame, lastEvent: StepEvent | null): FrameMood {
   if (lastEvent?.stage !== 'buffer') return null;
+  // A miss has not chosen a frame yet, so it highlights nothing.
   if (lastEvent.action === 'miss') return null;
   return lastEvent.frameId === frame.frameId ? lastEvent.action : null;
 }

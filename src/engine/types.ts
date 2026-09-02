@@ -117,7 +117,9 @@ export type StepEventBody =
   | { stage: 'plan'; planTree: PlanNode }
   | { stage: 'optimize'; rule: string; before: PlanNode; after: PlanNode }
   | { stage: 'execute'; op: string; rowsProduced: number }
-  | { stage: 'buffer'; action: 'hit' | 'miss' | 'load'; pageId: number; frameId: number }
+  | { stage: 'buffer'; action: 'hit' | 'load'; pageId: number; frameId: number }
+  /** A miss names no frame: nothing has been chosen to hold the page yet. */
+  | { stage: 'buffer'; action: 'miss'; pageId: number }
   | {
       stage: 'buffer';
       action: 'evict';
