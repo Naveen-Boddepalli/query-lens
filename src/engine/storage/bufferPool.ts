@@ -7,8 +7,6 @@
 
 import type { Emit } from '../trace.ts';
 import type { EngineOptions } from '../types.ts';
-import type { Heap, Page } from './page.ts';
-import { pageById } from './page.ts';
 import { policyFor } from './policy.ts';
 import type { BufferState, Frame, ReplacementPolicy } from './policy.ts';
 
@@ -17,7 +15,6 @@ export const DISK_READ_DWELL = 2.5;
 
 export interface FetchResult {
   frameId: number;
-  page: Page;
   hit: boolean;
 }
 
@@ -42,8 +39,14 @@ function emptyState(frameCount: number): BufferState {
   };
 }
 
+/**
+ * `pageCount` covers every page in the database — heap pages first, then index
+ * pages. The pool manages frames, not contents: what a page *holds* is the
+ * caller's business, which is why heap and index pages can share one pool and
+ * compete for the same frames.
+ */
 export function createBufferPool(
-  heap: Heap,
+  pageCount: number,
   options: EngineOptions,
   emit: Emit,
 ): BufferPool {
@@ -55,8 +58,7 @@ export function createBufferPool(
     state.frames.find((f) => f.pageId === pageId);
 
   function fetch(pageId: number): FetchResult | null {
-    const page = pageById(heap, pageId);
-    if (!page) return null;
+    if (!Number.isInteger(pageId) || pageId < 0 || pageId >= pageCount) return null;
 
     const hitFrame = resident(pageId);
     if (hitFrame) {
@@ -67,7 +69,7 @@ export function createBufferPool(
         `Page ${pageId} is already in frame ${hitFrame.frameId} — a buffer hit. No disk read.`,
         { stage: 'buffer', action: 'hit', pageId, frameId: hitFrame.frameId },
       );
-      return { frameId: hitFrame.frameId, page, hit: true };
+      return { frameId: hitFrame.frameId, hit: true };
     }
 
     stats.misses += 1;
@@ -120,7 +122,7 @@ export function createBufferPool(
       { dwell: DISK_READ_DWELL },
     );
 
-    return { frameId: target.frameId, page, hit: false };
+    return { frameId: target.frameId, hit: false };
   }
 
   function unpin(frameId: number): void {

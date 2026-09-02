@@ -6,9 +6,9 @@ An in-browser toy relational database engine that animates a SQL query as it mov
 A learning tool, not a production DB tool. See [plan.md](plan.md) for scope and
 [RESEARCH.md](RESEARCH.md) for the evidence the plan is built on.
 
-## Status: M3 complete — parser, planner, optimizer, buffer pool
+## Status: M4 complete — parser, planner, optimizer, buffer pool, B+Tree index
 
-Four stages of eight are real. `IMPLEMENTED_STAGES` in
+Five stages of eight are real. `IMPLEMENTED_STAGES` in
 [types.ts](src/engine/types.ts) is the single source of truth for that, and the UI reads it: the
 header counts built stages, unbuilt ones are dashed in the pipeline tracker, and selecting one says
 plainly that it is not built yet. plan.md §2 makes honesty about ground truth a top-line goal, and a
@@ -20,8 +20,8 @@ pipeline that *looks* complete when it is not would teach the wrong thing.
 | M1 | Recursive-descent parser + AST visualization | ✅ done |
 | M2 | Planner + predicate pushdown + plan tree | ✅ done |
 | M3 | Pages, buffer pool, LRU **and** clock sweep | ✅ done |
-| M4 | B+Tree index + traversal visualization | next |
-| M5 | Volcano executor wiring it all together | |
+| M4 | B+Tree index + traversal visualization | ✅ done |
+| M5 | Volcano executor wiring it all together | next |
 | M6 | Lock manager visual layer | |
 | M6.5 | Predict-then-reveal + editable seed data | |
 | M7 | Polish, a11y, deploy | |
@@ -121,8 +121,15 @@ Replacement is pluggable behind one interface with two implementations:
 access is **skewed**. On a uniform sequential scan every page is equally cold, so both policies evict
 exactly the same pages — clock just takes 8 extra sweep steps to reach the same answer (44 events vs
 36). Both facts are pinned by tests, and the panel says so rather than implying a difference that is
-not there. The contrast becomes real in **M4**, where index traversal re-reads the root page
-constantly and clock's usage counts finally earn their keep.
+not there. **M4 did not fix this, contrary to what M3 predicted.** A point lookup touches four pages against
+eight frames, so it never evicts at all and the two policies are again indistinguishable. Measured:
+`WHERE id = 5` is 4 disk reads and 0 evictions under both.
+
+Neither of the queries QueryLens currently runs can demonstrate the difference. It needs a workload
+that re-reads some pages while others stream past — a nested-loop join, or an index scan over many
+keys. Both are v1. The policies still earn their place (clock sweep is what PostgreSQL actually
+does, and its sweep mechanism is visible on the scan), but the "same pattern, different victim"
+demo does not exist in this product yet, and the panel does not pretend otherwise.
 
 ### Simulated latency
 
@@ -131,7 +138,35 @@ synchronous, so it cannot sleep and has no measurement it could honestly report.
 carries `dwell: 2.5` — an explicit **playback pacing weight**, not a latency claim — and playback
 lingers on it proportionally.
 
-## Decisions made during M0/M1/M2/M3
+## The B+Tree
+
+All data in the leaves, internal nodes hold separators only, leaves chained left to right. Fan-out
+is 4 keys — real fan-out is in the hundreds and would never split on a demo dataset, so the
+simplified model teaches better. Each node lives on its own page *after* the heap pages, so heap and
+index compete for the same buffer frames.
+
+The split rule, which is where implementations go wrong:
+
+- **leaf split → COPY up** — the separator goes to the parent *and stays in the leaf*, because
+  leaves must hold every key.
+- **internal split → PUSH up** — the middle key moves to the parent and is *removed* from the node.
+
+`validate()` checks every structural invariant plan.md §7.6 lists, and property tests run it over
+~1,300 random insertion orders and fan-outs. To confirm the suite can actually catch the bugs it was
+written for, three deliberate mutants were introduced and all three were caught: leaf-split pushing
+up (7 failures), internal-split copying up (3), and a lopsided split leaving nodes under half full
+(3).
+
+### The §9 contrast is now real
+
+| | `WHERE id = 5` | `WHERE age > 30` |
+|---|---|---|
+| access method | IndexScan | SeqScan |
+| disk reads | **4** | **12** |
+| evictions | 0 | 4 |
+| trace length | 22 events | 36 events |
+
+## Decisions made during M0/M1/M2/M3/M4
 
 - **TypeScript pinned to 6.0.3.** `typescript-eslint@8.69.0` declares `typescript: ">=4.8.4 <6.1.0"`
   — it excludes TS 7. Verified against the registry. Revisit once 7.1 ships a stable compiler API.
@@ -165,3 +200,12 @@ lingers on it proportionally.
   the victim itself, and those moves emit no event — so the UI could not reconstruct the position.
   A test folds the emitted events and compares the result against the engine's real buffer state,
   which is how that gap was found.
+- **The tree view follows the traversal, framing the current hop** (parent plus the child just
+  entered). Framing the whole root-to-leaf path is unreadable: on a wide tree that box spans almost
+  the entire width.
+- **Viewport maths is done by hand, from the d3 layout.** React Flow's `useNodesInitialized` and
+  `fitView({ nodes })` both depend on measured node dimensions, and these graphs never report as
+  measured — so both silently do nothing rather than failing loudly. `requestAnimationFrame` is
+  also unreliable here (throttled when the pane is not painting). A short timeout plus positions we
+  already hold is deterministic. Note this means the M1 note about `useNodesInitialized` fixing the
+  clipped AST tree was wrong — the panel height increase in the same change is what fixed it.

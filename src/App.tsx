@@ -15,9 +15,9 @@ import { SqlEditor } from './ui/SqlEditor.tsx';
 import { StageDetail } from './ui/panels/StageDetail.tsx';
 import { usePlayback, usePlaybackShortcuts } from './ui/usePlayback.ts';
 
-// The scan, not the point lookup, until M4 builds the B+Tree: this is the
-// query that exercises the newest layer (12 pages through 8 frames).
-const INITIAL_SQL = 'SELECT name, age\nFROM users\nWHERE age > 30;';
+// plan.md §9's first query: the indexed point lookup. Swap the WHERE for
+// `age > 30` to watch the same table read by a sequential scan instead.
+const INITIAL_SQL = 'SELECT *\nFROM users\nWHERE id = 5;';
 
 export default function App() {
   const [sql, setSql] = useState(INITIAL_SQL);

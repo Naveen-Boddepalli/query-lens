@@ -19,7 +19,7 @@ const opts = (over: Partial<EngineOptions> = {}): EngineOptions => ({
 function pool(o: EngineOptions, table: Table = users) {
   const { emit, drain } = createTracer();
   const heap = buildHeap(table, o.rowsPerPage);
-  return { pool: createBufferPool(heap, o, emit), heap, drain };
+  return { pool: createBufferPool(heap.pages.length, o, emit), heap, drain };
 }
 
 const bufferActions = (events: StepEvent[]) =>
@@ -104,6 +104,7 @@ describe('buffer pool — hits and misses', () => {
   it('returns null for a page that does not exist', () => {
     const { pool: bp } = pool(opts());
     expect(bp.fetch(9999)).toBeNull();
+    expect(bp.fetch(-1)).toBeNull();
   });
 
   it('reports a load for every miss and nothing more', () => {
@@ -297,7 +298,7 @@ describe('engine state and the UI fold agree', () => {
       const o = opts({ policy });
       const { emit, drain } = createTracer();
       const heap = buildHeap(users, o.rowsPerPage);
-      const bp = createBufferPool(heap, o, emit);
+      const bp = createBufferPool(heap.pages.length, o, emit);
 
       for (const page of heap.pages) {
         const f = bp.fetch(page.pageId);

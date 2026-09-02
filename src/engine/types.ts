@@ -49,6 +49,18 @@ export interface ASTNode {
   children?: ASTNode[];
 }
 
+/** Display shape for the B+Tree. */
+export interface IndexNode {
+  id: string;
+  kind: 'internal' | 'leaf';
+  /** The keys held in this node, formatted. */
+  label: string;
+  pageId: number;
+  /** Right sibling id — the chain that makes range scans possible. */
+  next?: string;
+  children?: IndexNode[];
+}
+
 export interface PlanNode {
   /** Stable across a rewrite, so before/after trees can be compared. */
   id: string;
@@ -126,12 +138,17 @@ export type StepEventBody =
       usageCountAfter: number;
       clockHand: number;
     }
+  /** Emitted once, before a traversal, so the UI has a tree to draw. */
+  | { stage: 'index'; action: 'open'; tree: IndexNode; nodeId: string; height: number }
   | {
       stage: 'index';
-      action: 'traverse' | 'found' | 'not-found';
+      action: 'traverse';
       nodeId: string;
       key?: SqlValue;
+      /** Which child pointer the comparison chose. Absent on a leaf. */
+      childIndex?: number;
     }
+  | { stage: 'index'; action: 'found' | 'not-found'; nodeId: string; key?: SqlValue }
   | {
       stage: 'lock';
       action: 'acquire' | 'release';
@@ -203,4 +220,5 @@ export const IMPLEMENTED_STAGES: readonly Stage[] = [
   'plan',
   'optimize',
   'buffer',
+  'index',
 ] as const;

@@ -7,10 +7,7 @@
  * pages the scan reads, and claims nothing about rows.
  */
 
-import type { Emit } from '../trace.ts';
-import type { EngineOptions } from '../types.ts';
 import type { Plan } from '../planner/index.ts';
-import { createBufferPool } from './bufferPool.ts';
 import type { BufferPool } from './bufferPool.ts';
 import type { Heap } from './page.ts';
 
@@ -28,12 +25,10 @@ export interface ScanOutcome {
 }
 
 export function emitScanEvents(
-  emit: Emit,
   plan: Plan,
   heap: Heap,
-  options: EngineOptions,
+  pool: BufferPool,
 ): ScanOutcome {
-  const pool = createBufferPool(heap, options, emit);
   const scan = findScan(plan);
 
   // An IndexScan needs the B+Tree, which arrives in M4. Reading every page

@@ -10,7 +10,8 @@
 
 import { emitParseEvents, parse } from './parser/index.ts';
 import { emitPlanEvents } from './planner/index.ts';
-import { buildHeap, emitScanEvents } from './storage/index.ts';
+import { buildHeap, createBufferPool, emitScanEvents, findScan } from './storage/index.ts';
+import { buildIndex, emitIndexLookup, pageCountFor } from './index/index.ts';
 import { createTracer } from './trace.ts';
 import { DEFAULT_ENGINE_OPTIONS } from './types.ts';
 import type { Database, EngineOptions, RunResult } from './types.ts';
@@ -61,10 +62,20 @@ export function runQuery(
   emitParseEvents(emit, parsed.ast);
   const plan = emitPlanEvents(emit, parsed.ast, table);
 
+  // Building the heap and the index is setup, not execution — it emits nothing.
+  // The trace describes running your query, not preparing the database.
   const heap = buildHeap(table, options.rowsPerPage);
-  emitScanEvents(emit, plan, heap, options);
+  const tree = table.indexedColumn ? buildIndex(heap, table.indexedColumn) : null;
+  const pool = createBufferPool(pageCountFor(heap, tree), options, emit);
 
-  // M4 adds the B+Tree; M5 the executor, which turns these page reads into rows.
+  const scan = findScan(plan);
+  if (scan?.op === 'IndexScan' && tree) {
+    emitIndexLookup(emit, tree, scan.key, pool, scan.column);
+  } else {
+    emitScanEvents(plan, heap, pool);
+  }
+
+  // M5 adds the executor, which turns these page reads into rows.
   return { events: drain(), rows: [] };
 }
 

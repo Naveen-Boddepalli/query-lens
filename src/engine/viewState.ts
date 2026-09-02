@@ -10,6 +10,7 @@
 import type {
   ASTNode,
   EngineOptions,
+  IndexNode,
   PlanNode,
   Row,
   Stage,
@@ -47,6 +48,7 @@ export interface ViewState {
   clockHand: number;
   bufferStats: { hits: number; misses: number; evictions: number };
 
+  indexTree: IndexNode | null;
   indexPath: string[];
   indexOutcome: 'searching' | 'found' | 'not-found' | null;
 
@@ -73,6 +75,7 @@ export function initialViewState(options: EngineOptions): ViewState {
     })),
     clockHand: 0,
     bufferStats: { hits: 0, misses: 0, evictions: 0 },
+    indexTree: null,
     indexPath: [],
     indexOutcome: null,
     locks: [],
@@ -178,14 +181,23 @@ export function applyEvent(state: ViewState, event: StepEvent): ViewState {
     }
 
     case 'index':
-      next.indexPath =
-        event.action === 'traverse' ? [...state.indexPath, event.nodeId] : state.indexPath;
-      next.indexOutcome =
-        event.action === 'traverse'
-          ? 'searching'
-          : event.action === 'found'
-            ? 'found'
-            : 'not-found';
+      switch (event.action) {
+        case 'open':
+          next.indexTree = event.tree;
+          next.indexPath = [];
+          next.indexOutcome = null;
+          return next;
+        case 'traverse':
+          next.indexPath = [...state.indexPath, event.nodeId];
+          next.indexOutcome = 'searching';
+          return next;
+        case 'found':
+          next.indexOutcome = 'found';
+          return next;
+        case 'not-found':
+          next.indexOutcome = 'not-found';
+          return next;
+      }
       return next;
 
     case 'lock':

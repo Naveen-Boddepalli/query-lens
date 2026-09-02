@@ -1,0 +1,97 @@
+/**
+ * A point lookup, narrated. Each node on the root-to-leaf path is fetched
+ * through the buffer pool first — index pages are pages, so a traversal costs
+ * real reads and shows up in the frame grid alongside the heap.
+ */
+
+import type { Emit } from '../trace.ts';
+import type { SqlValue } from '../types.ts';
+import type { BufferPool } from '../storage/index.ts';
+import { childIndexFor, compareKeys, descend, height, node } from './btree.ts';
+import type { BPlusTree, LeafNode, RowPointer } from './btree.ts';
+import { keyList, toIndexDisplay } from './display.ts';
+
+export interface LookupOutcome {
+  pointer: RowPointer | null;
+  /** Pages the traversal touched, root first. */
+  pagesRead: number[];
+}
+
+function describe(key: SqlValue): string {
+  return typeof key === 'string' ? `'${key}'` : String(key);
+}
+
+export function emitIndexLookup(
+  emit: Emit,
+  tree: BPlusTree,
+  key: SqlValue,
+  pool: BufferPool,
+  column: string,
+): LookupOutcome {
+  emit(
+    `Open the B+Tree on \`${column}\`: ${height(tree)} levels, so any key is at most ${height(tree)} node reads away — however many rows the table holds.`,
+    { stage: 'index', action: 'open', tree: toIndexDisplay(tree), nodeId: tree.rootId, height: height(tree) },
+  );
+
+  const path = descend(tree, key);
+  const pagesRead: number[] = [];
+
+  for (const nodeId of path) {
+    const n = node(tree, nodeId);
+
+    const fetched = pool.fetch(n.pageId);
+    if (fetched) {
+      pagesRead.push(n.pageId);
+      pool.unpin(fetched.frameId);
+    }
+
+    if (n.kind === 'internal') {
+      const internal = n;
+      const childIndex = childIndexFor(internal, key);
+      emit(
+        `Node ${nodeId} separates on ${keyList(internal.keys)}. ${describe(key)} ${
+          childIndex === 0
+            ? `is below ${describe(internal.keys[0]!)}`
+            : childIndex === internal.keys.length
+              ? `is at or above ${describe(internal.keys[internal.keys.length - 1]!)}`
+              : `falls between ${describe(internal.keys[childIndex - 1]!)} and ${describe(internal.keys[childIndex]!)}`
+        }, so follow child ${childIndex}.`,
+        { stage: 'index', action: 'traverse', nodeId, key, childIndex },
+      );
+    } else {
+      emit(`Reach leaf ${nodeId}, which holds keys ${keyList(n.keys)}.`, {
+        stage: 'index',
+        action: 'traverse',
+        nodeId,
+        key,
+      });
+    }
+  }
+
+  const leaf = node(tree, path[path.length - 1]!) as LeafNode;
+  const at = leaf.keys.findIndex((k) => compareKeys(k, key) === 0);
+
+  if (at === -1) {
+    emit(`${describe(key)} is not in this leaf, so it is not in the table at all — the search stops here.`, {
+      stage: 'index',
+      action: 'not-found',
+      nodeId: leaf.id,
+      key,
+    });
+    return { pointer: null, pagesRead };
+  }
+
+  const pointer = leaf.pointers[at]!;
+  emit(
+    `Found ${describe(key)}. The leaf stores a pointer to the row, not the row itself: heap page ${pointer.pageId}, slot ${pointer.slot}.`,
+    { stage: 'index', action: 'found', nodeId: leaf.id, key },
+  );
+
+  const heapFetch = pool.fetch(pointer.pageId);
+  if (heapFetch) {
+    pagesRead.push(pointer.pageId);
+    pool.unpin(heapFetch.frameId);
+  }
+
+  return { pointer, pagesRead };
+}

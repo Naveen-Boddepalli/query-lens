@@ -23,11 +23,22 @@ describe('runQuery', () => {
     }
   });
 
-  it('walks parse → plan → optimize in order', () => {
+  it('walks the pipeline in order for an indexed lookup', () => {
     expect(stages(run('SELECT * FROM users WHERE id = 5').events)).toEqual([
       'parse',
       'plan',
       'optimize',
+      'index',
+      'buffer',
+    ]);
+  });
+
+  it('walks the pipeline in order for a sequential scan — no index stage', () => {
+    expect(stages(run('SELECT * FROM users WHERE age > 30').events)).toEqual([
+      'parse',
+      'plan',
+      'optimize',
+      'buffer',
     ]);
   });
 
@@ -73,10 +84,38 @@ describe('runQuery', () => {
     expect(evictions).toHaveLength(pages - DEFAULT_ENGINE_OPTIONS.bufferFrames);
   });
 
-  it('does no page I/O for an IndexScan yet — the B+Tree is M4', () => {
-    // Reading every page here and calling it an index scan would be a lie.
+  it('reads dramatically fewer pages through the index than through a scan', () => {
+    // plan.md §9: this contrast is the demo. The scan reads every page; the
+    // lookup reads one node per tree level plus the heap page holding the row.
+    const diskReads = (sql: string) =>
+      run(sql).events.filter((e) => e.stage === 'buffer' && e.action === 'load').length;
+
+    const indexed = diskReads('SELECT * FROM users WHERE id = 5');
+    const scan = diskReads('SELECT * FROM users WHERE age > 30');
+
+    expect(indexed).toBeLessThan(scan / 2);
+    expect(scan).toBe(Math.ceil(db.tables.users!.rows.length / DEFAULT_ENGINE_OPTIONS.rowsPerPage));
+  });
+
+  it('the index lookup never evicts — it touches too few pages to fill the pool', () => {
     const { events } = run('SELECT * FROM users WHERE id = 5');
-    expect(events.filter((e) => e.stage === 'buffer')).toHaveLength(0);
+    expect(events.filter((e) => e.stage === 'buffer' && e.action === 'evict')).toHaveLength(0);
+  });
+
+  it('finds a key that exists and reports a miss for one that does not', () => {
+    const found = run('SELECT * FROM users WHERE id = 5').events;
+    expect(found.some((e) => e.stage === 'index' && e.action === 'found')).toBe(true);
+
+    const absent = run('SELECT * FROM users WHERE id = 9999').events;
+    expect(absent.some((e) => e.stage === 'index' && e.action === 'not-found')).toBe(true);
+  });
+
+  it('opens the tree exactly once, before traversing it', () => {
+    const indexEvents = run('SELECT * FROM users WHERE id = 5').events.filter(
+      (e) => e.stage === 'index',
+    );
+    expect(indexEvents.filter((e) => e.action === 'open')).toHaveLength(1);
+    expect(indexEvents[0]?.action).toBe('open');
   });
 });
 

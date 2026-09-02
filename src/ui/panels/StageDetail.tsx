@@ -2,6 +2,7 @@ import { IMPLEMENTED_STAGES } from '../../engine/index.ts';
 import type { ReplacementPolicyName, Span, Stage, ViewState } from '../../engine/index.ts';
 import { STAGE_META } from '../stageMeta.ts';
 import { AstTree } from './AstTree.tsx';
+import { BTreePanel } from './BTreePanel.tsx';
 import { BufferPoolPanel } from './BufferPoolPanel.tsx';
 import { ResultPanel } from './ResultPanel.tsx';
 import { PlanTree } from './PlanTree.tsx';
@@ -102,16 +103,13 @@ export function StageDetail({ stage, state, policy, activeSpan }: StageDetailPro
           />
         )}
 
-        {implemented && stage === 'index' &&
-          (state.indexPath.length === 0 ? (
-            <p className="text-sm text-ink-dim">The B+Tree has not been traversed yet.</p>
-          ) : (
-            <p className="font-mono text-xs">
-              {state.indexPath.join(' → ')}{' '}
-              {state.indexOutcome === 'found' && <span className="text-hit">✓ found</span>}
-              {state.indexOutcome === 'not-found' && <span className="text-evict">✗ not found</span>}
-            </p>
-          ))}
+        {implemented && stage === 'index' && (
+          <BTreePanel
+            tree={state.indexTree}
+            path={state.indexPath}
+            outcome={state.indexOutcome}
+          />
+        )}
 
         {implemented && stage === 'lock' &&
           (state.locks.length === 0 ? (
