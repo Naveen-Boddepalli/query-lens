@@ -80,17 +80,37 @@ export function StageDetail({ stage, state, policy, activeSpan }: StageDetailPro
           (state.operators.length === 0 ? (
             <p className="text-sm text-ink-dim">No operator has produced rows yet.</p>
           ) : (
-            <ul className="space-y-1.5">
-              {state.operators.map((op) => (
-                <li
-                  key={op.op}
-                  className="flex items-baseline justify-between rounded-md border border-edge bg-surface-3 px-2.5 py-1.5 font-mono text-xs"
-                >
-                  <span>{op.op}</span>
-                  <span className="text-ink-dim">{op.rowsProduced} rows</span>
-                </li>
-              ))}
-            </ul>
+            <div className="space-y-3">
+              {/* Listed root-last: rows are pulled from the top down and travel
+                  back up, so reading bottom-to-top follows a single row. */}
+              <ul className="space-y-1.5">
+                {[...state.operators].reverse().map((op) => {
+                  const active =
+                    state.lastEvent?.stage === 'execute' && state.lastEvent.op === op.op;
+                  return (
+                    <li
+                      key={op.op}
+                      className={[
+                        'flex items-baseline justify-between rounded-md border px-2.5 py-1.5 font-mono text-xs transition-colors',
+                        active
+                          ? 'border-accent bg-accent/15 text-ink'
+                          : 'border-edge bg-surface-3',
+                      ].join(' ')}
+                    >
+                      <span>{op.op}</span>
+                      <span className={active ? 'text-accent' : 'text-ink-dim'}>
+                        {op.rowsProduced} row{op.rowsProduced === 1 ? '' : 's'}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+              <p className="text-[11px] leading-relaxed text-ink-dim">
+                Volcano model: each operator pulls one row at a time from the one below
+                it. Nothing materialises the whole table — a row travels all the way to
+                the top before the next is fetched.
+              </p>
+            </div>
           ))}
 
         {implemented && stage === 'buffer' && (

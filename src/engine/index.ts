@@ -7,6 +7,7 @@ export { buildHeap, createBufferPool, policyFor, USAGE_COUNT_CAP } from './stora
 export type { BufferPool, Frame as BufferPoolFrame, Heap, Page } from './storage/index.ts';
 export { buildIndex, DEFAULT_MAX_KEYS, keyList, toIndexDisplay, validate } from './index/index.ts';
 export type { BPlusTree, BTreeNode, RowPointer } from './index/index.ts';
+export { evaluatePredicate, passes } from './exec/index.ts';
 export type { Plan } from './planner/index.ts';
 export type { Expr, SelectStatement } from './parser/index.ts';
 export {

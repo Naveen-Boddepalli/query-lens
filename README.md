@@ -6,9 +6,10 @@ An in-browser toy relational database engine that animates a SQL query as it mov
 A learning tool, not a production DB tool. See [plan.md](plan.md) for scope and
 [RESEARCH.md](RESEARCH.md) for the evidence the plan is built on.
 
-## Status: M4 complete — parser, planner, optimizer, buffer pool, B+Tree index
+## Status: M5 complete — the pipeline runs end to end
 
-Five stages of eight are real. `IMPLEMENTED_STAGES` in
+Seven stages of eight are real; only the lock manager is left. QueryLens now answers queries: it
+returns actual rows, and every number the UI shows is one the engine measured. `IMPLEMENTED_STAGES` in
 [types.ts](src/engine/types.ts) is the single source of truth for that, and the UI reads it: the
 header counts built stages, unbuilt ones are dashed in the pipeline tracker, and selecting one says
 plainly that it is not built yet. plan.md §2 makes honesty about ground truth a top-line goal, and a
@@ -21,8 +22,8 @@ pipeline that *looks* complete when it is not would teach the wrong thing.
 | M2 | Planner + predicate pushdown + plan tree | ✅ done |
 | M3 | Pages, buffer pool, LRU **and** clock sweep | ✅ done |
 | M4 | B+Tree index + traversal visualization | ✅ done |
-| M5 | Volcano executor wiring it all together | next |
-| M6 | Lock manager visual layer | |
+| M5 | Volcano executor wiring it all together | ✅ done |
+| M6 | Lock manager visual layer | next |
 | M6.5 | Predict-then-reveal + editable seed data | |
 | M7 | Polish, a11y, deploy | |
 
@@ -166,7 +167,31 @@ up (7 failures), internal-split copying up (3), and a lopsided split leaving nod
 | evictions | 0 | 4 |
 | trace length | 22 events | 36 events |
 
-## Decisions made during M0/M1/M2/M3/M4
+## Execution
+
+Volcano model: every operator exposes `open` / `next` / `close`, and rows are **pulled** from the
+root downward — one `next()` is one visualization tick. Nothing materialises the whole table; a row
+travels all the way to the top before the next is fetched, which is exactly what the interleaving of
+`buffer` and `execute` events in the trace shows.
+
+Operators: `SeqScan` (walks heap pages, pinning each while its rows are read), `IndexScan`
+(traverses the B+Tree, then fetches the one heap page), `Filter`, `Project`.
+
+### Three-valued logic
+
+Predicates evaluate to TRUE, FALSE or **UNKNOWN**, and only TRUE passes a `WHERE` clause. A
+comparison against NULL is UNKNOWN, not false; FALSE dominates UNKNOWN in an `AND`. This is modelled
+rather than flattened to booleans because it is real, commonly-missed SQL semantics — it is why
+`WHERE age > 30` and `WHERE NOT (age <= 30)` do not partition a table containing NULLs.
+
+### Results are checked against a reference
+
+Execution tests compute the expected rows with a plain JavaScript filter and compare. The same
+answer must come back regardless of which access method the optimizer picks, which replacement
+policy is selected, and how pages or frames are sized — so a storage bug cannot hide behind a
+correct-looking result.
+
+## Decisions made during M0/M1/M2/M3/M4/M5
 
 - **TypeScript pinned to 6.0.3.** `typescript-eslint@8.69.0` declares `typescript: ">=4.8.4 <6.1.0"`
   — it excludes TS 7. Verified against the registry. Revisit once 7.1 ships a stable compiler API.
@@ -209,3 +234,7 @@ up (7 failures), internal-split copying up (3), and a lopsided split leaving nod
   also unreliable here (throttled when the pane is not painting). A short timeout plus positions we
   already hold is deterministic. Note this means the M1 note about `useNodesInitialized` fixing the
   clipped AST tree was wrong — the panel height increase in the same change is what fixed it.
+- **`execute` events are per row, per operator.** A full scan is a long trace (55 events against the
+  index lookup's 25) and that length *is* the lesson — it is what the query actually costs.
+- **The ad-hoc scan driver from M3 is gone.** It existed only so the buffer pool could be watched
+  before an executor existed; `SeqScan` now does that work as a real operator.

@@ -30,6 +30,8 @@ describe('runQuery', () => {
       'optimize',
       'index',
       'buffer',
+      'execute',
+      'result',
     ]);
   });
 
@@ -39,6 +41,8 @@ describe('runQuery', () => {
       'plan',
       'optimize',
       'buffer',
+      'execute',
+      'result',
     ]);
   });
 
