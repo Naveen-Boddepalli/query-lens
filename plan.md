@@ -721,6 +721,19 @@ serves both. Worth recording that the first two attempts at this fix were aimed 
 thing: a hidden browser pane throttles `requestAnimationFrame`, so the animated transform never
 lands, which looks identical to a fit that never ran.
 
+> **Correction, M10.** The paragraph above is wrong on both counts, and the thing it dismissed
+> was the actual cause. `requestAnimationFrame` was not a distraction: React Flow moves the
+> viewport through a d3-zoom transition whenever it is given a duration, d3-timer advances those
+> on rAF, and a tab that is not painting never fires one — so the move was created, never ticked,
+> and nothing retried it. That is why the symptom was intermittent, and why it was *reliable* for
+> anyone opening the link into a background tab. And the `useStore(s => s.width)` gate this
+> paragraph describes never worked: React Flow's store does `width: size.width || 500`, so it does
+> not report a width of 0 — it reports 500, which the gate reads as ready and the framing maths
+> reads as a real pane. The fix that holds is in §19.4: measure the pane with a `ResizeObserver`,
+> compute the transform and hand it to `setViewport`, never animate the first framing or any
+> framing while `document.hidden`, and depend on the `panZoom` instance rather than a timeout.
+> Three e2e tests now hold it, each verified to fail against the code it replaced.
+
 ---
 
 ## 16. Visual Design Maturity — the "not AI-generated" gate
