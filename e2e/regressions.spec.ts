@@ -48,6 +48,43 @@ test('a pinned stage holds the panel, says so, and releases in one click', async
   await expect(page.locator('section h2').first()).toHaveText('Locks');
 });
 
+test('the tree zoom controls sit outside the canvas and work', async ({ page }) => {
+  // They used to be React Flow's own <Controls>, floating in the pane's
+  // bottom-right — which for a B+Tree is exactly where the leaf row is drawn.
+  await page.goto(`/?q=${LOOKUP}&p=lru&x=0&s=24`);
+  const canvas = page.locator('.react-flow');
+  const zoomIn = page.getByRole('button', { name: 'Zoom in' });
+  await expect(zoomIn).toBeVisible();
+
+  // Outside the canvas box: no node can ever be underneath them.
+  const [controls, pane] = await Promise.all([
+    zoomIn.boundingBox(),
+    canvas.boundingBox(),
+  ]);
+  expect(controls!.y + controls!.height).toBeLessThanOrEqual(pane!.y + 1);
+
+  const zoom = () => page.evaluate(() => {
+    const t = (document.querySelector('.react-flow__viewport') as HTMLElement).style.transform;
+    return Number(/scale\(([\d.]+)\)/.exec(t)?.[1] ?? 0);
+  });
+
+  const before = await zoom();
+  await zoomIn.click();
+  await page.waitForTimeout(400);
+  const zoomedIn = await zoom();
+  expect(zoomedIn).toBeGreaterThan(before);
+
+  await page.getByRole('button', { name: 'Zoom out' }).click();
+  await page.waitForTimeout(400);
+  expect(await zoom()).toBeLessThan(zoomedIn);
+
+  // Fit uses our own d3 maths, not React Flow's fitView, which needs measured
+  // node dimensions these graphs never report.
+  await page.getByRole('button', { name: 'Fit the whole tree' }).click();
+  await page.waitForTimeout(500);
+  expect(await zoom()).toBeGreaterThan(0);
+});
+
 test('no page overflow at any step, desktop or mobile', async ({ page }) => {
   // Reported as results "extending the page" instead of scrolling in place.
   // The horizontal half was found here: a long email column made the phone

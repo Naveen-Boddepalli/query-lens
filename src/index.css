@@ -236,9 +236,13 @@ body {
   background: transparent;
 }
 /* React Flow's attribution stays (their licence asks for it) but its default
-   styling sits at ~1.2:1 on this background. Readable, still unobtrusive. */
+   styling sits at ~1.2:1 on this background. Readable, still unobtrusive — and
+   given a background of its own, because as bare text it collided with whatever
+   node happened to sit in that corner. */
 .react-flow__attribution {
-  background: transparent !important;
+  padding: 0 0.25rem !important;
+  border-radius: 0.25rem 0 0 0;
+  background: color-mix(in oklab, var(--color-surface-2) 88%, transparent) !important;
 }
 .react-flow__attribution a {
   color: var(--color-ink-dim) !important;
@@ -249,11 +253,6 @@ body {
   font-size: 0.625rem;
 }
 
-.react-flow__controls-button {
-  background: var(--color-surface-3);
-  border-bottom: 1px solid var(--color-edge);
-  fill: var(--color-ink);
-}
 
 /* plan.md §15.1 item 8. The trace scrubber is the control a touch user leans
    on hardest, and the UA default draws a 16px-tall thumb — under WCAG 2.2

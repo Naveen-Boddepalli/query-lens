@@ -1,10 +1,17 @@
 # QueryLens
 
+![CI](https://github.com/Naveen-Boddepalli/QueryLens/actions/workflows/ci.yml/badge.svg)
+![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)
+![TypeScript](https://img.shields.io/badge/TypeScript-6.0.3-blue.svg)
+![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)
+
 An in-browser toy relational database engine that animates a SQL query as it moves through
 **Parser → Planner → Optimizer → Execution → Buffer Pool → B+Tree Index → Locks → Result**.
 
 A learning tool, not a production DB tool. See [plan.md](plan.md) for scope and
 [RESEARCH.md](RESEARCH.md) for the evidence the plan is built on.
+
+**[Contributing](CONTRIBUTING.md)** · **[Code of Conduct](CODE_OF_CONDUCT.md)** · **[Security](SECURITY.md)** · **[Changelog](CHANGELOG.md)** · **[License](LICENSE)**
 
 ## Status: MVP complete, both gates through P0 and P1
 
@@ -427,7 +434,7 @@ The licence is [MIT](LICENSE).
 | Layer | What it covers |
 |---|---|
 | `pnpm test` | 326 tests over the engine (parser, planner, buffer pool, B+Tree, executor, locks) and the UI (playback gating, keyboard shortcuts, the data editor, URL state, the error boundary) |
-| `pnpm test:e2e` | 14 Playwright tests against **`dist/`** — [smoke](e2e/smoke.spec.ts) (load→run→step→result, a shared link, the data editor's real modality, the theme toggle, axe in *both* palettes) and [regressions](e2e/regressions.spec.ts) (the panel following each step, a pinned stage, overflow at two viewports, gating, history, seed-data round trip, console silence) |
+| `pnpm test:e2e` | 15 Playwright tests against **`dist/`** — [smoke](e2e/smoke.spec.ts) (load→run→step→result, a shared link, the data editor's real modality, the theme toggle, axe in *both* palettes) and [regressions](e2e/regressions.spec.ts) (the panel following each step, a pinned stage, the tree's zoom controls, overflow at two viewports, gating, history, seed-data round trip, console silence) |
 | `pnpm budget` | A gzip ceiling per chunk and overall, so the bundle cannot drift back silently |
 
 The end-to-end suite is the only thing that catches "the deploy is broken", and it is where three
@@ -464,6 +471,15 @@ Three defects, two reported and one found while checking them. All three are now
 - **A phone scrolled sideways on the result view.** Found while testing the fix above. Grid and flex
   children default to `min-width: auto`, so the long `email` column refused to shrink and pushed the
   page wider instead of letting the table's own `overflow-auto` scroll. Four `min-w-0`s.
+
+- **The tree's zoom controls overlapped the nodes they exist to help you read.**
+  React Flow's `<Controls>` float in a corner of the pane, and for a B+Tree that corner is the leaf
+  row. They are now our own buttons, rendered into the panel's header beside the *"drag to pan · scroll
+  to zoom"* hint it already had. A strip *above* the canvas was the first attempt and cost the graph
+  exactly its own height — it clipped the leaf row instead of covering it. Fit uses the same d3 maths
+  as the automatic framing rather than React Flow's `fitView`, which needs measured node dimensions
+  these graphs never report. The required attribution badge got a background of its own for the same
+  collision reason.
 
 One reported symptom turned out **not** to be a bug: in the in-app preview browser, closing the data
 editor left it mounted and "Edit data" would not reopen it. In real Chromium the native `close` event

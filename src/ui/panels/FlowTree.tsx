@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Background,
   BackgroundVariant,
-  Controls,
   Handle,
   Position,
   ReactFlow,
@@ -65,6 +65,12 @@ function NodeView({ data }: NodeProps<TreeFlowNode>) {
 
 const nodeTypes = { tree: NodeView };
 
+// 24px minimum on both axes — WCAG 2.2 SC 2.5.8, the rule that also set the
+// scrubber's size (plan.md §15.1 item 8). React Flow's own buttons are 16px.
+const ZOOM_BUTTON =
+  'flex h-6 w-6 items-center justify-center rounded border border-edge bg-surface-3 text-sm ' +
+  'leading-none text-ink-dim transition-colors hover:border-accent/70 hover:text-ink';
+
 const overlaps = (a: Span | undefined, b: Span | undefined): boolean =>
   a !== undefined && b !== undefined && a.from < b.to && b.from < a.to;
 
@@ -86,6 +92,14 @@ export interface FlowTreeProps {
   sideEdges?: readonly SideEdge[];
   /** Zoom/fit buttons — worth it on a tree too big to read at fit scale. */
   controls?: boolean;
+  /**
+   * Where to put the zoom buttons. React Flow's own <Controls> float in a
+   * corner of the pane, and for a B+Tree that corner is the leaf row — they
+   * overlapped the nodes they exist to help you read. Rendering them into the
+   * panel's own header instead costs no canvas height, which a strip above the
+   * graph did: it clipped the bottom row by exactly its own height.
+   */
+  toolbarTarget?: HTMLElement | null;
   /**
    * Zoom to these nodes rather than the whole tree. A B+Tree over a real table
    * is far too wide to read at fit scale; the root-to-leaf path is the part
@@ -161,13 +175,14 @@ function Canvas({
   activeSpan,
   sideEdges,
   controls,
+  toolbarTarget,
   focusIds,
 }: FlowTreeProps & { wide: boolean; compact: boolean; sideEdges: readonly SideEdge[] }) {
   const { nodes, edges } = useMemo(
     () => build(root!, { tones, wide, compact }, activeSpan, sideEdges),
     [root, tones, wide, compact, activeSpan, sideEdges],
   );
-  const { setCenter } = useReactFlow();
+  const { setCenter, zoomIn, zoomOut } = useReactFlow();
   const paneRef = useRef<HTMLDivElement | null>(null);
   const focusKey = focusIds?.join(',') ?? '';
 
@@ -205,14 +220,10 @@ function Canvas({
    * (plan.md §15.1 item 1), the very first paint *is* the unfocused case — and
    * it was the one path still asking React Flow to measure something.
    */
-  useEffect(() => {
-    if (rfWidth === 0) return;
-    const timer = window.setTimeout(() => {
-      const focus = new Set(focusKey ? focusKey.split(',') : []);
-      const focused = nodes.filter((n) => focus.has(n.id));
-      const targets = focused.length > 0 ? focused : nodes;
+  /** Frames a set of nodes, from the d3 positions rather than measured DOM. */
+  const frame = useCallback(
+    (targets: TreeFlowNode[]) => {
       const pane = paneRef.current;
-
       if (targets.length === 0 || !pane) return;
 
       const paneW = pane.clientWidth || 600;
@@ -236,31 +247,77 @@ function Canvas({
         zoom: Math.max(zoom, 0.1),
         duration: 400 * glide,
       });
+    },
+    [setCenter, wide, compact, glide],
+  );
+
+  useEffect(() => {
+    if (rfWidth === 0) return;
+    const timer = window.setTimeout(() => {
+      const focus = new Set(focusKey ? focusKey.split(',') : []);
+      const focused = nodes.filter((n) => focus.has(n.id));
+      frame(focused.length > 0 ? focused : nodes);
     }, 60);
 
     return () => { window.clearTimeout(timer); };
     // `nodes` is read for positions; its length gates a full refit.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nodes.length, focusKey, setCenter, wide, compact, glide, rfWidth]);
+  }, [nodes.length, focusKey, frame, rfWidth]);
+
+  const zoomOpts = { duration: 200 * glide };
+
+  const toolbar = (
+    <>
+      <button
+        type="button"
+        onClick={() => { void zoomOut(zoomOpts); }}
+        aria-label="Zoom out"
+        className={ZOOM_BUTTON}
+      >
+        <span aria-hidden>−</span>
+      </button>
+      <button
+        type="button"
+        onClick={() => { void zoomIn(zoomOpts); }}
+        aria-label="Zoom in"
+        className={ZOOM_BUTTON}
+      >
+        <span aria-hidden>+</span>
+      </button>
+      <button
+        type="button"
+        // Our own maths, not React Flow's `fitView`: that needs measured node
+        // dimensions, which these graphs never report.
+        onClick={() => { frame(nodes); }}
+        aria-label="Fit the whole tree"
+        className={`${ZOOM_BUTTON} w-auto px-2 text-2xs`}
+      >
+        Fit
+      </button>
+    </>
+  );
 
   return (
-    <div ref={paneRef} className="h-full w-full">
-    <ReactFlow
-      nodes={nodes}
-      edges={edges}
-      nodeTypes={nodeTypes}
-      // No `fitView` prop: it lands late, once React Flow has measured, and
-      // then overrides the framing the effect above computed deliberately.
-      minZoom={0.08}
-      maxZoom={1.6}
-      nodesDraggable={false}
-      nodesConnectable={false}
-      elementsSelectable={false}
-    >
-      <Background variant={BackgroundVariant.Dots} gap={18} size={1} color="var(--color-edge)" />
-      {controls && <Controls showInteractive={false} position="bottom-right" />}
-    </ReactFlow>
-    </div>
+    <>
+      {controls && toolbarTarget && createPortal(toolbar, toolbarTarget)}
+
+      <div ref={paneRef} className="h-full w-full">
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={nodeTypes}
+          // No `fitView` prop: it lands late, once React Flow has measured, and
+          // then overrides the framing the effect above computed deliberately.
+          minZoom={0.08}
+          maxZoom={1.6}
+          nodesDraggable={false}
+          nodesConnectable={false}
+          elementsSelectable={false}
+        >
+          <Background variant={BackgroundVariant.Dots} gap={18} size={1} color="var(--color-edge)" />
+        </ReactFlow>
+      </div>
+    </>
   );
 }
 
@@ -274,6 +331,7 @@ export function FlowTree({
   compact = false,
   sideEdges = NO_SIDE_EDGES,
   controls = false,
+  toolbarTarget = null,
   focusIds,
   empty,
 }: FlowTreeProps) {
@@ -291,6 +349,7 @@ export function FlowTree({
           activeSpan={activeSpan}
           sideEdges={sideEdges}
           controls={controls}
+          toolbarTarget={toolbarTarget}
           focusIds={focusIds}
         />
       </ReactFlowProvider>

@@ -1,5 +1,22 @@
 # Project Plan: QueryLens — Interactive Database Internals Visualizer
 
+> **v6 — 2026-09-03.** A research pass over §16–§18, plus a new §19. §16 is **rewritten against a
+> count of `src/` rather than an impression of it** — three of its four v5 claims were overstated or
+> backwards, and the largest tell in the app (a typeface named in CSS that is never actually served,
+> under a CSP that forbids loading it from anywhere but here) was missing entirely; a written design
+> direction is added ahead of the task list. §17 **reopens the docs-tool choice** — v5 picked a Vue
+> framework for a React app — restructures the user manual around task-shaped minimalism, and grows
+> licensing to the two obligations the project has actually incurred: prose is not code (CC BY 4.0),
+> and a bundled OFL font is not either. §18 is marked to its true status: every P0/P1 governance file
+> now exists. **New §19** is the landing page, which v5 had as one row in a table — including the
+> decision that the app *is* the landing page, and why. §10's M10 splits into M10 and M11.
+>
+> **v5 — 2026-09-03.** Updated to add three new sections: §16, the visual design maturity gate
+> ("not AI-generated"); §17, documentation, user manual and licensing (VitePress, Diátaxis
+> structure, user manual chapter plan); §18, community and governance (CONTRIBUTING.md,
+> CODE_OF_CONDUCT.md, SECURITY.md, CHANGELOG.md, GitHub templates, README badges, social
+> presence strategy — socials deferred until deployed). New milestone M10 added to §10.
+>
 > **v4 — 2026-09-02.** Updated to incorporate [RESEARCH.md Part III](RESEARCH.md#part-iii--uiux-production-readiness),
 > the UI/UX pass done by driving the running app. Changed since v3: **new §15, the UX gate**; M9 added to
 > the milestone table (§10); first-run behaviour, prompt placement and a shareable URL added to §8; the
@@ -305,6 +322,8 @@ This event stream is the single contract between engine and UI — makes the UI 
 | **MVP complete** | Full pipeline for indexed point lookup **+ sequential-scan contrast** (§9) | **~10-14 weeks part-time** |
 | M8 | **Production readiness — the deploy gate (§14):** CI, error boundary, security headers, licence, supply-chain settings, link preview | ~1 day (P0) + 2-3 days (P1) — **both done** |
 | M9 | **UI/UX readiness (§15):** first-run trace, Run feedback, native dialog, shareable URL, prompt placement, responsive height | ~1 day (P0) + 2-3 days (P1) — **both done** |
+| M10 | **Visual design maturity (§16) + landing page (§19):** self-hosted typefaces, named type/space/motion scales, hover states across every diagram panel, footer, first-screen framing | ~1.5 days (P0) + 1 week (P1) |
+| M11 | **Docs, manual, licensing & governance (§17–§18):** docs site, Getting Started, the two manual pages the §9 study needs, `LICENSE-DOCS`, font licensing, README restructure | ~1 week (P0/P1) + ongoing |
 | v1 | Expand SQL coverage: joins, cost estimates, InnoDB midpoint-LRU as a third policy | Post-MVP |
 
 M8 sits between "the app works" and "the URL is public." It is not polish — every item on the P0 list in
@@ -314,6 +333,14 @@ M8 sits between "the app works" and "the URL is public." It is not polish — ev
 estimate this document had wrong — see the note there), undo for row deletion, and the standing
 obligation to re-run the contrast sweep at each visual change. Two of §14.6's checks stay open until
 the URL is live, because nothing can fetch the site before it exists.
+
+**M10 and M11 are ordered, not parallel.** M10 changes what the app looks like; M11 screenshots it.
+Writing the manual first means rewriting it. The one exception is the FAQ, which is prose about the
+model rather than the pixels and can be written at any point — and should be, since it is the page
+that decides whether a sceptical visitor stays.
+
+**M11's README restructure is blocked on M11's own docs site**, which is why both sit in the same
+milestone: moving 500 lines out of the README before there is somewhere for them to go is deletion.
 
 ---
 
@@ -642,9 +669,16 @@ in states it did not visit and the third only in a browser it did not use.
   `min-width: auto` and will not shrink below their content, so a long email column pushed the page
   wider rather than letting the table's own scroller work.
 
-The lasting change is not the three fixes but where they are pinned down: `e2e/regressions.spec.ts`
-walks all 33 steps asserting the panel matches the current stage, checks overflow at two viewports on
-both a short and a long trace, and asserts the console stays silent across a full playthrough. None of
+- **The B+Tree's zoom controls overlapped its leaf row.** React Flow's `<Controls>` float inside the
+  pane; for this graph the bottom-right corner is where the leaves are. Moving them into the panel
+  header — beside the hint that already described them — costs no canvas height, which a strip above
+  the graph did: it clipped the bottom row by exactly its own height. The first fix was worse than the
+  bug, and only a screenshot showed it.
+
+The lasting change is not the four fixes but where they are pinned down: `e2e/regressions.spec.ts`
+walks all 33 steps asserting the panel matches the current stage, asserts the zoom controls sit
+geometrically outside the canvas box, checks overflow at two viewports on both a short and a long
+trace, and asserts the console stays silent across a full playthrough. None of
 that is expressible in jsdom, which is why §14.2's "one Playwright smoke test" turned out to be the
 load-bearing item on that list.
 
@@ -686,3 +720,448 @@ every node through the same d3 maths rather than handing off to `fitView`, so on
 serves both. Worth recording that the first two attempts at this fix were aimed at the wrong
 thing: a hidden browser pane throttles `requestAnimationFrame`, so the animated transform never
 lands, which looks identical to a fit that never ran.
+
+---
+
+## 16. Visual Design Maturity — the "not AI-generated" gate
+
+> Added in v5, **rewritten in v6 against a measured audit of the code rather than an impression
+> of it.** §14 asks whether the deploy is safe, §15 asks whether the first visitor understands
+> anything, and this asks whether the product looks *intentional* — designed by a person with
+> opinions, not assembled component-by-component by a tool optimising for "looks plausible."
+
+**What the v5 draft got wrong, and why it is worth saying so.** v5 listed the symptoms a
+generic design audit lists: too many type sizes, spacing off a grid, jump-cuts, no hover states.
+Three of those four are either overstated or backwards here, and one much larger problem was
+missed entirely. The audit below is counted, not eyeballed — the same discipline §15 credits for
+paying for itself.
+
+### 16.0 The audit — what the code actually says
+
+| Claim in v5 | What a count of `src/` shows | Verdict |
+|---|---|---|
+| "Six type sizes with no documented purpose" | Six sizes, but the distribution is the story: `text-xs` ×30, `text-sm` ×20, `text-2xs` ×15, `text-3xs` ×10 — **55 of 77 usages are ≤ 12px** — against exactly **one** `text-lg` and one `text-base` in the entire application | **Misdiagnosed.** The problem is not too many sizes, it is that there is no *top* to the scale. Everything is chrome; nothing is a headline. Deleting a size makes this worse |
+| "Collapse all padding to a 4px/8px grid" | The four most common spacing values are `py-1.5` (6px), `gap-2` (8px), `px-2.5` (10px), `py-1` (4px). The half-steps are not strays — they are the majority, and they are what makes a dev-tool density readable | **Wrong target.** Forcing this to a 4px grid is a redesign that would inflate every panel. The base unit here is 2px; the fix is to *name* the scale that already exists, not replace it |
+| "Jump-cuts between states where a transition would help" | 28 `transition`/`duration`/`animate` usages already in `src/` | **Overstated.** Motion exists; what is missing is a *documented* set of durations and curves, so the next component matches the last one by rule rather than by memory |
+| "Interactive elements with no hover feedback" | Confirmed, and worse than stated: **every diagram panel has zero hover states** — `AstTree`, `PlanTree`, `BTreePanel`, `BufferPoolPanel`, `LockPanel`, `ResultPanel`, `FlowTree` and `PipelineTracker` between them contain one `hover:` rule, in `StageDetail` | **Confirmed, promote to P0.** These are the panels the product is *for* |
+
+**And the thing v5 missed, which is the largest single tell in the app.**
+
+`src/index.css` declares `--font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace`,
+and **no `@font-face` rule exists and no font file is served.** The typeface only appears for
+visitors who happen to have installed it locally — a population that skews to exactly the developers
+who would notice, which is why it survived this long. Everyone else gets their OS default, meaning
+the app's typography is currently *unchosen*. `public/_headers` sets `font-src 'self'`, so a Google
+Fonts link would be blocked by the project's own CSP — correctly. Self-hosting is the only route,
+and it carries a licence obligation (§17.3).
+
+An unchosen typeface is the first item on every published list of AI-design tells, alongside the
+indigo-to-purple gradient and the three-rounded-cards feature row. QueryLens has neither of the other
+two — its palette is a deliberate OKLCH system with semantic storage-layer hues and a documented
+reason for each — which is precisely why the font is now the weakest link.
+
+### 16.1 Design direction — the constraints, written down before the work
+
+The published diagnosis of generic-looking UI is consistent: it is what a model produces when it
+fills in taste decisions nobody made. The counter is not better prompting, it is **making the
+decisions explicitly and writing them where the next change can see them.** This subsection is that
+document. It is short on purpose; a design language nobody can recite is not a design language.
+
+1. **Two typefaces, both chosen, both self-hosted.** A monospace for everything the engine emits —
+   SQL, page IDs, keys, counters, narration — and a text face for prose and headings. The monospace
+   is JetBrains Mono (already named; now actually shipped). The text face must be a deliberate
+   choice and must **not** be Inter, for the same reason a house should not be beige: it is the
+   default, and defaults read as absence of choice. A grotesk with real character at small sizes and
+   an open licence is the brief.
+2. **One accent, and it is already spent.** `--color-accent` (a cyan) is the interaction colour. The
+   storage semantics — hit/miss/evict, internal/leaf — are *data* colours and are never borrowed for
+   chrome. No second accent, no gradient anywhere in the chrome. The diagrams are allowed colour
+   because the colour carries meaning; the frame around them is not.
+3. **The instrument aesthetic, not the SaaS aesthetic.** The reference class is an oscilloscope, a
+   profiler, a debugger — dense, flat, high-information, borders over shadows. Explicitly rejected:
+   `rounded-2xl` cards, `shadow-lg` lifts, `backdrop-blur`, hero gradients, three-icon feature rows.
+   Radius stays small and constant (4px chrome / 2px inside diagrams).
+4. **Asymmetry is allowed.** Equal thirds is the layout a generator reaches for. The pipeline is a
+   sequence with a wide middle; the layout should say so.
+5. **Motion is causal.** Anything that moves does so because something changed, and the duration
+   says how far it travelled. Nothing animates on load for decoration.
+
+These five are the acceptance criteria for every item below. An item that satisfies its own
+checkbox while violating one of these has not been done.
+
+### 16.2 P0 — before the URL is shared publicly
+
+Roughly a day and a half. Reordered from v5: the font work is new and first, the spacing rewrite is
+gone, and the hover audit is promoted out of P1.
+
+| # | Item | Where | Why it matters |
+|---|---|---|---|
+| 1 | **Ship the typefaces.** Self-host JetBrains Mono as a subset WOFF2 (Latin + the box-drawing and arrow glyphs the diagrams use), served from `/fonts/`, declared with `@font-face` and `font-display: swap`. Add a chosen text face for prose and headings. Preload only the two faces above the fold. Verify against `font-src 'self'`, and add the `size-adjust`/fallback metrics so the swap does not reflow | `public/fonts/` [NEW], `src/index.css`, `index.html` | The app currently has no typography of its own. Everything else in this section is polish on top of a font nobody chose |
+| 2 | **Give the scale a top, then name every step.** Add a display and a heading size above the current ceiling so the H1 and stage titles are not 14px, and name the six steps by role — `--text-display`, `--text-heading`, `--text-body`, `--text-label`, `--text-micro`, `--text-code` — on a minor-third-ish ratio. Six *named* sizes is a scale; six unnamed ones is an accident. Delete nothing until a role is proven unused | `src/index.css`, `App.tsx`, `StageDetail.tsx` | A named scale with a documented role per step is the single strongest signal of intentional design |
+| 3 | **Name the spacing scale that already exists.** Declare `--space-0.5` (2px) through `--space-6` (24px) on a 2px base, map the values already in use onto it, and document the density rule: 2px steps inside dense chrome, 4px steps and up for layout. Fix only the genuine strays (`p-0.5`, `py-0`, `px-0`, `mt-2.5`) | `src/index.css`, all components | The grid exists; nobody can point at it. A scale someone can name is the difference between "dense" and "inconsistent" |
+| 4 | **Hover and active states on every diagram element** — buffer-pool frames, B+Tree nodes, AST and plan nodes, lock rows, result rows, pipeline chips. Border-brighten plus a 1px background lift; `cursor: pointer` on the ones that are clickable, and nothing on the ones that are not, so the cursor tells the truth | `panels/*.tsx`, `PipelineTracker.tsx` | Zero hover states across eight panels is the audit's hardest finding. These panels *are* the product |
+| 5 | **Three named durations, three named curves.** `--dur-fast` 120ms (state flips), `--dur-base` 180ms (panel and stage changes), `--dur-slow` 320ms (diagram layout moves); `--ease-enter`, `--ease-exit`, `--ease-morph`. Replace every literal duration. Never `transition: all` — list the properties. Every one collapses to `0ms` under the existing reduced-motion hook | `src/index.css`, all animated components | Motion already exists (28 sites); what is missing is the rule that makes the 29th match |
+| 6 | **Acknowledge Run.** The trace takes ~50ms, so a spinner would flash and read as jank. Use the show-delay pattern: nothing before ~150ms, and if a spinner does appear, hold it ~400ms minimum. Under the threshold, a single-frame press state on the button is the whole acknowledgement | `App.tsx`, `PlaybackControls.tsx` | Professional tools acknowledge every action; they do not flash a spinner to prove they did |
+| 7 | **Tabular figures everywhere a number can change** — step index, page IDs, `usage_count`, hit/miss counters, the data grid. `font-variant-numeric: tabular-nums` | `src/index.css` | Digits that jitter during playback are the most visible possible defect in a step-through tool, and the fix is one declaration |
+| 8 | **The favicon at every size it is actually used.** The existing `favicon.svg` is sound; what is missing is a 180×180 `apple-touch-icon.png` and a check that the mark still reads at 16px — most marks do not | `public/`, `index.html` | The favicon is the brand at its smallest |
+| 9 | **A footer that is a footer.** `DisclaimerBanner` is a top bar and should stay one — §12 wants the disclaimer unmissable. Add a *separate* real footer: project name, one-line tagline, Docs · GitHub · Licence · Changelog, and the build SHA already stamped into the page | `Footer.tsx` [NEW], `App.tsx` | A build SHA in the footer is what a tool built by an engineer looks like. It also makes bug reports self-identifying |
+| 10 | **Scroll-snap on mobile** — `scroll-snap-type: y proximity` with `scroll-snap-align: start` on each section, so the trace and editor settle rather than drift | `src/index.css` | One CSS property, and mobile feel is where hand-assembly shows most |
+
+### 16.3 P1 — the fortnight after launch
+
+- **Focus-visible ring audit at 3:1 against every surface it lands on.** The ring exists and is
+  consistent; what has not been measured is its contrast against `--color-surface-3` and against the
+  diagram fills, where it is at its weakest. Interaction states must *increase* contrast, never
+  merely change hue
+- **Empty, loading and error states for every panel.** Today a panel with nothing to show renders an
+  empty box. Each needs a one-line statement of what will appear and what to do to make it appear —
+  "No index scan in this plan. Add `WHERE id = …` and re-run." Empty states are where thought about
+  failure becomes visible
+- **Skeletons at the geometry of the incoming content** on first paint, sized to the real panels so
+  nothing shifts. Not shimmer for its own sake — the point is zero layout shift
+- **Optical alignment pass** — icons against text baselines, the play triangle inside its button, the
+  clock hand against its ring. ±1px where perception beats geometry
+- **Typographic detail** — curly quotes in prose, `&nbsp;` joining values to units (`4&nbsp;KB`,
+  `⌘&nbsp;K`), no orphaned words in the narration line
+- **Hit targets** — ≥24px everywhere, ≥44px on touch, with the hit area expanded beyond the visual
+  target rather than the target inflated
+
+### 16.4 P2 — ongoing
+
+- **`tokens.json`** — export the token system so course themes, embeds and the docs site theme from
+  one source rather than three drifting copies
+- **Motion specification** — one page: what moves, how far, how fast, why. The §16.2 item 5 tokens
+  are the vocabulary; this is the sentence
+- **Component gallery** — every panel, every state, both themes, on one page. Not for users; for
+  making the next visual change without fear
+- **A second opinion.** Every item here is self-assessed. Before the §9 study, put the app in front
+  of one person who designs for a living and ask a single question: "what tells you a developer made
+  this rather than a designer?" Budget one afternoon and take notes rather than defending
+
+### 16.5 Definition of done
+
+- [ ] Both typefaces are self-hosted, subset, preloaded, and render under `font-src 'self'` with no
+      console warning and no layout shift on swap.
+- [ ] The type scale has six named steps with a documented role each, and a display size above 16px
+      exists and is used.
+- [ ] Every spacing value in `src/` maps to a named `--space-*` token; the density rule is written
+      down in `index.css`.
+- [ ] Every diagram element has a hover state and an active state, and `cursor: pointer` appears on
+      exactly the clickable ones.
+- [ ] Every transition uses a named duration and a named curve; no `transition: all` remains; all
+      collapse under `prefers-reduced-motion`.
+- [ ] Every changing number renders with `tabular-nums`.
+- [ ] `apple-touch-icon.png` exists, is linked, and the mark is legible at 16px.
+- [ ] A footer exists with Docs · GitHub · Licence · Changelog and the build SHA.
+- [ ] Mobile scroll snaps between sections.
+- [ ] Nothing in the app violates the five constraints in §16.1 — in particular, no gradient in the
+      chrome, no `rounded-2xl`, no `shadow-lg`, and no Inter.
+
+---
+
+## 17. Documentation, User Manual & Licensing
+
+> Added in v5, **revised in v6**: the docs-tool choice is reopened (v5 picked a Vue framework for a
+> React application), the user manual is restructured around minimalist, task-oriented principles
+> rather than a chapter per stage, and the licensing section grows to cover the two obligations the
+> project has actually incurred — prose is not code, and a bundled font is not either.
+
+The README is 665 lines and growing. It is a technical decision log — invaluable for contributors,
+overwhelming for a student who wants to know what a buffer pool does. This section splits that
+content into the right containers, and §19 builds the door people arrive at.
+
+### 17.1 Documentation site — the tool decision, reopened
+
+v5 chose VitePress on the grounds of speed and Vite-nativeness. Both are true. The problem is that
+**VitePress is Vue**, and QueryLens is React 19. Every interactive doc page — the thing that would
+make these docs worth reading rather than skimming — would need a Vue wrapper around a React root,
+or would have to give up on embedding the app entirely.
+
+Three candidates, judged on the one axis that actually differs for this project:
+
+| Tool | Embedding a live React B+Tree in a docs page | Other considerations |
+|---|---|---|
+| **VitePress** | Vue SFCs; a React component needs a manual mount wrapper per instance and loses SSR | Fastest dev loop of the three; simplest config; the docs you would copy from (Vite, Vitest) use it |
+| **Docusaurus** | React-native, MDX, components import directly | The broadest plugin ecosystem — versioning, OpenAPI, PWA. Heavier build, heavier client, and none of the plugin surface is needed here |
+| **Astro Starlight** | React is a first-class island: `<BTreeDemo client:visible />` in MDX, and the JS ships only for that island | Minimal JS by default; Cloudflare acquired the Astro team in January 2026, and the host here is already Cloudflare Pages |
+
+**Decision: Astro Starlight**, because the deciding requirement is embedding real components from
+`src/` into explanation pages, and it is the only one of the three where that costs nothing. It also
+keeps the docs bundle near zero on the pages that are pure prose, which is most of them. VitePress
+remains the right answer for a Vue project; this is not one.
+
+**If the embed requirement is dropped, the decision flips back to VitePress** — it is simpler and
+faster, and every doc page becomes a link into the app instead. Decide this before writing pages,
+not after: it is cheap now and a migration later.
+
+**The blocker nobody would find until deploy day:** `public/_headers` sets
+`frame-ancestors 'none'`. Any plan to `<iframe>` the live app inside a docs page is dead on arrival
+under the project's own CSP. Three ways out, in order of preference:
+
+1. **Import the components, not the app** (what Starlight buys). No iframe, no CSP change, and the
+   demo is a real `BufferPoolPanel` fed a canned trace.
+2. **Link out with a shareable URL** (§15/§17.2 already build this). Zero cost, zero risk, and the
+   reader lands in the real app at the exact step — but they leave the page.
+3. **Relax `frame-ancestors` to the docs origin only.** A real widening of the attack surface for a
+   cosmetic gain. Only if 1 and 2 both fail.
+
+**Hosting:** same Cloudflare Pages project, docs at `/docs`, so one deploy, one origin, one set of
+headers, and relative links between app and docs never break. A `docs.querylens.dev` subdomain is a
+DNS change later, not a decision now.
+
+**Structure (Diátaxis).** The framework's four modes — tutorial (learn), how-to (do), reference
+(look up), explanation (understand) — matter here for one reason above all: its central rule is
+**never mix two modes on one page.** A tutorial that stops to explain B+Tree fan-out helps nobody.
+This project is unusually prone to that mistake, because the subject matter is inherently
+explanatory and the temptation to teach mid-instruction is constant.
+
+| Section | Content | Audience | Diátaxis mode |
+|---|---|---|---|
+| **Getting Started** | 3 minutes: open → type → Run → step → what each panel shows. One outcome, no theory, no options | First-time users, students | Tutorial |
+| **User Manual** | Task-shaped how-tos (§17.2) | Students using it as a study tool | How-to |
+| **Concepts** | "What is a B+Tree?", "Why does a buffer pool exist?", "What does a planner decide?" — each illustrated by an embedded QueryLens component and honest about where the model diverges from Postgres and InnoDB | CS students, interview preppers | Explanation |
+| **Reference** | Supported SQL subset, keyboard shortcuts, URL parameters, the step-event schema, engine limits (fan-out 3–4, 8 frames, coarse locks) | Anyone checking a fact | Reference |
+| **Architecture** | Engine internals, the event model, how to add an operator or a stage. The README's architecture and decision-log sections move here verbatim | Contributors, forkers | Reference + Explanation |
+| **FAQ** | "Is this a real database?", "Can I use this in my course?", "How accurate is it?", "Where is my data stored?", "Can I embed it?" | Instructors, sceptics | — |
+| **Changelog** | Rendered from the root `CHANGELOG.md`, single source | Returning users | Reference |
+
+**Write order, because a docs site is abandoned in the order it is written:** FAQ (shortest, highest
+traffic, answers the question that decides whether anyone stays) → Getting Started → the Buffer Pool
+and B+Tree manual pages → Reference → Concepts → Architecture last, because that content already
+exists in the README and moving it is mechanical.
+
+### 17.2 User Manual detail
+
+The manual is the part that turns a demo into something people return to. Its shape follows
+Carroll's minimalist findings — readers learn faster from short, task-shaped chunks than from
+comprehensive narrative, and a wall of text is abandoned rather than skimmed. So:
+
+**The rules for every page:**
+
+- **Titled by the task, not the component.** "Watch a page get evicted", not "The Buffer Pool
+  Panel." The reader arrives with an intent, not a component name.
+- **Under one screen.** If it does not fit, it is two tasks.
+- **Starts at an action, not at background.** Theory lives in Concepts and is linked, not inlined.
+- **Every screenshot annotated.** Annotated screenshots measurably beat prose for task completion;
+  bare ones mostly add page weight.
+- **Ends with a "try this" that changes one variable** — "switch LRU to clock sweep and re-run the
+  same query: which frame dies now, and why is it a different one?"
+- **Every page opens the app at the state it describes**, via the §15 shareable URL. A manual for an
+  interactive tool that cannot put you inside the tool is a book about a bicycle.
+
+**The pages:**
+
+1. **Run your first query** — the 2-minute path, end to end.
+2. **Follow one row from disk to result** — the spine of the whole product, crossing every stage
+   once. If a reader reads one page, this is it.
+3. **Watch a page get evicted** — and the companion: **compare LRU against clock sweep** on one
+   access pattern. The §9 study tests this; the manual should teach it.
+4. **Watch a B+Tree split** — copy-up at a leaf, push-up internally, and why using the wrong one
+   yields a tree that looks right and returns wrong rows (§7.6).
+5. **Make the planner change its mind** — edit a predicate, watch predicate pushdown fire or not.
+6. **Edit the seed data** — add, edit, delete rows; what changes downstream and what does not.
+7. **Predict before you look** — what prediction mode is, the evidence it rests on (RESEARCH.md),
+   how to skip it when demonstrating to a room.
+8. **Share a moment** — what the URL encodes, how to link to an exact step, and why a malformed URL
+   drops the dataset rather than half-restoring it.
+9. **Keyboard reference** — the full table; the in-app hints are a reminder, not a reference.
+10. **When something goes wrong** — reading the error boundary, copying the repro, filing it.
+
+**For instructors** — a short page of its own, because it is a different reader with a different
+question: what the model does and does not claim, which stages map to which weeks of a 15-445-style
+syllabus, how to link to a specific state from a slide, and the licence position on classroom use
+(§17.3).
+
+### 17.3 Licensing & legal
+
+Current state: MIT `LICENSE`, `NOTICE` listing five production dependencies, `license: "MIT"` in
+`package.json`. That is a correct and complete position **for the code**. Two things the project is
+about to acquire are not code.
+
+| Item | Position | Status |
+|---|---|---|
+| **Code** | MIT. Unchanged, and the right choice: an educational tool wants the fewest possible reasons for a student or an instructor to hesitate | Done |
+| **Documentation and prose** | **CC BY 4.0**, declared in the docs site footer and in `LICENSE-DOCS`. MIT is a software licence; applying it to prose is a category error that leaves an instructor who wants to reproduce a manual page in courseware guessing. CC BY 4.0 is the permissive-with-attribution answer for non-software work, and dual-licensing code and docs separately is standard practice | [NEW] — P1 |
+| **The bundled font** (§16.2 item 1) | JetBrains Mono is SIL OFL 1.1. Self-hosting means *distributing* it, which brings obligations MIT does not: ship `OFL.txt` alongside the font files, keep the copyright notice, and — the one that actually bites — **a subset is a modified version, so it must not carry the reserved font name.** Name subset files `querylens-mono-*.woff2`, not `jetbrains-mono-*.woff2`, and say what they are in `NOTICE`. Same analysis for the chosen text face before it is bundled | [NEW] — P0, lands with §16.2 item 1 |
+| **`NOTICE`** | Extend to cover the fonts and to state the docs licence. Keep listing production dependencies only — a transitive dump helps nobody and rots immediately | Update |
+| **SPDX identifiers** | Add `SPDX-License-Identifier` to `LICENSE`, `LICENSE-DOCS` and the font directory's README so machine tooling can read the split. **Not** per-source-file headers: the root licence covers `src/`, and 60 files each gaining a two-line header is noise that will drift | Partial — P2 |
+| **Full REUSE compliance** | The FSFE REUSE spec (every file individually licensed, machine-verifiable via `reuse lint`) is the rigorous end of this. Worth it for a project vendoring code from several sources; overkill for one with a uniform `src/` and a handful of vendored assets. Revisit if third-party code ever lands inside `src/` | Decided: not now |
+| **Third-party disclosure page** | `pnpm licenses list --prod` output rendered on a docs page, for anyone embedding QueryLens in courseware and needing to answer procurement | P2 — docs site |
+| **Per-file headers in `src/`** | Not doing. The root LICENSE covers everything | Decided: not doing |
+
+**The instructor question, answered explicitly somewhere a search can find it** — MIT plus CC BY 4.0
+means: use it in a course, fork it, screenshot it, put it behind a university login, translate it.
+Attribution is the only ask. Saying this in the FAQ in plain words is worth more than either licence
+file, because the person who needs it will not read either.
+
+### 17.4 Definition of done
+
+- [ ] The docs framework decision is recorded with its embedding requirement, and the site builds
+      and deploys at `/docs` on the same Cloudflare Pages project.
+- [ ] FAQ answers "Is this a real database?", "Where is my data stored?", and "Can I use this in my
+      course?"
+- [ ] Getting Started exists and a first-time user completes it without opening the README.
+- [ ] The two manual pages the §9 study depends on — eviction and B+Tree split — exist, each with
+      annotated screenshots, a "try this", and a link that opens the app at that state.
+- [ ] At least one Concepts page embeds a real component from `src/` rather than a screenshot (or
+      the embed requirement is explicitly dropped and the tool choice revisited with it).
+- [ ] `LICENSE-DOCS` exists (CC BY 4.0) and the docs footer states it.
+- [ ] `OFL.txt` ships with the font files, subset files are renamed off the reserved font name, and
+      `NOTICE` covers both fonts.
+- [ ] No docs page mixes two Diátaxis modes.
+
+---
+
+## 18. Community & Governance
+
+> Added in v5; **status updated in v6.** A public repository with no CONTRIBUTING.md, no Code of
+> Conduct and no issue templates says "I have not thought about other people using this." These
+> files are the difference between "someone's project" and "a project someone can join."
+
+**Status: the P0 and P1 files all exist.** `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `SECURITY.md`,
+`CHANGELOG.md`, both issue-template forms and the PR template are written, and the README carries
+badges and links to all of them. What remains in this section is P2 and the README restructure,
+which is blocked on the docs site (§17.1) having somewhere to put the content.
+
+### 18.1 Repository governance files
+
+| File | Content | Status |
+|---|---|---|
+| `CONTRIBUTING.md` | fork → clone → `pnpm install` → `pnpm dev` → change → `pnpm test` → PR. Code style (ESLint enforces it), Conventional Commits, architecture boundaries (`src/engine/` is pure, `src/ui/` renders), the release-age floor caveat | Done |
+| `CODE_OF_CONDUCT.md` | Contributor Covenant v2.1, linked from CONTRIBUTING and README | Done |
+| `SECURITY.md` | Scope ("client-side only, no server, no auth, no user data, no secrets"), reporting via GitHub Security Advisories, 48h/7d/14d SLA, proactive measures | Done |
+| `CHANGELOG.md` | Keep a Changelog format, v0.1.0 baseline | Done |
+| `.github/ISSUE_TEMPLATE/bug_report.yml` | Structured form: description, repro, error-boundary output, expected, browser, OS, "I searched existing issues" | Done |
+| `.github/ISSUE_TEMPLATE/feature_request.yml` | Problem, proposal, pipeline area, alternatives, "I checked plan.md" | Done |
+| `.github/PULL_REQUEST_TEMPLATE.md` | Description, issue, type, testing, screenshots for visual changes, checklist | Done |
+| `.github/ISSUE_TEMPLATE/config.yml` | Point "Question" at GitHub Discussions rather than Issues, so the tracker stays a tracker | P2 — [NEW] |
+| `.github/FUNDING.yml` | Only if the project acquires active users | P2 |
+| `CITATION.cff` | GitHub renders a "Cite this repository" button from it. Cheap, and this is a teaching tool with a plausible path into a syllabus or a paper's reference list | P2 — [NEW] |
+
+### 18.2 Social presence
+
+**Still deferred, and deliberately.** There is no public URL to promote. When there is:
+
+- **A written launch post first, socials second.** The distributable artefact is a post that explains
+  one thing well — the LRU/clock-sweep contrast, or the copy-up/push-up split rule — with a GIF and
+  a link that opens the app at that exact step. Everything else is a pointer to it
+- **Twitter/X and Bluesky** — cross-posted. The DB/systems audience is on both, and animation GIFs
+  are this product's natural format
+- **GitHub Discussions** — enable at launch. Lower barrier than Discord, lives with the code, and is
+  indexed by search engines, which a Discord is not
+- **Reddit** — r/programming, r/compsci, r/databasedevelopment. No subreddit until >50 active users
+- **Hacker News** — one shot; it goes with the written post, not before it
+- **Discord** — premature. A dead Discord is worse than none
+- **YouTube** — high value, real production cost. After the §9 study validates the format
+
+### 18.3 README badges
+
+Done — CI, licence, TypeScript version and PRs-welcome are at the top of the README. Remaining
+refinement: normalise all four to `style=flat-square` so they read as one row rather than four
+imports, and drop any badge that would ever show a stale or misleading value.
+
+### 18.4 README restructure
+
+Still blocked on §17.1, and correctly so — moving content out of the README before the docs site
+exists would delete it. Target shape once it is unblocked:
+
+1. Title, badges, one-line description
+2. A GIF, not a screenshot — the product is motion, and a still cannot show a page being evicted
+3. **What is this?** — three sentences
+4. **Try it** — the live link, above every other link
+5. **Features** — 8–10 one-line bullets
+6. **Quick start (developers)** — clone, install, dev, test
+7. **Documentation** — the docs site
+8. **Contributing**, **Licence** (code MIT, docs CC BY 4.0), **Acknowledgments**
+
+Everything currently between "Status" and the end — architecture, decisions, storage layer, B+Tree,
+execution, the gate write-ups — moves to the docs site under Architecture. The README stops being a
+decision log and becomes a front door. Target: **under 120 lines**, from 665.
+
+### 18.5 Definition of done
+
+- [x] `CONTRIBUTING.md` exists and is linked from the README.
+- [x] `CODE_OF_CONDUCT.md` exists with the Contributor Covenant v2.1.
+- [x] `SECURITY.md` exists with reporting instructions and scope statement.
+- [x] `CHANGELOG.md` exists with v0.1.0 as the baseline.
+- [x] `.github/ISSUE_TEMPLATE/bug_report.yml` and `feature_request.yml` exist.
+- [x] `.github/PULL_REQUEST_TEMPLATE.md` exists.
+- [x] README has badges at the top.
+- [x] README links to CONTRIBUTING.md, CODE_OF_CONDUCT.md, and SECURITY.md.
+- [ ] GitHub Discussions is enabled and `ISSUE_TEMPLATE/config.yml` routes questions there.
+- [ ] README restructured to user-facing format, under 120 lines (blocked on §17.1).
+
+---
+
+## 19. The Landing Page — the first fifteen seconds
+
+> New in v6. v5 treated the landing page as one row in a docs-site table, and `index.html` treats
+> the Open Graph card as the landing page. Neither is enough: the OG card is what convinces someone
+> to click, and this section is about what happens in the fifteen seconds after they do.
+
+**The decision that has to come first: is the landing page a separate page, or is the app the
+landing page?**
+
+For most products the answer is a separate marketing page. For this one it is not, and the reasoning
+is worth writing down rather than re-deriving later. QueryLens is comprehensible in about four
+seconds of watching — a query moves through stages and things light up. A marketing page describing
+that is strictly worse than the thing itself, and it puts a click between the visitor and the
+product for no gain. The published guidance for developer-tool pages says the same thing from the
+other direction: make the tool testable in the hero, put the demo above the fold, and replace "book
+a demo" with "try it".
+
+**Decision: the app at `/` is the landing page.** §15 already did most of the work — a trace runs on
+load, so the first paint is the product mid-explanation rather than an empty editor. What is missing
+is the framing around it that answers *what is this and why should I care* without a single click,
+and without stealing space from the app for returning visitors.
+
+### 19.1 What the first screen must do
+
+Five jobs, in priority order. Each has a failure mode that is specific and observable.
+
+| # | Job | How | Fails as |
+|---|---|---|---|
+| 1 | **Say what this is in one line, in the visitor's words** | A tagline in the header beside the wordmark: *"Watch a SQL query become a B+Tree traversal."* Concrete nouns. Not "Build faster. Ship smarter." — weightless headline copy is itself one of the published tells of a generated page | "A database internals visualizer" — true, and it says nothing a title tag did not |
+| 2 | **Prove it, without a click** | Already true: the trace runs on load. Protect it. The first paint must never be an empty editor, a modal, or a cookie banner (there are no cookies, so there is no banner — a real advantage, and worth stating in the FAQ) | A hero that describes the product sitting above the product |
+| 3 | **Make the next action obvious** | One primary action — the SQL editor with a caret in it and a query already there. Everything else (theme, share, docs, data editor) is secondary and looks it | Five buttons of equal weight; the visitor picks none |
+| 4 | **Establish honesty immediately** | The disclaimer bar already does this, at the top, unmissable. It is a trust asset, not a compliance cost — an educational tool that states its own limits is more credible, not less | Burying it in a footer, where §12's misconception risk goes unaddressed |
+| 5 | **Offer the way deeper without cluttering** | The §16.2 footer: Docs · GitHub · Licence · Changelog · build SHA. Below the fold, findable, quiet | Docs links that never appear, so nobody reads the manual §17 spent a fortnight writing |
+
+### 19.2 First-visit affordances — P1, after the P0 above
+
+- **A first-visit-only strip**, one line under the header, dismissed permanently to `localStorage`:
+  *"New here? Press Space to step through the trace, or take the 60-second tour."* Returning visitors
+  never see it. First visitors get a route that does not require reading anything
+- **The 60-second tour** — 5–6 sequential highlights over the real UI, driven by the real trace, not
+  a video and not a modal carousel. Skippable at any point, never auto-replayed, and it must respect
+  `prefers-reduced-motion` by degrading to a static numbered overlay
+- **Three preset queries as chips** above the editor — *point lookup*, *sequential scan*, *the same
+  query with the index dropped*. One click each, and the third is the §9 contrast the whole product
+  is built to show. A blank editor asks a visitor to invent a query before they know what the tool
+  does with one
+- **A "what am I looking at?" affordance on every panel** — a small `?` opening a two-sentence
+  explanation and a link to the Concepts page. This is the seam between §19 and §17 and the most
+  likely path from app to docs
+
+### 19.3 The shareable card is still the real landing page
+
+Most visitors will decide from the link preview before the page loads. `index.html` gets this right
+already — absolute URLs, 1200×630 image, alt text, a title that is a sentence rather than a product
+name. Two items remain:
+
+- **The OG image is a static PNG of the buffer pool mid-eviction. Regenerate it from a real trace
+  whenever the visual design changes** (§16), or it becomes a picture of an app that no longer
+  exists — the most quietly embarrassing failure mode available
+- **Verify the card in the wild** once the URL is live: X, Slack, Discord, LinkedIn, iMessage.
+  §14.6 already holds this check open
+
+### 19.4 Definition of done
+
+- [ ] The first paint on a cold load shows a completed trace, a tagline, and a focused editor — no
+      modal, no banner, no empty state.
+- [ ] A visitor who does nothing but read the first screen can say what QueryLens does.
+- [ ] Exactly one element on the first screen reads as the primary action.
+- [ ] Preset query chips exist and the third demonstrates the §9 index/no-index contrast.
+- [ ] First-visit hint appears once, is dismissible, and never returns.
+- [ ] The tour is skippable, reduced-motion-safe, and never auto-replays.
+- [ ] The OG image is regenerated after the §16 visual pass and verified on at least three platforms.

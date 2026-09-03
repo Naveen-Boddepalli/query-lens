@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { FlowTree } from './FlowTree.tsx';
 import type { FlowNode, SideEdge } from './FlowTree.tsx';
 import type { IndexNode } from '../../engine/index.ts';
@@ -35,6 +35,9 @@ export interface BTreePanelProps {
 }
 
 export function BTreePanel({ tree, path, outcome }: BTreePanelProps) {
+  // The element FlowTree portals its zoom buttons into (see the header below).
+  const [toolbar, setToolbar] = useState<HTMLDivElement | null>(null);
+
   const pathSet = useMemo(() => new Set(path), [path]);
   const root = useMemo(() => (tree ? toFlow(tree, pathSet) : null), [tree, pathSet]);
   const sideEdges = useMemo(() => {
@@ -74,6 +77,14 @@ export function BTreePanel({ tree, path, outcome }: BTreePanelProps) {
             {outcome === 'not-found' && <span className="ml-1.5 text-evict">✗ not found</span>}
           </span>
         )}
+        {/* The zoom buttons render in here, via a portal from FlowTree. They
+            belong beside the sentence that describes them, and putting them in
+            this row costs the canvas no height — a strip above the graph clipped
+            the leaf row by exactly its own height. Last in the row and
+            `shrink-0`, so a lengthening path pushes the text left rather than
+            sliding the buttons out from under the cursor. A callback ref into
+            state, because a plain ref is still null on the render that needs it. */}
+        <div ref={setToolbar} className="flex shrink-0 items-center gap-1" />
       </div>
 
       <div className="min-h-0 flex-1">
@@ -87,6 +98,7 @@ export function BTreePanel({ tree, path, outcome }: BTreePanelProps) {
           focusIds={path.slice(-2)}
           compact
           controls
+          toolbarTarget={toolbar}
         />
       </div>
     </div>

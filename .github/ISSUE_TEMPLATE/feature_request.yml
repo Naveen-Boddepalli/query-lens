@@ -1,0 +1,52 @@
+name: "\U0001F4A1 Feature Request"
+description: Suggest an idea or improvement.
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Feature requests help shape the project's direction. Please check the [plan.md](https://github.com/Naveen-Boddepalli/QueryLens/blob/main/plan.md) to see if your idea is already planned.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: Describe the use case or frustration this feature would address.
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: How would this work? What would the user see or do?
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which area does this relate to?
+      options:
+        - Parser / SQL support
+        - Planner / Optimizer
+        - Buffer Pool
+        - B+Tree / Index
+        - Execution Engine
+        - Lock Manager
+        - UI / Visualization
+        - Accessibility
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Have you thought of other ways to solve this?
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I have checked plan.md and this is not already planned.
+          required: true

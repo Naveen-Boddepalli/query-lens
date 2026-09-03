@@ -1,0 +1,81 @@
+name: "\U0001F41B Bug Report"
+description: Report a bug to help us fix it.
+title: "[Bug]: "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting a bug! Please check [existing issues](https://github.com/Naveen-Boddepalli/QueryLens/issues) first to avoid duplicates.
+
+        **Tip:** If the app showed an error boundary with a copyable repro, paste it below — it contains everything needed to reproduce the bug.
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: A clear description of the bug.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: How can we reproduce this? Include the SQL query and any edited data.
+      placeholder: |
+        1. Open the app
+        2. Enter query: SELECT * FROM users WHERE id = 5;
+        3. Set policy to "Clock Sweep"
+        4. Step to event 12
+        5. See incorrect buffer pool state
+    validations:
+      required: true
+  - type: textarea
+    id: error-boundary
+    attributes:
+      label: Error boundary output (if any)
+      description: If the app crashed and showed a repro, paste it here.
+      render: text
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What did you expect to happen?
+    validations:
+      required: true
+  - type: dropdown
+    id: browser
+    attributes:
+      label: Browser
+      options:
+        - Chrome
+        - Firefox
+        - Safari
+        - Edge
+        - Arc
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating System
+      options:
+        - macOS
+        - Windows
+        - Linux
+        - iOS
+        - Android
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Screenshots, console errors, or anything else that helps.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I have searched existing issues and this is not a duplicate.
+          required: true
