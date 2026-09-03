@@ -322,7 +322,7 @@ This event stream is the single contract between engine and UI — makes the UI 
 | **MVP complete** | Full pipeline for indexed point lookup **+ sequential-scan contrast** (§9) | **~10-14 weeks part-time** |
 | M8 | **Production readiness — the deploy gate (§14):** CI, error boundary, security headers, licence, supply-chain settings, link preview | ~1 day (P0) + 2-3 days (P1) — **both done** |
 | M9 | **UI/UX readiness (§15):** first-run trace, Run feedback, native dialog, shareable URL, prompt placement, responsive height | ~1 day (P0) + 2-3 days (P1) — **both done** |
-| M10 | **Visual design maturity (§16) + landing page (§19):** self-hosted typefaces, named type/space/motion scales, hover states across every diagram panel, footer, first-screen framing | ~1.5 days (P0) + 1 week (P1) |
+| M10 | **Visual design maturity (§16) + landing page (§19):** self-hosted typefaces, named type/space/motion scales, hover states across every diagram panel, footer, first-screen framing | ~1.5 days (P0) + 1 week (P1) — **P0 done** |
 | M11 | **Docs, manual, licensing & governance (§17–§18):** docs site, Getting Started, the two manual pages the §9 study needs, `LICENSE-DOCS`, font licensing, README restructure | ~1 week (P0/P1) + ongoing |
 | v1 | Expand SQL coverage: joins, cost estimates, InnoDB midpoint-LRU as a third policy | Post-MVP |
 
@@ -773,6 +773,12 @@ document. It is short on purpose; a design language nobody can recite is not a d
    choice and must **not** be Inter, for the same reason a house should not be beige: it is the
    default, and defaults read as absence of choice. A grotesk with real character at small sizes and
    an open licence is the brief.
+
+   **Chosen: IBM Plex Sans** (OFL 1.1), shipping as `QueryLens Sans` — see §17.3 for why the subset
+   cannot keep the upstream name. It was built for technical interfaces, and its flared terminals
+   and double-storey `a` and `g` still read as themselves at the 11–12px where 55 of this app's 77
+   type usages live, which is the only size range that actually matters here. It is also the closest
+   of the candidates to constraint 3's instrument reference class: engineering, not marketing.
 2. **One accent, and it is already spent.** `--color-accent` (a cyan) is the interaction colour. The
    storage semantics — hit/miss/evict, internal/leaf — are *data* colours and are never borrowed for
    chrome. No second accent, no gradient anywhere in the chrome. The diagrams are allowed colour
@@ -840,22 +846,45 @@ gone, and the hover audit is promoted out of P1.
 
 ### 16.5 Definition of done
 
-- [ ] Both typefaces are self-hosted, subset, preloaded, and render under `font-src 'self'` with no
-      console warning and no layout shift on swap.
-- [ ] The type scale has six named steps with a documented role each, and a display size above 16px
-      exists and is used.
-- [ ] Every spacing value in `src/` maps to a named `--space-*` token; the density rule is written
-      down in `index.css`.
-- [ ] Every diagram element has a hover state and an active state, and `cursor: pointer` appears on
-      exactly the clickable ones.
-- [ ] Every transition uses a named duration and a named curve; no `transition: all` remains; all
-      collapse under `prefers-reduced-motion`.
-- [ ] Every changing number renders with `tabular-nums`.
-- [ ] `apple-touch-icon.png` exists, is linked, and the mark is legible at 16px.
-- [ ] A footer exists with Docs · GitHub · Licence · Changelog and the build SHA.
-- [ ] Mobile scroll snaps between sections.
-- [ ] Nothing in the app violates the five constraints in §16.1 — in particular, no gradient in the
-      chrome, no `rounded-2xl`, no `shadow-lg`, and no Inter.
+**P0 complete.** Every box below is ticked; the text face chosen against §16.1's brief is
+IBM Plex Sans, shipping as `QueryLens Sans`.
+
+- [x] Both typefaces are self-hosted, subset, preloaded, and render under `font-src 'self'` with no
+      console warning and no layout shift on swap. *Verified by serving `dist/` behind the real
+      header from `public/_headers` rather than assuming it: both faces load, one fetch each, zero
+      console output. `public/fonts/`, built by `scripts/build-fonts.py`.*
+- [x] The type scale has six named steps with a documented role each, and a display size above 16px
+      exists and is used. *`--text-display` 24px on the wordmark; Tailwind's own scale is cleared
+      with `--text-*: initial`, so every size in `src/` now names its job.*
+- [x] Every spacing value in `src/` maps to a named `--space-*` token; the density rule is written
+      down in `index.css`. *Naming the scale first reversed three of the four "strays" this section
+      listed — see the note in `index.css`; only `mt-2.5` was a genuine one.*
+- [x] Every diagram element has a hover state and an active state, and `cursor: pointer` appears on
+      exactly the clickable ones. *The cursor half was larger than the audit found: a `<button>`
+      takes `cursor: default` from the user agent, so every control in the app was pointing an arrow
+      at the user. Fixed globally in `index.css`.*
+- [x] Every transition uses a named duration and a named curve; no `transition: all` remains; all
+      collapse under `prefers-reduced-motion`. *The tokens themselves collapse to `0ms`, so
+      `src/ui/motion.ts` hands React Flow's viewport animations the same zero without knowing why.*
+- [x] Every changing number renders with `tabular-nums`.
+- [x] `apple-touch-icon.png` exists, is linked, and the mark is legible at 16px. *The check this item
+      asks for found the third page bar dropping out at 16px, so its opacity went 0.32 → 0.45 and the
+      stack reads as three again. `scripts/build-icons.py` regenerates both and asserts it still
+      matches `favicon.svg`.*
+- [x] A footer exists with Docs · GitHub · Licence · Changelog and the build SHA.
+- [x] Mobile scroll snaps between sections.
+- [x] Nothing in the app violates the five constraints in §16.1 — in particular, no gradient in the
+      chrome, no `rounded-2xl`, no `shadow-lg`, and no Inter. *One violation existed and is gone: the
+      phone's sticky playback bar used `backdrop-blur`, which constraint 3 rejects by name. It is an
+      opaque surface plus the border it already had.*
+
+**The licence obligations §17.3 attached to this work are done with it**, because they land with the
+font files rather than after them: `OFL.txt` ships beside each face, `NOTICE` covers both, and the
+subsets are renamed off the reserved font name — but only where one exists. IBM Plex reserves
+"Plex", so its subset ships as `QueryLens Sans`; JetBrains Mono declares no reserved name, so its
+subset keeps the family name, because accurate attribution beats an invented one when the licence
+does not require the change. `public/fonts/README.md` records that reasoning, and the build script
+refuses to write a file that still carries a reserved name.
 
 ---
 
@@ -1157,11 +1186,26 @@ name. Two items remain:
 
 ### 19.4 Definition of done
 
-- [ ] The first paint on a cold load shows a completed trace, a tagline, and a focused editor — no
-      modal, no banner, no empty state.
-- [ ] A visitor who does nothing but read the first screen can say what QueryLens does.
-- [ ] Exactly one element on the first screen reads as the primary action.
-- [ ] Preset query chips exist and the third demonstrates the §9 index/no-index contrast.
-- [ ] First-visit hint appears once, is dismissible, and never returns.
-- [ ] The tour is skippable, reduced-motion-safe, and never auto-replays.
-- [ ] The OG image is regenerated after the §16 visual pass and verified on at least three platforms.
+**P0 complete; the four P1 items in §19.2 are open.**
+
+- [x] The first paint on a cold load shows a completed trace, a tagline, and ~~a focused editor~~ — no
+      modal, no banner, no empty state. **Departure: the editor is deliberately not focused.** §15
+      binds Space to play/pause, so a caret in the editor on load would turn the app's primary
+      interaction into typing a space — and §19.2's own first-visit hint is *"Press Space to step
+      through the trace"*. On a phone it would also raise the keyboard over the trace, against §15.2's
+      read-first model. The editor still reads as the primary input without holding focus; this
+      checkbox and §15's keyboard model cannot both be satisfied, and §15's is load-bearing.
+- [x] A visitor who does nothing but read the first screen can say what QueryLens does. *The tagline
+      is now "Watch a SQL query become a B+Tree traversal." — the previous line, "see what your SQL
+      actually does", was the failure mode §19.1 names: true, and saying nothing the title tag did not.*
+- [x] Exactly one element on the first screen reads as the primary action.
+- [ ] Preset query chips exist and the third demonstrates the §9 index/no-index contrast. — §19.2, P1
+- [ ] First-visit hint appears once, is dismissible, and never returns. — §19.2, P1
+- [ ] The tour is skippable, reduced-motion-safe, and never auto-replays. — §19.2, P1
+- [x] The OG image is regenerated after the §16 visual pass ~~and verified on at least three
+      platforms~~. *Regenerated by `pnpm og` (`scripts/build-og.ts`), which drives the built app to
+      step 91 of the sequential scan — the first eviction — through the app's own shareable-URL
+      format and screenshots it, so the card cannot drift from the design again without someone
+      choosing not to re-run it. The alt text was already stale: it said "four frames" through a
+      change that made it eight. **Verification on three platforms stays open until the URL is
+      live**, alongside §14.6's two other held-open checks.*

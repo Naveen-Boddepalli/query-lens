@@ -10,7 +10,7 @@ export function LockPanel({ locks, taken }: LockPanelProps) {
   return (
     <div className="flex h-full flex-col gap-3">
       {locks.length === 0 ? (
-        <p className="text-sm text-ink-dim">
+        <p className="text-body text-ink-dim">
           No locks held right now.
           {taken > 0 && ' Every lock taken so far has been released.'}
         </p>
@@ -19,24 +19,28 @@ export function LockPanel({ locks, taken }: LockPanelProps) {
           {locks.map((lock) => (
             <li
               key={`${String(lock.pageId)}-${lock.mode}`}
-              className="flex items-baseline justify-between rounded-md border border-hue-orange/60 bg-hue-orange/10 px-2.5 py-1.5 font-mono text-xs text-hue-orange-ink"
+              /* plan.md §16.2 item 4, tinted rule. Two rows appear at once
+                 during a latch-crab, and telling them apart is the point of the
+                 note underneath — so pointing at one and having it answer is
+                 not decoration here. */
+              className="cell flex items-baseline justify-between rounded-md border border-hue-orange/60 bg-hue-orange/10 px-2.5 py-1.5 font-mono text-label text-hue-orange-ink hover:border-hue-orange/90 hover:bg-hue-orange/20"
             >
               <span>🔒 page {lock.pageId}</span>
-              <span className="text-3xs tracking-wide uppercase opacity-80">{lock.mode}</span>
+              <span className="text-micro tracking-wide uppercase opacity-80">{lock.mode}</span>
             </li>
           ))}
         </ul>
       )}
 
       {locks.length === 2 && (
-        <p className="rounded-md border border-edge bg-surface-3 px-2.5 py-2 text-2xs leading-relaxed">
+        <p className="rounded-md border border-edge bg-surface-3 px-2.5 py-2 text-micro leading-relaxed">
           Two at once — this is <span className="text-ink">latch crabbing</span>. The descent takes
           the child&rsquo;s lock <em>before</em> letting go of the parent&rsquo;s, so the branch
           cannot be restructured out from under it. The overlap is the technique.
         </p>
       )}
 
-      <div className="mt-auto space-y-2 text-2xs leading-relaxed text-ink-dim">
+      <div className="mt-auto space-y-2 text-micro leading-relaxed text-ink-dim">
         <p>
           <span className="text-ink">{taken}</span> lock
           {taken === 1 ? '' : 's'} taken so far. A sequential scan holds one page at a time; an index

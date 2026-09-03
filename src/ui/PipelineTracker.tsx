@@ -35,14 +35,21 @@ export function PipelineTracker({ current, visited, selected, onSelect }: Pipeli
                     : `${meta.blurb} — not built yet (${meta.milestone})`
               }
               className={[
-                'rounded-md border px-2.5 py-1 text-xs font-medium transition-colors',
+                /* plan.md §16.2 item 4. These chips are the one set of diagram
+                   elements that genuinely *are* controls — clicking pins the
+                   panel to a stage — so they are the one set with an `active:`
+                   press state, which the read-only cells have no business
+                   having. They are also buttons, so index.css's cursor rule
+                   already gives them the pointer that tells a visitor the
+                   tracker is not another diagram. */
+                'cell rounded-md border px-2.5 py-1 text-label font-medium',
                 isCurrent
-                  ? 'border-accent bg-accent/15 text-ink'
+                  ? 'border-accent bg-accent/15 text-ink hover:bg-accent/25 active:bg-accent/35'
                   : isVisited
-                    ? `border-edge bg-surface-3 ${meta.tone}`
+                    ? `border-edge bg-surface-3 hover:border-ink-dim/50 hover:bg-surface-4 active:bg-edge/60 ${meta.tone}`
                     : isBuilt
-                      ? 'border-edge/60 bg-transparent text-ink-dim'
-                      : 'border-dashed border-edge/50 bg-transparent text-ink-dim/80',
+                      ? 'border-edge/60 bg-transparent text-ink-dim hover:border-ink-dim/50 hover:bg-surface-3 hover:text-ink active:bg-surface-4'
+                      : 'border-dashed border-edge/50 bg-transparent text-ink-dim/80 hover:border-ink-dim/40 hover:bg-surface-3',
                 // Was `ring-1 ring-accent/70`, which is invisible next to a
                 // chip that already has a coloured border — and this state
                 // stops the panel following the trace, so it has to read.

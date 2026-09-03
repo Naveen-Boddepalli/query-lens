@@ -37,7 +37,7 @@ export function ThemeToggle({ choice, setChoice }: Pick<ThemeState, 'choice' | '
             className={[
               // 24px minimum on both axes: WCAG 2.2 SC 2.5.8, the same rule
               // that set the scrubber's size (plan.md §15.1 item 8).
-              'flex h-6 min-w-7 items-center justify-center rounded px-1 text-2xs transition-colors',
+              'flex h-6 min-w-7 items-center justify-center rounded px-1 text-micro transition-colors',
               selected
                 ? 'bg-accent/20 text-ink'
                 : 'text-ink-dim hover:bg-surface-3 hover:text-ink',

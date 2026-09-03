@@ -18,3 +18,24 @@ This project includes the following third-party software:
 
 - Tailwind CSS (MIT License) — Copyright (c) Tailwind Labs, Inc.
   https://github.com/tailwindlabs/tailwindcss
+
+This project also redistributes the following fonts, subset and served from
+public/fonts/. Fonts are not software: they carry the SIL Open Font License 1.1
+rather than this project's MIT licence, and each ships its full licence text
+alongside it. See public/fonts/README.md for the subsetting and renaming detail.
+
+- JetBrains Mono (SIL OFL 1.1) — Copyright 2020 The JetBrains Mono Project Authors
+  https://github.com/JetBrains/JetBrainsMono
+  Redistributed as public/fonts/querylens-mono.woff2, a subset of the variable
+  font limited to the 235 codepoints this application renders. The upstream
+  declares no Reserved Font Name, so the subset keeps the family name
+  "JetBrains Mono". Licence: public/fonts/querylens-mono-OFL.txt
+
+- IBM Plex Sans (SIL OFL 1.1) — Copyright 2017 IBM Corp. with Reserved Font
+  Name "Plex"
+  https://github.com/IBM/plex
+  Redistributed as public/fonts/querylens-sans.woff2, a subset of the variable
+  font limited to the same 235 codepoints. Because a subset is a Modified
+  Version and "Plex" is a Reserved Font Name, this file ships under the family
+  name "QueryLens Sans" and is NOT IBM Plex Sans. Licence:
+  public/fonts/querylens-sans-OFL.txt

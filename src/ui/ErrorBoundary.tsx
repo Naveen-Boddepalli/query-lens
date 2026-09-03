@@ -91,25 +91,25 @@ function ErrorFallback({ error, componentStack, variant, label, onRetry }: Fallb
           : 'flex h-full flex-col rounded-md border border-evict/50 bg-surface-3/40 p-4'
       }
     >
-      <h2 className="text-base font-semibold text-ink">
+      <h2 className="text-heading font-semibold text-ink">
         {variant === 'page'
           ? 'QueryLens hit a bug and stopped'
           : `The ${label ?? 'stage'} view hit a bug`}
       </h2>
 
-      <p className="mt-1 text-sm text-ink-dim">
+      <p className="mt-1 text-body text-ink-dim">
         {variant === 'page'
           ? 'The engine is deterministic, so the details below reproduce this exactly. Copying them into an issue is genuinely the whole bug report.'
           : 'The rest of the trace is intact — step away from this stage and it will keep working. The details below reproduce it exactly.'}
       </p>
 
-      <p className="mt-3 font-mono text-xs break-words text-evict">{message}</p>
+      <p className="mt-3 font-mono text-label break-words text-evict">{message}</p>
 
       <div className="mt-4 flex flex-wrap gap-2">
         <button
           type="button"
           onClick={() => { void copy(); }}
-          className="rounded-md border border-accent bg-accent/15 px-3 py-1.5 text-sm font-medium text-ink transition-colors hover:bg-accent/25"
+          className="rounded-md border border-accent bg-accent/15 px-3 py-1.5 text-body font-medium text-ink transition-colors hover:bg-accent/25"
         >
           {copied ? 'Copied ✓' : 'Copy report'}
         </button>
@@ -117,14 +117,14 @@ function ErrorFallback({ error, componentStack, variant, label, onRetry }: Fallb
           href={issueUrlFor(error, componentStack)}
           target="_blank"
           rel="noreferrer noopener"
-          className="rounded-md border border-edge px-3 py-1.5 text-sm text-ink-dim transition-colors hover:border-accent/70 hover:text-ink"
+          className="rounded-md border border-edge px-3 py-1.5 text-body text-ink-dim transition-colors hover:border-accent/70 hover:text-ink"
         >
           Open an issue
         </a>
         <button
           type="button"
           onClick={variant === 'page' ? () => { location.reload(); } : onRetry}
-          className="rounded-md border border-edge px-3 py-1.5 text-sm text-ink-dim transition-colors hover:border-accent/70 hover:text-ink"
+          className="rounded-md border border-edge px-3 py-1.5 text-body text-ink-dim transition-colors hover:border-accent/70 hover:text-ink"
         >
           {variant === 'page' ? 'Reload' : 'Try again'}
         </button>
@@ -134,7 +134,7 @@ function ErrorFallback({ error, componentStack, variant, label, onRetry }: Fallb
           exactly the situation where the text still has to be readable. */}
       <pre
         id="querylens-crash-report"
-        className="mt-4 max-h-56 overflow-auto rounded border border-edge bg-surface p-3 font-mono text-xs whitespace-pre-wrap text-ink-dim"
+        className="mt-4 max-h-56 overflow-auto rounded border border-edge bg-surface p-3 font-mono text-label whitespace-pre-wrap text-ink-dim"
       >
         {report}
       </pre>

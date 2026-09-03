@@ -21,13 +21,13 @@ export function ShortcutHints() {
   if (touch) return null;
 
   return (
-    <ul className="flex flex-wrap items-center gap-x-3 gap-y-1 text-2xs text-ink-dim">
+    <ul className="flex flex-wrap items-center gap-x-3 gap-y-1 text-micro text-ink-dim">
       {SHORTCUTS.map((shortcut) => (
         <li key={shortcut.what} className="flex items-center gap-1">
           {shortcut.keys.map((key) => (
             <kbd
               key={key}
-              className="rounded border border-edge bg-surface-3 px-1.5 py-0.5 font-mono text-3xs"
+              className="rounded border border-edge bg-surface-3 px-1.5 py-0.5 font-mono text-micro"
             >
               {key}
             </kbd>

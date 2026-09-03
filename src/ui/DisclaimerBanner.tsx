@@ -5,7 +5,7 @@
  */
 export function DisclaimerBanner() {
   return (
-    <p className="border-b border-edge bg-surface-2 px-4 py-1.5 text-center text-xs text-ink-dim">
+    <p className="border-b border-edge bg-surface-2 px-4 py-1.5 text-center text-label text-ink-dim">
       QueryLens runs a{' '}
       <strong className="font-medium text-ink">simplified educational model</strong> of
       database internals. Every number shown is true to <em>this</em> engine — not to the

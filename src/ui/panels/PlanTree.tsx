@@ -2,12 +2,23 @@ import { FlowTree } from './FlowTree.tsx';
 import type { FlowNode } from './FlowTree.tsx';
 import type { PlanNode } from '../../engine/index.ts';
 
-/** Access methods read warm; row-shaping operators read cool. */
+/**
+ * Access methods read warm; row-shaping operators read cool.
+ *
+ * Hover follows plan.md §16.2 item 4's tinted rule in each operator's own hue.
+ * It matters most on this panel: the optimize stage shows two plans side by
+ * side, and pointing at a node in one to find its counterpart in the other is
+ * the whole reading task.
+ */
 const TONES: Record<string, string> = {
-  Project: 'border-hue-sky/60 bg-hue-sky/10 text-hue-sky-ink',
-  Filter: 'border-hue-amber/60 bg-hue-amber/10 text-hue-amber-ink',
-  SeqScan: 'border-hue-orange/60 bg-hue-orange/10 text-hue-orange-ink',
-  IndexScan: 'border-hue-emerald/60 bg-hue-emerald/10 text-hue-emerald-ink',
+  Project:
+    'border-hue-sky/60 bg-hue-sky/10 text-hue-sky-ink hover:border-hue-sky/90 hover:bg-hue-sky/20',
+  Filter:
+    'border-hue-amber/60 bg-hue-amber/10 text-hue-amber-ink hover:border-hue-amber/90 hover:bg-hue-amber/20',
+  SeqScan:
+    'border-hue-orange/60 bg-hue-orange/10 text-hue-orange-ink hover:border-hue-orange/90 hover:bg-hue-orange/20',
+  IndexScan:
+    'border-hue-emerald/60 bg-hue-emerald/10 text-hue-emerald-ink hover:border-hue-emerald/90 hover:bg-hue-emerald/20',
 };
 
 function toFlow(node: PlanNode): FlowNode {

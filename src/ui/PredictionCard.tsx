@@ -25,23 +25,23 @@ export function PredictionCard({ prompt, answer, onAnswer, onSkip }: PredictionC
       className="rounded-lg border border-accent/60 bg-accent/5 p-3"
     >
       <div className="mb-2 flex items-baseline gap-2">
-        <span className="rounded-full border border-accent/60 px-2 py-0.5 text-3xs tracking-wide text-accent uppercase">
+        <span className="rounded-full border border-accent/60 px-2 py-0.5 text-micro tracking-wide text-accent uppercase">
           predict
         </span>
         {!answered && (
           <button
             type="button"
             onClick={onSkip}
-            className="ml-auto text-2xs text-ink-dim underline-offset-2 hover:underline"
+            className="ml-auto text-micro text-ink-dim underline-offset-2 hover:underline"
           >
             skip
           </button>
         )}
       </div>
 
-      <p className="text-sm leading-relaxed">{prompt.question}</p>
+      <p className="text-body leading-relaxed">{prompt.question}</p>
 
-      <ul className="mt-2.5 space-y-1.5">
+      <ul className="mt-3 space-y-1.5">
         {prompt.options.map((option) => {
           const isCorrect = option.id === prompt.correctOptionId;
           const isChosen = option.id === answer;
@@ -62,7 +62,7 @@ export function PredictionCard({ prompt, answer, onAnswer, onSkip }: PredictionC
                 onMouseEnter={() => { setHovered(option.id); }}
                 onMouseLeave={() => { setHovered(null); }}
                 className={[
-                  'w-full rounded-md border px-2.5 py-1.5 text-left font-mono text-xs transition-colors',
+                  'w-full rounded-md border px-2.5 py-1.5 text-left font-mono text-label transition-colors',
                   tone,
                   !answered && hovered === option.id ? 'bg-surface-3' : '',
                   answered ? 'cursor-default' : 'cursor-pointer',
@@ -80,12 +80,12 @@ export function PredictionCard({ prompt, answer, onAnswer, onSkip }: PredictionC
       </ul>
 
       {answered && (
-        <div className="mt-2.5 space-y-1.5">
-          <p className={`text-xs font-medium ${correct ? 'text-hit' : 'text-evict'}`}>
+        <div className="mt-3 space-y-1.5">
+          <p className={`text-label font-medium ${correct ? 'text-hit' : 'text-evict'}`}>
             {correct ? 'Right.' : 'Not quite.'}
           </p>
-          <p className="text-xs leading-relaxed text-ink-dim">{prompt.explanation}</p>
-          <p className="text-2xs text-ink-dim/80">
+          <p className="text-label leading-relaxed text-ink-dim">{prompt.explanation}</p>
+          <p className="text-micro text-ink-dim/80">
             Press <kbd className="rounded border border-edge px-1">→</kbd> to see it happen.
           </p>
         </div>

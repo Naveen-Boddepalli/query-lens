@@ -1,9 +1,89 @@
 @import 'tailwindcss';
 
+/**
+ * plan.md §16.2 item 1 — the typefaces, actually shipped.
+ *
+ * This file named 'JetBrains Mono' for a year while serving no font file, so
+ * the typeface appeared only for visitors who happened to have installed it —
+ * a population that skews to exactly the developers who would notice, which is
+ * why it survived. Everyone else got their OS default, meaning the app's
+ * typography was *unchosen*, which is the first item on every published list
+ * of AI-design tells.
+ *
+ * `public/_headers` sets `font-src 'self'`, so a Google Fonts <link> is blocked
+ * by the project's own CSP — correctly. Self-hosting is the only route, and it
+ * is what public/fonts/ and scripts/build-fonts.py exist for. Licensing (both
+ * faces are OFL 1.1, one with a reserved name) is handled in
+ * public/fonts/README.md and NOTICE.
+ *
+ * One file per family: each is a variable font carrying a single `wght` axis
+ * from 400 to 700, subset to the 235 codepoints src/ renders. ~30 kB each.
+ */
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('/fonts/querylens-mono.woff2') format('woff2');
+  font-weight: 400 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'QueryLens Sans';
+  src: url('/fonts/querylens-sans.woff2') format('woff2');
+  font-weight: 400 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+/**
+ * The adjusted fallbacks — the half of `font-display: swap` that stops it
+ * costing a layout shift.
+ *
+ * `swap` paints in a fallback face and re-paints in the real one, and the
+ * reflow between those two frames is proportional to how far their metrics
+ * disagree. Overriding the fallback's metrics to match ours removes the
+ * vertical half outright (ascent/descent/line-gap) and the horizontal half to
+ * within a percent (`size-adjust`, the ratio of average advance widths).
+ *
+ * Every number below was measured by scripts/build-fonts.py against the
+ * subset that actually ships — not copied from an article — and each face is
+ * measured against the face a browser will really substitute for it: Arial for
+ * the text face, Courier New for the monospace. Measuring a monospace against
+ * Arial gives a number that is arithmetically fine and physically meaningless.
+ * Both references map to metric-compatible Liberation faces under fontconfig,
+ * so Linux is covered too. Re-run the script if a face changes.
+ */
+@font-face {
+  font-family: 'QueryLens Sans Fallback';
+  src: local('Arial');
+  ascent-override: 102.5%;
+  descent-override: 27.5%;
+  line-gap-override: 0%;
+  size-adjust: 99.05%;
+}
+
+@font-face {
+  font-family: 'JetBrains Mono Fallback';
+  src: local('Courier New');
+  ascent-override: 102%;
+  descent-override: 30%;
+  line-gap-override: 0%;
+  size-adjust: 99.98%;
+}
+
 @theme {
   --color-surface: oklch(0.17 0.012 260);
   --color-surface-2: oklch(0.21 0.014 260);
   --color-surface-3: oklch(0.26 0.016 260);
+  /* plan.md §16.2 item 4. The palette had no step to hover *to*: a cell already
+     sitting on surface-3 has nowhere to go, which is part of why eight panels
+     ended up with no hover states between them. One more step on the same ramp
+     rather than a per-panel improvisation.
+
+     "Further from the page background" in both themes — lighter on dark, darker
+     on light — so the token means the same thing either way and a hover always
+     increases contrast rather than merely changing hue (§16.3's rule). */
+  --color-surface-4: oklch(0.31 0.017 260);
   --color-edge: oklch(0.33 0.018 260);
   --color-ink: oklch(0.95 0.005 260);
   --color-ink-dim: oklch(0.72 0.014 260);
@@ -70,17 +150,171 @@
   --color-select: oklch(0.78 0.14 196 / 25%);
   --color-span-active: oklch(0.78 0.14 196 / 16%);
 
-  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  /* The adjusted fallback sits second in each stack: it is a real face with
+     corrected metrics, so it is what the swap paints in before the webfont
+     arrives, and the generic families behind it only matter if even Arial or
+     Courier New is missing. */
+  --font-sans: 'QueryLens Sans', 'QueryLens Sans Fallback', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'JetBrains Mono Fallback', ui-monospace, 'SF Mono', Menlo, monospace;
 
-  /* plan.md §15.1 item 7. Tailwind stops at text-xs (0.75rem), so every label
-     below that size had been written as an arbitrary pixel value — and a pixel
-     is a pixel: at a doubled root font size those stayed exactly where they
-     were while everything around them grew. Same sizes, in rem, so they scale
-     with the user's setting instead of ignoring it. */
-  --text-2xs: 0.6875rem;
-  --text-2xs--line-height: 1.45;
-  --text-3xs: 0.625rem;
-  --text-3xs--line-height: 1.4;
+  /**
+   * plan.md §16.2 item 2 — the type scale, given a top and a name per step.
+   *
+   * The audit that produced this counted `src/` rather than eyeballing it, and
+   * the count said something other than the usual finding. There were six
+   * sizes, which is a normal number; the problem was their distribution.
+   * 55 of 77 usages were 12px or smaller, against exactly one `text-lg` and one
+   * `text-base` in the whole application. Everything was chrome and nothing was
+   * a headline — so deleting a size, the standard prescription, would have made
+   * it worse. What was missing was a *top*, and a documented role per step.
+   *
+   * Six steps, each with one job:
+   *
+   *   display   the wordmark, and nothing else
+   *   heading   stage titles and dialog titles — the things a scan should land on
+   *   body      prose, narration, buttons: anything read as a sentence
+   *   code      SQL and the editor gutter; sits between body and label on purpose,
+   *             because monospace reads smaller at an equal nominal size
+   *   label     the dense chrome — field labels, chips, table headers
+   *   micro     annotations inside diagrams: node kinds, frame ids, counters
+   *
+   * The ratio is a minor third (1.2) from `micro` up to `heading`, compressed
+   * slightly at the bottom because a dev tool's density lives down there. The
+   * jump from `heading` to `display` is two steps rather than one, deliberately:
+   * a top that is only one step above the next thing is not a top.
+   *
+   * Tailwind's own scale is cleared below rather than extended. A `text-xl`
+   * that still works is an invitation to reach for it, and then the scale is
+   * six sizes with a documented role plus however many undocumented ones
+   * accumulate. Every size in src/ now names its job.
+   */
+  --text-*: initial;
+
+  --text-display: 1.5rem;
+  --text-display--line-height: 1.15;
+  --text-display--letter-spacing: -0.015em;
+
+  --text-heading: 1.0625rem;
+  --text-heading--line-height: 1.3;
+  --text-heading--letter-spacing: -0.008em;
+
+  --text-body: 0.875rem;
+  --text-body--line-height: 1.5;
+
+  /* plan.md §15.1 item 7 is why these are rem and not px: a pixel is a pixel,
+     so at a doubled root font size a px label stays exactly where it was while
+     everything around it grows. */
+  --text-code: 0.8125rem;
+  --text-code--line-height: 1.5;
+
+  --text-label: 0.75rem;
+  --text-label--line-height: 1.4;
+
+  --text-micro: 0.6875rem;
+  --text-micro--line-height: 1.45;
+
+  /**
+   * plan.md §16.2 item 5 — three durations, three curves.
+   *
+   * Motion was never the problem here: 28 sites already animated. What was
+   * missing was the rule that makes the 29th match the 28th by something other
+   * than memory. Durations are named for what moved, not for a number, so the
+   * question at each new call site is "what kind of change is this?" rather
+   * than "what did the last one use?".
+   *
+   *   fast   a state flip in place — hover, focus, a colour change
+   *   base   a panel or stage change — something the user asked for
+   *   slow   a diagram laying itself out again — distance travelled on screen
+   *
+   * `--default-transition-*` below points Tailwind's bare `transition-colors`
+   * at the fast pair, which is what the overwhelming majority of them are.
+   * The two exceptions say so explicitly at their call sites.
+   */
+  --dur-fast: 120ms;
+  --dur-base: 180ms;
+  --dur-slow: 320ms;
+
+  /* Decelerate in, accelerate out, symmetric for a change in place. */
+  --ease-enter: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-exit: cubic-bezier(0.7, 0, 0.84, 0);
+  --ease-morph: cubic-bezier(0.4, 0, 0.2, 1);
+
+  --default-transition-duration: var(--dur-fast);
+  --default-transition-timing-function: var(--ease-morph);
+
+  /**
+   * plan.md §16.1 constraint 3 — the instrument aesthetic.
+   *
+   * The reference class is an oscilloscope, a profiler, a debugger: dense,
+   * flat, borders over shadows. Radius is small and constant rather than a
+   * scale, because a varying radius is a decorative decision and there is
+   * nothing here to decorate — 4px on chrome, 2px inside a diagram where the
+   * shapes are small enough that more reads as blur.
+   *
+   * Redefining Tailwind's steps rather than rewriting sixty `rounded-md` and
+   * `rounded-lg` call sites: the constraint is one radius, and this is how it
+   * becomes true everywhere at once and stays true for the next component.
+   * `rounded-full` is untouched — a pill is a shape, not a corner treatment.
+   */
+  --radius-xs: 2px;
+  --radius-sm: 2px;
+  --radius-md: 4px;
+  --radius-lg: 4px;
+  --radius-xl: 4px;
+  --radius-2xl: 4px;
+  --radius-3xl: 4px;
+}
+
+/**
+ * plan.md §16.2 item 3 — the spacing scale, named rather than replaced.
+ *
+ * The v5 draft of the plan asked for every padding to be collapsed onto a
+ * 4px grid. A count said that was the wrong target: the four commonest values
+ * in src/ are py-1.5 (6px), gap-2 (8px), px-2.5 (10px) and py-1 (4px), so the
+ * half-steps are not strays, they are the majority, and they are what makes a
+ * dev tool's density readable. Forcing them to 4px would have inflated every
+ * panel in the name of tidiness.
+ *
+ * The base unit is 2px, and Tailwind's `--spacing` already produces exactly
+ * that at its half steps. So these tokens name the scale that exists rather
+ * than introducing a second one; the utility and the token are the same number
+ * by construction, and cannot drift.
+ *
+ *   --space-0.5   2px   gap-0.5   hairline gaps inside a chip
+ *   --space-1     4px   p-1       the tightest padding that still reads
+ *   --space-1.5   6px   py-1.5    the default vertical padding for controls
+ *   --space-2     8px   gap-2     the default gap between siblings
+ *   --space-2.5  10px   px-2.5    the default horizontal padding for controls
+ *   --space-3    12px   gap-3     between groups inside a panel
+ *   --space-4    16px   p-4       panel padding, and the page gutter
+ *   --space-6    24px   gap-6     between major regions
+ *
+ * The density rule, so the next component does not have to guess: **2px steps
+ * inside dense chrome, 4px steps and up for layout.** Anything below 4px is
+ * spacing within a single control; anything at or above it separates controls.
+ *
+ * §16.2 item 3 also lists four values to fix as "genuine strays". Naming the
+ * scale first turned out to settle three of them the other way, so for the
+ * record:
+ *
+ *   mt-2.5   Fixed. 10px is the horizontal step for control padding, used here
+ *            as a vertical layout gap — which is exactly what the density rule
+ *            forbids. Now `mt-3` (12px), the step for separating groups.
+ *   p-0.5    Kept. 2px is `--space-0.5`, a real step: it is the inset of the
+ *            theme toggle's segmented control, spacing *within* one control.
+ *   py-0     Kept. Not a spacing value — it is `lg:py-0`, resetting the phone's
+ *            sticky-bar padding once the bar stops being sticky.
+ *   px-0     Same, and for the same reason.
+ */
+:root {
+  --space-0-5: calc(var(--spacing) * 0.5);
+  --space-1: calc(var(--spacing) * 1);
+  --space-1-5: calc(var(--spacing) * 1.5);
+  --space-2: calc(var(--spacing) * 2);
+  --space-2-5: calc(var(--spacing) * 2.5);
+  --space-3: calc(var(--spacing) * 3);
+  --space-4: calc(var(--spacing) * 4);
+  --space-6: calc(var(--spacing) * 6);
 }
 
 html,
@@ -123,6 +357,7 @@ body,
   --color-surface: oklch(0.99 0.002 260);
   --color-surface-2: oklch(0.968 0.004 260);
   --color-surface-3: oklch(0.935 0.006 260);
+  --color-surface-4: oklch(0.9 0.008 260);
   --color-edge: oklch(0.86 0.012 260);
   --color-ink: oklch(0.28 0.02 262);
   /* 0.42, not 0.46: the pipeline tracker's arrows are drawn at `/80`, and at
@@ -174,6 +409,111 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/**
+ * plan.md §16.2 item 7 — tabular figures, everywhere a number can change.
+ *
+ * Digits that jitter as a trace steps are the most visible defect available in
+ * a step-through tool: the step counter, the page ids, `usage_count`, the
+ * hit/miss counters and the data grid all change under playback, and a
+ * proportional 1 next to a proportional 8 makes the whole row twitch.
+ *
+ * Applied at the root rather than per component, because the failure mode of
+ * missing one is a visible bug and the cost of an unnecessary one is zero.
+ * Both shipped faces already have uniform digit widths by design — IBM Plex
+ * Sans draws every digit at 600 units, and a monospace has no choice — so this
+ * declaration is doing its real work on the *fallback* face during the swap,
+ * and on whatever a visitor's browser substitutes if the fetch fails.
+ */
+:root {
+  font-variant-numeric: tabular-nums;
+}
+
+/**
+ * plan.md §16.2 item 10 — scroll-snap on mobile.
+ *
+ * On a phone the page scrolls normally and the trace, the editor and the
+ * controls are three full-ish sections; without this they drift and a reader
+ * ends up half in one and half in the next. `proximity` rather than
+ * `mandatory`, deliberately: mandatory snapping fights a user who is trying to
+ * read something in the middle of a tall panel, which on this page is the
+ * common case. Restricted to the phone layout, where the page is a scroller at
+ * all — from `lg:` up the shell is fixed-height and the panels scroll inside it.
+ */
+@media (width < 64rem) {
+  .snap-sections {
+    scroll-snap-type: y proximity;
+  }
+
+  .snap-section {
+    scroll-snap-align: start;
+    /* Clears the disclaimer bar, which is the one thing above the fold that a
+       snapped section would otherwise land underneath. */
+    scroll-margin-top: var(--space-2);
+  }
+}
+
+/**
+ * plan.md §16.2 item 4 — the hover rule, written once.
+ *
+ * The audit's hardest finding was that the eight diagram panels contained one
+ * `hover:` rule between them: `AstTree`, `PlanTree`, `BTreePanel`,
+ * `BufferPoolPanel`, `LockPanel`, `ResultPanel`, `FlowTree` and
+ * `PipelineTracker` — which is to say, the panels the product exists for.
+ *
+ * The rule, so the next panel matches this one by construction:
+ *
+ *   Neutral cell   bg-surface-3 → hover:bg-surface-4
+ *                  border-edge  → hover:border-ink-dim/50
+ *   Tinted cell    bg-{hue}/10  → hover:bg-{hue}/20
+ *                  border-{hue}/60 → hover:border-{hue}/90
+ *   Active         one step further again, and only where a press does something
+ *   Cursor         `cursor-pointer` on the clickable ones and nothing on the
+ *                  rest, so the cursor tells the truth about what is a control
+ *
+ * Every one of those *increases* contrast rather than only shifting hue, which
+ * is the requirement §16.3 sets for interaction states and the reason the lift
+ * is a step on the surface ramp rather than a tint.
+ *
+ * The class below carries only the timing, so a cell cannot end up animating at
+ * a duration nobody chose; the colours stay at the call site in each panel's own
+ * palette, because a buffer frame and a B+Tree leaf do not share one. Note the
+ * listed properties — §16.2 item 5 bans `transition: all`, which was in
+ * `BufferPoolPanel` and is the reason a frame's box-shadow glow used to animate
+ * its geometry too.
+ */
+.cell {
+  transition-property: background-color, border-color, color, box-shadow;
+  transition-duration: var(--dur-fast);
+  transition-timing-function: var(--ease-morph);
+}
+
+/**
+ * The other half of item 4's cursor rule, and the larger half by count.
+ *
+ * A `<button>` gets `cursor: default` from the user agent, not `pointer` —
+ * that has always been true, and Tailwind v4's preflight does not override it
+ * the way v3's did. So every control in the app was pointing an arrow at the
+ * user while the diagrams, which are not controls, pointed the same arrow. The
+ * cursor was carrying no information at all.
+ *
+ * Set here rather than per component: the failure mode of missing one is a
+ * control that lies about being clickable, and there is no button in this app
+ * that should read as inert. `not-allowed` on the disabled ones for the same
+ * reason — a Play button at the end of a trace is disabled, and the cursor is
+ * the fastest way to say so.
+ */
+button:not(:disabled),
+select:not(:disabled),
+summary,
+[role='button']:not([aria-disabled='true']) {
+  cursor: pointer;
+}
+
+button:disabled,
+select:disabled {
+  cursor: not-allowed;
+}
+
 /* A visible focus ring everywhere. Keyboard users need to see where they are,
    and learners in training settings lean on the keyboard heavily (plan.md §8). */
 :focus-visible {
@@ -194,8 +534,21 @@ body {
 
 /* plan.md §8: honour reduced motion by snapping between states rather than
    tweening. This does NOT replace the Play/Pause controls — both are required
-   (WCAG 2.2.2). */
+   (WCAG 2.2.2).
+
+   Two layers, and both are wanted. Collapsing the tokens (§16.2 item 5) is the
+   one that reads correctly: anything built from the named scale reports a
+   duration of zero rather than being overridden to zero, so a component that
+   inspects its own timing sees the truth. The blanket rule underneath stays as
+   the backstop for anything that hard-codes a duration despite the rule —
+   third-party CSS included, which is most of the risk here. */
 @media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-fast: 0ms;
+    --dur-base: 0ms;
+    --dur-slow: 0ms;
+  }
+
   *,
   *::before,
   *::after {
@@ -203,14 +556,21 @@ body {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+
+  /* Snapping between sections is motion the user did not ask for. */
+  .snap-sections {
+    scroll-snap-type: none;
+  }
 }
 
 .cm-editor {
   background: transparent !important;
   /* plan.md §15.1 item 7 applies here most of all: the SQL is the text a
      learner reads hardest, and a pixel value ignores their font setting.
-     0.8125rem is the same 13px at a default root. */
-  font-size: 0.8125rem;
+     This is the whole reason `--text-code` is a named step rather than a
+     literal — the editor is the one place it is used, and naming it is what
+     stops the next person picking a different 13px. */
+  font-size: var(--text-code);
 }
 .cm-editor.cm-focused {
   outline: none !important;

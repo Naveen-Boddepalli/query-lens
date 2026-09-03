@@ -8,8 +8,16 @@ import type { IndexNode } from '../../engine/index.ts';
  * in their heads from BusTub's tree printer. Free familiarity (RESEARCH.md §4).
  */
 const TONES: Record<string, string> = {
-  internal: 'border-[var(--color-node-internal)]/70 bg-[var(--color-node-internal)]/10 text-[var(--color-node-internal)]',
-  leaf: 'border-[var(--color-node-leaf)]/70 bg-[var(--color-node-leaf)]/10 text-[var(--color-node-leaf)]',
+  internal:
+    'border-[var(--color-node-internal)]/70 bg-[var(--color-node-internal)]/10 text-[var(--color-node-internal)] ' +
+    // plan.md §16.2 item 4, in the node's own hue. This panel is where hover
+    // pays for itself most: a B+Tree over a real table is wide enough that the
+    // view zooms to the current hop, and everything outside it is a row of
+    // near-identical boxes you navigate by pointing.
+    'hover:border-[var(--color-node-internal)] hover:bg-[var(--color-node-internal)]/20',
+  leaf:
+    'border-[var(--color-node-leaf)]/70 bg-[var(--color-node-leaf)]/10 text-[var(--color-node-leaf)] ' +
+    'hover:border-[var(--color-node-leaf)] hover:bg-[var(--color-node-leaf)]/20',
 };
 
 function toFlow(node: IndexNode, path: ReadonlySet<string>): FlowNode {
@@ -49,7 +57,7 @@ export function BTreePanel({ tree, path, outcome }: BTreePanelProps) {
 
   if (!root) {
     return (
-      <p className="text-sm text-ink-dim">
+      <p className="text-body text-ink-dim">
         No index traversal yet. A plan has to choose an <span className="font-mono">IndexScan</span>{' '}
         before the B+Tree is opened.
       </p>
@@ -58,7 +66,7 @@ export function BTreePanel({ tree, path, outcome }: BTreePanelProps) {
 
   return (
     <div className="flex h-full flex-col gap-2">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-2xs text-ink-dim">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-micro text-ink-dim">
         <span className="flex items-center gap-1.5">
           <span className="h-2 w-2 rounded-sm bg-[var(--color-node-internal)]" /> internal
         </span>

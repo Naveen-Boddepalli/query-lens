@@ -188,7 +188,7 @@ export function SqlEditor({ value, onChange, onRun, error, activeSpan, theme }: 
       {error && (
         <div
           role="alert"
-          className="rounded-lg border border-evict/60 bg-evict/10 px-3 py-2 text-xs"
+          className="rounded-lg border border-evict/60 bg-evict/10 px-3 py-2 text-label"
         >
           <p className="text-ink">{error.message}</p>
           {error.hint && <p className="mt-1 text-ink-dim">{error.hint}</p>}

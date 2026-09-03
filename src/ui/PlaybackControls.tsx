@@ -7,7 +7,7 @@ export interface PlaybackControlsProps {
 }
 
 const btn =
-  'rounded-md border border-edge bg-surface-3 px-3 py-1.5 text-sm text-ink transition-colors hover:border-accent/70 disabled:cursor-not-allowed disabled:opacity-40';
+  'rounded-md border border-edge bg-surface-3 px-3 py-1.5 text-body text-ink transition-colors hover:border-accent/70 disabled:cursor-not-allowed disabled:opacity-40';
 
 export function PlaybackControls({ playback, length }: PlaybackControlsProps) {
   const { step, playing, speed, atStart, atEnd, blocked } = playback;
@@ -54,7 +54,7 @@ export function PlaybackControls({ playback, length }: PlaybackControlsProps) {
         <span aria-hidden>▶│</span>
       </button>
 
-      <label className="ml-2 flex items-center gap-2 text-xs text-ink-dim">
+      <label className="ml-2 flex items-center gap-2 text-label text-ink-dim">
         Speed
         <select
           className="rounded-md border border-edge bg-surface-3 px-2 py-1 text-ink"
@@ -67,7 +67,7 @@ export function PlaybackControls({ playback, length }: PlaybackControlsProps) {
         </select>
       </label>
 
-      <label className="flex flex-1 items-center gap-2 text-xs text-ink-dim">
+      <label className="flex flex-1 items-center gap-2 text-label text-ink-dim">
         <span className="tabular-nums" aria-label={`Step ${String(step)} of ${String(length)}`}>
           {step} / {length}
         </span>

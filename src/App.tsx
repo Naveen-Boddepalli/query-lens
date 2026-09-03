@@ -17,6 +17,7 @@ import type {
 } from './engine/index.ts';
 import { DisclaimerBanner } from './ui/DisclaimerBanner.tsx';
 import { ErrorBoundary } from './ui/ErrorBoundary.tsx';
+import { Footer } from './ui/Footer.tsx';
 import { publishRepro } from './ui/errorReport.ts';
 import { PipelineTracker } from './ui/PipelineTracker.tsx';
 import { PlaybackControls } from './ui/PlaybackControls.tsx';
@@ -251,14 +252,26 @@ export default function App() {
        instead. Without the `lg:h-dvh`, the grid row is auto-sized, so a 43-row
        result grows the row, the panel's `flex-1` never gets a definite height
        to divide, and the whole page gets taller than the viewport. */
-    <div className="flex min-h-dvh flex-col lg:h-dvh lg:overflow-hidden">
+    /* `snap-sections` is a no-op above `lg`, where this shell is fixed-height
+       and the panels scroll inside it rather than the page scrolling at all
+       (plan.md §16.2 item 10). */
+    <div className="snap-sections flex min-h-dvh flex-col lg:h-dvh lg:overflow-hidden">
       <DisclaimerBanner />
 
       <header className="flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b border-edge px-4 py-3">
-        <h1 className="text-lg font-semibold tracking-tight">QueryLens</h1>
-        <p className="text-xs text-ink-dim">see what your SQL actually does</p>
+        <h1 className="text-display font-semibold tracking-tight">QueryLens</h1>
+        {/* plan.md §19.1, job 1: say what this is in one line, in the visitor's
+            words, with concrete nouns. The previous line — "see what your SQL
+            actually does" — is the failure mode that section names: true, and
+            it says nothing the title tag did not. A visitor who reads only this
+            sentence should be able to describe the product; "B+Tree traversal"
+            is the noun that makes that possible, and it is also the promise the
+            first paint keeps, because the trace has already run. */}
+        <p className="text-label text-ink-dim">
+          Watch a SQL query become a B+Tree traversal.
+        </p>
         <span
-          className="ml-auto rounded-full border border-edge bg-surface-2 px-2.5 py-0.5 text-2xs text-ink-dim"
+          className="ml-auto rounded-full border border-edge bg-surface-2 px-2.5 py-0.5 text-micro text-ink-dim"
           title={`Built: ${IMPLEMENTED_STAGES.join(', ')}.`}
         >
           {IMPLEMENTED_STAGES.length}/{STAGES.length} stages built
@@ -271,7 +284,7 @@ export default function App() {
         {/* min-w-0: a grid item defaults to `min-width: auto`, so it refuses to
             shrink below its content and a long line pushes the page sideways
             instead of scrolling inside. */}
-        <div className="order-2 flex min-w-0 flex-col gap-3 lg:order-1 lg:min-h-0 lg:overflow-y-auto">
+        <div className="snap-section order-2 flex min-w-0 flex-col gap-3 lg:order-1 lg:min-h-0 lg:overflow-y-auto">
           <SqlEditor
             value={sql}
             onChange={setSql}
@@ -282,21 +295,32 @@ export default function App() {
           />
 
           <div className="flex flex-wrap items-center gap-2">
+            {/* plan.md §16.2 item 6 — acknowledge Run.
+                A trace takes roughly 50 ms and `runQuery` is synchronous, so a
+                spinner could not paint before the work finished even if one
+                existed: it would appear only to be torn down, which is the
+                jank the item warns about. Under that threshold the item's own
+                answer is a press state, and this is it — `active:` deepens the
+                fill for exactly as long as the button is held, with no state,
+                no timer and nothing to get out of sync with the engine.
+                §19.1 job 3 is the other half: this is the one element on the
+                first screen that reads as the primary action, and everything
+                beside it is deliberately quieter. */}
             <button
               type="button"
               onClick={() => { run(); }}
-              className="rounded-md border border-accent bg-accent/15 px-4 py-1.5 text-sm font-medium text-ink transition-colors hover:bg-accent/25"
+              className="rounded-md border border-accent bg-accent/15 px-4 py-1.5 text-body font-medium text-ink transition-colors hover:bg-accent/25 active:bg-accent/40"
             >
               Run{touch ? '' : ` ${RUN_HINT}`}
             </button>
             <button
               type="button"
               onClick={() => { setEditingData(true); }}
-              className="rounded-md border border-edge px-3 py-1.5 text-sm text-ink-dim transition-colors hover:border-accent/70 hover:text-ink"
+              className="rounded-md border border-edge px-3 py-1.5 text-body text-ink-dim transition-colors hover:border-accent/70 hover:text-ink active:bg-surface-3"
             >
               Edit data ({table?.rows.length ?? 0})
             </button>
-            <label className="ml-auto flex items-center gap-2 text-xs text-ink-dim">
+            <label className="ml-auto flex items-center gap-2 text-label text-ink-dim">
               Eviction
               <select
                 className="rounded-md border border-edge bg-surface-3 px-2 py-1 text-ink"
@@ -312,7 +336,7 @@ export default function App() {
           {/* plan.md §15.1 item 2: the trace length belongs next to the button
               that built it. The counter in the playback row is on the other
               side of the screen, and 12px of it moving is not feedback. */}
-          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-2xs text-ink-dim">
+          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-micro text-ink-dim">
             <p>
               {result.error ? (
                 <span className="text-evict">The query did not run — see the error by the editor.</span>
@@ -334,7 +358,7 @@ export default function App() {
             </button>
           </div>
 
-          <label className="flex items-center gap-2 text-xs text-ink-dim">
+          <label className="flex items-center gap-2 text-label text-ink-dim">
             <input
               type="checkbox"
               checked={predictOn}
@@ -348,7 +372,7 @@ export default function App() {
 
         {/* The trace. First on a phone: people open links on one, and nobody
             writes SQL there (plan.md §15.2, "mobile as read-first"). */}
-        <div className="order-1 flex min-h-0 min-w-0 flex-col gap-4 lg:order-2 lg:overflow-hidden">
+        <div className="snap-section order-1 flex min-h-0 min-w-0 flex-col gap-4 lg:order-2 lg:overflow-hidden">
           <PipelineTracker
             current={state?.stage ?? null}
             visited={visited}
@@ -387,7 +411,7 @@ export default function App() {
             ) : (
               /* Only reachable when step 0 itself asks a question, or when the
                  SQL failed to parse — the trace otherwise runs on load. */
-              <p className="text-sm text-ink-dim">
+              <p className="text-body text-ink-dim">
                 {result.error
                   ? 'Fix the query and run it again to build a trace.'
                   : 'Answer the question below to reveal the first step.'}
@@ -413,23 +437,36 @@ export default function App() {
             />
           ) : (
             <div className="rounded-lg border border-edge bg-surface-2 p-3">
-              <h2 className="mb-1 text-xs font-medium text-ink-dim">Narration</h2>
+              <h2 className="mb-1 text-label font-medium text-ink-dim">Narration</h2>
               {/* Announced as it changes: stepping is the primary interaction,
                   and a screen reader user needs to hear what each step did. */}
-              <p className="min-h-10 text-sm leading-relaxed" aria-live="polite">
+              <p className="min-h-10 text-body leading-relaxed" aria-live="polite">
                 {state.narration || 'Step forward to start the trace.'}
               </p>
             </div>
           )}
 
           {/* Sticky on a phone, so the control you press every few seconds stays
-              in thumb reach while the trace scrolls under it. */}
-          <div className="sticky bottom-0 z-10 -mx-4 space-y-2 border-t border-edge bg-surface/95 px-4 py-2 backdrop-blur lg:static lg:mx-0 lg:space-y-4 lg:border-0 lg:bg-transparent lg:px-0 lg:py-0 lg:backdrop-blur-none">
+              in thumb reach while the trace scrolls under it.
+
+              Was `bg-surface/95 backdrop-blur`. plan.md §16.1 constraint 3
+              rejects `backdrop-blur` by name — it is a SaaS-surface effect, and
+              the reference class here is an instrument, where separation comes
+              from a border. The blur was also barely doing anything behind a
+              95%-opaque background: an opaque surface plus the border that was
+              already there is the same separation, sharper, and one composited
+              layer cheaper on the phone where this bar actually appears. */}
+          <div className="sticky bottom-0 z-10 -mx-4 space-y-2 border-t border-edge bg-surface px-4 py-2 lg:static lg:mx-0 lg:space-y-4 lg:border-0 lg:bg-transparent lg:px-0 lg:py-0">
             <PlaybackControls playback={playback} length={result.events.length} />
             <ShortcutHints />
           </div>
         </div>
       </main>
+
+      {/* plan.md §16.2 item 9 and §19.1 job 5: the quiet way deeper, below the
+          fold. Outside <main> because it is not part of the trace, and after it
+          in the DOM so it is the last thing a screen reader reaches. */}
+      <Footer />
 
       {editingData && table && (
         <DataEditor

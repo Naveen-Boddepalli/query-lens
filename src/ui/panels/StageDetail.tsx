@@ -27,11 +27,11 @@ export interface StageDetailProps {
 function NotBuiltYet({ stage }: { stage: Stage }) {
   const meta = STAGE_META[stage];
   return (
-    <div className="flex h-full flex-col items-start justify-center gap-1.5 text-sm">
+    <div className="flex h-full flex-col items-start justify-center gap-1.5 text-body">
       <p className="text-ink-dim">
         The <span className="text-ink">{meta.title.toLowerCase()}</span> is not built yet.
       </p>
-      <p className="text-xs text-ink-dim/80">
+      <p className="text-label text-ink-dim/80">
         {meta.blurb}. Arrives in <span className="font-mono">{meta.milestone}</span>.
       </p>
     </div>
@@ -53,8 +53,8 @@ export function StageDetail({
     <section className="flex h-full flex-col gap-3">
       <header className="flex flex-wrap items-start gap-x-3 gap-y-1">
         <div>
-          <h2 className={`text-sm font-semibold ${meta.tone}`}>{meta.title}</h2>
-          <p className="text-xs text-ink-dim">{meta.blurb}</p>
+          <h2 className={`text-heading font-semibold ${meta.tone}`}>{meta.title}</h2>
+          <p className="text-label text-ink-dim">{meta.blurb}</p>
         </div>
 
         {/* Selecting a stage holds the panel there while the trace runs on,
@@ -66,7 +66,7 @@ export function StageDetail({
           <button
             type="button"
             onClick={onFollow}
-            className="ml-auto rounded-md border border-accent/70 bg-accent/10 px-2.5 py-1 text-2xs text-ink transition-colors hover:bg-accent/20"
+            className="ml-auto rounded-md border border-accent/70 bg-accent/10 px-2.5 py-1 text-micro text-ink transition-colors hover:bg-accent/20"
           >
             Pinned to {meta.title} — follow the trace
           </button>
@@ -88,11 +88,11 @@ export function StageDetail({
           (state.planBefore ? (
             <div className="grid h-full grid-rows-[auto_1fr] gap-2 sm:grid-cols-2 sm:grid-rows-1">
               <div className="grid h-full min-h-0 grid-rows-[auto_1fr]">
-                <h3 className="mb-1 text-xs text-ink-dim">before</h3>
+                <h3 className="mb-1 text-label text-ink-dim">before</h3>
                 <PlanTree root={state.planBefore} empty="—" />
               </div>
               <div className="grid h-full min-h-0 grid-rows-[auto_1fr] border-edge sm:border-l sm:pl-3">
-                <h3 className="mb-1 text-xs text-ink-dim">
+                <h3 className="mb-1 text-label text-ink-dim">
                   after ·{' '}
                   <span className="font-mono text-accent">
                     {state.appliedRules[state.appliedRules.length - 1]}
@@ -102,12 +102,12 @@ export function StageDetail({
               </div>
             </div>
           ) : (
-            <p className="text-sm text-ink-dim">No rewrite applied yet.</p>
+            <p className="text-body text-ink-dim">No rewrite applied yet.</p>
           ))}
 
         {implemented && stage === 'execute' &&
           (state.operators.length === 0 ? (
-            <p className="text-sm text-ink-dim">No operator has produced rows yet.</p>
+            <p className="text-body text-ink-dim">No operator has produced rows yet.</p>
           ) : (
             <div className="space-y-3">
               {/* Listed root-last: rows are pulled from the top down and travel
@@ -119,11 +119,15 @@ export function StageDetail({
                   return (
                     <li
                       key={op.op}
+                      /* plan.md §16.2 item 4. The active operator keeps the
+                         accent and deepens it on hover; the rest take the
+                         neutral lift. Both are `.cell`, so the two never
+                         animate at different speeds. */
                       className={[
-                        'flex items-baseline justify-between rounded-md border px-2.5 py-1.5 font-mono text-xs transition-colors',
+                        'cell flex items-baseline justify-between rounded-md border px-2.5 py-1.5 font-mono text-label',
                         active
-                          ? 'border-accent bg-accent/15 text-ink'
-                          : 'border-edge bg-surface-3',
+                          ? 'border-accent bg-accent/15 text-ink hover:bg-accent/25'
+                          : 'border-edge bg-surface-3 hover:border-ink-dim/50 hover:bg-surface-4',
                       ].join(' ')}
                     >
                       <span>{op.op}</span>
@@ -134,7 +138,7 @@ export function StageDetail({
                   );
                 })}
               </ul>
-              <p className="text-2xs leading-relaxed text-ink-dim">
+              <p className="text-micro leading-relaxed text-ink-dim">
                 Volcano model: each operator pulls one row at a time from the one below
                 it. Nothing materialises the whole table — a row travels all the way to
                 the top before the next is fetched.

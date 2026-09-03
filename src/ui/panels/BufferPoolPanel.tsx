@@ -18,11 +18,17 @@ function moodOf(frame: BufferFrame, lastEvent: StepEvent | null): FrameMood {
   return lastEvent.frameId === frame.frameId ? lastEvent.action : null;
 }
 
+/**
+ * The hover half of each mood follows plan.md §16.2 item 4's tinted rule —
+ * deepen the fill one step, brighten the border — rather than reaching for a
+ * neutral lift, so pointing at an evicted frame does not momentarily make it
+ * look like an ordinary one.
+ */
 const MOOD_CLASS: Record<Exclude<FrameMood, null>, string> = {
-  hit: 'border-hit bg-hit/15 shadow-[0_0_18px_-4px_var(--color-hit)]',
-  load: 'border-miss bg-miss/15 shadow-[0_0_18px_-4px_var(--color-miss)]',
-  evict: 'border-evict bg-evict/20 shadow-[0_0_18px_-4px_var(--color-evict)]',
-  sweep: 'border-accent bg-accent/10',
+  hit: 'border-hit bg-hit/15 shadow-[0_0_18px_-4px_var(--color-hit)] hover:bg-hit/25',
+  load: 'border-miss bg-miss/15 shadow-[0_0_18px_-4px_var(--color-miss)] hover:bg-miss/25',
+  evict: 'border-evict bg-evict/20 shadow-[0_0_18px_-4px_var(--color-evict)] hover:bg-evict/30',
+  sweep: 'border-accent bg-accent/10 hover:bg-accent/20',
 };
 
 const MOOD_TAG: Record<Exclude<FrameMood, null>, string> = {
@@ -51,16 +57,25 @@ export function BufferPoolPanel({
           return (
             <div
               key={frame.frameId}
+              /* A frame is not a control — nothing happens when you click one —
+                 so it gets the hover feedback and no `cursor-pointer`, per
+                 plan.md §16.2 item 4. The feedback still earns its place: in a
+                 four-up grid of near-identical boxes, pointing at one and
+                 seeing it respond is how you keep your place while stepping. */
               className={[
-                'relative rounded-lg border p-2.5 transition-all duration-200',
+                // Was `transition-all duration-200`, which animated the mood
+                // glow's geometry as well as its colour and used a literal
+                // duration nobody had chosen (§16.2 item 5). `.cell` lists the
+                // properties and names the timing.
+                'cell relative rounded-lg border p-2.5',
                 mood
                   ? MOOD_CLASS[mood]
                   : empty
-                    ? 'border-dashed border-edge/60'
-                    : 'border-edge bg-surface-3',
+                    ? 'border-dashed border-edge/60 hover:border-ink-dim/50'
+                    : 'border-edge bg-surface-3 hover:border-ink-dim/50 hover:bg-surface-4',
               ].join(' ')}
             >
-              <div className="flex items-baseline justify-between text-3xs text-ink-dim">
+              <div className="flex items-baseline justify-between text-micro text-ink-dim">
                 <span>frame {frame.frameId}</span>
                 {policy === 'clock' && clockHand === frame.frameId && (
                   <span title="clock hand is here" aria-label="clock hand">
@@ -69,7 +84,7 @@ export function BufferPoolPanel({
                 )}
               </div>
 
-              <div className="mt-0.5 font-mono text-sm">
+              <div className="mt-0.5 font-mono text-body">
                 {empty ? (
                   <span className="text-ink-dim">empty</span>
                 ) : (
@@ -94,7 +109,7 @@ export function BufferPoolPanel({
               )}
 
               {mood && (
-                <div className="mt-1 text-3xs tracking-wide uppercase opacity-80">
+                <div className="mt-1 text-micro tracking-wide uppercase opacity-80">
                   {MOOD_TAG[mood]}
                 </div>
               )}
@@ -103,7 +118,7 @@ export function BufferPoolPanel({
         })}
       </div>
 
-      <dl className="flex flex-wrap gap-x-5 gap-y-1 text-xs">
+      <dl className="flex flex-wrap gap-x-5 gap-y-1 text-label">
         <div>
           <dt className="text-ink-dim">hits</dt>
           <dd className="font-mono text-hit">{stats.hits}</dd>
@@ -126,7 +141,7 @@ export function BufferPoolPanel({
         </div>
       </dl>
 
-      <p className="mt-auto text-2xs leading-relaxed text-ink-dim">
+      <p className="mt-auto text-micro leading-relaxed text-ink-dim">
         {policy === 'lru' ? (
           <>
             <span className="text-ink">LRU</span> evicts whichever page was used

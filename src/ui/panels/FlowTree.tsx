@@ -14,6 +14,7 @@ import type { Edge, Node, NodeProps } from '@xyflow/react';
 import { hierarchy, tree } from 'd3-hierarchy';
 import '@xyflow/react/dist/style.css';
 import type { Span } from '../../engine/index.ts';
+import { durationMs } from '../motion.ts';
 import { useReducedMotion } from '../useReducedMotion.ts';
 
 /** The display shape every tree in the app renders through. */
@@ -43,8 +44,19 @@ type TreeFlowNode = Node<NodeData, 'tree'>;
 function NodeView({ data }: NodeProps<TreeFlowNode>) {
   return (
     <div
+      /* plan.md §16.2 item 4. Every tree in the app — AST, plan, B+Tree —
+         renders through this component, so one hover rule here is three panels
+         covered. The tone maps in AstTree/PlanTree/BTreePanel each carry their
+         own `hover:` pair, because a Filter node and a B+Tree leaf do not share
+         a palette; what they share is the timing, which `.cell` fixes.
+
+         No `cursor-pointer`: the canvas is explicitly `nodesDraggable={false}`
+         and `elementsSelectable={false}`, so a node is a thing to read, not a
+         control. The hover still earns its keep — a wide B+Tree at fit scale is
+         a field of near-identical boxes, and pointing at one to confirm which
+         is which is exactly what a reader does. */
       className={[
-        'rounded-md border px-2.5 py-1.5 text-center transition-shadow',
+        'cell rounded-md border px-2.5 py-1.5 text-center',
         data.wide ? 'w-44' : 'min-w-24',
         data.tone,
         data.highlighted ? 'ring-2 ring-accent shadow-[0_0_16px_-2px_var(--color-accent)]' : '',
@@ -52,10 +64,10 @@ function NodeView({ data }: NodeProps<TreeFlowNode>) {
     >
       <Handle id="in" type="target" position={Position.Top} className="!opacity-0" />
       <Handle id="prev" type="target" position={Position.Left} className="!opacity-0" />
-      <div className="font-mono text-xs leading-tight break-words">{data.label}</div>
-      <div className="text-3xs tracking-wide text-ink-dim uppercase">{data.kind}</div>
+      <div className="font-mono text-label leading-tight break-words">{data.label}</div>
+      <div className="text-micro tracking-wide text-ink-dim uppercase">{data.kind}</div>
       {data.detail && (
-        <div className="mt-0.5 font-mono text-3xs break-words text-ink-dim">{data.detail}</div>
+        <div className="mt-0.5 font-mono text-micro break-words text-ink-dim">{data.detail}</div>
       )}
       <Handle id="out" type="source" position={Position.Bottom} className="!opacity-0" />
       <Handle id="next" type="source" position={Position.Right} className="!opacity-0" />
@@ -68,7 +80,7 @@ const nodeTypes = { tree: NodeView };
 // 24px minimum on both axes — WCAG 2.2 SC 2.5.8, the rule that also set the
 // scrubber's size (plan.md §15.1 item 8). React Flow's own buttons are 16px.
 const ZOOM_BUTTON =
-  'flex h-6 w-6 items-center justify-center rounded border border-edge bg-surface-3 text-sm ' +
+  'flex h-6 w-6 items-center justify-center rounded border border-edge bg-surface-3 text-body ' +
   'leading-none text-ink-dim transition-colors hover:border-accent/70 hover:text-ink';
 
 const overlaps = (a: Span | undefined, b: Span | undefined): boolean =>
@@ -188,6 +200,11 @@ function Canvas({
 
   // Viewport moves are JavaScript, so the CSS media query cannot reach them:
   // snap instead of tweening when the viewer asks for reduced motion.
+  //
+  // `durationMs` reads the same `--dur-*` tokens the stylesheet uses, and the
+  // reduced-motion block already collapses those to 0ms — so this hook is now
+  // belt and braces rather than the only line of defence, and stays because
+  // `useReducedMotion` also re-renders when the setting changes mid-session.
   const reduced = useReducedMotion();
   const glide = reduced ? 0 : 1;
 
@@ -224,6 +241,10 @@ function Canvas({
   const frame = useCallback(
     (targets: TreeFlowNode[]) => {
       const pane = paneRef.current;
+      // @ts-expect-error DEBUG
+      window.__fl = window.__fl || []; // DEBUG
+      // @ts-expect-error DEBUG
+      window.__fl.push({ ev:'frame-call', n: targets.length, pane: pane && [pane.clientWidth, pane.clientHeight], t: Math.round(performance.now()) }); // DEBUG
       if (targets.length === 0 || !pane) return;
 
       const paneW = pane.clientWidth || 600;
@@ -243,15 +264,22 @@ function Canvas({
         1.15,
       );
 
+      // @ts-expect-error DEBUG
+      window.__fl.push({ ev:'setCenter', cx:(minX+maxX)/2, cy:(minY+maxY)/2, zoom: Math.max(zoom,0.1), box:[minX,maxX,minY,maxY], t: Math.round(performance.now()) }); // DEBUG
       void setCenter((minX + maxX) / 2, (minY + maxY) / 2, {
         zoom: Math.max(zoom, 0.1),
-        duration: 400 * glide,
+        // The whole diagram re-frames itself: that is the longest journey
+        // anything in the app makes, so it takes the slow step (§16.2 item 5).
+        // Was a literal 400 that matched nothing else on screen.
+        duration: durationMs('--dur-slow') * glide,
       });
     },
     [setCenter, wide, compact, glide],
   );
 
   useEffect(() => {
+    // @ts-expect-error DEBUG
+    window.__fl = window.__fl || []; window.__fl.push({ ev:'effect', rfWidth, n: nodes.length, focusKey, t: Math.round(performance.now()) }); // DEBUG
     if (rfWidth === 0) return;
     const timer = window.setTimeout(() => {
       const focus = new Set(focusKey ? focusKey.split(',') : []);
@@ -264,7 +292,9 @@ function Canvas({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nodes.length, focusKey, frame, rfWidth]);
 
-  const zoomOpts = { duration: 200 * glide };
+  // A zoom button is a deliberate control action rather than a layout settling,
+  // so it takes the base step — one notch quicker than the re-frame above.
+  const zoomOpts = { duration: durationMs('--dur-base') * glide };
 
   const toolbar = (
     <>
@@ -290,7 +320,7 @@ function Canvas({
         // dimensions, which these graphs never report.
         onClick={() => { frame(nodes); }}
         aria-label="Fit the whole tree"
-        className={`${ZOOM_BUTTON} w-auto px-2 text-2xs`}
+        className={`${ZOOM_BUTTON} w-auto px-2 text-micro`}
       >
         Fit
       </button>
@@ -336,7 +366,7 @@ export function FlowTree({
   empty,
 }: FlowTreeProps) {
   if (!root) {
-    return <p className="text-sm text-ink-dim">{empty ?? 'Nothing to show yet.'}</p>;
+    return <p className="text-body text-ink-dim">{empty ?? 'Nothing to show yet.'}</p>;
   }
   return (
     <div className="h-full min-h-48 w-full">

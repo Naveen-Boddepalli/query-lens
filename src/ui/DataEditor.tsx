@@ -90,22 +90,22 @@ export function DataEditor({ table, onApply, onReset, onClose }: DataEditorProps
     >
       <div className="flex max-h-[85dvh] flex-col">
         <header className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-edge px-4 py-3">
-          <h2 className="text-sm font-semibold">Seed data · {table.name}</h2>
-          <p className="text-xs text-ink-dim">
+          <h2 className="text-heading font-semibold">Seed data · {table.name}</h2>
+          <p className="text-label text-ink-dim">
             {rows.length} row{rows.length === 1 ? '' : 's'}
             {table.indexedColumn && ` · indexed on ${table.indexedColumn}`}
           </p>
           <button
             type="button"
             onClick={close}
-            className="ml-auto rounded-md border border-edge px-2.5 py-1 text-xs hover:border-accent/70"
+            className="ml-auto rounded-md border border-edge px-2.5 py-1 text-label hover:border-accent/70"
           >
             Close
           </button>
         </header>
 
         <div className="min-h-0 flex-1 overflow-auto">
-          <table className="w-full border-collapse text-left font-mono text-xs">
+          <table className="w-full border-collapse text-left font-mono text-label">
             <thead className="sticky top-0 bg-surface-2">
               <tr className="border-b border-edge text-ink-dim">
                 <th className="w-8 px-2 py-1.5" />
@@ -113,7 +113,7 @@ export function DataEditor({ table, onApply, onReset, onClose }: DataEditorProps
                   <th key={column} className="px-2 py-1.5 font-medium">
                     {column}
                     {column === table.indexedColumn && (
-                      <span className="ml-1 text-3xs text-accent">idx</span>
+                      <span className="ml-1 text-micro text-accent">idx</span>
                     )}
                   </th>
                 ))}
@@ -152,18 +152,18 @@ export function DataEditor({ table, onApply, onReset, onClose }: DataEditorProps
           <button
             type="button"
             onClick={addRow}
-            className="rounded-md border border-edge px-2.5 py-1.5 text-xs hover:border-accent/70"
+            className="rounded-md border border-edge px-2.5 py-1.5 text-label hover:border-accent/70"
           >
             + Add row
           </button>
           <button
             type="button"
             onClick={() => { close(); onReset(); }}
-            className="rounded-md border border-edge px-2.5 py-1.5 text-xs text-ink-dim hover:border-accent/70"
+            className="rounded-md border border-edge px-2.5 py-1.5 text-label text-ink-dim hover:border-accent/70"
           >
             Reset to seed
           </button>
-          <p className="ml-auto text-2xs text-ink-dim">
+          <p className="ml-auto text-micro text-ink-dim">
             Fewer rows means fewer pages, and the buffer pool may stop evicting entirely.
           </p>
           <button
@@ -171,7 +171,7 @@ export function DataEditor({ table, onApply, onReset, onClose }: DataEditorProps
             // close() before the callback, so focus lands back on the button
             // that opened this rather than on <body> after the unmount.
             onClick={() => { close(); onApply(rows); }}
-            className="rounded-md border border-accent bg-accent/15 px-4 py-1.5 text-xs font-medium hover:bg-accent/25"
+            className="rounded-md border border-accent bg-accent/15 px-4 py-1.5 text-label font-medium hover:bg-accent/25"
           >
             Apply &amp; re-run
           </button>

@@ -18,6 +18,7 @@
     "test:watch": "vitest",
     "trace": "node --experimental-strip-types scripts/trace.ts",
     "budget": "node --experimental-strip-types scripts/bundle-budget.ts",
+    "og": "node --experimental-strip-types scripts/build-og.ts",
     "test:e2e": "playwright test"
   },
   "dependencies": {
