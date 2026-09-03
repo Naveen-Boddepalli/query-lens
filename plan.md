@@ -624,6 +624,30 @@ Under a day, and each one was measured rather than guessed.
   opaque, so a semi-transparent stack fell through to white. A contrast tool that has not been tested
   against a known-good page is a random number generator.
 
+### 15.5 After the first bug report
+
+Three defects, none of which the audit in Part III would have caught, because two of them only appear
+in states it did not visit and the third only in a browser it did not use.
+
+- **A pinned stage looked like a broken one.** Selecting a chip holds the panel there while the trace
+  runs on — deliberate, useful, and silent. The report was "the graph is not updating when I step".
+  The panel now names the held stage and offers a one-click release. Worth generalising: a mode that
+  changes what the primary interaction does has to say so where that interaction happens, not in a
+  1px ring somewhere else.
+- **The result panel grew the page instead of scrolling.** §15.2 replaced a fixed `h-[27rem]` with a
+  `min-height` plus `flex-1`, which is right only if the row has a definite height to divide. It did
+  not: the grid row was auto-sized, so a 43-row result made the row 1300px tall in a 900px viewport.
+  The desktop layout is now a fixed-height shell and the panels scroll inside it.
+- **A phone scrolled sideways**, found while testing the fix above. Grid and flex children default to
+  `min-width: auto` and will not shrink below their content, so a long email column pushed the page
+  wider rather than letting the table's own scroller work.
+
+The lasting change is not the three fixes but where they are pinned down: `e2e/regressions.spec.ts`
+walks all 33 steps asserting the panel matches the current stage, checks overflow at two viewports on
+both a short and a long trace, and asserts the console stays silent across a full playthrough. None of
+that is expressible in jsdom, which is why §14.2's "one Playwright smoke test" turned out to be the
+load-bearing item on that list.
+
 ### 15.4 Definition of done
 
 - [x] A first-time visitor who touches nothing sees a real trace, not an empty box.

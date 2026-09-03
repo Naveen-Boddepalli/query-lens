@@ -427,7 +427,7 @@ The licence is [MIT](LICENSE).
 | Layer | What it covers |
 |---|---|
 | `pnpm test` | 326 tests over the engine (parser, planner, buffer pool, B+Tree, executor, locks) and the UI (playback gating, keyboard shortcuts, the data editor, URL state, the error boundary) |
-| `pnpm test:e2e` | Six Playwright tests against **`dist/`** — the load→run→step→result path, a shared link, the data editor's real modality, the theme toggle, and axe in *both* palettes |
+| `pnpm test:e2e` | 14 Playwright tests against **`dist/`** — [smoke](e2e/smoke.spec.ts) (load→run→step→result, a shared link, the data editor's real modality, the theme toggle, axe in *both* palettes) and [regressions](e2e/regressions.spec.ts) (the panel following each step, a pinned stage, overflow at two viewports, gating, history, seed-data round trip, console silence) |
 | `pnpm budget` | A gzip ceiling per chunk and overall, so the bundle cannot drift back silently |
 
 The end-to-end suite is the only thing that catches "the deploy is broken", and it is where three
@@ -443,6 +443,34 @@ Two things automated tests here deliberately do *not* claim:
 - **INP.** `stepLatency.test.ts` pins the half that can regress silently: that the fold memoises and
   never re-folds. React's render and React Flow's layout need field data from real hardware
   ([plan.md §14.2](plan.md#142-p1--the-fortnight-after-launch-before-the-9-study)).
+
+## Fixes from the first real bug report
+
+Three defects, two reported and one found while checking them. All three are now covered by
+[e2e/regressions.spec.ts](e2e/regressions.spec.ts).
+
+- **"The graph is not updating when I step."** It was — but the panel had been *pinned*. Clicking a
+  stage chip holds the panel there while the trace runs on, which is deliberate and useful (you can
+  watch the buffer pool while execute events stream past) and was completely silent: a 1px ring on one
+  chip, and no way back except clicking the same chip again. The panel now says
+  *"Pinned to Parser — follow the trace"* the moment the trace moves past the held stage, that label is
+  the button that releases it, and the chip's ring is a real ring. **The feature was fine; the absence
+  of feedback was the bug.**
+- **Results extended the page instead of scrolling in their container.** The grid row was auto-sized,
+  so a 43-row result grew the row, and the panel's `flex-1` never got a definite height to divide
+  against — 1300px of panel in a 900px viewport. On a wide screen the app is now a fixed-height shell
+  (`lg:h-dvh`, `lg:min-h-0` on the grid) and the panels scroll inside it; on a phone the page still
+  scrolls normally with the panel capped at `60dvh`.
+- **A phone scrolled sideways on the result view.** Found while testing the fix above. Grid and flex
+  children default to `min-width: auto`, so the long `email` column refused to shrink and pushed the
+  page wider instead of letting the table's own `overflow-auto` scroll. Four `min-w-0`s.
+
+One reported symptom turned out **not** to be a bug: in the in-app preview browser, closing the data
+editor left it mounted and "Edit data" would not reopen it. In real Chromium the native `close` event
+fires, React unmounts the dialog and it reopens correctly — the same preview browser also cannot
+deliver a trusted Escape to a `<dialog>`. The regression test asserts `toHaveCount(0)` rather than
+`toBeHidden()`, because a closed `<dialog>` is `display:none` either way and only the count would
+catch a real one.
 
 ## Decisions made during M8/M9 — P2 (light theme)
 

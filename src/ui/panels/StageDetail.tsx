@@ -13,6 +13,10 @@ export interface StageDetailProps {
   state: ViewState;
   policy: ReplacementPolicyName;
   activeSpan?: Span | undefined;
+  /** True when this panel is held on a stage the trace has already left. */
+  pinned?: boolean;
+  /** Clears the pin, so the panel follows the trace again. */
+  onFollow?: (() => void) | undefined;
 }
 
 /**
@@ -34,18 +38,42 @@ function NotBuiltYet({ stage }: { stage: Stage }) {
   );
 }
 
-export function StageDetail({ stage, state, policy, activeSpan }: StageDetailProps) {
+export function StageDetail({
+  stage,
+  state,
+  policy,
+  activeSpan,
+  pinned = false,
+  onFollow,
+}: StageDetailProps) {
   const meta = STAGE_META[stage];
   const implemented = IMPLEMENTED_STAGES.includes(stage);
 
   return (
     <section className="flex h-full flex-col gap-3">
-      <header>
-        <h2 className={`text-sm font-semibold ${meta.tone}`}>{meta.title}</h2>
-        <p className="text-xs text-ink-dim">{meta.blurb}</p>
+      <header className="flex flex-wrap items-start gap-x-3 gap-y-1">
+        <div>
+          <h2 className={`text-sm font-semibold ${meta.tone}`}>{meta.title}</h2>
+          <p className="text-xs text-ink-dim">{meta.blurb}</p>
+        </div>
+
+        {/* Selecting a stage holds the panel there while the trace runs on,
+            which is the point — you can watch the buffer pool while execute
+            events stream past. But held silently it reads as a bug: step with
+            the arrows and nothing moves. So say so, and make leaving one
+            click. */}
+        {pinned && onFollow && (
+          <button
+            type="button"
+            onClick={onFollow}
+            className="ml-auto rounded-md border border-accent/70 bg-accent/10 px-2.5 py-1 text-2xs text-ink transition-colors hover:bg-accent/20"
+          >
+            Pinned to {meta.title} — follow the trace
+          </button>
+        )}
       </header>
 
-      <div className="min-h-0 flex-1">
+      <div className="min-h-0 min-w-0 flex-1">
         {!implemented && <NotBuiltYet stage={stage} />}
 
         {implemented && stage === 'parse' && (

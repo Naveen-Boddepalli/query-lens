@@ -68,6 +68,19 @@ test('the data editor is a real modal', async ({ page }) => {
 
   await page.keyboard.press('Escape');
   await expect(dialog).toBeHidden();
+
+  // Unmounted, not merely hidden — and therefore reopenable. The component
+  // only calls showModal() on mount, so a dialog left mounted-but-closed would
+  // make "Edit data" silently dead for the rest of the session. `toBeHidden`
+  // alone would not catch that: a closed <dialog> is display:none either way.
+  await expect(page.locator('dialog')).toHaveCount(0);
+  await page.getByRole('button', { name: /^Edit data/ }).click();
+  await expect(page.locator('dialog')).toBeVisible();
+
+  // And focus comes back to the trigger rather than being stranded inside a
+  // hidden subtree.
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('button', { name: /^Edit data/ })).toBeFocused();
 });
 
 test('the theme toggle switches, persists, and survives a reload', async ({ page }) => {

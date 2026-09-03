@@ -246,7 +246,12 @@ export default function App() {
   }
 
   return (
-    <div className="flex min-h-dvh flex-col">
+    /* On a wide screen the app is a fixed-height shell and the panels scroll
+       inside it; on a phone the page scrolls normally and the panel is capped
+       instead. Without the `lg:h-dvh`, the grid row is auto-sized, so a 43-row
+       result grows the row, the panel's `flex-1` never gets a definite height
+       to divide, and the whole page gets taller than the viewport. */
+    <div className="flex min-h-dvh flex-col lg:h-dvh lg:overflow-hidden">
       <DisclaimerBanner />
 
       <header className="flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b border-edge px-4 py-3">
@@ -261,9 +266,12 @@ export default function App() {
         <ThemeToggle choice={choice} setChoice={setChoice} />
       </header>
 
-      <main className="grid flex-1 gap-4 p-4 lg:grid-cols-[minmax(300px,400px)_1fr]">
+      <main className="grid flex-1 gap-4 p-4 lg:min-h-0 lg:grid-cols-[minmax(300px,400px)_1fr]">
         {/* Authoring. Deliberately after the trace in phone reading order. */}
-        <div className="order-2 flex flex-col gap-3 lg:order-1">
+        {/* min-w-0: a grid item defaults to `min-width: auto`, so it refuses to
+            shrink below its content and a long line pushes the page sideways
+            instead of scrolling inside. */}
+        <div className="order-2 flex min-w-0 flex-col gap-3 lg:order-1 lg:min-h-0 lg:overflow-y-auto">
           <SqlEditor
             value={sql}
             onChange={setSql}
@@ -307,7 +315,7 @@ export default function App() {
           <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-2xs text-ink-dim">
             <p>
               {result.error ? (
-                <span className="text-evict">The query did not run — see the editor above.</span>
+                <span className="text-evict">The query did not run — see the error by the editor.</span>
               ) : (
                 <>
                   {result.events.length} steps in this trace · showing step{' '}
@@ -340,7 +348,7 @@ export default function App() {
 
         {/* The trace. First on a phone: people open links on one, and nobody
             writes SQL there (plan.md §15.2, "mobile as read-first"). */}
-        <div className="order-1 flex min-h-0 flex-col gap-4 lg:order-2">
+        <div className="order-1 flex min-h-0 min-w-0 flex-col gap-4 lg:order-2 lg:overflow-hidden">
           <PipelineTracker
             current={state?.stage ?? null}
             visited={visited}
@@ -354,7 +362,7 @@ export default function App() {
               column instead is stable for the same reason — the height comes
               from the viewport, not from what the current step happens to
               render — while actually using the screen it is given. */}
-          <div className="max-h-[60dvh] min-h-80 flex-1 overflow-hidden rounded-lg border border-edge bg-surface-2 p-4 lg:max-h-none">
+          <div className="max-h-[60dvh] min-h-80 min-w-0 flex-1 overflow-hidden rounded-lg border border-edge bg-surface-2 p-4 lg:max-h-none">
             {activeStage ? (
               /* A panel-scoped boundary, so one broken renderer costs the user
                  that stage rather than the trace they were part-way through.
@@ -369,6 +377,11 @@ export default function App() {
                   state={state}
                   policy={policy}
                   activeSpan={activeSpan}
+                  // Only "pinned" once the trace has moved on: holding the
+                  // panel on the stage it would show anyway is not a state
+                  // worth announcing.
+                  pinned={pinnedStage !== null && pinnedStage !== state.stage}
+                  onFollow={() => { setPinnedStage(null); }}
                 />
               </ErrorBoundary>
             ) : (
@@ -376,7 +389,7 @@ export default function App() {
                  SQL failed to parse — the trace otherwise runs on load. */
               <p className="text-sm text-ink-dim">
                 {result.error
-                  ? 'Fix the query above and run it again to build a trace.'
+                  ? 'Fix the query and run it again to build a trace.'
                   : 'Answer the question below to reveal the first step.'}
               </p>
             )}
