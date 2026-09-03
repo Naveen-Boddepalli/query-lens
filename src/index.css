@@ -19,12 +19,29 @@
   --color-node-leaf: oklch(0.78 0.15 150);
 
   --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  /* plan.md §15.1 item 7. Tailwind stops at text-xs (0.75rem), so every label
+     below that size had been written as an arbitrary pixel value — and a pixel
+     is a pixel: at a doubled root font size those stayed exactly where they
+     were while everything around them grew. Same sizes, in rem, so they scale
+     with the user's setting instead of ignoring it. */
+  --text-2xs: 0.6875rem;
+  --text-2xs--line-height: 1.45;
+  --text-3xs: 0.625rem;
+  --text-3xs--line-height: 1.4;
 }
 
 html,
 body,
 #root {
   height: 100%;
+}
+
+/* plan.md §15.1 item 4. Without this the UA renders its own chrome in light
+   mode against a dark page: scrollbars, the <select> popup and the text caret.
+   The `dark` class on <html> styles our own elements; only this styles theirs. */
+:root {
+  color-scheme: dark;
 }
 
 body {
@@ -56,7 +73,10 @@ body {
 
 .cm-editor {
   background: transparent !important;
-  font-size: 13px;
+  /* plan.md §15.1 item 7 applies here most of all: the SQL is the text a
+     learner reads hardest, and a pixel value ignores their font setting.
+     0.8125rem is the same 13px at a default root. */
+  font-size: 0.8125rem;
 }
 .cm-editor.cm-focused {
   outline: none !important;
@@ -89,9 +109,55 @@ body {
 .react-flow__attribution a {
   color: var(--color-ink-dim) !important;
 }
+/* The library hard-codes 10px on the badge. Same size at a default root, but
+   it now grows with the user's font setting like everything else (§15.1/7). */
+.react-flow__attribution {
+  font-size: 0.625rem;
+}
 
 .react-flow__controls-button {
   background: var(--color-surface-3);
   border-bottom: 1px solid var(--color-edge);
   fill: var(--color-ink);
+}
+
+/* plan.md §15.1 item 8. The trace scrubber is the control a touch user leans
+   on hardest, and the UA default draws a 16px-tall thumb — under WCAG 2.2
+   SC 2.5.8's 24×24 minimum. Painting it ourselves is the only way to set the
+   target size; the track stays thin so the thumb still reads as a handle. */
+.scrubber {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 1.5rem;
+  background: transparent;
+  cursor: pointer;
+}
+.scrubber::-webkit-slider-runnable-track {
+  height: 0.375rem;
+  border: 1px solid var(--color-edge);
+  border-radius: 999px;
+  background: var(--color-surface-3);
+}
+.scrubber::-moz-range-track {
+  height: 0.375rem;
+  border: 1px solid var(--color-edge);
+  border-radius: 999px;
+  background: var(--color-surface-3);
+}
+.scrubber::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 1.5rem;
+  height: 1.5rem;
+  /* Centres a 24px thumb on a 6px track: (6 - 24) / 2, plus the track border. */
+  margin-top: -0.5625rem;
+  border: 2px solid var(--color-surface);
+  border-radius: 50%;
+  background: var(--color-accent);
+}
+.scrubber::-moz-range-thumb {
+  width: 1.5rem;
+  height: 1.5rem;
+  border: 2px solid var(--color-surface);
+  border-radius: 50%;
+  background: var(--color-accent);
 }

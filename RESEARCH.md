@@ -1,4 +1,19 @@
-# QueryLens — Pre-Build Research Findings
+# QueryLens — Research Findings
+
+Three passes, in one file.
+
+- **Part I — Pre-build (2026-09-01, §1–§8).** Is this worth building, and is the design right?
+  Written before any code existed.
+- **[Part II — Production readiness](#part-ii--production-readiness) (2026-09-02, §9–§23).** Written
+  after M0–M7 shipped, asking the narrower question: what has to be true before the URL is handed to
+  strangers.
+- **[Part III — UI/UX production readiness](#part-iii--uiux-production-readiness) (2026-09-02, §24–§35).**
+  The same question asked of the interface, by driving the running app on desktop and phone and measuring
+  what it does.
+
+---
+
+## Part I — Pre-build
 
 Research pass over `plan.md`, done 2026-09-01, before writing code.
 Verdict up front: **the project is worth building and the differentiation holds — but two decisions in the plan should change before M0, and one of them is the core UX.**
@@ -215,7 +230,7 @@ Milestone impact: M0 shrinks (no worker wiring). M3 grows slightly (second evict
 2. **Which query does the vertical slice use?** §9 says indexed point lookup (`WHERE id = 5`). It's the right *first* one, but a point lookup touches only ~3 pages and never evicts — so it makes the buffer pool, your best differentiator, look boring. Consider building the **sequential scan on a non-indexed column** as the *second* query and demoing them side by side; the eviction storm in the scan is what makes the index lookup feel like magic.
 3. **Is the `.dc.html`-style single-file offline build worth targeting later?** (pev2's distribution trick — instructors can hand out one file.) Not an MVP concern, but it may influence keeping the bundle dependency-light.
 
-## Sources
+## Sources (Part I)
 
 - [A Meta-Study of Algorithm Visualization Effectiveness](http://s3.amazonaws.com/publicationslist.org/data/helplab/ref-52/JVLC-AVMetaStudy.pdf) — Hundhausen, Douglas & Stasko (read in full)
 - [Reevaluating and Refining the Engagement Taxonomy](https://dl.acm.org/doi/pdf/10.1145/1597849.1384397) — Lauer
@@ -229,3 +244,700 @@ Milestone impact: M0 shrinks (no worker wiring). M3 grows slightly (second evict
 - [TypeScript 7.0 GA: who should wait](https://blog.codercops.com/blog/typescript-7-0-ga-migration-playbook-2026/) · [InfoQ: TypeScript 7.0 released](https://www.infoq.com/news/2026/08/typescript-7-released/)
 - [Cloudflare Pages free tier limits 2026](https://temps.sh/blog/cloudflare-pages-free-tier-limits-2026) · [Vercel vs Cloudflare Pages](https://speedvitals.com/blog/cloudflare-pages-vs-vercel/)
 - [WCAG Pause/Stop/Hide and prefers-reduced-motion (w3c/wcag#3766)](https://github.com/w3c/wcag/issues/3766) · [web.dev: Animation and motion](https://web.dev/learn/accessibility/motion)
+
+---
+
+## Part II — Production readiness
+
+Second research pass, done 2026-09-02, **after** M0–M7 shipped and before the first public deploy.
+Part I asked "is this worth building and is the design right." This part asks one narrower question:
+**what has to be true before this URL is handed to strangers.**
+
+Verdict up front: **the application is done; the production surface around it barely exists.** Six things
+are missing that would each be felt on day one, and four of the six are under an hour of work. Nothing
+found here says "don't deploy" — it says the current failure modes are silent ones, and silent is the
+expensive kind.
+
+Same confidence labels as Part I: **[verified]** = I ran it or read the source. **[sourced]** = credible
+secondary source. **[judgment]** = my reasoning.
+
+---
+
+## 9. First, scope the checklist honestly
+
+Most "production readiness" checklists are written for a service: secrets management, database backups,
+rate limiting, PII handling, on-call rotations, SOC 2, blue/green cutover, connection-pool tuning. For
+QueryLens, **almost none of it applies, and pretending otherwise is how a two-day hardening pass turns
+into a three-week one.** There is no server, no database, no auth, no session, no user data, no
+third-party call, no secret. `runQuery` is a pure function over a string and an array, and the whole
+application is a folder of static files.
+
+What is genuinely left is a short list, and it is worth naming precisely because the list is short: **[judgment]**
+
+1. **Does it survive its own bugs** — an uncaught throw in the browser is the total outage here.
+2. **Can anyone tell when it breaks** — with no server there are no logs, no 500 rate, no alert.
+3. **Is the artifact reproducible and reversible** — same input, same bundle; and a way back.
+4. **Is the supply chain that produced the bundle trustworthy** — the only code execution risk in the product.
+5. **Does the browser know what the page is allowed to do** — headers, since there is no runtime to enforce anything.
+6. **May other people legally use it** — the growth path in §13 is instructors forking it.
+7. **Does it load and respond fast enough on the audience's hardware** — a lecture-hall laptop, not yours.
+
+Everything below is one of those seven. Anything that is not one of those seven is ceremony, and §21
+lists what I deliberately left out.
+
+---
+
+## 10. Nothing currently enforces the checks that already pass
+
+**[verified]** `pnpm test` → 281 tests across 13 files, green. `pnpm typecheck`, `pnpm lint`, `pnpm build`
+→ all green. And **there is no `.github/` directory at all** — no workflow, no CI, no required check.
+
+The gap is not test quality; it is that all of that quality is opt-in on a laptop. With a Cloudflare Pages
+Git integration, whatever lands on `main` is what the world gets, typechecked or not. The single highest
+value-per-line change in this entire document is a ~40-line workflow that runs the four commands that
+already exist.
+
+Two hardening details that are free if done at the start and irritating to retrofit **[sourced]**:
+
+- **Pin every action to a full 40-character commit SHA, not a tag.** Tags are mutable, and both of the
+  major CI supply-chain incidents exploited exactly that: `tj-actions/changed-files` (March 2025) had all
+  its version tags rewritten across roughly 23,000 dependent repos and exfiltrated CI secrets from every
+  workflow that ran in the window; `trivy-action` (March 2026) had 75 of its 76 tags force-pushed. Datadog's
+  2026 research puts the share of organisations that never SHA-pin any action at **71%**.
+- **`permissions: contents: read` at the workflow top level**, elevated per job only where a job needs
+  more. GitHub's own guidance is default-read, raise deliberately. This repo's CI needs nothing but read.
+
+There are no secrets to leak here today, which is precisely why it is cheap to establish the habit now —
+the first secret this repo ever holds will be a Cloudflare deploy token.
+
+---
+
+## 11. A crash today is a white screen with no message
+
+**[verified]** `grep -rn "ErrorBoundary\|componentDidCatch\|getDerivedStateFromError\|window.onerror\|unhandledrejection" src/` returns **nothing**. There is no boundary anywhere in the tree
+and no global handler.
+
+The engine's *expected* failures are handled well — `runQuery` returns errors as values
+([runQuery.ts](src/engine/runQuery.ts): unparseable SQL, unknown table, unknown column all return
+`{ events, rows: [], error }`), and the UI renders them as CodeMirror squiggles. That is the good half.
+The missing half is the *unexpected* throw: a B+Tree invariant that holds for the seed data but not for
+data the user typed, an `undefined` index into a page, a React render error in a panel. Any of those
+unmounts the entire application and leaves a blank page — no message, no way back, no way to report it.
+
+Two things make this more likely here than in a typical app **[judgment]**:
+
+- **M6.5 made the seed data user-editable**, so the engine's input is now user-controlled. Every property
+  test in `src/engine/__tests__` runs against generated or seed-shaped data; a user can type shapes no test
+  has seen.
+- **The UI is a fold over an event array.** A single malformed event doesn't degrade one panel; it can throw
+  inside `applyEvent` and take the whole render with it.
+
+Mechanics worth knowing before writing it **[sourced]**: as of React 19 **error boundaries are still class
+components** — there is no hook equivalent — but `createRoot` now accepts `onUncaughtError`,
+`onCaughtError` and `onRecoverableError` as root options. They complement boundaries rather than replacing
+them: the root callbacks are the reporting hook, the boundary is the thing that renders a fallback.
+
+The design that fits this product specifically: **the fallback should offer the repro.** The complete state
+that produced any crash is a SQL string, a seed table, a policy name and a step index — all serialisable,
+all already in `App`. A fallback that renders "something broke; here is your query and data, copy it into
+an issue" turns the worst UX moment in the product into the only bug report you will ever actually receive.
+That is a five-minute feature that no telemetry vendor can sell you.
+
+---
+
+## 12. Nobody will tell you it broke
+
+There is no telemetry of any kind. For a static site that is a defensible position — but it collides
+with plan.md §9, which makes the whole validation strategy depend on **5–10 real users** completing a
+session. If the app throws on their browser, or the CodeMirror bundle fails to load on a slow campus
+network, the study returns "it didn't work for me" with no stack trace and no way to distinguish a
+teaching failure from a bug. **[judgment]**
+
+The options, with their real costs:
+
+| Option | Cost | What it buys |
+|---|---|---|
+| Nothing (status quo) | $0, zero bytes | Honest "nothing leaves your browser" claim stays literally true |
+| Error boundary with a **copyable repro** | ~40 lines, zero bytes | The only bug reports you'd get anyway, but reproducible |
+| Cloudflare Web Analytics | free, ~1 script | Pageviews. **Still processes IPs and user agents, which are personal data under GDPR even with no cookies** **[sourced]** |
+| Plausible / Fathom / Umami class | ~$9/mo or self-host | Cookieless, no consent banner claimed, aggregate only **[sourced]** |
+| Sentry free tier | free to 5k errors/mo, ~30 kB SDK, a third-party `connect-src` | Actual stack traces, with `build.sourcemap: 'hidden'` uploaded but not served **[sourced]** |
+
+**Recommendation: the copyable-repro boundary before deploy; defer the vendor decision until the §9 study
+is actually scheduled** — that is the week silent breakage starts costing real data, and not before.
+**[judgment]** Note that "no backend, no accounts, no telemetry, nothing leaves your browser" is a genuine
+feature for a classroom tool, not merely an absence; if it is given up, it should be given up on purpose
+and said out loud in the README, not drifted away from.
+
+---
+
+## 13. Content-Security-Policy: measured, not guessed
+
+**[verified — I ran this]** I served the real `dist/` over a local static server with a strict policy
+injected, loaded the app, ran a query, and read the console.
+
+**The good news is better than expected.** The production `dist/index.html` contains **zero inline
+scripts** — Vite emits `<script type="module" crossorigin src="/assets/…">` and nothing else. So
+`script-src 'self'` works with **no hashes and no nonces**, which is the clean case a pure static SPA is
+supposed to get and frequently doesn't **[sourced]**. There were no `script-src`, `img-src`, `font-src` or
+`connect-src` violations at all.
+
+**The bad news is specific and would have shipped broken.** Under `style-src 'self'` the SQL editor loses
+every style — line numbers stack, syntax highlighting disappears — and the console reports:
+
+```
+Applying inline style violates the following Content Security Policy directive 'style-src 'self''.
+```
+
+The cause, traced to source: CodeMirror styles itself through `style-mod`, which in a normal document takes
+the `<style>`-element path — `doc.createElement("style")` and then `this.styleTag.textContent = text`
+(`style-mod@4.1.3/dist/style-mod.cjs:93,128`). The `adoptedStyleSheets` path above it is skipped because it
+is guarded on `!root.head`, and a document has a head. So CodeMirror writes an inline stylesheet at runtime,
+and a strict `style-src` blocks it. **[verified]**
+
+**Hashes are not a way out.** `style-mod` rewrites `textContent` as further modules mount, so the content
+is not stable across the session, and React Flow's inline `style` attributes fall under `style-src-attr`
+where hashes don't apply without `'unsafe-hashes'` anyway. The right call is `'unsafe-inline'` **for styles
+only** — a far smaller concession than the script-side equivalent, and now a decision with a reason
+attached rather than a copy-pasted default. **[judgment]**
+
+The policy that I verified renders and runs correctly, end to end:
+
+```
+default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;
+font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
+```
+
+Two notes. `frame-ancestors` is **ignored in a `<meta>` tag** and must be a real response header — which
+`public/_headers` already gives us, so this costs nothing. And `connect-src 'self'` will have to be edited
+the day analytics or Sentry is added; that is a feature, not friction — it makes §12's decision visible in
+a diff instead of silent.
+
+---
+
+## 14. The rest of the headers
+
+`public/_headers` currently sets caching, `X-Content-Type-Options: nosniff` and
+`Referrer-Policy: strict-origin-when-cross-origin` **[verified]** — a good start, and both of those are on
+every 2026 list. Missing, in descending order of value **[sourced]**:
+
+- **`Strict-Transport-Security: max-age=63072000; includeSubDomains; preload`** — two years, the value that
+  makes a domain eligible for the preload list.
+- **CSP** — §13.
+- **`Permissions-Policy: geolocation=(), microphone=(), camera=()`** — the app uses no device APIs, so deny
+  them all; free, and it shows up on every scanner.
+- **`Cross-Origin-Opener-Policy: same-origin`** — blocks cross-origin window access.
+- **Do not add `X-Frame-Options`.** CSP's `frame-ancestors` supersedes it, and `X-XSS-Protection` is
+  deprecated and harmful. The 2026 advice is to *drop* headers, not accumulate them.
+
+Verification is a URL, not an argument: Mozilla Observatory and securityheaders.com both grade this
+configuration, and A+ is achievable for a static site with no exceptions or excuses. **[sourced]**
+
+---
+
+## 15. Supply chain: the only real code-execution risk in the product
+
+`pnpm audit --prod` is clean today **[verified]**, and the dependency tree is 305 packages in the store for
+an application with no backend. The threat is not a known CVE; it is the next compromised release of a
+package already in the tree. 2025–26 made that concrete: the **Shai-Hulud** worm compromised **796 packages
+with 132M monthly downloads**, Glassworm followed in early 2026, and the **Axios** compromise in March 2026
+hit one of the most-downloaded packages on npm through credential theft. **[sourced]**
+
+A lockfile pins what is installed but does nothing the moment you intentionally upgrade or add a package —
+which is exactly when the compromised version arrives. The time-delay defence is the one that covers that
+window, because **most malicious packages are detected and removed within days of publication**. **[sourced]**
+
+- **pnpm v11 defaults `minimumReleaseAge` to 1440 minutes (one day)** **[sourced, pnpm docs]**. But
+  `pnpm config get minimumReleaseAge` here returns `undefined` **[verified]** — we are relying on an implicit
+  default from whichever pnpm the machine or CI happens to run. **Commit it explicitly, and raise it to
+  10080 (7 days).** This project has no reason to want a package the day it ships. **[judgment]**
+- **`blockExoticSubdeps: true`** — stops a transitive dependency resolving from a git URL or tarball.
+- **Explicit `allowBuilds`** rather than blanket approval of postinstall scripts.
+- **`--frozen-lockfile` in CI**, which is the lockfile's actual enforcement point.
+- **Renovate or Dependabot**, grouped and on a schedule — an unmaintained lockfile is its own risk, and
+  batching upgrades pairs correctly with a 7-day release-age floor.
+
+---
+
+## 16. The bundle is one 807 kB chunk
+
+**[verified — build output]**
+
+```
+dist/assets/index-BtKTZAVR.css   44.69 kB │ gzip:   8.29 kB
+dist/assets/index-g0DuG2fw.js   807.51 kB │ gzip: 261.38 kB   (Vite warns: >500 kB)
+```
+
+Everything is in one chunk, so the first paint pays for CodeMirror (~370 kB raw / ~120 kB gzip, per the
+README's own measurement) **and** React Flow + d3-hierarchy (~62 kB gzip) — even though the trees render
+nothing until the user presses Run. The editor is needed immediately; the graph panels are not. That is a
+textbook split, and Vite 8's Rolldown backend exposes it through `build.rolldownOptions` **[sourced]**.
+
+The metric that actually matters is not the byte count, though. Core Web Vitals thresholds are LCP < 2.5 s,
+**INP < 200 ms**, CLS < 0.1, judged at the **75th percentile of field data** — and **INP is the most
+commonly failed vital in 2026, with 43% of sites over the line** **[sourced]**. For QueryLens, INP is
+the one to watch on principle: pressing → re-folds the event stream, re-derives view state and re-lays out a
+React Flow graph, all inside one keypress-to-paint. That is *literally* an interaction-to-next-paint, and
+it is the interaction the whole product is built around.
+
+I have **not** measured it, and the honest recommendation is to measure before optimising **[judgment]**:
+`createTraceProjector` already memoises per index, so stepping may well be fine. What to do now is put a
+**bundle-size budget in CI** (fail the build if the entry chunk exceeds a set gzip size) and a **step-latency
+assertion in a test**, so a regression is caught by a machine rather than by a student on a slow laptop.
+
+---
+
+## 17. Accessibility is a strong claim with no regression test
+
+The README reports a composited-contrast sweep across every pipeline stage finding **zero elements below
+WCAG AA**, and it found a real bug (CodeMirror's light-background `defaultHighlightStyle` rendering keywords
+at 1.6:1). That is better diligence than most projects manage. The problem is that it was a **one-off
+measurement, and there is nothing to stop the next style change undoing it** — no axe, no
+`eslint-plugin-jsx-a11y` **[verified: not in `package.json`]**, no test.
+
+Context on the bar **[sourced]**: European Accessibility Act enforcement began **28 June 2025**;
+EN 301 549 currently references WCAG 2.1 AA, with **v4.1.1 expected during 2026 to incorporate WCAG 2.2**.
+Whether the EAA legally binds a free educational tool with no commerce is genuinely doubtful — but the
+target user is universities and training programmes, and "meets WCAG 2.2 AA" is a procurement checkbox
+there. It is worth being able to say it truthfully. **[judgment]**
+
+Calibration matters when picking tooling: **automated engines catch roughly 30–57% of WCAG failures**;
+the rest only surface under keyboard, screen-reader and cognitive-load testing **[sourced]**. So axe in CI
+is a **regression net** — it protects the work already done — and not a compliance claim. The manual sweep
+stays the real check, and should be repeated at each visual change, not annually.
+
+---
+
+## 18. The tests stop exactly at the engine boundary
+
+**[verified]** All 13 test files live in `src/engine/__tests__`. `@testing-library/react`, `jsdom` and
+`src/test/setup.ts` are installed and wired into `vite.config.ts` — and **not one test uses them**.
+
+So the parser, planner, buffer pool, B+Tree and executor are covered by 281 tests, while the code most
+likely to break in front of a user has none: playback gating, the prediction gate array
+(`gates[i]` = "do not advance past step i"), the keyboard shortcuts, the data editor's per-column type
+preservation, the viewport framing. Several of those are called out in the README as subtle, which is
+exactly the profile of code that needs a test.
+
+The highest-value additions, in order **[judgment]**:
+
+1. **One Playwright smoke test** — load the built app, press Run, step to the end, assert the result rows.
+   This is the test that catches "the deploy is broken," which no unit test can.
+2. **Testing Library tests for the gates** — prediction blocks advancement, answering unblocks it,
+   step-back never re-locks.
+3. **A data-editor test** — types survive an edit round-trip, since the README calls that out explicitly.
+
+Coverage thresholds are worth turning on at the same time, if only to stop the number sliding.
+
+---
+
+## 19. Licensing: the repo is public and has no licence
+
+**[verified]** No `LICENSE` file, and the remote is a public GitHub repository. Under default copyright
+that means **all rights reserved**: nobody may legally fork it, an instructor may not adapt it for a
+course, and no university will touch it. That directly blocks plan.md §13's "course/curriculum packaging"
+and Part I §4's observation that pev2's handout-a-single-file distribution is a strong move for a teaching
+tool.
+
+MIT is what this audience expects and is the shortest path; Apache-2.0 adds an explicit patent grant and
+is the safer choice if institutional adoption is a goal. Either is fine, and **not choosing is the only
+bad option**. **[judgment]** The existing decision to keep React Flow's attribution badge already respects
+their licence; a short third-party-notices line in the README closes the loop.
+
+---
+
+## 20. Deploy mechanics: the boring parts that get skipped
+
+- **Hosting stands.** Cloudflare now steers *new* projects toward Workers with static assets, but **Pages
+  remains fully supported with no forced migration and no deadline** **[sourced]**. For a pure static SPA,
+  Workers buys nothing today. The trigger to revisit is concrete: the first time this project wants any
+  server-side piece — an error-beacon endpoint, hosting for the §9 study — that is the moment to migrate,
+  not before.
+- **Version stamp.** There is no way to tell which commit is live. A commit SHA in a `<meta>` tag and a
+  console banner makes every bug report say which build it came from. Minutes of work.
+- **Rollback.** Cloudflare Pages retains previous deployments and rolls back in one click. That is fine —
+  but it needs to be *written down*, because the moment it is needed is the moment nobody is reading docs.
+- **`404.html`.** The app has no client-side routing, so no SPA redirect rule is needed (as the README
+  says) — but a typo'd path currently gets Cloudflare's default 404 rather than a way back to the app.
+- **The front door is a link preview.** `index.html` has `og:title`, `og:description` and
+  `twitter:card: summary` — but **no `og:image`** **[verified]**, no canonical URL and no `robots.txt`.
+  For a tool whose distribution path is a link posted to Hacker News, Reddit or a course page, the preview
+  card *is* the landing page, and it is currently a grey box. A single screenshot of the buffer pool
+  mid-eviction is the cheapest marketing this project will ever get.
+
+---
+
+## 21. What I deliberately left out
+
+Naming the non-work is part of the recommendation, because a padded checklist is how this pass fails. **[judgment]**
+
+- **Secrets management, key rotation, WAF, rate limiting, DDoS planning** — no server, no secrets, and
+  Cloudflare absorbs the traffic side on the free tier.
+- **Subresource Integrity on our own assets** — SRI defends against a compromised third-party CDN; our
+  assets are same-origin, content-hashed and covered by `script-src 'self'`.
+- **Cookie consent banner** — no cookies, no storage, nothing to consent to. This only becomes a question
+  if §12's analytics decision goes the wrong way.
+- **A privacy policy** — nothing is collected. If that changes, one paragraph, not a document.
+- **Uptime monitoring** — a static asset on Cloudflare's edge; if it is down, so is a large slice of the web.
+- **Docker, staging environments, blue/green** — Pages preview deployments per branch already provide
+  the only staging this needs, free.
+- **SLOs, on-call, incident severity levels** — for a solo project with no users yet, this is cosplay.
+  Revisit if a university ever depends on it in a scheduled lecture.
+
+---
+
+## 22. Suggested changes to the plan (Part II)
+
+| § | Current | Change to | Why |
+|---|---|---|---|
+| §10 | Milestones end at M7 | **Add M8 "Production readiness"** with an explicit deploy gate | The app is done; the surface around it is not (§9) |
+| §6 | Cloudflare Pages | Keep — **add the revisit trigger** (first server-side need) | Pages is supported; Workers buys nothing yet (§20) |
+| §8 | A11y = reduced motion, keyboard, contrast | **+ axe in CI as a regression net**, manual sweep stays the check | A one-off measurement decays (§17) |
+| §11 | $0 hosting | Unchanged; **note the two paid forks** (analytics, domain) | Both optional, both deferred (§12) |
+| §12 | Four risks, all pedagogical | **+ two operational risks**: silent client-side failure, checklist ceremony | §11, §21 |
+| — | — | **New §14: Production readiness** — P0 gate / P1 first fortnight / P2 ongoing | Sequencing is the deliverable, not the list |
+
+Estimated effort: **P0 is roughly one focused day** (CI, error boundary, headers, licence, preview image,
+pnpm settings); P1 is **two to three days** spread over the fortnight after launch. Neither blocks the §9
+validation study, and P0 should be done before the URL is shared with the first outside user.
+
+---
+
+## 23. Open questions for you
+
+1. **Telemetry: in or out?** The "nothing leaves your browser" claim is real and worth something to this
+   audience. My recommendation is to keep it and ship the copyable-repro boundary — but if the §9 study is
+   happening soon with users you cannot sit next to, Sentry for the duration of the study is the pragmatic
+   call. Decide once, write it in the README either way.
+2. **MIT or Apache-2.0?** MIT if the goal is "anyone can grab it"; Apache-2.0 if the goal is a university
+   adopting it into a course.
+3. **Is the §9 study the deploy trigger, or is the deploy the study's recruiting channel?** These sequence
+   differently: the first wants a private URL and P0 only; the second wants the preview image, the licence
+   and the analytics decision resolved before anything is posted anywhere.
+
+---
+
+## Sources (Part II)
+
+- [pnpm — Mitigating supply chain attacks](https://pnpm.io/supply-chain-security) · [npm supply chain security in 2026](https://mondoo.com/blog/npm-supply-chain-security-package-manager-defenses-2026) · [3 pnpm settings to protect yourself](https://gajus.com/blog/3-pnpm-settings-to-protect-yourself-from-supply-chain-attacks)
+- [Hardening GitHub Actions: lessons from recent attacks (Wiz)](https://www.wiz.io/blog/github-actions-security-guide) · [Pinning GitHub Actions — a complete guide (StepSecurity)](https://www.stepsecurity.io/blog/pinning-github-actions-for-enhanced-security-a-complete-guide) · [GitHub Docs — secure use reference](https://docs.github.com/en/actions/reference/security/secure-use)
+- [Setting security headers in 2026: CSP, HSTS, COEP and what actually matters](https://www.checkfast.io/blog/securing-headers-csp-hsts-2026) · [Deploying CSP in single-page applications](https://dev.to/robertinoc_dev/deploying-csp-in-single-page-applications-2a48) · [CSP FAQ (Google)](https://csp.withgoogle.com/docs/faq.html)
+- [React 19 — createRoot error options](https://react.dev/reference/react-dom/client/createRoot) · [Sentry — React error boundary](https://docs.sentry.io/platforms/javascript/guides/react/components/errorboundary) · [Why React error boundaries are still class components](https://renderlog.in/blog/why-react-error-boundaries-class-components/)
+- [Core Web Vitals 2026 — LCP, INP, CLS thresholds](https://www.corewebvitals.io/core-web-vitals) · [Core Web Vitals 2026 optimisation guide](https://www.digitalapplied.com/blog/core-web-vitals-2026-inp-lcp-cls-optimization-guide) · [Vite — build options](https://vite.dev/config/build-options) · [Rolldown output options](https://rolldown.rs/reference/)
+- [European Accessibility Act compliance guide (Level Access)](https://www.levelaccess.com/compliance-overview/european-accessibility-act-eaa/) · [EAA + WCAG 2.2 (OneTrust)](https://www.onetrust.com/blog/understanding-the-european-accessibility-act-and-wcag-22/) · [axe-core + Playwright accessibility testing](https://www.qamadness.com/a-you-oriented-guide-to-axe-core-playwright-accessibility-testing/)
+- [Cloudflare — migrate from Pages to Workers](https://developers.cloudflare.com/workers/static-assets/migration-guides/migrate-from-pages/) · [Cloudflare Pages vs Workers in 2026](https://mecanik.dev/en/posts/cloudflare-pages-vs-workers-which-to-use-in-2026/)
+- [Plausible — privacy-focused web analytics](https://plausible.io/privacy-focused-web-analytics) · [Analytics without a cookie banner](https://www.cookieyes.com/blog/analytics-without-cookie-banner/) · [Privacy-friendly analytics guide 2026](https://clickport.io/blog/privacy-friendly-analytics-guide)
+
+### Verified locally on 2026-09-02
+
+`pnpm test` → 281 passing across 13 files · `pnpm build` → 807.51 kB / 261.38 kB gzip in one chunk ·
+`pnpm audit --prod` → no known vulnerabilities · `pnpm config get minimumReleaseAge` → `undefined` ·
+`grep` for error boundaries → no matches · `ls .github` → does not exist · `ls LICENSE*` → no matches ·
+CSP tested by serving the real `dist/` under policy and reading console violations + screenshots ·
+`style-mod@4.1.3/dist/style-mod.cjs:93,128` read directly for the inline-style path.
+
+---
+
+## Part III — UI/UX production readiness
+
+Third pass, done 2026-09-02, after Part II. Part II asked what has to be true before the URL is public;
+this one asks the question a visitor asks: **is this good enough to hand to a stranger who has thirty
+seconds and no idea what a buffer pool is.**
+
+Method: I ran the app and drove it — desktop (1440×900), phone (375×812), first-run, a full trace, the
+prediction loop, the data editor — and measured rather than eyeballed where measuring was possible
+(computed contrast over composited backgrounds, computed font sizes at a doubled root size, target
+rectangles, focus location, `location.href`). Screenshots and console throughout.
+
+Verdict up front: **the interface is better built than it looks and worse composed than it is built.**
+The typography, colour, contrast and keyboard work are done properly — I could not break the contrast
+claim, and the a11y semantics under the hood are better than most shipped products. What is missing is
+mostly *composition*: the first screen shows nothing, the primary button appears to do nothing, the
+question is nowhere near the picture it is about, and nothing that happens can be shared with anyone.
+
+Same labels: **[verified]** = I ran it. **[sourced]** = credible secondary source. **[judgment]** = mine.
+
+---
+
+## 24. What "production-level UI/UX" means for *this* product
+
+Worth pinning down before listing anything, because the usual bar is the wrong bar. QueryLens has no
+signup, no funnel, no retention loop and nothing to convert. Its success metric is already written down:
+plan.md §9's post-test — **can someone answer a mechanism question they could not answer before.**
+So the UI's job is comprehension, and every UX finding below is worth fixing only insofar as it removes
+something between a learner and the mechanism. **[judgment]**
+
+That reframing kills a lot of standard advice (onboarding tours, activation checklists, engagement
+nudges) and promotes things a normal product review would rank lower — like where the question sits
+relative to the diagram it refers to (§28), which turns out to have a meta-analytic effect size attached.
+
+---
+
+## 25. The first thirty seconds are blank, and then appear to fail
+
+Two findings that compound into one bad first impression. **[verified]**
+
+**The empty state is the largest thing on screen and it teaches nothing.** On load, the stage panel — a
+fixed 27rem (432px) box, the biggest element in the layout — reads *"Nothing has run yet. Press Run to
+build a trace, then Space to play it."* On a 375×812 phone that box is more than half the viewport, and
+the playback controls sit below it, off-screen. The product's entire value proposition is invisible until
+the visitor takes an action, and the thing they are asked to trust before acting is an empty rectangle.
+
+The 2026 consensus on this is unusually direct: treat the first empty screen as the onboarding surface,
+and for tools with a learning curve **a pre-populated example beats a blank start, because users learn by
+modifying something that already works** **[sourced]**. QueryLens is the archetype of that case — it
+already *has* a default query, a seeded table and a deterministic trace. The trace could simply be run on
+mount, leaving the visitor looking at a parsed AST and a narration line instead of a grey box, with every
+control still exactly where it was.
+
+**And pressing Run looks like nothing happened.** I clicked Run and compared before/after: the stage panel
+still said "Nothing has run yet", the narration still said "Press Run, then step through", and the stage
+tracker was unchanged. The *only* differences were the counter going `0 / 0` → `0 / 33` in 12px type in
+the corner, and the Play button becoming enabled. The user pressed the primary button in the interface
+and the interface did not visibly respond.
+
+This is the textbook failure of visibility-of-system-status, and the documented consequence is exactly
+what a first-time user will do here: **click the button again, believing the first click failed**
+**[sourced]**. Feedback for a sub-100ms action is not a spinner — it is a state change: advance to step 1
+on Run so the parse is on screen, and say "33 steps ready" where the eye already is.
+
+---
+
+## 26. The layout ignores the room it is in
+
+The stage panel is `h-[27rem]` — a fixed height, not a range. **[verified]** The comment above it gives a
+real reason: *"if the panel resizes with its content, the playback controls below it move out from under
+the cursor mid-step."* That is a correct observation and a wrong fix, and it costs at both ends:
+
+- **At 1440×900**, the app stops around 740px and leaves a band of empty background below the controls —
+  the visualisation stays letterboxed while the monitor has room to spare. On the widest screens the
+  trees render into a panel with more empty margin than diagram.
+- **At 375×812**, the same 432px box is 53% of the viewport, and on first load it is 432px of *nothing*,
+  pushing Play, the scrubber and the speed control below the fold.
+
+The constraint the comment protects — controls must not move while stepping — is satisfied by any layout
+that pins the control bar rather than freezing the panel: `min-height` plus a grid whose control row
+holds position, or `dvh`-based sizing on large screens. **[judgment]**
+
+**Mobile deserves a decision rather than a default.** Mobile is 51–64% of global web traffic depending on
+whose measurement you take, but developer and technical audiences skew hard to desktop **[sourced]**, and
+typing SQL on a phone is nobody's plan. The realistic mobile scenario for this product is not authoring —
+it is **someone opening a link a friend or lecturer sent them, on a phone, to see what it is.** That
+argues for a mobile experience that is deliberately read-first: run the default trace on load, put the
+step controls within thumb reach, and drop the keyboard-shortcut bar, which currently renders
+`Space / ← / → / Home / ⌘↵` on a device with none of those keys. **[verified]**
+
+Credit where due: at 375px there is **no horizontal scroll** and the page is 1218px tall — the responsive
+plumbing works. This is a composition problem, not a breakage problem. **[verified]**
+
+---
+
+## 27. Nothing is shareable — there is no URL state at all
+
+`location.href` never changes: it is `/` on load and `/` after typing a query, editing 48 rows of seed
+data, switching the eviction policy to clock sweep and stepping to event 27. **[verified]**
+
+For this product that is the single biggest missing *feature*, not merely a UX gap. Every scenario the
+plan is built around wants a link:
+
+- plan.md §9's validation study wants every participant to start from an identical state.
+- plan.md §13's "course packaging" wants an instructor to set homework: *here is a query, predict what the
+  buffer pool does.*
+- Part I §4's competitive framing wants the thing that gets posted to Hacker News to be a **specific
+  moment** — the eviction storm — not a home page a reader must reconstruct.
+- The predict-then-reveal loop (Part I §1, the feature the evidence supports) is *made* of shareable
+  moments: "step 13, which child pointer?" is a question worth sending to someone.
+
+This is the settled convention for tools of this shape — Compiler Explorer, the TypeScript playground,
+regex101 and Excalidraw all encode the interesting state in the URL, and it is why their screenshots
+come with links attached. **[judgment]** The state here is small: SQL string, policy, prediction on/off,
+step index, and seed rows only when edited — comfortably a compressed query parameter, and it stays
+inside the "nothing leaves your browser" promise, since a URL is not a request to us.
+
+Second-order benefit worth naming: a URL that survives a refresh also fixes the fact that **a reload
+today silently discards an edited dataset** — a real loss-of-work moment in a product that explicitly
+invites people to construct their own data. **[verified: state is `useState` only, nothing persisted]**
+
+---
+
+## 28. The question is nowhere near the picture it is about
+
+The prediction card renders in the left sidebar, roughly 200px wide, while the visual it refers to fills
+a ~900px panel on the right. At the B+Tree step the mismatch is starkest: the prompt reads *"Node n8
+separates on 10 19 28 37. Looking for 5 — which child pointer does the search follow?"* while the panel
+on screen is showing **the Buffer Pool** — the tree the question is about is not visible anywhere.
+**[verified: `aria-current="step"` was on Buffer Pool while that prompt was displayed]**
+
+The tell is in the prompt text itself: it has to *recite* the node's keys in words because it cannot rely
+on the learner seeing them.
+
+This is the one finding with hard numbers behind it. The **spatial contiguity principle** — people learn
+more when related words and pictures are near each other — and its inverse, the **split-attention
+effect**, are among the better-replicated results in multimedia learning: a meta-analysis of **58
+independent comparisons found g = 0.63** for integrated over separated designs **[sourced]**. Separated
+sources force mental integration, which consumes the working memory that should be doing the learning.
+
+That effect size is comparable to the one Part I used to justify building the prediction feature at all.
+Having built it, putting it 900px from its referent gives back a chunk of what it bought. The fix is
+placement, not new functionality: **render the prompt against the panel it concerns** — anchored to the
+buffer grid for an eviction question, over the tree for a traversal question — and make the stage panel
+show the stage the question is about before asking it. **[judgment]**
+
+---
+
+## 29. The data editor breaks the modal contract in three measurable ways
+
+The dialog is marked up correctly — `role="dialog"`, `aria-modal="true"`, `aria-label` — and then does
+none of the behaviour those attributes promise. Measured with the editor open: **[verified]**
+
+1. **Focus is never moved into the dialog.** After clicking "Edit data", `document.activeElement` is still
+   the "Edit data" button *behind* the overlay (`dialog.contains(activeElement) === false`).
+2. **Escape does not close it.** With focus outside, pressing Escape leaves it open — the handler is a
+   React `onKeyDown` on the dialog element, so an event that starts on `<body>` never reaches it. The
+   escape hatch works only after the user has already clicked inside.
+3. **Tab walks straight into the page behind.** Two Tab presses from the opened state land on an input
+   outside the dialog; the background is neither `inert` nor trapped.
+
+There is no reason to hand-roll any of this in 2026. `<dialog>` with `showModal()` has been Baseline
+widely available since March 2022 (~96% of users) and supplies the top layer, the backdrop, the focus
+trap, the inert background and Esc-to-close for free; the newer `closedby` attribute adds click-outside
+dismissal declaratively **[sourced]**. Swapping the hand-built overlay for the native element deletes
+code and fixes all three defects at once.
+
+Two smaller things in the same component: the per-row delete `×` is an unconfirmed destructive action with
+no undo (mitigated, but not replaced, by "Reset to seed"), and focus is not restored to the triggering
+button on close. **[verified from source]**
+
+---
+
+## 30. Dark-only, and the browser is never told
+
+`<html class="dark">` is hardcoded, the token block defines exactly one palette, and there is no
+`prefers-color-scheme` handling anywhere. Two distinct problems. **[verified]**
+
+**The cheap one:** `getComputedStyle(document.documentElement).colorScheme` is `"normal"`. The page never
+declares `color-scheme: dark`, so the browser keeps painting native UI for a light page — scrollbars, the
+`<select>` popup, form-control chrome and the text caret. It is a one-line fix with a visible payoff.
+
+**The real one:** there is no light theme. The usual "dark mode is more accessible" claim does not hold —
+roughly **one in three adults has astigmatism, for whom light-on-dark text produces halation** (blur and
+haloing that causes headaches), which is why the current guidance is to offer the choice rather than
+pick for the user **[sourced]**. There is also a use case specific to this product: **lecture halls and
+projectors**, where dark UIs wash out and a light theme is what actually gets read from the back row.
+plan.md §13's course-packaging path runs directly through a projector. **[judgment]**
+
+The groundwork is already right: every colour is a semantic token in `@theme`, so a light palette is a
+second block of variable values plus a toggle, not a redesign. Doing it while there are 8 tokens is
+cheap; doing it after a year of one-off colours is not. Note that the existing palette avoids pure black
+and pure white, which is the other half of the halation advice, and should stay that way. **[verified]**
+
+---
+
+## 31. Four small things, each measured
+
+- **`⌘` is shown to every user on every platform.** The binding is correct — CodeMirror's `Mod-Enter`
+  resolves to Ctrl off macOS — but both labels ("Run ⌘↵" and the shortcut hint) hardcode the Command
+  glyph, and there is **no platform detection anywhere in `src/`** **[verified: grep]**. Most of the
+  student audience is on Windows or Linux and is being told to press a key their keyboard does not have.
+- **Eight elements are pinned at 10–11px and ignore the user's font-size setting.** Tailwind's scale is
+  rem-based, so almost all type scales correctly — I doubled the root font size and everything moved,
+  *except* the eight `text-[10px]` / `text-[11px]` arbitrary values, which stayed exactly 10px and 11px
+  while their neighbours doubled **[verified]**. These are the keyboard hints and the stages badge. Page
+  zoom still scales them (so WCAG 1.4.4 is not the issue) — but the default-font-size setting is the
+  accommodation many low-vision users actually use, and these opt out of it.
+- **The scrubber is 16px tall** — under WCAG 2.2's SC 2.5.8 Target Size (Minimum) 24×24 CSS px, an AA
+  criterion **[verified: measured rect; [sourced] for the threshold]**. It is also the control a touch
+  user needs most, since they have no arrow keys. (SC 2.5.7 Dragging Movements is *satisfied* — the
+  step buttons are a single-pointer alternative to dragging the slider.)
+- **The keyboard-shortcut bar renders on touch devices**, advertising Space, ←, →, Home and ⌘↵ to a
+  phone. **[verified at 375px]**
+
+---
+
+## 32. What is already right, and should not be touched
+
+Naming this matters as much as the findings, because a "make the UI production-level" mandate is exactly
+how working things get rewritten. **[verified unless noted]**
+
+- **Contrast passes.** I re-ran a composited sweep (walking each element's ancestor chain, compositing
+  translucent layers, converting OKLCH/OKLab properly): **66 text elements, zero below WCAG AA, lowest
+  ratio 5.29:1.** The README's claim still holds on the default screen. Two earlier versions of my own
+  script reported dozens of failures — both were colour-parsing bugs, which is a fair warning about
+  automated contrast tooling on an OKLCH codebase.
+- **The semantics are better than average**: `aria-current="step"` on the pipeline tracker, `aria-live`
+  on the narration and the prediction card, per-cell `aria-label`s in the data grid, real `<button>`s
+  throughout, a global `:focus-visible` ring, `<header>`/`<main>` landmarks.
+- **Reduced motion is honoured** in CSS and in the JS viewport animation, alongside — not instead of —
+  the Play/Pause controls, which is what WCAG 2.2.2 actually requires.
+- **The prediction feedback is genuinely good**: "Right." / "Not quite." with a substantive explanation of
+  *why*, plus a nudge to press → and watch it happen. This is the pedagogical core and it works.
+- **No horizontal scroll at 375px**, and the fixed-height decision is *documented with its reason* — the
+  reason is real even though the fix should change.
+
+---
+
+## 33. What I deliberately left out
+
+- **A design-system rewrite or a component library.** Eight semantic tokens and Tailwind are correct at
+  this size; adding shadcn/Radix would be a week spent to arrive where the project already is.
+- **An animation library.** `motion` was removed during M7 for good reason and nothing here argues for
+  bringing it back — the missing motion is a *transition* between states, which CSS already does.
+- **An onboarding tour, coach marks, or a product walkthrough.** §25's fix — run the default on load — is
+  the same lesson delivered by the product instead of by an overlay, and §24 says the metric is
+  comprehension, not activation.
+- **Mobile authoring parity.** Nobody writes SQL on a phone; §26 argues for read-first, not feature-equal.
+- **Internationalisation.** The audience reads English SQL keywords; this is a v2 concern at best.
+- **A visual redesign.** The look is coherent and legible. Almost nothing below is about how it looks.
+
+---
+
+## 34. Suggested changes to the plan (Part III)
+
+| § | Current | Change to | Why |
+|---|---|---|---|
+| §8 | UI/UX plan describes panels and controls | **+ first-run behaviour, + prompt placement, + shareable URL** | §25, §28, §27 |
+| §10 | Milestones end at M8 | **Add M9 "UI/UX readiness"** | Sequencing (§35) |
+| §12 | Risks are pedagogical + operational | **+ "the first thirty seconds"** as a named risk | §25 |
+| — | — | **New §15: UI/UX readiness**, P0/P1/P2 like §14 | The gate shape already works |
+
+Effort: **P0 is under a day** — run-on-load, Run feedback, native `<dialog>`, `color-scheme: dark`,
+platform-correct modifier key, drop shortcut hints on touch, un-pin the eight px sizes, thicken the
+scrubber. **P1 is two to three days** — URL state, prompt placement against its panel, responsive height.
+Light theme is P2 and is a half-day because the tokens already exist.
+
+---
+
+## 35. Open questions for you
+
+1. **Run the default trace on load, or land on a curated still?** Running on load is one line and shows
+   the real product. A curated frame (the buffer pool mid-eviction) is a better *poster* but is a second
+   thing to maintain. I would run it on load and leave the poster to §14's `og:image`.
+2. **How much state goes in the URL?** Query + policy + step is small and always shareable. Adding 48
+   edited rows makes long links; a length cap with a "data was customised" note is the usual compromise.
+3. **Is the light theme before or after the §9 study?** If any part of that study runs in a room with a
+   projector, before.
+4. **Does the prediction prompt move into the panel, or does the panel move to the prompt?** Anchoring
+   prompts to their visual is the stronger fix; a middle path is simply forcing the stage panel to the
+   stage the question is about, which is much less work.
+
+---
+
+## Sources (Part III)
+
+- [Spatial contiguity and split-attention effects: a meta-analysis](https://link.springer.com/article/10.1007/s10648-018-9435-9) · [The split-attention principle in multimedia learning (Cambridge Handbook)](https://www.cambridge.org/core/books/abs/cambridge-handbook-of-multimedia-learning/splitattention-principle-in-multimedia-learning/497A2FCB9737E3009B3CF0E4D97F7B99)
+- [Empty states as onboarding: a practical playbook](https://www.72technologies.com/blog/empty-states-as-onboarding-surface) · [Empty state UI design](https://www.setproduct.com/blog/empty-state-ui-design) · [SaaS empty state patterns](https://pixxen.com/blog/saas-empty-state-design/)
+- [Visibility of system status](https://uxuiprinciples.com/en/principles/visibility-of-system-status-principle) · [Response time limits: 0.1s, 1s, 10s](https://uxuiprinciples.com/en/principles/response-time-limits) · [Doherty threshold](https://uxuiprinciples.com/en/principles/doherty-threshold)
+- [MDN — `<dialog>`](https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/dialog) · [The modern modal in 2026, without accessibility traps](https://www.dfm2html.com/tutorials/the-modern-modal-in-2026-using-the-html-dialog-element/) · [HTML dialog: accessible native modals (2026)](https://www.buildmvpfast.com/blog/html-dialog-element-accessible-modal-browser-native-2026)
+- [WCAG 2.2 new success criteria explained](https://www.audioeye.com/post/whats-new-with-wcag-2-2/) · [Deque University — WCAG 2.2 updates](https://dequeuniversity.com/resources/wcag-2.2/)
+- [Inclusive dark mode (Smashing Magazine)](https://www.smashingmagazine.com/2025/04/inclusive-dark-mode-designing-accessible-dark-themes/) · [The dark mode accessibility myth, debunked](https://stephaniewalter.design/blog/dark-mode-accessibility-myth-debunked/) · [Come to the `light-dark()` side](https://css-tricks.com/come-to-the-light-dark-side/)
+- [Mobile vs desktop traffic share 2026 (Statista)](https://www.statista.com/statistics/277125/share-of-website-traffic-coming-from-mobile-devices/) · [Mobile vs desktop trends 2026](https://www.digitalsilk.com/digital-trends/mobile-vs-desktop-traffic-share/)
+
+### Verified locally on 2026-09-02
+
+Drove the running app at 1440×900 and 375×812. `location.href` unchanged across query, data, policy and
+step changes · Run leaves panel, narration and tracker unchanged (`0 / 0` → `0 / 33` and Play enabling are
+the only deltas) · data editor: `dialog.contains(document.activeElement) === false` on open, Escape leaves
+it open, two Tabs land outside · `getComputedStyle(document.documentElement).colorScheme === "normal"` ·
+root font-size doubled: all rem type scaled, the 8 `text-[10px]`/`text-[11px]` elements did not · scrubber
+rect 16px tall · composited contrast sweep: 66 elements, 0 failures, min 5.29:1 · `grep` for platform
+detection in `src/`: no matches · 375px: `scrollWidth === innerWidth`, document 1218px tall.

@@ -3,3 +3,18 @@
 overrides:
   '@codemirror/state': 6.7.2
   '@codemirror/view': 6.43.10
+
+# plan.md §14.1 item 7. pnpm 11 defaults minimumReleaseAge to 1440 minutes, but
+# `pnpm config get minimumReleaseAge` returns undefined here — an implicit
+# default is not something CI's pnpm can be assumed to share, so it is written
+# down. 10080 minutes = 7 days: long enough that a hijacked release is usually
+# yanked before this project would ever resolve it.
+minimumReleaseAge: 10080
+
+# A transitive dependency may not resolve from a git URL or a tarball.
+blockExoticSubdeps: true
+
+# Verified empty: not one package in this graph has a preinstall, install or
+# postinstall script. Stating that explicitly means adding one becomes a diff
+# someone has to approve, rather than a script that just starts running.
+allowBuilds: []

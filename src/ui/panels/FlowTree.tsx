@@ -8,6 +8,7 @@ import {
   ReactFlow,
   ReactFlowProvider,
   useReactFlow,
+  useStore,
 } from '@xyflow/react';
 import type { Edge, Node, NodeProps } from '@xyflow/react';
 import { hierarchy, tree } from 'd3-hierarchy';
@@ -52,9 +53,9 @@ function NodeView({ data }: NodeProps<TreeFlowNode>) {
       <Handle id="in" type="target" position={Position.Top} className="!opacity-0" />
       <Handle id="prev" type="target" position={Position.Left} className="!opacity-0" />
       <div className="font-mono text-xs leading-tight break-words">{data.label}</div>
-      <div className="text-[9px] tracking-wide text-ink-dim uppercase">{data.kind}</div>
+      <div className="text-3xs tracking-wide text-ink-dim uppercase">{data.kind}</div>
       {data.detail && (
-        <div className="mt-0.5 font-mono text-[9px] break-words text-ink-dim">{data.detail}</div>
+        <div className="mt-0.5 font-mono text-3xs break-words text-ink-dim">{data.detail}</div>
       )}
       <Handle id="out" type="source" position={Position.Bottom} className="!opacity-0" />
       <Handle id="next" type="source" position={Position.Right} className="!opacity-0" />
@@ -166,7 +167,7 @@ function Canvas({
     () => build(root!, { tones, wide, compact }, activeSpan, sideEdges),
     [root, tones, wide, compact, activeSpan, sideEdges],
   );
-  const { fitView, setCenter } = useReactFlow();
+  const { setCenter } = useReactFlow();
   const paneRef = useRef<HTMLDivElement | null>(null);
   const focusKey = focusIds?.join(',') ?? '';
 
@@ -176,24 +177,43 @@ function Canvas({
   const glide = reduced ? 0 : 1;
 
   /**
+   * React Flow's own measurement of its container, read from its store.
+   *
+   * Every viewport call — `setCenter` included — is a no-op while this is 0,
+   * silently. Since the app runs its first trace on load (plan.md §15.1 item
+   * 1), this canvas now mounts during the very first render, before the grid
+   * containing it has been laid out: the fit fired, did nothing, and the tree
+   * sat unframed in the corner until something else re-ran it. Measuring our
+   * own element would not help — React Flow measures asynchronously, so the
+   * number that matters is *its* width, not ours. Refitting on resize comes
+   * free with it.
+   */
+  const rfWidth = useStore((state) => state.width);
+
+  /**
    * Centre on the focused nodes, computed from the layout we already hold.
    *
-   * React Flow's own `fitView({ nodes })` and `useNodesInitialized` both depend
-   * on measured node dimensions, and these graphs never report as measured — so
+   * React Flow's own `fitView` and `useNodesInitialized` both depend on
+   * measured node dimensions, and these graphs never report as measured — so
    * both silently do nothing. d3 gave us exact positions, so use those.
    * `requestAnimationFrame` is unreliable here too (throttled when the pane is
    * not painting); a short timeout fires regardless.
+   *
+   * That applies to the unfocused case as much as the focused one, which is
+   * why the fallback frames every node through the same maths rather than
+   * handing off to `fitView`. Since the app now runs its first trace on load
+   * (plan.md §15.1 item 1), the very first paint *is* the unfocused case — and
+   * it was the one path still asking React Flow to measure something.
    */
   useEffect(() => {
+    if (rfWidth === 0) return;
     const timer = window.setTimeout(() => {
       const focus = new Set(focusKey ? focusKey.split(',') : []);
-      const targets = nodes.filter((n) => focus.has(n.id));
+      const focused = nodes.filter((n) => focus.has(n.id));
+      const targets = focused.length > 0 ? focused : nodes;
       const pane = paneRef.current;
 
-      if (targets.length === 0 || !pane) {
-        void fitView({ padding: 0.16, duration: 250 * glide });
-        return;
-      }
+      if (targets.length === 0 || !pane) return;
 
       const paneW = pane.clientWidth || 600;
       const paneH = pane.clientHeight || 320;
@@ -221,7 +241,7 @@ function Canvas({
     return () => { window.clearTimeout(timer); };
     // `nodes` is read for positions; its length gates a full refit.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nodes.length, focusKey, fitView, setCenter, wide, compact, glide]);
+  }, [nodes.length, focusKey, setCenter, wide, compact, glide, rfWidth]);
 
   return (
     <div ref={paneRef} className="h-full w-full">
@@ -229,8 +249,8 @@ function Canvas({
       nodes={nodes}
       edges={edges}
       nodeTypes={nodeTypes}
-      fitView
-      fitViewOptions={{ padding: 0.16 }}
+      // No `fitView` prop: it lands late, once React Flow has measured, and
+      // then overrides the framing the effect above computed deliberately.
       minZoom={0.08}
       maxZoom={1.6}
       nodesDraggable={false}

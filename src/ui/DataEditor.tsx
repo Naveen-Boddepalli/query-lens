@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Row, SqlValue, Table } from '../engine/index.ts';
 
 /**
@@ -27,6 +27,25 @@ function coerce(raw: string, previous: SqlValue): SqlValue {
 
 export function DataEditor({ table, onApply, onReset, onClose }: DataEditorProps) {
   const [rows, setRows] = useState<Row[]>(() => table.rows.map((r) => ({ ...r })));
+  const dialog = useRef<HTMLDialogElement>(null);
+
+  /**
+   * plan.md §15.1 item 3. The hand-rolled overlay this replaces had three
+   * measured defects — focus never entered it, Escape did not close it, and
+   * Tab reached the page behind. `showModal()` fixes all three (it moves focus
+   * in, closes on Escape, and makes everything outside inert), returns focus
+   * to the trigger on close, and deletes the code that tried to fake it.
+   *
+   * The component only mounts while open, so mounting is the open event.
+   */
+  useEffect(() => {
+    const el = dialog.current;
+    if (el && !el.open) el.showModal();
+  }, []);
+
+  // Route every dismissal through close() so the native `close` event is the
+  // single place onClose fires — Escape and the button then behave identically.
+  const close = () => { dialog.current?.close(); };
 
   const edit = (index: number, column: string, raw: string) => {
     setRows((current) =>
@@ -53,14 +72,16 @@ export function DataEditor({ table, onApply, onReset, onClose }: DataEditorProps
   };
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
-      role="dialog"
-      aria-modal="true"
+    <dialog
+      ref={dialog}
       aria-label="Edit seed data"
-      onKeyDown={(e) => { if (e.key === 'Escape') onClose(); }}
+      onClose={onClose}
+      // Clicking the backdrop targets the dialog itself; anything inside it
+      // targets a child. Cheap dismissal without a second overlay element.
+      onClick={(e) => { if (e.target === dialog.current) close(); }}
+      className="max-h-[85dvh] w-[min(48rem,calc(100vw-2rem))] overflow-hidden rounded-lg border border-edge bg-surface p-0 text-ink backdrop:bg-black/60"
     >
-      <div className="flex max-h-full w-full max-w-3xl flex-col overflow-hidden rounded-lg border border-edge bg-surface">
+      <div className="flex max-h-[85dvh] flex-col">
         <header className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-edge px-4 py-3">
           <h2 className="text-sm font-semibold">Seed data · {table.name}</h2>
           <p className="text-xs text-ink-dim">
@@ -69,7 +90,7 @@ export function DataEditor({ table, onApply, onReset, onClose }: DataEditorProps
           </p>
           <button
             type="button"
-            onClick={onClose}
+            onClick={close}
             className="ml-auto rounded-md border border-edge px-2.5 py-1 text-xs hover:border-accent/70"
           >
             Close
@@ -85,7 +106,7 @@ export function DataEditor({ table, onApply, onReset, onClose }: DataEditorProps
                   <th key={column} className="px-2 py-1.5 font-medium">
                     {column}
                     {column === table.indexedColumn && (
-                      <span className="ml-1 text-[9px] text-accent">idx</span>
+                      <span className="ml-1 text-3xs text-accent">idx</span>
                     )}
                   </th>
                 ))}
@@ -130,23 +151,25 @@ export function DataEditor({ table, onApply, onReset, onClose }: DataEditorProps
           </button>
           <button
             type="button"
-            onClick={onReset}
+            onClick={() => { close(); onReset(); }}
             className="rounded-md border border-edge px-2.5 py-1.5 text-xs text-ink-dim hover:border-accent/70"
           >
             Reset to seed
           </button>
-          <p className="ml-auto text-[11px] text-ink-dim">
+          <p className="ml-auto text-2xs text-ink-dim">
             Fewer rows means fewer pages, and the buffer pool may stop evicting entirely.
           </p>
           <button
             type="button"
-            onClick={() => { onApply(rows); }}
+            // close() before the callback, so focus lands back on the button
+            // that opened this rather than on <body> after the unmount.
+            onClick={() => { close(); onApply(rows); }}
             className="rounded-md border border-accent bg-accent/15 px-4 py-1.5 text-xs font-medium hover:bg-accent/25"
           >
             Apply &amp; re-run
           </button>
         </footer>
       </div>
-    </div>
+    </dialog>
   );
 }

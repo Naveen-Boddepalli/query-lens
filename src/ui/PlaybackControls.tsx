@@ -73,7 +73,7 @@ export function PlaybackControls({ playback, length }: PlaybackControlsProps) {
         </span>
         <input
           type="range"
-          className="w-full accent-[var(--color-accent)]"
+          className="scrubber w-full accent-[var(--color-accent)]"
           min={0}
           max={length}
           value={step}

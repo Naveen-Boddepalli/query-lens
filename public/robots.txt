@@ -1,0 +1,4 @@
+# One page, no routing, nothing private. Everything here is meant to be found —
+# plan.md §13's course packaging depends on it being indexable.
+User-agent: *
+Allow: /

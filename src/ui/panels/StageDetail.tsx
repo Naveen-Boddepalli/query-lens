@@ -106,7 +106,7 @@ export function StageDetail({ stage, state, policy, activeSpan }: StageDetailPro
                   );
                 })}
               </ul>
-              <p className="text-[11px] leading-relaxed text-ink-dim">
+              <p className="text-2xs leading-relaxed text-ink-dim">
                 Volcano model: each operator pulls one row at a time from the one below
                 it. Nothing materialises the whole table — a row travels all the way to
                 the top before the next is fetched.

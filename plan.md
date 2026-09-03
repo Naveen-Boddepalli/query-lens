@@ -1,5 +1,15 @@
 # Project Plan: QueryLens — Interactive Database Internals Visualizer
 
+> **v4 — 2026-09-02.** Updated to incorporate [RESEARCH.md Part III](RESEARCH.md#part-iii--uiux-production-readiness),
+> the UI/UX pass done by driving the running app. Changed since v3: **new §15, the UX gate**; M9 added to
+> the milestone table (§10); first-run behaviour, prompt placement and a shareable URL added to §8; the
+> first-thirty-seconds risk added (§12).
+>
+> **v3 — 2026-09-02.** Updated to incorporate [RESEARCH.md Part II](RESEARCH.md#part-ii--production-readiness),
+> the production-readiness pass done after M0–M7 shipped. Changed since v2: **new §14, the deploy gate**
+> (P0/P1/P2); M8 added to the milestone table (§10); hosting revisit trigger noted (§6); a11y regression
+> testing added (§8); two operational risks added (§12); cost forks named (§11).
+>
 > **v2 — 2026-09-01.** Updated to incorporate the pre-build research in [RESEARCH.md](RESEARCH.md).
 > Changed since v1: engagement features promoted into the MVP (§4, §8); Web Worker dropped for v0 (§5);
 > buffer replacement policy made pluggable (§7.5); stack corrections — TypeScript 6.0.3, CodeMirror 6,
@@ -126,7 +136,7 @@ No backend server is required for v0. Everything — parsing, storage, indexing,
 | Visualization | React Flow (`@xyflow/react`) for plan/AST/B+Tree graphs, `d3-hierarchy` for layout math, `motion` for animation | Node-based graphs without hand-rolling SVG; d3-hierarchy supplies tree layout |
 | Styling | Tailwind CSS v4 (`@tailwindcss/vite`) | CSS-first config (`@import "tailwindcss"`, `@theme`); no `tailwind.config.js` |
 | SQL editor | CodeMirror 6 (`@uiw/react-codemirror` + `@codemirror/lang-sql`) | ~50kB tree-shaken vs Monaco's 2–5MB; a `<textarea>` cannot syntax-highlight |
-| Hosting | **Cloudflare Pages** (free tier) | Vercel Hobby is non-commercial-only by ToS and pauses past 100GB; Cloudflare serves unlimited static bandwidth |
+| Hosting | **Cloudflare Pages** (free tier) | Vercel Hobby is non-commercial-only by ToS and pauses past 100GB; Cloudflare serves unlimited static bandwidth. Cloudflare now steers *new* projects to Workers static assets, but Pages is fully supported with no migration deadline — **revisit only when this project first needs a server-side piece** (an error-beacon endpoint, hosting for the §9 study), not before |
 | Persistence (deferred) | Supabase (free tier) | Only needed if/when adding accounts or saved queries — not in MVP |
 | Dev tools | VS Code, Node.js, pnpm, Git/GitHub | All free/open-source |
 
@@ -231,17 +241,31 @@ This event stream is the single contract between engine and UI — makes the UI 
 - **Pipeline view**: horizontal or vertical stage tracker (Parser → Planner → Optimizer → Execution → Buffer Pool → Index → Locks → Result), current stage highlighted.
 - **Stage detail panel**: changes based on selected/active stage — tree diagram for parser/planner, grid for buffer pool, node graph for B+Tree.
 - **Playback controls**: Play, Pause, Step Forward, Step Back, Reset, speed slider.
+- **First run happens without being asked for.** The default query, seed table and trace are all
+  deterministic, so the app runs them on load and opens on a parsed AST rather than an empty box —
+  a pre-populated example beats a blank start for any tool with a learning curve, and the empty state is
+  otherwise the largest element on the screen. Pressing Run must also *visibly* respond (advance to
+  step 1), or a first-time user will press it twice believing it failed.
 - **Predict-then-reveal prompts**: at marked steps the run halts and asks the user to commit before revealing.
   Natural prompt points fall straight out of the §7.8 event union — `buffer:evict` (which frame?),
   `index:traverse` (which child pointer?), `optimize` (where does the filter move to?), `result` (how many rows?).
   This is the single highest-leverage feature in the product and it is cheap: a modal over an event stream
-  that already exists.
+  that already exists. **The prompt must sit against the panel it is about** — the spatial contiguity
+  effect (g = 0.63 over 58 comparisons) is the same order as the effect that justified building
+  prediction at all, and asking "which child pointer?" while the buffer pool is on screen gives it back.
+- **A shareable URL.** Query, policy, prediction mode and step index live in the address bar, so a link
+  reproduces a *moment*: §9's study can start every participant identically, an instructor can set
+  "predict what happens at step 13" as homework, and what gets posted publicly is the eviction storm
+  rather than a home page. It also means a refresh no longer discards an edited dataset.
 - **Editable seed-data grid**: change the rows, re-run, see a different trace.
 - **Policy toggle**: LRU ⇄ clock sweep on the buffer pool panel.
 - **Accessibility** (cheap now, invasive later): the Play/Pause controls already satisfy WCAG 2.2.2
   (Pause, Stop, Hide). Honour `prefers-reduced-motion` by snapping between states instead of tweening —
   it does *not* replace the controls, both are required. Keyboard shortcuts throughout
   (Space = play/pause, ←/→ = step); learners in training settings lean on them heavily.
+  A one-off contrast sweep decays on the next style change, so **axe runs in CI as a regression net**
+  (§14) — but automated tooling catches only 30–57% of WCAG failures, so the manual sweep stays the
+  real check and is repeated at each visual change, not annually.
 - **Disclaimer banner** (persistent, not just footer text): "This is a simplified educational model of database internals, not the exact behavior of any real database engine."
 
 ---
@@ -278,18 +302,31 @@ This event stream is the single contract between engine and UI — makes the UI 
 | M6 | Lock manager visual layer | 1 week |
 | M6.5 | Predict-then-reveal layer + editable seed-data grid | 1 week |
 | M7 | Polish: playback controls, a11y (reduced-motion, keyboard), disclaimer, styling, demo-ready | 1-2 weeks |
-| **MVP complete** | Full pipeline for indexed point lookup **+ sequential-scan contrast** (§9), deployed free | **~10-14 weeks part-time** |
+| **MVP complete** | Full pipeline for indexed point lookup **+ sequential-scan contrast** (§9) | **~10-14 weeks part-time** |
+| M8 | **Production readiness — the deploy gate (§14):** CI, error boundary, security headers, licence, supply-chain settings, link preview | ~1 day (P0) + 2-3 days (P1) |
+| M9 | **UI/UX readiness (§15):** first-run trace, Run feedback, native dialog, shareable URL, prompt placement, responsive height, light theme | ~1 day (P0) + 2-3 days (P1) |
 | v1 | Expand SQL coverage: joins, cost estimates, InnoDB midpoint-LRU as a third policy | Post-MVP |
+
+M8 sits between "the app works" and "the URL is public." It is not polish — every item on the P0 list in
+§14 fails *silently* if skipped, which is why it gets its own gate rather than being folded into M7.
 
 ---
 
 ## 11. Cost Summary
 - Development: $0 (own hardware, free/open-source tools).
-- Hosting: $0 (Vercel/Cloudflare Pages free tier).
+- Hosting: $0 (Cloudflare Pages free tier — unlimited static bandwidth, 500 builds/month).
+- CI: $0 (GitHub Actions is free for public repositories).
 - Domain (optional): ~$10-15/year.
 - Persistence/accounts (deferred, optional in v1+): $0 on free tiers (Supabase/Firebase) at MVP scale.
 
 **Total to ship MVP: $0, or ~$10-15/year if a custom domain is desired.**
+
+Two places where a decision in §14 could introduce a bill, both optional and both deferred:
+
+- **Error tracking.** Sentry's free tier covers 5k errors/month, which this will not approach. The real
+  cost is ~30 kB of SDK and a third-party origin in `connect-src`, not money.
+- **Analytics.** Cloudflare Web Analytics is free; the cookieless alternatives (Plausible, Fathom) start
+  around $9/month, or $0 self-hosted. §14 recommends shipping with neither.
 
 ---
 
@@ -302,6 +339,22 @@ This event stream is the single contract between engine and UI — makes the UI 
   it is not the variable that teaches. Mitigation: the prediction layer is MVP scope (§4, §8), not v1.
 - **Visualization quality is the actual product**: if animations are clunky or confusing, the SQL/engine correctness underneath won't matter. Budget disproportionate time to UI/animation polish relative to engine breadth.
 - **Clarity of "simplified model" framing**: must be unmistakable in-product (not buried in a README) that this doesn't represent real engine internals exactly, to avoid misleading learners.
+- **Silent client-side failure.** With no server there is no error rate, no log and no alert: an uncaught
+  throw is a blank page that nobody reports, and §9's validation study would read it as "the format didn't
+  work" rather than "the app crashed." This is the risk §14's P0 list exists to close, and it is the one
+  that most directly threatens the plan's only real experiment. Mitigation: an error boundary whose
+  fallback hands the user a copyable repro (the SQL, the seed rows, the step index — the entire state that
+  produced the crash).
+- **The first thirty seconds.** The interface currently opens on an empty 432px box and responds to its
+  own primary button with no visible change. A visitor who arrives from a link, understands nothing in
+  ten seconds and presses Run to no apparent effect leaves — and §9's post-test never gets taken. The
+  engine being correct underneath does not survive that; this risk sits upstream of every pedagogical
+  one already listed. Mitigation: §15's P0, which is a day's work.
+- **Checklist ceremony.** The opposite failure: importing a service-shaped production checklist into an
+  application with no server, no secrets and no user data, and spending three weeks on secret rotation,
+  uptime monitoring and incident tiers that reduce no risk here. Mitigation: [RESEARCH.md §21](RESEARCH.md#21-what-i-deliberately-left-out)
+  names what is deliberately *not* being done, so skipping it is a decision on the record rather than an
+  oversight to be re-litigated.
 
 ---
 
@@ -310,3 +363,227 @@ This event stream is the single contract between engine and UI — makes the UI 
 - Course/curriculum packaging (structured lessons, quizzes tied to visualizations).
 - Comparison mode: same query, different index strategy, side-by-side.
 - Community query-sharing (would require backend + persistence).
+
+---
+
+## 14. Production Readiness — the deploy gate
+
+> Added in v3 from [RESEARCH.md Part II](RESEARCH.md#part-ii--production-readiness). M7 finished the
+> application; this section is everything *around* it that is currently missing.
+
+**The framing that keeps this short.** QueryLens has no server, no database, no auth, no user data, no
+secrets and no third-party call — `runQuery` is a pure function and the deliverable is a folder of static
+files. So most of a standard production checklist genuinely does not apply, and importing it anyway is the
+failure mode named in §12. What is actually left is seven questions:
+
+1. Does it survive its own bugs?  2. Can anyone tell when it breaks?  3. Is the artifact reproducible and
+reversible?  4. Is the supply chain that produced it trustworthy?  5. Does the browser know what the page
+may do?  6. May other people legally use it?  7. Does it load and respond on the audience's hardware —
+a lecture-hall laptop, not the author's?
+
+Everything below answers one of those. [RESEARCH.md §21](RESEARCH.md#21-what-i-deliberately-left-out)
+lists what is deliberately excluded, so that "we skipped it" reads as a decision rather than an oversight.
+
+### 14.1 P0 — before the URL is shared with anyone outside
+
+Roughly one focused day. Each of these fails *silently* if skipped, which is why it gates the deploy.
+
+| # | Item | Where | Why it gates |
+|---|---|---|---|
+| 1 | **CI on PR and `main`** — `typecheck`, `lint`, `test`, `build`, with `--frozen-lockfile` and Node from `.node-version` | `.github/workflows/ci.yml` | 281 tests, all green, and nothing runs them. With a Pages Git integration, a bad merge ships |
+| 2 | **Actions hardened** — every action pinned to a full 40-char commit SHA; `permissions: contents: read` at workflow level | same file | Mutable tags are how `tj-actions/changed-files` (2025) and `trivy-action` (2026) exfiltrated CI secrets. Free to do at the start |
+| 3 | **Error boundary + root handlers** — one boundary at the app root, one around `StageDetail`; `onUncaughtError`/`onRecoverableError` on `createRoot`; `window.onerror` and `unhandledrejection` | `src/main.tsx`, new `src/ui/ErrorBoundary.tsx` | An uncaught throw is currently a blank page. M6.5 made the engine's input user-editable, so this is not hypothetical |
+| 4 | **The fallback hands over a repro** — SQL string, seed rows, policy, step index, build SHA, all copyable, with a link to open an issue | same | The crashing state is four serialisable values that `App` already holds. This is the only bug report that will ever arrive |
+| 5 | **Security headers** — the tested CSP plus HSTS, Permissions-Policy, COOP (§14.3) | `public/_headers` | A CSP guessed rather than tested breaks the SQL editor — see §14.3 |
+| 6 | **`LICENSE`** — MIT or Apache-2.0 | repo root | Public repo with no licence = all rights reserved. §13's "course packaging" is illegal for the instructor until this exists |
+| 7 | **Supply-chain settings committed** — `minimumReleaseAge: 10080`, `blockExoticSubdeps: true`, explicit `allowBuilds` | `pnpm-workspace.yaml` | pnpm 11 defaults to 1440 minutes, but `pnpm config get minimumReleaseAge` returns `undefined` here — we are relying on an implicit default that CI's pnpm may not share |
+| 8 | **Link preview + `robots.txt`** — an `og:image` (the buffer pool mid-eviction), canonical URL | `index.html`, `public/` | Distribution is a link posted to HN, Reddit or a course page. The preview card *is* the landing page, and it is currently a grey box |
+| 9 | **Version stamp** — commit SHA in a `<meta>` and a console banner | `index.html` via Vite `define` | Otherwise no bug report can be tied to a build |
+| 10 | **`404.html`** | `public/` | No routing, so no SPA rewrite needed — but a typo'd path should offer a way back |
+
+### 14.2 P1 — the fortnight after launch, before the §9 study
+
+- **Split the bundle.** One 807 kB chunk (261 kB gzip) today. CodeMirror (~120 kB gzip) is needed at first
+  paint; React Flow + d3-hierarchy (~62 kB gzip) render nothing until Run. Lazy-load the panels behind Run
+  via `build.rolldownOptions`, and **put a gzip budget in CI** so the number cannot drift back.
+- **Measure INP before optimising it.** Core Web Vitals pass at LCP < 2.5 s, **INP < 200 ms**, CLS < 0.1 at
+  the 75th percentile of field data, and INP is the most-failed vital of 2026. Stepping the trace re-folds
+  events and re-lays-out a React Flow graph inside one keypress-to-paint — the interaction the product is
+  built around is *literally* an INP measurement. `createTraceProjector` memoises, so it may well be fine:
+  assert step latency in a test rather than guessing.
+- **UI tests.** All 13 test files are engine-side; `@testing-library/react`, jsdom and `src/test/setup.ts`
+  are installed, wired and **unused**. Cover the gate array (prediction blocks advancement, answering
+  unblocks, step-back never re-locks), the keyboard shortcuts, and the data editor's type preservation.
+- **One Playwright smoke test** against the built output: load → Run → step to end → assert result rows.
+  This is the only test that catches "the deploy is broken."
+- **axe in CI + `eslint-plugin-jsx-a11y`.** A regression net for the contrast work already done — not a
+  compliance claim, since automated tooling catches 30–57% of WCAG failures (§8).
+- **Renovate or Dependabot**, grouped and scheduled, which pairs correctly with a 7-day release-age floor.
+- **Settle the telemetry question** (§14.4) and write the answer into the README either way.
+
+### 14.3 The security headers, tested rather than assumed
+
+The CSP below was verified by serving the real `dist/` under policy and reading console violations.
+**The result was not what a copy-pasted policy would have given:** the build emits zero inline scripts, so
+`script-src 'self'` needs no hashes or nonces — but a strict `style-src 'self'` **breaks the SQL editor**,
+because CodeMirror's `style-mod` styles itself by assigning `textContent` to a runtime `<style>` element.
+Hashes don't fix it (the content changes as modules mount). `'unsafe-inline'` for *styles only* is the
+right call, and it is now a decision with a reason rather than a default.
+
+```
+/*
+  Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
+  Strict-Transport-Security: max-age=63072000; includeSubDomains; preload
+  Permissions-Policy: geolocation=(), microphone=(), camera=()
+  Cross-Origin-Opener-Policy: same-origin
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+```
+
+Notes: `frame-ancestors` is ignored in a `<meta>` tag and must be a real header — `public/_headers` gives
+that for free. Do **not** add `X-Frame-Options` (superseded) or `X-XSS-Protection` (deprecated); the 2026
+advice is to drop headers, not accumulate them. `connect-src 'self'` will need editing the day analytics
+or error tracking is added, which is a feature: it puts §14.4's decision in a diff instead of leaving it
+silent. Verify with Mozilla Observatory and securityheaders.com — A+ is achievable here with no exceptions.
+
+### 14.4 The telemetry decision, stated rather than drifted into
+
+There is no telemetry of any kind today, and **"no backend, no accounts, nothing leaves your browser" is a
+real feature for a classroom tool**, not merely an absence. It also collides with §9: if the app throws on
+a study participant's machine, the post-test returns "it didn't work for me" and the result cannot be told
+apart from a teaching failure.
+
+**Recommendation: ship with none, and rely on P0 item 4** — the copyable repro is the bug report that would
+actually have arrived anyway. Revisit exactly once, when the §9 study is scheduled with users you cannot
+sit beside; Sentry for the duration of the study is the pragmatic call there, with
+`build.sourcemap: 'hidden'` so maps are uploaded but not served. If analytics is ever added, note that
+Cloudflare Web Analytics still processes IPs and user agents — personal data under GDPR even with no
+cookies — while the cookieless tools (Plausible, Fathom, Umami) claim no consent banner is required.
+Whichever way it goes, the README states it.
+
+### 14.5 P2 — ongoing, once there are users
+
+- Repeat the composited-contrast sweep at every visual change; axe only guards against regression.
+- Review dependency upgrades in batches; keep `pnpm audit --prod` clean.
+- Revisit **TypeScript 7** when 7.1 ships a stable compiler API and `typescript-eslint` supports it (§6).
+- Revisit **Cloudflare Workers static assets** the first time a server-side piece is needed (§6) — not before.
+- Write the rollback down before it is needed: Pages retains previous deployments and rolls back in one
+  click, which is only useful if that sentence exists somewhere at 2am.
+
+### 14.6 Definition of done
+
+The URL may be shared publicly when all ten P0 items are true, and specifically when:
+
+- [x] A pull request cannot merge without `typecheck`, `lint`, `test` and `build` passing.
+      *`.github/workflows/ci.yml` runs all four on PR and `main`, every action pinned to a
+      40-char SHA, `permissions: contents: read`. **The branch-protection rule that makes it
+      blocking is a GitHub setting, not a file** — it has to be switched on in the repo.*
+- [x] Forcing a throw inside a panel shows a fallback with a copyable repro, not a blank page.
+      *Verified by forcing a throw in `BufferPoolPanel` against the running app: the rest of the
+      trace stayed live, and the fallback carried build SHA, page, browser, error, component
+      stack and the four repro values.*
+- [~] securityheaders.com reports A or A+, and the SQL editor is still styled under the live CSP.
+      *The editor half is verified — `dist/` was served under the exact `_headers` policy and
+      CodeMirror renders styled, with zero CSP violations in the console. The grade itself needs
+      the public URL and is the one item that cannot be closed before the first deploy.*
+- [x] `LICENSE` exists and the README names it.
+- [~] Pasting the URL into Slack or Twitter shows an image of the product.
+      *`public/og.png` (1200×630, the buffer pool mid-eviction) plus `og:`/`twitter:` tags with an
+      absolute URL from `VITE_SITE_URL`/`CF_PAGES_URL`. Unverifiable until something can fetch it.*
+- [x] The live page reports which commit it was built from.
+      *`<meta name="querylens:build">` in the served HTML and a console banner, both from the
+      same `define`.*
+
+---
+
+## 15. UI/UX Readiness — the comprehension gate
+
+> Added in v4 from [RESEARCH.md Part III](RESEARCH.md#part-iii--uiux-production-readiness), which drove
+> the running app on desktop and phone and measured what it does. §14 asks whether the deploy is safe;
+> this asks whether the first visitor understands anything.
+
+**The bar, stated so it does not drift.** This product has no signup, no funnel and nothing to convert.
+Its success metric is already written: §9's post-test — can someone answer a mechanism question they
+could not answer before. **Every item here earns its place by removing something standing between a
+learner and the mechanism**, which is why standard product-UX work (onboarding tours, activation
+checklists, engagement nudges) is absent and something a normal review would rank low — where the
+question sits relative to the diagram — is P1.
+
+The audit's summary: *better built than it looks, worse composed than it is built.* Contrast, keyboard
+support, ARIA semantics and reduced-motion handling are all done properly and measured as passing
+([RESEARCH.md §32](RESEARCH.md#32-what-is-already-right-and-should-not-be-touched)). Almost nothing below
+is about how it looks.
+
+### 15.1 P0 — before the URL is shared (with §14's P0)
+
+Under a day, and each one was measured rather than guessed.
+
+| # | Item | Where | Why it gates |
+|---|---|---|---|
+| 1 | **Run the default trace on load** | `App.tsx` | The empty state is the biggest element on screen and teaches nothing; on a phone it is 53% of the viewport. Everything needed is deterministic and already there |
+| 2 | **Make Run visibly respond** — advance to step 1, name the step count where the eye is | `App.tsx` | Today the panel, narration and tracker are unchanged; only a 12px `0/0`→`0/33` counter moves. The documented consequence is the user pressing it again |
+| 3 | **Native `<dialog>` + `showModal()`** for the data editor | `DataEditor.tsx` | Three measured defects: focus never enters, Escape does not close, Tab reaches the background. The native element fixes all three and deletes code |
+| 4 | **`color-scheme: dark`** | `index.css` | Currently `normal`, so scrollbars, the `<select>` popup and the caret render as light-mode chrome |
+| 5 | **Platform-correct modifier key** | `App.tsx`, `ShortcutHints.tsx` | `⌘` is hardcoded for every user; there is no platform detection in `src/`. The binding is right, only the label lies |
+| 6 | **Hide the keyboard hints on touch** | `ShortcutHints.tsx` | A phone is told about Space, ←, →, Home and ⌘↵ |
+| 7 | **Un-pin the eight `text-[10px]`/`text-[11px]` values** | various | Verified: at a doubled root font size everything scaled except these eight, which stayed 10px and 11px |
+| 8 | **Scrubber at ≥24px** | `PlaybackControls.tsx` | Measured 16px tall, under WCAG 2.2 SC 2.5.8 (AA) — and it is the control a touch user depends on most |
+
+### 15.2 P1 — the fortnight after launch, before the §9 study
+
+- **Shareable URL state** — query, policy, predict on/off, step index; seed rows only when customised.
+  This is the biggest missing *feature*, not a polish item: §9 wants every participant to start
+  identically, §13's course packaging wants "predict what happens at step 13" to be a link, and a refresh
+  currently discards an edited dataset with no warning.
+- **Put the prompt against its panel** — anchored to the buffer grid for an eviction question, to the tree
+  for a traversal one. The prompt currently recites node keys in words because the tree is not on screen;
+  the cheaper half of this fix is simply forcing the stage panel to the stage the question is about.
+- **Responsive height** — replace the fixed `h-[27rem]` with a `min-height` plus a control row that holds
+  its position. The current comment is right that controls must not move mid-step and wrong that freezing
+  the panel is the way: it letterboxes a 1440×900 monitor and eats half a phone.
+- **Mobile as read-first** — nobody writes SQL on a phone, but people open links on one. Trace on load,
+  step controls in thumb reach, authoring gracefully secondary.
+
+### 15.3 P2 — once there are users
+
+- **A light theme.** The tokens are already semantic, so this is a second block of values plus a toggle,
+  not a redesign. Two reasons it is not optional forever: roughly one adult in three has astigmatism, for
+  whom light-on-dark text haloes; and §13's course path runs through a projector, where dark UIs wash out.
+- Restore focus to the trigger when the editor closes; consider undo for row deletion.
+- Re-run the composited contrast sweep at every visual change (§8) — it passes today at a minimum of
+  5.29:1 across 66 elements, and that is a snapshot, not a guarantee.
+
+### 15.4 Definition of done
+
+- [x] A first-time visitor who touches nothing sees a real trace, not an empty box.
+      *The app opens at step 1 of the 33-step default trace: AST on screen, narration written,
+      pipeline tracker on Parser. This turned out to need a second fix — see the note below.*
+- [x] Pressing Run changes something they are already looking at.
+      *Run lands on step 1 rather than 0, and the trace length is named under the button that
+      built it ("33 steps in this trace · showing step 1") instead of only in the 12px counter
+      on the far side of the screen.*
+- [x] The data editor takes focus, closes on Escape, and does not leak Tab to the page behind it.
+      *Native `<dialog>` + `showModal()`. Focus-in and `:modal` were verified in real Chrome;
+      Escape is covered by a test against a spec-mirroring jsdom shim, because jsdom 30
+      implements none of the dialog methods and CDP-injected keys cannot raise a browser-level
+      close request (a bare `<dialog>` ignores them too). Playback shortcuts are suspended while
+      it is open, so ←/→ no longer step a trace nobody can see.*
+- [x] Every shortcut label matches the key on the user's actual keyboard.
+      *`src/ui/platform.ts` uses CodeMirror's own Apple test, so the label cannot disagree with
+      the keymap. On a touch device the hints and the Run suffix are dropped entirely.*
+- [ ] A link reproduces a specific query at a specific step.
+      *P1 (§15.2), deliberately not in this pass.*
+- [x] Nothing on screen is pinned below the user's chosen font size.
+      *Measured: at a doubled root font size every text node now scales exactly 2×, with none
+      left under 16px. Beyond the eight the audit found, this also caught the SQL editor itself
+      (`.cm-editor` was 13px) and React Flow's attribution badge.*
+
+**One regression, found by measuring rather than by looking.** Running the trace on load moves
+the first React Flow canvas into the very first render, before its container has been measured —
+and *every* viewport call, `fitView` and `setCenter` alike, is a silent no-op while React Flow's
+store reports a width of 0. The tree rendered unframed in the corner. The fit is now gated on
+`useStore(s => s.width)`, which also buys a refit on window resize; the unfocused case frames
+every node through the same d3 maths rather than handing off to `fitView`, so one code path
+serves both. Worth recording that the first two attempts at this fix were aimed at the wrong
+thing: a hidden browser pane throttles `requestAnimationFrame`, so the animated transform never
+lands, which looks identical to a fit that never ran.

@@ -6,12 +6,31 @@ An in-browser toy relational database engine that animates a SQL query as it mov
 A learning tool, not a production DB tool. See [plan.md](plan.md) for scope and
 [RESEARCH.md](RESEARCH.md) for the evidence the plan is built on.
 
-## Status: MVP complete
+## Status: MVP complete, both P0 gates closed
 
 All eight pipeline stages are real, the run halts to ask you to predict before it reveals, the seed
-data is editable, and the whole thing is keyboard-driven and accessible. Ready to deploy.
+data is editable, and the whole thing is keyboard-driven and accessible. The *application* is done.
 
-**The one thing still outstanding is not code**: plan.md §9 step 4 asks for a post-test against a
+**M8 and M9 — the two P0 gates that stood between it and a public URL — are now done.** The app runs
+its first trace on load, survives its own bugs with a copyable repro instead of a blank page, ships
+under a tested CSP, and carries a licence. What is left of those milestones is their P1 lists, which
+are the fortnight *after* launch by design.
+
+[plan.md §14](plan.md#14-production-readiness--the-deploy-gate) was the deploy gate, from
+[RESEARCH.md Part II](RESEARCH.md#part-ii--production-readiness): ten P0 items, each of which fails
+silently if skipped. All ten are in. Two of its six done-checks cannot close until the URL is live —
+the securityheaders.com grade and the link-preview card both need something able to fetch the site —
+so [§14.6](plan.md#146-definition-of-done) marks those `[~]` with what *was* verified locally.
+
+[plan.md §15](plan.md#15-uiux-readiness--the-comprehension-gate) was the comprehension gate, from
+[RESEARCH.md Part III](RESEARCH.md#part-iii--uiux-production-readiness), which drove the running app on
+desktop and phone and measured it. The verdict was *better built than it looks, worse composed than it
+is built*. All eight P0 items are in; the one done-check still open is the shareable URL, which §15.2
+puts in P1. Measuring rather than eyeballing paid for itself twice: the font-size sweep caught the SQL
+editor and React Flow's badge on top of the eight labels the audit had listed, and running the trace on
+load turned out to break React Flow's viewport fit in a way that only a transform readout showed.
+
+**The other outstanding item is not code**: plan.md §9 step 4 asks for a post-test against a
 text-explanation control, with 5–10 target users. That experiment decides whether the format works,
 and it needs people, not commits. `IMPLEMENTED_STAGES` in
 [types.ts](src/engine/types.ts) is the single source of truth for that, and the UI reads it: the
@@ -30,7 +49,17 @@ pipeline that *looks* complete when it is not would teach the wrong thing.
 | M6 | Lock manager visual layer | ✅ done |
 | M6.5 | Predict-then-reveal + editable seed data | ✅ done |
 | M7 | Polish, a11y, deploy config | ✅ done |
+| M8 | **Production readiness — the deploy gate (plan.md §14)** | ✅ P0 done · P1 open |
+| M9 | **UI/UX readiness — the comprehension gate (plan.md §15)** | ✅ P0 done · P1 open |
 | — | **Validation post-test with real users (plan.md §9)** | ⬜ your call |
+
+Two things are worth knowing before the first deploy:
+
+- **CI is written, but a workflow file is not a rule.** `.github/workflows/ci.yml` runs typecheck,
+  lint, test and build on every PR and push to `main`. Making it *blocking* is a branch-protection
+  setting in the repository, which no file in here can turn on.
+- **`VITE_SITE_URL` decides the canonical and `og:image` URLs.** It falls back to Cloudflare's
+  `CF_PAGES_URL`, then to `https://query-lens.pages.dev`. Set it if the site gets a custom domain.
 
 ## Commands
 
@@ -267,6 +296,15 @@ preserve each column's type, so `42` in a number column stays a number.
   so SQL keywords were rendering at **1.6:1**. The editor now uses a purpose-built dark highlight
   style.
 
+  Re-measured on 2026-09-02 against the running app: **66 text elements, zero below AA, minimum 5.29:1.**
+  Nothing regressed. Note the caveat found while doing it — two versions of the measuring script reported
+  dozens of false failures, both times by mis-parsing OKLCH/OKLab colours, which is worth knowing before
+  trusting any off-the-shelf contrast tool on this codebase.
+
+- **Not yet done** — there is no light theme, and `color-scheme` is never declared, so native scrollbars
+  and `<select>` popups still render as light-mode chrome. See
+  [plan.md §15](plan.md#15-uiux-readiness--the-comprehension-gate).
+
 ## Deploying
 
 Cloudflare Pages, per plan.md §6 — Vercel's Hobby tier is non-commercial-only by ToS and pauses the
@@ -279,8 +317,71 @@ Build output directory:   dist
 Node version:             pinned to 22 by .node-version
 ```
 
-`public/_headers` sets immutable caching for hashed assets and revalidation for the entry document.
-No SPA redirect rule is needed — the app has no client-side routing.
+`public/_headers` sets immutable caching for hashed assets, revalidation for the entry document, and
+the full security block from [plan.md §14.3](plan.md#143-the-security-headers-tested-rather-than-assumed):
+CSP, HSTS, `Permissions-Policy`, COOP, `X-Content-Type-Options` and `Referrer-Policy`. No SPA redirect
+rule is needed — the app has no client-side routing.
+
+The CSP was **tested, not copied**. `dist/` was served under the exact policy and the console read for
+violations. Two results worth keeping: the build emits zero inline scripts, so `script-src 'self'`
+needs no hashes and no nonce; and a strict `style-src 'self'` silently breaks the SQL editor, because
+CodeMirror's `style-mod` styles itself by assigning `textContent` to a runtime `<style>` element.
+Hashes cannot fix that — the content changes as modules mount — so `'unsafe-inline'` is scoped to
+styles only, on purpose. `frame-ancestors` is in the header rather than a `<meta>` because it is
+ignored in a tag. `X-Frame-Options` and `X-XSS-Protection` are deliberately absent.
+
+There is **no telemetry of any kind**, and that is a decision rather than an omission
+([plan.md §14.4](plan.md#144-the-telemetry-decision-stated-rather-than-drifted-into)): no analytics, no
+error tracking, no cookies, nothing leaves the browser. `connect-src 'self'` means adding any of it
+would show up as a diff in this file. The bug report that replaces it is the copyable crash repro —
+SQL, policy, step index, edited rows, build SHA — offered by the error boundary and printed to the
+console by the global handlers.
+
+The licence is [MIT](LICENSE).
+
+## Decisions made during M8/M9
+
+- **Every GitHub Action is pinned to a 40-char commit SHA**, with the tag in a trailing comment as
+  documentation only. Mutable tags are how `tj-actions/changed-files` and `trivy-action` exfiltrated
+  CI secrets. `permissions: contents: read` is set at workflow level: nothing in this build writes.
+- **`allowBuilds: []` is stated, not left implicit.** Verified that not one package in the graph has
+  a `preinstall`, `install` or `postinstall` script — so adding one becomes a diff somebody has to
+  approve rather than a script that simply starts running. `minimumReleaseAge: 10080` is written down
+  for the same reason: pnpm 11 defaults it to 1440, but `pnpm config get minimumReleaseAge` returns
+  `undefined` here, and an implicit default is not something CI's pnpm can be assumed to share.
+- **The crash repro is published during render, not from an effect.** The state worth reporting is the
+  state of the render that threw; an effect only ever sees renders that already succeeded, so it would
+  report step 12 for a crash the user caused by stepping to 13. The write is idempotent, so StrictMode's
+  double render is harmless.
+- **Two boundaries, not one.** The root boundary is the alternative to a white screen; the panel
+  boundary around `StageDetail` keeps the editor, narration, tracker and playback alive when one stage
+  renderer dies, and is keyed by stage so leaving a broken stage clears it.
+- **The crash report is shown on screen, not only behind the Copy button.** Clipboard access can be
+  denied, and that is exactly the case where the text still has to be selectable.
+- **`landingStep` gates on the prompt, not just on Run.** Landing on step 1 is what makes Run visibly
+  respond — but if step 0 itself asks a question, predict-then-reveal outranks the feedback and it
+  stays at 0.
+- **`usePlayback` gained `land` alongside `seek`.** `seek` clamps against the length it can see, which
+  during a Run is still the *previous* trace's — so seeking to step 1 right after a run that followed a
+  parse error (length 0) would clamp to 0. `land` skips the upper clamp because the derived `step`
+  re-clamps against the new length on render anyway.
+- **The data editor is a native `<dialog>`.** `showModal()` fixed all three measured defects at once —
+  focus never entered, Escape did nothing, Tab reached the background — and returns focus to the
+  trigger for free. Playback shortcuts are suspended while it is open.
+- **jsdom 30 implements none of the `<dialog>` methods**, so `src/test/setup.ts` carries a shim. It
+  mirrors the spec's close request deliberately, firing a cancelable `cancel` and honouring
+  `defaultPrevented`, so a regression that swallows Escape fails the test instead of slipping through.
+- **Small text is three rem tokens now, not eighteen pixel values.** `--text-2xs` and `--text-3xs` sit
+  below Tailwind's `text-xs`. Measuring at a doubled root font size caught two the audit had not
+  listed: `.cm-editor` at 13px, and React Flow's attribution badge at 10px from its own stylesheet.
+- **React Flow's viewport fit is gated on `useStore(s => s.width)`.** Every viewport call is a silent
+  no-op while React Flow's store reports width 0, which is exactly the state at first paint now that
+  the trace runs on load. Gating on its measured width also refits on window resize. The unfocused case
+  now frames every node through the same d3 maths the focused case uses, so `fitView` — which needs
+  node measurements these graphs never report — is gone from the component entirely.
+- **A hidden browser pane throttles `requestAnimationFrame`**, so React Flow's animated transform never
+  lands and the tree looks unfitted. It is indistinguishable from a fit that never ran, and it cost two
+  wrong fixes before a `duration: 0` run and a headless screenshot separated the two.
 
 ## Decisions made during M0/M1/M2/M3/M4/M5/M6/M6.5/M7
 

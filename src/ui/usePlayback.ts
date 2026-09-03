@@ -16,6 +16,8 @@ export interface Playback {
   stepBack: () => void;
   reset: () => void;
   seek: (step: number) => void;
+  /** Land on a step in a trace arriving in this same commit. See below. */
+  land: (step: number) => void;
   setSpeed: (speed: number) => void;
 }
 
@@ -38,11 +40,17 @@ export interface PlaybackOptions {
    * hook stays free of caller-owned refs.
    */
   dwells?: readonly number[];
+  /**
+   * Where to sit before anything is pressed. plan.md §15.1 item 1 opens the app
+   * on a real trace, and step 0 means "no event applied yet" — which renders
+   * the empty state that item exists to delete.
+   */
+  initialStep?: number;
 }
 
 /** Playback is an index into an array we already own — nothing more. */
 export function usePlayback(length: number, options?: PlaybackOptions): Playback {
-  const [rawStep, setRawStep] = useState(0);
+  const [rawStep, setRawStep] = useState(options?.initialStep ?? 0);
   const [wantsToPlay, setWantsToPlay] = useState(false);
   const [speed, setSpeed] = useState(1);
 
@@ -80,6 +88,16 @@ export function usePlayback(length: number, options?: PlaybackOptions): Playback
     },
     [length],
   );
+  /**
+   * `seek` clamps against the length it can see, which during a Run is still
+   * the *previous* trace's — so seeking to step 1 straight after a run that
+   * follows a parse error (length 0) would clamp to 0. This skips the upper
+   * clamp because `step` re-derives it from the new length on render anyway.
+   */
+  const land = useCallback((target: number) => {
+    setWantsToPlay(false);
+    setRawStep(Math.max(0, target));
+  }, []);
 
   // The weight of the event currently on screen: we linger on what just
   // happened before moving to the next thing.
@@ -93,7 +111,7 @@ export function usePlayback(length: number, options?: PlaybackOptions): Playback
 
   return {
     step, playing, speed, atStart, atEnd, blocked,
-    play, pause, toggle, stepForward, stepBack, reset, seek, setSpeed,
+    play, pause, toggle, stepForward, stepBack, reset, seek, land, setSpeed,
   };
 }
 

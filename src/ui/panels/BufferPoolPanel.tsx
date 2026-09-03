@@ -60,7 +60,7 @@ export function BufferPoolPanel({
                     : 'border-edge bg-surface-3',
               ].join(' ')}
             >
-              <div className="flex items-baseline justify-between text-[10px] text-ink-dim">
+              <div className="flex items-baseline justify-between text-3xs text-ink-dim">
                 <span>frame {frame.frameId}</span>
                 {policy === 'clock' && clockHand === frame.frameId && (
                   <span title="clock hand is here" aria-label="clock hand">
@@ -94,7 +94,7 @@ export function BufferPoolPanel({
               )}
 
               {mood && (
-                <div className="mt-1 text-[9px] tracking-wide uppercase opacity-80">
+                <div className="mt-1 text-3xs tracking-wide uppercase opacity-80">
                   {MOOD_TAG[mood]}
                 </div>
               )}
@@ -126,7 +126,7 @@ export function BufferPoolPanel({
         </div>
       </dl>
 
-      <p className="mt-auto text-[11px] leading-relaxed text-ink-dim">
+      <p className="mt-auto text-2xs leading-relaxed text-ink-dim">
         {policy === 'lru' ? (
           <>
             <span className="text-ink">LRU</span> evicts whichever page was used

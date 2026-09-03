@@ -2,7 +2,25 @@
 /assets/*
   Cache-Control: public, max-age=31536000, immutable
 
+# plan.md §14.3. The CSP was tested against the real dist/ rather than copied:
+# the build emits zero inline scripts, so `script-src 'self'` needs no hashes
+# and no nonce — but a strict `style-src 'self'` silently breaks the SQL
+# editor, because CodeMirror's style-mod styles itself by assigning textContent
+# to a runtime <style> element. Hashes cannot fix that (the content changes as
+# modules mount), so 'unsafe-inline' is scoped to styles only, deliberately.
+#
+# frame-ancestors is ignored inside a <meta> tag and has to be a real header,
+# which is the reason this file exists rather than a tag in index.html.
+# connect-src 'self' means the day analytics or error tracking is added
+# (plan.md §14.4 recommends neither), it shows up here as a diff.
+#
+# Deliberately absent: X-Frame-Options (superseded by frame-ancestors) and
+# X-XSS-Protection (deprecated, and its filter was itself an XSS vector).
 /*
   Cache-Control: public, max-age=0, must-revalidate
+  Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
+  Strict-Transport-Security: max-age=63072000; includeSubDomains; preload
+  Permissions-Policy: geolocation=(), microphone=(), camera=()
+  Cross-Origin-Opener-Policy: same-origin
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin
