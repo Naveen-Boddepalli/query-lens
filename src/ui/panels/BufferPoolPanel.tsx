@@ -75,7 +75,7 @@ export function BufferPoolPanel({
                     : 'border-edge bg-surface-3 hover:border-ink-dim/50 hover:bg-surface-4',
               ].join(' ')}
             >
-              <div className="flex items-baseline justify-between text-micro text-ink-dim">
+              <div className="flex items-baseline justify-between text-label text-ink-dim">
                 <span>frame {frame.frameId}</span>
                 {policy === 'clock' && clockHand === frame.frameId && (
                   <span title="clock hand is here" aria-label="clock hand">
@@ -109,7 +109,7 @@ export function BufferPoolPanel({
               )}
 
               {mood && (
-                <div className="mt-1 text-micro tracking-wide uppercase opacity-80">
+                <div className="mt-1 text-label tracking-wide uppercase opacity-80">
                   {MOOD_TAG[mood]}
                 </div>
               )}
@@ -141,7 +141,7 @@ export function BufferPoolPanel({
         </div>
       </dl>
 
-      <p className="mt-auto text-micro leading-relaxed text-ink-dim">
+      <p className="mt-auto text-label leading-relaxed text-ink-dim">
         {policy === 'lru' ? (
           <>
             <span className="text-ink">LRU</span> evicts whichever page was used

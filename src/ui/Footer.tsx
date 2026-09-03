@@ -49,7 +49,7 @@ export function Footer() {
   const commitUrl = BUILD_SHA === 'unknown' ? null : `${REPO_URL}/commit/${BUILD_SHA}`;
 
   return (
-    <footer className="border-t border-edge px-4 py-3 text-micro text-ink-dim">
+    <footer className="border-t border-edge px-4 py-3 text-label text-ink-dim">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
         <p>
           <span className="font-medium text-ink">QueryLens</span> — a toy database engine

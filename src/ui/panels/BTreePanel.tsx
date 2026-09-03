@@ -66,7 +66,7 @@ export function BTreePanel({ tree, path, outcome }: BTreePanelProps) {
 
   return (
     <div className="flex h-full flex-col gap-2">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-micro text-ink-dim">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-label text-ink-dim">
         <span className="flex items-center gap-1.5">
           <span className="h-2 w-2 rounded-sm bg-[var(--color-node-internal)]" /> internal
         </span>

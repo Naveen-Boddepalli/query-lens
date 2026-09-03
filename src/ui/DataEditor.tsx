@@ -113,7 +113,7 @@ export function DataEditor({ table, onApply, onReset, onClose }: DataEditorProps
                   <th key={column} className="px-2 py-1.5 font-medium">
                     {column}
                     {column === table.indexedColumn && (
-                      <span className="ml-1 text-micro text-accent">idx</span>
+                      <span className="ml-1 text-label text-accent">idx</span>
                     )}
                   </th>
                 ))}
@@ -163,7 +163,7 @@ export function DataEditor({ table, onApply, onReset, onClose }: DataEditorProps
           >
             Reset to seed
           </button>
-          <p className="ml-auto text-micro text-ink-dim">
+          <p className="ml-auto text-label text-ink-dim">
             Fewer rows means fewer pages, and the buffer pool may stop evicting entirely.
           </p>
           <button

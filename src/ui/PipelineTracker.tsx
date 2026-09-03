@@ -32,7 +32,7 @@ export function PipelineTracker({ current, visited, selected, onSelect }: Pipeli
                   ? `${meta.title} is pinned — click to follow the trace again`
                   : isBuilt
                     ? meta.blurb
-                    : `${meta.blurb} — not built yet (${meta.milestone})`
+                    : `${meta.blurb} — not part of this release`
               }
               className={[
                 /* plan.md §16.2 item 4. These chips are the one set of diagram

@@ -65,9 +65,9 @@ function NodeView({ data }: NodeProps<TreeFlowNode>) {
       <Handle id="in" type="target" position={Position.Top} className="!opacity-0" />
       <Handle id="prev" type="target" position={Position.Left} className="!opacity-0" />
       <div className="font-mono text-label leading-tight break-words">{data.label}</div>
-      <div className="text-micro tracking-wide text-ink-dim uppercase">{data.kind}</div>
+      <div className="text-label tracking-wide text-ink-dim uppercase">{data.kind}</div>
       {data.detail && (
-        <div className="mt-0.5 font-mono text-micro break-words text-ink-dim">{data.detail}</div>
+        <div className="mt-0.5 font-mono text-label break-words text-ink-dim">{data.detail}</div>
       )}
       <Handle id="out" type="source" position={Position.Bottom} className="!opacity-0" />
       <Handle id="next" type="source" position={Position.Right} className="!opacity-0" />
@@ -382,7 +382,7 @@ function Canvas({
         // viewer is by definition looking at the tab when they press it.
         onClick={() => { frame(nodes, true); }}
         aria-label="Fit the whole tree"
-        className={`${ZOOM_BUTTON} w-auto px-2 text-micro`}
+        className={`${ZOOM_BUTTON} w-auto px-2 text-label`}
       >
         Fit
       </button>

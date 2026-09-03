@@ -3,9 +3,7 @@ import {
   createSeedDatabase,
   createTraceProjector,
   DEFAULT_ENGINE_OPTIONS,
-  IMPLEMENTED_STAGES,
   runQuery,
-  STAGES,
 } from './engine/index.ts';
 import type {
   Database,
@@ -270,12 +268,17 @@ export default function App() {
         <p className="text-label text-ink-dim">
           Watch a SQL query become a B+Tree traversal.
         </p>
-        <span
-          className="ml-auto rounded-full border border-edge bg-surface-2 px-2.5 py-0.5 text-micro text-ink-dim"
-          title={`Built: ${IMPLEMENTED_STAGES.join(', ')}.`}
+        {/* The "8/8 stages built" badge that used to sit here was a progress
+            bar for the backlog, not information for a visitor: it answered
+            "how far along is the author?", which nobody arriving at a finished
+            tool is asking. Its place goes to the docs link, which is a
+            question people do have. */}
+        <a
+          href="/docs/"
+          className="ml-auto rounded-md px-2 py-1 text-label text-ink-dim transition-colors hover:text-ink"
         >
-          {IMPLEMENTED_STAGES.length}/{STAGES.length} stages built
-        </span>
+          Docs
+        </a>
         <ThemeToggle choice={choice} setChoice={setChoice} />
       </header>
 
@@ -336,7 +339,7 @@ export default function App() {
           {/* plan.md §15.1 item 2: the trace length belongs next to the button
               that built it. The counter in the playback row is on the other
               side of the screen, and 12px of it moving is not feedback. */}
-          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-micro text-ink-dim">
+          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-label text-ink-dim">
             <p>
               {result.error ? (
                 <span className="text-evict">The query did not run — see the error by the editor.</span>

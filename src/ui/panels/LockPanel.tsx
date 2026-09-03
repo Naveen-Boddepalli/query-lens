@@ -26,21 +26,21 @@ export function LockPanel({ locks, taken }: LockPanelProps) {
               className="cell flex items-baseline justify-between rounded-md border border-hue-orange/60 bg-hue-orange/10 px-2.5 py-1.5 font-mono text-label text-hue-orange-ink hover:border-hue-orange/90 hover:bg-hue-orange/20"
             >
               <span>🔒 page {lock.pageId}</span>
-              <span className="text-micro tracking-wide uppercase opacity-80">{lock.mode}</span>
+              <span className="text-label tracking-wide uppercase opacity-80">{lock.mode}</span>
             </li>
           ))}
         </ul>
       )}
 
       {locks.length === 2 && (
-        <p className="rounded-md border border-edge bg-surface-3 px-2.5 py-2 text-micro leading-relaxed">
+        <p className="rounded-md border border-edge bg-surface-3 px-2.5 py-2 text-label leading-relaxed">
           Two at once — this is <span className="text-ink">latch crabbing</span>. The descent takes
           the child&rsquo;s lock <em>before</em> letting go of the parent&rsquo;s, so the branch
           cannot be restructured out from under it. The overlap is the technique.
         </p>
       )}
 
-      <div className="mt-auto space-y-2 text-micro leading-relaxed text-ink-dim">
+      <div className="mt-auto space-y-2 text-label leading-relaxed text-ink-dim">
         <p>
           <span className="text-ink">{taken}</span> lock
           {taken === 1 ? '' : 's'} taken so far. A sequential scan holds one page at a time; an index

@@ -20,20 +20,25 @@ export interface StageDetailProps {
 }
 
 /**
- * Shown for stages the engine does not implement yet. Being explicit about
- * this is not an apology — a pipeline that looks complete when it is not would
- * teach the wrong thing (plan.md §2).
+ * The fallback for a stage the engine does not implement.
+ *
+ * Every stage in the pipeline is implemented today, so nothing renders this —
+ * but `STAGES` and `IMPLEMENTED_STAGES` are separate lists precisely so a new
+ * stage can be declared before it works, and plan.md §2 is clear that a
+ * pipeline which *looks* complete when it is not would teach the wrong thing.
+ * The guard stays; what has gone is the release vocabulary it used to print.
+ * "Arrives in M4" is a sentence about our backlog, not about databases, and a
+ * visitor has no way to know what M4 is.
  */
 function NotBuiltYet({ stage }: { stage: Stage }) {
   const meta = STAGE_META[stage];
   return (
     <div className="flex h-full flex-col items-start justify-center gap-1.5 text-body">
       <p className="text-ink-dim">
-        The <span className="text-ink">{meta.title.toLowerCase()}</span> is not built yet.
+        The <span className="text-ink">{meta.title.toLowerCase()}</span> is not part of this
+        release.
       </p>
-      <p className="text-label text-ink-dim/80">
-        {meta.blurb}. Arrives in <span className="font-mono">{meta.milestone}</span>.
-      </p>
+      <p className="text-label text-ink-dim/80">{meta.blurb}.</p>
     </div>
   );
 }
@@ -66,7 +71,7 @@ export function StageDetail({
           <button
             type="button"
             onClick={onFollow}
-            className="ml-auto rounded-md border border-accent/70 bg-accent/10 px-2.5 py-1 text-micro text-ink transition-colors hover:bg-accent/20"
+            className="ml-auto rounded-md border border-accent/70 bg-accent/10 px-2.5 py-1 text-label text-ink transition-colors hover:bg-accent/20"
           >
             Pinned to {meta.title} — follow the trace
           </button>
@@ -138,7 +143,7 @@ export function StageDetail({
                   );
                 })}
               </ul>
-              <p className="text-micro leading-relaxed text-ink-dim">
+              <p className="text-label leading-relaxed text-ink-dim">
                 Volcano model: each operator pulls one row at a time from the one below
                 it. Nothing materialises the whole table — a row travels all the way to
                 the top before the next is fetched.

@@ -25,14 +25,14 @@ export function PredictionCard({ prompt, answer, onAnswer, onSkip }: PredictionC
       className="rounded-lg border border-accent/60 bg-accent/5 p-3"
     >
       <div className="mb-2 flex items-baseline gap-2">
-        <span className="rounded-full border border-accent/60 px-2 py-0.5 text-micro tracking-wide text-accent uppercase">
+        <span className="rounded-full border border-accent/60 px-2 py-0.5 text-label tracking-wide text-accent uppercase">
           predict
         </span>
         {!answered && (
           <button
             type="button"
             onClick={onSkip}
-            className="ml-auto text-micro text-ink-dim underline-offset-2 hover:underline"
+            className="ml-auto text-label text-ink-dim underline-offset-2 hover:underline"
           >
             skip
           </button>
@@ -85,7 +85,7 @@ export function PredictionCard({ prompt, answer, onAnswer, onSkip }: PredictionC
             {correct ? 'Right.' : 'Not quite.'}
           </p>
           <p className="text-label leading-relaxed text-ink-dim">{prompt.explanation}</p>
-          <p className="text-micro text-ink-dim/80">
+          <p className="text-label text-ink-dim/80">
             Press <kbd className="rounded border border-edge px-1">→</kbd> to see it happen.
           </p>
         </div>
