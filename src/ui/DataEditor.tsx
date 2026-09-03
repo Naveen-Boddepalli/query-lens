@@ -72,6 +72,13 @@ export function DataEditor({ table, onApply, onReset, onClose }: DataEditorProps
   };
 
   return (
+    // The onClick below dismisses on a backdrop click. jsx-a11y is right in
+    // general and wrong here: it is a mouse-only shortcut for something
+    // keyboard users already have two better routes to — Escape, handled
+    // natively by showModal(), and a focusable Close button that focus lands on
+    // when the dialog opens. Satisfying the rule would bind a second, redundant
+    // Escape handler and make the component worse.
+    // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-noninteractive-element-interactions
     <dialog
       ref={dialog}
       aria-label="Edit seed data"

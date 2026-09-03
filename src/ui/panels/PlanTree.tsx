@@ -4,10 +4,10 @@ import type { PlanNode } from '../../engine/index.ts';
 
 /** Access methods read warm; row-shaping operators read cool. */
 const TONES: Record<string, string> = {
-  Project: 'border-sky-400/60 bg-sky-400/10 text-sky-200',
-  Filter: 'border-amber-400/60 bg-amber-400/10 text-amber-200',
-  SeqScan: 'border-orange-400/60 bg-orange-400/10 text-orange-200',
-  IndexScan: 'border-emerald-400/60 bg-emerald-400/10 text-emerald-200',
+  Project: 'border-hue-sky/60 bg-hue-sky/10 text-hue-sky-ink',
+  Filter: 'border-hue-amber/60 bg-hue-amber/10 text-hue-amber-ink',
+  SeqScan: 'border-hue-orange/60 bg-hue-orange/10 text-hue-orange-ink',
+  IndexScan: 'border-hue-emerald/60 bg-hue-emerald/10 text-hue-emerald-ink',
 };
 
 function toFlow(node: PlanNode): FlowNode {

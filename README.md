@@ -6,29 +6,40 @@ An in-browser toy relational database engine that animates a SQL query as it mov
 A learning tool, not a production DB tool. See [plan.md](plan.md) for scope and
 [RESEARCH.md](RESEARCH.md) for the evidence the plan is built on.
 
-## Status: MVP complete, both P0 gates closed
+## Status: MVP complete, both gates through P0 and P1
 
 All eight pipeline stages are real, the run halts to ask you to predict before it reveals, the seed
 data is editable, and the whole thing is keyboard-driven and accessible. The *application* is done.
 
-**M8 and M9 — the two P0 gates that stood between it and a public URL — are now done.** The app runs
-its first trace on load, survives its own bugs with a copyable repro instead of a blank page, ships
-under a tested CSP, and carries a licence. What is left of those milestones is their P1 lists, which
-are the fortnight *after* launch by design.
+**M8 and M9 — the two gates that stood between it and a public URL — are done through P0 and P1.**
+The app runs its first trace on load, a link reproduces any moment in it, it survives its own bugs
+with a copyable repro instead of a blank page, and it ships under a tested CSP with a licence, CI, a
+bundle budget, an end-to-end smoke test and axe. What is left in either milestone is P2.
 
 [plan.md §14](plan.md#14-production-readiness--the-deploy-gate) was the deploy gate, from
 [RESEARCH.md Part II](RESEARCH.md#part-ii--production-readiness): ten P0 items, each of which fails
-silently if skipped. All ten are in. Two of its six done-checks cannot close until the URL is live —
-the securityheaders.com grade and the link-preview card both need something able to fetch the site —
-so [§14.6](plan.md#146-definition-of-done) marks those `[~]` with what *was* verified locally.
+silently if skipped, then a P1 list. All of both are in. Two of its six done-checks cannot close until
+the URL is live — the securityheaders.com grade and the link-preview card both need something able to
+fetch the site — so [§14.6](plan.md#146-definition-of-done) marks those `[~]` with what *was* verified
+locally.
 
 [plan.md §15](plan.md#15-uiux-readiness--the-comprehension-gate) was the comprehension gate, from
 [RESEARCH.md Part III](RESEARCH.md#part-iii--uiux-production-readiness), which drove the running app on
 desktop and phone and measured it. The verdict was *better built than it looks, worse composed than it
 is built*. All eight P0 items are in; the one done-check still open is the shareable URL, which §15.2
-puts in P1. Measuring rather than eyeballing paid for itself twice: the font-size sweep caught the SQL
-editor and React Flow's badge on top of the eight labels the audit had listed, and running the trace on
-load turned out to break React Flow's viewport fit in a way that only a transform readout showed.
+puts in P1 — and that is now done too. Measuring rather than eyeballing paid for itself repeatedly: the
+font-size sweep caught the SQL editor and React Flow's badge on top of the eight labels the audit had
+listed; running the trace on load turned out to break React Flow's viewport fit in a way only a
+transform readout showed; axe found that the SQL editor's real textbox had no accessible name; and the
+first contrast sweep reported 57 failures that were all bugs in the sweep.
+
+**The one estimate in the plan that was wrong** was §15.3's light theme — "a second block of values plus
+a toggle, not a redesign." True of the surface and ink tokens, false of the diagrams: 47 hardcoded
+Tailwind palette colours lived outside the token system, in `AstTree`, `PlanTree`, `stageMeta` and
+`LockPanel`, every one a `border-{hue}-400/60 bg-{hue}-400/10 text-{hue}-200` triple tuned for
+light-on-dark. **That groundwork is now done** — all 47 are semantic tokens, at values verified
+pixel-identical to Tailwind's so nothing moved on screen — which makes the plan's original claim true
+for whoever builds the theme. The theme itself is still open.
 
 **The other outstanding item is not code**: plan.md §9 step 4 asks for a post-test against a
 text-explanation control, with 5–10 target users. That experiment decides whether the format works,
@@ -49,8 +60,10 @@ pipeline that *looks* complete when it is not would teach the wrong thing.
 | M6 | Lock manager visual layer | ✅ done |
 | M6.5 | Predict-then-reveal + editable seed data | ✅ done |
 | M7 | Polish, a11y, deploy config | ✅ done |
-| M8 | **Production readiness — the deploy gate (plan.md §14)** | ✅ P0 done · P1 open |
-| M9 | **UI/UX readiness — the comprehension gate (plan.md §15)** | ✅ P0 done · P1 open |
+| M8 | **Production readiness — the deploy gate (plan.md §14)** | ✅ P0 + P1 done |
+| M9 | **UI/UX readiness — the comprehension gate (plan.md §15)** | ✅ P0 + P1 done |
+| — | Light theme (plan.md §15.3, P2) — tokens done, palette + toggle open | ⬜ open |
+| — | Undo for row deletion (plan.md §15.3, P2) | ⬜ open |
 | — | **Validation post-test with real users (plan.md §9)** | ⬜ your call |
 
 Two things are worth knowing before the first deploy:
@@ -66,11 +79,23 @@ Two things are worth knowing before the first deploy:
 ```bash
 pnpm install
 pnpm dev        # http://localhost:5173
-pnpm test       # vitest
+pnpm test       # vitest — 326 unit tests
 pnpm typecheck  # tsc -b
-pnpm lint       # eslint
+pnpm lint       # eslint, including jsx-a11y
 pnpm build      # tsc -b && vite build
+pnpm budget     # gzip budget over dist/ — run after build
+pnpm test:e2e   # playwright against the built output, including axe
 ```
+
+CI runs exactly that sequence. `pnpm test:e2e` needs a browser once:
+`pnpm exec playwright install chromium`.
+
+**Adding a dependency trips the release-age floor.** `minimumReleaseAge: 10080` is a resolution-time
+rule and pnpm re-resolves every direct dependency when package.json changes, so `pnpm add` fails on
+whichever *existing* pins happen to be under a week old. `--frozen-lockfile` is unaffected, which is
+why CI never sees this. Check the age of what you are actually adding, then run the one-off as
+`pnpm install --config.minimumReleaseAge=0` — do not weaken the committed setting, and do not start an
+exclude list, which becomes unbounded the moment a transitive dependency trips it too.
 
 ## Architecture
 
@@ -271,6 +296,30 @@ Prediction is **on by default** — the evidence says it is what teaches — wit
 off, and a per-prompt skip. Scrubbing is deliberately never blocked: a prompt should not trap
 someone who wants to jump elsewhere in the trace.
 
+## Shareable links
+
+The address bar holds the moment on screen: the query, the eviction policy, whether prediction is on,
+the step index, and — only when you have edited them — the rows. So a link reproduces a *state*, not a
+home page.
+
+```
+?q=SELECT%20*%20FROM%20users%20WHERE%20id%20%3D%205%3B&p=clock&x=1&s=13
+```
+
+Three things this buys, all of them named in plan.md: [§9](plan.md#9-validation-strategy-before-building-breadth)'s
+study can start every participant identically; [§13](plan.md#13-future-directions-post-v1-not-committed)'s
+course packaging can set "predict what happens at step 13" as homework; and a refresh no longer discards
+an edited dataset.
+
+Opening a link at step 13 marks the prompts *before* it as skipped and leaves the one *at* it pending —
+those earlier questions were never put to this reader, so arming their gates would freeze playback on
+something they have not seen. The link is the question.
+
+It is also the only input this app takes from a stranger, so `urlState.ts` parses it defensively: caps
+on query length, row count and string length, and a dataset that does not match the table schema is
+dropped whole rather than patched. A half-restored table would render a trace that is a lie, which is
+the one thing [plan.md §2](plan.md#2-goals-and-non-goals) says this product must never do.
+
 ## Editable seed data
 
 "Construct their own input data sets" is named explicitly in the condition that beat both text and a
@@ -339,7 +388,80 @@ console by the global handlers.
 
 The licence is [MIT](LICENSE).
 
-## Decisions made during M8/M9
+## Testing
+
+| Layer | What it covers |
+|---|---|
+| `pnpm test` | 326 tests over the engine (parser, planner, buffer pool, B+Tree, executor, locks) and the UI (playback gating, keyboard shortcuts, the data editor, URL state, the error boundary) |
+| `pnpm test:e2e` | Four Playwright tests against **`dist/`** — the load→run→step→result path, a shared link, the data editor's real modality, and axe |
+| `pnpm budget` | A gzip ceiling per chunk and overall, so the bundle cannot drift back silently |
+
+The end-to-end suite is the only thing that catches "the deploy is broken", and it is where three
+checks live that nothing else can make: a **trusted** Escape key against a native `<dialog>` (jsdom
+implements none of the dialog methods, and a CDP-injected key press cannot raise a browser-level close
+request), axe's contrast analysis, and "the built page logged no console errors".
+
+Two things automated tests here deliberately do *not* claim:
+
+- **Accessibility conformance.** axe catches 30–57% of WCAG failures. The real check is the manual
+  composited-contrast sweep — last run across five views at 62–129 elements each, 0 failures, minimum
+  5.29:1 — repeated at every visual change, not annually.
+- **INP.** `stepLatency.test.ts` pins the half that can regress silently: that the fold memoises and
+  never re-folds. React's render and React Flow's layout need field data from real hardware
+  ([plan.md §14.2](plan.md#142-p1--the-fortnight-after-launch-before-the-9-study)).
+
+## Decisions made during M8/M9 — P1
+
+- **The bundle split is for caching, not for first paint.** plan.md §14.2 wanted the panels lazy-loaded
+  behind Run because React Flow "renders nothing until Run" — which §15.1 item 1 then made false by
+  running the trace on load. Deferring the AST tree would now trade a measured comprehension win for a
+  smaller number, so the split went to four cacheable chunks instead: a returning visitor re-downloads
+  the ~24 kB app chunk rather than 264 kB. The gzip budget shipped as written and is the durable half.
+- **The step-latency test asserts memoisation by reference identity, not by a stopwatch.** Timing
+  assertions on a shared CI runner measure the runner. `at(k) === at(k)` cannot flake and fails for
+  exactly the reason that matters — the fold stopped memoising.
+- **URL state is parsed as hostile input.** It is the one value this app takes from a stranger. A
+  dataset that does not match the schema is dropped whole rather than patched, because a half-restored
+  table renders a trace that is a lie — which is the one thing plan.md §2 says this product must never
+  do.
+- **A shared link marks earlier prompts skipped and leaves its own pending.** Opening at step 13 means
+  the questions before it were never put to *this* reader; arming their gates would freeze playback on
+  something they have not seen. The question *at* 13 is the moment the link points at, so it still gets
+  asked.
+- **The prompt moved out of the authoring column.** plan.md §15.2 offered "forcing the stage panel to
+  the stage the question is about" as the cheaper half. Doing both halves cost one JSX move and puts the
+  prompt directly under the diagram — which is what the spatial-contiguity result (g = 0.63 over 58
+  comparisons) is actually about.
+- **The panel fills its column instead of being frozen at `27rem`.** The original comment was right that
+  the controls must not move mid-step and wrong about the remedy: taking the height from the viewport is
+  stable for the same reason, without letterboxing a large monitor or eating half a phone.
+- **Mobile ordering is CSS, not a second layout.** `order-1`/`lg:order-2` puts the trace before the
+  editor on a phone and after it on a desktop, so there is one DOM and one set of components.
+- **The SQL editor's accessible name is set through `EditorView.contentAttributes`.** The label had been
+  on the wrapper `div`, which also carried `role="textbox"` — so the page had two nested textboxes and
+  the one a screen reader actually lands in, CodeMirror's `contenteditable`, was unnamed. axe found it.
+- **jsx-a11y's two findings on the backdrop click are suppressed with a reason, not silenced.** Escape
+  is handled natively and focus lands on a real Close button; adding a key handler to satisfy the rule
+  would bind a second, redundant Escape and make the component worse.
+- **The release-age floor is a resolution-time rule, and that has a cost.** `pnpm add` re-resolves every
+  direct dependency, so it fails on existing pins that happen to be under a week old — eight were. The
+  fix is a per-command `--config.minimumReleaseAge=0` after checking what you are adding, not a
+  permanent exclude list, which becomes unbounded the moment a transitive dependency trips it too.
+- **The diagram colours are tokens now, at unchanged values.** §15.3 assumed a light theme was a token
+  swap; 47 hardcoded Tailwind palette classes in the four diagram renderers said otherwise. They are now
+  five `--color-hue-*`/`-ink` pairs plus eight `--color-stage-*` accents. Two scales, not one, because
+  the tracker labels a chip and the diagrams label a node, and merging them would make the two disagree
+  about what "the parse colour" is. Named by hue rather than by role: the same sky is a
+  `SelectStatement` in the AST and a `Project` in the plan, so naming it for either would lie about the
+  other. Verified as a no-op — all 18 tokens pixel-identical to Tailwind's values, and the contrast
+  sweep unchanged at 5.29:1 across five views.
+- **The contrast sweep was wrong before it was right.** Its first run reported 57 failures; all 57 were
+  its own bugs — parsing `oklch()` as `rgb()`, and hardcoding composited alpha to 1 so a translucent
+  stack fell through to white. Corrected, it reproduces the recorded 5.29:1 baseline exactly across
+  every view. A contrast tool that has not been checked against a known-good page is a random number
+  generator.
+
+## Decisions made during M8/M9 — P0
 
 - **Every GitHub Action is pinned to a 40-char commit SHA**, with the tag in a trailing comment as
   documentation only. Mutable tags are how `tj-actions/changed-files` and `trivy-action` exfiltrated

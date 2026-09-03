@@ -48,6 +48,14 @@ export function CodeMirrorEditor({
         doc: value,
         extensions: [
           ...extensions,
+          // The name has to go on CodeMirror's own contenteditable, which is
+          // the element that actually carries role="textbox". Labelling the
+          // host div instead left the real input unnamed — axe caught it
+          // (aria-input-field-name), and a screen reader would have announced
+          // the editor as an unlabelled text box.
+          ...(ariaLabel === undefined
+            ? []
+            : [EditorView.contentAttributes.of({ 'aria-label': ariaLabel })]),
           EditorView.updateListener.of((update) => {
             if (update.docChanged) onChangeRef.current(update.state.doc.toString());
           }),
@@ -64,7 +72,7 @@ export function CodeMirrorEditor({
     };
     // `value` is intentionally read only as the initial document.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [extensions, viewRef]);
+  }, [extensions, viewRef, ariaLabel]);
 
   useEffect(() => {
     const view = ownViewRef.current;
@@ -74,5 +82,7 @@ export function CodeMirrorEditor({
     view.dispatch({ changes: { from: 0, to: current.length, insert: value } });
   }, [value]);
 
-  return <div ref={hostRef} className={className} role="textbox" aria-label={ariaLabel} />;
+  // A plain wrapper: CodeMirror renders the labelled textbox inside it, and a
+  // second role="textbox" out here would nest two of them.
+  return <div ref={hostRef} className={className} />;
 }

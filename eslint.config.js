@@ -1,5 +1,6 @@
 import js from '@eslint/js';
 import globals from 'globals';
+import jsxA11y from 'eslint-plugin-jsx-a11y';
 import reactHooks from 'eslint-plugin-react-hooks';
 import reactRefresh from 'eslint-plugin-react-refresh';
 import tseslint from 'typescript-eslint';
@@ -14,6 +15,10 @@ export default tseslint.config([
       tseslint.configs.recommendedTypeChecked,
       reactHooks.configs.flat['recommended-latest'],
       reactRefresh.configs.vite,
+      // plan.md §14.2. A regression net over the accessibility work already
+      // done, not a compliance claim: automated tooling catches 30–57% of WCAG
+      // failures (§8), so the manual contrast sweep stays the real check.
+      jsxA11y.flatConfigs.recommended,
     ],
     languageOptions: {
       ecmaVersion: 2022,

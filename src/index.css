@@ -18,6 +18,51 @@
   --color-node-internal: oklch(0.75 0.15 340);
   --color-node-leaf: oklch(0.78 0.15 150);
 
+  /* Diagram hues (plan.md §15.3 groundwork).
+     ------------------------------------------------------------------
+     These were 47 hardcoded Tailwind palette classes spread across
+     AstTree, PlanTree, stageMeta and LockPanel — every one a
+     `border-{hue}-400/60 bg-{hue}-400/10 text-{hue}-200` triple tuned
+     for light-on-dark. §15.3 assumed a light theme was "a second block
+     of values plus a toggle"; it was not, because none of these were
+     tokens and all of them invert. They are tokens now, so that claim
+     becomes true.
+
+     Two per hue, because the roles do not move together: `-line` reads
+     against either background and carries borders and fills, while
+     `-ink` is the label and is the half that has to flip. Values are
+     Tailwind's 400 and 200 verbatim, so this refactor changes nothing
+     on screen — deliberately. The light values go in a second block
+     when the theme is built.
+
+     Named by hue rather than by role: the same sky is a SelectStatement
+     in the AST and a Project in the plan, and naming it for either
+     would be a lie about the other. */
+  --color-hue-sky: oklch(74.6% 0.16 232.661);
+  --color-hue-sky-ink: oklch(90.1% 0.058 230.902);
+  --color-hue-violet: oklch(70.2% 0.183 293.541);
+  --color-hue-violet-ink: oklch(89.4% 0.057 293.283);
+  --color-hue-amber: oklch(82.8% 0.189 84.429);
+  --color-hue-amber-ink: oklch(92.4% 0.12 95.746);
+  --color-hue-emerald: oklch(76.5% 0.177 163.223);
+  --color-hue-emerald-ink: oklch(90.5% 0.093 164.15);
+  --color-hue-orange: oklch(75% 0.183 55.934);
+  --color-hue-orange-ink: oklch(90.1% 0.076 70.697);
+
+  /* The pipeline tracker's per-stage accents. A separate scale from the
+     pair above (Tailwind's 300, one step darker than an `-ink`) because
+     they label a chip rather than a node, and mixing the two would make
+     the tracker and the diagrams disagree about what "the parse colour"
+     is. One token per stage, matching STAGE_META. */
+  --color-stage-parse: oklch(82.8% 0.111 230.318);
+  --color-stage-plan: oklch(81.1% 0.111 293.571);
+  --color-stage-optimize: oklch(83.3% 0.145 321.434);
+  --color-stage-execute: oklch(87.9% 0.169 91.605);
+  --color-stage-buffer: oklch(84.5% 0.143 164.978);
+  --color-stage-index: oklch(82.3% 0.12 346.018);
+  --color-stage-lock: oklch(83.7% 0.128 66.29);
+  --color-stage-result: oklch(86.5% 0.127 207.078);
+
   --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
 
   /* plan.md §15.1 item 7. Tailwind stops at text-xs (0.75rem), so every label

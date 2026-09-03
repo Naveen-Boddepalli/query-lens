@@ -19,7 +19,7 @@ export function LockPanel({ locks, taken }: LockPanelProps) {
           {locks.map((lock) => (
             <li
               key={`${String(lock.pageId)}-${lock.mode}`}
-              className="flex items-baseline justify-between rounded-md border border-orange-400/60 bg-orange-400/10 px-2.5 py-1.5 font-mono text-xs text-orange-200"
+              className="flex items-baseline justify-between rounded-md border border-hue-orange/60 bg-hue-orange/10 px-2.5 py-1.5 font-mono text-xs text-hue-orange-ink"
             >
               <span>🔒 page {lock.pageId}</span>
               <span className="text-3xs tracking-wide uppercase opacity-80">{lock.mode}</span>

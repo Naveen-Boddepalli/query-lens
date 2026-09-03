@@ -3,7 +3,9 @@
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo",
     "target": "ES2023",
     "lib": [
-      "ES2023"
+      "ES2023",
+      "DOM",
+      "DOM.Iterable"
     ],
     "module": "ESNext",
     "moduleResolution": "bundler",
@@ -24,6 +26,8 @@
   "include": [
     "vite.config.ts",
     "eslint.config.js",
-    "scripts/**/*.ts"
+    "playwright.config.ts",
+    "scripts/**/*.ts",
+    "e2e/**/*.ts"
   ]
 }

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   createSeedDatabase,
   createTraceProjector,
@@ -28,6 +28,12 @@ import { RUN_HINT, useIsTouch } from './ui/platform.ts';
 import { StageDetail } from './ui/panels/StageDetail.tsx';
 import { STAGE_META } from './ui/stageMeta.ts';
 import { usePlayback, usePlaybackShortcuts } from './ui/usePlayback.ts';
+import {
+  encodeShareState,
+  readShareState,
+  skippedAnswersBefore,
+  writeShareState,
+} from './ui/urlState.ts';
 
 // plan.md §9's first query: the indexed point lookup. Swap the WHERE for
 // `age > 30` to watch the same table read by a sequential scan instead.
@@ -49,25 +55,54 @@ function landingStep(result: RunResult, predictOn: boolean): number {
   return predictOn && result.events[0]?.predictable !== undefined ? 0 : 1;
 }
 
+/**
+ * The moment this tab opened on (plan.md §8, §15.2), read once at module load.
+ *
+ * Everything below is derived from it rather than from constants, so a shared
+ * link and a cold start take exactly the same path through the app — there is
+ * no second "restore" code path that can drift from the first.
+ */
+const SEED = createSeedDatabase();
+const SHARED = readShareState(
+  typeof location === 'undefined' ? '' : location.search,
+  SEED.tables[TABLE]?.columns ?? [],
+);
+
+const START = {
+  sql: SHARED.sql ?? INITIAL_SQL,
+  policy: SHARED.policy ?? DEFAULT_ENGINE_OPTIONS.policy,
+  predictOn: SHARED.predictOn ?? true,
+  db: ((): Database => {
+    const table = SEED.tables[TABLE];
+    if (!SHARED.rows || !table) return SEED;
+    return { tables: { ...SEED.tables, [TABLE]: { ...table, rows: SHARED.rows } } };
+  })(),
+};
+
 // plan.md §15.1 item 1. Everything the first trace needs is deterministic and
 // already here, so the app can open on it rather than on an empty box that is
 // 53% of a phone viewport and teaches nothing.
-const INITIAL_RESULT = runQuery(INITIAL_SQL, createSeedDatabase(), DEFAULT_ENGINE_OPTIONS);
+const INITIAL_RESULT = runQuery(START.sql, START.db, {
+  ...DEFAULT_ENGINE_OPTIONS,
+  policy: START.policy,
+});
 
 export default function App() {
-  const [sql, setSql] = useState(INITIAL_SQL);
-  const [policy, setPolicy] = useState<ReplacementPolicyName>('lru');
+  const [sql, setSql] = useState(START.sql);
+  const [policy, setPolicy] = useState<ReplacementPolicyName>(START.policy);
   const [pinnedStage, setPinnedStage] = useState<Stage | null>(null);
-  const [db, setDb] = useState<Database>(createSeedDatabase);
+  const [db, setDb] = useState<Database>(START.db);
   const [editingData, setEditingData] = useState(false);
   // Only so a crash report can say whether the rows are worth including.
-  const [rowsEdited, setRowsEdited] = useState(false);
+  const [rowsEdited, setRowsEdited] = useState(SHARED.rows !== undefined);
   const [result, setResult] = useState<RunResult>(INITIAL_RESULT);
 
   // Prediction is on by default: RESEARCH.md §1 is that the prompts are what
   // teach. A toggle, not a trap, for anyone who just wants to watch.
-  const [predictOn, setPredictOn] = useState(true);
-  const [answers, setAnswers] = useState<Record<number, string>>({});
+  const [predictOn, setPredictOn] = useState(START.predictOn);
+  const [answers, setAnswers] = useState<Record<number, string>>(() =>
+    skippedAnswersBefore(INITIAL_RESULT.events, SHARED.step ?? 0),
+  );
 
   const options = useMemo(() => ({ ...DEFAULT_ENGINE_OPTIONS, policy }), [policy]);
   const table = db.tables[TABLE];
@@ -94,7 +129,8 @@ export default function App() {
   const playback = usePlayback(result.events.length, {
     dwells,
     gates,
-    initialStep: landingStep(INITIAL_RESULT, true),
+    // A link names its own step; a cold start lands on 1 (plan.md §15.1 item 2).
+    initialStep: SHARED.step ?? landingStep(INITIAL_RESULT, START.predictOn),
   });
   // The data editor is a modal: its own Escape and Tab handling should not be
   // competing with ←/→/Space stepping a trace nobody can see behind it.
@@ -112,7 +148,11 @@ export default function App() {
     return seen;
   }, [result, playback.step]);
 
-  const activeStage = pinnedStage ?? state?.stage ?? null;
+  // A pinned stage always wins; otherwise the panel follows the question when
+  // one is pending, and the last applied event when one is not. The cheap half
+  // of plan.md §15.2's spatial-contiguity fix: a prompt about an eviction is
+  // useless while the parser is on screen.
+  const activeStage = pinnedStage ?? (prompt ? upcoming?.stage : undefined) ?? state.stage ?? null;
 
   const activeSpan: Span | undefined =
     state?.lastEvent?.stage === 'parse' ? state.lastEvent.span : undefined;
@@ -128,6 +168,46 @@ export default function App() {
     rows: table?.rows ?? [],
     rowsEdited,
   });
+
+  /**
+   * Keep the address bar pointing at the moment on screen (plan.md §15.2).
+   *
+   * Debounced, because this also runs on every SQL keystroke and browsers rate-
+   * limit history writes. `replaceState` rather than `pushState`, so stepping a
+   * 33-event trace does not bury the previous page under 33 history entries.
+   */
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      writeShareState(
+        encodeShareState(
+          {
+            sql,
+            policy,
+            predictOn,
+            step: playback.step,
+            // The seed set is reproducible from the code; only a customised
+            // table earns 2 kB of URL.
+            ...(rowsEdited && table ? { rows: table.rows } : {}),
+          },
+          table,
+        ),
+      );
+    }, 250);
+    return () => { window.clearTimeout(timer); };
+  }, [sql, policy, predictOn, playback.step, rowsEdited, table]);
+
+  const [copied, setCopied] = useState(false);
+  async function copyLink() {
+    try {
+      await navigator.clipboard.writeText(location.href);
+      setCopied(true);
+      window.setTimeout(() => { setCopied(false); }, 2000);
+    } catch {
+      // Clipboard permission can be refused. The URL is the source of truth
+      // either way, so say where it is rather than failing silently.
+      setCopied(false);
+    }
+  }
 
   const run = useCallback(
     (database: Database = db) => {
@@ -176,7 +256,8 @@ export default function App() {
       </header>
 
       <main className="grid flex-1 gap-4 p-4 lg:grid-cols-[minmax(300px,400px)_1fr]">
-        <div className="space-y-3">
+        {/* Authoring. Deliberately after the trace in phone reading order. */}
+        <div className="order-2 flex flex-col gap-3 lg:order-1">
           <SqlEditor
             value={sql}
             onChange={setSql}
@@ -216,16 +297,27 @@ export default function App() {
           {/* plan.md §15.1 item 2: the trace length belongs next to the button
               that built it. The counter in the playback row is on the other
               side of the screen, and 12px of it moving is not feedback. */}
-          <p className="text-2xs text-ink-dim">
-            {result.error ? (
-              <span className="text-evict">The query did not run — see the editor above.</span>
-            ) : (
-              <>
-                {result.events.length} steps in this trace · showing step{' '}
-                <span className="tabular-nums text-ink">{playback.step}</span>
-              </>
-            )}
-          </p>
+          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-2xs text-ink-dim">
+            <p>
+              {result.error ? (
+                <span className="text-evict">The query did not run — see the editor above.</span>
+              ) : (
+                <>
+                  {result.events.length} steps in this trace · showing step{' '}
+                  <span className="tabular-nums text-ink">{playback.step}</span>
+                </>
+              )}
+            </p>
+            {/* The address bar already holds the moment, but nobody looks there
+                — and on a phone it is usually hidden entirely. */}
+            <button
+              type="button"
+              onClick={() => { void copyLink(); }}
+              className="ml-auto underline-offset-2 transition-colors hover:text-ink hover:underline"
+            >
+              {copied ? 'Link copied ✓' : 'Copy link to this step'}
+            </button>
+          </div>
 
           <label className="flex items-center gap-2 text-xs text-ink-dim">
             <input
@@ -237,30 +329,11 @@ export default function App() {
             Ask me to predict before each reveal
           </label>
 
-          {prompt && upcoming ? (
-            <PredictionCard
-              prompt={prompt}
-              answer={answers[upcoming.id]}
-              onAnswer={(optionId) => {
-                setAnswers((current) => ({ ...current, [upcoming.id]: optionId }));
-              }}
-              onSkip={() => {
-                setAnswers((current) => ({ ...current, [upcoming.id]: '' }));
-              }}
-            />
-          ) : (
-            <div className="rounded-lg border border-edge bg-surface-2 p-3">
-              <h2 className="mb-1 text-xs font-medium text-ink-dim">Narration</h2>
-              {/* Announced as it changes: stepping is the primary interaction,
-                  and a screen reader user needs to hear what each step did. */}
-              <p className="min-h-10 text-sm leading-relaxed" aria-live="polite">
-                {state.narration || 'Step forward to start the trace.'}
-              </p>
-            </div>
-          )}
         </div>
 
-        <div className="space-y-4">
+        {/* The trace. First on a phone: people open links on one, and nobody
+            writes SQL there (plan.md §15.2, "mobile as read-first"). */}
+        <div className="order-1 flex min-h-0 flex-col gap-4 lg:order-2">
           <PipelineTracker
             current={state?.stage ?? null}
             visited={visited}
@@ -268,9 +341,13 @@ export default function App() {
             onSelect={(s) => { setPinnedStage((prev) => (prev === s ? null : s)); }}
           />
 
-          {/* Fixed height on purpose: if the panel resizes with its content, the
-              playback controls below it move out from under the cursor mid-step. */}
-          <div className="h-[27rem] overflow-hidden rounded-lg border border-edge bg-surface-2 p-4">
+          {/* plan.md §15.2. The old fixed `h-[27rem]` was right that the controls
+              must not move mid-step and wrong that freezing the panel is how:
+              it letterboxed a 1440×900 monitor and ate half a phone. Filling the
+              column instead is stable for the same reason — the height comes
+              from the viewport, not from what the current step happens to
+              render — while actually using the screen it is given. */}
+          <div className="max-h-[60dvh] min-h-80 flex-1 overflow-hidden rounded-lg border border-edge bg-surface-2 p-4 lg:max-h-none">
             {activeStage ? (
               /* A panel-scoped boundary, so one broken renderer costs the user
                  that stage rather than the trace they were part-way through.
@@ -293,13 +370,44 @@ export default function App() {
               <p className="text-sm text-ink-dim">
                 {result.error
                   ? 'Fix the query above and run it again to build a trace.'
-                  : 'Answer the question on the left to reveal the first step.'}
+                  : 'Answer the question below to reveal the first step.'}
               </p>
             )}
           </div>
 
-          <PlaybackControls playback={playback} length={result?.events.length ?? 0} />
-          <ShortcutHints />
+          {/* Directly under the panel it is about (plan.md §8, §15.2): the
+              spatial-contiguity effect is g = 0.63 over 58 comparisons, the
+              same order as the effect that justified building prediction at
+              all, and asking "which child pointer?" with the buffer pool on
+              screen hands it straight back. */}
+          {prompt && upcoming ? (
+            <PredictionCard
+              prompt={prompt}
+              answer={answers[upcoming.id]}
+              onAnswer={(optionId) => {
+                setAnswers((current) => ({ ...current, [upcoming.id]: optionId }));
+              }}
+              onSkip={() => {
+                setAnswers((current) => ({ ...current, [upcoming.id]: '' }));
+              }}
+            />
+          ) : (
+            <div className="rounded-lg border border-edge bg-surface-2 p-3">
+              <h2 className="mb-1 text-xs font-medium text-ink-dim">Narration</h2>
+              {/* Announced as it changes: stepping is the primary interaction,
+                  and a screen reader user needs to hear what each step did. */}
+              <p className="min-h-10 text-sm leading-relaxed" aria-live="polite">
+                {state.narration || 'Step forward to start the trace.'}
+              </p>
+            </div>
+          )}
+
+          {/* Sticky on a phone, so the control you press every few seconds stays
+              in thumb reach while the trace scrolls under it. */}
+          <div className="sticky bottom-0 z-10 -mx-4 space-y-2 border-t border-edge bg-surface/95 px-4 py-2 backdrop-blur lg:static lg:mx-0 lg:space-y-4 lg:border-0 lg:bg-transparent lg:px-0 lg:py-0 lg:backdrop-blur-none">
+            <PlaybackControls playback={playback} length={result.events.length} />
+            <ShortcutHints />
+          </div>
         </div>
       </main>
 

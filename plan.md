@@ -303,12 +303,17 @@ This event stream is the single contract between engine and UI — makes the UI 
 | M6.5 | Predict-then-reveal layer + editable seed-data grid | 1 week |
 | M7 | Polish: playback controls, a11y (reduced-motion, keyboard), disclaimer, styling, demo-ready | 1-2 weeks |
 | **MVP complete** | Full pipeline for indexed point lookup **+ sequential-scan contrast** (§9) | **~10-14 weeks part-time** |
-| M8 | **Production readiness — the deploy gate (§14):** CI, error boundary, security headers, licence, supply-chain settings, link preview | ~1 day (P0) + 2-3 days (P1) |
-| M9 | **UI/UX readiness (§15):** first-run trace, Run feedback, native dialog, shareable URL, prompt placement, responsive height, light theme | ~1 day (P0) + 2-3 days (P1) |
+| M8 | **Production readiness — the deploy gate (§14):** CI, error boundary, security headers, licence, supply-chain settings, link preview | ~1 day (P0) + 2-3 days (P1) — **both done** |
+| M9 | **UI/UX readiness (§15):** first-run trace, Run feedback, native dialog, shareable URL, prompt placement, responsive height | ~1 day (P0) + 2-3 days (P1) — **both done** |
 | v1 | Expand SQL coverage: joins, cost estimates, InnoDB midpoint-LRU as a third policy | Post-MVP |
 
 M8 sits between "the app works" and "the URL is public." It is not polish — every item on the P0 list in
 §14 fails *silently* if skipped, which is why it gets its own gate rather than being folded into M7.
+
+**Both gates are through P0 and P1.** What is left in either is P2: the light theme (§15.3, whose
+estimate this document had wrong — see the note there), undo for row deletion, and the standing
+obligation to re-run the contrast sweep at each visual change. Two of §14.6's checks stay open until
+the URL is live, because nothing can fetch the site before it exists.
 
 ---
 
@@ -403,23 +408,52 @@ Roughly one focused day. Each of these fails *silently* if skipped, which is why
 
 ### 14.2 P1 — the fortnight after launch, before the §9 study
 
-- **Split the bundle.** One 807 kB chunk (261 kB gzip) today. CodeMirror (~120 kB gzip) is needed at first
-  paint; React Flow + d3-hierarchy (~62 kB gzip) render nothing until Run. Lazy-load the panels behind Run
-  via `build.rolldownOptions`, and **put a gzip budget in CI** so the number cannot drift back.
-- **Measure INP before optimising it.** Core Web Vitals pass at LCP < 2.5 s, **INP < 200 ms**, CLS < 0.1 at
-  the 75th percentile of field data, and INP is the most-failed vital of 2026. Stepping the trace re-folds
-  events and re-lays-out a React Flow graph inside one keypress-to-paint — the interaction the product is
-  built around is *literally* an INP measurement. `createTraceProjector` memoises, so it may well be fine:
-  assert step latency in a test rather than guessing.
-- **UI tests.** All 13 test files are engine-side; `@testing-library/react`, jsdom and `src/test/setup.ts`
-  are installed, wired and **unused**. Cover the gate array (prediction blocks advancement, answering
-  unblocks, step-back never re-locks), the keyboard shortcuts, and the data editor's type preservation.
+**Status: done, with one item's premise corrected by §15.1.**
+
+- ~~**Split the bundle.**~~ **Done differently, on purpose.** The item assumed React Flow and
+  d3-hierarchy "render nothing until Run" — which stopped being true the moment §15.1 item 1 made the
+  app run its first trace on load. The AST tree *is* first paint now, so lazy-loading it would trade a
+  measured comprehension win for a smaller number. What shipped instead is a split for **caching**:
+  four chunks (codemirror 116 kB, flow 61 kB, react 54 kB, app 24 kB gzip) so a returning visitor
+  re-downloads the ~24 kB that actually changed rather than 264 kB. The durable half of the item —
+  **a gzip budget in CI** — shipped as written (`scripts/bundle-budget.ts`, `pnpm budget`).
+- **Measure INP before optimising it.** ✅ *as far as it can be measured off-device.*
+  `src/engine/__tests__/stepLatency.test.ts` pins the half that can regress silently: the fold memoises
+  (asserted by reference identity, not by timing), walking backwards after walking forwards re-folds
+  nothing, and a full walk of the longest trace stays inside a single interaction's budget. React's
+  render and React Flow's layout are the other half and jsdom timings for them would be fiction — those
+  still need field data from real hardware, which is what this item said to collect *before* optimising.
+- **UI tests.** ✅ Four new files, 45 tests. The gate array (blocks, unblocks, never re-locks on the way
+  back, does not trap a scrubber), the keyboard shortcuts including the `code`-not-`key` space bar and
+  the disabled-while-modal case, the data editor's modality and type preservation, and the URL state's
+  round trip plus every way a hostile link can be malformed. Two of these caught real defects while
+  being written: Testing Library's cleanup was never registered (no `globals: true`), and jsdom 30
+  implements none of the `<dialog>` methods.
 - **One Playwright smoke test** against the built output: load → Run → step to end → assert result rows.
   This is the only test that catches "the deploy is broken."
-- **axe in CI + `eslint-plugin-jsx-a11y`.** A regression net for the contrast work already done — not a
-  compliance claim, since automated tooling catches 30–57% of WCAG failures (§8).
-- **Renovate or Dependabot**, grouped and scheduled, which pairs correctly with a 7-day release-age floor.
-- **Settle the telemetry question** (§14.4) and write the answer into the README either way.
+- **axe in CI + `eslint-plugin-jsx-a11y`.** ✅ Both. axe runs inside the Playwright suite against the
+  built page (wcag2a/2aa/21a/21aa) and reports zero violations; jsx-a11y runs in `pnpm lint`. Each
+  found one real defect on its first run: axe caught that the SQL editor's actual `role="textbox"` —
+  CodeMirror's `contenteditable`, not the wrapper the label was on — had no accessible name, and
+  jsx-a11y caught the data editor's backdrop-click handler. Still a regression net, not a compliance
+  claim: automated tooling catches 30–57% of WCAG failures (§8).
+  **Note:** `eslint-plugin-jsx-a11y@6.10.2` declares a peer range ending at ESLint 9 and this project
+  is on ESLint 10. It loads and its rules run correctly; the range is stale metadata, not a conflict.
+- **Renovate or Dependabot**, grouped and scheduled. ✅ `.github/dependabot.yml` — weekly npm batches
+  grouped by what breaks together (CodeMirror, React, dev), monthly for the SHA-pinned actions, which is
+  exactly the case a human never re-resolves by hand.
+- **Settle the telemetry question** (§14.4) and write the answer into the README either way. ✅ Shipped
+  with none, and the README says so under *Deploying*.
+
+**One thing the release-age floor cost, worth knowing before the next `pnpm add`.** `minimumReleaseAge:
+10080` is a *resolution-time* rule, and pnpm re-resolves every direct dependency whenever package.json
+changes — so adding any package fails on whichever existing pins happen to be under a week old
+(eight were). `--frozen-lockfile` is unaffected, which is why CI never sees it. The fix is not to
+weaken the floor or to accumulate `minimumReleaseAgeExclude` entries, which would be unbounded once a
+transitive dependency trips it too: run the one-off as
+`pnpm install --config.minimumReleaseAge=0` **after checking the ages of what you are actually adding**.
+The floor's real job — stopping a fresh release being adopted silently — is done by the error itself,
+which appears exactly when a human is at the keyboard.
 
 ### 14.3 The security headers, tested rather than assumed
 
@@ -531,27 +565,63 @@ Under a day, and each one was measured rather than guessed.
 
 ### 15.2 P1 — the fortnight after launch, before the §9 study
 
-- **Shareable URL state** — query, policy, predict on/off, step index; seed rows only when customised.
-  This is the biggest missing *feature*, not a polish item: §9 wants every participant to start
-  identically, §13's course packaging wants "predict what happens at step 13" to be a link, and a refresh
-  currently discards an edited dataset with no warning.
-- **Put the prompt against its panel** — anchored to the buffer grid for an eviction question, to the tree
-  for a traversal one. The prompt currently recites node keys in words because the tree is not on screen;
-  the cheaper half of this fix is simply forcing the stage panel to the stage the question is about.
-- **Responsive height** — replace the fixed `h-[27rem]` with a `min-height` plus a control row that holds
-  its position. The current comment is right that controls must not move mid-step and wrong that freezing
-  the panel is the way: it letterboxes a 1440×900 monitor and eats half a phone.
-- **Mobile as read-first** — nobody writes SQL on a phone, but people open links on one. Trace on load,
-  step controls in thumb reach, authoring gracefully secondary.
+**Status: done.**
+
+- **Shareable URL state** ✅ `src/ui/urlState.ts`. Query, policy, predict on/off and step index ride in
+  the address bar; edited rows travel as arrays of values rather than repeated objects, and only when
+  they differ from the seed. `replaceState`, never `pushState` — stepping a 33-event trace would
+  otherwise bury the previous page under 33 history entries — debounced, because it also fires on every
+  keystroke. Opening a link at step 13 marks the prompts *before* 13 as skipped and leaves the one *at*
+  13 pending: those earlier questions were never put to this reader, and leaving their gates armed would
+  freeze playback on something they have not seen. The URL is the one input this app takes from a
+  stranger, so every field is parsed defensively and a dataset that does not match the schema is dropped
+  whole rather than half-restored — a partly-restored table would render a trace that is simply a lie.
+- **Put the prompt against its panel** ✅ **Both halves, not just the cheap one.** The panel follows the
+  question when one is pending (unless a stage is explicitly pinned), *and* the prompt moved out of the
+  authoring column to sit directly beneath the diagram it is about.
+- **Responsive height** ✅ The panel fills its column with a `min-height` floor and a `60dvh` ceiling on
+  phones. The old comment was right that the controls must not move mid-step and wrong that freezing the
+  panel is how: the height now comes from the viewport rather than from what the current step happens to
+  render, which is stable for the same reason without letterboxing a 1440×900 monitor.
+- **Mobile as read-first** ✅ The trace column is ordered before the authoring column on a phone and
+  after it on a wide screen, so a link opens on the visualization and the SQL editor is what you scroll
+  *to*. Playback controls stick to the bottom of the viewport within the trace column, in thumb reach.
 
 ### 15.3 P2 — once there are users
 
-- **A light theme.** The tokens are already semantic, so this is a second block of values plus a toggle,
-  not a redesign. Two reasons it is not optional forever: roughly one adult in three has astigmatism, for
-  whom light-on-dark text haloes; and §13's course path runs through a projector, where dark UIs wash out.
-- Restore focus to the trigger when the editor closes; consider undo for row deletion.
-- Re-run the composited contrast sweep at every visual change (§8) — it passes today at a minimum of
-  5.29:1 across 66 elements, and that is a snapshot, not a guarantee.
+- **A light theme. The estimate in this section was wrong, and the correction is the useful part.**
+  "The tokens are already semantic, so this is a second block of values plus a toggle, not a redesign"
+  is true of `--color-surface`, `--color-ink` and friends — and false of the diagrams, which are where
+  the product actually lives. Counted: **47 hardcoded Tailwind palette colours** outside the token
+  system, in `AstTree` (24), `PlanTree` (12), `stageMeta` (8) and `LockPanel` (3), every one of them a
+  `border-{hue}-400/60 bg-{hue}-400/10 text-{hue}-200` triple tuned for light-on-dark. On white the
+  fills vanish and the `-200` labels fail AA outright. So the real shape of this work was: collapse those
+  47 into semantic hue pairs, *then* the second block of values and the toggle. The groundwork was the
+  job; the theme is the easy part after it.
+
+  **The groundwork is now done.** All 47 are gone: five `--color-hue-*` / `--color-hue-*-ink` pairs for
+  the diagrams (a line colour that reads on either background, and a label colour that is the half which
+  has to flip) plus eight `--color-stage-*` tokens for the pipeline tracker's accents, which are a
+  separate scale on purpose — they label a chip rather than a node, and sharing one scale would make the
+  tracker and the diagrams disagree about what "the parse colour" is. Values are Tailwind's verbatim, so
+  the refactor changed nothing on screen: all 18 tokens verified pixel-identical against Tailwind's own
+  values, and the contrast sweep reproduces 5.29:1 with 0 failures across all five views at the same
+  element counts as before. **What remains is genuinely what this section originally claimed** — a
+  second block of values and a toggle.
+
+  The two reasons it is not optional forever are unchanged: roughly one adult in three has astigmatism,
+  for whom light-on-dark text haloes, and §13's course path runs through a projector, where dark UIs
+  wash out.
+- ~~Restore focus to the trigger when the editor closes~~ ✅ free with the native `<dialog>`, and Apply
+  and Reset were routed through `close()` so they return focus like Escape and the Close button do.
+- Consider undo for row deletion. — still open.
+- Re-run the composited contrast sweep at every visual change (§8). ✅ **Re-run after the §15.2 layout
+  work**: 62–129 elements per view across the default view, a pending prediction, the buffer pool, the
+  result and the data editor — 0 failures, minimum 5.29:1, matching the recorded baseline exactly.
+  Worth recording that the first run of the sweep reported 57 failures and all 57 were the sweep's own
+  bug: it parsed `oklch()` as if it were `rgb()`, and its alpha compositing hardcoded the result to
+  opaque, so a semi-transparent stack fell through to white. A contrast tool that has not been tested
+  against a known-good page is a random number generator.
 
 ### 15.4 Definition of done
 
@@ -571,8 +641,9 @@ Under a day, and each one was measured rather than guessed.
 - [x] Every shortcut label matches the key on the user's actual keyboard.
       *`src/ui/platform.ts` uses CodeMirror's own Apple test, so the label cannot disagree with
       the keymap. On a touch device the hints and the Run suffix are dropped entirely.*
-- [ ] A link reproduces a specific query at a specific step.
-      *P1 (§15.2), deliberately not in this pass.*
+- [x] A link reproduces a specific query at a specific step.
+      *Query, policy, prediction mode, step index and — only when customised — the rows. Covered by 19
+      unit tests and one end-to-end test against the built page.*
 - [x] Nothing on screen is pinned below the user's chosen font size.
       *Measured: at a doubled root font size every text node now scales exactly 2×, with none
       left under 16px. Beyond the eight the audit found, this also caught the SQL editor itself

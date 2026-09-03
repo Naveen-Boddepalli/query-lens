@@ -55,6 +55,34 @@ export default defineConfig({
       },
     },
   ],
+  build: {
+    /**
+     * plan.md §14.2 asked for the panels to be lazy-loaded behind Run, on the
+     * grounds that React Flow and d3-hierarchy "render nothing until Run".
+     * §15.1 item 1 then made the app run its first trace on load, so the AST
+     * tree *is* first paint now and deferring it would undo the fix that made
+     * the app comprehensible. The premise changed; the item does not apply as
+     * written, and pretending otherwise would trade a real teaching win for a
+     * smaller number.
+     *
+     * What is still worth having is separation for caching: app code changes
+     * on every commit, these three do not, so splitting them means a returning
+     * visitor re-downloads ~10 kB rather than ~260 kB, and the browser fetches
+     * them in parallel. The size floor is held by the CI budget instead
+     * (`scripts/bundle-budget.ts`), which is the durable half of that item.
+     */
+    rolldownOptions: {
+      output: {
+        advancedChunks: {
+          groups: [
+            { name: 'codemirror', test: /node_modules\/(@codemirror|@lezer|style-mod|w3c-keyname)\// },
+            { name: 'flow', test: /node_modules\/(@xyflow|d3-|classcat|zustand)/ },
+            { name: 'react', test: /node_modules\/(react|react-dom|scheduler)\// },
+          ],
+        },
+      },
+    },
+  },
   define: {
     __BUILD_SHA__: JSON.stringify(BUILD_SHA),
     __BUILD_TIME__: JSON.stringify(BUILD_TIME),
@@ -62,6 +90,7 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
+    // Scoped to src/: `e2e/` is Playwright's, and Vitest cannot run it.
     include: ['src/**/*.{test,spec}.{ts,tsx}'],
   },
 });

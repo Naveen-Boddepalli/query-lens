@@ -1,0 +1,35 @@
+# plan.md §14.2. Grouped and scheduled rather than continuous: a 7-day release
+# age floor (pnpm-workspace.yaml) and a stream of one-package PRs work against
+# each other — weekly batches give the floor time to mean something, and give a
+# solo maintainer one review instead of twenty.
+version: 2
+
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    groups:
+      # The three that move together and break together.
+      codemirror:
+        patterns: ['@codemirror/*', '@lezer/*']
+      react:
+        patterns: ['react', 'react-dom', '@types/react', '@types/react-dom']
+      dev:
+        dependency-type: development
+        exclude-patterns: ['@types/react', '@types/react-dom']
+    ignore:
+      # Pinned deliberately, with reasons in the README: typescript-eslint
+      # excludes TS 7, and two CodeMirror packages are overridden to keep a
+      # single copy in the graph. An automated bump would silently undo both.
+      - dependency-name: typescript
+        versions: ['7.x']
+
+  # The workflow pins actions to commit SHAs (§14.1 item 2), which is exactly
+  # the case where an updater earns its keep — nobody re-resolves those by hand.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
