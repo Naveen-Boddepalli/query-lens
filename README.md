@@ -37,9 +37,9 @@ first contrast sweep reported 57 failures that were all bugs in the sweep.
 a toggle, not a redesign." True of the surface and ink tokens, false of the diagrams: 47 hardcoded
 Tailwind palette colours lived outside the token system, in `AstTree`, `PlanTree`, `stageMeta` and
 `LockPanel`, every one a `border-{hue}-400/60 bg-{hue}-400/10 text-{hue}-200` triple tuned for
-light-on-dark. **That groundwork is now done** — all 47 are semantic tokens, at values verified
-pixel-identical to Tailwind's so nothing moved on screen — which makes the plan's original claim true
-for whoever builds the theme. The theme itself is still open.
+light-on-dark. Those became semantic tokens first, at values verified pixel-identical to Tailwind's so
+nothing moved on screen — and *then* the plan's original claim was true and the theme was exactly a
+second block of values plus a toggle. **Both are now done.**
 
 **The other outstanding item is not code**: plan.md §9 step 4 asks for a post-test against a
 text-explanation control, with 5–10 target users. That experiment decides whether the format works,
@@ -62,7 +62,7 @@ pipeline that *looks* complete when it is not would teach the wrong thing.
 | M7 | Polish, a11y, deploy config | ✅ done |
 | M8 | **Production readiness — the deploy gate (plan.md §14)** | ✅ P0 + P1 done |
 | M9 | **UI/UX readiness — the comprehension gate (plan.md §15)** | ✅ P0 + P1 done |
-| — | Light theme (plan.md §15.3, P2) — tokens done, palette + toggle open | ⬜ open |
+| — | Light theme (plan.md §15.3, P2) | ✅ done |
 | — | Undo for row deletion (plan.md §15.3, P2) | ⬜ open |
 | — | **Validation post-test with real users (plan.md §9)** | ⬜ your call |
 
@@ -296,6 +296,40 @@ Prediction is **on by default** — the evidence says it is what teaches — wit
 off, and a per-prompt skip. Scrubbing is deliberately never blocked: a prompt should not trap
 someone who wants to jump elsewhere in the trace.
 
+## Themes
+
+Dark is the design the app was built in; light exists because roughly one adult in three has
+astigmatism, for whom light-on-dark text haloes, and because [plan.md §13](plan.md#13-future-directions-post-v1-not-committed)'s
+course path runs through a projector, where dark UIs wash out.
+
+The toggle has **three** states, not two. A two-state switch has to decide what it means on first
+load, and whichever it picks it has silently stopped following the system setting the user already
+made once, for every app. "System" is the default, and choosing Light and changing your mind is
+reversible — the stored value is *removed*, not set.
+
+[`public/theme.js`](public/theme.js) resolves the theme before the first paint. It is a separate,
+blocking file rather than an inline script because the CSP is `script-src 'self'` with no nonce, and
+the app bundle is a module, so it runs after the browser has already painted. It resolves the *system*
+preference into the same `data-theme` attribute an explicit choice sets, which is what lets
+[index.css](src/index.css) carry one light block instead of a media query plus two override selectors.
+
+Everything else is CSS variables, with one exception: CodeMirror's `HighlightStyle.define` bakes its
+colours into generated class rules at definition time, so the editor's syntax palette is two objects
+swapped through a compartment. Reconfigured, not remounted, so the document, selection and undo
+history survive a theme change.
+
+### The bug that only shows up on the second look
+
+A live theme switch used to leave every `transition-colors` element — the Run button, the pipeline
+chips, the toggle itself — painting its *previous* text colour, indefinitely. Chrome starts a `color`
+transition when the custom property behind it changes, then keeps interpolating toward the endpoint
+that property held when the transition began, so the element settles on the old palette. A fresh load
+of either theme was always correct, which is why nothing caught it until the contrast sweep was run
+twice in the same page. Suppressing transitions *before* the swap is not enough; the fix is a forced
+style flush taken while `transition: none` is in force. [theme.ts](src/ui/theme.ts) carries it, and an
+end-to-end test reads a real element's computed colour rather than the token, because the token was
+right the whole time.
+
 ## Shareable links
 
 The address bar holds the moment on screen: the query, the eviction policy, whether prediction is on,
@@ -393,7 +427,7 @@ The licence is [MIT](LICENSE).
 | Layer | What it covers |
 |---|---|
 | `pnpm test` | 326 tests over the engine (parser, planner, buffer pool, B+Tree, executor, locks) and the UI (playback gating, keyboard shortcuts, the data editor, URL state, the error boundary) |
-| `pnpm test:e2e` | Four Playwright tests against **`dist/`** — the load→run→step→result path, a shared link, the data editor's real modality, and axe |
+| `pnpm test:e2e` | Six Playwright tests against **`dist/`** — the load→run→step→result path, a shared link, the data editor's real modality, the theme toggle, and axe in *both* palettes |
 | `pnpm budget` | A gzip ceiling per chunk and overall, so the bundle cannot drift back silently |
 
 The end-to-end suite is the only thing that catches "the deploy is broken", and it is where three
@@ -404,11 +438,40 @@ request), axe's contrast analysis, and "the built page logged no console errors"
 Two things automated tests here deliberately do *not* claim:
 
 - **Accessibility conformance.** axe catches 30–57% of WCAG failures. The real check is the manual
-  composited-contrast sweep — last run across five views at 62–129 elements each, 0 failures, minimum
-  5.29:1 — repeated at every visual change, not annually.
+  composited-contrast sweep — last run across six views in **both themes** at 68–140 elements each,
+  0 failures, minimum 5.29:1 dark and 4.62:1 light — repeated at every visual change, not annually.
 - **INP.** `stepLatency.test.ts` pins the half that can regress silently: that the fold memoises and
   never re-folds. React's render and React Flow's layout need field data from real hardware
   ([plan.md §14.2](plan.md#142-p1--the-fortnight-after-launch-before-the-9-study)).
+
+## Decisions made during M8/M9 — P2 (light theme)
+
+- **`public/theme.js` is a separate blocking file, not an inline script.** The CSP has no nonce and no
+  hashes, and the app bundle is a module — so the only way to resolve the theme before first paint is
+  a same-origin classic script in `<head>`. It costs one ~600-byte request and removes the flash.
+- **It resolves the system preference into the same attribute an explicit choice sets.** That single
+  decision collapses what would otherwise be three near-identical CSS blocks — a `prefers-color-scheme`
+  media query, an explicit-light selector, and an explicit-dark selector to override the media query —
+  into one, with the values written once.
+- **Three states, not two.** A two-state switch has to decide what it means on first load, and
+  whichever it picks it has silently stopped following the system. "System" stores nothing; picking it
+  *removes* the key rather than writing `"system"`, so a later change of system preference is followed.
+- **CodeMirror's syntax palette is two objects, not variables.** `HighlightStyle.define` bakes colours
+  into generated class rules at definition time, so the cascade cannot reach them. They swap through a
+  compartment, reconfigured rather than remounted, so the document, selection and undo history survive.
+- **The light palette was measured, not translated.** `--color-ink-dim` sits at L 0.42 rather than 0.46
+  because the tracker's arrows are drawn at `/80` and 0.46 lands on 4.30:1; 0.44 is the first passing
+  value and past 0.42 the floor stops improving. Three stage accents — amber, orange, emerald — sit at
+  Tailwind's 800 where the rest sit at 700, because at a fixed lightness a warm hue reads brighter and
+  all three failed AA at 700. The inconsistent-looking values are what make the result consistent.
+- **The light sweep is taken at the end of the trace.** That is where every pipeline chip is *visited*
+  and painting its own stage colour — the state the three failures were hiding in. Measuring the
+  default view alone would have passed and shipped them.
+- **The stuck-transition fix needed a forced style flush, and the order was found by measurement.**
+  Suppressing transitions before the swap does not work; Chrome coalesces both attribute changes into
+  one recalc and latches the colour endpoint anyway. Setting both, then reading a layout property while
+  `transition: none` is in force, is what re-resolves them. The end-to-end test reads a real element's
+  computed colour rather than the token, because the token was correct throughout.
 
 ## Decisions made during M8/M9 — P1
 

@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" class="dark">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -9,7 +9,13 @@
       content="An in-browser toy database engine that animates a SQL query through parser, planner, optimizer, execution, buffer pool and B+Tree index. Predict what happens next, then watch it run."
     />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="theme-color" content="#12151c" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#12151c" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#fbfbfc" />
+
+    <!-- Blocking on purpose: it resolves the theme before the first paint, and
+         the app bundle is a module, so it runs too late to prevent a flash.
+         A separate file rather than inline because the CSP has no nonce. -->
+    <script src="/theme.js"></script>
     <link rel="canonical" href="%SITE_URL%/" />
 
     <!-- plan.md §14.1 item 8. Distribution is a link posted to HN, Reddit or a

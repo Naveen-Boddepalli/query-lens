@@ -70,12 +70,67 @@ test('the data editor is a real modal', async ({ page }) => {
   await expect(dialog).toBeHidden();
 });
 
+test('the theme toggle switches, persists, and survives a reload', async ({ page }) => {
+  // plan.md §15.3. Three states, because a two-state switch has to silently
+  // stop following the system the moment it decides what it means on load.
+  await page.goto('/');
+  const root = page.locator('html');
+
+  await page.getByRole('radio', { name: 'Light' }).click();
+  await expect(root).toHaveAttribute('data-theme', 'light');
+
+  // The stuck-colour bug this guards against: Chrome settles a transitioned
+  // colour on the value its custom property held when the transition started,
+  // so every `transition-colors` element kept the *previous* palette. Reading
+  // a real element's colour is the only way to catch it — the token is right
+  // either way. See src/ui/theme.ts.
+  const runColour = () =>
+    page.getByRole('button', { name: /^Run/ }).evaluate((el) => getComputedStyle(el).color);
+  const lightRun = await runColour();
+
+  await page.getByRole('radio', { name: 'Dark' }).click();
+  await expect(root).toHaveAttribute('data-theme', 'dark');
+  const darkRun = await runColour();
+  expect(darkRun).not.toBe(lightRun);
+
+  await page.getByRole('radio', { name: 'Light' }).click();
+  expect(await runColour()).toBe(lightRun);
+
+  // Persisted, and resolved before first paint by public/theme.js.
+  await page.reload();
+  await expect(root).toHaveAttribute('data-theme', 'light');
+  await expect(page.getByRole('radio', { name: 'Light' })).toHaveAttribute('aria-checked', 'true');
+
+  // "System" is a real third state: it forgets the choice rather than storing one.
+  await page.getByRole('radio', { name: 'System' }).click();
+  expect(await page.evaluate(() => localStorage.getItem('querylens:theme'))).toBeNull();
+});
+
 test('has no detectable WCAG A/AA violations on the default view', async ({ page }) => {
   // plan.md §8: a regression net, explicitly *not* a compliance claim —
   // automated tooling catches 30–57% of WCAG failures, so the manual
   // composited-contrast sweep stays the real check (§15.3).
   await page.goto('/');
   await expect(page.getByText(/steps in this trace/)).toBeVisible();
+
+  const results = await new AxeBuilder({ page })
+    .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+    .analyze();
+
+  expect(
+    results.violations.map((v) => `${v.id}: ${v.nodes.length} node(s) — ${v.help}`),
+  ).toEqual([]);
+});
+
+test('has no detectable WCAG A/AA violations in the light theme either', async ({ page }) => {
+  // A second palette is a second chance to fail contrast, and the light one is
+  // the newer of the two. Taken at the end of the trace on purpose: that is
+  // where every pipeline chip is in its *visited* state and painting its own
+  // stage colour, which is exactly where three of them failed when measured.
+  await page.goto('/?q=SELECT%20*%20FROM%20users%20WHERE%20id%20%3D%205%3B&p=lru&x=0&s=33');
+  await page.getByRole('radio', { name: 'Light' }).click();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+  await expect(page.getByText(/showing step/)).toContainText('33');
 
   const results = await new AxeBuilder({ page })
     .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])

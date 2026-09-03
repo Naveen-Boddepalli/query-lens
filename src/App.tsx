@@ -24,6 +24,8 @@ import { SqlEditor } from './ui/SqlEditor.tsx';
 import { DataEditor } from './ui/DataEditor.tsx';
 import { PredictionCard } from './ui/PredictionCard.tsx';
 import { ShortcutHints } from './ui/ShortcutHints.tsx';
+import { ThemeToggle } from './ui/ThemeToggle.tsx';
+import { useTheme } from './ui/theme.ts';
 import { RUN_HINT, useIsTouch } from './ui/platform.ts';
 import { StageDetail } from './ui/panels/StageDetail.tsx';
 import { STAGE_META } from './ui/stageMeta.ts';
@@ -108,6 +110,9 @@ export default function App() {
   const table = db.tables[TABLE];
   // A phone has no ⌘ and no ↵ to press (plan.md §15.1 item 6).
   const touch = useIsTouch();
+  // Everything else follows the CSS tokens; only CodeMirror needs telling,
+  // because a HighlightStyle bakes its colours in at definition time.
+  const { choice, theme, setChoice } = useTheme();
 
   const projector = useMemo(
     () => createTraceProjector(result.events, options),
@@ -253,6 +258,7 @@ export default function App() {
         >
           {IMPLEMENTED_STAGES.length}/{STAGES.length} stages built
         </span>
+        <ThemeToggle choice={choice} setChoice={setChoice} />
       </header>
 
       <main className="grid flex-1 gap-4 p-4 lg:grid-cols-[minmax(300px,400px)_1fr]">
@@ -264,6 +270,7 @@ export default function App() {
             onRun={run}
             error={result.error}
             activeSpan={activeSpan}
+            theme={theme}
           />
 
           <div className="flex flex-wrap items-center gap-2">

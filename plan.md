@@ -589,7 +589,8 @@ Under a day, and each one was measured rather than guessed.
 
 ### 15.3 P2 — once there are users
 
-- **A light theme. The estimate in this section was wrong, and the correction is the useful part.**
+- **A light theme. ✅ Done — but the estimate in this section was wrong, and the correction is the
+  useful part.**
   "The tokens are already semantic, so this is a second block of values plus a toggle, not a redesign"
   is true of `--color-surface`, `--color-ink` and friends — and false of the diagrams, which are where
   the product actually lives. Counted: **47 hardcoded Tailwind palette colours** outside the token
@@ -599,7 +600,7 @@ Under a day, and each one was measured rather than guessed.
   47 into semantic hue pairs, *then* the second block of values and the toggle. The groundwork was the
   job; the theme is the easy part after it.
 
-  **The groundwork is now done.** All 47 are gone: five `--color-hue-*` / `--color-hue-*-ink` pairs for
+  **The groundwork was done first.** All 47 are gone: five `--color-hue-*` / `--color-hue-*-ink` pairs for
   the diagrams (a line colour that reads on either background, and a label colour that is the half which
   has to flip) plus eight `--color-stage-*` tokens for the pipeline tracker's accents, which are a
   separate scale on purpose — they label a chip rather than a node, and sharing one scale would make the
@@ -644,6 +645,9 @@ Under a day, and each one was measured rather than guessed.
 - [x] A link reproduces a specific query at a specific step.
       *Query, policy, prediction mode, step index and — only when customised — the rows. Covered by 19
       unit tests and one end-to-end test against the built page.*
+- [x] The app is legible on a projector and to a reader who cannot use light-on-dark.
+      *Light theme with a three-state System/Light/Dark toggle, resolved before first paint, verified
+      by sweep and axe in both palettes (§15.3).*
 - [x] Nothing on screen is pinned below the user's chosen font size.
       *Measured: at a doubled root font size every text node now scales exactly 2×, with none
       left under 16px. Beyond the eight the audit found, this also caught the SQL editor itself
