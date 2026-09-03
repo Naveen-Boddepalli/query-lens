@@ -60,9 +60,23 @@ jobs:
         run: pnpm build
 
       # plan.md §14.2. The budget is the durable half of the bundle item: the
-      # size can move, but only in a commit that says so.
+      # size can move, but only in a commit that says so. Scoped to dist/assets,
+      # which the docs step below never writes to (docs/astro.config.mjs emits
+      # into dist/docs), so this measures the application alone.
       - name: Bundle budget
         run: pnpm budget
+
+      # The docs site (plan.md §17.1) is its own package with its own lockfile
+      # — see docs/pnpm-workspace.yaml for why it is isolated from the app's.
+      # Built here, into the same dist/ the app just built into, so a broken
+      # page (bad frontmatter, a link to a route that does not exist, a
+      # content-collection error) fails CI exactly like a broken app build
+      # would, rather than shipping silently.
+      - name: Install docs dependencies
+        run: pnpm -C docs install --frozen-lockfile
+
+      - name: Build docs
+        run: pnpm -C docs build
 
       # The only test that catches "the deploy is broken": it loads dist/ in a
       # real browser. Also where axe runs, since jsdom cannot judge contrast.

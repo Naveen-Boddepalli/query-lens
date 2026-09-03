@@ -1,0 +1,22 @@
+# The docs site resolves independently of the application (plan.md §17.1).
+#
+# Not a workspace package of the root, deliberately. Adding any dependency
+# re-resolves the *whole* tree, and the root's 7-day `minimumReleaseAge` then
+# refuses the install because several already-locked packages — and their
+# transitive `zod`, and others — were published inside that window. Isolating
+# the docs means the application's lockfile is never touched by documentation
+# work, CI's `--frozen-lockfile` for the app keeps meaning what it meant, and
+# `scripts/bundle-budget.ts` still measures the app alone.
+#
+# The same supply-chain policy applies here, for the same reasons: a compromised
+# build-time dependency can inject into generated HTML just as easily as into a
+# bundle.
+minimumReleaseAge: 10080
+blockExoticSubdeps: true
+# esbuild is the one exception, and it is a deliberate, reviewable one — which
+# is the whole point of an explicit map rather than a blanket allow. Its
+# postinstall links the platform binary Astro's build depends on; without it
+# the docs do not build at all. The application's own `allowBuilds: []` is
+# untouched and still verified empty.
+allowBuilds:
+  esbuild: true

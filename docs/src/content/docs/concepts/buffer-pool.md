@@ -1,0 +1,56 @@
+---
+title: The buffer pool
+description: Why databases keep a fixed set of pages in memory, and how QueryLens's two eviction policies decide what to keep.
+---
+
+A disk read is slow compared to reading memory that is already there — often by several orders of
+magnitude. Every real database keeps a **buffer pool**: a fixed number of memory slots ("frames"),
+each holding one on-disk page. When a query needs a page, the engine checks the pool first. Found it
+already there — a **hit** — and the read is nearly free. Not found — a **miss** — and the engine has
+to fetch the page from disk and put it in a frame, which is slow and, if every frame is already full,
+means evicting whatever was there first.
+
+QueryLens models this directly: **8 fixed frames**, real hit/miss counting, and a real eviction
+decision every time the pool is full and a new page arrives.
+
+## Try this
+
+Run [`SELECT * FROM users WHERE age > 30`](/?q=SELECT%20%2A%20FROM%20users%20WHERE%20age%20%3E%2030%3B&p=lru&x=0&s=91)
+— a sequential scan touches enough pages to fill the pool and force an eviction. That link opens the
+app already stepped to the moment it happens: frame 0 outlined and labelled **EVICTED**, with the
+narration line explaining which page was chosen and why.
+
+Compare it against [the same query under clock sweep](/?q=SELECT%20%2A%20FROM%20users%20WHERE%20age%20%3E%2030%3B&p=clock&x=0&s=99)
+— its own first eviction happens a few steps later (99 rather than 91: clock sweep visits a couple
+more pages before it needs to evict its first one), but picks the **same** frame 0. On a scan like
+this one, where every page is read exactly once, the two policies have nothing to disagree about —
+see below for why, and for where they actually diverge.
+
+## Two eviction policies, and why both exist
+
+QueryLens implements two replacement policies, switchable from the dropdown next to Run:
+
+**LRU (least recently used)** evicts whichever page was accessed longest ago. It is the policy every
+course teaches, and it is intuitive: the page nobody has touched in a while is the safest to throw
+away. It is also the policy PostgreSQL deliberately avoids in its own buffer manager, because
+maintaining an exact recency ordering means taking a lock on *every single page access* — a real cost
+at high concurrency that a teaching diagram doesn't have to pay.
+
+**Clock sweep** is what PostgreSQL actually does. Each frame carries a small usage counter. A
+"clock hand" walks the frames in a circle; at each frame it either decrements the counter (if it is
+above zero) and moves on, or evicts it (if the counter is already zero). A page that keeps getting
+used has its counter refreshed before the hand comes back around, so it survives — with no ordered
+list to maintain on every access, only an occasional walk.
+
+On a uniform scan — reading every page roughly once, which is what a sequential scan does — the two
+policies tend to pick the same victims, because nothing is meaningfully "hotter" than anything else.
+They only diverge once some pages are read more often than others, which is exactly what the point
+lookup vs. sequential scan contrast on the [Getting started](/getting-started/) page is built to show.
+
+## Where this simplifies
+
+A real buffer pool serves many concurrent queries, is sized in the hundreds of megabytes to gigabytes,
+and is protected by fine-grained internal locking that has nothing to do with the SQL-level locks the
+app's own Locks panel draws. QueryLens's 8 frames and single active query are a scale model of the
+same mechanism, chosen so the whole pool fits in one screen and every eviction is visible — not an
+attempt to reproduce a production buffer manager's actual sizing or its internal concurrency control.

@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Documentation site** at `/docs`, built with Astro Starlight (plan.md §17.1) — sidebar
+  navigation, on-this-page outline, full-text search, and the app's own fonts, colours and
+  dark/light toggle. Nine pages: what QueryLens is, Getting started, FAQ, Concepts (buffer pool,
+  B+Tree), and Reference (supported SQL, keyboard shortcuts, URL parameters, engine limits). Every
+  factual claim in them — step numbers, error message text, engine limits — is checked against
+  `src/` rather than written from memory, and the Concepts pages link back into the running app at
+  the exact step they describe, verified live rather than assumed. Built by its own isolated
+  package (`docs/`) with its own lockfile, so the application's dependency tree is never
+  re-resolved by documentation work; `pnpm build:site` builds both, and CI now builds the docs as
+  their own step so a broken page fails the same gate a broken app build would
 - Self-hosted typefaces: JetBrains Mono and IBM Plex Sans (as `QueryLens Sans`), subset to the 235
   codepoints the app renders, ~30 kB each, preloaded and served under the existing `font-src 'self'`
   CSP. Previously the CSS named a font that was never shipped, so it appeared only for visitors who
@@ -35,6 +45,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   §19 (The Landing Page) added to `plan.md`
 
 ### Changed
+- Raised the app's type floor: body 14→15px, label 12→13px, code 13→14px, heading 17→20px, display
+  24→28px. The 11px `micro` step is retired; 13px is now the smallest text anywhere in the app.
+  §16.1's instrument density is otherwise unchanged — verified against the densest panels (the
+  eight-frame buffer grid, the compact B+Tree) where nothing overflows
 - Tagline is now "Watch a SQL query become a B+Tree traversal." — concrete enough that reading the
   first screen tells you what the tool does
 - Corner radius is constant (4px chrome, 2px inside diagrams) and the phone's sticky playback bar no
@@ -43,6 +57,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   so the cursor had been telling the user nothing
 - The link-preview card is regenerated from a real trace at the first buffer eviction; its alt text
   said "four frames" through a change that made it eight
+- The header's development-progress badge ("8/8 stages built") is replaced with a Docs link; the
+  footer's Docs link now points at the real site instead of the README
+- Grandfathered seven dependencies that were pinned inside the project's own 7-day
+  `minimumReleaseAge` window before that policy could ever check them — invisible until now because
+  CI only ever runs `--frozen-lockfile`, which does not re-resolve. See
+  `pnpm-workspace.yaml`'s `minimumReleaseAgeExclude` for the list and the reasoning
+
+### Removed
+- Release-planning vocabulary from the shipped UI: the `M1`–`M6` milestone codes stageMeta used to
+  print ("Arrives in M4") were a sentence about the backlog, not about databases, and unreadable to
+  anyone outside the repository. The not-implemented guard they lived in stays — every stage is
+  built today, but `STAGES`/`IMPLEMENTED_STAGES` remain separate lists on purpose
 
 ### Fixed
 - The diagram tree arrived unframed in the panel's corner on some cold loads, and always when the

@@ -402,10 +402,18 @@ site past 100 GB, which is the wrong failure mode for a teaching tool that might
 somewhere busy.
 
 ```
-Build command:            pnpm build
+Build command:            pnpm build:site
 Build output directory:   dist
 Node version:             pinned to 22 by .node-version
 ```
+
+`pnpm build:site` builds the application, then installs and builds the documentation site
+(`docs/`) into `dist/docs` — one deploy, one origin, so relative links between the app and the
+docs never break (plan.md §17.1). The docs are their own package with their own lockfile,
+deliberately isolated from the app's (see `docs/pnpm-workspace.yaml`), so `pnpm build` alone still
+builds the application only — that is what `scripts/bundle-budget.ts` and the end-to-end suite
+measure, and what CI runs as its own step so a broken docs page fails the same gate a broken app
+build does.
 
 `public/_headers` sets immutable caching for hashed assets, revalidation for the entry document, and
 the full security block from [plan.md §14.3](plan.md#143-the-security-headers-tested-rather-than-assumed):

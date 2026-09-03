@@ -323,7 +323,7 @@ This event stream is the single contract between engine and UI — makes the UI 
 | M8 | **Production readiness — the deploy gate (§14):** CI, error boundary, security headers, licence, supply-chain settings, link preview | ~1 day (P0) + 2-3 days (P1) — **both done** |
 | M9 | **UI/UX readiness (§15):** first-run trace, Run feedback, native dialog, shareable URL, prompt placement, responsive height | ~1 day (P0) + 2-3 days (P1) — **both done** |
 | M10 | **Visual design maturity (§16) + landing page (§19):** self-hosted typefaces, named type/space/motion scales, hover states across every diagram panel, footer, first-screen framing | ~1.5 days (P0) + 1 week (P1) — **P0 done** |
-| M11 | **Docs, manual, licensing & governance (§17–§18):** docs site, Getting Started, the two manual pages the §9 study needs, `LICENSE-DOCS`, font licensing, README restructure | ~1 week (P0/P1) + ongoing |
+| M11 | **Docs, manual, licensing & governance (§17–§18):** docs site, Getting Started, the two manual pages the §9 study needs, `LICENSE-DOCS`, font licensing, README restructure | ~1 week (P0/P1) + ongoing — **docs site built, see note** |
 | v1 | Expand SQL coverage: joins, cost estimates, InnoDB midpoint-LRU as a third policy | Post-MVP |
 
 M8 sits between "the app works" and "the URL is public." It is not polish — every item on the P0 list in
@@ -971,6 +971,26 @@ explanatory and the temptation to teach mid-instruction is constant.
 traffic, answers the question that decides whether anyone stays) → Getting Started → the Buffer Pool
 and B+Tree manual pages → Reference → Concepts → Architecture last, because that content already
 exists in the README and moving it is mechanical.
+
+> **Status, session after v6.** The tool decision above shipped rather than stayed a decision:
+> Astro Starlight is live at `/docs` on the same Cloudflare Pages project, built by its own
+> isolated package (`docs/`, its own `pnpm-workspace.yaml` and lockfile — see the file for why:
+> installing anything re-resolves the whole tree, and the app's 7-day `minimumReleaseAge` then
+> rejects the install over packages the app itself had already pinned inside that window).
+> `pnpm build:site` builds both; CI builds docs as its own step so a broken page fails the gate a
+> broken app build would. Nine pages exist — the index, Getting Started, FAQ, both Concepts pages,
+> and all four Reference pages — each fact in them checked against `src/` rather than written from
+> memory (a first draft of the buffer-pool page claimed LRU and clock sweep evict *different*
+> frames on a uniform scan; running it showed they pick the same one, which is what the page's own
+> explanation says two paragraphs later — the draft had it backwards). The footer and header
+> "Docs" links point at `/docs/` and an end-to-end test proves that URL and the docs build agree.
+>
+> Two things from this section remain open. The docs get their own type scale rather than
+> inheriting the app's §16.1 tokens — deliberately, and `docs/src/styles/querylens.css` explains
+> why — so if a future pass unifies them, start there. And the licensing formalization below
+> (`LICENSE-DOCS`, the CC BY 4.0 footer notice) was not done alongside the site: it is its own
+> P1 item with its own open questions (SPDX placement, the REUSE decision already recorded), and
+> doing it partially to close this note felt worse than leaving it explicitly open.
 
 ### 17.2 User Manual detail
 

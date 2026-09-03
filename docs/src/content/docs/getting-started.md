@@ -1,0 +1,56 @@
+---
+title: Getting started
+description: Three minutes from opening QueryLens to reading your first trace.
+---
+
+import { Steps } from '@astrojs/starlight/components';
+
+No install, no account, no setup. This page is the whole tutorial — one outcome, no theory, no
+options to weigh yet.
+
+<Steps>
+
+1. **Open [QueryLens](/).** It starts already running a trace — `SELECT * FROM users WHERE id = 5`
+   against a small seed table — so the first thing you see is the parser's syntax tree, not an empty
+   editor.
+
+2. **Read the pipeline tracker** along the top of the trace panel: Parser → Planner → Optimizer →
+   Execution → Buffer Pool → Index → Locks → Result. The highlighted stage is where the trace is
+   right now.
+
+3. **Step forward.** Press <kbd>→</kbd>, or click the step-forward button under the trace. Each
+   press applies one event and updates the narration line underneath the panel — read that line
+   first; it says in plain words what just happened.
+
+4. **Press <kbd>Space</kbd> to play** the rest of the trace automatically, or keep stepping by hand.
+   <kbd>Home</kbd> resets to the start.
+
+5. **Try the sequential-scan contrast.** Change the query's `WHERE id = 5` to `WHERE age > 30` and
+   press Run (or <kbd>⌘</kbd><kbd>↵</kbd> / <kbd>Ctrl</kbd><kbd>↵</kbd> from the editor). The planner
+   now chooses a full table scan instead of an index lookup — watch the Buffer Pool panel: this
+   trace touches far more pages, and eventually evicts one to make room. Same table, same kind of
+   question, a completely different cost.
+
+6. **Predict before you look.** The checkbox above the trace — "Ask me to predict before each
+   reveal" — is on by default. At a handful of steps, the app will ask you a question (which frame
+   gets evicted? which child pointer does the descent follow?) before showing you the answer.
+   Committing to a guess first is what makes the difference stick; turn it off any time you just
+   want to watch.
+
+</Steps>
+
+## What each panel shows
+
+The trace panel always shows one pipeline stage in full. Click any chip in the tracker to *pin* the
+panel there while the trace runs on underneath — useful for watching the buffer pool fill up over
+many execute steps without the view jumping back to whichever stage just fired. A "Pinned — follow
+the trace" button appears whenever the panel and the trace have drifted apart; click it to catch up.
+
+## Where to go next
+
+- **[Concepts](/concepts/buffer-pool/)** if a panel showed you something you want explained —
+  why LRU, what a B+Tree split is, why locks are visual-only here.
+- **[Reference](/reference/sql/)** for the exact SQL subset, every keyboard shortcut, and what the
+  shareable URL encodes.
+- **[FAQ](/faq/)** for "is this a real database?", "can I use this in my course?", and where the
+  model's simplifications actually are.

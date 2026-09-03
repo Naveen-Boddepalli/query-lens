@@ -1,0 +1,15 @@
+{
+  "name": "querylens-docs",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview"
+  },
+  "dependencies": {
+    "@astrojs/mdx": "7.0.8",
+    "@astrojs/starlight": "^0.41.9",
+    "astro": "^7.2.8"
+  }
+}

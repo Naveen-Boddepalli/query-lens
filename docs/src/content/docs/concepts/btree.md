@@ -1,0 +1,55 @@
+---
+title: The B+Tree index
+description: How an index turns a table scan into a handful of pointer follows, and what QueryLens's traversal panel actually shows.
+---
+
+Without an index, finding one row means reading every page of the table — a **sequential scan**.
+A **B+Tree index** turns that into a short walk down a tree: at each level, compare the key you want
+against a handful of separator values and follow exactly one child pointer, until you land on a
+**leaf** that either holds the row or proves it doesn't exist. For a table with thousands of rows,
+that is the difference between reading thousands of pages and reading three or four.
+
+QueryLens builds a real B+Tree over the seed table — internal nodes routing the search, leaf nodes
+holding the actual keys, leaves linked in a sibling chain for range scans — and traces every step of
+a lookup through it.
+
+## Try this
+
+Run [`SELECT * FROM users WHERE id = 5`](/?q=SELECT%20%2A%20FROM%20users%20WHERE%20id%20%3D%205%3B&p=lru&x=0&s=25)
+— that link opens the app at the exact moment the descent finds the row: the path so far
+(`n8 → n2 → n1`) printed above the tree, and the leaf holding key 5 marked **✓ found**.
+
+Step backward from there one event at a time and watch the highlighted path grow one hop at a time,
+root to leaf — each step is one comparison, one child pointer followed.
+
+## Reading the panel
+
+- **Pink nodes are internal** — they hold separator keys and route the search, but never hold a row
+  themselves.
+- **Green nodes are leaves** — they hold the actual keys (and, in a real engine, either the row or a
+  pointer to it).
+- **The dashed line between leaves** is the sibling chain every B+Tree leaf level keeps, so a
+  *range* scan (`WHERE age > 30`, say) can walk sideways across leaves once it finds the first one,
+  instead of climbing back up to the root for each next value.
+- The view frames only the current hop plus its parent, rather than the whole tree — a realistic
+  B+Tree over even a small table is far wider than a screen, and the root-to-leaf path is the part
+  that carries the lesson.
+
+## Splits, and why fan-out matters
+
+Each node in QueryLens's tree holds at most 4 keys before it **splits**: a full node divides into
+two, and the middle key is pushed up into the parent as a new separator. That number — the tree's
+**fan-out** — is the whole reason a B+Tree is fast. A higher fan-out means fewer levels for the same
+number of rows, which means fewer pointer follows, which means fewer page reads, which is the entire
+point of building the index in the first place. Real database indexes tune fan-out to match a disk
+page's size — often hundreds of keys per node — precisely to keep the tree as shallow as possible.
+
+## Where this simplifies
+
+QueryLens's tree has a small, fixed fan-out (enough to demonstrate a split without needing thousands
+of rows) and supports point lookups and inserts. A production index also handles deletion, key
+updates, and — critically — concurrent modification, which is where the
+[locking the app's Locks panel visualises](/) actually earns its keep in a real engine: two
+descents that briefly hold two levels of the tree at once ("latch crabbing") are how a B+Tree stays
+correct while more than one query touches it at the same time. QueryLens runs exactly one query, so
+that layer is drawn but never actually contested.

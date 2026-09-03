@@ -7,7 +7,13 @@ import tseslint from 'typescript-eslint';
 import { globalIgnores } from 'eslint/config';
 
 export default tseslint.config([
-  globalIgnores(['dist', 'node_modules']),
+  // `docs/` is its own package — its own pnpm-workspace.yaml, its own lockfile,
+  // its own tsconfig via Astro's generated `.astro/types.d.ts` (see
+  // docs/pnpm-workspace.yaml for why it is isolated). `projectService` below
+  // resolves every *.ts/*.tsx it finds against *this* tsconfig, which docs'
+  // files were never part of, hence the parse errors. Same reasoning as
+  // excluding `node_modules`: a directory that manages its own toolchain.
+  globalIgnores(['dist', 'node_modules', 'docs']),
   {
     files: ['**/*.{ts,tsx}'],
     extends: [

@@ -11,6 +11,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:site": "pnpm build && pnpm -C docs install --frozen-lockfile && pnpm -C docs build",
     "preview": "vite preview",
     "typecheck": "tsc -b",
     "lint": "eslint .",

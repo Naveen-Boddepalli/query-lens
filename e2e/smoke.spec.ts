@@ -153,3 +153,19 @@ test('has no detectable WCAG A/AA violations in the light theme either', async (
     results.violations.map((v) => `${v.id}: ${v.nodes.length} node(s) — ${v.help}`),
   ).toEqual([]);
 });
+
+test('the header Docs link opens a real page, not a 404', async ({ page }) => {
+  // The docs site (plan.md §17.1) is a separate Astro package built into
+  // dist/docs by a separate CI step — nothing here proves at build time that
+  // the two halves of the deploy actually agree on the URL between them, only
+  // that each builds on its own. This is that proof: click the link the app
+  // itself renders, and land on a real Starlight page rather than the app's
+  // own 404.html.
+  // Both the header and the footer link to /docs/ now, hence the scope: the
+  // point of this test is that the URL and the docs build agree, and either
+  // link proves that equally well.
+  await page.goto('/');
+  await page.getByRole('banner').getByRole('link', { name: 'Docs' }).click();
+  await expect(page).toHaveURL(/\/docs\/$/);
+  await expect(page.getByRole('heading', { name: 'What QueryLens is' })).toBeVisible();
+});

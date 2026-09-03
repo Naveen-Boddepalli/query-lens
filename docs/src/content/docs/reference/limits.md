@@ -1,0 +1,45 @@
+---
+title: Engine limits
+description: The fixed numbers behind the engine — buffer pool size, B+Tree fan-out, and what's out of scope entirely.
+---
+
+The specific numbers QueryLens's engine runs with, for anyone checking a fact rather than reading a
+concept explanation.
+
+## Buffer pool
+
+- **8 frames**, fixed.
+- **4 rows per page.**
+- Two replacement policies: **LRU** and **clock sweep**, switchable per query. See
+  [The buffer pool](/concepts/buffer-pool/).
+- Clock sweep's per-frame usage counter caps at **5**.
+
+## B+Tree index
+
+- **One index**, built over the seed table's `id` column.
+- **Fan-out**: each node holds at most **4 keys** (5 children) before splitting.
+- Supported operations: **insert** and **point lookup**, both traced. See
+  [The B+Tree index](/concepts/btree/).
+- The planner uses the index only for an **equality** predicate on the indexed column
+  (`WHERE id = 5`) — a range predicate (`WHERE age > 30`) always runs as a sequential scan, which is
+  also the point of the comparison the [Getting started](/getting-started/) page walks through.
+- Not supported: deletion, key updates.
+
+## Locks
+
+- **Page-level**, coarse-grained: one shared read lock per page, taken and released as a scan or
+  descent visits it.
+- **Visual only** — QueryLens runs exactly one query at a time, so no lock ever actually waits on
+  another. The panel draws what a real engine's lock manager would be doing, not an enforced
+  constraint.
+
+## SQL
+
+See [Supported SQL](/reference/sql/) for the complete accepted grammar.
+
+## What's out of scope entirely
+
+No aggregates (`COUNT`, `SUM`, …), no `GROUP BY`, no subqueries, no joins, no writes (`INSERT` /
+`UPDATE` / `DELETE`), no transactions, no concurrency, no query cost estimation. These are
+deliberate exclusions for this release, not bugs — see the parser's own error messages in
+[Supported SQL](/reference/sql/) for exactly which keywords are recognised and rejected.

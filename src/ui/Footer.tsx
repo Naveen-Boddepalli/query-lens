@@ -15,7 +15,6 @@ import { BUILD_SHA, BUILD_TIME, REPO_URL } from '../buildInfo.ts';
  * built the thing, which is exactly what §16 is for.
  */
 
-/** One row of the link list. `external` is every one of them, for now. */
 interface FooterLink {
   label: string;
   href: string;
@@ -25,11 +24,12 @@ interface FooterLink {
 const LINKS: FooterLink[] = [
   {
     label: 'Docs',
-    // Points at the README until M11 builds the docs site, at which point this
-    // becomes `/docs` and stops leaving the origin. Naming it "Docs" now rather
-    // than after the site exists is deliberate: the link that is missing is the
-    // one nobody clicks, and §19.1 counts an absent docs route as a failure.
-    href: `${REPO_URL}#readme`,
+    // The Astro Starlight site at /docs (plan.md §17.1), same origin, same
+    // Cloudflare Pages deploy. Used to point at the README's #readme anchor
+    // before the site existed — e2e's "the header Docs link" test now proves
+    // this URL and the docs build agree, so a mismatch fails CI rather than
+    // shipping a link nobody notices is dead.
+    href: '/docs/',
     title: 'How QueryLens works, and what it deliberately simplifies',
   },
   { label: 'GitHub', href: REPO_URL, title: 'Source, issues and discussions' },
