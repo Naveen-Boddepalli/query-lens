@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Background,
@@ -194,8 +194,7 @@ function Canvas({
     () => build(root!, { tones, wide, compact }, activeSpan, sideEdges),
     [root, tones, wide, compact, activeSpan, sideEdges],
   );
-  const { setCenter, zoomIn, zoomOut } = useReactFlow();
-  const paneRef = useRef<HTMLDivElement | null>(null);
+  const { setViewport, zoomIn, zoomOut } = useReactFlow();
   const focusKey = focusIds?.join(',') ?? '';
 
   // Viewport moves are JavaScript, so the CSS media query cannot reach them:
@@ -209,46 +208,73 @@ function Canvas({
   const glide = reduced ? 0 : 1;
 
   /**
-   * React Flow's own measurement of its container, read from its store.
-   *
-   * Every viewport call — `setCenter` included — is a no-op while this is 0,
-   * silently. Since the app runs its first trace on load (plan.md §15.1 item
-   * 1), this canvas now mounts during the very first render, before the grid
-   * containing it has been laid out: the fit fired, did nothing, and the tree
-   * sat unframed in the corner until something else re-ran it. Measuring our
-   * own element would not help — React Flow measures asynchronously, so the
-   * number that matters is *its* width, not ours. Refitting on resize comes
-   * free with it.
+   * The pane element, held in state rather than a ref so its arrival is a
+   * render — something the effect below can depend on. A ref hands us the node
+   * without telling us when, which is the gap the old 60ms timeout papered over.
    */
-  const rfWidth = useStore((state) => state.width);
+  const [pane, setPane] = useState<HTMLDivElement | null>(null);
 
   /**
-   * Centre on the focused nodes, computed from the layout we already hold.
+   * Our own measurement of the pane, and the reason we no longer ask React Flow
+   * for one.
    *
-   * React Flow's own `fitView` and `useNodesInitialized` both depend on
-   * measured node dimensions, and these graphs never report as measured — so
-   * both silently do nothing. d3 gave us exact positions, so use those.
-   * `requestAnimationFrame` is unreliable here too (throttled when the pane is
-   * not painting); a short timeout fires regardless.
-   *
-   * That applies to the unfocused case as much as the focused one, which is
-   * why the fallback frames every node through the same maths rather than
-   * handing off to `fitView`. Since the app now runs its first trace on load
-   * (plan.md §15.1 item 1), the very first paint *is* the unfocused case — and
-   * it was the one path still asking React Flow to measure something.
+   * Its store does `width: size.width || 500` (and the same for height), so a
+   * container it has measured at zero is indistinguishable from one genuinely
+   * 500px wide. That is not hypothetical: instrumenting the failure showed the
+   * store reporting 798 wide while the pane's own `clientWidth` was 0, and
+   * framing against that invented number centres the tree on a point that does
+   * not exist. Observing the element ourselves gives a number that is either
+   * real or zero, and re-fitting on resize comes free with it.
    */
-  /** Frames a set of nodes, from the d3 positions rather than measured DOM. */
-  const frame = useCallback(
-    (targets: TreeFlowNode[]) => {
-      const pane = paneRef.current;
-      // @ts-expect-error DEBUG
-      window.__fl = window.__fl || []; // DEBUG
-      // @ts-expect-error DEBUG
-      window.__fl.push({ ev:'frame-call', n: targets.length, pane: pane && [pane.clientWidth, pane.clientHeight], t: Math.round(performance.now()) }); // DEBUG
-      if (targets.length === 0 || !pane) return;
+  const [size, setSize] = useState({ w: 0, h: 0 });
 
-      const paneW = pane.clientWidth || 600;
-      const paneH = pane.clientHeight || 320;
+  useEffect(() => {
+    if (!pane) return;
+    const measure = () => {
+      const { clientWidth: w, clientHeight: h } = pane;
+      // Same-value writes are skipped, so `size` keeps a stable identity and
+      // the framing effect below does not re-run on every observer callback.
+      setSize((prev) => (prev.w === w && prev.h === h ? prev : { w, h }));
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(pane);
+    return () => { observer.disconnect(); };
+  }, [pane]);
+
+  /**
+   * React Flow's pan/zoom instance — the thing that actually moves the viewport.
+   *
+   * Every viewport call does nothing at all while this is null, silently, and it
+   * stays null until React Flow's own mount effect has built it. Depending on
+   * the instance rather than on elapsed time is what makes the framing below
+   * deterministic instead of a race against a timeout; depending on its
+   * *identity* also catches it being rebuilt, which resets the transform to the
+   * origin — StrictMode's double mount does exactly that in development.
+   */
+  const panZoom = useStore((state) => state.panZoom);
+
+  /**
+   * Frames a set of nodes, from the d3 positions rather than measured DOM.
+   *
+   * React Flow's own `fitView` and `useNodesInitialized` both depend on measured
+   * node dimensions, and these graphs never report as measured — so both
+   * silently do nothing. d3 gave us exact positions, so use those. That applies
+   * to the unfocused case as much as the focused one, which is why the fallback
+   * frames every node through the same maths rather than handing off to
+   * `fitView`.
+   *
+   * `setViewport` rather than `setCenter`: `setCenter` derives the translation
+   * from React Flow's own measured width, which is the number we just
+   * established cannot be trusted. We know the box and the pane, so compute the
+   * transform outright and hand over the finished answer.
+   *
+   * Returns whether it had enough information to frame anything.
+   */
+  const frame = useCallback(
+    (targets: TreeFlowNode[], animate: boolean) => {
+      if (targets.length === 0 || size.w === 0 || size.h === 0) return false;
+
       const nodeW = wide ? 200 : compact ? 104 : 132;
       const nodeH = 62;
 
@@ -258,39 +284,73 @@ function Canvas({
       const maxY = Math.max(...targets.map((n) => n.position.y)) + nodeH;
 
       const margin = 1.35;
-      const zoom = Math.min(
-        paneW / Math.max(maxX - minX, 1) / margin,
-        paneH / Math.max(maxY - minY, 1) / margin,
-        1.15,
+      const zoom = Math.max(
+        Math.min(
+          size.w / Math.max(maxX - minX, 1) / margin,
+          size.h / Math.max(maxY - minY, 1) / margin,
+          1.15,
+        ),
+        0.1,
       );
 
-      // @ts-expect-error DEBUG
-      window.__fl.push({ ev:'setCenter', cx:(minX+maxX)/2, cy:(minY+maxY)/2, zoom: Math.max(zoom,0.1), box:[minX,maxX,minY,maxY], t: Math.round(performance.now()) }); // DEBUG
-      void setCenter((minX + maxX) / 2, (minY + maxY) / 2, {
-        zoom: Math.max(zoom, 0.1),
-        // The whole diagram re-frames itself: that is the longest journey
-        // anything in the app makes, so it takes the slow step (§16.2 item 5).
-        // Was a literal 400 that matched nothing else on screen.
-        duration: durationMs('--dur-slow') * glide,
-      });
+      /**
+       * Whether this move may be a *transition* — the other half of the fix.
+       *
+       * A duration makes React Flow move the viewport through a d3 transition,
+       * and d3 transitions only advance on `requestAnimationFrame`. A tab that
+       * is not painting never fires one, so the transition is created and never
+       * ticks: the call returns cleanly, nothing moves, and nothing tries again.
+       *
+       * The first framing is therefore always instant — it is the diagram
+       * arriving at its correct position, and §16.1 constraint 5 rules out
+       * animating on load for decoration anyway, so the fix and the constraint
+       * want the same thing.
+       *
+       * `document.hidden` covers the *later* framings for the same reason. A
+       * link posted to HN, Reddit or a course page is routinely opened into a
+       * background tab, and playback timers keep running there — so a B+Tree
+       * hop can re-frame while the tab is hidden, and an animated move would be
+       * lost exactly as the first one was. Read at call time rather than
+       * subscribed to, because the only question is whether *this* move can
+       * animate.
+       */
+      const canAnimate = animate && !document.hidden;
+
+      void setViewport(
+        {
+          x: size.w / 2 - ((minX + maxX) / 2) * zoom,
+          y: size.h / 2 - ((minY + maxY) / 2) * zoom,
+          zoom,
+        },
+        {
+          // The whole diagram re-frames itself: the longest journey anything in
+          // the app makes, so it takes the slow step (§16.2 item 5). Was a
+          // literal 400 that matched nothing else on screen.
+          duration: canAnimate ? durationMs('--dur-slow') * glide : 0,
+        },
+      );
+      return true;
     },
-    [setCenter, wide, compact, glide],
+    [setViewport, wide, compact, glide, size],
   );
 
-  useEffect(() => {
-    // @ts-expect-error DEBUG
-    window.__fl = window.__fl || []; window.__fl.push({ ev:'effect', rfWidth, n: nodes.length, focusKey, t: Math.round(performance.now()) }); // DEBUG
-    if (rfWidth === 0) return;
-    const timer = window.setTimeout(() => {
-      const focus = new Set(focusKey ? focusKey.split(',') : []);
-      const focused = nodes.filter((n) => focus.has(n.id));
-      frame(focused.length > 0 ? focused : nodes);
-    }, 60);
+  /**
+   * The panZoom instance the current transform was framed for, so a re-frame
+   * can be told from a first frame — and so a rebuilt instance, which arrives
+   * with the transform reset to the origin, is treated as a first frame again.
+   */
+  const framedFor = useRef<typeof panZoom>(null);
 
-    return () => { window.clearTimeout(timer); };
+  useEffect(() => {
+    if (!panZoom) return;
+    const focus = new Set(focusKey ? focusKey.split(',') : []);
+    const focused = nodes.filter((n) => focus.has(n.id));
+    if (frame(focused.length > 0 ? focused : nodes, framedFor.current === panZoom)) {
+      framedFor.current = panZoom;
+    }
     // `nodes` is read for positions; its length gates a full refit.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nodes.length, focusKey, frame, rfWidth]);
+  }, [nodes.length, focusKey, frame, panZoom]);
 
   // A zoom button is a deliberate control action rather than a layout settling,
   // so it takes the base step — one notch quicker than the re-frame above.
@@ -318,7 +378,9 @@ function Canvas({
         type="button"
         // Our own maths, not React Flow's `fitView`: that needs measured node
         // dimensions, which these graphs never report.
-        onClick={() => { frame(nodes); }}
+        // Animated: a button press is the most causal move there is, and the
+        // viewer is by definition looking at the tab when they press it.
+        onClick={() => { frame(nodes, true); }}
         aria-label="Fit the whole tree"
         className={`${ZOOM_BUTTON} w-auto px-2 text-micro`}
       >
@@ -331,7 +393,7 @@ function Canvas({
     <>
       {controls && toolbarTarget && createPortal(toolbar, toolbarTarget)}
 
-      <div ref={paneRef} className="h-full w-full">
+      <div ref={setPane} className="h-full w-full">
         <ReactFlow
           nodes={nodes}
           edges={edges}

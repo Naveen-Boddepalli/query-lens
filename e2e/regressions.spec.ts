@@ -177,3 +177,162 @@ test('logs nothing to the console across a full playthrough', async ({ page }) =
   await page.waitForTimeout(400);
   expect(noise).toEqual([]);
 });
+
+/**
+ * Framing the tree on load.
+ *
+ * The symptom was an unframed tree — viewport left at `translate(0px, 0px)
+ * scale(1)`, the graph in the pane's top-left corner — on some cold loads but
+ * not others. The cause was that the framing was applied with a duration, and
+ * a duration makes React Flow move the viewport through a d3 transition, which
+ * only advances on `requestAnimationFrame`. On a cold load the first animation
+ * frame can arrive arbitrarily late, and until it does the transition has not
+ * started: the transform stays at the identity it was initialised with, and
+ * nothing re-runs the framing afterwards.
+ *
+ * These two tests come at it from both ends — the symptom, and the cause.
+ */
+
+const IDENTITY = 'translate(0px, 0px) scale(1)';
+
+/** The viewport transform, and where the nodes sit inside the pane. */
+const readFraming = (page: import('@playwright/test').Page) =>
+  page.evaluate(() => {
+    const pane = document.querySelector('.react-flow') as HTMLElement;
+    const view = pane.querySelector('.react-flow__viewport') as HTMLElement;
+    const nodes = [...pane.querySelectorAll('.react-flow__node')].map((n) =>
+      n.getBoundingClientRect(),
+    );
+    const paneBox = pane.getBoundingClientRect();
+    const box = {
+      left: Math.min(...nodes.map((n) => n.left)),
+      right: Math.max(...nodes.map((n) => n.right)),
+      top: Math.min(...nodes.map((n) => n.top)),
+      bottom: Math.max(...nodes.map((n) => n.bottom)),
+    };
+    return {
+      transform: view.style.transform,
+      count: nodes.length,
+      // How far the nodes' centre sits from the pane's, as a fraction of the
+      // pane. 0 is dead centre; the unframed corner case is about 0.3–0.5.
+      offX: Math.abs((box.left + box.right) / 2 - (paneBox.left + paneBox.right) / 2) / paneBox.width,
+      offY: Math.abs((box.top + box.bottom) / 2 - (paneBox.top + paneBox.bottom) / 2) / paneBox.height,
+    };
+  });
+
+test('the parse tree is framed on every cold load, not left at the origin', async ({ page }) => {
+  // Reported as intermittent, so one load proves nothing: reload repeatedly.
+  await page.setViewportSize({ width: 1360, height: 900 });
+  const problems: string[] = [];
+
+  for (let i = 0; i < 8; i++) {
+    await page.goto(`/?q=${LOOKUP}&p=lru&x=0&s=1`);
+    await expect(page.locator('.react-flow__node').first()).toBeVisible();
+    await page.waitForTimeout(600);
+
+    const f = await readFraming(page);
+    if (f.transform === IDENTITY) problems.push(`load ${i}: viewport never moved (${f.transform})`);
+    // Framed means centred, not merely moved.
+    if (f.offX > 0.08 || f.offY > 0.08) {
+      problems.push(`load ${i}: off centre by ${f.offX.toFixed(2)}/${f.offY.toFixed(2)}`);
+    }
+  }
+
+  expect(problems).toEqual([]);
+});
+
+test.describe('framing does not depend on an animation frame arriving', () => {
+  // The bug only exists when the framing is animated, and it is animated only
+  // when the viewer has not asked for reduced motion. Pin that here: under
+  // `reduce` the duration is 0, the move is synchronous, and this test would
+  // pass without ever exercising the thing it is about.
+  test.use({ contextOptions: { reducedMotion: 'no-preference' } });
+
+  test('the tree is framed before the first animation frame runs', async ({ page }) => {
+    // Hold every animation-frame callback, the way a tab that has not started
+    // painting does, and release them well after the assertion below. With the
+    // framing applied through a d3 transition the tree stays in the corner for
+    // the whole hold; applied directly it is framed immediately.
+    await page.addInitScript(() => {
+      const real = window.requestAnimationFrame.bind(window);
+      const held: FrameRequestCallback[] = [];
+      let holding = true;
+      let handle = 1e6;
+      window.requestAnimationFrame = (cb: FrameRequestCallback) => {
+        if (!holding) return real(cb);
+        held.push(cb);
+        return handle++;
+      };
+      setTimeout(() => {
+        holding = false;
+        for (const cb of held) real(cb);
+      }, 6000);
+    });
+
+    await page.setViewportSize({ width: 1360, height: 900 });
+    await page.goto(`/?q=${LOOKUP}&p=lru&x=0&s=1`);
+    await expect(page.locator('.react-flow__node').first()).toBeVisible();
+
+    // Comfortably inside the hold, so a pass cannot come from rAF resuming.
+    await expect.poll(async () => (await readFraming(page)).transform, { timeout: 2500 })
+      .not.toBe(IDENTITY);
+
+    const f = await readFraming(page);
+    expect(f.count).toBeGreaterThan(0);
+    expect(f.offX).toBeLessThan(0.08);
+    expect(f.offY).toBeLessThan(0.08);
+  });
+});
+
+test('a re-frame also survives a tab that is not painting', async ({ page }) => {
+  /**
+   * The sibling of the test above, for every framing after the first.
+   *
+   * The fix has two halves. The first framing is unconditionally instant, which
+   * the test above pins. Later framings animate — but a shared link is routinely
+   * opened with ⌘-click or "open in new tab", playback timers keep running in a
+   * hidden tab, and a re-frame that happens there would animate into the same
+   * dead d3 transition. `FlowTree` guards that with `document.hidden`, and this
+   * pins it.
+   *
+   * Both halves of a background tab are modelled, because either alone proves
+   * nothing: rAF held (so an animated move cannot land) *and* `document.hidden`
+   * true (so the guard is the only thing that can save it).
+   */
+  await page.addInitScript(() => {
+    Object.defineProperty(Document.prototype, 'hidden', { get: () => true, configurable: true });
+    Object.defineProperty(Document.prototype, 'visibilityState', {
+      get: () => 'hidden',
+      configurable: true,
+    });
+    const real = window.requestAnimationFrame.bind(window);
+    const held: FrameRequestCallback[] = [];
+    let holding = true;
+    let handle = 1e6;
+    window.requestAnimationFrame = (cb: FrameRequestCallback) => {
+      if (!holding) return real(cb);
+      held.push(cb);
+      return handle++;
+    };
+    setTimeout(() => {
+      holding = false;
+      for (const cb of held) real(cb);
+    }, 8000);
+  });
+
+  await page.setViewportSize({ width: 1360, height: 900 });
+  await page.goto(`/?q=${LOOKUP}&p=lru&x=0&s=1`);
+  await expect(page.locator('.react-flow__node').first()).toBeVisible();
+  await expect.poll(async () => (await readFraming(page)).transform, { timeout: 3000 })
+    .not.toBe(IDENTITY);
+
+  // Resizing re-measures the pane, which re-runs the framing — this time as a
+  // *re-frame*, the animated path. A much narrower pane, so a move that is lost
+  // leaves the tree visibly off centre rather than coincidentally near it.
+  await page.setViewportSize({ width: 700, height: 900 });
+
+  await expect
+    .poll(async () => (await readFraming(page)).offX, { timeout: 3000 })
+    .toBeLessThan(0.08);
+  expect((await readFraming(page)).offY).toBeLessThan(0.08);
+});

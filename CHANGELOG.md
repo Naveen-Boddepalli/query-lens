@@ -45,6 +45,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   said "four frames" through a change that made it eight
 
 ### Fixed
+- The diagram tree arrived unframed in the panel's corner on some cold loads, and always when the
+  page loaded into a background tab — the common case for a shared link. React Flow animates viewport
+  moves with a d3-zoom transition, which is driven by `requestAnimationFrame` and so never advances
+  in a tab that is not painting. The first framing is now instant, and no framing animates while the
+  tab is hidden
+- Tree framing measured the pane through React Flow's store, which reports `size.width || 500` — so a
+  container measured at zero was indistinguishable from one 500px wide, and the tree was centred on a
+  point that did not exist. `FlowTree` now measures its own pane with a `ResizeObserver` and computes
+  the viewport transform itself, and the 60ms timeout that raced React Flow's mount is gone
 - The favicon's third page bar dropped out at 16px, so the stack read as two
 
 ## [0.1.0] - 2026-09-03

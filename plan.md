@@ -1189,7 +1189,28 @@ name. Two items remain:
 **P0 complete; the four P1 items in §19.2 are open.**
 
 - [x] The first paint on a cold load shows a completed trace, a tagline, and ~~a focused editor~~ — no
-      modal, no banner, no empty state. **Departure: the editor is deliberately not focused.** §15
+      modal, no banner, no empty state. *Protecting this turned up two real defects, both fixed.*
+
+      *One: the diagram arrived unframed in the panel's corner on some cold loads, and always when
+      the page loaded into a **background tab** — how a link posted to HN or Reddit is routinely
+      opened. React Flow animates a viewport move with a d3-zoom transition, d3-timer drives those
+      off `requestAnimationFrame`, and a tab that is not painting never fires one, so the move was
+      created, never ticked, and never retried. The first framing is now unconditionally instant —
+      which §16.1 constraint 5 wanted anyway, since nothing should animate on load for decoration —
+      and no framing animates while the tab is hidden.*
+
+      *Two, found while reviewing a second independent fix for the first: the framing was measuring
+      the pane through React Flow's store, which does `width: size.width || 500`. A container it has
+      measured at zero is therefore indistinguishable from one genuinely 500px wide, and framing
+      against that invented number centres the tree on a point that does not exist. `FlowTree` now
+      measures its own pane with a `ResizeObserver` and computes the transform itself via
+      `setViewport`, so the number is either real or zero. The 60ms timeout that raced React Flow's
+      mount is gone with it: the framing effect now depends on the `panZoom` instance, which also
+      makes it re-frame if that instance is rebuilt.*
+
+      *Three e2e regression tests cover it — the symptom across repeated cold loads, the cause with
+      animation frames held, and the hidden-tab re-frame — each verified to fail against the code it
+      replaces.* **Departure: the editor is deliberately not focused.** §15
       binds Space to play/pause, so a caret in the editor on load would turn the app's primary
       interaction into typing a space — and §19.2's own first-visit hint is *"Press Space to step
       through the trace"*. On a phone it would also raise the keyboard over the trace, against §15.2's
