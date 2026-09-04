@@ -38,12 +38,19 @@ export function TopNav() {
             {item.label}
           </NavLink>
         ))}
-        <a
-          href="/docs/"
-          className="rounded-md px-3 py-1.5 text-label font-medium text-ink-dim transition-colors hover:bg-surface-3 hover:text-ink"
+        <NavLink
+          to="/docs"
+          className={({ isActive }) =>
+            [
+              'rounded-md px-3 py-1.5 text-label font-medium transition-colors',
+              isActive
+                ? 'bg-accent/15 text-ink'
+                : 'text-ink-dim hover:bg-surface-3 hover:text-ink',
+            ].join(' ')
+          }
         >
           Docs
-        </a>
+        </NavLink>
       </nav>
 
       <ThemeToggle choice={choice} setChoice={setChoice} />

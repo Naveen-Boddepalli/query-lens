@@ -3,7 +3,7 @@ title: Getting started
 description: Three minutes from opening QueryLens to reading your first trace.
 ---
 
-import { Steps } from '@astrojs/starlight/components';
+import { Steps } from '../../ui/DocsComponents.tsx';
 
 No install, no account, no setup. This page is the whole tutorial — one outcome, no theory, no
 options to weigh yet.

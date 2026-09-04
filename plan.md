@@ -1,5 +1,27 @@
 # Project Plan: QueryLens — Interactive Database Internals Visualizer
 
+> **v8 — 2026-09-04.** Reframes the plan around the app it has actually become: a **client-side
+> multi-page application**, not a single playground. A **new §21** is the route map and the feature
+> catalogue — the Playground hub plus stage explainers, standalone tools, a query gallery, a
+> comparison view, a classroom track, settings and a trace inspector — with each feature given an
+> address, a URL-state schema and a build status. §21.1 is a count of what routing already exists
+> and the five things a count finds wrong with it (no SPA rewrite, so every deep link 404s on a
+> hard load; a dead `src/router.tsx`; a 404 page that still says "QueryLens is a single page"; a
+> stale `index.html` title; routes that are not actually code-split). §21.5 is a one-day P0 to fix
+> those, added to §10 as **M13**. §5 gains the shell layer, §6 gains the routing row, §19 and §20
+> gain pointers. No feature here is new scope — §21 gives the work already in §13 and §20 a
+> navigation model.
+>
+> **v7 — 2026-09-04.** A **new §20**, from a list of ~12 feature and spin-off ideas across four
+> audiences — slide-makers, three different CS courses, EdTech graders, and DBAs. §20 is that list
+> **counted against `src/` rather than against the architecture diagram**: three items are cheap,
+> need no backend, and produce the launch artefacts §18.2 already wants, so they become **M12** in
+> §10; the rest is v1 or its own plan, each with a written trigger, because a solo part-time project
+> that adds four audiences before running the §9 study is §12's first risk played straight. Two
+> edits fall out of it — §2's "production query debugging" non-goal now points at §20.6 (a paste-in
+> `EXPLAIN` viewer was considered and kept separate, not missed), and §13's one-line futures point
+> at §20 for the worked version.
+>
 > **v6 — 2026-09-03.** A research pass over §16–§18, plus a new §19. §16 is **rewritten against a
 > count of `src/` rather than an impression of it** — three of its four v5 claims were overstated or
 > backwards, and the largest tell in the app (a typeface named in CSS that is never actually served,
@@ -52,7 +74,8 @@ An in-browser, self-built toy relational database engine that visually animates 
 - Full ANSI SQL support.
 - Matching real engine behavior (Postgres/MySQL internals) exactly.
 - Multi-tenant server-side query execution.
-- Production query debugging / APM use case.
+- Production query debugging / APM use case. (A static, paste-in `EXPLAIN` visualiser was weighed
+  against this line and deliberately kept as a *separate* product — §20.6 — not folded in here.)
 - Concurrent/multi-user real-time collaboration (v1+).
 
 ---
@@ -141,6 +164,13 @@ if a v1 feature (a large dataset, the concurrent-query demo) ever needs it.
 
 No backend server is required for v0. Everything — parsing, storage, indexing, "disk" simulation — happens in-memory, in the browser.
 
+**The shell around the engine is a client-side multi-page app.** One `Layout` (disclaimer bar, top
+nav, footer) wraps a React Router route tree: the Playground at `/` is the landing page and first
+paint (§19), and every other feature — the stage explainers, the standalone tools, the classroom
+and comparison surfaces — is its own route that shares the engine, the panels and the design tokens
+rather than re-implementing them. The full map, the cross-page conventions and the routing work this
+still needs are §21. The docs (`/docs`) are a separate Astro build on the same origin (§17.1).
+
 ---
 
 ## 6. Tech Stack
@@ -150,6 +180,7 @@ No backend server is required for v0. Everything — parsing, storage, indexing,
 | Engine language | TypeScript **6.0.3 (pinned)** | TS 7 is faster but `typescript-eslint` excludes it (`<6.1.0`); revisit after 7.1 |
 | Engine execution context | Main thread, pure sync module | Step-back needs full history anyway; worker-ready for v1 |
 | Frontend framework | React + TypeScript | Familiar, large ecosystem, easy state management for step-through UI |
+| Routing | React Router 7 (`react-router-dom`), declarative `<BrowserRouter>` | Client-side routes for the stage explainers, tools and classroom pages (§21); the Playground stays first paint. Needs an SPA rewrite on Pages, which is not yet configured — §21.5. Currently the one `^`-ranged dependency; pin it |
 | Visualization | React Flow (`@xyflow/react`) for plan/AST/B+Tree graphs, `d3-hierarchy` for layout math, `motion` for animation | Node-based graphs without hand-rolling SVG; d3-hierarchy supplies tree layout |
 | Styling | Tailwind CSS v4 (`@tailwindcss/vite`) | CSS-first config (`@import "tailwindcss"`, `@theme`); no `tailwind.config.js` |
 | SQL editor | CodeMirror 6 (`@uiw/react-codemirror` + `@codemirror/lang-sql`) | ~50kB tree-shaken vs Monaco's 2–5MB; a `<textarea>` cannot syntax-highlight |
@@ -324,7 +355,10 @@ This event stream is the single contract between engine and UI — makes the UI 
 | M9 | **UI/UX readiness (§15):** first-run trace, Run feedback, native dialog, shareable URL, prompt placement, responsive height | ~1 day (P0) + 2-3 days (P1) — **both done** |
 | M10 | **Visual design maturity (§16) + landing page (§19):** self-hosted typefaces, named type/space/motion scales, hover states across every diagram panel, footer, first-screen framing | ~1.5 days (P0) + 1 week (P1) — **P0 done** |
 | M11 | **Docs, manual, licensing & governance (§17–§18):** docs site, Getting Started, the two manual pages the §9 study needs, `LICENSE-DOCS`, font licensing, README restructure | ~1 week (P0/P1) + ongoing — **docs site built, see note** |
-| v1 | Expand SQL coverage: joins, cost estimates, InnoDB midpoint-LRU as a third policy | Post-MVP |
+| M12 | **Portable artefacts (§20.3):** copy-as-Mermaid (AST, plan), PNG export of any panel, `scripts/record.ts` for launch GIFs/WebM. No backend, no new engine code — feeds the §18.2 launch post | ~1 week |
+| M13 | **Site structure — routing consolidation (§21.5):** SPA rewrite so deep links resolve, delete the dead `src/router.tsx`, correct the "single page" 404 and the stale `index.html` title, code-split routes, one nav component. Gates every new page because a multi-page app whose links 404 is not one | ~1 day |
+| v1 | Expand SQL coverage: joins, cost estimates, InnoDB midpoint-LRU as a third policy. **Plus the §20/§21 v1 tranche:** the non-SQL event driver + single-panel page seam (§20.2), the Buffer Pool standalone with extra policies (§20.4, `/tools/buffer-pool`), assignment links (§20.5, `/a/:id`), the query gallery (§21.3), the comparison view (§13, `/compare`), settings, true vector SVG export (§20.3) | Post-MVP |
+| v2+ | **Each its own plan (§20.5–§20.6):** graded submission (first backend), the interactive-embed package, the Visual `EXPLAIN` viewer. The B+Tree standalone (§20.4) is here until B+Tree delete exists | Not committed |
 
 M8 sits between "the app works" and "the URL is public." It is not polish — every item on the P0 list in
 §14 fails *silently* if skipped, which is why it gets its own gate rather than being folded into M7.
@@ -341,6 +375,19 @@ that decides whether a sceptical visitor stays.
 
 **M11's README restructure is blocked on M11's own docs site**, which is why both sit in the same
 milestone: moving 500 lines out of the README before there is somewhere for them to go is deletion.
+
+**M12 is the only build milestone §20 adds, and it is deliberately small.** The analysis of a
+twelve-item idea list returns exactly three things that need no backend, no new engine code and no
+roadmap fork — and they are the three that produce the GIF and the link the §18.2 launch post is
+made of. Everything else §20 examined is v1 or its own plan, gated on the §9 study, because that
+study is still the one experiment that says whether any of the rest is worth building.
+
+**M13 adds no feature — it makes the ones already shipped reachable.** Client routing landed for
+the stage pages, but the deploy config never caught up: without an SPA rewrite, a hard load of
+`/stages/parse` serves the 404 page, so the "multi-page" app is one page plus a set of links that
+break when shared. M13 is the day that closes, and it is a hard prerequisite for every route §21
+adds after it — there is no point publishing `/tools/buffer-pool` to a URL that only works if you
+navigated there from inside the app.
 
 ---
 
@@ -395,6 +442,10 @@ Two places where a decision in §14 could introduce a bill, both optional and bo
 - Course/curriculum packaging (structured lessons, quizzes tied to visualizations).
 - Comparison mode: same query, different index strategy, side-by-side.
 - Community query-sharing (would require backend + persistence).
+
+**§20 takes the export, spin-off and classroom items further** — analysed against the code,
+sequenced, and mostly deferred with named triggers. The bullets above are the one-line form; the
+course-packaging and query-sharing lines in particular are expanded there (§20.4–§20.5).
 
 ---
 
@@ -1177,6 +1228,11 @@ load, so the first paint is the product mid-explanation rather than an empty edi
 is the framing around it that answers *what is this and why should I care* without a single click,
 and without stealing space from the app for returning visitors.
 
+This decision constrains §21: the app is a multi-page application, but the Playground is the hub and
+stays the first thing a cold visitor sees. The other routes are for the returning visitor and the
+instructor, and the top nav that leads to them has to stay quiet enough not to pull a first-timer
+off the running trace.
+
 ### 19.1 What the first screen must do
 
 Five jobs, in priority order. Each has a failure mode that is specific and observable.
@@ -1263,3 +1319,421 @@ name. Two items remain:
       choosing not to re-run it. The alt text was already stale: it said "four frames" through a
       change that made it eight. **Verification on three platforms stays open until the URL is
       live**, alongside §14.6's two other held-open checks.*
+
+---
+
+## 20. Spin-offs, Exports & Adjacent Tools
+
+> New in v7. A dozen feature and spin-off ideas arrived as a list across four audiences —
+> slide-makers, CS-course instructors for three different courses, EdTech graders, and DBAs. This
+> section is that list, **counted against `src/` rather than against the architecture diagram**,
+> sequenced, and — for most of it — deferred with a named trigger rather than a maybe. The reason
+> for the deference is §12's first risk: the project is solo and part-time, the §9 study that
+> decides whether the core teaching format works has not been run, and adding four audiences before
+> validating one is scope creep with a plan stapled to it. What survives into a milestone is the
+> subset that costs a week, needs no server, and builds the §18.2 launch post — that is §10's M12.
+
+### 20.1 The filter, and the architecture reality-check
+
+Every item below is scored on four questions before it is scheduled at all:
+
+1. **Does it serve the §9 study?** — the only experiment in the plan. An item that hands the study a
+   cleaner instrument or a tighter control jumps the queue.
+2. **Does it serve the §18.2 launch?** — the launch post is a GIF and a link that opens the app at
+   one step. An item that produces that artefact is worth building *before* launch, not after.
+3. **Does it need a backend, or break "nothing leaves your browser"?** — §14.4 and the FAQ both sell
+   the zero-telemetry position as a feature, not an absence. Anything that needs a server, or
+   collects a keystroke from a third party, is a different product with a different privacy
+   statement — not a feature flag.
+4. **Does it fork the audience?** — the audience (§3) is a learner. A DBA debugging a production
+   plan is not that person, wants different things, and is served by a different competitive set.
+
+**What "the engine is decoupled from the UI" actually buys, and what it does not.** The claim is
+true — `src/engine/` is pure, synchronous, React-free and returns a serialisable `StepEvent[]`, and
+`src/ui/` is a fold over that array. Four things the framing tends to assume, which a count of `src/`
+does not support:
+
+| Assumption | What `src/` shows | Where that puts the cost |
+|---|---|---|
+| "The diagrams are SVG you can lift out" | Every panel is Tailwind **HTML**. `FlowTree` (AST, plan, B+Tree) is React Flow, whose nodes are absolutely-positioned `<div>`s — only the *edges* are SVG | A clean vector export is a **new renderer**, not `.outerHTML`. §20.3 |
+| "Spin a stage out as a standalone tool" | Every panel today is driven by `runQuery(sql, db)` → `events[]` → `projector.at(step)`. There is **no path** to drive a panel from a hand-authored operation sequence (`insert(15)`, a page-reference string) | Each standalone needs a non-SQL driver that emits the same events. §20.2, §20.4 |
+| "Embed the app in a blog with an `<iframe>`" | `public/_headers` sets `frame-ancestors 'none'`, deliberately (§14.3, §17.1) | The literal iframe is dead on arrival under the project's own CSP. §20.3 |
+| "Watch the B+Tree rebalance on delete" | `src/engine/index/` exports `insert`, `search`, `descend`, `height` — **no delete**. Underflow, borrow, merge and root-collapse are unimplemented | The DSA spin-off's headline feature is a build task with its own property tests (§7.6), not a wiring task. §20.4 |
+
+None of these kills an idea. They move where the work is.
+
+### 20.2 Three shared primitives
+
+Most of the list collapses onto three pieces of infrastructure. Building these once, well, is the
+optimisation — the alternative is five half-versions of each, one per feature.
+
+1. **`src/export/` — a pure module, on the same rules as `src/engine/`.** `toMermaid(tree)` and
+   `renderSvg(view, state)` as pure functions: no DOM, fully unit-testable, mirroring the engine
+   boundary the project already enforces. Consumed by in-app buttons, by `scripts/` (the OG card and
+   the §20.3 recordings), and by the docs build. `scripts/build-og.ts` is the proof this pays off —
+   it already drives the built app headlessly; a shared renderer is what stops the button and the
+   script from drifting apart.
+2. **A non-SQL `StepEvent` driver.** A thin adapter that takes a command sequence and calls the
+   engine's own primitives (`insert`, `pool.pin`, …) while threading the same `emit` the SQL path
+   uses — so the existing panels and the existing fold render it unchanged. This is the seam every
+   standalone in §20.4 needs. Roughly a day, plus B+Tree delete if the DSA module is in scope.
+3. **A single-panel page with a chrome level.** `src/pages/StagePage.tsx` is already 60% of this: it
+   mounts one `StageDetail` in isolation over a demo state. Generalise it to
+   `<PanelPage panel driver chrome="minimal | full" />`. This is what a standalone renders through,
+   what an embed serves, and what an assignment link opens.
+
+The fourth backbone already exists: the shareable URL (`src/ui/urlState.ts`). It is the input format
+for recordings, the transport for assignment links, and the "open the app here" target of every
+export.
+
+### 20.3 Presentation & content export (slide-makers, technical writers)
+
+| Item | Verdict | Cost against this codebase | What a generic version gets wrong |
+|---|---|---|---|
+| **Copy as Mermaid** (AST, plan) | **Build — M12** | ½ day. `toMermaid(ASTNode \| PlanNode)` is ~30 pure lines each; the clipboard path already exists (`copyLink` in the playground) | Including the B+Tree — Mermaid lays out a B+Tree with a sibling chain badly. AST and plan are where PR-and-Notion pasting actually happens |
+| **PNG export of any panel** | **Build — M12** | ½ day. `html-to-image` (~15 kB) against the panel's DOM node; `img-src 'self' data:` already permits the result; a blob download is same-origin and unblocked by the CSP | Assuming it is caveat-free — the self-hosted woff2 has to be inlined into the capture, and `oklch()` fills need a renderer that rasterises through `foreignObject`. Test in Safari, where that path has known bugs |
+| **True vector SVG export** (papers, slides) | **v1** | ~2–3 days. A dedicated `renderSvg` emitting real `<rect>/<text>/<path>` from the d3 layout `FlowTree` already computes — the grid and lock rows are trivial; the three trees share one renderer because they share `FlowNode` | `html-to-image`'s `toSvg` produces HTML wrapped in `<foreignObject>`, which Illustrator, Inkscape and PowerPoint all import inconsistently. That is not "a high-quality SVG" — it is a screenshot with extra steps |
+| **Animation export (GIF/WebM)** | **Build as a script, not a button — M12** | ½ day. `scripts/record.ts <shareUrl> --from N --to M`, driven by Playwright (already a dependency), frame-stepping the real built app and muxing with ffmpeg | Doing it in-browser: a GIF encoder is ~40 kB of bundle for a feature used monthly, 256 colours wreck the OKLCH palette and the anti-aliased type, and a 131-step scan takes 20–30 s to encode client-side. The script gets the real fonts and colours, and it *is* the §18.2 launch artefact |
+| **Interactive embeds (iframes)** | **v1+, gated on demand** | The URL is already the embed: an author links "scrub through this trace" and it opens the real app at the step. A true in-page embed is either a CSP-relaxed `/embed` entry — safe *here* only because the app has no auth, no actions and no secrets to clickjack — or a published `@querylens/embed` component package. Both are real work; neither is warranted before someone asks | Treating `frame-ancestors 'none'` as an oversight. It is a decision (§14.3); relaxing it globally to make a blog embed work trades the project's cleanest security property for a cosmetic gain |
+
+M12 takes the three that need no backend and no engine change and that produce the launch artefacts
+§18.2 already calls for. The other two wait.
+
+### 20.4 Standalone educational modules (DSA, OS, compilers courses)
+
+All three render through primitives §20.2 #2 and #3, and all three live at `/tools/*` on the **same
+deploy** — one origin, one header set, per the §17.1 precedent — not on separate domains. §21.3
+gives them their routes and their URL-state schemas; §21.5's SPA rewrite (M13) is a prerequisite
+for any of them being linkable.
+
+- **Buffer Pool as an OS-course tool — the strongest candidate, v1.** It needs no missing engine
+  feature: the pool already runs LRU and clock and emits `hit/load/miss/evict/sweep`. "A mock stream
+  of page requests" is an array of page IDs fed to `pool.pin` in a loop — a ~40-line driver. It
+  fills a real gap (LRU vs clock is a notoriously hard lecture), and it *is* §9's contrast, so it
+  doubles as a tighter study instrument than the whole pipeline. To be worth an OS student's hour it
+  wants more policies — FIFO, Second-Chance, Bélády-optimal — which the `ReplacementPolicy`
+  interface (`name`, `onAccess`, `selectVictim`) already makes a per-file addition. This is also
+  where §7.5's promised InnoDB midpoint-LRU finally lands.
+- **B+Tree as a DSA-course tool — v1, but only after delete is built.** The visualisation, the
+  animated traversal and the display transformer all exist. The headline interaction — type
+  `insert(15)`, `delete(4)`, watch it rebalance — needs B+Tree **deletion**, which
+  `src/engine/index/` does not have: underflow, borrow-from-sibling, merge, and root-collapse, each
+  with the property-based tests §7.6 mandates *before* the animation. That is the real scope of this
+  item; the UI around it is small. Decide delete on its own merits (it strengthens the core product
+  too), and this follows cheaply.
+- **Parser as a compilers-course tool — v2, lowest of the three.** The playground already shows a
+  recursive-descent parse building an AST live, with error squiggles — that half is done. The only
+  new surface is a **token ribbon**: the tokenizer (`src/engine/parser/tokenizer.ts`, separately
+  tested) produces tokens that never enter the event model, so showing the token stream and the
+  parser's cursor in it is a new small panel and a couple of new event kinds. Worth doing; not worth
+  doing early.
+
+### 20.5 Instructor & assessment tools (EdTech)
+
+This category splits cleanly on question 3 of the §20.1 filter.
+
+- **Assignment *links* — no backend, v1.** The shareable URL already encodes the seed data, the
+  query and the step; prediction prompts are engine-generated, so "predict what happens at step 13"
+  is already `?s=13&x=1`. What is missing is a thin authoring surface — set rows, set query, pick
+  the step, get a link — and an "assignment mode" flag that withholds the reveal and the explanation
+  until the learner commits. This stays entirely client-side and keeps every promise the FAQ makes.
+- **Graded submission — its own plan, post-v1, gated on §9.** "Answers are scored and submitted back
+  to the instructor" is the **first backend in the entire plan**: a store keyed by assignment and
+  student, a results view, therefore an identity notion (a class code at least), plus student
+  answers at rest — which is personal data, which is a consent surface, a privacy policy, and
+  possibly FERPA. It reverses §14.4's "nothing leaves your browser" for those users. That can be a
+  deliberate choice, but the mitigation has to be structural: a **separate opt-in surface**
+  (`/classroom`, or its own subdomain) with its own privacy statement, so the core tool keeps its
+  position. And it is premature until the §9 study says the format teaches — grading a format that
+  does not is effort spent upside-down. This is the moment §14.3 anticipated, where `connect-src` in
+  `_headers` stops being `'self'` and the change shows up as a diff.
+
+### 20.6 Developer tooling — the DBA track
+
+**This category collides with a Non-Goal, and writing that down is the point.** §2 lists "Production
+query debugging / APM use case" as out of scope, possibly forever.
+
+- **Visual `EXPLAIN` viewer — its own product, its own plan.** Pasting a real
+  `EXPLAIN (FORMAT JSON)` and drawing it is *not* APM: no live connection, no agent, no metric over
+  time. It is a plan pretty-printer. But it forks the audience (question 4) — the reader is now a
+  DBA, and the competitive set is `explain.dalibo.com` and `pev2`, not a textbook — and the code
+  saving is narrow: `FlowTree` would render a `FlowNode`, but a Postgres plan node carries ~40
+  fields, MySQL's format is unrelated, and "highlight the bottleneck" is a heuristic engine of its
+  own (row-estimate error, seq scan on a large relation, sort spilling to disk). `src/engine/` is
+  untouched by any of it. If it is pursued it is `querylens-explain`, sharing the design system and
+  the `FlowTree` component through the §16.4 `tokens.json` and component-gallery path — not this
+  engine and not this plan. Recorded here so "we kept it separate" reads as a decision, not an
+  omission.
+- **Standalone SQL linter/formatter — declined.** The parser is a deliberate v0 subset (§4): one
+  table, `=` / `<` / `>` / `AND`, one join as a stretch goal. A formatter people would actually use
+  has to handle the SQL they write — CTEs, window functions, subqueries, `GROUP BY`, dialect quirks
+  — all of which this parser rejects with a squiggle. A real one is `sql-formatter` off npm, which
+  shares no code with QueryLens. The linting that does make sense here already exists: CodeMirror
+  plus our own parser errors, scoped to the supported subset, inside the app.
+
+### 20.7 Decision log
+
+| Item | Verdict | Earliest | Trigger to revisit |
+|---|---|---|---|
+| Copy as Mermaid (AST, plan) | Build | M12 | — |
+| PNG export of a panel | Build | M12 | — |
+| `scripts/record.ts` (GIF/WebM) | Build | M12 | — |
+| True vector SVG export | Build | v1 | A paper or a course deck needs it |
+| Buffer Pool standalone (+ policies) | Build | v1 | — (also sharpens the §9 instrument) |
+| B+Tree standalone | Conditional | v1 | Only once B+Tree delete is implemented |
+| Parser standalone (token ribbon) | Build | v2 | Demand from a compilers course |
+| Assignment links (client-side) | Build | v1 | — |
+| Graded submission (backend) | Own plan | post-v1 | §9 validates the format, then a separate surface |
+| Interactive embed (package or CSP entry) | Own plan | v1+ | A named author needs an in-page embed |
+| Visual `EXPLAIN` viewer | Own product | — | A decision to serve DBAs — not this plan |
+| Standalone SQL formatter | Declined | — | The parser grows materially past the v0 subset |
+
+Nothing here changes the MVP or the §9 study. M12 is one small, launch-facing milestone; everything
+else waits behind the experiment that decides whether it is worth building.
+
+### 20.8 Definition of done — M12 only
+
+- [ ] `src/export/toMermaid.ts` is a pure function with unit tests, and a **Copy as Mermaid** action
+      on the AST and plan panels writes a valid `mermaid` fenced block to the clipboard.
+- [ ] A **Download PNG** action on every diagram panel produces an image with the real fonts and
+      colours embedded, verified in Chrome, Firefox and Safari, and the download is not blocked by
+      the CSP.
+- [ ] `scripts/record.ts` takes a shareable URL and a step range and emits a GIF and a WebM from the
+      built app, with the real typefaces loaded before the first frame — the `scripts/build-og.ts`
+      pattern, generalised.
+- [ ] The three share one renderer path where they can, so a token or layout change cannot make the
+      button and the script disagree (§20.2 #1).
+- [ ] `CHANGELOG.md` and the docs Reference note the export formats; no §2 non-goal is crossed.
+
+---
+
+## 21. The Multi-Page Application — routes, pages & the feature catalogue
+
+> New in v8. Commit `5c7ef5d` added client-side routing and a stage section; `ad2bc59` added the
+> docs site. The app is no longer "a single page" — the phrase still in `public/404.html` — but
+> nothing wrote down what the page map *is*, which routes are load-bearing, or what a second and
+> third feature area cost once there is a shell to hang them on. This section is that map. It adds
+> no feature that §13 or §20 did not already name; it gives each one an address, a URL-state
+> schema, a place in the navigation and a build status, and it fixes the routing that a count of
+> `src/` shows is half-wired.
+
+### 21.1 Where routing stands — counted
+
+**What exists** (`src/App.tsx`, the live route tree):
+
+| Route | Page | State |
+|---|---|---|
+| `/` | Playground | `src/ui/urlState.ts` — query, policy, predict, step, edited rows |
+| `/stages` | Pipeline index — eight stage cards | none |
+| `/stages/:stageId` | Stage explainer + one isolated `StageDetail` over a demo trace | `:stageId` only |
+| `/examples` | Three curated queries, each a link into `/?sql=…` | none |
+| `/docs/*` | Astro Starlight, separate build, same origin (§17.1) | its own |
+| `*` | `NotFoundPage` (in-app) | — |
+
+**Five things a count finds wrong with it:**
+
+1. **No SPA rewrite.** `public/` has `_headers` and `404.html` but no `_redirects`. On Cloudflare
+   Pages a hard load of `/stages/parse` — a refresh, a shared link, a new tab — matches no static
+   file and serves `404.html`, which carries `noindex`. Every route except `/` is reachable only by
+   in-app navigation. For an app whose entire distribution model is a shared link (§14.1, §19.3),
+   this is the deploy-day blocker. The fix is one file: `/*  /index.html  200`, with Pages'
+   static-asset-first ordering leaving `/docs/*` and `/assets/*` untouched.
+2. **`src/router.tsx` is dead code.** It exports a `createBrowserRouter` data router that nothing
+   imports; `App.tsx` uses the declarative `<BrowserRouter><Routes>` form instead. Two route trees,
+   one wired — the unwired one will drift and then mislead.
+3. **`public/404.html` still says "QueryLens is a single page — there is nothing at this address."**
+   Written before the stage section existed. With an SPA rewrite in place the hard-404 page should
+   only ever show for a genuinely unroutable path, and its copy should say that.
+4. **`index.html` `<title>` and `og:title` are `QueryLens — see what your SQL actually does`** — the
+   exact line §19.4 recorded as the *rejected* tagline, replaced in the app header by "Watch a SQL
+   query become a B+Tree traversal." The document metadata never took the change. Align it, or note
+   deliberately why the two differ.
+5. **Routes are not code-split.** `router.tsx`'s comment claims pages are lazy-loaded; neither file
+   uses `React.lazy`. Today the whole app is one entry, so `/stages` pays for the Playground's
+   CodeMirror and `/examples` — pure prose — pays for React Flow. Fine at two sections; not fine at
+   eight.
+
+`react-router-dom` is also the one dependency on a `^` range (§6); pin it while the routing is
+being touched.
+
+### 21.2 The shape — a hub, not a site
+
+The instinct when a site goes multi-page is equal-weight navigation: a bar of peers, a home page
+that is a directory. That is wrong here for the reason §19 spends a section on — the Playground *is*
+the product, comprehensible in four seconds of watching, and a cold visitor who clicks "Stages"
+before the first trace finishes has been sent away from the thing that would have convinced them.
+
+So: **one hub, quiet spokes.**
+
+- **`/` is the hub and the first paint.** It never becomes a launcher screen. The trace runs on
+  load; the nav is present but visually secondary (§19.1 job 3).
+- **The spokes are for the second visit and the instructor.** Stage explainers, tools, the gallery,
+  compare, classroom — a returning learner working through the pipeline, or a teacher building a
+  link for a class. None of them is on the path a first-timer needs.
+- **Every spoke has a way back into the hub at the relevant state** — an "Open in Playground" action
+  that carries the query and step through the §21.4 URL layer. The spokes explain; the hub is where
+  you *do*.
+- **The docs (`/docs`) are the fourth surface**, deliberately a different build (§17.1). The app
+  links into them; they link into the app by shareable URL, never by iframe (`frame-ancestors
+  'none'`).
+
+### 21.3 The route catalogue
+
+Grouped by area. **Status** is `built` / a milestone / `v1` / `v2` / `own plan`, matching §10 and
+§20. A route marked `own plan` is named here for the map and the navigation, not scheduled.
+
+**Hub**
+
+| Route | Page | Primary feature | URL state | Status |
+|---|---|---|---|---|
+| `/` | Playground | Author SQL, run, step the full pipeline, predict-then-reveal, edit seed rows, switch policy | query, policy, predict, step, rows | built |
+
+**Learn**
+
+| Route | Page | Primary feature | URL state | Status |
+|---|---|---|---|---|
+| `/stages` | Pipeline index | Eight stage cards, grouped Query Processing / Runtime / Concurrency / Output | — | built |
+| `/stages/:stageId` | Stage explainer | Prose + one isolated live panel over a canned trace; prev/next through the pipeline | `:stageId` | built |
+| `/learn` | Guided path | The §17.2 manual tasks as an ordered, in-app interactive track; progress in `localStorage` | — | v2 |
+| `/learn/:lessonId` | One lesson | A single task ("Follow one row from disk to result"), the app driven to each step, a "try this" at the end | `:lessonId`, step | v2 |
+
+**Explore**
+
+| Route | Page | Primary feature | URL state | Status |
+|---|---|---|---|---|
+| `/examples` | Examples | Curated queries; each opens the Playground | — | built (3; grow it) |
+| `/gallery` | Moment gallery | Named, deep-linked traces — point lookup, the eviction storm, the index-dropped contrast, a B+Tree split — each a card that opens the hub at a step. §19.2's preset chips, promoted to a page and reused as the chips | per-card share string | v1 |
+| `/compare` | Comparison view | Two synced playbacks side by side: LRU vs clock on one access pattern, or index vs no-index on one query (§13) | two share strings + a linked step | v1/v2 |
+| `/trace` | Trace inspector | The raw `StepEvent[]` for the current share string as a filterable table and copyable JSON — the developer-facing complement to §20.3's exports | share string | v2 |
+
+**Tools** (§20.4 — each renders through the §20.2 `PanelPage` primitive)
+
+| Route | Page | Primary feature | URL state | Status |
+|---|---|---|---|---|
+| `/tools` | Tools index | What each standalone is for, and who it is for | — | v1 |
+| `/tools/buffer-pool` | Buffer pool sandbox | Type or generate a page-reference string; step it against LRU / clock / FIFO / Second-Chance / Bélády-optimal; hit-ratio readout | reference string, policy, frames, step | v1 |
+| `/tools/btree` | B+Tree sandbox | `insert 15`, `delete 4`, `find 9` REPL; watch split, borrow and merge; fan-out slider | key sequence, fan-out, step | v2 — needs B+Tree delete (§20.4) |
+| `/tools/parser` | Parser sandbox | Arbitrary text → token ribbon → live AST with error squiggles and recursion depth | source text | v2 |
+
+**Classroom** (§20.5)
+
+| Route | Page | Primary feature | URL state | Status |
+|---|---|---|---|---|
+| `/assignments/new` | Assignment author | Set rows, query and the step to predict at; produce a link; choose whether the reveal is withheld until commit | encoded in the produced link | v1 (client-side) |
+| `/a/:id` | Open an assignment | `:id` decodes to a share string plus an "assignment mode" flag; the learner commits before the reveal | `:id`, step | v1 (client-side) |
+| `/classroom` | Graded track | Submit scored answers back to an instructor — its own plan, its own privacy statement, likely its own subdomain (§20.5) | — | own plan |
+
+**Meta**
+
+| Route | Page | Primary feature | URL state | Status |
+|---|---|---|---|---|
+| `/settings` | Settings | Theme, reduced-motion override, default policy, default predict-on, tabular figures — persisted to `localStorage` | — | v1 |
+| `/shortcuts` | Keyboard reference | The full table; the in-app hints are a reminder, not a reference (§17.2 page 9). May instead be a docs page — decide with §17 | — | v1 or docs |
+| `/about` | About | What the model claims and does not, credits, the licence position in plain words. May instead be the FAQ's landing — decide with §17 | — | v1 or docs |
+| `/embed/*` | Embed surface | Stripped, read-only `PanelPage`; the only route served without `frame-ancestors 'none'`, safe here only because the app has no auth, actions or secrets (§20.3) | share string | own plan |
+
+That is roughly twenty routes. Four exist; **M13** makes those four linkable; one small tranche —
+gallery, the buffer-pool tool, assignments, compare, settings — is v1 and already in §10; the rest
+is v2 or its own plan. The catalogue is a map, not a backlog.
+
+### 21.4 Cross-page conventions
+
+The pages are cheap only if they share machinery. Five conventions make that true.
+
+1. **One shell.** `src/ui/Layout.tsx` — disclaimer bar, top nav, footer — wraps the whole route
+   tree and is never forked per page. A section that needs its own secondary nav (Stages has a
+   sidebar) nests a layout inside it, as `StagesLayout` already does.
+2. **One panel-in-isolation primitive.** `StagePage` is the prototype; §20.2 #3 generalises it to
+   `<PanelPage panel driver chrome="minimal | full" />`. The stage explainers, all three tools, the
+   embed surface and each `/compare` pane are the same component with a different driver.
+3. **One URL-state layer.** `src/ui/urlState.ts` is Playground-only today and writes history with a
+   raw `history.replaceState`, outside React Router. Generalise it to `useShareState(schema)` —
+   per-page typed schemas, still parsed defensively as untrusted input (it stays the one value the
+   app takes from a stranger), but writing through React Router's own `navigate({ replace: true })`
+   so the two histories cannot desync. `replaceState` not `pushState` stays the rule: stepping a
+   trace must not bury the back button.
+4. **One "Open in Playground" contract.** Every explanatory page hands its current query and step to
+   the hub through that layer. This is the seam between §21 and §17 — the most likely path from a
+   docs concept to the running app — and it must land the reader on the exact step, not the top.
+5. **One nav definition.** Top nav, footer links and any section sidebar come from a single route
+   manifest, so a new route appears in all three or none. The current three (`TopNav`, `Footer`,
+   `Sidebar`) already drift; collapsing them is part of M13.
+
+**Rendering strategy, stated so it does not drift.** The app is client-rendered; the docs are
+Astro-prerendered. The prose-heavy new routes — `/about`, `/learn`, the `/gallery` copy — would
+read better prerendered and be more findable by search. The decision (M13 or v1, not later): either
+those routes move into the Astro build alongside the docs, or the SPA gets a build-time prerender
+crawl. **Default: keep them in the app, CSR, and revisit only if search referral ever matters** — a
+learning tool's traffic is a shared link, not a search result, and a second rendering path is a
+standing tax. Recorded so the choice is deliberate rather than accreted one route at a time.
+
+### 21.5 P0 — routing consolidation (M13, ~1 day)
+
+Each of these gates the same way: a multi-page app whose deep links 404 is a single-page app with
+extra buttons.
+
+| # | Item | Where | Why it gates |
+|---|---|---|---|
+| 1 | **SPA rewrite** — `/*  /index.html  200`, verified against `/stages/parse` on a cold load and a refresh | `public/_redirects` [NEW] | Without it every route but `/` serves the `noindex` 404 on a shared link. This is the item |
+| 2 | **Delete or adopt `src/router.tsx`** — one route tree, and it is the one `App.tsx` renders | `src/router.tsx`, `src/App.tsx` | Two trees, one wired: the dead one drifts and then someone edits it |
+| 3 | **Correct the 404 copy** — it no longer describes a single-page app; say what an unroutable path is and link home | `public/404.html` | It currently contradicts the product |
+| 4 | **Align `index.html` metadata** — `<title>`, `description`, `og:title` to §19's tagline, or a comment on why they differ | `index.html` | The card is the landing page (§14.1); its title is three versions stale |
+| 5 | **Code-split routes** — `React.lazy` per page, so `/examples` does not ship React Flow | `src/App.tsx` | Cheap now, structural later; the `router.tsx` comment already claims it is done |
+| 6 | **One nav source** — `TopNav`, `Footer` and `Sidebar` read one route manifest | `src/ui/` | A route that exists but appears in no nav is a route nobody finds |
+| 7 | **Pin `react-router-dom`** — off the `^` range onto an exact version (§6, §14.2) | `package.json` | Every other dependency is pinned; the router should not be the exception while it is load-bearing |
+
+### 21.6 P1 / P2 — the feature routes
+
+Not new scheduling — §10's v1 tranche and §20's deferred items, now with addresses. Order within
+v1, by leverage:
+
+1. **`/gallery`** — smallest, and it doubles as §19.2's preset chips. A card is a share string and a
+   caption; the page is a grid of `PanelPage` thumbnails or static SVGs (§20.3).
+2. **`/tools/buffer-pool`** — the strongest standalone (§20.4), a reference-string driver over the
+   existing pool, and a cleaner §9 instrument than the whole pipeline.
+3. **`/assignments/new` + `/a/:id`** — client-side, a thin authoring surface over the URL layer.
+4. **`/compare`** — two `PanelPage`s and a linked step; the payoff is §13's comparison mode and §9's
+   LRU-vs-clock contrast on one screen.
+5. **`/settings`** — small, but it is where reduced-motion-override and default-policy stop being
+   URL params nobody sets.
+
+P2 / v2: `/learn`, `/tools/btree` (gated on delete), `/tools/parser`, `/trace`. Own plan:
+`/classroom`, `/embed/*`.
+
+### 21.7 Risks specific to going multi-page
+
+- **Diluting the hub.** Every nav item is an invitation to leave the trace. Mitigation: §21.2's
+  hub-and-spoke, the nav stays visually secondary (§19.1), and the first-run hint still points at
+  Space, not at the nav.
+- **Deep-link 404s.** The one in §21.5 item 1. Until the rewrite ships, publish no URL but `/`.
+- **A second rendering path.** Prerendering the prose routes means Astro-in-the-app or a prerender
+  crawl — a standing tax on every build. §21.4 defaults to not paying it; the risk is paying it by
+  accident, one route at a time.
+- **Bundle creep.** Eight route chunks that each `import` a panel can each pull React Flow.
+  Mitigation: the `flow` vendor chunk (`vite.config.ts`) is already shared; keep panels behind
+  `PanelPage` so the import graph stays one edge deep, and keep the CI bundle budget covering the
+  entry, not just the whole.
+- **Nav drift.** Three nav components today, already inconsistent. §21.5 item 6, or it compounds per
+  route.
+- **Back-button surprise.** The URL layer writes with `replace`. A user who steps a trace then hits
+  Back expects the previous *page*, which `replace` gives them and `push` would not. The rule holds;
+  the risk is a future contributor "fixing" it to `push`.
+- **The docs/app seam.** Two build systems (`vite`, `astro`), one origin, one header set. A relative
+  link across the seam that assumes a trailing slash, or a font path that Astro's `base` rewrites
+  (§17.1 hit this once), breaks silently. The e2e check that the nav's "Docs" link and the docs
+  build agree already exists; extend it to every cross-seam link.
+
+### 21.8 Definition of done — M13
+
+- [ ] A hard load of `/stages/parse`, `/stages` and `/examples` — refresh and new tab — renders the
+      app, not the 404 page. Asserted by an e2e test against the built output.
+- [ ] `src/router.tsx` is gone, or it is what `App.tsx` renders — not both.
+- [ ] `public/404.html` describes an unroutable path, not "a single page," and links home.
+- [ ] `index.html` `<title>` and `og:title` match the app's own tagline, or carry a comment on why
+      not.
+- [ ] `/examples` downloads neither the React Flow nor the CodeMirror chunk; verified in the network
+      panel against the built site.
+- [ ] Top nav, footer and the stages sidebar are generated from one route manifest.
+- [ ] `react-router-dom` is pinned to an exact version.
+- [ ] The bundle budget (`scripts/bundle-budget.ts`) covers the entry chunk and fails if a route
+      import pulls a vendor chunk into it.

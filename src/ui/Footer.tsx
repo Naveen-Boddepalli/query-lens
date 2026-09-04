@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom';
 import { REPO_URL } from '../buildInfo.ts';
 
 /**
@@ -29,7 +30,7 @@ const LINKS: FooterLink[] = [
     // before the site existed — e2e's "the header Docs link" test now proves
     // this URL and the docs build agree, so a mismatch fails CI rather than
     // shipping a link nobody notices is dead.
-    href: '/docs/',
+    href: '/docs',
     title: 'How QueryLens works, and what it deliberately simplifies',
   },
   { label: 'GitHub', href: REPO_URL, title: 'Source, issues and discussions' },
@@ -58,14 +59,25 @@ export function Footer() {
 
         <nav aria-label="Project links" className="flex flex-wrap items-center gap-x-3 gap-y-1">
           {LINKS.map((link) => (
-            <a
-              key={link.label}
-              href={link.href}
-              title={link.title}
-              className="cell underline-offset-2 hover:text-ink hover:underline"
-            >
-              {link.label}
-            </a>
+            link.href.startsWith('/') ? (
+              <Link
+                key={link.label}
+                to={link.href}
+                title={link.title}
+                className="cell underline-offset-2 hover:text-ink hover:underline"
+              >
+                {link.label}
+              </Link>
+            ) : (
+              <a
+                key={link.label}
+                href={link.href}
+                title={link.title}
+                className="cell underline-offset-2 hover:text-ink hover:underline"
+              >
+                {link.label}
+              </a>
+            )
           ))}
         </nav>
 

@@ -2,6 +2,9 @@ import { execSync } from 'node:child_process';
 import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
+import mdx from '@mdx-js/rollup';
+import remarkFrontmatter from 'remark-frontmatter';
+import remarkMdxFrontmatter from 'remark-mdx-frontmatter';
 
 // plan.md §14.1 item 9. Without this, no bug report can be tied to a build.
 // Cloudflare Pages sets CF_PAGES_COMMIT_SHA; GitHub Actions sets GITHUB_SHA;
@@ -36,6 +39,7 @@ const SITE_URL = (
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [
+    { enforce: 'pre', ...mdx({ remarkPlugins: [remarkFrontmatter, remarkMdxFrontmatter] }) },
     react(),
     tailwindcss(),
     {

@@ -22,3 +22,6 @@ playwright/.cache
 # scripts/build-icons.py writes its 16px legibility check here (§16.2 item 8).
 # The shipped icons live in public/.
 build/
+.pnpm-store/
+
+.pnpm-store/
