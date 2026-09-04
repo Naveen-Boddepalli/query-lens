@@ -447,6 +447,16 @@ body {
        snapped section would otherwise land underneath. */
     scroll-margin-top: var(--space-2);
   }
+
+  /* Sidebar collapses on mobile: it becomes a horizontal scroll strip above
+     the content, keeping the stages accessible without stealing the viewport. */
+  .sidebar-nav {
+    width: 100%;
+    border-right: none;
+    border-bottom: 1px solid var(--color-edge);
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
 }
 
 /**

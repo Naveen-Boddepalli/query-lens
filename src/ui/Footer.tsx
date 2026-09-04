@@ -1,4 +1,4 @@
-import { BUILD_SHA, BUILD_TIME, REPO_URL } from '../buildInfo.ts';
+import { REPO_URL } from '../buildInfo.ts';
 
 /**
  * plan.md §16.2 item 9, and §19.1's fifth job.
@@ -46,7 +46,7 @@ const LINKS: FooterLink[] = [
 ];
 
 export function Footer() {
-  const commitUrl = BUILD_SHA === 'unknown' ? null : `${REPO_URL}/commit/${BUILD_SHA}`;
+
 
   return (
     <footer className="border-t border-edge px-4 py-3 text-label text-ink-dim">
@@ -69,24 +69,6 @@ export function Footer() {
           ))}
         </nav>
 
-        {/* Right-aligned and monospace: it is a machine identifier, and dressing
-            it as prose would invite reading it as one. `tabular-nums` comes from
-            the root rule, so the hex does not shuffle between builds. */}
-        <p className="ml-auto font-mono" title={`Built ${BUILD_TIME}`}>
-          build{' '}
-          {commitUrl ? (
-            <a
-              href={commitUrl}
-              className="cell underline-offset-2 hover:text-ink hover:underline"
-            >
-              {BUILD_SHA}
-            </a>
-          ) : (
-            // A local build with no git and no CI. Saying so beats printing a
-            // plausible-looking wrong SHA into someone's bug report.
-            <span>unknown</span>
-          )}
-        </p>
       </div>
     </footer>
   );
