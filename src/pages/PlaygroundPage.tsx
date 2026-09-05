@@ -23,6 +23,7 @@ import { PredictionCard } from '../ui/PredictionCard.tsx';
 import { ShortcutHints } from '../ui/ShortcutHints.tsx';
 import { useThemeContext } from '../ui/ThemeContext.tsx';
 import { RUN_HINT, useIsTouch } from '../ui/platform.ts';
+import { readDefaultPolicy, readDefaultPredictOn } from '../ui/preferences.ts';
 import { StageDetail } from '../ui/panels/StageDetail.tsx';
 import { STAGE_META } from '../ui/stageMeta.ts';
 import { usePlayback, usePlaybackShortcuts } from '../ui/usePlayback.ts';
@@ -50,8 +51,11 @@ const SHARED = readShareState(
 
 const START = {
   sql: SHARED.sql ?? INITIAL_SQL,
-  policy: SHARED.policy ?? DEFAULT_ENGINE_OPTIONS.policy,
-  predictOn: SHARED.predictOn ?? true,
+  // The URL wins when present; a `/settings` preference (plan.md §21.3) is the
+  // fallback for a bare visit, and the engine's own default is the fallback
+  // for that. Same precedence order the theme already follows.
+  policy: SHARED.policy ?? readDefaultPolicy() ?? DEFAULT_ENGINE_OPTIONS.policy,
+  predictOn: SHARED.predictOn ?? readDefaultPredictOn() ?? true,
   db: ((): Database => {
     const table = SEED.tables[TABLE];
     if (!SHARED.rows || !table) return SEED;

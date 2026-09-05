@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import { REPO_URL } from '../buildInfo.ts';
+import { NAV_ITEMS } from '../routes.ts';
 
 /**
  * plan.md §16.2 item 9, and §19.1's fifth job.
@@ -8,31 +9,22 @@ import { REPO_URL } from '../buildInfo.ts';
  * model" framing unmissable, and a disclaimer in a footer is a disclaimer
  * nobody read. This is a *separate*, real footer: the quiet way deeper, below
  * the fold, for the visitor who has watched a trace and now wants the source,
- * the licence, or a way to file a bug.
+ * the licence, or a way to file a bug. (The build SHA that identifies a bug
+ * report lives in the served HTML and the console banner — see index.html and
+ * src/ui/errorReport.ts — not in visible footer text.)
  *
- * The build SHA is the reason this is not merely decorative. It makes every bug
- * report self-identifying — "it does X on 4f2a1c" is actionable in a way that
- * "it does X" is not — and it is the single clearest signal that an engineer
- * built the thing, which is exactly what §16 is for.
+ * The internal links come from `src/routes.ts` (the `footer` flag), the same
+ * source the top nav reads, so "Docs" cannot mean two different paths in the
+ * two places (plan.md §21.5 item 6).
  */
 
-interface FooterLink {
+interface ExternalLink {
   label: string;
   href: string;
   title: string;
 }
 
-const LINKS: FooterLink[] = [
-  {
-    label: 'Docs',
-    // The Astro Starlight site at /docs (plan.md §17.1), same origin, same
-    // Cloudflare Pages deploy. Used to point at the README's #readme anchor
-    // before the site existed — e2e's "the header Docs link" test now proves
-    // this URL and the docs build agree, so a mismatch fails CI rather than
-    // shipping a link nobody notices is dead.
-    href: '/docs',
-    title: 'How QueryLens works, and what it deliberately simplifies',
-  },
+const EXTERNAL_LINKS: ExternalLink[] = [
   { label: 'GitHub', href: REPO_URL, title: 'Source, issues and discussions' },
   {
     label: 'Licence',
@@ -46,9 +38,9 @@ const LINKS: FooterLink[] = [
   },
 ];
 
+const INTERNAL_LINKS = NAV_ITEMS.filter((item) => item.footer);
+
 export function Footer() {
-
-
   return (
     <footer className="border-t border-edge px-4 py-3 text-label text-ink-dim">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
@@ -58,29 +50,26 @@ export function Footer() {
         </p>
 
         <nav aria-label="Project links" className="flex flex-wrap items-center gap-x-3 gap-y-1">
-          {LINKS.map((link) => (
-            link.href.startsWith('/') ? (
-              <Link
-                key={link.label}
-                to={link.href}
-                title={link.title}
-                className="cell underline-offset-2 hover:text-ink hover:underline"
-              >
-                {link.label}
-              </Link>
-            ) : (
-              <a
-                key={link.label}
-                href={link.href}
-                title={link.title}
-                className="cell underline-offset-2 hover:text-ink hover:underline"
-              >
-                {link.label}
-              </a>
-            )
+          {INTERNAL_LINKS.map((link) => (
+            <Link
+              key={link.path}
+              to={link.path}
+              className="cell underline-offset-2 hover:text-ink hover:underline"
+            >
+              {link.label}
+            </Link>
+          ))}
+          {EXTERNAL_LINKS.map((link) => (
+            <a
+              key={link.label}
+              href={link.href}
+              title={link.title}
+              className="cell underline-offset-2 hover:text-ink hover:underline"
+            >
+              {link.label}
+            </a>
           ))}
         </nav>
-
       </div>
     </footer>
   );

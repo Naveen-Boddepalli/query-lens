@@ -1,4 +1,11 @@
 export { runQuery } from './runQuery.ts';
+export {
+  MAX_REFERENCES,
+  parseReferenceString,
+  randomReferenceString,
+  runBufferTrace,
+} from './bufferTrace.ts';
+export type { BufferTraceResult } from './bufferTrace.ts';
 export { createSeedDatabase } from './seed.ts';
 export { createTracer } from './trace.ts';
 export { parse, toDisplayTree, columnsIn } from './parser/index.ts';

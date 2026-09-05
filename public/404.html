@@ -9,7 +9,13 @@
     <meta name="theme-color" content="#12151c" />
     <!-- Deliberately standalone: no bundle, no JS. A 404 that depends on the
          app loading is a 404 that breaks whenever the app does. Inline styles
-         are permitted by the CSP's style-src, which CodeMirror already needs. -->
+         are permitted by the CSP's style-src, which CodeMirror already needs.
+
+         Since plan.md §21.5, `public/_redirects` rewrites every unmatched path
+         to the SPA, so an ordinary unknown route (`/stages/nope`) is now drawn
+         by React Router as NotFoundPage *inside* the loaded app. This file is
+         only reached when that app cannot load at all — a bad deploy, a
+         chunk 404, a Cloudflare-side error — so its copy speaks to that. -->
     <style>
       /* Standalone, so it cannot read the app's stored choice — it follows the
          system only. Dark first, because that is the app's own default. */
@@ -74,11 +80,12 @@
     </style>
   </head>
   <body>
-    <h1>No page here</h1>
+    <h1>QueryLens didn’t load</h1>
     <p>
-      QueryLens is a single page — there is nothing at this address.<br />
-      A shared link with a query in it lives at the root.
+      You’re seeing this static page because the app itself couldn’t start —
+      usually a stale link to a build that no longer exists.<br />
+      Reloading from the root normally fixes it.
     </p>
-    <a href="/">Open QueryLens</a>
+    <a href="/">Reload QueryLens</a>
   </body>
 </html>

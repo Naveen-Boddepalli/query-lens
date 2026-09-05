@@ -19,16 +19,44 @@ const DIST = 'dist/assets';
 
 /** Matched against the chunk name; the first match wins. */
 const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
-  { name: 'codemirror', test: /^codemirror-/, kb: 128, note: 'SQL editor, needed at first paint' },
+  { name: 'codemirror', test: /^codemirror-/, kb: 128, note: 'SQL editor, loaded with the Playground route' },
   { name: 'flow', test: /^flow-.*\.js$/, kb: 70, note: 'React Flow + d3-hierarchy' },
   { name: 'react', test: /^react-/, kb: 62, note: 'react + react-dom' },
-  { name: 'app', test: /^index-.*\.js$/, kb: 34, note: 'engine + UI — the only chunk most commits touch' },
+  // The entry chunk after M13 (plan.md §21.5). Every route is now `React.lazy`,
+  // so this is App + Router + the layout shell and little else — down from the
+  // ~44 kB it had crept to across `5c7ef5d` and the docs migration, neither of
+  // which moved the old 34 kB line. Tight on purpose: a jump here means a page
+  // (or its deps) stopped being lazy.
+  { name: 'entry', test: /^index-.*\.js$/, kb: 24, note: 'App + Router + layout shell — most commits touch this' },
+  // The trace UI: the Playground page, the StageDetail panel it shares with the
+  // stage explainers, and the engine-core plumbing (the tracer, the seed data,
+  // playback controls) two or more lazy routes now import — rolldown hoists a
+  // module into its own chunk the moment a second entry point needs it, which
+  // is why `seed-*.js` and `trace-*.js` exist as their own files rather than
+  // being duplicated into every page that touches the demo database.
+  { name: 'trace-ui', test: /^(PlaygroundPage|StageDetail|stageMeta|types|seed|trace|PlaybackControls)-/, kb: 32, note: 'Playground + shared engine/UI plumbing, lazy' },
+  // The small per-route shells: stage index, examples, docs shell, 404, tools index.
+  { name: 'routes', test: /^(StagePage|StagesIndex|StagesLayout|ExamplesPage|DocsLayout|NotFoundPage|ToolsIndexPage)-/, kb: 10, note: 'lazy per-route chunks, loaded on navigation' },
+  // The §21.3 feature routes: Gallery, Compare, Settings, Assignments, the
+  // buffer-pool sandbox, and what they share — the standalone buffer-trace
+  // driver (src/engine/bufferTrace.ts), the panel it renders through, and the
+  // thin `preferences`/`urlState` helpers. None of it loads unless one of
+  // these routes is visited.
+  { name: 'standalone-tools', test: /^(GalleryPage|ComparePage|SettingsPage|AssignmentsNewPage|BufferPoolToolPage|BufferPoolPanel|bufferTrace|preferences|urlState)-/, kb: 18, note: 'Gallery, Tools, Compare, Settings, Assignments (plan.md §21.3)' },
+  // The nine docs pages, folded into one async chunk by vite.config.ts. Loads
+  // on the first `/docs` hit, never at first paint.
+  { name: 'docs', test: /^docs-.*\.js$/, kb: 16, note: 'integrated MDX docs (plan.md §17.1), lazy' },
   { name: 'css', test: /\.css$/, kb: 14, note: "Tailwind's output plus React Flow's stylesheet" },
   { name: 'runtime', test: /^rolldown-runtime-/, kb: 2, note: 'module loader emitted by rolldown' },
 ];
 
-/** Everything together, so a chunk moving between groups cannot hide growth. */
-const TOTAL_KB = 300;
+/**
+ * Everything together, so a chunk moving between groups cannot hide growth.
+ * Raised 315 → 335 for the §21.3 feature routes (Gallery, Tools, Compare,
+ * Settings, Assignments) — none of it loads before a route asks for it, so
+ * the cost is real but never first-paint.
+ */
+const TOTAL_KB = 335;
 
 const gzipKb = (bytes: Buffer): number => gzipSync(bytes, { level: 9 }).length / 1024;
 

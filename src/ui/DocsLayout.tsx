@@ -1,3 +1,4 @@
+import { Suspense } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
 
 const DOCS_NAV = [
@@ -62,7 +63,12 @@ export function DocsLayout() {
       
       <div className="min-h-0 flex-1 overflow-y-auto p-6 lg:p-10">
         <div className="prose prose-invert max-w-3xl">
-          <Outlet />
+          {/* Its own boundary, so moving between docs pages (each its own lazy
+              chunk) does not drop this sidebar while the next page loads. The
+              outer boundary in App.tsx only covers the first `/docs` hit. */}
+          <Suspense fallback={null}>
+            <Outlet />
+          </Suspense>
         </div>
       </div>
     </div>

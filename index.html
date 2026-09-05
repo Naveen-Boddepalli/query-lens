@@ -3,7 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>QueryLens — see what your SQL actually does</title>
+    <!-- plan.md §21.5 item 4. This line and the og:title below were three
+         versions stale: "see what your SQL actually does" is the tagline §19.4
+         recorded as *rejected* — true, and saying nothing the product name did
+         not. The app header, the OG card and this markup now all read the same
+         concrete sentence. -->
+    <title>QueryLens — watch a SQL query become a B+Tree traversal</title>
     <meta
       name="description"
       content="An in-browser toy database engine that animates a SQL query through parser, planner, optimizer, execution, buffer pool and B+Tree index. Predict what happens next, then watch it run."
@@ -53,7 +58,7 @@
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="QueryLens" />
     <meta property="og:url" content="%SITE_URL%/" />
-    <meta property="og:title" content="QueryLens — see what your SQL actually does" />
+    <meta property="og:title" content="QueryLens — watch a SQL query become a B+Tree traversal" />
     <meta
       property="og:description"
       content="Watch a SQL query move through parser, planner, optimizer, B+Tree index and buffer pool — one step at a time, on a query you typed. A simplified educational model, not a real engine."

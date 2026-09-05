@@ -336,3 +336,67 @@ test('a re-frame also survives a tab that is not painting', async ({ page }) => 
     .toBeLessThan(0.08);
   expect((await readFraming(page)).offY).toBeLessThan(0.08);
 });
+
+/**
+ * Deep links resolve to the app, not the 404 page (plan.md §21.5 / §21.8).
+ *
+ * Client routing landed in `5c7ef5d` but the deploy never got an SPA rewrite,
+ * so a hard load of any route but `/` — a refresh, a shared link, a new tab —
+ * had nothing to serve. `public/_redirects` closes that on Cloudflare Pages;
+ * `vite preview` has always had its own history fallback, so what this pins is
+ * the half that lives in the app: every route renders the shell and its own
+ * content on a cold load, rather than React Router's NotFoundPage or the
+ * standalone `public/404.html`. (The Cloudflare rewrite itself can only be
+ * checked against the live URL — playwright.config.ts's note on `_headers`
+ * applies to `_redirects` too.)
+ */
+test('every route renders the app on a cold load, not the 404 page', async ({ page }) => {
+  const routes: [string, RegExp][] = [
+    ['/stages', /Pipeline Stages/],
+    ['/stages/parse', /Parser/],
+    ['/examples', /Examples/],
+    ['/docs/faq', /Frequently Asked|FAQ|data/i],
+    // The §21.3 feature routes (built after M13, on the same manifest/lazy
+    // wiring — a route missing its own Suspense boundary would blank here).
+    ['/gallery', /Gallery/],
+    ['/tools', /Tools/],
+    ['/tools/buffer-pool', /Buffer pool sandbox/],
+    ['/compare', /LRU vs\. clock sweep/],
+    ['/settings', /Settings/],
+    ['/assignments/new', /Create an assignment/],
+  ];
+  for (const [path, marker] of routes) {
+    const response = await page.goto(path);
+    expect(response?.status(), `${path} status`).toBeLessThan(400);
+    // The disclaimer bar is in Layout, so it is on every in-app route and on
+    // none of the fallback pages.
+    await expect(
+      page.getByText(/simplified educational model/),
+      `${path}: app shell missing`,
+    ).toBeVisible();
+    await expect(page.locator('body'), `${path}: content missing`).toContainText(marker);
+    // The standalone fallback would have this exact copy; the app never does.
+    await expect(page.getByText("QueryLens didn’t load")).toHaveCount(0);
+  }
+});
+
+test('/examples does not pull the CodeMirror or Playground chunk', async ({ page }) => {
+  // plan.md §21.8: a prose-only route that drags in the editor means the lazy
+  // split (App.tsx) is not holding. CodeMirror is the 367 kB one that must not
+  // leak; `PlaygroundPage`, `StageDetail` and `docs` must not either.
+  //
+  // React Flow (`flow-*.js`) is deliberately not asserted here: the deprecated
+  // `advancedChunks` config in vite.config.ts hoists that chunk into the entry
+  // graph, so every route preloads it. Un-sharing it is a chunk-config change
+  // with its own blast radius (every hash moves, §14.2's caching story) — a
+  // separate task, tracked apart from M13.
+  const leaked: string[] = [];
+  page.on('request', (r) => {
+    const file = r.url().split('/').pop() ?? '';
+    if (/^(codemirror|PlaygroundPage|StageDetail|docs)-/.test(file)) leaked.push(file);
+  });
+  await page.goto('/examples');
+  await expect(page.getByRole('heading', { name: 'Examples' })).toBeVisible();
+  await page.waitForTimeout(300);
+  expect(leaked).toEqual([]);
+});

@@ -82,6 +82,11 @@ export default defineConfig({
             { name: 'codemirror', test: /node_modules\/(@codemirror|@lezer|style-mod|w3c-keyname)\// },
             { name: 'flow', test: /node_modules\/(@xyflow|d3-|classcat|zustand)/ },
             { name: 'react', test: /node_modules\/(react|react-dom|scheduler)\// },
+            // The nine docs pages (plan.md §21.5 item 5) are `React.lazy` in
+            // App.tsx, so they are already out of the entry chunk; this folds
+            // their individual async chunks into one `docs-*.js` that loads on
+            // the first `/docs` hit rather than nine round trips.
+            { name: 'docs', test: /src[\\/]pages[\\/]DocsContent[\\/]/ },
           ],
         },
       },

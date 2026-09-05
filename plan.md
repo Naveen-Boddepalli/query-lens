@@ -1,5 +1,29 @@
 # Project Plan: QueryLens — Interactive Database Internals Visualizer
 
+> **v10 — 2026-09-05.** §21.3's v1 tranche shipped: `/gallery`, `/tools`, `/tools/buffer-pool`,
+> `/compare`, `/settings` and `/assignments/new` are built, routed, in the nav manifest (seven
+> primary items now, plus two footer-only), and covered by a new `e2e/features.spec.ts`. The build
+> produced `src/engine/bufferTrace.ts` — a page-reference-string driver over the same
+> `createBufferPool` the SQL path uses — a milestone earlier than §20.2 #2 called for, because
+> Compare needed the same seam the buffer-pool tool did. §21.3's table now records three shipped
+> gaps rather than smoothing them over: Gallery has no B+Tree-split or index-dropped moment (the
+> engine cannot produce either yet), Compare covers only the buffer-pool half of §13's idea, and
+> assignment links default prediction on without yet withholding the reveal until commit. Full
+> status note under §21.3; §21.6 struck through as each item landed. Gate: typecheck, lint, 338
+> unit tests, build, budget (two new groups), 26 e2e, zero axe violations across all six new routes.
+>
+> **v9 — 2026-09-04.** **M13 executed** (§21.5, §21.8): the SPA rewrite (`public/_redirects`), the
+> dead `src/router.tsx` removed, the "single page" 404 and the stale `index.html` title corrected,
+> every route `React.lazy` behind `<Suspense>`, a `src/routes.ts` nav manifest feeding top nav and
+> footer, and `react-router-dom` pinned. The work surfaced three regressions the P0 list had not
+> named — the desktop fixed-height shell and the mobile scroll-snap both lost when `5c7ef5d` moved
+> the layout into `Layout.tsx` (two e2e tests red since), and a bundle budget whose 34 kB entry
+> line had been failing just as long — all now fixed, entry down to ~18 kB with the docs and the
+> trace UI split out. Commit `6eca5ac` (landed mid-work) reversed §17.1's Astro-Starlight decision
+> in favour of integrated MDX routes; §17.1 and §21 are updated to match, and the change removed
+> the docs/app build seam rather than adding to it. Gate is green: typecheck, lint, 326 unit tests,
+> build, bundle budget, 21 e2e.
+>
 > **v8 — 2026-09-04.** Reframes the plan around the app it has actually become: a **client-side
 > multi-page application**, not a single playground. A **new §21** is the route map and the feature
 > catalogue — the Playground hub plus stage explainers, standalone tools, a query gallery, a
@@ -169,7 +193,8 @@ nav, footer) wraps a React Router route tree: the Playground at `/` is the landi
 paint (§19), and every other feature — the stage explainers, the standalone tools, the classroom
 and comparison surfaces — is its own route that shares the engine, the panels and the design tokens
 rather than re-implementing them. The full map, the cross-page conventions and the routing work this
-still needs are §21. The docs (`/docs`) are a separate Astro build on the same origin (§17.1).
+still needs are §21. The docs (`/docs`) are MDX routes inside this same build (§17.1, as of commit
+`6eca5ac`) — lazy-loaded, so they cost nothing until visited.
 
 ---
 
@@ -356,8 +381,8 @@ This event stream is the single contract between engine and UI — makes the UI 
 | M10 | **Visual design maturity (§16) + landing page (§19):** self-hosted typefaces, named type/space/motion scales, hover states across every diagram panel, footer, first-screen framing | ~1.5 days (P0) + 1 week (P1) — **P0 done** |
 | M11 | **Docs, manual, licensing & governance (§17–§18):** docs site, Getting Started, the two manual pages the §9 study needs, `LICENSE-DOCS`, font licensing, README restructure | ~1 week (P0/P1) + ongoing — **docs site built, see note** |
 | M12 | **Portable artefacts (§20.3):** copy-as-Mermaid (AST, plan), PNG export of any panel, `scripts/record.ts` for launch GIFs/WebM. No backend, no new engine code — feeds the §18.2 launch post | ~1 week |
-| M13 | **Site structure — routing consolidation (§21.5):** SPA rewrite so deep links resolve, delete the dead `src/router.tsx`, correct the "single page" 404 and the stale `index.html` title, code-split routes, one nav component. Gates every new page because a multi-page app whose links 404 is not one | ~1 day |
-| v1 | Expand SQL coverage: joins, cost estimates, InnoDB midpoint-LRU as a third policy. **Plus the §20/§21 v1 tranche:** the non-SQL event driver + single-panel page seam (§20.2), the Buffer Pool standalone with extra policies (§20.4, `/tools/buffer-pool`), assignment links (§20.5, `/a/:id`), the query gallery (§21.3), the comparison view (§13, `/compare`), settings, true vector SVG export (§20.3) | Post-MVP |
+| M13 | **Site structure — routing consolidation (§21.5):** SPA rewrite so deep links resolve, delete the dead `src/router.tsx`, correct the "single page" 404 and the stale `index.html` title, code-split routes, one nav manifest. Gates every new page because a multi-page app whose links 404 is not one | ~1 day — **done (v9), + 3 regressions it uncovered** |
+| v1 | Expand SQL coverage: joins, cost estimates, InnoDB midpoint-LRU as a third policy. **§20/§21 v1 tranche — shipped (v10):** the non-SQL event driver (`src/engine/bufferTrace.ts`, ahead of schedule), the Buffer Pool standalone (`/tools/buffer-pool`, LRU/clock only — extra policies still open), assignment links (`/assignments/new`, no reveal-lock yet), the query gallery (`/gallery`), the comparison view (`/compare`, buffer-pool half only). **Still open:** true vector SVG export (§20.3), the full-pipeline half of Compare, a reveal-lock for assignments | Post-MVP |
 | v2+ | **Each its own plan (§20.5–§20.6):** graded submission (first backend), the interactive-embed package, the Visual `EXPLAIN` viewer. The B+Tree standalone (§20.4) is here until B+Tree delete exists | Not committed |
 
 M8 sits between "the app works" and "the URL is public." It is not polish — every item on the P0 list in
@@ -440,7 +465,9 @@ Two places where a decision in §14 could introduce a bill, both optional and bo
 ## 13. Future Directions (post-v1, not committed)
 - Rust + WASM engine rewrite for performance and authenticity.
 - Course/curriculum packaging (structured lessons, quizzes tied to visualizations).
-- Comparison mode: same query, different index strategy, side-by-side.
+- Comparison mode: same query, different index strategy, side-by-side. (The buffer-pool half of
+  this — same access pattern, LRU vs. clock sweep — shipped at `/compare` in v10, §21.3. The
+  full-pipeline, index-vs-no-index half described here is still open.)
 - Community query-sharing (would require backend + persistence).
 
 **§20 takes the export, spin-off and classroom items further** — analysed against the code,
@@ -1042,6 +1069,19 @@ exists in the README and moving it is mechanical.
 > (`LICENSE-DOCS`, the CC BY 4.0 footer notice) was not done alongside the site: it is its own
 > P1 item with its own open questions (SPDX placement, the REUSE decision already recorded), and
 > doing it partially to close this note felt worse than leaving it explicitly open.
+>
+> **Status update, v9 — the tool decision was reversed.** Commit `6eca5ac` removed the isolated
+> `docs/` Astro package and rebuilt the nine pages as MDX/Markdown routes inside the app's own
+> Vite build (`@mdx-js/rollup`, lazy-loaded into one `docs-*.js` chunk, rendered through
+> `src/ui/DocsLayout.tsx`). The trade this section weighed still holds — Starlight is the better
+> answer for a Vue-free docs *site* — but the embedding requirement won: a docs page can now
+> `import` a real component from `src/` with no wrapper, one build, one origin, one header set,
+> and `pnpm build:site`/the separate CI docs step are gone. What the migration did **not** finish,
+> and is now debt: the pages render no visible `<h1>` (the frontmatter `title` is parsed but not
+> shown), in-content links still use Starlight's trailing-slash form (`/faq/` → the app's 404),
+> the dropped `template: splash`/`hero` frontmatter, `prose prose-invert` locking the docs to the
+> dark palette against §15.3, and five `^`-ranged MDX dependencies against §14.2's pin rule. None
+> of that was in M13's scope; it is the "finish the docs migration" follow-up.
 
 ### 17.2 User Manual detail
 
@@ -1479,10 +1519,10 @@ query debugging / APM use case" as out of scope, possibly forever.
 | PNG export of a panel | Build | M12 | — |
 | `scripts/record.ts` (GIF/WebM) | Build | M12 | — |
 | True vector SVG export | Build | v1 | A paper or a course deck needs it |
-| Buffer Pool standalone (+ policies) | Build | v1 | — (also sharpens the §9 instrument) |
+| Buffer Pool standalone | **Done, v10** | v1 | Extra policies (FIFO, Second-Chance, Bélády) still open |
 | B+Tree standalone | Conditional | v1 | Only once B+Tree delete is implemented |
 | Parser standalone (token ribbon) | Build | v2 | Demand from a compilers course |
-| Assignment links (client-side) | Build | v1 | — |
+| Assignment links (client-side) | **Done, v10 (partial)** | v1 | The reveal-lock (withhold until commit) is still open |
 | Graded submission (backend) | Own plan | post-v1 | §9 validates the format, then a separate surface |
 | Interactive embed (package or CSP entry) | Own plan | v1+ | A named author needs an in-page embed |
 | Visual `EXPLAIN` viewer | Own product | — | A decision to serve DBAs — not this plan |
@@ -1516,6 +1556,20 @@ else waits behind the experiment that decides whether it is worth building.
 > no feature that §13 or §20 did not already name; it gives each one an address, a URL-state
 > schema, a place in the navigation and a build status, and it fixes the routing that a count of
 > `src/` shows is half-wired.
+>
+> **Status, v9 — M13 shipped.** §21.5's seven-item P0 is done (see §21.8). The SPA rewrite,
+> the dead `router.tsx`, the stale 404 and `index.html` copy, per-route `React.lazy`, the
+> `src/routes.ts` nav manifest, and the `react-router-dom` pin all landed together. Doing it
+> turned up more than the list said it would: the desktop fixed-height shell and the mobile
+> scroll-snap had *both* been dropped from the layout when `5c7ef5d` moved it into `Layout.tsx`
+> (two `e2e/regressions.spec.ts` tests had been red since, alongside a bundle budget that had
+> been failing just as long — the multi-page entry never got its 24 kB line updated). All three
+> are fixed. Commit `6eca5ac` also reversed §17.1's Astro decision in between — the docs are now
+> integrated MDX routes — which simplified this section rather than complicating it: one build,
+> no docs/app seam. The stale Astro references below are corrected; the leftover *docs-content*
+> debt from that migration (no visible page headings, in-content links still using Astro's
+> trailing-slash form, `prose-invert` locking the docs to dark) is real and tracked separately,
+> not part of M13.
 
 ### 21.1 Where routing stands — counted
 
@@ -1527,7 +1581,7 @@ else waits behind the experiment that decides whether it is worth building.
 | `/stages` | Pipeline index — eight stage cards | none |
 | `/stages/:stageId` | Stage explainer + one isolated `StageDetail` over a demo trace | `:stageId` only |
 | `/examples` | Three curated queries, each a link into `/?sql=…` | none |
-| `/docs/*` | Astro Starlight, separate build, same origin (§17.1) | its own |
+| `/docs/*` | Integrated MDX routes (commit `6eca5ac` replaced the Astro build — §17.1), one lazy chunk | per-page (static) |
 | `*` | `NotFoundPage` (in-app) | — |
 
 **Five things a count finds wrong with it:**
@@ -1602,16 +1656,16 @@ Grouped by area. **Status** is `built` / a milestone / `v1` / `v2` / `own plan`,
 | Route | Page | Primary feature | URL state | Status |
 |---|---|---|---|---|
 | `/examples` | Examples | Curated queries; each opens the Playground | — | built (3; grow it) |
-| `/gallery` | Moment gallery | Named, deep-linked traces — point lookup, the eviction storm, the index-dropped contrast, a B+Tree split — each a card that opens the hub at a step. §19.2's preset chips, promoted to a page and reused as the chips | per-card share string | v1 |
-| `/compare` | Comparison view | Two synced playbacks side by side: LRU vs clock on one access pattern, or index vs no-index on one query (§13) | two share strings + a linked step | v1/v2 |
+| `/gallery` | Moment gallery | Named, deep-linked traces — a point lookup, the eviction storm (LRU and clock), the optimizer's rewrite — each card computes its own step via `events.findIndex(...)` against a real run, so an engine change fails the page rather than shipping a stale link. The index-dropped contrast and a B+Tree split are not here yet: the first is one more moment to add, the second needs the B+Tree standalone's underlying delete work (§20.4) | per-card share string | **built** |
+| `/compare` | Comparison view | Two buffer-pool traces (`src/engine/bufferTrace.ts`) stepping together under LRU and clock sweep on one typed reference string, synchronised by *access index* since the policies emit different event counts for the same string; flags the first access where they pick different victims. The full-pipeline index-vs-no-index half of this idea (§13) is not built — this is the buffer-pool half only | reference string (session-local; not yet in the URL) | **built** |
 | `/trace` | Trace inspector | The raw `StepEvent[]` for the current share string as a filterable table and copyable JSON — the developer-facing complement to §20.3's exports | share string | v2 |
 
 **Tools** (§20.4 — each renders through the §20.2 `PanelPage` primitive)
 
 | Route | Page | Primary feature | URL state | Status |
 |---|---|---|---|---|
-| `/tools` | Tools index | What each standalone is for, and who it is for | — | v1 |
-| `/tools/buffer-pool` | Buffer pool sandbox | Type or generate a page-reference string; step it against LRU / clock / FIFO / Second-Chance / Bélády-optimal; hit-ratio readout | reference string, policy, frames, step | v1 |
+| `/tools` | Tools index | What each standalone is for, and who it is for, and which are not built yet | — | **built** |
+| `/tools/buffer-pool` | Buffer pool sandbox | Type or generate a page-reference string; step it against LRU or clock sweep through the exact `BufferPoolPanel` the Playground uses, driven by `runBufferTrace` — no SQL, no table. FIFO, Second-Chance and Bélády-optimal are not implemented; the `ReplacementPolicy` interface (§7.5) makes each a per-file addition when wanted | reference string, frames, policy | **built** |
 | `/tools/btree` | B+Tree sandbox | `insert 15`, `delete 4`, `find 9` REPL; watch split, borrow and merge; fan-out slider | key sequence, fan-out, step | v2 — needs B+Tree delete (§20.4) |
 | `/tools/parser` | Parser sandbox | Arbitrary text → token ribbon → live AST with error squiggles and recursion depth | source text | v2 |
 
@@ -1619,22 +1673,42 @@ Grouped by area. **Status** is `built` / a milestone / `v1` / `v2` / `own plan`,
 
 | Route | Page | Primary feature | URL state | Status |
 |---|---|---|---|---|
-| `/assignments/new` | Assignment author | Set rows, query and the step to predict at; produce a link; choose whether the reveal is withheld until commit | encoded in the produced link | v1 (client-side) |
-| `/a/:id` | Open an assignment | `:id` decodes to a share string plus an "assignment mode" flag; the learner commits before the reveal | `:id`, step | v1 (client-side) |
+| `/assignments/new` | Assignment author | Pick a preset or custom query, a policy and the step to land on; get a link (`encodeShareState`, unmodified) with prediction forced on. **Not built**: withholding the reveal until commit — today the link opens an ordinary Playground with `x=1`, which asks the question but does not stop a learner from skipping it | encoded in the produced link | **built (partial)** |
+| `/a/:id` | Open an assignment | Superseded by the above — there is no server-side id to decode, so an assignment *is* a Playground link rather than a separate route. Kept here as the originally-planned shape, struck by the simpler one that shipped | — | not built, and not needed as specified |
 | `/classroom` | Graded track | Submit scored answers back to an instructor — its own plan, its own privacy statement, likely its own subdomain (§20.5) | — | own plan |
 
 **Meta**
 
 | Route | Page | Primary feature | URL state | Status |
 |---|---|---|---|---|
-| `/settings` | Settings | Theme, reduced-motion override, default policy, default predict-on, tabular figures — persisted to `localStorage` | — | v1 |
+| `/settings` | Settings | Default eviction policy and default predict-on, persisted to `localStorage`, read by the Playground only when a URL does not already specify one — the same precedence the theme already follows. Theme has its own header toggle already; reduced-motion and tabular figures are not per-visitor settings (the first follows the OS, the second is unconditional CSS), so neither is here | — | **built** |
 | `/shortcuts` | Keyboard reference | The full table; the in-app hints are a reminder, not a reference (§17.2 page 9). May instead be a docs page — decide with §17 | — | v1 or docs |
 | `/about` | About | What the model claims and does not, credits, the licence position in plain words. May instead be the FAQ's landing — decide with §17 | — | v1 or docs |
 | `/embed/*` | Embed surface | Stripped, read-only `PanelPage`; the only route served without `frame-ancestors 'none'`, safe here only because the app has no auth, actions or secrets (§20.3) | share string | own plan |
 
-That is roughly twenty routes. Four exist; **M13** makes those four linkable; one small tranche —
-gallery, the buffer-pool tool, assignments, compare, settings — is v1 and already in §10; the rest
-is v2 or its own plan. The catalogue is a map, not a backlog.
+That is roughly twenty routes. Four existed before this pass; **M13** made those four linkable;
+the v1 tranche named in §10 — gallery, the buffer-pool tool, compare, assignment links, settings —
+**shipped in the same push**, ten routes built in total. The rest is v2 or its own plan. The
+catalogue is a map, not a backlog.
+
+> **Status, v10 — the v1 tranche shipped.** `/gallery`, `/tools`, `/tools/buffer-pool`, `/compare`,
+> `/settings` and `/assignments/new` are built, routed, in the nav manifest, and covered by
+> `e2e/features.spec.ts` plus a new `src/engine/bufferTrace.ts` with its own unit tests. The
+> buffer-pool tool and Compare share one primitive — `runBufferTrace`, a page-reference-string
+> driver over the *same* `createBufferPool` the SQL path uses, folded through the *same*
+> `createTraceProjector` and rendered by the *same* `BufferPoolPanel` — which is exactly §20.2 #2's
+> promised seam, arriving a milestone early because Compare needed it too. Three things shipped
+> smaller than §21.3 first described, each recorded at its row above rather than smoothed over:
+> Gallery has no B+Tree-split or index-dropped moment yet (nothing in the current engine produces
+> either); Compare is the buffer-pool half of §13's idea only, not the full pipeline; and assignment
+> links do not yet withhold the reveal until the learner commits, they only default prediction to
+> on. `/tools/buffer-pool`'s policy list is LRU and clock only — FIFO, Second-Chance and
+> Bélády-optimal stay open per §20.4. New nav: the header carries seven primary items now
+> (Playground, Stages, Gallery, Tools, Compare, Examples, Docs); Settings and Assignments sit in the
+> footer only (§21.2's hub-and-spoke — an instructor feature has no business in a cold visitor's
+> first look). Full gate green: typecheck, lint, 338 unit tests, build, bundle budget (two new
+> groups — `standalone-tools` and a widened `trace-ui` — see `scripts/bundle-budget.ts`), 26 e2e,
+> and a manual axe pass on all six new routes with zero violations.
 
 ### 21.4 Cross-page conventions
 
@@ -1669,8 +1743,8 @@ standing tax. Recorded so the choice is deliberate rather than accreted one rout
 
 ### 21.5 P0 — routing consolidation (M13, ~1 day)
 
-Each of these gates the same way: a multi-page app whose deep links 404 is a single-page app with
-extra buttons.
+**Done, v9 — all seven, see §21.8 for how each landed.** Each of these gates the same way: a
+multi-page app whose deep links 404 is a single-page app with extra buttons.
 
 | # | Item | Where | Why it gates |
 |---|---|---|---|
@@ -1684,21 +1758,26 @@ extra buttons.
 
 ### 21.6 P1 / P2 — the feature routes
 
-Not new scheduling — §10's v1 tranche and §20's deferred items, now with addresses. Order within
-v1, by leverage:
+**The v1 tranche shipped (v10) — see the status note under §21.3.** What follows is the order it
+went in, kept for the record, plus what is left.
 
-1. **`/gallery`** — smallest, and it doubles as §19.2's preset chips. A card is a share string and a
-   caption; the page is a grid of `PanelPage` thumbnails or static SVGs (§20.3).
-2. **`/tools/buffer-pool`** — the strongest standalone (§20.4), a reference-string driver over the
-   existing pool, and a cleaner §9 instrument than the whole pipeline.
-3. **`/assignments/new` + `/a/:id`** — client-side, a thin authoring surface over the URL layer.
-4. **`/compare`** — two `PanelPage`s and a linked step; the payoff is §13's comparison mode and §9's
-   LRU-vs-clock contrast on one screen.
-5. **`/settings`** — small, but it is where reduced-motion-override and default-policy stop being
-   URL params nobody sets.
+1. ~~**`/gallery`**~~ — done. A card is a share string and a caption, computed against a real run
+   rather than a hand-typed step.
+2. ~~**`/tools/buffer-pool`**~~ — done, and it produced the shared primitive
+   (`src/engine/bufferTrace.ts`) the next item needed too.
+3. ~~**`/assignments/new`**~~ — done, minus the reveal-withholding half (§21.3's row for it is
+   explicit about the gap). `/a/:id` was dropped in favour of the plain Playground link — no
+   server-side id exists to decode, so inventing one would have been complexity with nothing behind
+   it.
+4. ~~**`/compare`**~~ — done, for the buffer-pool half of §13's idea. A full-pipeline
+   index-vs-no-index comparison (two `PanelPage`s side by side) is still open.
+5. ~~**`/settings`**~~ — done, scoped to default policy and default predict-on; reduced-motion and
+   tabular figures turned out not to be per-visitor settings once considered (§21.3's row explains
+   why).
 
-P2 / v2: `/learn`, `/tools/btree` (gated on delete), `/tools/parser`, `/trace`. Own plan:
-`/classroom`, `/embed/*`.
+P2 / v2, unchanged: `/learn`, `/tools/btree` (gated on delete), `/tools/parser`, `/trace`,
+FIFO/Second-Chance/Bélády policies for the buffer-pool tool, a reveal-lock for assignments, and the
+full-pipeline half of Compare. Own plan: `/classroom`, `/embed/*`.
 
 ### 21.7 Risks specific to going multi-page
 
@@ -1718,22 +1797,37 @@ P2 / v2: `/learn`, `/tools/btree` (gated on delete), `/tools/parser`, `/trace`. 
 - **Back-button surprise.** The URL layer writes with `replace`. A user who steps a trace then hits
   Back expects the previous *page*, which `replace` gives them and `push` would not. The rule holds;
   the risk is a future contributor "fixing" it to `push`.
-- **The docs/app seam.** Two build systems (`vite`, `astro`), one origin, one header set. A relative
-  link across the seam that assumes a trailing slash, or a font path that Astro's `base` rewrites
-  (§17.1 hit this once), breaks silently. The e2e check that the nav's "Docs" link and the docs
-  build agree already exists; extend it to every cross-seam link.
+- ~~**The docs/app seam.**~~ **Gone as of commit `6eca5ac`.** The docs were an isolated Astro
+  package until then; they are now MDX routes in the one Vite build, so there is no second build
+  system, no cross-origin, and no `base`-rewrite to trip on. The e2e check that the nav's "Docs"
+  link resolves to real docs content stays as a cheap guard.
 
 ### 21.8 Definition of done — M13
 
-- [ ] A hard load of `/stages/parse`, `/stages` and `/examples` — refresh and new tab — renders the
-      app, not the 404 page. Asserted by an e2e test against the built output.
-- [ ] `src/router.tsx` is gone, or it is what `App.tsx` renders — not both.
-- [ ] `public/404.html` describes an unroutable path, not "a single page," and links home.
-- [ ] `index.html` `<title>` and `og:title` match the app's own tagline, or carry a comment on why
-      not.
-- [ ] `/examples` downloads neither the React Flow nor the CodeMirror chunk; verified in the network
-      panel against the built site.
-- [ ] Top nav, footer and the stages sidebar are generated from one route manifest.
-- [ ] `react-router-dom` is pinned to an exact version.
-- [ ] The bundle budget (`scripts/bundle-budget.ts`) covers the entry chunk and fails if a route
-      import pulls a vendor chunk into it.
+**Done, v9.** All seven P0 items shipped together; three regressions the list did not name were
+found and fixed alongside (see the status note under §21).
+
+- [x] A hard load of `/stages/parse`, `/stages`, `/examples` and `/docs/faq` — refresh and new tab
+      — renders the app, not the 404 page. *`public/_redirects` (`/* /index.html 200`) for
+      Cloudflare; `e2e/regressions.spec.ts` asserts the app half (the shell renders, the content
+      renders, the standalone 404 copy is absent) against the built output. The Cloudflare rewrite
+      itself needs the live URL, like §14.6's other held-open checks.*
+- [x] `src/router.tsx` is gone. *It was dead code — nothing imported it; `App.tsx` has the tree.*
+- [x] `public/404.html` describes an unroutable path, not "a single page," and links home. *Reframed
+      as the last-resort "the app didn't load" page it now is, since the rewrite means React Router
+      renders ordinary unknown routes as `NotFoundPage`.*
+- [x] `index.html` `<title>` and `og:title` match the app's own tagline. *"watch a SQL query become
+      a B+Tree traversal", with a comment recording that the old line was §19.4's rejected one.*
+- [~] `/examples` downloads neither the React Flow nor the CodeMirror chunk. *CodeMirror (367 kB) —
+      and `PlaygroundPage`, `StageDetail`, `docs` — are confirmed absent, asserted by e2e. React
+      Flow still preloads on every route: the deprecated `advancedChunks` config in `vite.config.ts`
+      hoists that chunk into the entry graph. Un-sharing it moves every chunk hash (§14.2's caching
+      story), so it is a separate change, tracked apart from M13.*
+- [x] Top nav and footer are generated from one manifest (`src/routes.ts`). *The stages sidebar
+      stays built from `STAGE_META`, the canonical stage list — a different axis, deliberately not
+      folded in.*
+- [x] `react-router-dom` is pinned to an exact version. *`7.18.3`; the five `^`-ranged deps the
+      `6eca5ac` MDX migration added are noted as migration debt, not changed here.*
+- [x] The bundle budget covers the entry chunk and the lazy chunks. *`entry` 24 kB (was a stale
+      34 that had been failing since `5c7ef5d`), plus new `trace-ui`, `routes` and `docs` groups so
+      a page that stops being lazy fails the build.*
