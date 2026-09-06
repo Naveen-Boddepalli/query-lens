@@ -90,6 +90,13 @@ test('no page overflow at any step, desktop or mobile', async ({ page }) => {
   // The horizontal half was found here: a long email column made the phone
   // scroll sideways, because grid and flex children default to
   // `min-width: auto` and refuse to shrink below their content.
+  //
+  // Since the Footer redesign, the desktop page is deliberately one viewport
+  // of app-shell (`Layout.tsx`'s `lg:h-dvh` block) plus the footer below it —
+  // "the quiet way deeper, below the fold" is no longer a metaphor once the
+  // footer has real height. What must still never happen is the *app shell*
+  // itself growing: the total page height should track the footer's own
+  // height and nothing else, regardless of how large a result set is.
   const problems: string[] = [];
   for (const [name, size] of [['desktop', { width: 1360, height: 900 }], ['mobile', { width: 375, height: 812 }]] as const) {
     await page.setViewportSize(size);
@@ -98,11 +105,18 @@ test('no page overflow at any step, desktop or mobile', async ({ page }) => {
       await page.waitForTimeout(400);
       const m = await page.evaluate(() => ({
         x: document.documentElement.scrollWidth > innerWidth + 1,
-        y: document.documentElement.scrollHeight > innerHeight + 2,
+        overflowPastFooter:
+          document.documentElement.scrollHeight -
+          innerHeight -
+          document.querySelector('footer')!.getBoundingClientRect().height,
       }));
       if (m.x) problems.push(`${name} ${url}: horizontal overflow`);
-      // Only the desktop shell is fixed-height; the phone is meant to scroll.
-      if (name === 'desktop' && m.y) problems.push(`${name} ${url}: page grew past the viewport`);
+      // Only the desktop shell is fixed-height; the phone is meant to scroll,
+      // and by more than just the footer, since content there is not height-
+      // constrained at all.
+      if (name === 'desktop' && m.overflowPastFooter > 2) {
+        problems.push(`${name} ${url}: app shell grew ${String(m.overflowPastFooter)}px past the viewport, beyond the footer`);
+      }
     }
   }
   expect(problems).toEqual([]);
@@ -369,9 +383,10 @@ test('every route renders the app on a cold load, not the 404 page', async ({ pa
     const response = await page.goto(path);
     expect(response?.status(), `${path} status`).toBeLessThan(400);
     // The disclaimer bar is in Layout, so it is on every in-app route and on
-    // none of the fallback pages.
+    // none of the fallback pages. `.first()`: the footer's own closing line
+    // (Footer.tsx) repeats similar wording further down the same page.
     await expect(
-      page.getByText(/simplified educational model/),
+      page.getByText(/simplified educational model/).first(),
       `${path}: app shell missing`,
     ).toBeVisible();
     await expect(page.locator('body'), `${path}: content missing`).toContainText(marker);

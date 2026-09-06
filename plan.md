@@ -1,5 +1,45 @@
 # Project Plan: QueryLens — Interactive Database Internals Visualizer
 
+> **v11 — 2026-09-05.** A footer and docs-structure pass, prompted by a reference layout the user
+> shared. `Footer.tsx` is now four blocks — a brand block (mark, one-line description, a
+> licence/privacy badge) plus Explore / Documentation / Project columns — reading from
+> `src/routes.ts` and a new `src/docsNav.ts` rather than a hand-typed row of links, so nothing in it
+> can name a destination that has moved. It sits *outside* `Layout.tsx`'s fixed-height desktop shell
+> now, not inside it: a footer with real content is tall enough that folding it into the one-viewport
+> block would have shrunk the Playground's usable height on every load, which is exactly the
+> "stealing space from the app" failure §19 warns against — "below the fold" is no longer a
+> metaphor. `e2e/regressions.spec.ts`'s overflow test was rewritten to check that the page is at most
+> one viewport plus the footer's own height, not that it never exceeds one viewport.
+>
+> Restructuring the docs pages to have real hierarchy — a title, an audience/version-style meta
+> line, an on-this-page contents block, a callout for the one thing not to skim past — surfaced a
+> bug that had been live since the docs migration (`6eca5ac`) and touched every one of the eight
+> `.md` pages: **left at its default, `@mdx-js/rollup` compiles a `.md` file as plain CommonMark**,
+> with no JSX or `{expression}` support, and only a literal `.mdx` extension gets the real MDX
+> processor. Every doc page `import`s and uses a component — `<Steps>`, `<Card>`, and the three new
+> ones — so every one of them was silently rendering as escaped text
+> (`&lt;DocMeta items={...} /&gt;`) instead of a component, invisible until something asked more of
+> the page than a paragraph of prose. Forcing `format: 'mdx'` globally turns JSX on but breaks
+> `remark-frontmatter`'s recognition of a `.md`-extensioned file's leading `---` block — so the fix
+> that shipped is renaming all eight to `.mdx`, which sidesteps the interaction entirely. Discovering
+> that also surfaced a second, adjacent bug: three reference pages use markdown tables, which plain
+> `remark-parse` renders as a literal paragraph of pipe characters — `remark-gfm` is now in the
+> pipeline. And `@tailwindcss/typography` had been a dependency since the same migration commit
+> without ever being registered (no `@plugin` line in `index.css`), so `.prose` did nothing and
+> every doc page had no heading hierarchy at all; it is now registered and themed onto the app's own
+> semantic tokens rather than the plugin's default palette, and `prose-invert` — which hardcoded a
+> dark palette regardless of the viewer's chosen theme — is gone with it. Three flagship pages
+> (index, FAQ, getting started) carry the new `DocMeta`/`Contents`/`Callout` structure; the other six
+> got the extension fix, the link fix (see below), and the typography/table fixes for free but not
+> the new components — a deliberate scope line, not an oversight.
+>
+> Also fixed while in this code, because the docs restructure made them impossible not to notice:
+> 18 internal doc links across six pages still used Astro Starlight's trailing-slash form
+> (`/faq/`) from before `6eca5ac`, none of which resolve under this app's routes (`/docs/faq`) —
+> all corrected. Gate: typecheck, lint, 338 unit tests, build, bundle budget (raised for the
+> typography plugin's CSS), 26 e2e, zero axe violations across the footer and five checked docs
+> pages.
+>
 > **v10 — 2026-09-05.** §21.3's v1 tranche shipped: `/gallery`, `/tools`, `/tools/buffer-pool`,
 > `/compare`, `/settings` and `/assignments/new` are built, routed, in the nav manifest (seven
 > primary items now, plus two footer-only), and covered by a new `e2e/features.spec.ts`. The build
@@ -1077,11 +1117,16 @@ exists in the README and moving it is mechanical.
 > answer for a Vue-free docs *site* — but the embedding requirement won: a docs page can now
 > `import` a real component from `src/` with no wrapper, one build, one origin, one header set,
 > and `pnpm build:site`/the separate CI docs step are gone. What the migration did **not** finish,
-> and is now debt: the pages render no visible `<h1>` (the frontmatter `title` is parsed but not
-> shown), in-content links still use Starlight's trailing-slash form (`/faq/` → the app's 404),
-> the dropped `template: splash`/`hero` frontmatter, `prose prose-invert` locking the docs to the
-> dark palette against §15.3, and five `^`-ranged MDX dependencies against §14.2's pin rule. None
-> of that was in M13's scope; it is the "finish the docs migration" follow-up.
+> and was debt: ~~the pages render no visible `<h1>`~~, ~~in-content links still use Starlight's
+> trailing-slash form~~, ~~`prose prose-invert` locking the docs to the dark palette~~ — all fixed
+> in v11, along with two bugs the fix surfaced that had nothing to do with the original list: every
+> `.md` page's imported components (`<Steps>`, `<Card>`) had been rendering as escaped text, not
+> components, since this migration (`@mdx-js/rollup` compiles `.md` as plain CommonMark unless the
+> extension is `.mdx` — now all nine are), and three reference pages' markdown tables rendered as
+> literal pipe characters (`remark-gfm` was missing). Still open: the dropped `template: splash`/
+> `hero` frontmatter (its content is now inline prose instead, which is the fix), and the five
+> `^`-ranged MDX dependencies against §14.2's pin rule (`rehype-slug`, `remark-gfm` added in v11 are
+> exactly pinned; the four inherited from `6eca5ac` are not, and remain migration debt).
 
 ### 17.2 User Manual detail
 

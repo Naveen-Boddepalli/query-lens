@@ -77,14 +77,14 @@ const DocsLayout = lazy(() =>
 // each has a default export. Lazy so they form their own async chunk — folded
 // into one `docs-*.js` by vite.config.ts — rather than first-paint weight.
 const DocsIndex = lazy(() => import('./pages/DocsContent/index.mdx'));
-const DocsGettingStarted = lazy(() => import('./pages/DocsContent/getting-started.md'));
-const DocsFaq = lazy(() => import('./pages/DocsContent/faq.md'));
-const DocsBufferPool = lazy(() => import('./pages/DocsContent/concepts/buffer-pool.md'));
-const DocsBTree = lazy(() => import('./pages/DocsContent/concepts/btree.md'));
-const DocsSql = lazy(() => import('./pages/DocsContent/reference/sql.md'));
-const DocsUrlParameters = lazy(() => import('./pages/DocsContent/reference/url-parameters.md'));
-const DocsShortcuts = lazy(() => import('./pages/DocsContent/reference/shortcuts.md'));
-const DocsLimits = lazy(() => import('./pages/DocsContent/reference/limits.md'));
+const DocsGettingStarted = lazy(() => import('./pages/DocsContent/getting-started.mdx'));
+const DocsFaq = lazy(() => import('./pages/DocsContent/faq.mdx'));
+const DocsBufferPool = lazy(() => import('./pages/DocsContent/concepts/buffer-pool.mdx'));
+const DocsBTree = lazy(() => import('./pages/DocsContent/concepts/btree.mdx'));
+const DocsSql = lazy(() => import('./pages/DocsContent/reference/sql.mdx'));
+const DocsUrlParameters = lazy(() => import('./pages/DocsContent/reference/url-parameters.mdx'));
+const DocsShortcuts = lazy(() => import('./pages/DocsContent/reference/shortcuts.mdx'));
+const DocsLimits = lazy(() => import('./pages/DocsContent/reference/limits.mdx'));
 
 export default function App() {
   return (

@@ -1,45 +1,60 @@
 ---
 title: What QueryLens is
 description: An in-browser toy database engine that animates a SQL query through parser, planner, optimizer, execution, buffer pool and B+Tree index.
-template: splash
-hero:
-  tagline: Watch a SQL query become a B+Tree traversal.
-  actions:
-    - text: Open the app
-      link: /
-      icon: right-arrow
-      variant: primary
-    - text: Getting started
-      link: /getting-started/
-      icon: rocket
-      variant: minimal
 ---
 
-import { Card, CardGrid } from '../../ui/DocsComponents.tsx';
+import { Card, CardGrid, Callout, Contents, DocMeta } from '../../ui/DocsComponents.tsx';
+
+# What QueryLens is
+
+Watch a SQL query become a B+Tree traversal.
+
+<DocMeta items={[
+  { label: 'Audience', value: 'CS students, interview preppers, self-taught developers' },
+  { label: 'Model', value: 'v0 SQL subset · client-side only, no server' },
+  { label: 'Licence', value: 'code MIT · this documentation CC BY 4.0' },
+]} />
+
+<Contents items={[
+  { href: '#what-it-does', label: 'What it does' },
+  { href: '#what-it-is-not', label: 'What it is not' },
+  { href: '#the-four-things-worth-knowing-first', label: 'The four things worth knowing first' },
+]} />
+
+## What it does
 
 QueryLens is a self-built toy relational database engine that runs entirely in your browser. Type a
 query, press Run, and step through exactly what happens to it — Parser → Planner → Optimizer →
 Execution → Buffer Pool → B+Tree Index → Locks → Result — one event at a time, with the state of
 every stage on screen at once.
 
-It is a learning tool, not a production database. Every number it shows is true to *this* engine —
-not to the exact behaviour of Postgres, MySQL, or any real system. See the [FAQ](/faq/) for exactly
-where the model simplifies and why.
+[Open the app](/) to see it running, or [Getting started](/docs/getting-started) for a three-minute
+walkthrough of the interface.
+
+## What it is not
+
+<Callout>
+  It is a learning tool, not a production database. Every number it shows is true to *this* engine —
+  not to the exact behaviour of Postgres, MySQL, or any real system. See the [FAQ](/docs/faq) for
+  exactly where the model simplifies and why.
+</Callout>
+
+## The four things worth knowing first
 
 <CardGrid>
-  <Card title="The buffer pool" icon="document">
+  <Card title="The buffer pool">
     Eight fixed frames, a real eviction policy (LRU or clock sweep), hits and misses you can watch
-    happen. [Read the concept](/concepts/buffer-pool/).
+    happen. [Read the concept](/docs/concepts/buffer-pool).
   </Card>
-  <Card title="The B+Tree index" icon="seti:db">
+  <Card title="The B+Tree index">
     A real B+Tree — insert, split, point lookup — with the descent traced node by node.
-    [Read the concept](/concepts/btree/).
+    [Read the concept](/docs/concepts/btree).
   </Card>
-  <Card title="Predict, then reveal" icon="magnifier">
+  <Card title="Predict, then reveal">
     At marked steps the app asks you to commit to an answer — which frame gets evicted? which child
     pointer? — before it shows you. The prompts are what make it stick.
   </Card>
-  <Card title="No accounts, no telemetry" icon="approve-check">
+  <Card title="No accounts, no telemetry">
     Nothing leaves your browser. The engine runs client-side; a shared link carries the query and
     step in the URL, not on a server.
   </Card>

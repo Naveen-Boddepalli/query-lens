@@ -20,7 +20,7 @@ export interface NavItem {
   end?: boolean;
   /** Shown in the primary header nav. */
   nav?: boolean;
-  /** Also surfaced in the footer's quiet "way deeper" row (plan.md §16.2 item 9). */
+  /** Surfaced in the footer's "Project" column (plan.md §16.2 item 9). */
   footer?: boolean;
 }
 
@@ -31,11 +31,11 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { path: '/tools', label: 'Tools', nav: true },
   { path: '/compare', label: 'Compare', nav: true },
   { path: '/examples', label: 'Examples', nav: true },
-  { path: '/docs', label: 'Docs', nav: true, footer: true },
+  { path: '/docs', label: 'Docs', nav: true },
   // Quiet on purpose (plan.md §21.2): settings and the assignment authoring
   // tool are for a returning visitor or an instructor, not the first fifteen
-  // seconds a cold visitor sees, so they sit in the footer rather than
-  // crowding the primary nav a first-time reader scans.
+  // seconds a cold visitor sees, so neither is in the primary nav — only in
+  // the footer's Project column.
   { path: '/settings', label: 'Settings', footer: true },
-  { path: '/assignments/new', label: 'Assignments', footer: true },
+  { path: '/assignments/new', label: 'Create an assignment', footer: true },
 ] as const;

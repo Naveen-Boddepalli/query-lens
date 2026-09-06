@@ -3,7 +3,20 @@ title: Getting started
 description: Three minutes from opening QueryLens to reading your first trace.
 ---
 
-import { Steps } from '../../ui/DocsComponents.tsx';
+import { Contents, DocMeta, Steps } from '../../ui/DocsComponents.tsx';
+
+# Getting started
+
+<DocMeta items={[
+  { label: 'Audience', value: 'First-time visitors' },
+  { label: 'Time', value: '~3 minutes' },
+]} />
+
+<Contents items={[
+  { href: '#getting-started', label: 'The walkthrough' },
+  { href: '#what-each-panel-shows', label: 'What each panel shows' },
+  { href: '#where-to-go-next', label: 'Where to go next' },
+]} />
 
 No install, no account, no setup. This page is the whole tutorial — one outcome, no theory, no
 options to weigh yet.
@@ -48,9 +61,9 @@ the trace" button appears whenever the panel and the trace have drifted apart; c
 
 ## Where to go next
 
-- **[Concepts](/concepts/buffer-pool/)** if a panel showed you something you want explained —
+- **[Concepts](/docs/concepts/buffer-pool)** if a panel showed you something you want explained —
   why LRU, what a B+Tree split is, why locks are visual-only here.
-- **[Reference](/reference/sql/)** for the exact SQL subset, every keyboard shortcut, and what the
+- **[Reference](/docs/reference/sql)** for the exact SQL subset, every keyboard shortcut, and what the
   shareable URL encodes.
-- **[FAQ](/faq/)** for "is this a real database?", "can I use this in my course?", and where the
+- **[FAQ](/docs/faq)** for "is this a real database?", "can I use this in my course?", and where the
   model's simplifications actually are.

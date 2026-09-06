@@ -5,6 +5,8 @@ import tailwindcss from '@tailwindcss/vite';
 import mdx from '@mdx-js/rollup';
 import remarkFrontmatter from 'remark-frontmatter';
 import remarkMdxFrontmatter from 'remark-mdx-frontmatter';
+import remarkGfm from 'remark-gfm';
+import rehypeSlug from 'rehype-slug';
 
 // plan.md §14.1 item 9. Without this, no bug report can be tied to a build.
 // Cloudflare Pages sets CF_PAGES_COMMIT_SHA; GitHub Actions sets GITHUB_SHA;
@@ -39,7 +41,34 @@ const SITE_URL = (
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [
-    { enforce: 'pre', ...mdx({ remarkPlugins: [remarkFrontmatter, remarkMdxFrontmatter] }) },
+    // `rehype-slug` gives every rendered heading a stable `id` (kebab-cased
+    // from its text), which is what lets a docs page's own `<Contents>` block
+    // (src/ui/DocsComponents.tsx) link to `#section-name` and have the browser
+    // actually land there — MDX/remark emit plain heading elements with no id
+    // on their own.
+    //
+    // Every docs page is `.mdx`, deliberately, not `.md` — see the note on
+    // `src/pages/DocsContent/`. Left at its default "detect" format, a `.md`
+    // extension compiles as plain CommonMark with no JSX or `{expression}`
+    // support, so every doc page's `import`ed component (`<Steps>`, `<Card>`,
+    // `<DocMeta>`, `<Contents>`) would silently render as escaped text
+    // instead of a component. Forcing `format: 'mdx'` for every file was the
+    // first fix tried and it does turn JSX on — but it also breaks
+    // `remark-frontmatter`'s recognition of the leading `---` block on a
+    // `.md`-extensioned file specifically (a micromark/mdx interaction this
+    // comment does not need to fully explain to route around). Naming every
+    // file `.mdx` sidesteps the interaction entirely: format detection then
+    // correctly and consistently picks 'mdx' for all of them.
+    // `remark-gfm` adds the GitHub-flavoured syntax three reference pages
+    // depend on — tables, mainly. Plain `remark-parse` treats a `| a | b |`
+    // block as a literal paragraph of pipe characters, not a table; three
+    // reference pages (SQL, shortcuts, URL parameters) had exactly that bug
+    // since the docs migration, invisible until something rendered the raw
+    // text rather than a table.
+    { enforce: 'pre', ...mdx({
+      remarkPlugins: [remarkFrontmatter, remarkMdxFrontmatter, remarkGfm],
+      rehypePlugins: [rehypeSlug],
+    }) },
     react(),
     tailwindcss(),
     {

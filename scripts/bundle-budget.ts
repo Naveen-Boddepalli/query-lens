@@ -46,7 +46,10 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
   // The nine docs pages, folded into one async chunk by vite.config.ts. Loads
   // on the first `/docs` hit, never at first paint.
   { name: 'docs', test: /^docs-.*\.js$/, kb: 16, note: 'integrated MDX docs (plan.md §17.1), lazy' },
-  { name: 'css', test: /\.css$/, kb: 14, note: "Tailwind's output plus React Flow's stylesheet" },
+  // Raised 14 → 17: @tailwindcss/typography (the docs' `.prose` styling,
+  // themed onto the app's own tokens rather than its default palette — see
+  // index.css) is a real, one-time addition to the generated stylesheet.
+  { name: 'css', test: /\.css$/, kb: 17, note: "Tailwind's output, React Flow's stylesheet, and the docs' typography plugin" },
   { name: 'runtime', test: /^rolldown-runtime-/, kb: 2, note: 'module loader emitted by rolldown' },
 ];
 

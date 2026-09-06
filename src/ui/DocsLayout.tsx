@@ -1,32 +1,6 @@
 import { Suspense } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
-
-const DOCS_NAV = [
-  {
-    title: 'Introduction',
-    items: [
-      { to: '/docs', label: 'Overview' },
-      { to: '/docs/getting-started', label: 'Getting Started' },
-      { to: '/docs/faq', label: 'FAQ' },
-    ],
-  },
-  {
-    title: 'Concepts',
-    items: [
-      { to: '/docs/concepts/buffer-pool', label: 'Buffer Pool' },
-      { to: '/docs/concepts/btree', label: 'B+Tree' },
-    ],
-  },
-  {
-    title: 'Reference',
-    items: [
-      { to: '/docs/reference/sql', label: 'SQL Supported' },
-      { to: '/docs/reference/url-parameters', label: 'URL Parameters' },
-      { to: '/docs/reference/shortcuts', label: 'Keyboard Shortcuts' },
-      { to: '/docs/reference/limits', label: 'Limits' },
-    ],
-  },
-];
+import { DOCS_NAV } from '../docsNav.ts';
 
 export function DocsLayout() {
   return (
@@ -60,9 +34,12 @@ export function DocsLayout() {
           ))}
         </nav>
       </aside>
-      
+
       <div className="min-h-0 flex-1 overflow-y-auto p-6 lg:p-10">
-        <div className="prose prose-invert max-w-3xl">
+        {/* No `prose-invert`: `.prose` is themed onto the app's own semantic
+            tokens in index.css, which already flip with the theme, so the
+            docs read correctly in light and dark without a second variant. */}
+        <div className="prose">
           {/* Its own boundary, so moving between docs pages (each its own lazy
               chunk) does not drop this sidebar while the next page loads. The
               outer boundary in App.tsx only covers the first `/docs` hit. */}

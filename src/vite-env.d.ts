@@ -4,5 +4,6 @@
 declare const __BUILD_SHA__: string;
 declare const __BUILD_TIME__: string;
 
+// Every docs page is `.mdx` (see src/pages/DocsContent/); nothing imports
+// `.md` directly, so no declaration for it.
 declare module '*.mdx' { const Component: React.ComponentType; export default Component; }
-declare module '*.md' { const Component: React.ComponentType; export default Component; }
