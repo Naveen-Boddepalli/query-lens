@@ -57,9 +57,10 @@ export const cardInteractive =
 
 /* ----- text -------------------------------------------------------------- */
 
-/** The small caps label that sits above a page or section title. */
-export const eyebrow =
-  'text-label font-medium tracking-[0.14em] text-accent uppercase';
+/** The quiet kicker above a page title — a category label, not a banner. Dim
+ *  and lowercase on purpose: the wide-tracked all-caps accent version reads as
+ *  a template. */
+export const eyebrow = 'text-label font-medium text-ink-dim';
 
 /** A small rounded tag — a status, a hint, a count. */
 export const pill =

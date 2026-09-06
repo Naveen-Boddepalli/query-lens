@@ -308,9 +308,9 @@
  *   --space-3    12px   gap-3     between groups inside a panel
  *   --space-4    16px   p-4       panel padding, and the page gutter
  *   --space-6    24px   gap-6     between major regions
- *   --space-8    32px   gap-8     section rhythm on a prose page
- *   --space-12   48px            the vertical breathing room around the hero
- *   --space-16   64px            a full section break on a marketing surface
+ *   --space-8    32px   gap-8     between sections on a prose page
+ *   --space-12   48px            a section break on the landing
+ *   --space-16   64px            the landing's outer top padding
  *
  * The density rule, so the next component does not have to guess: **2px steps
  * inside dense chrome, 4px steps and up for layout.**
@@ -334,22 +334,16 @@
    * flips in the light block.
    */
 
-  /* The hero backdrop: low-alpha radial washes over the page base — one accent,
-     one violet, plus a soft top glow. Static by default; the drift animation
-     only moves the wash positions. */
+  /* A single soft wash behind the hero — light falling from where the text
+     starts, not a two-colour "aurora". Static. */
   --gradient-hero:
-    radial-gradient(50% 60% at 15% 0%, oklch(0.78 0.14 196 / 0.28), transparent 70%),
-    radial-gradient(45% 55% at 92% 4%, oklch(0.72 0.18 293 / 0.22), transparent 72%),
-    radial-gradient(100% 80% at 50% -10%, oklch(0.4 0.05 240 / 0.35), transparent 65%);
+    radial-gradient(90% 55% at 20% -10%, oklch(0.7 0.09 220 / 0.16), transparent 68%);
 
   /* A 1px top highlight for the lit edge of a card. `--color-hairline` is the
      colour; this is the ready-made gradient a `::before`/`background-image`
      can drop in. */
   --sheen: linear-gradient(180deg, var(--color-hairline), transparent 40%);
 
-  /* Grain: a tiny inline SVG turbulence, tiled, at very low opacity. Breaks up
-     the flat gradient banding on the hero without a raster asset. */
-  --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E");
 }
 
 html,
@@ -435,9 +429,7 @@ html {
   --shadow-glow: 0 0 0 1px oklch(0.52 0.12 218 / 0.4), 0 0 24px -6px oklch(0.52 0.12 218 / 0.35);
 
   --gradient-hero:
-    radial-gradient(50% 60% at 15% 0%, oklch(0.62 0.13 218 / 0.16), transparent 70%),
-    radial-gradient(45% 55% at 92% 4%, oklch(0.6 0.2 293 / 0.13), transparent 72%),
-    radial-gradient(100% 80% at 50% -10%, oklch(0.9 0.03 240 / 0.5), transparent 65%);
+    radial-gradient(90% 55% at 20% -10%, oklch(0.55 0.09 220 / 0.1), transparent 68%);
 }
 
 body {
@@ -524,51 +516,18 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-/**
- * The keyframes the redesign adds. Each is written so its *end state* is the
- * correct resting appearance, so `prefers-reduced-motion` (which zeroes every
- * duration below) leaves the element exactly where it should be.
- */
-@keyframes ql-fade-up {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-
-@keyframes ql-aurora-drift {
-  0%,
-  100% {
-    transform: translate3d(0, 0, 0) scale(1);
-  }
-  50% {
-    transform: translate3d(2%, 1.5%, 0) scale(1.08);
-  }
-}
-
+/* The dash that crawls along a highlighted React Flow path. Its resting state
+   is a plain solid stroke, so reduced motion (which zeroes the duration) just
+   stops the crawl. */
 @keyframes ql-flow-dash {
   to {
     stroke-dashoffset: -16;
   }
 }
 
-/* Entrance for a routed page and the hero's stacked content. Opt-in via the
-   class so nothing animates that should not. */
-.ql-enter {
-  animation: ql-fade-up var(--dur-slow) var(--ease-enter) both;
-}
-.ql-enter-1 { animation-delay: 40ms; }
-.ql-enter-2 { animation-delay: 90ms; }
-.ql-enter-3 { animation-delay: 140ms; }
-.ql-enter-4 { animation-delay: 190ms; }
-
 /**
- * The hero backdrop layer. A single absolutely-positioned element the Hero
- * component drops in; carries the gradient, the grain and the slow drift.
+ * The hero backdrop layer — a single absolutely-positioned element the Hero
+ * component drops in, carrying one static wash. No animation, no grain.
  */
 .ql-hero-backdrop {
   position: absolute;
@@ -577,16 +536,6 @@ body {
   pointer-events: none;
   background: var(--gradient-hero);
   background-repeat: no-repeat;
-  animation: ql-aurora-drift 24s var(--ease-morph) infinite;
-  will-change: transform;
-}
-.ql-hero-backdrop::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background-image: var(--grain);
-  opacity: 0.12;
-  mix-blend-mode: soft-light;
 }
 
 /**
@@ -736,10 +685,6 @@ select:disabled {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
-  }
-
-  .ql-hero-backdrop {
-    animation: none !important;
   }
 
   .snap-sections {

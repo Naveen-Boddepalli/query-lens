@@ -366,7 +366,7 @@ test('a re-frame also survives a tab that is not painting', async ({ page }) => 
  */
 test('every route renders the app on a cold load, not the 404 page', async ({ page }) => {
   const routes: [string, RegExp][] = [
-    ['/', /One query, eight stages/],
+    ['/', /Reading a trace/],
     ['/playground', /steps in this trace/],
     ['/stages', /Pipeline stages/i],
     ['/stages/parse', /Parser/],

@@ -80,11 +80,8 @@ export function Contents({ items }: { items: { href: string; label: string }[] }
  */
 export function Callout({ children }: { children: React.ReactNode }) {
   return (
-    <div className="not-prose ql-sheen my-6 flex gap-3 rounded-xl border border-accent/40 border-l-2 border-l-accent bg-accent-soft px-4 py-3 text-body leading-relaxed text-ink shadow-e1 [&_a]:underline [&_a]:underline-offset-2 [&_strong]:font-semibold">
-      <span aria-hidden className="mt-0.5 shrink-0 text-accent">
-        ⓘ
-      </span>
-      <div>{children}</div>
+    <div className="not-prose my-6 rounded-md border-l-2 border-accent bg-accent-soft px-4 py-3 text-body leading-relaxed text-ink [&_a]:underline [&_a]:underline-offset-2 [&_strong]:font-semibold">
+      {children}
     </div>
   );
 }

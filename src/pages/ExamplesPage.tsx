@@ -10,7 +10,7 @@ export function ExamplesPage() {
 
   return (
     <div className="mx-auto w-full max-w-3xl p-6 sm:p-8">
-      <PageHeader eyebrow="Starting points" title="Examples">
+      <PageHeader title="Examples">
         Pre-built queries that demonstrate different engine behaviours. Click one to load it in
         the playground.
       </PageHeader>

@@ -39,7 +39,7 @@ export function SettingsPage() {
 
   return (
     <div className="mx-auto w-full max-w-2xl p-6 sm:p-8">
-      <PageHeader eyebrow="Preferences" title="Settings">
+      <PageHeader title="Settings">
         Defaults for a bare visit to the Playground. A{' '}
         <a href="/docs/reference/url-parameters" className="underline underline-offset-2 hover:text-ink">
           shared link

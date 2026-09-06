@@ -3,7 +3,7 @@ import { btnPrimary, btnGhost } from '../ui/primitives.ts';
 
 export function NotFoundPage() {
   return (
-    <div className="ql-enter flex flex-1 flex-col items-center justify-center gap-4 p-8 text-center">
+    <div className="flex flex-1 flex-col items-center justify-center gap-4 p-8 text-center">
       <p
         className="font-mono text-hero font-semibold text-ink-dim"
         style={{ textShadow: '0 0 40px var(--color-accent-soft)' }}

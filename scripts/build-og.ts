@@ -50,7 +50,9 @@ const ORIGIN = `http://localhost:${String(PORT)}`;
  * wrong thing.
  *
  * Parameter names come from `src/ui/urlState.ts`: q=sql, p=policy, x=predict,
- * s=step. Prediction is off, because a prompt card would cover the panel.
+ * s=step. Prediction is off, because a prompt card would cover the panel. The
+ * URL targets `/playground` directly — a bare `/?q=...` still works (App.tsx
+ * redirects it), but going straight there skips a client-side hop.
  */
 const SQL = 'SELECT *\nFROM users\nWHERE age > 30;';
 const EVICTION_STEP = 91;
@@ -62,7 +64,7 @@ function shareUrl(): string {
     x: '0',
     s: String(EVICTION_STEP),
   });
-  return `${ORIGIN}/?${params.toString()}`;
+  return `${ORIGIN}/playground?${params.toString()}`;
 }
 
 async function waitForServer(url: string, timeoutMs = 30_000): Promise<void> {

@@ -16,8 +16,6 @@
 export interface NavItem {
   path: string;
   label: string;
-  /** Passed to `NavLink`'s `end` — only the index route needs exact matching. */
-  end?: boolean;
   /** Shown in the primary header nav. */
   nav?: boolean;
   /** Surfaced in the footer's "Project" column (plan.md §16.2 item 9). */

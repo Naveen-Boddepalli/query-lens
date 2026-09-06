@@ -19,7 +19,7 @@ const STAGE_DESCRIPTIONS: Partial<Record<Stage, string>> = {
 export function StagesIndex() {
   return (
     <div className="p-6 sm:p-8">
-      <PageHeader eyebrow="The pipeline" title="Pipeline stages">
+      <PageHeader title="Pipeline stages">
         A SQL query passes through eight stages on its way from text to result rows. Each stage
         page shows an interactive demo and explains what that stage does.
       </PageHeader>

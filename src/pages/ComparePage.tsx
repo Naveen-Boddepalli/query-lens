@@ -124,7 +124,7 @@ export function ComparePage() {
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-4 p-6 sm:p-8">
-      <PageHeader eyebrow="Side by side" title="LRU vs. clock sweep">
+      <PageHeader title="LRU vs. clock sweep">
         One access pattern, {FRAMES} frames, two policies stepping together. plan.md §9 calls
         this the contrast that makes the honesty problem the product's best teaching moment —
         same inputs, different victim.

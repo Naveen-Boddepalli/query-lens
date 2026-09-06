@@ -128,12 +128,12 @@ test('has no detectable WCAG A/AA violations on the landing page', async ({ page
   // composited-contrast sweep stays the real check (§15.3). The landing is the
   // page a cold visitor actually sees first, so it gets its own sweep.
   //
-  // Reduced motion so axe reads the *settled* state: the `.ql-enter` intro
-  // sections fade up from opacity 0, and a contrast check that lands mid-fade
-  // flags a transient sub-opacity value that WCAG does not actually govern.
+  // Reduced motion so axe reads the *settled* state, not a frame mid-transition
+  // — a contrast check that lands on a sub-opacity value flags something WCAG
+  // does not actually govern.
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.goto('/');
-  await expect(page.getByText('One query, eight stages, nothing hidden')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Reading a trace' })).toBeVisible();
 
   const results = await new AxeBuilder({ page })
     .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])

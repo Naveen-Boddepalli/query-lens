@@ -2,10 +2,10 @@ import type { ReactNode } from 'react';
 import { eyebrow as eyebrowClass } from './primitives.ts';
 
 /**
- * The shared header block every non-Playground page opens with: a small caps
- * eyebrow, a display-size title, and an optional dim lede — one rhythm so the
- * `/stages`, `/gallery`, `/examples`, `/compare` and `/settings` pages read as
- * one product rather than five variations on `text-heading font-semibold`.
+ * The shared header block every non-Playground page opens with: an optional
+ * quiet kicker, a display-size title, and an optional dim lede — one rhythm so
+ * the `/stages`, `/gallery`, `/examples`, `/compare` and `/settings` pages read
+ * as one product rather than five variations on `text-heading font-semibold`.
  *
  * The title level defaults to `h2` because `TopNav`'s wordmark is the page's
  * `h1`; pass `as="h1"` where a route genuinely owns the top of the document.
@@ -24,9 +24,9 @@ export function PageHeader({
   className?: string;
 }) {
   return (
-    <div className={`ql-enter ${className}`}>
-      {eyebrow && <p className={eyebrowClass}>{eyebrow}</p>}
-      <Tag className="mt-2 text-display font-semibold tracking-tight text-ink text-balance">
+    <div className={className}>
+      {eyebrow && <p className={`mb-2 ${eyebrowClass}`}>{eyebrow}</p>}
+      <Tag className="text-display font-semibold tracking-tight text-balance text-ink">
         {title}
       </Tag>
       {children && (

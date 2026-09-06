@@ -34,7 +34,7 @@ const TOOLS = [
 export function ToolsIndexPage() {
   return (
     <div className="mx-auto w-full max-w-3xl p-6 sm:p-8">
-      <PageHeader eyebrow="Standalone modules" title="Tools">
+      <PageHeader title="Tools">
         Individual pipeline stages, split out for courses that only need one of them.
       </PageHeader>
 

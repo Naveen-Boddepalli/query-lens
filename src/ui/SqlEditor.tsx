@@ -178,12 +178,7 @@ export function SqlEditor({ value, onChange, onRun, error, activeSpan, theme }: 
         ref={wrapperRef}
         className="ql-sheen overflow-hidden rounded-xl border border-edge bg-surface-2 shadow-e2"
       >
-        <div className="flex items-center gap-2 border-b border-edge/70 px-3 py-1.5">
-          <span aria-hidden className="flex gap-1">
-            <span className="h-2 w-2 rounded-full bg-edge" />
-            <span className="h-2 w-2 rounded-full bg-edge" />
-            <span className="h-2 w-2 rounded-full bg-edge" />
-          </span>
+        <div className="border-b border-edge/70 px-3 py-1.5">
           <span className="font-mono text-label text-ink-dim">query.sql</span>
         </div>
         <CodeMirrorEditor

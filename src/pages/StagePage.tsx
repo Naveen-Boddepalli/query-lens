@@ -57,7 +57,7 @@ export function StagePage() {
   const nextStage = stageIndex < STAGES.length - 1 ? STAGES[stageIndex + 1] : null;
 
   return (
-    <div className="ql-enter flex flex-1 flex-col gap-6 overflow-y-auto p-6 sm:p-8">
+    <div className="flex flex-1 flex-col gap-6 overflow-y-auto p-6 sm:p-8">
       <div>
         <p className={eyebrow}>
           Stage {stageIndex + 1} of {STAGES.length}

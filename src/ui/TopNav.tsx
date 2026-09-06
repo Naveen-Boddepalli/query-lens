@@ -28,7 +28,7 @@ export function TopNav() {
           route cannot appear here and go missing there (plan.md §21.5 item 6). */}
       <nav aria-label="Main navigation" className="ml-auto flex flex-wrap items-center gap-0.5">
         {PRIMARY_ITEMS.map((item) => (
-          <NavLink key={item.path} to={item.path} end={item.end ?? false} className={linkClass}>
+          <NavLink key={item.path} to={item.path} className={linkClass}>
             {item.label}
           </NavLink>
         ))}

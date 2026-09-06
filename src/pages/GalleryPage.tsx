@@ -83,7 +83,7 @@ const MOMENTS: Moment[] = [
 export function GalleryPage() {
   return (
     <div className="mx-auto w-full max-w-3xl p-6 sm:p-8">
-      <PageHeader eyebrow="Deep links" title="Gallery">
+      <PageHeader title="Gallery">
         Named moments in the pipeline, each a link that opens the Playground already stepped to
         that exact point. Good for pointing someone at a specific mechanism rather than a query.
       </PageHeader>

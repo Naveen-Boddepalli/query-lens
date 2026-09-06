@@ -95,7 +95,7 @@ export function BufferPoolToolPage() {
 
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-4 p-6 sm:p-8">
-      <PageHeader eyebrow="Standalone module" title="Buffer pool sandbox">
+      <PageHeader title="Buffer pool sandbox">
         Type a page-reference string — the sequence of pages a program touches — and step through
         how {policy === 'lru' ? 'LRU' : 'clock sweep'} decides what stays resident. No SQL: this
         is the buffer pool from the{' '}
