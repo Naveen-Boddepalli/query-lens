@@ -7,6 +7,8 @@ import {
 } from '../engine/index.ts';
 import type { BufferTraceResult, EngineOptions } from '../engine/index.ts';
 import { BufferPoolPanel } from '../ui/panels/BufferPoolPanel.tsx';
+import { PageHeader } from '../ui/PageHeader.tsx';
+import { btnPrimary, btnSecondary, inputField, panelSurface } from '../ui/primitives.ts';
 
 /**
  * plan.md §13's comparison mode, scoped to the contrast §9 actually validates:
@@ -53,7 +55,7 @@ function Column({
   return (
     <div className="flex min-w-0 flex-1 flex-col gap-2">
       <h3 className="text-body font-semibold text-ink">{label}</h3>
-      <div className="min-h-56 rounded-lg border border-edge bg-surface-2 p-3">
+      <div className={`${panelSurface} min-h-56 p-3`}>
         <BufferPoolPanel
           frames={state.frames}
           stats={state.bufferStats}
@@ -121,32 +123,25 @@ export function ComparePage() {
   }
 
   return (
-    <div className="mx-auto flex max-w-5xl flex-1 flex-col gap-4 p-6">
-      <div>
-        <h2 className="text-heading font-semibold">Compare: LRU vs. clock sweep</h2>
-        <p className="mt-1 max-w-2xl text-body text-ink-dim">
-          One access pattern, {FRAMES} frames, two policies stepping together. plan.md §9 calls
-          this the contrast that makes the honesty problem the product's best teaching moment —
-          same inputs, different victim.
-        </p>
-      </div>
+    <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-4 p-6 sm:p-8">
+      <PageHeader eyebrow="Side by side" title="LRU vs. clock sweep">
+        One access pattern, {FRAMES} frames, two policies stepping together. plan.md §9 calls
+        this the contrast that makes the honesty problem the product's best teaching moment —
+        same inputs, different victim.
+      </PageHeader>
 
-      <div className="flex flex-wrap items-end gap-3 rounded-lg border border-edge bg-surface-2 p-3">
+      <div className="mt-4 flex flex-wrap items-end gap-3 rounded-xl border border-edge bg-surface-2 p-3 shadow-e1">
         <label className="flex flex-1 min-w-64 flex-col gap-1 text-label text-ink-dim">
           Reference string
           <input
             type="text"
             value={refInput}
             onChange={(e) => { setRefInput(e.target.value); }}
-            className="rounded-md border border-edge bg-surface-3 px-2.5 py-1.5 font-mono text-body text-ink"
+            className={`${inputField} font-mono`}
             spellCheck={false}
           />
         </label>
-        <button
-          type="button"
-          onClick={run}
-          className="rounded-md border border-accent bg-accent/15 px-4 py-1.5 text-body font-medium text-ink transition-colors hover:bg-accent/25"
-        >
+        <button type="button" onClick={run} className={btnPrimary}>
           Run
         </button>
       </div>
@@ -156,7 +151,7 @@ export function ComparePage() {
           type="button"
           onClick={() => { setAccessIndex((i) => Math.max(0, i - 1)); }}
           disabled={accessIndex === 0}
-          className="rounded-md border border-edge bg-surface-3 px-3 py-1.5 text-body text-ink transition-colors hover:border-accent/70 disabled:cursor-not-allowed disabled:opacity-40"
+          className={btnSecondary}
         >
           ◀ back
         </button>
@@ -166,24 +161,24 @@ export function ComparePage() {
           max={refs.length}
           value={accessIndex}
           onChange={(e) => { setAccessIndex(Number(e.target.value)); }}
-          className="flex-1"
+          className="scrubber flex-1 accent-[var(--color-accent)]"
           aria-label="Access index"
         />
         <button
           type="button"
           onClick={() => { setAccessIndex((i) => Math.min(refs.length, i + 1)); }}
           disabled={accessIndex >= refs.length}
-          className="rounded-md border border-edge bg-surface-3 px-3 py-1.5 text-body text-ink transition-colors hover:border-accent/70 disabled:cursor-not-allowed disabled:opacity-40"
+          className={btnSecondary}
         >
           forward ▶
         </button>
-        <span className="tabular-nums">
+        <span className="tabular-nums text-ink">
           access {accessIndex} / {refs.length}
         </span>
       </div>
 
       {divergedAt !== null && (
-        <p className="rounded-md border border-accent/40 bg-accent/10 px-3 py-2 text-label text-ink">
+        <p className="rounded-xl border border-accent/40 bg-accent-soft px-3 py-2 text-label text-ink shadow-e1">
           The two policies first pick a <em>different</em> victim at access {divergedAt}.{' '}
           <button
             type="button"

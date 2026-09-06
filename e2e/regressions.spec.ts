@@ -13,7 +13,7 @@ const SCAN = 'SELECT%20*%20FROM%20users%20WHERE%20age%20%3E%2025%3B';
 test('the panel follows every step of the trace', async ({ page }) => {
   // Reported as "the graph is not updating". The panel really does track the
   // trace; what stops it is a *pinned* stage, covered by the next test.
-  await page.goto(`/?q=${LOOKUP}&p=lru&x=0&s=1`);
+  await page.goto(`/playground?q=${LOOKUP}&p=lru&x=0&s=1`);
   const problems: string[] = [];
   for (let i = 1; i <= 33; i++) {
     await page.getByLabel('Scrub to step').fill(String(i));
@@ -28,7 +28,7 @@ test('a pinned stage holds the panel, says so, and releases in one click', async
   // Clicking a chip holds the panel there while the trace runs on — which is
   // the point, and which read as a bug because nothing said it was happening
   // and nothing obvious undid it.
-  await page.goto(`/?q=${LOOKUP}&p=lru&x=0&s=4`);
+  await page.goto(`/playground?q=${LOOKUP}&p=lru&x=0&s=4`);
   const follow = page.getByRole('button', { name: /follow the trace/ });
 
   await page.getByRole('button', { name: 'Parser', exact: true }).click();
@@ -51,7 +51,7 @@ test('a pinned stage holds the panel, says so, and releases in one click', async
 test('the tree zoom controls sit outside the canvas and work', async ({ page }) => {
   // They used to be React Flow's own <Controls>, floating in the pane's
   // bottom-right — which for a B+Tree is exactly where the leaf row is drawn.
-  await page.goto(`/?q=${LOOKUP}&p=lru&x=0&s=24`);
+  await page.goto(`/playground?q=${LOOKUP}&p=lru&x=0&s=24`);
   const canvas = page.locator('.react-flow');
   const zoomIn = page.getByRole('button', { name: 'Zoom in' });
   await expect(zoomIn).toBeVisible();
@@ -91,31 +91,27 @@ test('no page overflow at any step, desktop or mobile', async ({ page }) => {
   // scroll sideways, because grid and flex children default to
   // `min-width: auto` and refuse to shrink below their content.
   //
-  // Since the Footer redesign, the desktop page is deliberately one viewport
-  // of app-shell (`Layout.tsx`'s `lg:h-dvh` block) plus the footer below it —
-  // "the quiet way deeper, below the fold" is no longer a metaphor once the
-  // footer has real height. What must still never happen is the *app shell*
-  // itself growing: the total page height should track the footer's own
-  // height and nothing else, regardless of how large a result set is.
+  // The Playground shell (`Layout.tsx`'s `lg:h-dvh` block, marked
+  // `[data-app-shell]`) is deliberately one viewport tall on desktop, with the
+  // footer below it. What must never happen is the *app shell itself* growing:
+  // it is measured directly here, so the check is footer-agnostic and stays
+  // about the one invariant that matters — a large result scrolls inside its
+  // panel instead of stretching the shell.
   const problems: string[] = [];
   for (const [name, size] of [['desktop', { width: 1360, height: 900 }], ['mobile', { width: 375, height: 812 }]] as const) {
     await page.setViewportSize(size);
-    for (const url of [`/?q=${LOOKUP}&p=lru&x=0&s=33`, `/?q=${SCAN}&p=clock&x=0&s=9999`]) {
+    for (const url of [`/playground?q=${LOOKUP}&p=lru&x=0&s=33`, `/playground?q=${SCAN}&p=clock&x=0&s=9999`]) {
       await page.goto(url);
       await page.waitForTimeout(400);
       const m = await page.evaluate(() => ({
         x: document.documentElement.scrollWidth > innerWidth + 1,
-        overflowPastFooter:
-          document.documentElement.scrollHeight -
-          innerHeight -
-          document.querySelector('footer')!.getBoundingClientRect().height,
+        shellHeight: document.querySelector('[data-app-shell]')!.getBoundingClientRect().height,
       }));
       if (m.x) problems.push(`${name} ${url}: horizontal overflow`);
       // Only the desktop shell is fixed-height; the phone is meant to scroll,
-      // and by more than just the footer, since content there is not height-
-      // constrained at all.
-      if (name === 'desktop' && m.overflowPastFooter > 2) {
-        problems.push(`${name} ${url}: app shell grew ${String(m.overflowPastFooter)}px past the viewport, beyond the footer`);
+      // since content there is not height-constrained at all.
+      if (name === 'desktop' && m.shellHeight > size.height + 2) {
+        problems.push(`${name} ${url}: app shell is ${String(Math.round(m.shellHeight))}px, past the ${String(size.height)}px viewport`);
       }
     }
   }
@@ -124,8 +120,11 @@ test('no page overflow at any step, desktop or mobile', async ({ page }) => {
 
 test('a long result scrolls inside its panel', async ({ page }) => {
   await page.setViewportSize({ width: 1360, height: 900 });
-  await page.goto(`/?q=${SCAN}&p=lru&x=0&s=9999`);
+  await page.goto(`/playground?q=${SCAN}&p=lru&x=0&s=9999`);
   await page.waitForTimeout(500);
+  // The desktop Playground shell is exactly one viewport, so if the result did
+  // *not* scroll inside its own panel the playback controls would be pushed
+  // off the bottom.
   const m = await page.evaluate(() => {
     const box = document.querySelector('.min-h-80');
     const scroller = box?.querySelector('.overflow-auto');
@@ -138,7 +137,7 @@ test('a long result scrolls inside its panel', async ({ page }) => {
 });
 
 test('prediction gates advancement and answering releases it', async ({ page }) => {
-  await page.goto(`/?q=${LOOKUP}&p=lru&x=1&s=8`);
+  await page.goto(`/playground?q=${LOOKUP}&p=lru&x=1&s=8`);
   const forward = page.getByRole('button', { name: 'Step forward' });
   await expect(forward).toBeDisabled();
   await expect(page.getByRole('button', { name: 'Play' })).toBeDisabled();
@@ -151,16 +150,17 @@ test('prediction gates advancement and answering releases it', async ({ page }) 
 
 test('stepping does not pollute browser history', async ({ page }) => {
   await page.goto('/');
-  await page.goto(`/?q=${LOOKUP}&p=lru&x=0&s=1`);
+  await page.goto(`/playground?q=${LOOKUP}&p=lru&x=0&s=1`);
   for (let i = 0; i < 6; i++) await page.getByRole('button', { name: 'Step forward' }).click();
   await page.waitForTimeout(500);
-  // replaceState, not pushState: one Back should leave the app entirely.
+  // replaceState, not pushState: stepping adds no history entries, so one Back
+  // returns to wherever the visitor came from (here, the landing page).
   await page.goBack();
   await expect(page).toHaveURL(/\/$/);
 });
 
 test('editing seed data re-runs the trace', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/playground');
   await page.getByRole('button', { name: /^Edit data/ }).click();
   await page.getByLabel('age row 1', { exact: true }).fill('999');
   await page.getByRole('button', { name: /Apply/ }).click();
@@ -180,7 +180,7 @@ test('logs nothing to the console across a full playthrough', async ({ page }) =
   page.on('console', (m) => { if (m.type() === 'error' || m.type() === 'warning') noise.push(`${m.type()}: ${m.text()}`); });
   page.on('pageerror', (e) => noise.push(`pageerror: ${e.message}`));
 
-  await page.goto(`/?q=${LOOKUP}&p=lru&x=0&s=1`);
+  await page.goto(`/playground?q=${LOOKUP}&p=lru&x=0&s=1`);
   for (const stage of ['Parser', 'Planner', 'Optimizer', 'Execution', 'Buffer Pool', 'Index', 'Locks', 'Result']) {
     await page.getByRole('button', { name: stage, exact: true }).click();
     await page.waitForTimeout(60);
@@ -240,7 +240,7 @@ test('the parse tree is framed on every cold load, not left at the origin', asyn
   const problems: string[] = [];
 
   for (let i = 0; i < 8; i++) {
-    await page.goto(`/?q=${LOOKUP}&p=lru&x=0&s=1`);
+    await page.goto(`/playground?q=${LOOKUP}&p=lru&x=0&s=1`);
     await expect(page.locator('.react-flow__node').first()).toBeVisible();
     await page.waitForTimeout(600);
 
@@ -284,7 +284,7 @@ test.describe('framing does not depend on an animation frame arriving', () => {
     });
 
     await page.setViewportSize({ width: 1360, height: 900 });
-    await page.goto(`/?q=${LOOKUP}&p=lru&x=0&s=1`);
+    await page.goto(`/playground?q=${LOOKUP}&p=lru&x=0&s=1`);
     await expect(page.locator('.react-flow__node').first()).toBeVisible();
 
     // Comfortably inside the hold, so a pass cannot come from rAF resuming.
@@ -335,7 +335,7 @@ test('a re-frame also survives a tab that is not painting', async ({ page }) => 
   });
 
   await page.setViewportSize({ width: 1360, height: 900 });
-  await page.goto(`/?q=${LOOKUP}&p=lru&x=0&s=1`);
+  await page.goto(`/playground?q=${LOOKUP}&p=lru&x=0&s=1`);
   await expect(page.locator('.react-flow__node').first()).toBeVisible();
   await expect.poll(async () => (await readFraming(page)).transform, { timeout: 3000 })
     .not.toBe(IDENTITY);
@@ -366,7 +366,9 @@ test('a re-frame also survives a tab that is not painting', async ({ page }) => 
  */
 test('every route renders the app on a cold load, not the 404 page', async ({ page }) => {
   const routes: [string, RegExp][] = [
-    ['/stages', /Pipeline Stages/],
+    ['/', /One query, eight stages/],
+    ['/playground', /steps in this trace/],
+    ['/stages', /Pipeline stages/i],
     ['/stages/parse', /Parser/],
     ['/examples', /Examples/],
     ['/docs/faq', /Frequently Asked|FAQ|data/i],

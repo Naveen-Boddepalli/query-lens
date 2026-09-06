@@ -71,8 +71,9 @@ export function StageDetail({
           <button
             type="button"
             onClick={onFollow}
-            className="ml-auto rounded-md border border-accent/70 bg-accent/10 px-2.5 py-1 text-label text-ink transition-colors hover:bg-accent/20"
+            className="ml-auto inline-flex items-center gap-1.5 rounded-full border border-accent/70 bg-accent-soft px-3 py-1 text-label text-ink shadow-e1 transition hover:bg-accent/20"
           >
+            <span aria-hidden>📌</span>
             Pinned to {meta.title} — follow the trace
           </button>
         )}

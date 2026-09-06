@@ -22,7 +22,7 @@ export function ThemeToggle({ choice, setChoice }: Pick<ThemeState, 'choice' | '
     <div
       role="radiogroup"
       aria-label="Colour theme"
-      className="flex items-center gap-0.5 rounded-md border border-edge bg-surface-2 p-0.5"
+      className="flex items-center gap-0.5 rounded-full border border-edge bg-surface-2 p-0.5 shadow-e1"
     >
       {OPTIONS.map((option) => {
         const selected = choice === option.value;
@@ -37,9 +37,9 @@ export function ThemeToggle({ choice, setChoice }: Pick<ThemeState, 'choice' | '
             className={[
               // 24px minimum on both axes: WCAG 2.2 SC 2.5.8, the same rule
               // that set the scrubber's size (plan.md §15.1 item 8).
-              'flex h-6 min-w-7 items-center justify-center rounded px-1 text-label transition-colors',
+              'flex h-6 min-w-7 items-center justify-center rounded-full px-1 text-label transition',
               selected
-                ? 'bg-accent/20 text-ink'
+                ? 'bg-accent-soft text-ink shadow-e1'
                 : 'text-ink-dim hover:bg-surface-3 hover:text-ink',
             ].join(' ')}
           >

@@ -6,6 +6,8 @@ import {
 } from '../engine/index.ts';
 import type { ReplacementPolicyName } from '../engine/index.ts';
 import { encodeShareState } from '../ui/urlState.ts';
+import { PageHeader } from '../ui/PageHeader.tsx';
+import { btnPrimary, card, inputField } from '../ui/primitives.ts';
 
 /**
  * plan.md §20.5 / §21.3: "assignment links", the part of the EdTech idea that
@@ -44,7 +46,7 @@ export function AssignmentsNewPage() {
       { sql, policy, predictOn: true, step: clampedStep },
       undefined,
     );
-    return `${location.origin}/?${query}`;
+    return `${location.origin}/playground?${query}`;
   }, [sql, policy, clampedStep, trace.error]);
 
   async function copyLink() {
@@ -58,22 +60,21 @@ export function AssignmentsNewPage() {
   }
 
   return (
-    <div className="mx-auto max-w-2xl p-6">
-      <h2 className="mb-2 text-heading font-semibold">Create an assignment</h2>
-      <p className="mb-6 text-body text-ink-dim">
+    <div className="mx-auto w-full max-w-2xl p-6 sm:p-8">
+      <PageHeader eyebrow="For instructors" title="Create an assignment">
         Pick a query, a policy and a step, and get a link. Opening it lands the reader on that
         exact step with prediction switched on, so the first thing they do is answer a question
         rather than read background. No account, no submission — the link <em>is</em> the
         assignment.
-      </p>
+      </PageHeader>
 
-      <div className="space-y-4 rounded-lg border border-edge bg-surface-2 p-4">
+      <div className={`mt-8 space-y-4 ${card}`}>
         <label className="flex flex-col gap-1 text-label text-ink-dim">
           Query
           <select
             value={PRESETS.some((p) => p.sql === sql) ? sql : 'custom'}
             onChange={(e) => { if (e.target.value !== 'custom') setSql(e.target.value); }}
-            className="rounded-md border border-edge bg-surface-3 px-2 py-1.5 text-body text-ink"
+            className={inputField}
           >
             {PRESETS.map((p) => (
               <option key={p.label} value={p.sql}>
@@ -91,7 +92,7 @@ export function AssignmentsNewPage() {
             onChange={(e) => { setSql(e.target.value); }}
             rows={3}
             spellCheck={false}
-            className="rounded-md border border-edge bg-surface-3 px-2.5 py-1.5 font-mono text-body text-ink"
+            className={`${inputField} font-mono`}
           />
         </label>
 
@@ -105,7 +106,7 @@ export function AssignmentsNewPage() {
             <select
               value={policy}
               onChange={(e) => { setPolicy(e.target.value as ReplacementPolicyName); }}
-              className="rounded-md border border-edge bg-surface-3 px-2 py-1.5 text-body text-ink"
+              className={inputField}
             >
               <option value="lru">LRU</option>
               <option value="clock">Clock sweep</option>
@@ -121,7 +122,7 @@ export function AssignmentsNewPage() {
               value={clampedStep}
               onChange={(e) => { setStep(Number(e.target.value)); }}
               disabled={!!trace.error}
-              className="w-24 rounded-md border border-edge bg-surface-3 px-2.5 py-1.5 text-body text-ink tabular-nums disabled:opacity-40"
+              className={`${inputField} w-24 tabular-nums`}
             />
           </label>
 
@@ -134,13 +135,9 @@ export function AssignmentsNewPage() {
       </div>
 
       {link && (
-        <div className="mt-4 flex flex-wrap items-center gap-2 rounded-lg border border-edge bg-surface-2 p-3">
+        <div className="ql-sheen mt-4 flex flex-wrap items-center gap-2 rounded-xl border border-edge bg-surface-2 p-3 shadow-e1">
           <code className="min-w-0 flex-1 truncate font-mono text-label text-ink">{link}</code>
-          <button
-            type="button"
-            onClick={() => { void copyLink(); }}
-            className="rounded-md border border-accent bg-accent/15 px-3 py-1.5 text-label font-medium text-ink transition-colors hover:bg-accent/25"
-          >
+          <button type="button" onClick={() => { void copyLink(); }} className={btnPrimary}>
             {copied ? 'Copied ✓' : 'Copy link'}
           </button>
         </div>

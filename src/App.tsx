@@ -1,6 +1,6 @@
 import { lazy, Suspense } from 'react';
 import type { ComponentType } from 'react';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { ThemeProvider } from './ui/ThemeContext.tsx';
 import { Layout } from './ui/Layout.tsx';
 
@@ -33,9 +33,31 @@ function suspended(Component: ComponentType) {
   );
 }
 
+const LandingPage = lazy(() =>
+  import('./pages/LandingPage.tsx').then((m) => ({ default: m.LandingPage })),
+);
 const PlaygroundPage = lazy(() =>
   import('./pages/PlaygroundPage.tsx').then((m) => ({ default: m.PlaygroundPage })),
 );
+
+/**
+ * `/` is the landing page — unless it carries a shared-moment query string, in
+ * which case it is an old Playground link (the Playground lived at `/` until the
+ * landing hub was added). Those redirect to `/playground` with the params
+ * intact, so every link posted to HN, a course page or an assignment — and the
+ * OG card — keeps resolving. The share keys are `src/ui/urlState.ts`'s `PARAM`
+ * map, plus the legacy `sql=` the first Examples page emitted.
+ */
+const SHARE_KEYS = ['q', 'p', 'x', 's', 'd', 'sql'];
+
+function IndexRoute() {
+  const { search, hash } = useLocation();
+  const params = new URLSearchParams(search);
+  if (SHARE_KEYS.some((key) => params.has(key))) {
+    return <Navigate to={`/playground${search}${hash}`} replace />;
+  }
+  return suspended(LandingPage);
+}
 const StagesLayout = lazy(() =>
   import('./ui/StagesLayout.tsx').then((m) => ({ default: m.StagesLayout })),
 );
@@ -92,7 +114,8 @@ export default function App() {
       <BrowserRouter>
         <Routes>
           <Route element={<Layout />}>
-            <Route index element={suspended(PlaygroundPage)} />
+            <Route index element={<IndexRoute />} />
+            <Route path="playground" element={suspended(PlaygroundPage)} />
 
             <Route path="stages" element={suspended(StagesLayout)}>
               <Route index element={<StagesIndex />} />

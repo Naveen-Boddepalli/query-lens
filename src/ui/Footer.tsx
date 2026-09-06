@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom';
 import { newIssueUrl, REPO_URL } from '../buildInfo.ts';
 import { DOCS_NAV } from '../docsNav.ts';
 import { NAV_ITEMS } from '../routes.ts';
+import { Logo } from './Logo.tsx';
 
 /**
  * plan.md §16.2 item 9, and §19.1's fifth job.
@@ -64,7 +65,7 @@ const PROJECT_LINKS: FooterLink[] = [
 function FooterColumn({ title, links }: { title: string; links: FooterLink[] }) {
   return (
     <nav aria-label={title}>
-      <h2 className="mb-3 text-label font-medium tracking-wide text-ink-dim uppercase">{title}</h2>
+      <h2 className="mb-3 text-label font-medium tracking-[0.14em] text-ink-dim uppercase">{title}</h2>
       <ul className="space-y-2 text-label">
         {links.map((link) =>
           link.external ? (
@@ -101,18 +102,18 @@ function FooterColumn({ title, links }: { title: string; links: FooterLink[] }) 
 
 export function Footer() {
   return (
-    <footer className="border-t border-edge px-4 py-8 text-ink-dim sm:px-8">
+    <footer className="border-t border-edge bg-surface-2/30 px-4 py-10 text-ink-dim sm:px-8">
       <div className="mx-auto grid max-w-6xl gap-8 sm:grid-cols-[minmax(0,1.3fr)_repeat(3,minmax(0,1fr))]">
         <div>
-          <Link to="/" className="flex items-center gap-2">
-            <img src="/favicon.svg" alt="" width={28} height={28} className="rounded" />
-            <span className="text-body font-semibold text-ink">QueryLens</span>
+          <Link to="/" className="flex items-center gap-2.5 text-ink transition hover:opacity-90">
+            <Logo className="h-7 w-7" />
+            <span className="text-heading font-semibold text-ink">QueryLens</span>
           </Link>
           <p className="mt-3 max-w-xs text-label leading-relaxed">
             An in-browser toy database engine that shows its working — every SQL query, traced
             through the parser, planner, buffer pool and B+Tree index, one step at a time.
           </p>
-          <p className="mt-4 inline-flex flex-wrap items-center gap-x-1.5 rounded-full border border-edge bg-surface-2 px-3 py-1 text-label text-ink-dim">
+          <p className="mt-4 inline-flex flex-wrap items-center gap-x-1.5 rounded-full border border-edge bg-surface-2 px-3 py-1 text-label text-ink-dim shadow-e1">
             <span>MIT</span>
             <span aria-hidden className="text-ink-dim/50">
               ·

@@ -25,7 +25,10 @@ export interface NavItem {
 }
 
 export const NAV_ITEMS: readonly NavItem[] = [
-  { path: '/', label: 'Playground', end: true, nav: true },
+  // `/` is the landing hub (reached via the wordmark), not a nav item; the
+  // Playground now has its own route. Old `/?q=...` links redirect to it
+  // (App.tsx's IndexRoute).
+  { path: '/playground', label: 'Playground', nav: true },
   { path: '/stages', label: 'Stages', nav: true },
   { path: '/gallery', label: 'Gallery', nav: true },
   { path: '/tools', label: 'Tools', nav: true },

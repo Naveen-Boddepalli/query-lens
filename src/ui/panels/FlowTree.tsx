@@ -56,10 +56,10 @@ function NodeView({ data }: NodeProps<TreeFlowNode>) {
          a field of near-identical boxes, and pointing at one to confirm which
          is which is exactly what a reader does. */
       className={[
-        'cell rounded-md border px-2.5 py-1.5 text-center',
+        'cell ql-sheen rounded-lg border px-2.5 py-1.5 text-center shadow-e1',
         data.wide ? 'w-44' : 'min-w-24',
         data.tone,
-        data.highlighted ? 'ring-2 ring-accent shadow-[0_0_16px_-2px_var(--color-accent)]' : '',
+        data.highlighted ? 'z-10 scale-[1.03] shadow-glow' : '',
       ].join(' ')}
     >
       <Handle id="in" type="target" position={Position.Top} className="!opacity-0" />
@@ -80,8 +80,8 @@ const nodeTypes = { tree: NodeView };
 // 24px minimum on both axes — WCAG 2.2 SC 2.5.8, the rule that also set the
 // scrubber's size (plan.md §15.1 item 8). React Flow's own buttons are 16px.
 const ZOOM_BUTTON =
-  'flex h-6 w-6 items-center justify-center rounded border border-edge bg-surface-3 text-body ' +
-  'leading-none text-ink-dim transition-colors hover:border-accent/70 hover:text-ink';
+  'flex h-6 w-6 items-center justify-center rounded-md border border-edge bg-surface-3 text-body ' +
+  'leading-none text-ink-dim shadow-e1 transition hover:border-accent/70 hover:text-ink';
 
 const overlaps = (a: Span | undefined, b: Span | undefined): boolean =>
   a !== undefined && b !== undefined && a.from < b.to && b.from < a.to;
@@ -149,16 +149,24 @@ function build(
   }));
 
   const present = new Set(nodes.map((n) => n.id));
+  const lit = new Set(nodes.filter((n) => n.data.highlighted).map((n) => n.id));
 
   const edges: Edge[] = [
-    ...h.links().map((l) => ({
-      id: `${l.source.data.id}->${l.target.data.id}`,
-      source: l.source.data.id,
-      target: l.target.data.id,
-      sourceHandle: 'out',
-      targetHandle: 'in',
-      style: { stroke: 'var(--color-edge)', strokeWidth: 1.5 },
-    })),
+    ...h.links().map((l) => {
+      // An edge whose both ends are lit is on the active path (a B+Tree hop,
+      // an optimizer rewrite) — give it the animated dash via the global
+      // `.is-active` rule in index.css.
+      const active = lit.has(l.source.data.id) && lit.has(l.target.data.id);
+      return {
+        id: `${l.source.data.id}->${l.target.data.id}`,
+        source: l.source.data.id,
+        target: l.target.data.id,
+        sourceHandle: 'out',
+        targetHandle: 'in',
+        ...(active ? { className: 'is-active' } : {}),
+        style: { stroke: 'var(--color-flow-edge)', strokeWidth: 1.5 },
+      };
+    }),
     ...sideEdges
       .filter((e) => present.has(e.source) && present.has(e.target))
       .map((e) => ({

@@ -35,8 +35,10 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
   // is why `seed-*.js` and `trace-*.js` exist as their own files rather than
   // being duplicated into every page that touches the demo database.
   { name: 'trace-ui', test: /^(PlaygroundPage|StageDetail|stageMeta|types|seed|trace|PlaybackControls)-/, kb: 32, note: 'Playground + shared engine/UI plumbing, lazy' },
-  // The small per-route shells: stage index, examples, docs shell, 404, tools index.
-  { name: 'routes', test: /^(StagePage|StagesIndex|StagesLayout|ExamplesPage|DocsLayout|NotFoundPage|ToolsIndexPage)-/, kb: 10, note: 'lazy per-route chunks, loaded on navigation' },
+  // The small per-route shells: landing hub, stage index, examples, docs shell,
+  // 404, tools index — plus the redesign's shared UI kit (primitives.ts,
+  // PageHeader, Hero) that two or more of them import.
+  { name: 'routes', test: /^(LandingPage|Hero|PageHeader|primitives|StagePage|StagesIndex|StagesLayout|ExamplesPage|DocsLayout|NotFoundPage|ToolsIndexPage)-/, kb: 12, note: 'lazy per-route chunks + shared UI kit, loaded on navigation' },
   // The §21.3 feature routes: Gallery, Compare, Settings, Assignments, the
   // buffer-pool sandbox, and what they share — the standalone buffer-trace
   // driver (src/engine/bufferTrace.ts), the panel it renders through, and the
@@ -49,7 +51,11 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
   // Raised 14 → 17: @tailwindcss/typography (the docs' `.prose` styling,
   // themed onto the app's own tokens rather than its default palette — see
   // index.css) is a real, one-time addition to the generated stylesheet.
-  { name: 'css', test: /\.css$/, kb: 17, note: "Tailwind's output, React Flow's stylesheet, and the docs' typography plugin" },
+  // Raised 17 → 20: the premium-minimal redesign adds an elevation/shadow
+  // scale, hero gradient + grain tokens, three keyframes, themed scrollbars,
+  // the `.ql-sheen` top-highlight utility and an expanded `.prose` block — all
+  // one-time additions to the generated stylesheet, none of it JS.
+  { name: 'css', test: /\.css$/, kb: 20, note: "Tailwind's output, React Flow's stylesheet, the typography plugin, and the redesign's elevation/motion layer" },
   { name: 'runtime', test: /^rolldown-runtime-/, kb: 2, note: 'module loader emitted by rolldown' },
 ];
 

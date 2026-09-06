@@ -174,7 +174,18 @@ export function SqlEditor({ value, onChange, onRun, error, activeSpan, theme }: 
 
   return (
     <div className="space-y-2">
-      <div ref={wrapperRef} className="overflow-hidden rounded-lg border border-edge bg-surface-2">
+      <div
+        ref={wrapperRef}
+        className="ql-sheen overflow-hidden rounded-xl border border-edge bg-surface-2 shadow-e2"
+      >
+        <div className="flex items-center gap-2 border-b border-edge/70 px-3 py-1.5">
+          <span aria-hidden className="flex gap-1">
+            <span className="h-2 w-2 rounded-full bg-edge" />
+            <span className="h-2 w-2 rounded-full bg-edge" />
+            <span className="h-2 w-2 rounded-full bg-edge" />
+          </span>
+          <span className="font-mono text-label text-ink-dim">query.sql</span>
+        </div>
         <CodeMirrorEditor
           value={value}
           onChange={onChange}
@@ -188,7 +199,7 @@ export function SqlEditor({ value, onChange, onRun, error, activeSpan, theme }: 
       {error && (
         <div
           role="alert"
-          className="rounded-lg border border-evict/60 bg-evict/10 px-3 py-2 text-label"
+          className="rounded-lg border border-evict/60 bg-evict/10 px-3 py-2 text-label shadow-e1"
         >
           <p className="text-ink">{error.message}</p>
           {error.hint && <p className="mt-1 text-ink-dim">{error.hint}</p>}

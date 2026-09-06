@@ -27,7 +27,7 @@ export function ShortcutHints() {
           {shortcut.keys.map((key) => (
             <kbd
               key={key}
-              className="rounded border border-edge bg-surface-3 px-1.5 py-0.5 font-mono text-label"
+              className="rounded-md border border-edge border-b-2 bg-surface-3 px-1.5 py-0.5 font-mono text-label text-ink shadow-e1"
             >
               {key}
             </kbd>

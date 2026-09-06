@@ -10,7 +10,7 @@ import { expect, test } from '@playwright/test';
 test('a gallery moment opens the Playground already stepped to it', async ({ page }) => {
   await page.goto('/gallery');
   await page.getByRole('link', { name: /eviction storm/i }).click();
-  await expect(page).toHaveURL(/\/\?q=/);
+  await expect(page).toHaveURL(/\/playground\?q=/);
   await expect(page.getByText(/showing step/)).toBeVisible();
   await expect(page.getByText(/is evicted from frame/)).toBeVisible();
 });
@@ -51,16 +51,17 @@ test('a settings preference becomes the Playground default on a bare visit', asy
   await page.goto('/settings');
   await page.getByRole('radio', { name: 'Clock sweep' }).click();
 
-  await page.goto('/');
+  await page.goto('/playground');
   await expect(page.getByLabel('Eviction')).toHaveValue('clock');
 
-  // A link's own policy still wins over the stored preference.
+  // A link's own policy still wins over the stored preference — and a bare
+  // `/?...` link redirects into `/playground` with its params intact.
   await page.goto('/?q=SELECT%20*%20FROM%20users%20WHERE%20id%20%3D%205%3B&p=lru&x=0&s=1');
   await expect(page.getByLabel('Eviction')).toHaveValue('lru');
 
   await page.goto('/settings');
   await page.getByRole('button', { name: 'Reset to engine defaults' }).click();
-  await page.goto('/');
+  await page.goto('/playground');
   await expect(page.getByLabel('Eviction')).toHaveValue('lru');
 });
 

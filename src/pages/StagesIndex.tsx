@@ -2,6 +2,8 @@ import { Link } from 'react-router-dom';
 import type { Stage } from '../engine/index.ts';
 import { STAGES } from '../engine/index.ts';
 import { STAGE_META } from '../ui/stageMeta.ts';
+import { PageHeader } from '../ui/PageHeader.tsx';
+import { cardInteractive } from '../ui/primitives.ts';
 
 const STAGE_DESCRIPTIONS: Partial<Record<Stage, string>> = {
   parse: 'SQL text → tokens → abstract syntax tree. The first pass that turns your query into a structure the engine can reason about.',
@@ -16,25 +18,25 @@ const STAGE_DESCRIPTIONS: Partial<Record<Stage, string>> = {
 
 export function StagesIndex() {
   return (
-    <div className="p-6">
-      <h2 className="mb-2 text-heading font-semibold">Pipeline Stages</h2>
-      <p className="mb-6 max-w-2xl text-body text-ink-dim">
-        A SQL query passes through eight stages on its way from text to result rows.
-        Each stage page shows an interactive demo and explains what that stage does.
-      </p>
+    <div className="p-6 sm:p-8">
+      <PageHeader eyebrow="The pipeline" title="Pipeline stages">
+        A SQL query passes through eight stages on its way from text to result rows. Each stage
+        page shows an interactive demo and explains what that stage does.
+      </PageHeader>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-        {STAGES.map((stageId) => {
+      <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        {STAGES.map((stageId, i) => {
           const meta = STAGE_META[stageId];
           return (
-            <Link
-              key={stageId}
-              to={`/stages/${stageId}`}
-              className="cell group rounded-lg border border-edge bg-surface-2 p-4 transition-colors hover:border-accent/50 hover:bg-surface-3"
-            >
-              <h3 className={`text-body font-semibold ${meta.tone} group-hover:text-ink`}>
-                {meta.title}
-              </h3>
+            <Link key={stageId} to={`/stages/${stageId}`} className={cardInteractive}>
+              <div className="flex items-baseline gap-2">
+                <span aria-hidden className="font-mono text-label text-ink-dim/60">
+                  {String(i + 1).padStart(2, '0')}
+                </span>
+                <h3 className={`text-body font-semibold ${meta.tone} group-hover:text-ink`}>
+                  {meta.title}
+                </h3>
+              </div>
               <p className="mt-1 text-label text-ink-dim">{meta.blurb}</p>
               {STAGE_DESCRIPTIONS[stageId] && (
                 <p className="mt-2 text-label leading-relaxed text-ink-dim/80">

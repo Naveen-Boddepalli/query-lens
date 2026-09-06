@@ -11,6 +11,8 @@ import type { ReplacementPolicyName } from '../../engine/index.ts';
 import { BufferPoolPanel } from '../../ui/panels/BufferPoolPanel.tsx';
 import { PlaybackControls } from '../../ui/PlaybackControls.tsx';
 import { usePlayback, usePlaybackShortcuts } from '../../ui/usePlayback.ts';
+import { PageHeader } from '../../ui/PageHeader.tsx';
+import { btnPrimary, btnSecondary, inputField, panelSurface } from '../../ui/primitives.ts';
 
 /**
  * The OS-course standalone (plan.md §20.4, §21.3): the buffer pool with no
@@ -92,28 +94,25 @@ export function BufferPoolToolPage() {
   }
 
   return (
-    <div className="mx-auto flex max-w-4xl flex-1 flex-col gap-4 p-6">
-      <div>
-        <h2 className="text-heading font-semibold">Buffer pool sandbox</h2>
-        <p className="mt-1 max-w-2xl text-body text-ink-dim">
-          Type a page-reference string — the sequence of pages a program touches — and step through
-          how {policy === 'lru' ? 'LRU' : 'clock sweep'} decides what stays resident. No SQL: this
-          is the buffer pool from the{' '}
-          <Link to="/" className="underline underline-offset-2 hover:text-ink">
-            Playground
-          </Link>
-          , driven directly.
-        </p>
-      </div>
+    <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-4 p-6 sm:p-8">
+      <PageHeader eyebrow="Standalone module" title="Buffer pool sandbox">
+        Type a page-reference string — the sequence of pages a program touches — and step through
+        how {policy === 'lru' ? 'LRU' : 'clock sweep'} decides what stays resident. No SQL: this
+        is the buffer pool from the{' '}
+        <Link to="/playground" className="underline underline-offset-2 hover:text-ink">
+          Playground
+        </Link>
+        , driven directly.
+      </PageHeader>
 
-      <div className="flex flex-wrap items-end gap-3 rounded-lg border border-edge bg-surface-2 p-3">
+      <div className="mt-4 flex flex-wrap items-end gap-3 rounded-xl border border-edge bg-surface-2 p-3 shadow-e1">
         <label className="flex flex-1 min-w-64 flex-col gap-1 text-label text-ink-dim">
           Reference string (page numbers, space or comma separated)
           <input
             type="text"
             value={refInput}
             onChange={(e) => { setRefInput(e.target.value); }}
-            className="rounded-md border border-edge bg-surface-3 px-2.5 py-1.5 font-mono text-body text-ink"
+            className={`${inputField} font-mono`}
             spellCheck={false}
           />
         </label>
@@ -129,7 +128,7 @@ export function BufferPoolToolPage() {
               const n = Number(e.target.value);
               if (Number.isInteger(n) && n >= MIN_FRAMES && n <= MAX_FRAMES) setFrames(n);
             }}
-            className="w-20 rounded-md border border-edge bg-surface-3 px-2.5 py-1.5 text-body text-ink tabular-nums"
+            className={`${inputField} w-20 tabular-nums`}
           />
         </label>
 
@@ -138,25 +137,17 @@ export function BufferPoolToolPage() {
           <select
             value={policy}
             onChange={(e) => { setPolicy(e.target.value as ReplacementPolicyName); }}
-            className="rounded-md border border-edge bg-surface-3 px-2 py-1.5 text-body text-ink"
+            className={inputField}
           >
             <option value="lru">LRU</option>
             <option value="clock">Clock sweep</option>
           </select>
         </label>
 
-        <button
-          type="button"
-          onClick={run}
-          className="rounded-md border border-accent bg-accent/15 px-4 py-1.5 text-body font-medium text-ink transition-colors hover:bg-accent/25"
-        >
+        <button type="button" onClick={run} className={btnPrimary}>
           Run
         </button>
-        <button
-          type="button"
-          onClick={generate}
-          className="rounded-md border border-edge px-3 py-1.5 text-body text-ink-dim transition-colors hover:border-accent/70 hover:text-ink"
-        >
+        <button type="button" onClick={generate} className={btnSecondary}>
           Generate a pattern
         </button>
       </div>
@@ -172,7 +163,7 @@ export function BufferPoolToolPage() {
             `${String(refs.length)} accesses, ${String(result.events.length)} steps · showing step ${String(playback.step)}`}
       </p>
 
-      <div className="min-h-64 flex-1 rounded-lg border border-edge bg-surface-2 p-4">
+      <div className={`${panelSurface} min-h-64 flex-1 p-4`}>
         <BufferPoolPanel
           frames={state.frames}
           stats={state.bufferStats}
@@ -182,8 +173,10 @@ export function BufferPoolToolPage() {
         />
       </div>
 
-      <div className="rounded-lg border border-edge bg-surface-2 p-3">
-        <h3 className="mb-1 text-label font-medium text-ink-dim">Narration</h3>
+      <div className="ql-sheen rounded-xl border border-edge bg-surface-2 p-3 shadow-e1">
+        <h3 className="mb-1 text-label font-medium tracking-[0.12em] text-ink-dim uppercase">
+          Narration
+        </h3>
         <p className="min-h-10 text-body leading-relaxed" aria-live="polite">
           {state.narration || 'Step forward to start.'}
         </p>

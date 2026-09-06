@@ -4,7 +4,7 @@
 
 export function Steps({ children }: { children: React.ReactNode }) {
   return (
-    <div className="docs-steps border-l-2 border-edge pl-6 my-6 space-y-6">
+    <div className="docs-steps border-l-2 border-accent/40 pl-6 my-6 space-y-6">
       {children}
     </div>
   );
@@ -20,7 +20,7 @@ export function CardGrid({ children }: { children: React.ReactNode }) {
 
 export function Card({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="cell rounded-lg border border-edge bg-surface-2 p-4">
+    <div className="ql-sheen cell rounded-xl border border-edge bg-surface-2 p-4 shadow-e1 transition hover:-translate-y-0.5 hover:border-accent/40 hover:shadow-e2">
       <h3 className="text-body font-semibold text-ink">{title}</h3>
       <div className="mt-2 text-label text-ink-dim">
         {children}
@@ -80,8 +80,11 @@ export function Contents({ items }: { items: { href: string; label: string }[] }
  */
 export function Callout({ children }: { children: React.ReactNode }) {
   return (
-    <div className="not-prose my-6 rounded-md border-l-2 border-accent bg-accent/10 px-4 py-3 text-body leading-relaxed text-ink [&_a]:underline [&_a]:underline-offset-2 [&_strong]:font-semibold">
-      {children}
+    <div className="not-prose ql-sheen my-6 flex gap-3 rounded-xl border border-accent/40 border-l-2 border-l-accent bg-accent-soft px-4 py-3 text-body leading-relaxed text-ink shadow-e1 [&_a]:underline [&_a]:underline-offset-2 [&_strong]:font-semibold">
+      <span aria-hidden className="mt-0.5 shrink-0 text-accent">
+        ⓘ
+      </span>
+      <div>{children}</div>
     </div>
   );
 }

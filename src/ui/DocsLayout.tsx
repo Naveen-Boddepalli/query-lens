@@ -2,29 +2,28 @@ import { Suspense } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
 import { DOCS_NAV } from '../docsNav.ts';
 
+const itemClass = ({ isActive }: { isActive: boolean }) =>
+  [
+    'cell block rounded-r-md border-l-2 py-1.5 pr-2.5 pl-3 text-body transition',
+    isActive
+      ? 'border-accent bg-accent-soft font-medium text-ink'
+      : 'border-transparent text-ink-dim hover:border-edge hover:bg-surface-3 hover:text-ink',
+  ].join(' ');
+
 export function DocsLayout() {
   return (
     <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
-      <aside className="sidebar-nav w-60 shrink-0 overflow-y-auto border-r border-edge bg-surface-2 p-4">
+      <aside className="sidebar-nav w-60 shrink-0 overflow-y-auto border-r border-edge bg-surface-2/40 p-4">
         <nav aria-label="Docs navigation">
           {DOCS_NAV.map((group) => (
-            <div key={group.title} className="mb-4">
-              <h3 className="mb-1.5 text-label font-medium text-ink-dim">{group.title}</h3>
+            <div key={group.title} className="mb-5">
+              <h3 className="mb-2 text-label font-medium tracking-[0.12em] text-ink-dim uppercase">
+                {group.title}
+              </h3>
               <ul className="space-y-0.5">
                 {group.items.map((item) => (
                   <li key={item.to}>
-                    <NavLink
-                      to={item.to}
-                      end={item.to === '/docs'}
-                      className={({ isActive }) =>
-                        [
-                          'cell block rounded-md px-2.5 py-1.5 text-body transition-colors',
-                          isActive
-                            ? 'bg-accent/15 font-medium text-ink'
-                            : 'text-ink-dim hover:bg-surface-3 hover:text-ink',
-                        ].join(' ')
-                      }
-                    >
+                    <NavLink to={item.to} end={item.to === '/docs'} className={itemClass}>
                       {item.label}
                     </NavLink>
                   </li>

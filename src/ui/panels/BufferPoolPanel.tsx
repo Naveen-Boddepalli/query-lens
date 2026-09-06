@@ -25,10 +25,10 @@ function moodOf(frame: BufferFrame, lastEvent: StepEvent | null): FrameMood {
  * look like an ordinary one.
  */
 const MOOD_CLASS: Record<Exclude<FrameMood, null>, string> = {
-  hit: 'border-hit bg-hit/15 shadow-[0_0_18px_-4px_var(--color-hit)] hover:bg-hit/25',
-  load: 'border-miss bg-miss/15 shadow-[0_0_18px_-4px_var(--color-miss)] hover:bg-miss/25',
-  evict: 'border-evict bg-evict/20 shadow-[0_0_18px_-4px_var(--color-evict)] hover:bg-evict/30',
-  sweep: 'border-accent bg-accent/10 hover:bg-accent/20',
+  hit: 'border-hit bg-hit/15 shadow-[0_0_26px_-4px_var(--color-hit)] hover:bg-hit/25',
+  load: 'border-miss bg-miss/15 shadow-[0_0_26px_-4px_var(--color-miss)] hover:bg-miss/25',
+  evict: 'border-evict bg-evict/20 shadow-[0_0_28px_-4px_var(--color-evict)] hover:bg-evict/30',
+  sweep: 'border-accent bg-accent/10 shadow-glow hover:bg-accent/20',
 };
 
 const MOOD_TAG: Record<Exclude<FrameMood, null>, string> = {
@@ -67,11 +67,11 @@ export function BufferPoolPanel({
                 // glow's geometry as well as its colour and used a literal
                 // duration nobody had chosen (§16.2 item 5). `.cell` lists the
                 // properties and names the timing.
-                'cell relative rounded-lg border p-2.5',
+                'cell ql-sheen relative rounded-xl border p-2.5 shadow-e1',
                 mood
                   ? MOOD_CLASS[mood]
                   : empty
-                    ? 'border-dashed border-edge/60 hover:border-ink-dim/50'
+                    ? 'border-dashed border-edge/60 shadow-none hover:border-ink-dim/50'
                     : 'border-edge bg-surface-3 hover:border-ink-dim/50 hover:bg-surface-4',
               ].join(' ')}
             >

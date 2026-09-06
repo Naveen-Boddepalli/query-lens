@@ -21,6 +21,7 @@ import { SqlEditor } from '../ui/SqlEditor.tsx';
 import { DataEditor } from '../ui/DataEditor.tsx';
 import { PredictionCard } from '../ui/PredictionCard.tsx';
 import { ShortcutHints } from '../ui/ShortcutHints.tsx';
+import { btnPrimary, btnSecondary, panelSurface } from '../ui/primitives.ts';
 import { useThemeContext } from '../ui/ThemeContext.tsx';
 import { RUN_HINT, useIsTouch } from '../ui/platform.ts';
 import { readDefaultPolicy, readDefaultPredictOn } from '../ui/preferences.ts';
@@ -206,24 +207,20 @@ export function PlaygroundPage() {
           />
 
           <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={() => { run(); }}
-              className="rounded-md border border-accent bg-accent/15 px-4 py-1.5 text-body font-medium text-ink transition-colors hover:bg-accent/25 active:bg-accent/40"
-            >
+            <button type="button" onClick={() => { run(); }} className={btnPrimary}>
               Run{touch ? '' : ` ${RUN_HINT}`}
             </button>
             <button
               type="button"
               onClick={() => { setEditingData(true); }}
-              className="rounded-md border border-edge px-3 py-1.5 text-body text-ink-dim transition-colors hover:border-accent/70 hover:text-ink active:bg-surface-3"
+              className={btnSecondary}
             >
               Edit data ({table?.rows.length ?? 0})
             </button>
             <label className="ml-auto flex items-center gap-2 text-label text-ink-dim">
               Eviction
               <select
-                className="rounded-md border border-edge bg-surface-3 px-2 py-1 text-ink"
+                className="rounded-lg border border-edge bg-surface-3 px-2 py-1 text-ink shadow-e1 transition hover:border-ink-dim/50"
                 value={policy}
                 onChange={(e) => { setPolicy(e.target.value as ReplacementPolicyName); }}
               >
@@ -266,7 +263,7 @@ export function PlaygroundPage() {
         </div>
 
         {/* Trace panel */}
-        <div className="snap-section order-1 flex min-h-0 min-w-0 flex-col gap-4 lg:order-2 lg:overflow-hidden">
+        <div className="snap-section order-1 flex min-h-0 min-w-0 flex-col gap-3 lg:order-2 lg:overflow-hidden">
           <PipelineTracker
             current={state?.stage ?? null}
             visited={visited}
@@ -274,7 +271,7 @@ export function PlaygroundPage() {
             onSelect={(s) => { setPinnedStage((prev) => (prev === s ? null : s)); }}
           />
 
-          <div className="max-h-[60dvh] min-h-80 min-w-0 flex-1 overflow-hidden rounded-lg border border-edge bg-surface-2 p-4 lg:max-h-none">
+          <div className={`${panelSurface} max-h-[60dvh] min-h-80 min-w-0 flex-1 overflow-hidden p-4 lg:max-h-none`}>
             {activeStage ? (
               <ErrorBoundary
                 variant="panel"
@@ -311,15 +308,17 @@ export function PlaygroundPage() {
               }}
             />
           ) : (
-            <div className="rounded-lg border border-edge bg-surface-2 p-3">
-              <h2 className="mb-1 text-label font-medium text-ink-dim">Narration</h2>
+            <div className="ql-sheen rounded-xl border border-edge bg-surface-2 p-3 shadow-e1">
+              <h2 className="mb-1 text-label font-medium tracking-[0.12em] text-ink-dim uppercase">
+                Narration
+              </h2>
               <p className="min-h-10 text-body leading-relaxed" aria-live="polite">
                 {state.narration || 'Step forward to start the trace.'}
               </p>
             </div>
           )}
 
-          <div className="sticky bottom-0 z-10 -mx-4 space-y-2 border-t border-edge bg-surface px-4 py-2 lg:static lg:mx-0 lg:space-y-4 lg:border-0 lg:bg-transparent lg:px-0 lg:py-0">
+          <div className="sticky bottom-0 z-10 -mx-4 space-y-2 border-t border-edge bg-surface/85 px-4 py-2 backdrop-blur-md lg:static lg:mx-0 lg:space-y-3 lg:border-0 lg:bg-transparent lg:px-0 lg:py-0 lg:backdrop-blur-none">
             <PlaybackControls playback={playback} length={result.events.length} />
             <ShortcutHints />
           </div>

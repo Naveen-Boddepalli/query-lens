@@ -19,7 +19,7 @@ test('loads, runs the default trace, and steps to a result', async ({ page }) =>
     if (message.type() === 'error') errors.push(message.text());
   });
 
-  await page.goto('/');
+  await page.goto('/playground');
 
   // plan.md §15.1 item 1: a visitor who touches nothing sees a real trace.
   await expect(page.getByText(/steps in this trace/)).toBeVisible();
@@ -48,7 +48,10 @@ test('loads, runs the default trace, and steps to a result', async ({ page }) =>
 test('a shared link reproduces the moment it points at', async ({ page }) => {
   // plan.md §15.2. §9's study needs every participant to start identically and
   // §13's course packaging wants "predict what happens at step 13" to be a link.
+  // A bare `/?q=...` is an old Playground link: it must redirect to /playground
+  // (App.tsx's IndexRoute) with the params — and therefore the moment — intact.
   await page.goto(`/?q=${encodeURIComponent(POINT_LOOKUP)}&p=clock&x=0&s=13`);
+  await expect(page).toHaveURL(/\/playground\?/);
 
   await expect(page.getByText(/showing step/)).toContainText('13');
   await expect(page.getByLabel('Eviction')).toHaveValue('clock');
@@ -58,7 +61,7 @@ test('a shared link reproduces the moment it points at', async ({ page }) => {
 test('the data editor is a real modal', async ({ page }) => {
   // plan.md §15.1 item 3. jsdom implements none of the dialog methods, so the
   // browser is the only place the top layer and Escape can actually be checked.
-  await page.goto('/');
+  await page.goto('/playground');
   await page.getByRole('button', { name: /^Edit data/ }).click();
 
   const dialog = page.locator('dialog');
@@ -86,7 +89,7 @@ test('the data editor is a real modal', async ({ page }) => {
 test('the theme toggle switches, persists, and survives a reload', async ({ page }) => {
   // plan.md §15.3. Three states, because a two-state switch has to silently
   // stop following the system the moment it decides what it means on load.
-  await page.goto('/');
+  await page.goto('/playground');
   const root = page.locator('html');
 
   await page.getByRole('radio', { name: 'Light' }).click();
@@ -119,11 +122,31 @@ test('the theme toggle switches, persists, and survives a reload', async ({ page
   expect(await page.evaluate(() => localStorage.getItem('querylens:theme'))).toBeNull();
 });
 
-test('has no detectable WCAG A/AA violations on the default view', async ({ page }) => {
+test('has no detectable WCAG A/AA violations on the landing page', async ({ page }) => {
   // plan.md §8: a regression net, explicitly *not* a compliance claim —
   // automated tooling catches 30–57% of WCAG failures, so the manual
-  // composited-contrast sweep stays the real check (§15.3).
+  // composited-contrast sweep stays the real check (§15.3). The landing is the
+  // page a cold visitor actually sees first, so it gets its own sweep.
+  //
+  // Reduced motion so axe reads the *settled* state: the `.ql-enter` intro
+  // sections fade up from opacity 0, and a contrast check that lands mid-fade
+  // flags a transient sub-opacity value that WCAG does not actually govern.
+  await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.goto('/');
+  await expect(page.getByText('One query, eight stages, nothing hidden')).toBeVisible();
+
+  const results = await new AxeBuilder({ page })
+    .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+    .analyze();
+
+  expect(
+    results.violations.map((v) => `${v.id}: ${v.nodes.length} node(s) — ${v.help}`),
+  ).toEqual([]);
+});
+
+test('has no detectable WCAG A/AA violations on the Playground', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.goto('/playground');
   await expect(page.getByText(/steps in this trace/)).toBeVisible();
 
   const results = await new AxeBuilder({ page })
@@ -140,6 +163,7 @@ test('has no detectable WCAG A/AA violations in the light theme either', async (
   // the newer of the two. Taken at the end of the trace on purpose: that is
   // where every pipeline chip is in its *visited* state and painting its own
   // stage colour, which is exactly where three of them failed when measured.
+  await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.goto('/?q=SELECT%20*%20FROM%20users%20WHERE%20id%20%3D%205%3B&p=lru&x=0&s=33');
   await page.getByRole('radio', { name: 'Light' }).click();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');

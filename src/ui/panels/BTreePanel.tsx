@@ -68,16 +68,18 @@ export function BTreePanel({ tree, path, outcome }: BTreePanelProps) {
     <div className="flex h-full flex-col gap-2">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-label text-ink-dim">
         <span className="flex items-center gap-1.5">
-          <span className="h-2 w-2 rounded-sm bg-[var(--color-node-internal)]" /> internal
+          <span className="h-2 w-2 rounded-full bg-[var(--color-node-internal)]" /> internal
         </span>
         <span className="flex items-center gap-1.5">
-          <span className="h-2 w-2 rounded-sm bg-[var(--color-node-leaf)]" /> leaf
+          <span className="h-2 w-2 rounded-full bg-[var(--color-node-leaf)]" /> leaf
         </span>
         <span className="flex items-center gap-1.5">
           <span className="h-px w-4 border-t border-dashed border-[var(--color-node-leaf)]" />
           sibling chain
         </span>
-        <span className="ml-auto text-ink-dim">drag to pan · scroll to zoom</span>
+        <span className="ml-auto rounded-full border border-edge bg-surface-2 px-2 py-0.5 text-ink-dim">
+          drag to pan · scroll to zoom
+        </span>
         {path.length > 0 && (
           <span className="font-mono">
             {path.join(' → ')}

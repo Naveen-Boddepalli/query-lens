@@ -22,17 +22,18 @@ export function PredictionCard({ prompt, answer, onAnswer, onSkip }: PredictionC
   return (
     <section
       aria-live="polite"
-      className="rounded-lg border border-accent/60 bg-accent/5 p-3"
+      className="ql-sheen rounded-xl border border-accent/50 bg-accent/[0.07] p-3 shadow-e2"
     >
       <div className="mb-2 flex items-baseline gap-2">
-        <span className="rounded-full border border-accent/60 px-2 py-0.5 text-label tracking-wide text-accent uppercase">
+        <span className="inline-flex items-center gap-1.5 rounded-full border border-accent/60 bg-accent-soft px-2.5 py-0.5 text-label font-medium tracking-[0.12em] text-accent uppercase">
+          <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-accent-strong shadow-[0_0_8px_var(--color-accent)]" />
           predict
         </span>
         {!answered && (
           <button
             type="button"
             onClick={onSkip}
-            className="ml-auto text-label text-ink-dim underline-offset-2 hover:underline"
+            className="ml-auto text-label text-ink-dim underline-offset-2 hover:text-ink hover:underline"
           >
             skip
           </button>
@@ -46,10 +47,10 @@ export function PredictionCard({ prompt, answer, onAnswer, onSkip }: PredictionC
           const isCorrect = option.id === prompt.correctOptionId;
           const isChosen = option.id === answer;
 
-          let tone = 'border-edge bg-surface-3 hover:border-accent/70';
+          let tone = 'border-edge bg-surface-3 shadow-e1 hover:border-accent/70 hover:bg-surface-4';
           if (answered) {
-            if (isCorrect) tone = 'border-hit bg-hit/15 text-hit';
-            else if (isChosen) tone = 'border-evict bg-evict/15 text-evict';
+            if (isCorrect) tone = 'border-hit bg-hit/15 text-hit shadow-e1';
+            else if (isChosen) tone = 'border-evict bg-evict/15 text-evict shadow-e1';
             else tone = 'border-edge/50 bg-transparent text-ink-dim/60';
           }
 
@@ -62,9 +63,9 @@ export function PredictionCard({ prompt, answer, onAnswer, onSkip }: PredictionC
                 onMouseEnter={() => { setHovered(option.id); }}
                 onMouseLeave={() => { setHovered(null); }}
                 className={[
-                  'w-full rounded-md border px-2.5 py-1.5 text-left font-mono text-label transition-colors',
+                  'w-full rounded-lg border px-2.5 py-1.5 text-left font-mono text-label transition',
                   tone,
-                  !answered && hovered === option.id ? 'bg-surface-3' : '',
+                  !answered && hovered === option.id ? 'bg-surface-4' : '',
                   answered ? 'cursor-default' : 'cursor-pointer',
                 ].join(' ')}
               >

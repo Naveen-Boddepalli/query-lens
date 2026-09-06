@@ -6,6 +6,8 @@ import {
   writeDefaultPolicy,
   writeDefaultPredictOn,
 } from '../ui/preferences.ts';
+import { PageHeader } from '../ui/PageHeader.tsx';
+import { btnGhost, card, segBase, segOff, segOn } from '../ui/primitives.ts';
 
 /**
  * plan.md §21.3. Small on purpose: the only two things worth defaulting are
@@ -36,17 +38,16 @@ export function SettingsPage() {
   }
 
   return (
-    <div className="mx-auto max-w-2xl p-6">
-      <h2 className="mb-2 text-heading font-semibold">Settings</h2>
-      <p className="mb-6 text-body text-ink-dim">
+    <div className="mx-auto w-full max-w-2xl p-6 sm:p-8">
+      <PageHeader eyebrow="Preferences" title="Settings">
         Defaults for a bare visit to the Playground. A{' '}
         <a href="/docs/reference/url-parameters" className="underline underline-offset-2 hover:text-ink">
           shared link
         </a>{' '}
         always wins over these — that is what makes it reproduce the exact moment it points to.
-      </p>
+      </PageHeader>
 
-      <section className="mb-6 rounded-lg border border-edge bg-surface-2 p-4">
+      <section className={`mt-8 mb-4 ${card}`}>
         <h3 className="mb-1 text-body font-semibold text-ink">Default eviction policy</h3>
         <p className="mb-3 text-label text-ink-dim">
           Which replacement policy the buffer pool uses when a query does not specify one.
@@ -65,12 +66,7 @@ export function SettingsPage() {
               role="radio"
               aria-checked={policy === opt.value}
               onClick={() => { choosePolicy(opt.value); }}
-              className={[
-                'rounded-md border px-3 py-1.5 text-body transition-colors',
-                policy === opt.value
-                  ? 'border-accent bg-accent/15 text-ink'
-                  : 'border-edge text-ink-dim hover:border-accent/70 hover:text-ink',
-              ].join(' ')}
+              className={`${segBase} ${policy === opt.value ? segOn : segOff}`}
             >
               {opt.label}
             </button>
@@ -78,7 +74,7 @@ export function SettingsPage() {
         </div>
       </section>
 
-      <section className="mb-6 rounded-lg border border-edge bg-surface-2 p-4">
+      <section className={`mb-6 ${card}`}>
         <h3 className="mb-1 text-body font-semibold text-ink">Predict-then-reveal</h3>
         <p className="mb-3 text-label text-ink-dim">
           Whether the Playground asks you to commit to an answer before revealing each step, by
@@ -98,12 +94,7 @@ export function SettingsPage() {
               role="radio"
               aria-checked={predictOn === opt.value}
               onClick={() => { choosePredict(opt.value); }}
-              className={[
-                'rounded-md border px-3 py-1.5 text-body transition-colors',
-                predictOn === opt.value
-                  ? 'border-accent bg-accent/15 text-ink'
-                  : 'border-edge text-ink-dim hover:border-accent/70 hover:text-ink',
-              ].join(' ')}
+              className={`${segBase} ${predictOn === opt.value ? segOn : segOff}`}
             >
               {opt.label}
             </button>
@@ -114,7 +105,7 @@ export function SettingsPage() {
       <button
         type="button"
         onClick={() => { choosePolicy('default'); choosePredict('default'); }}
-        className="rounded-md border border-edge px-3 py-1.5 text-label text-ink-dim transition-colors hover:border-accent/70 hover:text-ink"
+        className={btnGhost}
       >
         Reset to engine defaults
       </button>

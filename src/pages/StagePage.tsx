@@ -11,6 +11,7 @@ import type { Stage } from '../engine/index.ts';
 import { STAGE_META } from '../ui/stageMeta.ts';
 import { ErrorBoundary } from '../ui/ErrorBoundary.tsx';
 import { StageDetail } from '../ui/panels/StageDetail.tsx';
+import { btnGhost, btnPrimary, eyebrow, panelSurface } from '../ui/primitives.ts';
 
 const INITIAL_SQL = 'SELECT *\nFROM users\nWHERE id = 5;';
 
@@ -56,10 +57,15 @@ export function StagePage() {
   const nextStage = stageIndex < STAGES.length - 1 ? STAGES[stageIndex + 1] : null;
 
   return (
-    <div className="flex flex-1 flex-col gap-6 overflow-y-auto p-6">
+    <div className="ql-enter flex flex-1 flex-col gap-6 overflow-y-auto p-6 sm:p-8">
       <div>
-        <h2 className={`text-heading font-semibold ${meta.tone}`}>{meta.title}</h2>
-        <p className="mt-1 text-body text-ink-dim">{meta.blurb}</p>
+        <p className={eyebrow}>
+          Stage {stageIndex + 1} of {STAGES.length}
+        </p>
+        <h2 className={`mt-2 text-display font-semibold tracking-tight ${meta.tone}`}>
+          {meta.title}
+        </h2>
+        <p className="mt-2 text-body text-ink-dim">{meta.blurb}</p>
       </div>
 
       <div className="max-w-3xl text-body leading-relaxed text-ink-dim">
@@ -67,7 +73,7 @@ export function StagePage() {
       </div>
 
       {/* Interactive demo panel */}
-      <div className="min-h-80 overflow-hidden rounded-lg border border-edge bg-surface-2 p-4">
+      <div className={`${panelSurface} min-h-80 overflow-hidden p-4`}>
         <ErrorBoundary variant="panel" label={meta.title} resetKey={stageId}>
           <StageDetail
             stage={stageId}
@@ -79,29 +85,20 @@ export function StagePage() {
       </div>
 
       {/* Previous / Next navigation */}
-      <nav className="flex items-center justify-between border-t border-edge pt-4">
+      <nav className="flex items-center justify-between gap-3 border-t border-edge pt-4">
         {prevStage ? (
-          <Link
-            to={`/stages/${prevStage}`}
-            className="rounded-md border border-edge px-3 py-1.5 text-label text-ink-dim transition-colors hover:border-accent/70 hover:text-ink"
-          >
+          <Link to={`/stages/${prevStage}`} className={btnGhost}>
             ← {STAGE_META[prevStage].title}
           </Link>
         ) : (
           <span />
         )}
         {nextStage ? (
-          <Link
-            to={`/stages/${nextStage}`}
-            className="rounded-md border border-edge px-3 py-1.5 text-label text-ink-dim transition-colors hover:border-accent/70 hover:text-ink"
-          >
+          <Link to={`/stages/${nextStage}`} className={btnGhost}>
             {STAGE_META[nextStage].title} →
           </Link>
         ) : (
-          <Link
-            to="/"
-            className="rounded-md border border-accent bg-accent/15 px-3 py-1.5 text-label font-medium text-ink transition-colors hover:bg-accent/25"
-          >
+          <Link to="/playground" className={btnPrimary}>
             Try it in the Playground →
           </Link>
         )}

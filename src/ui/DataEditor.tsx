@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Row, SqlValue, Table } from '../engine/index.ts';
+import { btnGhost, btnPrimary, btnSecondary } from './primitives.ts';
 
 /**
  * "Construct their own input data sets" is named explicitly in the condition
@@ -86,27 +87,23 @@ export function DataEditor({ table, onApply, onReset, onClose }: DataEditorProps
       // Clicking the backdrop targets the dialog itself; anything inside it
       // targets a child. Cheap dismissal without a second overlay element.
       onClick={(e) => { if (e.target === dialog.current) close(); }}
-      className="max-h-[85dvh] w-[min(48rem,calc(100vw-2rem))] overflow-hidden rounded-lg border border-edge bg-surface p-0 text-ink backdrop:bg-black/60"
+      className="max-h-[85dvh] w-[min(48rem,calc(100vw-2rem))] overflow-hidden rounded-2xl border border-edge bg-surface p-0 text-ink shadow-e3 backdrop:bg-black/70 backdrop:backdrop-blur-sm"
     >
       <div className="flex max-h-[85dvh] flex-col">
-        <header className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-edge px-4 py-3">
+        <header className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-edge bg-surface-2/40 px-4 py-3">
           <h2 className="text-heading font-semibold">Seed data · {table.name}</h2>
           <p className="text-label text-ink-dim">
             {rows.length} row{rows.length === 1 ? '' : 's'}
             {table.indexedColumn && ` · indexed on ${table.indexedColumn}`}
           </p>
-          <button
-            type="button"
-            onClick={close}
-            className="ml-auto rounded-md border border-edge px-2.5 py-1 text-label hover:border-accent/70"
-          >
+          <button type="button" onClick={close} className={`ml-auto ${btnGhost}`}>
             Close
           </button>
         </header>
 
         <div className="min-h-0 flex-1 overflow-auto">
           <table className="w-full border-collapse text-left font-mono text-label">
-            <thead className="sticky top-0 bg-surface-2">
+            <thead className="sticky top-0 bg-surface-2/95 backdrop-blur-sm">
               <tr className="border-b border-edge text-ink-dim">
                 <th className="w-8 px-2 py-1.5" />
                 {table.columns.map((column) => (
@@ -138,7 +135,7 @@ export function DataEditor({ table, onApply, onReset, onClose }: DataEditorProps
                         value={String(row[column] ?? '')}
                         onChange={(e) => { edit(i, column, e.target.value); }}
                         aria-label={`${column} row ${String(i + 1)}`}
-                        className="w-full rounded border border-transparent bg-transparent px-1.5 py-1 hover:border-edge focus:border-accent focus:outline-none"
+                        className="w-full rounded-md border border-transparent bg-transparent px-1.5 py-1 transition hover:border-edge focus:border-accent focus:bg-surface-3 focus:outline-none"
                       />
                     </td>
                   ))}
@@ -148,22 +145,14 @@ export function DataEditor({ table, onApply, onReset, onClose }: DataEditorProps
           </table>
         </div>
 
-        <footer className="flex flex-wrap items-center gap-2 border-t border-edge px-4 py-3">
-          <button
-            type="button"
-            onClick={addRow}
-            className="rounded-md border border-edge px-2.5 py-1.5 text-label hover:border-accent/70"
-          >
+        <footer className="flex flex-wrap items-center gap-2 border-t border-edge bg-surface-2/40 px-4 py-3">
+          <button type="button" onClick={addRow} className={btnSecondary}>
             + Add row
           </button>
-          <button
-            type="button"
-            onClick={() => { close(); onReset(); }}
-            className="rounded-md border border-edge px-2.5 py-1.5 text-label text-ink-dim hover:border-accent/70"
-          >
+          <button type="button" onClick={() => { close(); onReset(); }} className={btnGhost}>
             Reset to seed
           </button>
-          <p className="ml-auto text-label text-ink-dim">
+          <p className="ml-auto max-w-xs text-label text-ink-dim">
             Fewer rows means fewer pages, and the buffer pool may stop evicting entirely.
           </p>
           <button
@@ -171,7 +160,7 @@ export function DataEditor({ table, onApply, onReset, onClose }: DataEditorProps
             // close() before the callback, so focus lands back on the button
             // that opened this rather than on <body> after the unmount.
             onClick={() => { close(); onApply(rows); }}
-            className="rounded-md border border-accent bg-accent/15 px-4 py-1.5 text-label font-medium hover:bg-accent/25"
+            className={btnPrimary}
           >
             Apply &amp; re-run
           </button>

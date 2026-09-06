@@ -6,6 +6,8 @@ import {
 } from '../engine/index.ts';
 import type { ReplacementPolicyName, StepEvent } from '../engine/index.ts';
 import { encodeShareState } from '../ui/urlState.ts';
+import { PageHeader } from '../ui/PageHeader.tsx';
+import { cardInteractive } from '../ui/primitives.ts';
 
 /**
  * Named, deep-linked traces (plan.md §21.3, §19.2's preset-chip idea promoted
@@ -44,7 +46,7 @@ function moment(
   const result = runQuery(sql, SEED, { ...DEFAULT_ENGINE_OPTIONS, policy });
   const step = find(result.events);
   const query = encodeShareState({ sql, policy, predictOn: false, step }, undefined);
-  return { title, description, href: `/?${query}` };
+  return { title, description, href: `/playground?${query}` };
 }
 
 const MOMENTS: Moment[] = [
@@ -80,21 +82,24 @@ const MOMENTS: Moment[] = [
 
 export function GalleryPage() {
   return (
-    <div className="mx-auto max-w-3xl p-6">
-      <h2 className="mb-2 text-heading font-semibold">Gallery</h2>
-      <p className="mb-6 text-body text-ink-dim">
+    <div className="mx-auto w-full max-w-3xl p-6 sm:p-8">
+      <PageHeader eyebrow="Deep links" title="Gallery">
         Named moments in the pipeline, each a link that opens the Playground already stepped to
         that exact point. Good for pointing someone at a specific mechanism rather than a query.
-      </p>
+      </PageHeader>
 
-      <div className="space-y-4">
+      <div className="mt-8 space-y-3">
         {MOMENTS.map((m) => (
-          <Link
-            key={m.title}
-            to={m.href}
-            className="cell block rounded-lg border border-edge bg-surface-2 p-4 transition-colors hover:border-accent/50 hover:bg-surface-3"
-          >
-            <h3 className="text-body font-semibold text-ink">{m.title}</h3>
+          <Link key={m.title} to={m.href} className={cardInteractive}>
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="text-body font-semibold text-ink">{m.title}</h3>
+              <span
+                aria-hidden
+                className="text-ink-dim transition group-hover:translate-x-0.5 group-hover:text-accent"
+              >
+                →
+              </span>
+            </div>
             <p className="mt-1 text-label text-ink-dim">{m.description}</p>
           </Link>
         ))}
