@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Assignment reveal-lock** (plan.md §20.5) — `/assignments/new` can now lock the reveal: the
+  generated link (`&l=1`) opens the Playground with prediction forced on, the prompt's "skip"
+  removed, and the playhead — scrubber included — unable to cross an unanswered prediction. It lifts
+  one prompt at a time as the learner commits. The author is warned when the chosen step has no
+  prompt for the lock to catch on
 - **Trace inspector** at `/trace` (plan.md §21.3) — the raw event stream `runQuery` produces for a
   query, as a filterable table (per-stage toggles, a narration text filter), with each event's full
   JSON on click and a Copy-JSON of the filtered set. Runs the same engine path the Playground does;

@@ -31,6 +31,7 @@ export function AssignmentsNewPage() {
   const [sql, setSql] = useState<string>(PRESETS[0].sql);
   const [policy, setPolicy] = useState<ReplacementPolicyName>('lru');
   const [step, setStep] = useState(1);
+  const [lockReveal, setLockReveal] = useState(true);
   const [copied, setCopied] = useState(false);
 
   const trace = useMemo(
@@ -40,14 +41,18 @@ export function AssignmentsNewPage() {
 
   const clampedStep = trace.error ? 0 : Math.max(0, Math.min(step, trace.events.length));
 
+  // Whether the landing step (or, if it has no prompt, any later step) actually
+  // asks a question — the lock does nothing without one.
+  const promptAhead = !trace.error && trace.events.slice(clampedStep).some((e) => e.predictable);
+
   const link = useMemo(() => {
     if (typeof location === 'undefined' || trace.error) return '';
     const query = encodeShareState(
-      { sql, policy, predictOn: true, step: clampedStep },
+      { sql, policy, predictOn: true, step: clampedStep, ...(lockReveal ? { lockReveal: true } : {}) },
       undefined,
     );
     return `${location.origin}/playground?${query}`;
-  }, [sql, policy, clampedStep, trace.error]);
+  }, [sql, policy, clampedStep, lockReveal, trace.error]);
 
   async function copyLink() {
     try {
@@ -64,7 +69,8 @@ export function AssignmentsNewPage() {
       <PageHeader eyebrow="For instructors" title="Create an assignment">
         Pick a query, a policy and a step, and get a link. Opening it lands the reader on that
         exact step with prediction switched on, so the first thing they do is answer a question
-        rather than read background. No account, no submission — the link <em>is</em> the
+        rather than read background. With the reveal locked, they cannot scrub or skip past that
+        question until they commit. No account, no submission — the link <em>is</em> the
         assignment.
       </PageHeader>
 
@@ -132,6 +138,23 @@ export function AssignmentsNewPage() {
             </p>
           )}
         </div>
+
+        <label className="flex items-start gap-2 text-label text-ink-dim">
+          <input
+            type="checkbox"
+            checked={lockReveal}
+            onChange={(e) => { setLockReveal(e.target.checked); }}
+            className="mt-0.5 accent-[var(--color-accent)]"
+          />
+          <span>
+            Lock the reveal until they answer
+            {lockReveal && !promptAhead && !trace.error && (
+              <span className="block text-evict">
+                No prediction prompt at or after this step — the lock will have no effect here.
+              </span>
+            )}
+          </span>
+        </label>
       </div>
 
       {link && (

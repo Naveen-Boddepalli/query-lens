@@ -4,6 +4,12 @@ import type { Playback } from './usePlayback.ts';
 export interface PlaybackControlsProps {
   playback: Playback;
   length: number;
+  /**
+   * Upper bound for the scrubber track — assignment mode (plan.md §20.5) sets
+   * it below `length` so the thumb cannot be dragged past a sealed step.
+   * Defaults to `length`.
+   */
+  maxStep?: number;
 }
 
 /** A round icon button inside the segmented transport group. */
@@ -11,8 +17,9 @@ const iconBtn =
   'flex h-8 w-8 items-center justify-center rounded-full text-body text-ink-dim transition ' +
   'hover:bg-surface-3 hover:text-ink disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent';
 
-export function PlaybackControls({ playback, length }: PlaybackControlsProps) {
+export function PlaybackControls({ playback, length, maxStep }: PlaybackControlsProps) {
   const { step, playing, speed, atStart, atEnd, blocked } = playback;
+  const scrubMax = maxStep ?? length;
 
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
@@ -87,7 +94,7 @@ export function PlaybackControls({ playback, length }: PlaybackControlsProps) {
           type="range"
           className="scrubber w-full accent-[var(--color-accent)]"
           min={0}
-          max={length}
+          max={scrubMax}
           value={step}
           onChange={(e) => { playback.seek(Number(e.target.value)); }}
           aria-label="Scrub to step"

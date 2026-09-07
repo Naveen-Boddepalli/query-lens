@@ -20,6 +20,12 @@ export interface ShareState {
   step: number;
   /** Present only when the rows differ from the seed set. */
   rows?: Row[];
+  /**
+   * Assignment mode (plan.md §20.5): the playhead cannot move past the
+   * prediction at the landing step until it is answered, and the prompt has no
+   * "skip". Set only by `/assignments/new`; absent on an ordinary link.
+   */
+  lockReveal?: boolean;
 }
 
 const PARAM = {
@@ -28,6 +34,7 @@ const PARAM = {
   predict: 'x',
   step: 's',
   rows: 'd',
+  lock: 'l',
 } as const;
 
 // Caps, because the input is a link somebody else wrote. None of these is a
@@ -101,6 +108,13 @@ export function readShareState(
   const predict = params.get(PARAM.predict);
   if (predict === '0' || predict === '1') state.predictOn = predict === '1';
 
+  // An assignment link forces prediction on regardless of `x` — the lock is
+  // meaningless without it.
+  if (params.get(PARAM.lock) === '1') {
+    state.lockReveal = true;
+    state.predictOn = true;
+  }
+
   const step = clampStep(params.get(PARAM.step));
   if (step !== undefined) state.step = step;
 
@@ -122,6 +136,7 @@ export function encodeShareState(state: ShareState, table: Table | undefined): s
   params.set(PARAM.policy, state.policy);
   params.set(PARAM.predict, state.predictOn ? '1' : '0');
   params.set(PARAM.step, String(state.step));
+  if (state.lockReveal) params.set(PARAM.lock, '1');
   // Only when customised (plan.md §15.2). The seed set is 48 rows and is
   // reproducible from the code, so putting it in every link would be 2 kB of
   // URL saying "unchanged".

@@ -176,17 +176,48 @@ test('a settings preference becomes the Playground default on a bare visit', asy
   await expect(page.getByLabel('Eviction')).toHaveValue('lru');
 });
 
-test('creating an assignment produces a link the Playground opens correctly', async ({ page }) => {
+test('an assignment link lands on the step, forces prediction on, and locks the reveal', async ({ page }) => {
   await page.goto('/assignments/new');
-  await page.getByLabel('Land on step').fill('5');
+  // Step 8 of the default point-lookup trace carries a prediction prompt.
+  await page.getByLabel('Land on step').fill('8');
 
   const link = page.locator('code');
-  await expect(link).toContainText('s=5');
+  await expect(link).toContainText('s=8');
   await expect(link).toContainText('x=1');
+  await expect(link).toContainText('l=1');
 
-  const linkText = await link.textContent();
-  const url = new URL(linkText ?? '');
+  const url = new URL((await link.textContent()) ?? '');
   await page.goto(`${url.pathname}${url.search}`);
-  await expect(page.getByText(/showing step/)).toContainText('5');
+  await expect(page.getByText(/showing step/)).toContainText('8');
+
+  // Assignment mode replaces the predict checkbox with a notice.
+  await expect(page.getByText('Assignment mode.')).toBeVisible();
+  await expect(page.getByLabel('Ask me to predict before each reveal')).toHaveCount(0);
+
+  // The prompt is up; there is no skip, and playback cannot pass it.
+  await expect(page.getByText('answer to continue')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'skip' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Step forward' })).toBeDisabled();
+
+  // The scrubber track itself ends at the sealed step — it cannot be dragged past.
+  const scrubber = page.getByLabel('Scrub to step');
+  await expect(scrubber).toHaveAttribute('max', '8');
+
+  // Committing an answer lifts the seal to the next prompt.
+  await page.locator('section li button').first().click();
+  await expect(scrubber).not.toHaveAttribute('max', '8');
+  await expect(page.getByRole('button', { name: 'Step forward' })).toBeEnabled();
+});
+
+test('unchecking the lock produces an ordinary predict-on link', async ({ page }) => {
+  await page.goto('/assignments/new');
+  await page.getByLabel('Lock the reveal until they answer').uncheck();
+
+  const link = page.locator('code');
+  await expect(link).toContainText('x=1');
+  await expect(link).not.toContainText('l=1');
+
+  const url = new URL((await link.textContent()) ?? '');
+  await page.goto(`${url.pathname}${url.search}`);
   await expect(page.getByLabel('Ask me to predict before each reveal')).toBeChecked();
 });

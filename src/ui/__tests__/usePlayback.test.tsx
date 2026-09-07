@@ -102,6 +102,36 @@ describe('usePlayback bounds', () => {
   });
 });
 
+describe('usePlayback ceiling (assignment mode)', () => {
+  it('stops the scrubber at the ceiling — the gate a `gates` entry cannot', () => {
+    const { result } = renderHook(() =>
+      usePlayback(20, { ceiling: 5, gates: [false, false, false, false, false, true] }),
+    );
+    // `gates` alone lets a scrub jump anywhere; the ceiling does not.
+    act(() => { result.current.seek(18); });
+    expect(result.current.step).toBe(5);
+    expect(result.current.atEnd).toBe(false); // stuck at the gate, not the end
+  });
+
+  it('lifts as the ceiling is raised, one gate at a time', () => {
+    const { result, rerender } = renderHook(({ c }) => usePlayback(20, { ceiling: c }), {
+      initialProps: { c: 5 },
+    });
+    act(() => { result.current.seek(20); });
+    expect(result.current.step).toBe(5);
+
+    rerender({ c: 12 });
+    act(() => { result.current.seek(20); });
+    expect(result.current.step).toBe(12);
+  });
+
+  it('never exceeds the trace length even with a larger ceiling', () => {
+    const { result } = renderHook(() => usePlayback(8, { ceiling: 999 }));
+    act(() => { result.current.seek(50); });
+    expect(result.current.step).toBe(8);
+  });
+});
+
 describe('usePlaybackShortcuts', () => {
   function setup(enabled = true) {
     return renderHook(() => {

@@ -46,6 +46,13 @@ export interface PlaybackOptions {
    * the empty state that item exists to delete.
    */
   initialStep?: number;
+  /**
+   * A hard upper bound the playhead cannot cross by *any* route — including the
+   * scrubber, which `gates` deliberately does not stop. Assignment mode
+   * (plan.md §20.5) sets this to the first unanswered prediction, so the reveal
+   * stays sealed until the learner commits. Defaults to `length`.
+   */
+  ceiling?: number;
 }
 
 /** Playback is an index into an array we already own — nothing more. */
@@ -56,8 +63,10 @@ export function usePlayback(length: number, options?: PlaybackOptions): Playback
 
   // Derived, not stored: a re-run producing a shorter trace must not leave us
   // parked past the end, and playing must stop at the end on its own.
-  const step = Math.min(rawStep, length);
-  const blocked = options?.gates?.[Math.min(rawStep, length)] ?? false;
+  const hardCeiling = options?.ceiling; // undefined unless a caller sets one
+  const ceiling = Math.min(hardCeiling ?? length, length);
+  const step = Math.min(rawStep, ceiling);
+  const blocked = options?.gates?.[Math.min(rawStep, ceiling)] ?? false;
   const atStart = step === 0;
   const atEnd = step >= length;
   const playing = wantsToPlay && !atEnd && !blocked;
@@ -79,14 +88,15 @@ export function usePlayback(length: number, options?: PlaybackOptions): Playback
     if (step < length && !blocked) setRawStep(step + 1);
   }, [step, length, blocked]);
   const reset = useCallback(() => { setWantsToPlay(false); setRawStep(0); }, []);
-  // Scrubbing is deliberately *not* blocked: a prompt should not trap someone
-  // who wants to jump elsewhere in the trace.
+  // Scrubbing is deliberately *not* stopped by a `gate` — a prompt should not
+  // trap someone who wants to look elsewhere in the trace — but it *is* stopped
+  // by `ceiling`, which assignment mode uses to seal the reveal.
   const seek = useCallback(
     (target: number) => {
       setWantsToPlay(false);
-      setRawStep(Math.max(0, Math.min(target, length)));
+      setRawStep(Math.max(0, Math.min(target, ceiling)));
     },
-    [length],
+    [ceiling],
   );
   /**
    * `seek` clamps against the length it can see, which during a Run is still
@@ -96,8 +106,10 @@ export function usePlayback(length: number, options?: PlaybackOptions): Playback
    */
   const land = useCallback((target: number) => {
     setWantsToPlay(false);
-    setRawStep(Math.max(0, target));
-  }, []);
+    // Skip the length clamp — it's the previous trace's during a Run — but
+    // still honour an explicit ceiling if one is set.
+    setRawStep(hardCeiling === undefined ? Math.max(0, target) : Math.max(0, Math.min(target, hardCeiling)));
+  }, [hardCeiling]);
 
   // The weight of the event currently on screen: we linger on what just
   // happened before moving to the next thing.

@@ -32,12 +32,19 @@
 > keys (its `p` also takes the three buffer-pool-only policies); footer-only nav, next to Settings
 > and Assignments per §21.2. No engine change.
 >
-> Gate: typecheck, lint, 360 unit tests (+22: 10 policy, 12 B+Tree delete incl. 5 property tests),
-> build, bundle budget (`standalone-tools` 18→24 kB, total 335→342 — the parser/B+Tree/trace routes
-> plus the shared `FlowTree`/`BTreePanel`/`display` chunks that split out once a second route
-> imported them), 31 e2e (+4), zero axe violations on `/tools/parser`, `/tools/btree`, `/trace`,
-> `/compare`, `/tools` and `/tools/buffer-pool` in both themes (fixed a pre-existing `opacity-70`
-> contrast failure on the Tools index card, and swapped the trace inspector's stage colours off the
+> **The assignment reveal-lock** shipped too — the last gap in a v10 feature. `/assignments/new`
+> gained a "lock the reveal" toggle that adds `&l=1`; the Playground then forces prediction on,
+> removes the prompt's "skip", and — via a new `ceiling` on `usePlayback` — stops the scrubber
+> (which `gates` deliberately never blocked) from crossing an unanswered prompt. The lock lifts one
+> prompt at a time, and the author is warned when the chosen step has no prompt to lock on.
+>
+> Gate: typecheck, lint, 365 unit tests (+27: 10 policy, 12 B+Tree delete incl. 5 property tests,
+> 5 reveal-lock), build, bundle budget (`standalone-tools` 18→24 kB, total 335→342 — the
+> parser/B+Tree/trace routes plus the shared `FlowTree`/`BTreePanel`/`display` chunks that split out
+> once a second route imported them), 32 e2e (+6), zero axe violations on `/tools/parser`,
+> `/tools/btree`, `/trace`, `/compare`, `/tools`, `/tools/buffer-pool` and the Playground in
+> assignment mode, in both themes (fixed a pre-existing `opacity-70` contrast failure on the Tools
+> index card, and swapped the trace inspector's stage colours off the
 > text — some `--color-stage-*` fall under 4.5:1 as 13px body text — onto a swatch).
 >
 > **v11 — 2026-09-05.** A footer and docs-structure pass, prompted by a reference layout the user
@@ -1609,7 +1616,7 @@ query debugging / APM use case" as out of scope, possibly forever.
 | Buffer Pool standalone | **Done, v10; FIFO / Second-Chance / Bélády added v12** | v1 | InnoDB midpoint-LRU (§7.5) is the one policy still open |
 | B+Tree standalone | **Done, v12** (delete + property tests built with it) | v1 | Stepping the split / borrow / merge restructure (new `index` event kinds) is the obvious extension |
 | Parser standalone (token ribbon) | **Done, v12** | v2 | Stepping the parser's cursor through the ribbon (new event kinds) is the obvious extension |
-| Assignment links (client-side) | **Done, v10 (partial)** | v1 | The reveal-lock (withhold until commit) is still open |
+| Assignment links (client-side) | **Done, v10; reveal-lock added v12** | v1 | — |
 | Graded submission (backend) | Own plan | post-v1 | §9 validates the format, then a separate surface |
 | Interactive embed (package or CSP entry) | Own plan | v1+ | A named author needs an in-page embed |
 | Visual `EXPLAIN` viewer | Own product | — | A decision to serve DBAs — not this plan |
@@ -1760,7 +1767,7 @@ Grouped by area. **Status** is `built` / a milestone / `v1` / `v2` / `own plan`,
 
 | Route | Page | Primary feature | URL state | Status |
 |---|---|---|---|---|
-| `/assignments/new` | Assignment author | Pick a preset or custom query, a policy and the step to land on; get a link (`encodeShareState`, unmodified) with prediction forced on. **Not built**: withholding the reveal until commit — today the link opens an ordinary Playground with `x=1`, which asks the question but does not stop a learner from skipping it | encoded in the produced link | **built (partial)** |
+| `/assignments/new` | Assignment author | Pick a preset or custom query, a policy and the step to land on; get a link with prediction forced on and (v12) **the reveal locked** — `&l=1` makes the Playground seal the trace at the landing step until the learner commits: no "skip" on the prompt, and `usePlayback`'s new `ceiling` stops the scrubber (which `gates` deliberately does not) from crossing an unanswered prompt. The lock lifts one prompt at a time. The author is warned when the chosen step carries no prompt | encoded in the produced link (`q`/`p`/`x`/`s`/`l`) | **built** — v12 |
 | `/a/:id` | Open an assignment | Superseded by the above — there is no server-side id to decode, so an assignment *is* a Playground link rather than a separate route. Kept here as the originally-planned shape, struck by the simpler one that shipped | — | not built, and not needed as specified |
 | `/classroom` | Graded track | Submit scored answers back to an instructor — its own plan, its own privacy statement, likely its own subdomain (§20.5) | — | own plan |
 
@@ -1862,15 +1869,16 @@ went in, kept for the record, plus what is left.
    tabular figures turned out not to be per-visitor settings once considered (§21.3's row explains
    why).
 
-P2 / v2: `/learn`, a reveal-lock for assignments, and the full-pipeline half of Compare.
-Own plan: `/classroom`, `/embed/*`.
+P2 / v2: `/learn`, and the full-pipeline half of Compare. Own plan: `/classroom`, `/embed/*`.
 
 **v12 landed all three `/tools/*` sandboxes plus `/trace`.** `/tools/parser` is the live token
 ribbon + `AstTree` + recursion depth + the parser's own errors (§21.3's row). `/tools/btree` is the
 number-pad REPL over `insert` / `deleteKey` / `search`, and the B+Tree **deletion** it needed was
 built with it (borrow / merge / root-collapse / separator rewrite, with §7.6's property tests).
 `/trace` is the raw-event inspector — filterable table, per-row JSON, jump-to-step links — running
-the same `runQuery` as the Playground, footer-only. The buffer-pool tool and Compare gained `fifo`,
+the same `runQuery` as the Playground, footer-only. **Assignment links** gained the reveal-lock
+they were always missing: `&l=1` seals the trace at the landing step until the learner answers
+(`usePlayback` `ceiling`, no "skip"). The buffer-pool tool and Compare gained `fifo`,
 `second-chance` and `optimal` behind the existing `ReplacementPolicy` interface — `optimal` needed
 one new seam, an optional lookahead array on `BufferState` that `runBufferTrace` fills and the SQL
 path leaves empty. `ReplacementPolicyName` is now the five, but the Playground picker, `urlState`

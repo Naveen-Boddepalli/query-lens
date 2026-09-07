@@ -50,6 +50,14 @@ const SHARED = readShareState(
   SEED.tables[TABLE]?.columns ?? [],
 );
 
+/**
+ * plan.md §20.5: an assignment link (`&l=1`) seals the trace at its landing
+ * step until the learner commits an answer — the scrubber cannot cross it and
+ * the prompt has no "skip". `readShareState` has already forced `predictOn`
+ * true when this is set.
+ */
+const ASSIGNMENT = SHARED.lockReveal === true;
+
 const START = {
   sql: SHARED.sql ?? INITIAL_SQL,
   // The URL wins when present; a `/settings` preference (plan.md §21.3) is the
@@ -103,9 +111,19 @@ export function PlaygroundPage() {
     [result, predictOn, answers],
   );
 
+  // In assignment mode the playhead cannot pass the first unanswered prompt by
+  // any route — the scrubber included. It lifts one gate at a time as answers
+  // come in.
+  const ceiling = useMemo(() => {
+    if (!ASSIGNMENT) return undefined;
+    const firstGate = gates.findIndex((g) => g);
+    return firstGate === -1 ? result.events.length : firstGate;
+  }, [gates, result]);
+
   const playback = usePlayback(result.events.length, {
     dwells,
     gates,
+    ...(ceiling === undefined ? {} : { ceiling }),
     initialStep: SHARED.step ?? landingStep(INITIAL_RESULT, START.predictOn),
   });
   usePlaybackShortcuts(playback, !editingData);
@@ -250,15 +268,22 @@ export function PlaygroundPage() {
             </button>
           </div>
 
-          <label className="flex items-center gap-2 text-label text-ink-dim">
-            <input
-              type="checkbox"
-              checked={predictOn}
-              onChange={(e) => { setPredictOn(e.target.checked); }}
-              className="accent-[var(--color-accent)]"
-            />
-            Ask me to predict before each reveal
-          </label>
+          {ASSIGNMENT ? (
+            <p className="rounded-lg border border-accent/40 bg-accent/[0.07] px-3 py-2 text-label text-ink-dim">
+              <span className="font-medium text-ink">Assignment mode.</span> The trace is sealed at
+              this step until you answer the question — no skipping, no scrubbing ahead.
+            </p>
+          ) : (
+            <label className="flex items-center gap-2 text-label text-ink-dim">
+              <input
+                type="checkbox"
+                checked={predictOn}
+                onChange={(e) => { setPredictOn(e.target.checked); }}
+                className="accent-[var(--color-accent)]"
+              />
+              Ask me to predict before each reveal
+            </label>
+          )}
 
         </div>
 
@@ -300,6 +325,7 @@ export function PlaygroundPage() {
             <PredictionCard
               prompt={prompt}
               answer={answers[upcoming.id]}
+              canSkip={!ASSIGNMENT}
               onAnswer={(optionId) => {
                 setAnswers((current) => ({ ...current, [upcoming.id]: optionId }));
               }}
@@ -319,7 +345,11 @@ export function PlaygroundPage() {
           )}
 
           <div className="sticky bottom-0 z-10 -mx-4 space-y-2 border-t border-edge bg-surface/85 px-4 py-2 backdrop-blur-md lg:static lg:mx-0 lg:space-y-3 lg:border-0 lg:bg-transparent lg:px-0 lg:py-0 lg:backdrop-blur-none">
-            <PlaybackControls playback={playback} length={result.events.length} />
+            <PlaybackControls
+              playback={playback}
+              length={result.events.length}
+              maxStep={ceiling ?? result.events.length}
+            />
             <ShortcutHints />
           </div>
         </div>

@@ -7,6 +7,8 @@ export interface PredictionCardProps {
   answer: string | undefined;
   onAnswer: (optionId: string) => void;
   onSkip: () => void;
+  /** False in assignment mode (plan.md §20.5): answering is the only way past. */
+  canSkip?: boolean;
 }
 
 /**
@@ -14,7 +16,7 @@ export interface PredictionCardProps {
  * evidence actually supports: a wrong guess you have committed to teaches more
  * than a correct animation you watched.
  */
-export function PredictionCard({ prompt, answer, onAnswer, onSkip }: PredictionCardProps) {
+export function PredictionCard({ prompt, answer, onAnswer, onSkip, canSkip = true }: PredictionCardProps) {
   const [hovered, setHovered] = useState<string | null>(null);
   const answered = answer !== undefined;
   const correct = answer === prompt.correctOptionId;
@@ -29,7 +31,7 @@ export function PredictionCard({ prompt, answer, onAnswer, onSkip }: PredictionC
           <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-accent-strong shadow-[0_0_8px_var(--color-accent)]" />
           predict
         </span>
-        {!answered && (
+        {!answered && canSkip && (
           <button
             type="button"
             onClick={onSkip}
@@ -37,6 +39,9 @@ export function PredictionCard({ prompt, answer, onAnswer, onSkip }: PredictionC
           >
             skip
           </button>
+        )}
+        {!answered && !canSkip && (
+          <span className="ml-auto text-label text-ink-dim">answer to continue</span>
         )}
       </div>
 

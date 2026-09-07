@@ -30,6 +30,26 @@ describe('share state', () => {
     expect(readShareState(query, COLUMNS).rows).toBeUndefined();
   });
 
+  it('round-trips an assignment lock, and the lock forces prediction on', () => {
+    const query = encodeShareState(
+      { sql: 'SELECT * FROM users;', policy: 'lru', predictOn: false, step: 9, lockReveal: true },
+      TABLE,
+    );
+    expect(query).toContain('l=1');
+    // `x=0` in the link loses to the lock — the lock is meaningless without
+    // prediction on.
+    expect(readShareState(query, COLUMNS)).toMatchObject({ lockReveal: true, predictOn: true });
+  });
+
+  it('omits the lock param when the reveal is not locked', () => {
+    const query = encodeShareState(
+      { sql: 'SELECT * FROM users;', policy: 'lru', predictOn: true, step: 0 },
+      TABLE,
+    );
+    expect(query).not.toContain('l=');
+    expect(readShareState(query, COLUMNS).lockReveal).toBeUndefined();
+  });
+
   it('carries edited rows, values and types intact', () => {
     const rows = [
       { id: 1, name: 'ada', email: 'ada@example.com', age: 36 },

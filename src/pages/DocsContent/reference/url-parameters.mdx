@@ -16,6 +16,7 @@ the current one. This page is for building one by hand.
 | `p` | Eviction policy — `lru` or `clock` | `p=clock` |
 | `x` | Predict-then-reveal — `1` on, `0` off | `x=0` |
 | `s` | The step to land on | `s=25` |
+| `l` | Assignment lock — `l=1` seals the trace at step `s` until its prediction is answered (no skip, no scrubbing ahead); forces `x=1` | `l=1` |
 | `d` | Custom row data, only present when the seed rows have been edited | *(generated, not hand-written — see below)* |
 
 A link that omits a parameter falls back to that setting's default, so the shortest working link is
