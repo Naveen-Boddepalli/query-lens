@@ -20,8 +20,27 @@ export {
   USAGE_COUNT_CAP,
 } from './storage/index.ts';
 export type { BufferPool, Frame as BufferPoolFrame, Heap, Page } from './storage/index.ts';
-export { buildIndex, DEFAULT_MAX_KEYS, keyList, toIndexDisplay, validate } from './index/index.ts';
-export type { BPlusTree, BTreeNode, RowPointer } from './index/index.ts';
+export {
+  allKeys,
+  buildIndex,
+  createTree,
+  DEFAULT_MAX_KEYS,
+  deleteKey,
+  descend,
+  height,
+  insert,
+  keyList,
+  search,
+  toIndexDisplay,
+  validate,
+} from './index/index.ts';
+export type {
+  BPlusTree,
+  BTreeNode,
+  DeleteResult,
+  DeleteStep,
+  RowPointer,
+} from './index/index.ts';
 export { evaluatePredicate, passes } from './exec/index.ts';
 export { createLockManager } from './locks/index.ts';
 export type { HeldLock, LockManager, LockMode } from './locks/index.ts';

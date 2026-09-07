@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **B+Tree sandbox** at `/tools/btree` (plan.md §20.4, §21.3) — insert, delete and find keys against
+  a live B+Tree, with a fan-out slider and the structural invariants re-checked and shown after
+  every edit. Building it required **B+Tree deletion** in the engine (`deleteKey`): leaf and
+  internal underflow handled by borrowing from a sibling or merging, root-collapse, and a separator
+  rewrite up the descent path so every internal key stays a real leaf key. Covered by property
+  tests that assert the tree stays sound after every operation against a set oracle (plan.md §7.6)
 - **Parser sandbox** at `/tools/parser` (plan.md §20.4, §21.3) — type any SQL, supported or not, and
   see the tokenizer's stream as a colour-coded ribbon and the recursive-descent parser's AST built
   live, with a recursion-depth readout and the parser's own tokenize/parse error messages. No engine

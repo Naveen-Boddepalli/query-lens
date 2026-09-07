@@ -241,6 +241,218 @@ function insertIntoParent(
 }
 
 /* -------------------------------------------------------------------------- */
+/* Delete                                                                      */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * THE DELETE RULE (plan.md §7.6) — the mirror of the split rule, and just as
+ * easy to get subtly wrong:
+ *
+ *   leaf underflow     → borrow a key from a sibling, or MERGE with one. The
+ *                        separator between the two in the parent is *rewritten*
+ *                        to the new boundary (borrow) or *removed* (merge).
+ *   internal underflow → borrow, or merge — and the parent's separator is
+ *                        *pulled down* into the merged node, because internal
+ *                        nodes hold no data and must not duplicate a key.
+ *   deleted key was a separator → the copy in every ancestor that routes into
+ *                        this leaf's subtree is replaced with the leaf's new
+ *                        minimum, so `validate`'s "every separator exists as a
+ *                        leaf key" invariant still holds after any delete.
+ *
+ * "Under half full" is `ceil(maxKeys / 2)` keys for a leaf and
+ * `ceil((maxKeys + 1) / 2)` children for an internal node — the same floors
+ * `validate` enforces. The root is exempt: it may hold as little as one key
+ * (leaf) or two children (internal), and collapses into its only child when it
+ * drops below that.
+ */
+
+const minLeafKeys = (tree: BPlusTree): number => Math.ceil(tree.maxKeys / 2);
+const minInternalChildren = (tree: BPlusTree): number =>
+  Math.ceil((tree.maxKeys + 1) / 2);
+
+export type DeleteStepKind =
+  | 'remove'
+  | 'update-separator'
+  | 'borrow-left'
+  | 'borrow-right'
+  | 'merge'
+  | 'root-collapse';
+
+export interface DeleteStep {
+  kind: DeleteStepKind;
+  /** The node this step acts on (or, for a collapse, the new root). */
+  node: string;
+  detail?: string;
+}
+
+export interface DeleteResult {
+  /** False when the key was not in the tree — nothing changed. */
+  found: boolean;
+  /** What the delete did, in order. Empty beyond the `remove` step means the
+   *  key came out of a leaf that stayed at least half full. */
+  steps: DeleteStep[];
+}
+
+export function deleteKey(tree: BPlusTree, key: SqlValue): DeleteResult {
+  const steps: DeleteStep[] = [];
+  const path = descend(tree, key);
+  const leaf = node(tree, path[path.length - 1]!) as LeafNode;
+
+  const at = lowerBound(leaf.keys, key);
+  if (at >= leaf.keys.length || compareKeys(leaf.keys[at]!, key) !== 0) {
+    return { found: false, steps };
+  }
+
+  leaf.keys.splice(at, 1);
+  leaf.pointers.splice(at, 1);
+  steps.push({ kind: 'remove', node: leaf.id, detail: String(key) });
+
+  // The deleted key can only be a separator if it was this leaf's minimum.
+  // Rewrite it wherever an ancestor routes right into this leaf's subtree.
+  if (at === 0 && leaf.keys.length > 0) {
+    updateSeparators(tree, path, key, leaf.keys[0]!, steps);
+  }
+
+  // The root leaf is allowed to sit below the floor, empty included.
+  if (path.length === 1 || leaf.keys.length >= minLeafKeys(tree)) {
+    return { found: true, steps };
+  }
+
+  rebalanceLeaf(tree, path, steps);
+  return { found: true, steps };
+}
+
+function updateSeparators(
+  tree: BPlusTree,
+  path: string[],
+  oldKey: SqlValue,
+  newKey: SqlValue,
+  steps: DeleteStep[],
+): void {
+  for (let i = 0; i < path.length - 1; i++) {
+    const parent = node(tree, path[i]!) as InternalNode;
+    const childIndex = parent.children.indexOf(path[i + 1]!);
+    if (childIndex > 0 && compareKeys(parent.keys[childIndex - 1]!, oldKey) === 0) {
+      parent.keys[childIndex - 1] = newKey;
+      steps.push({
+        kind: 'update-separator',
+        node: parent.id,
+        detail: `${String(oldKey)} → ${String(newKey)}`,
+      });
+    }
+  }
+}
+
+function rebalanceLeaf(tree: BPlusTree, path: string[], steps: DeleteStep[]): void {
+  const leaf = node(tree, path[path.length - 1]!) as LeafNode;
+  const parent = node(tree, path[path.length - 2]!) as InternalNode;
+  const idx = parent.children.indexOf(leaf.id);
+  const floor = minLeafKeys(tree);
+
+  const left = idx > 0 ? (node(tree, parent.children[idx - 1]!) as LeafNode) : null;
+  const right =
+    idx < parent.children.length - 1
+      ? (node(tree, parent.children[idx + 1]!) as LeafNode)
+      : null;
+
+  if (left && left.keys.length > floor) {
+    leaf.keys.unshift(left.keys.pop()!);
+    leaf.pointers.unshift(left.pointers.pop()!);
+    parent.keys[idx - 1] = leaf.keys[0]!;
+    steps.push({ kind: 'borrow-left', node: leaf.id, detail: `from ${left.id}` });
+    return;
+  }
+  if (right && right.keys.length > floor) {
+    leaf.keys.push(right.keys.shift()!);
+    leaf.pointers.push(right.pointers.shift()!);
+    parent.keys[idx] = right.keys[0]!;
+    steps.push({ kind: 'borrow-right', node: leaf.id, detail: `from ${right.id}` });
+    return;
+  }
+
+  // No sibling has a key to spare — merge, and drop the separator between them.
+  if (left) {
+    left.keys.push(...leaf.keys);
+    left.pointers.push(...leaf.pointers);
+    left.next = leaf.next;
+    delete tree.nodes[leaf.id];
+    parent.keys.splice(idx - 1, 1);
+    parent.children.splice(idx, 1);
+    steps.push({ kind: 'merge', node: left.id, detail: `absorbed ${leaf.id}` });
+  } else if (right) {
+    leaf.keys.push(...right.keys);
+    leaf.pointers.push(...right.pointers);
+    leaf.next = right.next;
+    delete tree.nodes[right.id];
+    parent.keys.splice(idx, 1);
+    parent.children.splice(idx + 1, 1);
+    steps.push({ kind: 'merge', node: leaf.id, detail: `absorbed ${right.id}` });
+  }
+
+  rebalanceInternal(tree, path.slice(0, -1), steps);
+}
+
+function rebalanceInternal(tree: BPlusTree, path: string[], steps: DeleteStep[]): void {
+  const target = node(tree, path[path.length - 1]!) as InternalNode;
+
+  if (path.length === 1) {
+    // The root may thin all the way to a single child; then it *is* that child.
+    if (target.children.length === 1) {
+      tree.rootId = target.children[0]!;
+      delete tree.nodes[target.id];
+      steps.push({ kind: 'root-collapse', node: tree.rootId, detail: `dropped ${target.id}` });
+    }
+    return;
+  }
+
+  if (target.children.length >= minInternalChildren(tree)) return;
+
+  const parent = node(tree, path[path.length - 2]!) as InternalNode;
+  const idx = parent.children.indexOf(target.id);
+  const left = idx > 0 ? (node(tree, parent.children[idx - 1]!) as InternalNode) : null;
+  const right =
+    idx < parent.children.length - 1
+      ? (node(tree, parent.children[idx + 1]!) as InternalNode)
+      : null;
+  const floor = minInternalChildren(tree);
+
+  // Borrow: rotate a child across, threading it through the parent separator.
+  if (left && left.children.length > floor) {
+    target.children.unshift(left.children.pop()!);
+    target.keys.unshift(parent.keys[idx - 1]!);
+    parent.keys[idx - 1] = left.keys.pop()!;
+    steps.push({ kind: 'borrow-left', node: target.id, detail: `from ${left.id}` });
+    return;
+  }
+  if (right && right.children.length > floor) {
+    target.children.push(right.children.shift()!);
+    target.keys.push(parent.keys[idx]!);
+    parent.keys[idx] = right.keys.shift()!;
+    steps.push({ kind: 'borrow-right', node: target.id, detail: `from ${right.id}` });
+    return;
+  }
+
+  // Merge: the parent separator comes down between the two nodes' children.
+  if (left) {
+    left.keys.push(parent.keys[idx - 1]!, ...target.keys);
+    left.children.push(...target.children);
+    delete tree.nodes[target.id];
+    parent.keys.splice(idx - 1, 1);
+    parent.children.splice(idx, 1);
+    steps.push({ kind: 'merge', node: left.id, detail: `absorbed ${target.id}` });
+  } else if (right) {
+    target.keys.push(parent.keys[idx]!, ...right.keys);
+    target.children.push(...right.children);
+    delete tree.nodes[right.id];
+    parent.keys.splice(idx, 1);
+    parent.children.splice(idx + 1, 1);
+    steps.push({ kind: 'merge', node: target.id, detail: `absorbed ${right.id}` });
+  }
+
+  rebalanceInternal(tree, path.slice(0, -1), steps);
+}
+
+/* -------------------------------------------------------------------------- */
 /* Reading                                                                     */
 /* -------------------------------------------------------------------------- */
 

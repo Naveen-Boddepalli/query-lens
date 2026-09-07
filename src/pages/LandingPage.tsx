@@ -92,10 +92,14 @@ export function LandingPage() {
           , and standalone sandboxes for the{' '}
           <Link to="/tools/buffer-pool" className="underline underline-offset-2 hover:text-ink">
             buffer pool
-          </Link>{' '}
-          and the{' '}
+          </Link>
+          , the{' '}
           <Link to="/tools/parser" className="underline underline-offset-2 hover:text-ink">
             parser
+          </Link>{' '}
+          and the{' '}
+          <Link to="/tools/btree" className="underline underline-offset-2 hover:text-ink">
+            B+Tree
           </Link>
           .
         </p>

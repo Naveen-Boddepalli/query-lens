@@ -4,6 +4,7 @@ export {
   compareKeys,
   createTree,
   DEFAULT_MAX_KEYS,
+  deleteKey,
   descend,
   height,
   insert,
@@ -14,6 +15,9 @@ export {
 export type {
   BPlusTree,
   BTreeNode,
+  DeleteResult,
+  DeleteStep,
+  DeleteStepKind,
   InternalNode,
   LeafNode,
   RowPointer,

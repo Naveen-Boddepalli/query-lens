@@ -70,6 +70,45 @@ test('the parser sandbox shows the token stream and the parser\'s own errors', a
   await expect(page.getByLabel('Tokens').getByText(/Unexpected character/)).toBeVisible();
 });
 
+test('the B+Tree sandbox inserts, deletes with rebalancing, and finds', async ({ page }) => {
+  await page.goto('/tools/btree');
+  await page.getByRole('button', { name: 'Sample' }).click();
+  await expect(page.getByText('invariants hold')).toBeVisible();
+  expect(await page.locator('.react-flow__node').count()).toBeGreaterThan(3);
+
+  const key = page.getByLabel('Key', { exact: true });
+  const del = page.getByRole('button', { name: 'Delete', exact: true });
+
+  // 48 lives in a leaf sitting at the minimum, next to a sibling with a key to
+  // spare — so removing it underflows the leaf and forces a borrow.
+  await key.fill('48');
+  await del.click();
+  await expect(page.getByText(/underflowed: .*borrowed a key/)).toBeVisible();
+  await expect(page.getByText('invariants hold')).toBeVisible();
+
+  // Keep deleting; the tree stays sound the whole way down.
+  for (const k of ['50', '45', '40', '35', '33']) {
+    await key.fill(k);
+    await del.click();
+    await expect(page.getByText('invariants hold')).toBeVisible();
+  }
+
+  // A surviving key still resolves; a deleted one does not.
+  await key.fill('25');
+  await page.getByRole('button', { name: 'Find', exact: true }).click();
+  await expect(page.getByText(/Found 25 after \d+ node read/)).toBeVisible();
+
+  await key.fill('48');
+  await page.getByRole('button', { name: 'Find', exact: true }).click();
+  await expect(page.getByText(/48 is not in the tree/)).toBeVisible();
+
+  // Re-inserting keeps the tree sound.
+  await key.fill('48');
+  await page.getByRole('button', { name: 'Insert', exact: true }).click();
+  await expect(page.getByText(/Inserted 48/)).toBeVisible();
+  await expect(page.getByText('invariants hold')).toBeVisible();
+});
+
 test('compare finds the point where LRU and clock sweep pick different victims', async ({ page }) => {
   await page.goto('/compare');
   await expect(page.getByText(/first pick a different victim/)).toBeVisible();

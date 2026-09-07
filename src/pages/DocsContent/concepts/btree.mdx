@@ -44,11 +44,19 @@ number of rows, which means fewer pointer follows, which means fewer page reads,
 point of building the index in the first place. Real database indexes tune fan-out to match a disk
 page's size — often hundreds of keys per node — precisely to keep the tree as shallow as possible.
 
+Deletion is the split rule run backwards. When a node drops below half full it first tries to
+**borrow** a key from a sibling; if neither sibling can spare one, the two nodes **merge** and the
+separator between them comes out of the parent — which can cascade upward until the root itself
+collapses into its only child. The [B+Tree sandbox](/tools/btree) lets you insert, delete and find
+against a live tree and watch exactly that, with a fan-out slider and the structural invariants
+re-checked after every edit.
+
 ## Where this simplifies
 
 QueryLens's tree has a small, fixed fan-out (enough to demonstrate a split without needing thousands
-of rows) and supports point lookups and inserts. A production index also handles deletion, key
-updates, and — critically — concurrent modification, which is where the
+of rows). It supports point lookups, inserts and deletes — the last only in the standalone
+[sandbox](/tools/btree), since the pipeline itself runs `SELECT` and never removes a row. A
+production index also handles key updates and — critically — concurrent modification, which is where the
 [locking the app's Locks panel visualises](/) actually earns its keep in a real engine: two
 descents that briefly hold two levels of the tree at once ("latch crabbing") are how a B+Tree stays
 correct while more than one query touches it at the same time. QueryLens runs exactly one query, so

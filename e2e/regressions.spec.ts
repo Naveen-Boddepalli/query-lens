@@ -378,6 +378,7 @@ test('every route renders the app on a cold load, not the 404 page', async ({ pa
     ['/tools', /Tools/],
     ['/tools/buffer-pool', /Buffer pool sandbox/],
     ['/tools/parser', /Parser sandbox/],
+    ['/tools/btree', /B\+Tree sandbox/],
     ['/compare', /Compare replacement policies/],
     ['/settings', /Settings/],
     ['/assignments/new', /Create an assignment/],

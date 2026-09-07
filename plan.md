@@ -12,11 +12,25 @@
 > widened to the five; the Playground `<select>`, `urlState` and `/settings` still allow-list
 > `lru`/`clock` only, so the pipeline's contrast (§9) and every shared link are unchanged.
 > `ComparePage` now picks either side from the five rather than being fixed on LRU-vs-clock.
-> Gate: typecheck, lint, 348 unit tests (+10 for the new policies), build, bundle budget
-> (`standalone-tools` 18→20 kB for the parser route; `AstTree`/`display` split into `trace-ui` as
-> the sandbox became a second importer), 29 e2e (+2), zero axe violations on `/tools/parser`,
-> `/compare`, `/tools` and `/tools/buffer-pool` in both themes (fixed a pre-existing `opacity-70`
-> contrast failure on the Tools index's "coming later" card while there).
+> **`/tools/btree`** shipped in the same push — the last of the three §21.3 tool routes, and the
+> only one gated on an engine build. **B+Tree deletion** now exists (`deleteKey` in
+> `src/engine/index/btree.ts`): leaf underflow → borrow from a sibling or merge; internal underflow
+> → the same, pulling the parent separator down; root-collapse when the root thins to one child;
+> and a separator rewrite up the descent path so `validate`'s "every internal key is a real leaf
+> key" invariant survives any delete sequence. Strict, not lazy — the property tests
+> (`btreeDelete.test.ts`, five of them, `validate` asserted clean after *every* op against a `Set`
+> oracle, per §7.6) would catch a stale separator. The sandbox itself is small (§20.4 said it would
+> be): a number pad over `insert` / `deleteKey` / `search`, the tree re-rendered whole after each
+> edit through the Playground's own `BTreePanel`, a fan-out slider, `deleteKey`'s step log narrated,
+> and the invariant check shown as a badge. Stepping the restructure event-by-event (new `index`
+> event kinds) is left for later, the same line drawn for the parser cursor.
+>
+> Gate: typecheck, lint, 360 unit tests (+22: 10 policy, 12 B+Tree delete incl. 5 property tests),
+> build, bundle budget (`standalone-tools` 18→24 kB, total 335→342 — the parser and B+Tree routes
+> plus the shared `FlowTree`/`BTreePanel`/`display` chunks that split out once a second route
+> imported them), 30 e2e (+3), zero axe violations on `/tools/parser`, `/tools/btree`, `/compare`,
+> `/tools` and `/tools/buffer-pool` in both themes (fixed a pre-existing `opacity-70` contrast
+> failure on the Tools index card while there).
 >
 > **v11 — 2026-09-05.** A footer and docs-structure pass, prompted by a reference layout the user
 > shared. `Footer.tsx` is now four blocks — a brand block (mark, one-line description, a
@@ -1461,7 +1475,7 @@ does not support:
 | "The diagrams are SVG you can lift out" | Every panel is Tailwind **HTML**. `FlowTree` (AST, plan, B+Tree) is React Flow, whose nodes are absolutely-positioned `<div>`s — only the *edges* are SVG | A clean vector export is a **new renderer**, not `.outerHTML`. §20.3 |
 | "Spin a stage out as a standalone tool" | Every panel today is driven by `runQuery(sql, db)` → `events[]` → `projector.at(step)`. There is **no path** to drive a panel from a hand-authored operation sequence (`insert(15)`, a page-reference string) | Each standalone needs a non-SQL driver that emits the same events. §20.2, §20.4 |
 | "Embed the app in a blog with an `<iframe>`" | `public/_headers` sets `frame-ancestors 'none'`, deliberately (§14.3, §17.1) | The literal iframe is dead on arrival under the project's own CSP. §20.3 |
-| "Watch the B+Tree rebalance on delete" | `src/engine/index/` exports `insert`, `search`, `descend`, `height` — **no delete**. Underflow, borrow, merge and root-collapse are unimplemented | The DSA spin-off's headline feature is a build task with its own property tests (§7.6), not a wiring task. §20.4 |
+| "Watch the B+Tree rebalance on delete" | ~~`src/engine/index/` exports `insert`, `search`, `descend`, `height` — **no delete**~~ **Done, v12.** `deleteKey` handles underflow (borrow / merge), root-collapse and the separator rewrite, with the property tests §7.6 demands (`btreeDelete.test.ts`). Drives `/tools/btree` | — |
 
 None of these kills an idea. They move where the work is.
 
@@ -1517,19 +1531,21 @@ for any of them being linkable.
   wants more policies — FIFO, Second-Chance, Bélády-optimal — which the `ReplacementPolicy`
   interface (`name`, `onAccess`, `selectVictim`) already makes a per-file addition. This is also
   where §7.5's promised InnoDB midpoint-LRU finally lands.
-- **B+Tree as a DSA-course tool — v1, but only after delete is built.** The visualisation, the
-  animated traversal and the display transformer all exist. The headline interaction — type
-  `insert(15)`, `delete(4)`, watch it rebalance — needs B+Tree **deletion**, which
-  `src/engine/index/` does not have: underflow, borrow-from-sibling, merge, and root-collapse, each
-  with the property-based tests §7.6 mandates *before* the animation. That is the real scope of this
-  item; the UI around it is small. Decide delete on its own merits (it strengthens the core product
-  too), and this follows cheaply.
-- **Parser as a compilers-course tool — v2, lowest of the three.** The playground already shows a
-  recursive-descent parse building an AST live, with error squiggles — that half is done. The only
-  new surface is a **token ribbon**: the tokenizer (`src/engine/parser/tokenizer.ts`, separately
-  tested) produces tokens that never enter the event model, so showing the token stream and the
-  parser's cursor in it is a new small panel and a couple of new event kinds. Worth doing; not worth
-  doing early.
+- **B+Tree as a DSA-course tool — done, v12.** The visualisation, the animated traversal and the
+  display transformer already existed; the missing half was B+Tree **deletion**, which
+  `src/engine/index/btree.ts` now has — `deleteKey`: leaf and internal underflow (borrow-from-
+  sibling, then merge), root-collapse, and a separator rewrite up the descent path, with the
+  property-based tests §7.6 mandates (`btreeDelete.test.ts`, `validate` clean after every op vs. a
+  `Set` oracle). The UI around it was small as predicted: a number pad, the tree re-rendered whole
+  through the Playground's `BTreePanel`, a fan-out slider, `deleteKey`'s step log narrated, the
+  invariants shown as a badge. Stepping the restructure itself (new `index` event kinds) is a later
+  addition.
+- **Parser as a compilers-course tool — done, v12.** The playground already showed the
+  recursive-descent parse building an AST live with error squiggles. The new surface was the
+  **token ribbon**: `tokenize` re-exported from `src/engine/index.ts`, rendered as colour-coded
+  chips, with recursion depth and both tokenize- and parse-error messages. The parser's cursor
+  *within* the ribbon (a couple of new event kinds) is the same later addition the B+Tree tool's
+  restructure-stepping is.
 
 ### 20.5 Instructor & assessment tools (EdTech)
 
@@ -1583,7 +1599,7 @@ query debugging / APM use case" as out of scope, possibly forever.
 | `scripts/record.ts` (GIF/WebM) | Build | M12 | — |
 | True vector SVG export | Build | v1 | A paper or a course deck needs it |
 | Buffer Pool standalone | **Done, v10; FIFO / Second-Chance / Bélády added v12** | v1 | InnoDB midpoint-LRU (§7.5) is the one policy still open |
-| B+Tree standalone | Conditional | v1 | Only once B+Tree delete is implemented |
+| B+Tree standalone | **Done, v12** (delete + property tests built with it) | v1 | Stepping the split / borrow / merge restructure (new `index` event kinds) is the obvious extension |
 | Parser standalone (token ribbon) | **Done, v12** | v2 | Stepping the parser's cursor through the ribbon (new event kinds) is the obvious extension |
 | Assignment links (client-side) | **Done, v10 (partial)** | v1 | The reveal-lock (withhold until commit) is still open |
 | Graded submission (backend) | Own plan | post-v1 | §9 validates the format, then a separate surface |
@@ -1719,7 +1735,7 @@ Grouped by area. **Status** is `built` / a milestone / `v1` / `v2` / `own plan`,
 | Route | Page | Primary feature | URL state | Status |
 |---|---|---|---|---|
 | `/examples` | Examples | Curated queries; each opens the Playground | — | built (3; grow it) |
-| `/gallery` | Moment gallery | Named, deep-linked traces — a point lookup, the eviction storm (LRU and clock), the optimizer's rewrite — each card computes its own step via `events.findIndex(...)` against a real run, so an engine change fails the page rather than shipping a stale link. The index-dropped contrast and a B+Tree split are not here yet: the first is one more moment to add, the second needs the B+Tree standalone's underlying delete work (§20.4) | per-card share string | **built** |
+| `/gallery` | Moment gallery | Named, deep-linked traces — a point lookup, the eviction storm (LRU and clock), the optimizer's rewrite — each card computes its own step via `events.findIndex(...)` against a real run, so an engine change fails the page rather than shipping a stale link. The index-dropped contrast and a B+Tree split/merge moment are not here yet — both are now just one more moment to add (B+Tree delete landed in v12) | per-card share string | **built** |
 | `/compare` | Comparison view | Two buffer-pool traces (`src/engine/bufferTrace.ts`) stepping together on one typed reference string, synchronised by *access index* since the policies emit different event counts for the same string; flags the first access where they pick different victims. v12: either side is any of the five replacement policies, not fixed on LRU-vs-clock. The full-pipeline index-vs-no-index half of this idea (§13) is not built — this is the buffer-pool half only | reference string, both policies (session-local; not yet in the URL) | **built** |
 | `/trace` | Trace inspector | The raw `StepEvent[]` for the current share string as a filterable table and copyable JSON — the developer-facing complement to §20.3's exports | share string | v2 |
 
@@ -1729,7 +1745,7 @@ Grouped by area. **Status** is `built` / a milestone / `v1` / `v2` / `own plan`,
 |---|---|---|---|---|
 | `/tools` | Tools index | What each standalone is for, and who it is for, and which are not built yet | — | **built** |
 | `/tools/buffer-pool` | Buffer pool sandbox | Type or generate a page-reference string; step it against any of five policies — LRU, clock sweep, FIFO, second-chance, optimal (Bélády) — through the exact `BufferPoolPanel` the Playground uses, driven by `runBufferTrace`. No SQL, no table. `optimal` reads the whole reference string as lookahead (the SQL path has none, so it degrades to FIFO there) | reference string, frames, policy | **built** — v12 added the three non-pipeline policies |
-| `/tools/btree` | B+Tree sandbox | `insert 15`, `delete 4`, `find 9` REPL; watch split, borrow and merge; fan-out slider | key sequence, fan-out, step | v2 — needs B+Tree delete (§20.4) |
+| `/tools/btree` | B+Tree sandbox | `insert` / `delete` / `find` number pad; watch it split on insert and borrow or merge on delete; fan-out slider; structural invariants re-checked and shown after every edit | `keys`, `fanout` | **built** — v12; B+Tree deletion (`deleteKey`) built with it |
 | `/tools/parser` | Parser sandbox | Arbitrary text → live token ribbon → live AST (the Playground's `AstTree`, from `toDisplayTree`) with recursion depth and the parser's own tokenize/parse error messages | source text (`src`) | **built** — v12 |
 
 **Classroom** (§20.5)
@@ -1838,15 +1854,18 @@ went in, kept for the record, plus what is left.
    tabular figures turned out not to be per-visitor settings once considered (§21.3's row explains
    why).
 
-P2 / v2: `/learn`, `/tools/btree` (gated on delete), `/trace`, a reveal-lock for assignments, and the
-full-pipeline half of Compare. Own plan: `/classroom`, `/embed/*`.
+P2 / v2: `/learn`, `/trace`, a reveal-lock for assignments, and the full-pipeline half of Compare.
+Own plan: `/classroom`, `/embed/*`.
 
-**v12 landed `/tools/parser` and the extra buffer-pool policies.** `/tools/parser` is the live token
-ribbon + `AstTree` + recursion depth + the parser's own errors (§21.3's row). The buffer-pool tool
-and Compare gained `fifo`, `second-chance` and `optimal` behind the existing `ReplacementPolicy`
-interface — `optimal` needed one new seam, an optional lookahead array on `BufferState` that
-`runBufferTrace` fills and the SQL path leaves empty. `ReplacementPolicyName` is now the five, but
-the Playground picker, `urlState` and `/settings` still allow-list `lru`/`clock`, so §9's contrast
+**v12 landed all three `/tools/*` sandboxes.** `/tools/parser` is the live token ribbon + `AstTree`
++ recursion depth + the parser's own errors (§21.3's row). `/tools/btree` is the number-pad REPL
+over `insert` / `deleteKey` / `search`, and the B+Tree **deletion** it needed was built with it
+(borrow / merge / root-collapse / separator rewrite, with §7.6's property tests). The buffer-pool
+tool and Compare gained `fifo`, `second-chance` and `optimal` behind the existing
+`ReplacementPolicy` interface — `optimal` needed one new seam, an optional lookahead array on
+`BufferState` that `runBufferTrace` fills and the SQL path leaves empty. `ReplacementPolicyName` is
+now the five, but the Playground picker, `urlState` and `/settings` still allow-list `lru`/`clock`,
+so §9's contrast
 and every shared link are untouched. Still open there: InnoDB midpoint-LRU (§7.5).
 
 ### 21.7 Risks specific to going multi-page

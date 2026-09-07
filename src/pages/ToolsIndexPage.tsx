@@ -24,10 +24,10 @@ const TOOLS = [
   },
   {
     title: 'B+Tree sandbox',
-    href: null,
+    href: '/tools/btree',
     description:
-      'insert(), delete(), find() against a live B+Tree, watching it split, borrow and merge. Waiting on B+Tree deletion in the engine (plan.md §20.4).',
-    available: false,
+      'insert, delete and find against a live B+Tree — watch it split on insert, and borrow from a sibling or merge on delete, with a fan-out slider and the structural invariants checked after every edit.',
+    available: true,
   },
 ] as const;
 

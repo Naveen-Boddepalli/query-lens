@@ -34,7 +34,7 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
   // module into its own chunk the moment a second entry point needs it, which
   // is why `seed-*.js` and `trace-*.js` exist as their own files rather than
   // being duplicated into every page that touches the demo database.
-  { name: 'trace-ui', test: /^(PlaygroundPage|StageDetail|stageMeta|types|seed|trace|PlaybackControls|AstTree|display)-/, kb: 32, note: 'Playground + shared engine/UI plumbing, lazy (AstTree + the parse-stage display transformer split out once the parser sandbox became a second importer)' },
+  { name: 'trace-ui', test: /^(PlaygroundPage|StageDetail|stageMeta|types|seed|trace|PlaybackControls|AstTree|BTreePanel|FlowTree|display)-/, kb: 32, note: 'Playground + the shared panel/tree renderers (AstTree, BTreePanel, FlowTree, the two display transformers) that split out once the parser and B+Tree sandboxes became second importers' },
   // The small per-route shells: landing hub, stage index, examples, docs shell,
   // 404, tools index — plus the redesign's shared UI kit (primitives.ts,
   // PageHeader, Hero) that two or more of them import.
@@ -44,7 +44,7 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
   // driver (src/engine/bufferTrace.ts), the panel it renders through, and the
   // thin `preferences`/`urlState` helpers. None of it loads unless one of
   // these routes is visited.
-  { name: 'standalone-tools', test: /^(GalleryPage|ComparePage|SettingsPage|AssignmentsNewPage|BufferPoolToolPage|ParserToolPage|BufferPoolPanel|bufferTrace|preferences|urlState)-/, kb: 20, note: 'Gallery, Tools, Compare, Settings, Assignments, the buffer-pool and parser sandboxes (plan.md §21.3, §20.4)' },
+  { name: 'standalone-tools', test: /^(GalleryPage|ComparePage|SettingsPage|AssignmentsNewPage|BufferPoolToolPage|ParserToolPage|BTreeToolPage|BufferPoolPanel|bufferTrace|preferences|urlState)-/, kb: 24, note: 'Gallery, Tools, Compare, Settings, Assignments, and the buffer-pool / parser / B+Tree sandboxes (plan.md §21.3, §20.4)' },
   // The nine docs pages, folded into one async chunk by vite.config.ts. Loads
   // on the first `/docs` hit, never at first paint.
   { name: 'docs', test: /^docs-.*\.js$/, kb: 16, note: 'integrated MDX docs (plan.md §17.1), lazy' },
@@ -62,10 +62,14 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
 /**
  * Everything together, so a chunk moving between groups cannot hide growth.
  * Raised 315 → 335 for the §21.3 feature routes (Gallery, Tools, Compare,
- * Settings, Assignments) — none of it loads before a route asks for it, so
- * the cost is real but never first-paint.
+ * Settings, Assignments).
+ * Raised 335 → 342 for the §20.4 standalone tools — the parser and B+Tree
+ * sandboxes, plus the shared panel renderers (FlowTree, BTreePanel, the two
+ * display transformers) that split into their own chunks once a second route
+ * imported them. None of it is first-paint: a chunk loads only when its route
+ * is visited.
  */
-const TOTAL_KB = 335;
+const TOTAL_KB = 342;
 
 const gzipKb = (bytes: Buffer): number => gzipSync(bytes, { level: 9 }).length / 1024;
 
