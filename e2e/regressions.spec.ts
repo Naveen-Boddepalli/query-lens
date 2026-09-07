@@ -375,6 +375,7 @@ test('every route renders the app on a cold load, not the 404 page', async ({ pa
     // The §21.3 feature routes (built after M13, on the same manifest/lazy
     // wiring — a route missing its own Suspense boundary would blank here).
     ['/gallery', /Gallery/],
+    ['/trace', /Trace inspector/],
     ['/tools', /Tools/],
     ['/tools/buffer-pool', /Buffer pool sandbox/],
     ['/tools/parser', /Parser sandbox/],

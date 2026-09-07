@@ -88,6 +88,9 @@ const BTreeToolPage = lazy(() =>
 const ComparePage = lazy(() =>
   import('./pages/ComparePage.tsx').then((m) => ({ default: m.ComparePage })),
 );
+const TracePage = lazy(() =>
+  import('./pages/TracePage.tsx').then((m) => ({ default: m.TracePage })),
+);
 const SettingsPage = lazy(() =>
   import('./pages/SettingsPage.tsx').then((m) => ({ default: m.SettingsPage })),
 );
@@ -131,6 +134,7 @@ export default function App() {
             <Route path="examples" element={suspended(ExamplesPage)} />
             <Route path="gallery" element={suspended(GalleryPage)} />
             <Route path="compare" element={suspended(ComparePage)} />
+            <Route path="trace" element={suspended(TracePage)} />
             <Route path="settings" element={suspended(SettingsPage)} />
             <Route path="assignments/new" element={suspended(AssignmentsNewPage)} />
 

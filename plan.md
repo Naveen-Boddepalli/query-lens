@@ -25,12 +25,20 @@
 > and the invariant check shown as a badge. Stepping the restructure event-by-event (new `index`
 > event kinds) is left for later, the same line drawn for the parser cursor.
 >
+> **`/trace`** shipped alongside them — the raw `StepEvent[]` for a query as a filterable table
+> (per-stage toggles, a narration text filter) with per-row JSON and a Copy-JSON of the filtered
+> set. It runs the same `runQuery` the Playground does, so what you inspect is exactly what the
+> panels fold; each row's `#` opens the Playground at that step. Reads the Playground's `q`/`p`/`d`
+> keys (its `p` also takes the three buffer-pool-only policies); footer-only nav, next to Settings
+> and Assignments per §21.2. No engine change.
+>
 > Gate: typecheck, lint, 360 unit tests (+22: 10 policy, 12 B+Tree delete incl. 5 property tests),
-> build, bundle budget (`standalone-tools` 18→24 kB, total 335→342 — the parser and B+Tree routes
+> build, bundle budget (`standalone-tools` 18→24 kB, total 335→342 — the parser/B+Tree/trace routes
 > plus the shared `FlowTree`/`BTreePanel`/`display` chunks that split out once a second route
-> imported them), 30 e2e (+3), zero axe violations on `/tools/parser`, `/tools/btree`, `/compare`,
-> `/tools` and `/tools/buffer-pool` in both themes (fixed a pre-existing `opacity-70` contrast
-> failure on the Tools index card while there).
+> imported them), 31 e2e (+4), zero axe violations on `/tools/parser`, `/tools/btree`, `/trace`,
+> `/compare`, `/tools` and `/tools/buffer-pool` in both themes (fixed a pre-existing `opacity-70`
+> contrast failure on the Tools index card, and swapped the trace inspector's stage colours off the
+> text — some `--color-stage-*` fall under 4.5:1 as 13px body text — onto a swatch).
 >
 > **v11 — 2026-09-05.** A footer and docs-structure pass, prompted by a reference layout the user
 > shared. `Footer.tsx` is now four blocks — a brand block (mark, one-line description, a
@@ -1737,7 +1745,7 @@ Grouped by area. **Status** is `built` / a milestone / `v1` / `v2` / `own plan`,
 | `/examples` | Examples | Curated queries; each opens the Playground | — | built (3; grow it) |
 | `/gallery` | Moment gallery | Named, deep-linked traces — a point lookup, the eviction storm (LRU and clock), the optimizer's rewrite — each card computes its own step via `events.findIndex(...)` against a real run, so an engine change fails the page rather than shipping a stale link. The index-dropped contrast and a B+Tree split/merge moment are not here yet — both are now just one more moment to add (B+Tree delete landed in v12) | per-card share string | **built** |
 | `/compare` | Comparison view | Two buffer-pool traces (`src/engine/bufferTrace.ts`) stepping together on one typed reference string, synchronised by *access index* since the policies emit different event counts for the same string; flags the first access where they pick different victims. v12: either side is any of the five replacement policies, not fixed on LRU-vs-clock. The full-pipeline index-vs-no-index half of this idea (§13) is not built — this is the buffer-pool half only | reference string, both policies (session-local; not yet in the URL) | **built** |
-| `/trace` | Trace inspector | The raw `StepEvent[]` for the current share string as a filterable table and copyable JSON — the developer-facing complement to §20.3's exports | share string | v2 |
+| `/trace` | Trace inspector | The raw `StepEvent[]` for a query as a filterable table (per-stage toggles + a narration text filter) with per-row JSON and a **Copy JSON** of the filtered set. Runs the same `runQuery` the Playground does; each row's `#` opens the Playground at that step (§21.4 #4). Reads `q`/`p`/`d`; footer-only nav (§21.2) | `q`, `p`, `d` | **built** — v12 |
 
 **Tools** (§20.4 — each renders through the §20.2 `PanelPage` primitive)
 
@@ -1854,19 +1862,20 @@ went in, kept for the record, plus what is left.
    tabular figures turned out not to be per-visitor settings once considered (§21.3's row explains
    why).
 
-P2 / v2: `/learn`, `/trace`, a reveal-lock for assignments, and the full-pipeline half of Compare.
+P2 / v2: `/learn`, a reveal-lock for assignments, and the full-pipeline half of Compare.
 Own plan: `/classroom`, `/embed/*`.
 
-**v12 landed all three `/tools/*` sandboxes.** `/tools/parser` is the live token ribbon + `AstTree`
-+ recursion depth + the parser's own errors (§21.3's row). `/tools/btree` is the number-pad REPL
-over `insert` / `deleteKey` / `search`, and the B+Tree **deletion** it needed was built with it
-(borrow / merge / root-collapse / separator rewrite, with §7.6's property tests). The buffer-pool
-tool and Compare gained `fifo`, `second-chance` and `optimal` behind the existing
-`ReplacementPolicy` interface — `optimal` needed one new seam, an optional lookahead array on
-`BufferState` that `runBufferTrace` fills and the SQL path leaves empty. `ReplacementPolicyName` is
-now the five, but the Playground picker, `urlState` and `/settings` still allow-list `lru`/`clock`,
-so §9's contrast
-and every shared link are untouched. Still open there: InnoDB midpoint-LRU (§7.5).
+**v12 landed all three `/tools/*` sandboxes plus `/trace`.** `/tools/parser` is the live token
+ribbon + `AstTree` + recursion depth + the parser's own errors (§21.3's row). `/tools/btree` is the
+number-pad REPL over `insert` / `deleteKey` / `search`, and the B+Tree **deletion** it needed was
+built with it (borrow / merge / root-collapse / separator rewrite, with §7.6's property tests).
+`/trace` is the raw-event inspector — filterable table, per-row JSON, jump-to-step links — running
+the same `runQuery` as the Playground, footer-only. The buffer-pool tool and Compare gained `fifo`,
+`second-chance` and `optimal` behind the existing `ReplacementPolicy` interface — `optimal` needed
+one new seam, an optional lookahead array on `BufferState` that `runBufferTrace` fills and the SQL
+path leaves empty. `ReplacementPolicyName` is now the five, but the Playground picker, `urlState`
+and `/settings` still allow-list `lru`/`clock`, so §9's contrast and every shared link are
+untouched. Still open there: InnoDB midpoint-LRU (§7.5).
 
 ### 21.7 Risks specific to going multi-page
 

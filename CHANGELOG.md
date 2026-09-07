@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Trace inspector** at `/trace` (plan.md §21.3) — the raw event stream `runQuery` produces for a
+  query, as a filterable table (per-stage toggles, a narration text filter), with each event's full
+  JSON on click and a Copy-JSON of the filtered set. Runs the same engine path the Playground does;
+  every row links into the Playground at that step. Reads the Playground's own `q`/`p`/`d` link keys
 - **B+Tree sandbox** at `/tools/btree` (plan.md §20.4, §21.3) — insert, delete and find keys against
   a live B+Tree, with a fan-out slider and the structural invariants re-checked and shown after
   every edit. Building it required **B+Tree deletion** in the engine (`deleteKey`): leaf and

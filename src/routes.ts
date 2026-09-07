@@ -33,10 +33,11 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { path: '/compare', label: 'Compare', nav: true },
   { path: '/examples', label: 'Examples', nav: true },
   { path: '/docs', label: 'Docs', nav: true },
-  // Quiet on purpose (plan.md §21.2): settings and the assignment authoring
-  // tool are for a returning visitor or an instructor, not the first fifteen
-  // seconds a cold visitor sees, so neither is in the primary nav — only in
-  // the footer's Project column.
+  // Quiet on purpose (plan.md §21.2): settings, the assignment authoring tool
+  // and the raw-event inspector are for a returning visitor, an instructor or a
+  // contributor — not the first fifteen seconds a cold visitor sees, so none is
+  // in the primary nav, only in the footer's Project column.
   { path: '/settings', label: 'Settings', footer: true },
   { path: '/assignments/new', label: 'Create an assignment', footer: true },
+  { path: '/trace', label: 'Trace inspector', footer: true },
 ] as const;

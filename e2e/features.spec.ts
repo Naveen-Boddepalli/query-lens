@@ -122,6 +122,42 @@ test('compare finds the point where LRU and clock sweep pick different victims',
   await expect(clockColumn.getByText('page 4').first()).toBeVisible();
 });
 
+test('the trace inspector filters the raw event stream and links into the Playground', async ({ page }) => {
+  await page.goto('/trace');
+  await expect(page.getByText(/of \d+ events/)).toBeVisible();
+
+  // Toggling a stage chip removes that stage's rows.
+  const parseCell = page.locator('tbody tr td span').filter({ hasText: /^parse$/ });
+  expect(await parseCell.count()).toBeGreaterThan(0);
+  await page.getByRole('button', { name: 'parse', exact: true }).click();
+  await expect(parseCell).toHaveCount(0);
+  await page.getByRole('button', { name: 'parse', exact: true }).click();
+
+  // A full scan under clock sweep evicts; the text filter narrows the table.
+  await page.getByLabel('Query').fill('SELECT * FROM users WHERE age > 30');
+  await page.getByLabel('Eviction policy').selectOption('clock');
+  await page.getByRole('button', { name: 'Run' }).click();
+  await expect(page.getByText(/query returned 35 rows/)).toBeVisible();
+
+  const allRows = await page.locator('tbody tr').count();
+  await page.getByLabel('Filter events by text').fill('evict');
+  const filteredRows = await page.locator('tbody tr').count();
+  expect(filteredRows).toBeGreaterThan(0);
+  expect(filteredRows).toBeLessThan(allRows);
+  await expect(page.getByText(/of \d+ events/)).toContainText(`of ${String(allRows)} events`);
+
+  // Clearing the filter and clicking a row reveals that event's JSON.
+  await page.getByLabel('Filter events by text').fill('');
+  await page.locator('tbody tr').first().click();
+  await expect(page.locator('tbody pre')).toContainText('"stage"');
+
+  // The # cell is a link into the Playground at that exact step.
+  await expect(page.locator('tbody tr td a').first()).toHaveAttribute(
+    'href',
+    /\/playground\?q=.*&p=clock&s=\d+/,
+  );
+});
+
 test('a settings preference becomes the Playground default on a bare visit', async ({ page }) => {
   await page.goto('/settings');
   await page.getByRole('radio', { name: 'Clock sweep' }).click();

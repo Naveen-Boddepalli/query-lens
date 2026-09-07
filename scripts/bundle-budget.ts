@@ -44,7 +44,7 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
   // driver (src/engine/bufferTrace.ts), the panel it renders through, and the
   // thin `preferences`/`urlState` helpers. None of it loads unless one of
   // these routes is visited.
-  { name: 'standalone-tools', test: /^(GalleryPage|ComparePage|SettingsPage|AssignmentsNewPage|BufferPoolToolPage|ParserToolPage|BTreeToolPage|BufferPoolPanel|bufferTrace|preferences|urlState)-/, kb: 24, note: 'Gallery, Tools, Compare, Settings, Assignments, and the buffer-pool / parser / B+Tree sandboxes (plan.md §21.3, §20.4)' },
+  { name: 'standalone-tools', test: /^(GalleryPage|ComparePage|SettingsPage|AssignmentsNewPage|TracePage|BufferPoolToolPage|ParserToolPage|BTreeToolPage|BufferPoolPanel|bufferTrace|preferences|urlState)-/, kb: 24, note: 'Gallery, Tools, Compare, Settings, Assignments, the trace inspector, and the buffer-pool / parser / B+Tree sandboxes (plan.md §21.3, §20.4)' },
   // The nine docs pages, folded into one async chunk by vite.config.ts. Loads
   // on the first `/docs` hit, never at first paint.
   { name: 'docs', test: /^docs-.*\.js$/, kb: 16, note: 'integrated MDX docs (plan.md §17.1), lazy' },
