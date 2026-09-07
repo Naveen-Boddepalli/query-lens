@@ -38,13 +38,22 @@
 > (which `gates` deliberately never blocked) from crossing an unanswered prompt. The lock lifts one
 > prompt at a time, and the author is warned when the chosen step has no prompt to lock on.
 >
+> **`/compare` gained its full-pipeline half** (§13, §21.3's "not built" note). A mode toggle sits
+> above the existing policy comparison; the new "index vs. sequential scan" mode runs the same SQL
+> twice — once against the seed table, once against a copy with `indexedColumn` dropped, which is
+> all it takes to force a `SeqScan` — and scores them side by side (trace steps, disk reads,
+> evictions, B+Tree node reads, locks, rows). Scorecards, not two stepped panels: the contrast §13
+> is about is the *aggregate* work, and the Playground is where you step. A range query that cannot
+> use the index says so instead of scoring twins.
+>
 > Gate: typecheck, lint, 365 unit tests (+27: 10 policy, 12 B+Tree delete incl. 5 property tests,
 > 5 reveal-lock), build, bundle budget (`standalone-tools` 18→24 kB, total 335→342 — the
 > parser/B+Tree/trace routes plus the shared `FlowTree`/`BTreePanel`/`display` chunks that split out
-> once a second route imported them), 32 e2e (+6), zero axe violations on `/tools/parser`,
-> `/tools/btree`, `/trace`, `/compare`, `/tools`, `/tools/buffer-pool` and the Playground in
-> assignment mode, in both themes (fixed a pre-existing `opacity-70` contrast failure on the Tools
-> index card, and swapped the trace inspector's stage colours off the
+> once a second route imported them; `ComparePage` grew ~1.4 kB gzip for `runQuery`), 33 e2e (+7),
+> zero axe violations on `/tools/parser`, `/tools/btree`, `/trace`, `/compare` (both modes),
+> `/tools`, `/tools/buffer-pool` and the Playground in assignment mode, in both themes (fixed a
+> pre-existing `opacity-70` contrast failure on the Tools index card, and swapped the trace
+> inspector's stage colours off the
 > text — some `--color-stage-*` fall under 4.5:1 as 13px body text — onto a swatch).
 >
 > **v11 — 2026-09-05.** A footer and docs-structure pass, prompted by a reference layout the user
@@ -469,7 +478,7 @@ This event stream is the single contract between engine and UI — makes the UI 
 | M11 | **Docs, manual, licensing & governance (§17–§18):** docs site, Getting Started, the two manual pages the §9 study needs, `LICENSE-DOCS`, font licensing, README restructure | ~1 week (P0/P1) + ongoing — **docs site built, see note** |
 | M12 | **Portable artefacts (§20.3):** copy-as-Mermaid (AST, plan), PNG export of any panel, `scripts/record.ts` for launch GIFs/WebM. No backend, no new engine code — feeds the §18.2 launch post | ~1 week |
 | M13 | **Site structure — routing consolidation (§21.5):** SPA rewrite so deep links resolve, delete the dead `src/router.tsx`, correct the "single page" 404 and the stale `index.html` title, code-split routes, one nav manifest. Gates every new page because a multi-page app whose links 404 is not one | ~1 day — **done (v9), + 3 regressions it uncovered** |
-| v1 | Expand SQL coverage: joins, cost estimates, InnoDB midpoint-LRU as a third policy. **§20/§21 v1 tranche — shipped (v10):** the non-SQL event driver (`src/engine/bufferTrace.ts`, ahead of schedule), the Buffer Pool standalone (`/tools/buffer-pool`, LRU/clock only — extra policies still open), assignment links (`/assignments/new`, no reveal-lock yet), the query gallery (`/gallery`), the comparison view (`/compare`, buffer-pool half only). **Still open:** true vector SVG export (§20.3), the full-pipeline half of Compare, a reveal-lock for assignments | Post-MVP |
+| v1 | Expand SQL coverage: joins, cost estimates, InnoDB midpoint-LRU as a third policy. **§20/§21 v1 tranche — shipped (v10):** the non-SQL event driver (`src/engine/bufferTrace.ts`, ahead of schedule), the Buffer Pool standalone (`/tools/buffer-pool`, LRU/clock only — extra policies still open), assignment links (`/assignments/new`, no reveal-lock yet), the query gallery (`/gallery`), the comparison view (`/compare`, buffer-pool half only). **v12:** the parser and B+Tree standalones (`/tools/parser`, `/tools/btree` + B+Tree delete), `/trace`, three more buffer-pool policies, the assignment reveal-lock, and the full-pipeline half of Compare. **Still open:** true vector SVG export (§20.3), `/learn`, InnoDB midpoint-LRU | Post-MVP |
 | v2+ | **Each its own plan (§20.5–§20.6):** graded submission (first backend), the interactive-embed package, the Visual `EXPLAIN` viewer. The B+Tree standalone (§20.4) is here until B+Tree delete exists | Not committed |
 
 M8 sits between "the app works" and "the URL is public." It is not polish — every item on the P0 list in
@@ -552,9 +561,9 @@ Two places where a decision in §14 could introduce a bill, both optional and bo
 ## 13. Future Directions (post-v1, not committed)
 - Rust + WASM engine rewrite for performance and authenticity.
 - Course/curriculum packaging (structured lessons, quizzes tied to visualizations).
-- Comparison mode: same query, different index strategy, side-by-side. (The buffer-pool half of
-  this — same access pattern, LRU vs. clock sweep — shipped at `/compare` in v10, §21.3. The
-  full-pipeline, index-vs-no-index half described here is still open.)
+- Comparison mode: same query, different index strategy, side-by-side. (Shipped at `/compare`: the
+  buffer-pool half — one access pattern, two policies — in v10; the full-pipeline index-vs-no-index
+  half, as scorecards, in v12. §21.3.)
 - Community query-sharing (would require backend + persistence).
 
 **§20 takes the export, spin-off and classroom items further** — analysed against the code,
@@ -1751,7 +1760,7 @@ Grouped by area. **Status** is `built` / a milestone / `v1` / `v2` / `own plan`,
 |---|---|---|---|---|
 | `/examples` | Examples | Curated queries; each opens the Playground | — | built (3; grow it) |
 | `/gallery` | Moment gallery | Named, deep-linked traces — a point lookup, the eviction storm (LRU and clock), the optimizer's rewrite — each card computes its own step via `events.findIndex(...)` against a real run, so an engine change fails the page rather than shipping a stale link. The index-dropped contrast and a B+Tree split/merge moment are not here yet — both are now just one more moment to add (B+Tree delete landed in v12) | per-card share string | **built** |
-| `/compare` | Comparison view | Two buffer-pool traces (`src/engine/bufferTrace.ts`) stepping together on one typed reference string, synchronised by *access index* since the policies emit different event counts for the same string; flags the first access where they pick different victims. v12: either side is any of the five replacement policies, not fixed on LRU-vs-clock. The full-pipeline index-vs-no-index half of this idea (§13) is not built — this is the buffer-pool half only | reference string, both policies (session-local; not yet in the URL) | **built** |
+| `/compare` | Comparison view | Two modes. **Replacement policies**: two buffer-pool traces (`src/engine/bufferTrace.ts`) stepping together on one reference string, synced by *access index*, flagging the first differing victim — either side any of the five policies (v12). **Index vs. sequential scan** (v12): the same SQL run once with the `id` index and once with it removed (`indexedColumn` dropped from the table — the optimizer and `runQuery` both key off it), scored side by side — trace steps, disk reads, evictions, B+Tree node reads, locks, rows. This is §13's full-pipeline half, at the altitude of the numbers rather than stepped panels | reference string + both policies, or the query (session-local) | **built** |
 | `/trace` | Trace inspector | The raw `StepEvent[]` for a query as a filterable table (per-stage toggles + a narration text filter) with per-row JSON and a **Copy JSON** of the filtered set. Runs the same `runQuery` the Playground does; each row's `#` opens the Playground at that step (§21.4 #4). Reads `q`/`p`/`d`; footer-only nav (§21.2) | `q`, `p`, `d` | **built** — v12 |
 
 **Tools** (§20.4 — each renders through the §20.2 `PanelPage` primitive)
@@ -1863,13 +1872,14 @@ went in, kept for the record, plus what is left.
    explicit about the gap). `/a/:id` was dropped in favour of the plain Playground link — no
    server-side id exists to decode, so inventing one would have been complexity with nothing behind
    it.
-4. ~~**`/compare`**~~ — done, for the buffer-pool half of §13's idea. A full-pipeline
-   index-vs-no-index comparison (two `PanelPage`s side by side) is still open.
+4. ~~**`/compare`**~~ — done. Shipped as the buffer-pool half of §13's idea (v10); the
+   full-pipeline index-vs-no-index half landed as a second mode in v12 — scorecards of the same
+   query with and without the `id` index, rather than two stepped `PanelPage`s.
 5. ~~**`/settings`**~~ — done, scoped to default policy and default predict-on; reduced-motion and
    tabular figures turned out not to be per-visitor settings once considered (§21.3's row explains
    why).
 
-P2 / v2: `/learn`, and the full-pipeline half of Compare. Own plan: `/classroom`, `/embed/*`.
+P2 / v2: `/learn`. Own plan: `/classroom`, `/embed/*`.
 
 **v12 landed all three `/tools/*` sandboxes plus `/trace`.** `/tools/parser` is the live token
 ribbon + `AstTree` + recursion depth + the parser's own errors (§21.3's row). `/tools/btree` is the
@@ -1878,7 +1888,9 @@ built with it (borrow / merge / root-collapse / separator rewrite, with §7.6's 
 `/trace` is the raw-event inspector — filterable table, per-row JSON, jump-to-step links — running
 the same `runQuery` as the Playground, footer-only. **Assignment links** gained the reveal-lock
 they were always missing: `&l=1` seals the trace at the landing step until the learner answers
-(`usePlayback` `ceiling`, no "skip"). The buffer-pool tool and Compare gained `fifo`,
+(`usePlayback` `ceiling`, no "skip"). **`/compare`** gained a second mode — index vs. sequential
+scan on the same query, scored side by side — closing §13's full-pipeline half. The buffer-pool
+tool and Compare's policy mode gained `fifo`,
 `second-chance` and `optimal` behind the existing `ReplacementPolicy` interface — `optimal` needed
 one new seam, an optional lookahead array on `BufferState` that `runBufferTrace` fills and the SQL
 path leaves empty. `ReplacementPolicyName` is now the five, but the Playground picker, `urlState`

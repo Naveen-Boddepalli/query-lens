@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`/compare` — index vs. sequential scan** (plan.md §13) — a second mode alongside the
+  replacement-policy comparison: the same query run once with the `id` index and once with it
+  removed, scored side by side (trace steps, disk reads, evictions, B+Tree node reads, locks, rows).
+  Same rows out, very different work — and a query that cannot use the index says so
 - **Assignment reveal-lock** (plan.md §20.5) — `/assignments/new` can now lock the reveal: the
   generated link (`&l=1`) opens the Playground with prediction forced on, the prompt's "skip"
   removed, and the playhead — scrubber included — unable to cross an unanswered prediction. It lifts

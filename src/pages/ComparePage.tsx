@@ -1,50 +1,60 @@
 import { useMemo, useState } from 'react';
 import {
+  createSeedDatabase,
   createTraceProjector,
   DEFAULT_ENGINE_OPTIONS,
   parseReferenceString,
   REPLACEMENT_POLICY_LABELS,
   REPLACEMENT_POLICY_NAMES,
   runBufferTrace,
+  runQuery,
 } from '../engine/index.ts';
 import type {
   BufferTraceResult,
+  Database,
   EngineOptions,
   ReplacementPolicyName,
+  RunResult,
 } from '../engine/index.ts';
 import { BufferPoolPanel } from '../ui/panels/BufferPoolPanel.tsx';
 import { PageHeader } from '../ui/PageHeader.tsx';
-import { btnPrimary, btnSecondary, inputField, panelSurface } from '../ui/primitives.ts';
+import {
+  btnPrimary,
+  btnSecondary,
+  inputField,
+  panelSurface,
+  segBase,
+  segOff,
+  segOn,
+} from '../ui/primitives.ts';
 
 /**
- * plan.md §13's comparison mode. It started life fixed on the contrast §9
- * validates — LRU vs. clock sweep — and now lets you pick either side from the
- * five replacement policies (§20.4), so "FIFO vs. the optimal bound on this
- * pattern" is a two-click question rather than a rebuild.
+ * plan.md §13's comparison view, in two modes:
  *
- * Two policies emit different numbers of events for an identical reference
- * string — clock sweep and second-chance add a `sweep` event per frame they
- * pass — so they cannot share one raw event-index scrubber. Both sides are
- * instead driven by *access index* (`BufferTraceResult.accessBoundaries`,
- * src/engine/bufferTrace.ts), which every trace agrees on by construction: "10
- * references in" means the same thing on both panels even though it lands at a
- * different event count in each.
+ *  - **replacement policies** — the original: one page-reference string under
+ *    two of the five policies (§20.4), stepped together by *access index*
+ *    (`BufferTraceResult.accessBoundaries`), which every trace agrees on even
+ *    though the policies emit different event counts. Flags the first access
+ *    where they pick a different victim (§9's teaching moment).
+ *  - **index vs. sequential scan** — the full-pipeline half §21.3 records as
+ *    unbuilt: the *same SQL* run once with the `id` index and once with it
+ *    removed, scored side by side. Same rows, wildly different work — which is
+ *    the entire reason an index exists.
  */
+
+type Mode = 'policies' | 'index';
+
+/* -------------------------------------------------------------------------- */
+/* Replacement-policy comparison                                              */
+/* -------------------------------------------------------------------------- */
 
 // Pages 0-2 are touched twice each (hot), page 3 once (cold), before page 4
 // forces an eviction. Verified to diverge for the default pair: LRU evicts
-// page 0 — purely recency-ordered, and 0's last touch is the earliest of the
-// repeated three — while clock sweep's usage count has protected 0-2 and
-// evicts the genuinely cold page 3 instead. A uniform scan (no repeats) picks
-// the same victim under both, which is `bufferTrace.test.ts`'s point.
+// page 0, clock sweep protects the hot pages and takes cold page 3.
 const DEFAULT_REF = '0 1 2 0 1 2 3 4';
 const FRAMES = 4;
 
-function side(refs: number[], options: EngineOptions): BufferTraceResult {
-  return runBufferTrace(refs, options);
-}
-
-function Column({
+function PolicyColumn({
   label,
   policy,
   trace,
@@ -110,7 +120,7 @@ function PolicyPicker({
   );
 }
 
-export function ComparePage() {
+function PolicyCompare() {
   const [refInput, setRefInput] = useState(DEFAULT_REF);
   const [refs, setRefs] = useState<number[]>(() => parseReferenceString(DEFAULT_REF));
   const [accessIndex, setAccessIndex] = useState(0);
@@ -126,19 +136,13 @@ export function ComparePage() {
     [policyB],
   );
 
-  const a = useMemo(() => side(refs, optionsA), [refs, optionsA]);
-  const b = useMemo(() => side(refs, optionsB), [refs, optionsB]);
+  const a = useMemo(() => runBufferTrace(refs, optionsA), [refs, optionsA]);
+  const b = useMemo(() => runBufferTrace(refs, optionsB), [refs, optionsB]);
 
   /**
-   * The first access where the two policies chose a different victim, or
-   * `null` if they agree throughout (which includes picking the same policy
-   * on both sides).
-   *
-   * An eviction is not necessarily the *last* event of an access — under
-   * clock sweep or second-chance it is miss, some number of sweep ticks,
-   * evict, then load — so this scans every event *within* each access's slice
-   * for the one eviction it can contain, rather than looking only at the
-   * boundary event (which is always the trailing `load`).
+   * The first access where the two policies chose a different victim. An
+   * eviction is not necessarily the *last* event of an access, so this scans
+   * every event within each access's slice rather than the boundary event.
    */
   const divergedAt = useMemo(() => {
     if (policyA === policyB) return null;
@@ -166,15 +170,14 @@ export function ComparePage() {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-4 p-6 sm:p-8">
-      <PageHeader title="Compare replacement policies">
+    <>
+      <p className="text-body text-ink-dim">
         One access pattern, {FRAMES} frames, two policies stepping together. plan.md §9 calls the
-        LRU/clock-sweep version of this the contrast that makes the honesty problem the product&rsquo;s
-        best teaching moment — same inputs, different victim. Swap either side to line any two of
-        the five up against each other.
-      </PageHeader>
+        LRU/clock-sweep version of this the contrast that makes the honesty problem the
+        product&rsquo;s best teaching moment — same inputs, different victim.
+      </p>
 
-      <div className="mt-4 flex flex-wrap items-end gap-3 rounded-xl border border-edge bg-surface-2 p-3 shadow-e1">
+      <div className="mt-2 flex flex-wrap items-end gap-3 rounded-xl border border-edge bg-surface-2 p-3 shadow-e1">
         <label htmlFor="ref" className="flex flex-1 min-w-64 flex-col gap-1 text-label text-ink-dim">
           Reference string
           <input
@@ -238,14 +241,14 @@ export function ComparePage() {
       )}
 
       <div className="flex flex-col gap-4 lg:flex-row">
-        <Column
+        <PolicyColumn
           label={REPLACEMENT_POLICY_LABELS[policyA]}
           policy={policyA}
           trace={a}
           options={optionsA}
           accessIndex={accessIndex}
         />
-        <Column
+        <PolicyColumn
           label={REPLACEMENT_POLICY_LABELS[policyB]}
           policy={policyB}
           trace={b}
@@ -253,6 +256,230 @@ export function ComparePage() {
           accessIndex={accessIndex}
         />
       </div>
+    </>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Index vs. sequential-scan comparison                                       */
+/* -------------------------------------------------------------------------- */
+
+const SEED = createSeedDatabase();
+// The same table with the index declaration dropped — the optimizer's
+// index-selection rule and `runQuery`'s `buildIndex` call both key off
+// `indexedColumn`, so this is all it takes to force a sequential scan.
+const { indexedColumn: _indexed, ...USERS_NO_INDEX } = SEED.tables.users!;
+const NO_INDEX_DB: Database = { tables: { users: USERS_NO_INDEX } };
+
+const INDEX_PRESETS = [
+  { label: 'Point lookup on the indexed column', sql: 'SELECT * FROM users WHERE id = 5' },
+  { label: 'Range on a non-indexed column', sql: 'SELECT * FROM users WHERE age > 30' },
+  { label: 'Every row', sql: 'SELECT * FROM users' },
+] as const;
+
+interface Scorecard {
+  steps: number;
+  diskReads: number;
+  hits: number;
+  evictions: number;
+  btreeReads: number;
+  locks: number;
+  rows: number;
+  usedIndex: boolean;
+}
+
+function scoreOf(result: RunResult): Scorecard {
+  const end = createTraceProjector(result.events, DEFAULT_ENGINE_OPTIONS).at(result.events.length);
+  return {
+    steps: result.events.length,
+    diskReads: end.bufferStats.misses,
+    hits: end.bufferStats.hits,
+    evictions: end.bufferStats.evictions,
+    btreeReads: end.indexPath.length,
+    locks: end.locksTaken,
+    rows: result.rows.length,
+    usedIndex: result.events.some((e) => e.stage === 'index'),
+  };
+}
+
+const STAT_ROWS: { key: keyof Scorecard; label: string }[] = [
+  { key: 'steps', label: 'trace steps' },
+  { key: 'diskReads', label: 'disk reads' },
+  { key: 'hits', label: 'buffer hits' },
+  { key: 'evictions', label: 'evictions' },
+  { key: 'btreeReads', label: 'B+Tree node reads' },
+  { key: 'locks', label: 'locks acquired' },
+  { key: 'rows', label: 'rows returned' },
+];
+
+function ScoreColumn({
+  label,
+  sub,
+  score,
+  compareTo,
+}: {
+  label: string;
+  sub: string;
+  score: Scorecard;
+  compareTo: Scorecard;
+}) {
+  return (
+    <div className="flex min-w-0 flex-1 flex-col gap-2">
+      <div>
+        <h3 className="text-body font-semibold text-ink">{label}</h3>
+        <p className="text-label text-ink-dim">{sub}</p>
+      </div>
+      <dl className={`${panelSurface} grid grid-cols-[1fr_auto] gap-x-4 gap-y-1.5 p-3 text-label`}>
+        {STAT_ROWS.map(({ key, label: rowLabel }) => {
+          const mine = score[key] as number;
+          const theirs = compareTo[key] as number;
+          const worse = rowLabel !== 'buffer hits' && rowLabel !== 'rows returned' && mine > theirs;
+          return (
+            <div key={key} className="contents">
+              <dt className="text-ink-dim">{rowLabel}</dt>
+              <dd className={`text-right font-mono tabular-nums ${worse ? 'text-evict' : 'text-ink'}`}>
+                {mine}
+              </dd>
+            </div>
+          );
+        })}
+      </dl>
+    </div>
+  );
+}
+
+function IndexCompare() {
+  const [sqlInput, setSqlInput] = useState<string>(INDEX_PRESETS[0].sql);
+  const [sql, setSql] = useState<string>(INDEX_PRESETS[0].sql);
+
+  const withIndex = useMemo(() => runQuery(sql, SEED, DEFAULT_ENGINE_OPTIONS), [sql]);
+  const noIndex = useMemo(() => runQuery(sql, NO_INDEX_DB, DEFAULT_ENGINE_OPTIONS), [sql]);
+
+  const indexed = useMemo(() => scoreOf(withIndex), [withIndex]);
+  const scan = useMemo(() => scoreOf(noIndex), [noIndex]);
+
+  const samePlan = !indexed.usedIndex;
+  const ratio =
+    indexed.diskReads > 0 ? Math.round((scan.diskReads / indexed.diskReads) * 10) / 10 : null;
+
+  return (
+    <>
+      <p className="text-body text-ink-dim">
+        The same query, run once with the B+Tree index on <code className="font-mono text-ink">id</code>{' '}
+        and once with it removed. plan.md §13: same rows out, and the whole point of the index is how
+        differently it gets there.
+      </p>
+
+      <div className="mt-2 flex flex-col gap-3 rounded-xl border border-edge bg-surface-2 p-3 shadow-e1">
+        <label htmlFor="index-preset" className="flex flex-col gap-1 text-label text-ink-dim">
+          Query
+          <select
+            id="index-preset"
+            value={INDEX_PRESETS.some((p) => p.sql === sqlInput) ? sqlInput : 'custom'}
+            onChange={(e) => { if (e.target.value !== 'custom') setSqlInput(e.target.value); }}
+            className={inputField}
+          >
+            {INDEX_PRESETS.map((p) => (
+              <option key={p.label} value={p.sql}>{p.label}</option>
+            ))}
+            <option value="custom">Custom (edit below)</option>
+          </select>
+        </label>
+        <div className="flex flex-wrap items-end gap-3">
+          <label htmlFor="index-sql" className="flex flex-1 min-w-64 flex-col gap-1 text-label text-ink-dim">
+            SQL
+            <input
+              id="index-sql"
+              type="text"
+              value={sqlInput}
+              onChange={(e) => { setSqlInput(e.target.value); }}
+              className={`${inputField} font-mono`}
+              spellCheck={false}
+            />
+          </label>
+          <button type="button" onClick={() => { setSql(sqlInput); }} className={btnPrimary}>
+            Run
+          </button>
+        </div>
+      </div>
+
+      {withIndex.error ? (
+        <p className="rounded-lg border border-evict/40 bg-evict/10 p-3 text-label text-ink">
+          {withIndex.error.message}
+        </p>
+      ) : samePlan ? (
+        <p className="rounded-xl border border-edge bg-surface-2 px-3 py-2 text-label text-ink-dim shadow-e1">
+          This query has no equality on <code className="font-mono text-ink">id</code>, so the
+          optimizer cannot use the index — both runs are the same sequential scan
+          ({scan.diskReads} disk reads, {scan.rows} row{scan.rows === 1 ? '' : 's'}). Try the point
+          lookup preset to see the contrast.
+        </p>
+      ) : (
+        <>
+          <p className="rounded-xl border border-accent/40 bg-accent-soft px-3 py-2 text-label text-ink shadow-e1">
+            Same <span className="font-mono">{indexed.rows}</span> row
+            {indexed.rows === 1 ? '' : 's'} either way. The index found them in{' '}
+            <span className="font-mono">{indexed.diskReads}</span> disk read
+            {indexed.diskReads === 1 ? '' : 's'} and{' '}
+            <span className="font-mono">{indexed.btreeReads}</span> B+Tree node read
+            {indexed.btreeReads === 1 ? '' : 's'}; the sequential scan needed{' '}
+            <span className="font-mono">{scan.diskReads}</span>
+            {scan.evictions > 0 && <>, evicting {scan.evictions} page{scan.evictions === 1 ? '' : 's'} on the way</>}
+            {ratio !== null && ratio >= 2 && <> — {ratio}× the disk work</>}.
+          </p>
+
+          <div className="flex flex-col gap-4 lg:flex-row">
+            <ScoreColumn
+              label="With the index"
+              sub="B+Tree lookup on id"
+              score={indexed}
+              compareTo={scan}
+            />
+            <ScoreColumn
+              label="Sequential scan"
+              sub="index removed — every page read"
+              score={scan}
+              compareTo={indexed}
+            />
+          </div>
+        </>
+      )}
+    </>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+
+export function ComparePage() {
+  const [mode, setMode] = useState<Mode>('policies');
+
+  return (
+    <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-4 p-6 sm:p-8">
+      <PageHeader title="Compare">
+        Two runs, side by side, to make one contrast concrete.
+      </PageHeader>
+
+      <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Comparison">
+        {(
+          [
+            ['policies', 'Replacement policies'],
+            ['index', 'Index vs. sequential scan'],
+          ] as const
+        ).map(([value, label]) => (
+          <button
+            key={value}
+            type="button"
+            role="radio"
+            aria-checked={mode === value}
+            onClick={() => { setMode(value); }}
+            className={`${segBase} ${mode === value ? segOn : segOff}`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {mode === 'policies' ? <PolicyCompare /> : <IndexCompare />}
     </div>
   );
 }

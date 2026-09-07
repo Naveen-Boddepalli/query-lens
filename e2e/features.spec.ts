@@ -122,6 +122,31 @@ test('compare finds the point where LRU and clock sweep pick different victims',
   await expect(clockColumn.getByText('page 4').first()).toBeVisible();
 });
 
+test('compare scores the same query with and without the index', async ({ page }) => {
+  await page.goto('/compare');
+  await page.getByRole('radio', { name: 'Index vs. sequential scan' }).click();
+
+  // The default preset is the point lookup, where the index pays off hugely.
+  await expect(page.getByText(/Same 1 row either way/)).toBeVisible();
+  const column = (heading: string) =>
+    page.locator('div.flex.flex-col.gap-2', {
+      has: page.getByRole('heading', { name: heading, exact: true }),
+    });
+  const btreeReads = (heading: string) =>
+    column(heading).locator('div.contents', { hasText: 'B+Tree node reads' }).locator('dd');
+  await expect(btreeReads('With the index')).not.toHaveText('0');
+  await expect(btreeReads('Sequential scan')).toHaveText('0');
+
+  // A range query cannot use the index — the page says so instead of scoring.
+  await page.getByLabel('Query').selectOption('SELECT * FROM users WHERE age > 30');
+  await page.getByRole('button', { name: 'Run' }).click();
+  await expect(page.getByText(/cannot use the index/)).toBeVisible();
+
+  // The policy comparison is still one click away.
+  await page.getByRole('radio', { name: 'Replacement policies' }).click();
+  await expect(page.getByText(/first pick a different victim/)).toBeVisible();
+});
+
 test('the trace inspector filters the raw event stream and links into the Playground', async ({ page }) => {
   await page.goto('/trace');
   await expect(page.getByText(/of \d+ events/)).toBeVisible();
