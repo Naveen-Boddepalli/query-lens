@@ -6,7 +6,7 @@
  */
 
 import type { Emit } from '../trace.ts';
-import type { EngineOptions } from '../types.ts';
+import type { EngineOptions, ReplacementPolicyName } from '../types.ts';
 import { policyFor } from './policy.ts';
 import { evictionPrompt } from '../predict.ts';
 import type { BufferState, Frame, ReplacementPolicy } from './policy.ts';
@@ -34,10 +34,28 @@ function emptyState(frameCount: number): BufferState {
       usageCount: 0,
       pinCount: 0,
       lastUsedAt: -1,
+      loadedAt: -1,
     })),
     now: 0,
     hand: 0,
+    lookaheadCursor: 0,
   };
+}
+
+/** How the `evict` event narrates the choice, per policy. */
+function evictionReason(policy: ReplacementPolicyName): string {
+  switch (policy) {
+    case 'lru':
+      return 'LRU picked it because it was used least recently.';
+    case 'clock':
+      return 'Clock sweep picked it because the hand reached it with a usage count of zero.';
+    case 'fifo':
+      return 'FIFO picked it because it has been resident longest — first in, first out, however much it was used.';
+    case 'second-chance':
+      return 'Second-chance picked it: the oldest frame whose reference bit was already clear.';
+    case 'optimal':
+      return "The optimal policy picked it because its next use is farthest away — the choice no real policy can make, since it needs the future.";
+  }
 }
 
 /**
@@ -50,10 +68,20 @@ export function createBufferPool(
   pageCount: number,
   options: EngineOptions,
   emit: Emit,
+  /**
+   * The full page-reference string, when the caller has one (`runBufferTrace`
+   * does; `runQuery` does not — its page accesses emerge from execution). Only
+   * the `optimal` policy reads it; every other policy ignores it.
+   */
+  lookahead?: readonly number[],
 ): BufferPool {
   const state = emptyState(options.bufferFrames);
+  if (lookahead !== undefined) state.lookahead = lookahead;
   const policy: ReplacementPolicy = policyFor(options.policy);
   const stats = { hits: 0, misses: 0, evictions: 0 };
+  // Which access `fetch` is resolving, so `optimal` can look past it. Advances
+  // once per successful `fetch`, staying aligned with the reference index.
+  let accessIndex = -1;
   // Only the first eviction asks. After that the learner has the rule, and a
   // prompt on every one of them would be nagging rather than teaching.
   let evictionAsked = false;
@@ -63,6 +91,9 @@ export function createBufferPool(
 
   function fetch(pageId: number): FetchResult | null {
     if (!Number.isInteger(pageId) || pageId < 0 || pageId >= pageCount) return null;
+
+    accessIndex += 1;
+    state.lookaheadCursor = accessIndex;
 
     const hitFrame = resident(pageId);
     if (hitFrame) {
@@ -100,11 +131,9 @@ export function createBufferPool(
       evictionAsked = true;
 
       emit(
-        `The pool is full, so page ${evicted} is evicted from frame ${victimId} to make room. ${
-          options.policy === 'lru'
-            ? 'LRU picked it because it was used least recently.'
-            : 'Clock sweep picked it because the hand reached it with a usage count of zero.'
-        }`,
+        `The pool is full, so page ${evicted} is evicted from frame ${victimId} to make room. ${evictionReason(
+          options.policy,
+        )}`,
         {
           stage: 'buffer',
           action: 'evict',
@@ -118,11 +147,17 @@ export function createBufferPool(
 
       victim.pageId = null;
       victim.usageCount = 0;
+      victim.loadedAt = -1;
       target = victim;
     }
 
+    // Bump the clock on every load, not only in `onAccess` — FIFO and
+    // second-chance order frames by `loadedAt`, and FIFO's `onAccess` is a
+    // no-op, so nothing else would advance it.
+    state.now += 1;
     target.pageId = pageId;
     target.usageCount = 0;
+    target.loadedAt = state.now;
     target.pinCount += 1;
     policy.onAccess(state, target.frameId);
 

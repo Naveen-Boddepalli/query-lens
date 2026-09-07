@@ -5,6 +5,8 @@ import {
   DEFAULT_ENGINE_OPTIONS,
   parseReferenceString,
   randomReferenceString,
+  REPLACEMENT_POLICY_LABELS,
+  REPLACEMENT_POLICY_NAMES,
   runBufferTrace,
 } from '../../engine/index.ts';
 import type { ReplacementPolicyName } from '../../engine/index.ts';
@@ -37,13 +39,16 @@ function readInitial() {
   const ref = params.get('ref');
   const framesRaw = Number(params.get('frames'));
   const policyRaw = params.get('policy');
+  const policy = (REPLACEMENT_POLICY_NAMES as readonly string[]).includes(policyRaw ?? '')
+    ? (policyRaw as ReplacementPolicyName)
+    : 'lru';
   return {
     refInput: ref && ref.length > 0 ? ref : DEFAULT_REF,
     frames:
       Number.isInteger(framesRaw) && framesRaw >= MIN_FRAMES && framesRaw <= MAX_FRAMES
         ? framesRaw
         : 4,
-    policy: policyRaw === 'lru' || policyRaw === 'clock' ? policyRaw : ('lru' as ReplacementPolicyName),
+    policy,
   };
 }
 
@@ -97,12 +102,13 @@ export function BufferPoolToolPage() {
     <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-4 p-6 sm:p-8">
       <PageHeader title="Buffer pool sandbox">
         Type a page-reference string — the sequence of pages a program touches — and step through
-        how {policy === 'lru' ? 'LRU' : 'clock sweep'} decides what stays resident. No SQL: this
-        is the buffer pool from the{' '}
+        how {REPLACEMENT_POLICY_LABELS[policy]} decides what stays resident. No SQL: this is the
+        buffer pool from the{' '}
         <Link to="/playground" className="underline underline-offset-2 hover:text-ink">
           Playground
         </Link>
-        , driven directly.
+        , driven directly — with three policies the pipeline itself never uses (FIFO,
+        second-chance and the optimal bound).
       </PageHeader>
 
       <div className="mt-4 flex flex-wrap items-end gap-3 rounded-xl border border-edge bg-surface-2 p-3 shadow-e1">
@@ -139,8 +145,11 @@ export function BufferPoolToolPage() {
             onChange={(e) => { setPolicy(e.target.value as ReplacementPolicyName); }}
             className={inputField}
           >
-            <option value="lru">LRU</option>
-            <option value="clock">Clock sweep</option>
+            {REPLACEMENT_POLICY_NAMES.map((name) => (
+              <option key={name} value={name}>
+                {REPLACEMENT_POLICY_LABELS[name]}
+              </option>
+            ))}
           </select>
         </label>
 

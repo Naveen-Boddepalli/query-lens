@@ -10,7 +10,7 @@
  * whatever the engine is actually about to do. None of it is authored.
  */
 
-import type { PredictionPrompt, SqlValue } from './types.ts';
+import type { PredictionPrompt, ReplacementPolicyName, SqlValue } from './types.ts';
 import type { Frame } from './storage/index.ts';
 
 function format(value: SqlValue): string {
@@ -18,29 +18,43 @@ function format(value: SqlValue): string {
   return typeof value === 'string' ? `'${value}'` : String(value);
 }
 
+const POLICY_LABEL: Record<ReplacementPolicyName, string> = {
+  lru: 'LRU',
+  clock: 'clock sweep',
+  fifo: 'FIFO',
+  'second-chance': 'second-chance',
+  optimal: 'the optimal policy',
+};
+
+const POLICY_WHY: Record<ReplacementPolicyName, string> = {
+  lru: 'LRU evicts whichever page was accessed longest ago. On a sequential scan that is simply the first one still resident.',
+  clock:
+    'The clock hand walks forward, decrementing usage counts as it goes, and takes the first frame it finds at zero with nothing pinning it.',
+  fifo: 'FIFO evicts whichever page has been resident longest, regardless of how often it has been used since — which is exactly what clock sweep sets out to fix.',
+  'second-chance':
+    'Second-chance is FIFO with a reprieve: a page used since it loaded is passed over once, its reference bit cleared, and sent to the back of the queue. The victim is the oldest page that has not been touched.',
+  optimal:
+    'The optimal policy evicts the page whose next use is farthest in the future. It cannot be built for real — nothing knows the future — but it is the fewest-misses bound every real policy is judged against.',
+};
+
 /** "Which frame gets evicted?" — the canonical prompt from the research. */
 export function evictionPrompt(
   frames: readonly Frame[],
   victimFrameId: number,
   incomingPage: number,
-  policy: 'lru' | 'clock',
+  policy: ReplacementPolicyName,
 ): PredictionPrompt | null {
   const occupied = frames.filter((f) => f.pageId !== null);
   if (occupied.length < 2) return null;
 
   return {
-    question: `The pool is full and page ${String(incomingPage)} has to be read in. Under ${
-      policy === 'lru' ? 'LRU' : 'clock sweep'
-    }, which frame gets evicted?`,
+    question: `The pool is full and page ${String(incomingPage)} has to be read in. Under ${POLICY_LABEL[policy]}, which frame gets evicted?`,
     options: occupied.map((f) => ({
       id: `frame-${String(f.frameId)}`,
       label: `frame ${String(f.frameId)} · page ${String(f.pageId)}`,
     })),
     correctOptionId: `frame-${String(victimFrameId)}`,
-    explanation:
-      policy === 'lru'
-        ? 'LRU evicts whichever page was accessed longest ago. On a sequential scan that is simply the first one still resident.'
-        : 'The clock hand walks forward, decrementing usage counts as it goes, and takes the first frame it finds at zero with nothing pinning it.',
+    explanation: POLICY_WHY[policy],
   };
 }
 

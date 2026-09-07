@@ -231,13 +231,14 @@ describe('clock sweep', () => {
 });
 
 describe('policy interface', () => {
-  it('both policies are reachable by name', () => {
-    expect(policyFor('lru').name).toBe('lru');
-    expect(policyFor('clock').name).toBe('clock');
+  const ALL = ['lru', 'clock', 'fifo', 'second-chance', 'optimal'] as const;
+
+  it('every policy is reachable by name', () => {
+    for (const name of ALL) expect(policyFor(name).name).toBe(name);
   });
 
-  it('both survive a full scan and read every page exactly once', () => {
-    for (const policy of ['lru', 'clock'] as const) {
+  it('every policy survives a full scan and reads each page exactly once', () => {
+    for (const policy of ALL) {
       const o = opts({ policy });
       const { pool: bp, heap, drain } = pool(o);
       for (const page of heap.pages) {
@@ -251,6 +252,128 @@ describe('policy interface', () => {
       expect(bp.stats.hits, policy).toBe(0);
     }
   });
+});
+
+describe('FIFO', () => {
+  const victims = (accesses: number[], frames: number) => {
+    const o = opts({ bufferFrames: frames, policy: 'fifo' });
+    const { pool: bp, drain } = pool(o);
+    for (const p of accesses) {
+      const f = bp.fetch(p);
+      if (f) bp.unpin(f.frameId);
+    }
+    return drain().flatMap((e) =>
+      e.stage === 'buffer' && e.action === 'evict' ? [e.victimPageId] : [],
+    );
+  };
+
+  it('evicts in load order, however hot the page has since become', () => {
+    // Page 0 is hammered after loading; FIFO evicts it anyway — first in,
+    // first out. This is precisely the failure clock sweep was designed around.
+    expect(victims([0, 1, 2, 0, 0, 0, 3], 3)).toEqual([0]);
+  });
+
+  it('emits no sweep events — it has no second-chance pass', () => {
+    const o = opts({ bufferFrames: 2, policy: 'fifo' });
+    const { pool: bp, drain } = pool(o);
+    for (const p of [0, 1, 2, 3]) {
+      const f = bp.fetch(p);
+      if (f) bp.unpin(f.frameId);
+    }
+    expect(bufferActions(drain())).not.toContain('sweep');
+  });
+});
+
+describe('second-chance', () => {
+  function evictRun(accesses: number[], frames: number) {
+    const o = opts({ bufferFrames: frames, policy: 'second-chance' });
+    const { pool: bp, drain } = pool(o);
+    for (const p of accesses) {
+      const f = bp.fetch(p);
+      if (f) bp.unpin(f.frameId);
+    }
+    const events = drain();
+    return {
+      victims: events.flatMap((e) =>
+        e.stage === 'buffer' && e.action === 'evict' ? [e.victimPageId] : [],
+      ),
+      sweeps: events.filter((e) => e.stage === 'buffer' && e.action === 'sweep').length,
+    };
+  }
+
+  it('forgives a page referenced since it loaded, and says so with a sweep', () => {
+    // [0 1 2] fill; 3 forces a pass that clears every bit and evicts 0; then 1
+    // is re-touched (bit set again) so the next eviction passes over it and
+    // takes 2 instead. FIFO would have taken 1.
+    const { victims, sweeps } = evictRun([0, 1, 2, 3, 1, 4], 3);
+    expect(victims).toEqual([0, 2]);
+    expect(sweeps).toBeGreaterThan(0);
+
+    const fifoVictims = (() => {
+      const o = opts({ bufferFrames: 3, policy: 'fifo' });
+      const { pool: bp, drain } = pool(o);
+      for (const p of [0, 1, 2, 3, 1, 4]) {
+        const f = bp.fetch(p);
+        if (f) bp.unpin(f.frameId);
+      }
+      return drain().flatMap((e) =>
+        e.stage === 'buffer' && e.action === 'evict' ? [e.victimPageId] : [],
+      );
+    })();
+    expect(fifoVictims).toEqual([0, 1]);
+  });
+
+  it('terminates and returns a victim once every bit in the pool is set', () => {
+    const o = opts({ bufferFrames: 4, policy: 'second-chance' });
+    const { pool: bp } = pool(o);
+    for (let round = 0; round < 40; round++) {
+      const f = bp.fetch(round % 12);
+      if (f) bp.unpin(f.frameId);
+    }
+    expect(bp.state.frames.every((f) => f.pageId !== null)).toBe(true);
+  });
+});
+
+describe('optimal (Bélády)', () => {
+  it('falls back to FIFO order when it has no lookahead', () => {
+    // `createBufferPool` with no reference string — the SQL path. The farthest
+    // next use is unknowable, so every resident page ties and the oldest goes.
+    const o = opts({ bufferFrames: 3, policy: 'optimal' });
+    const { emit, drain } = createTracer();
+    const heap = buildHeap(users, o.rowsPerPage);
+    const bp = createBufferPool(heap.pages.length, o, emit); // no 4th arg
+    for (const p of [0, 1, 2, 3]) {
+      const f = bp.fetch(p);
+      if (f) bp.unpin(f.frameId);
+    }
+    const victims = drain().flatMap((e) =>
+      e.stage === 'buffer' && e.action === 'evict' ? [e.victimPageId] : [],
+    );
+    expect(victims).toEqual([0]);
+  });
+});
+
+describe('engine state and the UI fold agree — extra policies', () => {
+  // The clock-only `usageCount` the fold reconstructs is meaningless for these
+  // policies (the panel never renders it for them), so this pins the frame
+  // *contents* and the stats rather than every field.
+  it.each(['fifo', 'second-chance', 'optimal'] as const)(
+    'folding the emitted events reproduces the resident pages (%s)',
+    (policy) => {
+      const o = opts({ policy });
+      const { emit, drain } = createTracer();
+      const heap = buildHeap(users, o.rowsPerPage);
+      const bp = createBufferPool(heap.pages.length, o, emit);
+      for (const page of heap.pages) {
+        const f = bp.fetch(page.pageId);
+        bp.unpin(f!.frameId);
+      }
+      const events = drain();
+      const folded = stateAt(events, events.length, o);
+      expect(folded.frames.map((f) => f.pageId)).toEqual(bp.state.frames.map((f) => f.pageId));
+      expect(folded.bufferStats).toEqual(bp.stats);
+    },
+  );
 });
 
 describe('LRU vs clock sweep — where they actually differ', () => {

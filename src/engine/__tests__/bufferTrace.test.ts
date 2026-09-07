@@ -58,6 +58,36 @@ describe('runBufferTrace', () => {
     expect(victim(clock.events)).toMatchObject({ victimPageId: 3 });
   });
 
+  it('the optimal policy uses the reference string to beat LRU on the same input', () => {
+    // [0 1 2 3 1 0], 3 frames. LRU evicts page 0 at access 3 (oldest), then has
+    // to re-read it at access 5 — 5 misses. The optimal policy sees that page 2
+    // is the one never touched again and evicts *that*, keeping 0 and 1
+    // resident for their later hits — 4 misses.
+    const refs = [0, 1, 2, 3, 1, 0];
+    const misses = (events: StepEvent[]) => actions(events).filter((a) => a === 'miss').length;
+    const firstVictim = (events: StepEvent[]) =>
+      events.find((e) => e.stage === 'buffer' && e.action === 'evict');
+
+    const lru = runBufferTrace(refs, opts({ bufferFrames: 3, policy: 'lru' }));
+    const optimal = runBufferTrace(refs, opts({ bufferFrames: 3, policy: 'optimal' }));
+
+    expect(firstVictim(optimal.events)).toMatchObject({ victimPageId: 2 });
+    expect(firstVictim(lru.events)).toMatchObject({ victimPageId: 0 });
+    expect(misses(optimal.events)).toBeLessThan(misses(lru.events));
+  });
+
+  it('no policy ever reads a page that is not referenced by the string', () => {
+    for (const policy of ['fifo', 'second-chance', 'optimal'] as const) {
+      const refs = [0, 1, 2, 3, 4, 2, 1, 5, 0];
+      const { events } = runBufferTrace(refs, opts({ bufferFrames: 3, policy }));
+      const loaded = events.flatMap((e) =>
+        e.stage === 'buffer' && e.action === 'load' ? [e.pageId] : [],
+      );
+      expect(new Set(loaded).size, policy).toBeLessThanOrEqual(new Set(refs).size);
+      expect(loaded.every((p) => refs.includes(p)), policy).toBe(true);
+    }
+  });
+
   it('caps the reference string rather than hanging on a hostile input', () => {
     const huge = Array.from({ length: MAX_REFERENCES + 200 }, (_, i) => i % 10);
     const { accessBoundaries } = runBufferTrace(huge, opts());

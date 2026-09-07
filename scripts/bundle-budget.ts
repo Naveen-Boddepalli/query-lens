@@ -34,7 +34,7 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
   // module into its own chunk the moment a second entry point needs it, which
   // is why `seed-*.js` and `trace-*.js` exist as their own files rather than
   // being duplicated into every page that touches the demo database.
-  { name: 'trace-ui', test: /^(PlaygroundPage|StageDetail|stageMeta|types|seed|trace|PlaybackControls)-/, kb: 32, note: 'Playground + shared engine/UI plumbing, lazy' },
+  { name: 'trace-ui', test: /^(PlaygroundPage|StageDetail|stageMeta|types|seed|trace|PlaybackControls|AstTree|display)-/, kb: 32, note: 'Playground + shared engine/UI plumbing, lazy (AstTree + the parse-stage display transformer split out once the parser sandbox became a second importer)' },
   // The small per-route shells: landing hub, stage index, examples, docs shell,
   // 404, tools index — plus the redesign's shared UI kit (primitives.ts,
   // PageHeader, Hero) that two or more of them import.
@@ -44,7 +44,7 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
   // driver (src/engine/bufferTrace.ts), the panel it renders through, and the
   // thin `preferences`/`urlState` helpers. None of it loads unless one of
   // these routes is visited.
-  { name: 'standalone-tools', test: /^(GalleryPage|ComparePage|SettingsPage|AssignmentsNewPage|BufferPoolToolPage|BufferPoolPanel|bufferTrace|preferences|urlState)-/, kb: 18, note: 'Gallery, Tools, Compare, Settings, Assignments (plan.md §21.3)' },
+  { name: 'standalone-tools', test: /^(GalleryPage|ComparePage|SettingsPage|AssignmentsNewPage|BufferPoolToolPage|ParserToolPage|BufferPoolPanel|bufferTrace|preferences|urlState)-/, kb: 20, note: 'Gallery, Tools, Compare, Settings, Assignments, the buffer-pool and parser sandboxes (plan.md §21.3, §20.4)' },
   // The nine docs pages, folded into one async chunk by vite.config.ts. Loads
   // on the first `/docs` hit, never at first paint.
   { name: 'docs', test: /^docs-.*\.js$/, kb: 16, note: 'integrated MDX docs (plan.md §17.1), lazy' },

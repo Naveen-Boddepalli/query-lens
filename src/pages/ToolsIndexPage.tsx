@@ -12,7 +12,14 @@ const TOOLS = [
     title: 'Buffer pool sandbox',
     href: '/tools/buffer-pool',
     description:
-      'Type a page-reference string and watch LRU or clock sweep decide what gets evicted. No SQL — the OS-course version of the pipeline\'s buffer pool.',
+      'Type a page-reference string and watch a replacement policy decide what gets evicted. Five policies — LRU, clock sweep, FIFO, second-chance and the optimal bound. No SQL: the OS-course version of the pipeline\'s buffer pool.',
+    available: true,
+  },
+  {
+    title: 'Parser sandbox',
+    href: '/tools/parser',
+    description:
+      'Type arbitrary SQL — supported or not — and watch the tokenizer build the token stream and the recursive-descent parser build the AST, with recursion depth and the parser\'s own error messages.',
     available: true,
   },
   {
@@ -20,13 +27,6 @@ const TOOLS = [
     href: null,
     description:
       'insert(), delete(), find() against a live B+Tree, watching it split, borrow and merge. Waiting on B+Tree deletion in the engine (plan.md §20.4).',
-    available: false,
-  },
-  {
-    title: 'Parser sandbox',
-    href: null,
-    description:
-      'Type arbitrary SQL and watch the tokenizer and the recursive-descent parser build the AST, including the token stream. Most of this already exists in the Playground; this adds the token ribbon.',
     available: false,
   },
 ] as const;
@@ -56,7 +56,10 @@ export function ToolsIndexPage() {
           ) : (
             <div
               key={tool.title}
-              className="rounded-xl border border-dashed border-edge/60 p-4 opacity-70"
+              /* No `opacity-70` here: it dropped the description and the pill
+                 below the 4.5:1 contrast floor (the axe gate). The dashed
+                 border and the "coming later" pill already say "not a link". */
+              className="rounded-xl border border-dashed border-edge/60 p-4"
             >
               <h3 className="flex items-center gap-2 text-body font-semibold text-ink">
                 {tool.title}

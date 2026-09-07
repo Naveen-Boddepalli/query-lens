@@ -79,6 +79,9 @@ const ToolsIndexPage = lazy(() =>
 const BufferPoolToolPage = lazy(() =>
   import('./pages/tools/BufferPoolToolPage.tsx').then((m) => ({ default: m.BufferPoolToolPage })),
 );
+const ParserToolPage = lazy(() =>
+  import('./pages/tools/ParserToolPage.tsx').then((m) => ({ default: m.ParserToolPage })),
+);
 const ComparePage = lazy(() =>
   import('./pages/ComparePage.tsx').then((m) => ({ default: m.ComparePage })),
 );
@@ -131,6 +134,7 @@ export default function App() {
             <Route path="tools">
               <Route index element={suspended(ToolsIndexPage)} />
               <Route path="buffer-pool" element={suspended(BufferPoolToolPage)} />
+              <Route path="parser" element={suspended(ParserToolPage)} />
             </Route>
 
             <Route path="docs" element={suspended(DocsLayout)}>

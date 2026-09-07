@@ -12,7 +12,9 @@ const prompts = (events: StepEvent[]) =>
 
 describe('prompt builders', () => {
   it('returns null rather than an unanswerable eviction question', () => {
-    const frames = [{ frameId: 0, pageId: 3, usageCount: 1, pinCount: 0, lastUsedAt: 0 }];
+    const frames = [
+      { frameId: 0, pageId: 3, usageCount: 1, pinCount: 0, lastUsedAt: 0, loadedAt: 0 },
+    ];
     expect(evictionPrompt(frames, 0, 9, 'lru')).toBeNull();
   });
 

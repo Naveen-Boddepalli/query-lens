@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { USAGE_COUNT_CAP } from '../../engine/index.ts';
 import type { BufferFrame, ReplacementPolicyName, StepEvent } from '../../engine/index.ts';
 
@@ -36,6 +37,55 @@ const MOOD_TAG: Record<Exclude<FrameMood, null>, string> = {
   load: 'disk read',
   evict: 'evicted',
   sweep: 'swept',
+};
+
+/**
+ * The footnote under the grid — what this policy does and, where it matters,
+ * what it gets wrong that the next one fixes. `lru` and `clock` are the
+ * pipeline's pair; the other three are the standalone tool's study material
+ * (plan.md §20.4).
+ */
+const POLICY_NOTE: Record<ReplacementPolicyName, ReactNode> = {
+  lru: (
+    <>
+      <span className="text-ink">LRU</span> evicts whichever page was used longest ago. It is
+      the policy every course teaches — and the one PostgreSQL deliberately avoids, because
+      maintaining the ordering needs a lock on every single page access.
+    </>
+  ),
+  clock: (
+    <>
+      <span className="text-ink">Clock sweep</span> is what PostgreSQL actually does. Each frame
+      carries a usage count; the hand walks in a circle, decrementing as it goes, and evicts the
+      first frame it finds at zero. Hot pages survive several passes with no list to maintain. On
+      a uniform scan it picks the same victims as LRU — the two only diverge once some pages are
+      hotter than others.
+    </>
+  ),
+  fifo: (
+    <>
+      <span className="text-ink">FIFO</span> evicts whichever page has been resident longest, no
+      matter how heavily it has been used since. Cheap to run, but it will throw out a page the
+      query is about to read again — the failure clock sweep and second-chance both set out to
+      fix.
+    </>
+  ),
+  'second-chance': (
+    <>
+      <span className="text-ink">Second-chance</span> is FIFO with one reprieve. Each frame has a
+      reference bit, set when the page is used. The oldest frame is inspected first; if its bit
+      is set, the bit clears and the frame goes to the back of the queue instead of out. Clock
+      sweep is this idea with a circular hand and a counter instead of a single bit.
+    </>
+  ),
+  optimal: (
+    <>
+      <span className="text-ink">Optimal</span> evicts the page whose next use is farthest in the
+      future — a page never used again first. No real system can run it, because it needs the
+      whole future access pattern, but it is the fewest-misses bound every policy above is
+      measured against.
+    </>
+  ),
 };
 
 export function BufferPoolPanel({
@@ -141,25 +191,7 @@ export function BufferPoolPanel({
         </div>
       </dl>
 
-      <p className="mt-auto text-label leading-relaxed text-ink-dim">
-        {policy === 'lru' ? (
-          <>
-            <span className="text-ink">LRU</span> evicts whichever page was used
-            longest ago. It is the policy every course teaches — and the one
-            PostgreSQL deliberately avoids, because maintaining the ordering needs a
-            lock on every single page access.
-          </>
-        ) : (
-          <>
-            <span className="text-ink">Clock sweep</span> is what PostgreSQL actually
-            does. Each frame carries a usage count; the hand walks in a circle,
-            decrementing as it goes, and evicts the first frame it finds at zero. Hot
-            pages survive several passes with no list to maintain. On a uniform scan
-            it picks the same victims as LRU — the two only diverge once some pages
-            are hotter than others.
-          </>
-        )}
-      </p>
+      <p className="mt-auto text-label leading-relaxed text-ink-dim">{POLICY_NOTE[policy]}</p>
     </div>
   );
 }

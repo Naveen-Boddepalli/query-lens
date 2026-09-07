@@ -34,6 +34,42 @@ test('the buffer-pool sandbox steps a typed reference string', async ({ page }) 
   await expect(evicted).toBeVisible();
 });
 
+test('the buffer-pool sandbox runs a policy the SQL pipeline never offers', async ({ page }) => {
+  await page.goto('/tools/buffer-pool');
+  // Five distinct pages, four frames: page 0 is loaded first and then made the
+  // hottest page — FIFO evicts it anyway when page 4 arrives.
+  await page.getByLabel(/Reference string/).fill('0 1 2 3 0 0 0 4');
+  await page.getByLabel('Policy').selectOption('fifo');
+  await page.getByRole('button', { name: 'Run' }).click();
+
+  const forward = page.getByRole('button', { name: 'Step forward' });
+  const evicted = page.getByText(/is evicted from frame/);
+  for (let i = 0; i < 30 && (await evicted.count()) === 0 && !(await forward.isDisabled()); i++) {
+    await forward.click();
+  }
+  await expect(page.getByText(/page 0 is evicted from frame.*FIFO/)).toBeVisible();
+  await expect(page).toHaveURL(/policy=fifo/);
+});
+
+test('the parser sandbox shows the token stream and the parser\'s own errors', async ({ page }) => {
+  await page.goto('/tools/parser');
+  const src = page.getByLabel('SQL source');
+
+  await src.fill("SELECT name FROM users WHERE age > 30");
+  await expect(page.getByText(/\d+ tokens, then EOF/)).toBeVisible();
+  await expect(page.getByText(/Parsed ·/)).toContainText('recursion depth');
+
+  // Unsupported SQL tokenizes fine but the parser rejects it by name.
+  await src.fill('SELECT * FROM users GROUP BY id');
+  await expect(page.getByText(/`GROUP` is not supported yet/)).toBeVisible();
+  await expect(page.getByText(/not in the v0 subset/)).toBeVisible();
+
+  // A lexing failure is reported where it happens, not swallowed — the ribbon
+  // and the AST panel both surface it, since parsing lexes too.
+  await src.fill('SELECT # FROM t');
+  await expect(page.getByLabel('Tokens').getByText(/Unexpected character/)).toBeVisible();
+});
+
 test('compare finds the point where LRU and clock sweep pick different victims', async ({ page }) => {
   await page.goto('/compare');
   await expect(page.getByText(/first pick a different victim/)).toBeVisible();

@@ -176,7 +176,20 @@ export interface Table {
   indexedColumn?: string;
 }
 
-export type ReplacementPolicyName = 'lru' | 'clock';
+/**
+ * `lru` and `clock` are the pipeline's contrast (plan.md §9) and the only two
+ * the Playground and shareable links offer. `fifo`, `second-chance` and
+ * `optimal` are the standalone buffer-pool tool's extra study material
+ * (plan.md §20.4) — reachable through `runBufferTrace`, not the SQL path.
+ * `optimal` needs the future reference string and falls back to FIFO order
+ * when it does not have one (i.e. anywhere but the tool).
+ */
+export type ReplacementPolicyName =
+  | 'lru'
+  | 'clock'
+  | 'fifo'
+  | 'second-chance'
+  | 'optimal';
 
 export interface Database {
   tables: Record<string, Table>;

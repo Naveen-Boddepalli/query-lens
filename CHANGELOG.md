@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Parser sandbox** at `/tools/parser` (plan.md §20.4, §21.3) — type any SQL, supported or not, and
+  see the tokenizer's stream as a colour-coded ribbon and the recursive-descent parser's AST built
+  live, with a recursion-depth readout and the parser's own tokenize/parse error messages. No engine
+  change: the AST view is the Playground's, driven straight from `toDisplayTree`
+- **Three more buffer-pool replacement policies** — FIFO, second-chance and optimal (Bélády's MIN) —
+  selectable in the buffer-pool sandbox and on both sides of `/compare`. They sit behind the existing
+  `ReplacementPolicy` interface; `optimal` reads the whole page-reference string as lookahead and
+  degrades to FIFO where there is none (the SQL pipeline). The Playground, shareable links and
+  `/settings` still offer only LRU and clock sweep, so the pipeline's teaching contrast is unchanged
+- `/compare` now pits any two of the five policies against each other, rather than being fixed on
+  LRU vs. clock sweep
 - **Documentation site** at `/docs`, built with Astro Starlight (plan.md §17.1) — sidebar
   navigation, on-this-page outline, full-text search, and the app's own fonts, colours and
   dark/light toggle. Nine pages: what QueryLens is, Getting started, FAQ, Concepts (buffer pool,

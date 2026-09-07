@@ -1,5 +1,23 @@
 # Project Plan: QueryLens — Interactive Database Internals Visualizer
 
+> **v12 — 2026-09-07.** Two more of §21.3's tool routes shipped. **`/tools/parser`** is built: a
+> live token ribbon over the existing tokenizer (`tokenize` now re-exported from
+> `src/engine/index.ts`), the Playground's AST view (`AstTree`, driven directly from
+> `toDisplayTree`), a recursion-depth readout, and the parser's own error messages for both
+> tokenize and parse failures — no engine change, since the parse half already existed (§20.4).
+> **Three replacement policies** joined the buffer-pool sandbox and Compare: `fifo`,
+> `second-chance` (emitting the same `sweep` events clock does) and `optimal` (Bélády's MIN —
+> `runBufferTrace` now hands `createBufferPool` the whole reference string as lookahead;
+> `optimal` degrades to FIFO without one, which is all the SQL path ever sees). `ReplacementPolicyName`
+> widened to the five; the Playground `<select>`, `urlState` and `/settings` still allow-list
+> `lru`/`clock` only, so the pipeline's contrast (§9) and every shared link are unchanged.
+> `ComparePage` now picks either side from the five rather than being fixed on LRU-vs-clock.
+> Gate: typecheck, lint, 348 unit tests (+10 for the new policies), build, bundle budget
+> (`standalone-tools` 18→20 kB for the parser route; `AstTree`/`display` split into `trace-ui` as
+> the sandbox became a second importer), 29 e2e (+2), zero axe violations on `/tools/parser`,
+> `/compare`, `/tools` and `/tools/buffer-pool` in both themes (fixed a pre-existing `opacity-70`
+> contrast failure on the Tools index's "coming later" card while there).
+>
 > **v11 — 2026-09-05.** A footer and docs-structure pass, prompted by a reference layout the user
 > shared. `Footer.tsx` is now four blocks — a brand block (mark, one-line description, a
 > licence/privacy badge) plus Explore / Documentation / Project columns — reading from
@@ -1564,9 +1582,9 @@ query debugging / APM use case" as out of scope, possibly forever.
 | PNG export of a panel | Build | M12 | — |
 | `scripts/record.ts` (GIF/WebM) | Build | M12 | — |
 | True vector SVG export | Build | v1 | A paper or a course deck needs it |
-| Buffer Pool standalone | **Done, v10** | v1 | Extra policies (FIFO, Second-Chance, Bélády) still open |
+| Buffer Pool standalone | **Done, v10; FIFO / Second-Chance / Bélády added v12** | v1 | InnoDB midpoint-LRU (§7.5) is the one policy still open |
 | B+Tree standalone | Conditional | v1 | Only once B+Tree delete is implemented |
-| Parser standalone (token ribbon) | Build | v2 | Demand from a compilers course |
+| Parser standalone (token ribbon) | **Done, v12** | v2 | Stepping the parser's cursor through the ribbon (new event kinds) is the obvious extension |
 | Assignment links (client-side) | **Done, v10 (partial)** | v1 | The reveal-lock (withhold until commit) is still open |
 | Graded submission (backend) | Own plan | post-v1 | §9 validates the format, then a separate surface |
 | Interactive embed (package or CSP entry) | Own plan | v1+ | A named author needs an in-page embed |
@@ -1702,7 +1720,7 @@ Grouped by area. **Status** is `built` / a milestone / `v1` / `v2` / `own plan`,
 |---|---|---|---|---|
 | `/examples` | Examples | Curated queries; each opens the Playground | — | built (3; grow it) |
 | `/gallery` | Moment gallery | Named, deep-linked traces — a point lookup, the eviction storm (LRU and clock), the optimizer's rewrite — each card computes its own step via `events.findIndex(...)` against a real run, so an engine change fails the page rather than shipping a stale link. The index-dropped contrast and a B+Tree split are not here yet: the first is one more moment to add, the second needs the B+Tree standalone's underlying delete work (§20.4) | per-card share string | **built** |
-| `/compare` | Comparison view | Two buffer-pool traces (`src/engine/bufferTrace.ts`) stepping together under LRU and clock sweep on one typed reference string, synchronised by *access index* since the policies emit different event counts for the same string; flags the first access where they pick different victims. The full-pipeline index-vs-no-index half of this idea (§13) is not built — this is the buffer-pool half only | reference string (session-local; not yet in the URL) | **built** |
+| `/compare` | Comparison view | Two buffer-pool traces (`src/engine/bufferTrace.ts`) stepping together on one typed reference string, synchronised by *access index* since the policies emit different event counts for the same string; flags the first access where they pick different victims. v12: either side is any of the five replacement policies, not fixed on LRU-vs-clock. The full-pipeline index-vs-no-index half of this idea (§13) is not built — this is the buffer-pool half only | reference string, both policies (session-local; not yet in the URL) | **built** |
 | `/trace` | Trace inspector | The raw `StepEvent[]` for the current share string as a filterable table and copyable JSON — the developer-facing complement to §20.3's exports | share string | v2 |
 
 **Tools** (§20.4 — each renders through the §20.2 `PanelPage` primitive)
@@ -1710,9 +1728,9 @@ Grouped by area. **Status** is `built` / a milestone / `v1` / `v2` / `own plan`,
 | Route | Page | Primary feature | URL state | Status |
 |---|---|---|---|---|
 | `/tools` | Tools index | What each standalone is for, and who it is for, and which are not built yet | — | **built** |
-| `/tools/buffer-pool` | Buffer pool sandbox | Type or generate a page-reference string; step it against LRU or clock sweep through the exact `BufferPoolPanel` the Playground uses, driven by `runBufferTrace` — no SQL, no table. FIFO, Second-Chance and Bélády-optimal are not implemented; the `ReplacementPolicy` interface (§7.5) makes each a per-file addition when wanted | reference string, frames, policy | **built** |
+| `/tools/buffer-pool` | Buffer pool sandbox | Type or generate a page-reference string; step it against any of five policies — LRU, clock sweep, FIFO, second-chance, optimal (Bélády) — through the exact `BufferPoolPanel` the Playground uses, driven by `runBufferTrace`. No SQL, no table. `optimal` reads the whole reference string as lookahead (the SQL path has none, so it degrades to FIFO there) | reference string, frames, policy | **built** — v12 added the three non-pipeline policies |
 | `/tools/btree` | B+Tree sandbox | `insert 15`, `delete 4`, `find 9` REPL; watch split, borrow and merge; fan-out slider | key sequence, fan-out, step | v2 — needs B+Tree delete (§20.4) |
-| `/tools/parser` | Parser sandbox | Arbitrary text → token ribbon → live AST with error squiggles and recursion depth | source text | v2 |
+| `/tools/parser` | Parser sandbox | Arbitrary text → live token ribbon → live AST (the Playground's `AstTree`, from `toDisplayTree`) with recursion depth and the parser's own tokenize/parse error messages | source text (`src`) | **built** — v12 |
 
 **Classroom** (§20.5)
 
@@ -1820,9 +1838,16 @@ went in, kept for the record, plus what is left.
    tabular figures turned out not to be per-visitor settings once considered (§21.3's row explains
    why).
 
-P2 / v2, unchanged: `/learn`, `/tools/btree` (gated on delete), `/tools/parser`, `/trace`,
-FIFO/Second-Chance/Bélády policies for the buffer-pool tool, a reveal-lock for assignments, and the
+P2 / v2: `/learn`, `/tools/btree` (gated on delete), `/trace`, a reveal-lock for assignments, and the
 full-pipeline half of Compare. Own plan: `/classroom`, `/embed/*`.
+
+**v12 landed `/tools/parser` and the extra buffer-pool policies.** `/tools/parser` is the live token
+ribbon + `AstTree` + recursion depth + the parser's own errors (§21.3's row). The buffer-pool tool
+and Compare gained `fifo`, `second-chance` and `optimal` behind the existing `ReplacementPolicy`
+interface — `optimal` needed one new seam, an optional lookahead array on `BufferState` that
+`runBufferTrace` fills and the SQL path leaves empty. `ReplacementPolicyName` is now the five, but
+the Playground picker, `urlState` and `/settings` still allow-list `lru`/`clock`, so §9's contrast
+and every shared link are untouched. Still open there: InnoDB midpoint-LRU (§7.5).
 
 ### 21.7 Risks specific to going multi-page
 

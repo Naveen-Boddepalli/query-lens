@@ -24,7 +24,7 @@ const START: { title: string; blurb: string; to: string }[] = [
   },
   {
     title: 'Compare',
-    blurb: 'LRU and clock sweep on the same access pattern, stepping together until they disagree.',
+    blurb: 'Any two replacement policies on the same access pattern, stepping together until they disagree.',
     to: '/compare',
   },
 ];
@@ -89,9 +89,13 @@ export function LandingPage() {
           <Link to="/examples" className="underline underline-offset-2 hover:text-ink">
             example queries
           </Link>
-          , and the{' '}
+          , and standalone sandboxes for the{' '}
           <Link to="/tools/buffer-pool" className="underline underline-offset-2 hover:text-ink">
-            buffer-pool sandbox
+            buffer pool
+          </Link>{' '}
+          and the{' '}
+          <Link to="/tools/parser" className="underline underline-offset-2 hover:text-ink">
+            parser
           </Link>
           .
         </p>

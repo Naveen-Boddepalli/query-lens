@@ -46,7 +46,9 @@ export function runBufferTrace(
   const refs = referenceString.slice(0, MAX_REFERENCES);
   const { emit, drain } = createTracer();
   const pageCount = refs.length === 0 ? 1 : Math.max(...refs) + 1;
-  const pool = createBufferPool(pageCount, options, emit);
+  // The whole string is the lookahead the `optimal` policy needs; the other
+  // policies are handed it and ignore it.
+  const pool = createBufferPool(pageCount, options, emit, refs);
 
   const accessBoundaries: number[] = [];
   for (const pageId of refs) {
