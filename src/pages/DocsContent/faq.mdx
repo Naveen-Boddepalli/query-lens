@@ -64,6 +64,15 @@ which is a deliberate choice rather than an oversight. The supported way in is a
 [shareable link](/docs/reference/url-parameters): it opens the real app at an exact query and step, which
 is how this documentation itself links out to worked examples.
 
+## Can I get the diagrams out?
+
+Two ways, from the panel header on any stage. **Copy as Mermaid** puts the AST or the plan on your
+clipboard as a `flowchart` in a fenced code block, ready to paste into a pull request or a doc —
+not the B+Tree, which Mermaid lays out badly. **Download PNG** saves any panel as an image with the
+app's real typeface and colours baked in; it renders correctly in Chrome and Firefox, and may fall
+back to plain sRGB in Safari, whose SVG-to-canvas path has known colour bugs. Both run entirely in
+your browser.
+
 ## Why no joins, subqueries, or `GROUP BY`?
 
 They are out of scope for this release, not forgotten — see [Supported SQL](/docs/reference/sql) for

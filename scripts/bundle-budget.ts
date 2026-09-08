@@ -50,6 +50,10 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
   // link-builder that computes each step from a real engine run. Lazy; loads
   // only when someone visits `/learn`.
   { name: 'learn', test: /^(LearnPage|LessonPage|learnProgress|lessons)-/, kb: 8, note: 'the /learn track: index, lesson page, progress, and the lesson content' },
+  // `html-to-image`, behind the panel "Download PNG" button (§20.3). `import()`ed
+  // on the first export, never at route load — the one runtime dependency the
+  // app adds beyond its framework and editor.
+  { name: 'html-to-image', test: /^html-to-image-/, kb: 8, note: 'panel PNG export, lazy-loaded on first use (plan.md §20.3)' },
   // The nine docs pages, folded into one async chunk by vite.config.ts. Loads
   // on the first `/docs` hit, never at first paint.
   { name: 'docs', test: /^docs-.*\.js$/, kb: 16, note: 'integrated MDX docs (plan.md §17.1), lazy' },
@@ -73,10 +77,11 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
  * display transformers) that split into their own chunks once a second route
  * imported them.
  * Raised 342 → 348 for the `/learn` guided track (two routes plus the lesson
- * content). None of it is first-paint: a chunk loads only when its route
- * is visited.
+ * content).
+ * Raised 348 → 354 for `html-to-image` behind the panel PNG export (§20.3) —
+ * `import()`ed on first use, so still never first-paint.
  */
-const TOTAL_KB = 348;
+const TOTAL_KB = 354;
 
 const gzipKb = (bytes: Buffer): number => gzipSync(bytes, { level: 9 }).length / 1024;
 

@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Download PNG** (plan.md §20.3, §20.8) — a button on every stage's panel that saves it as an
+  image with the app's real typeface and `oklch` colours baked in. `html-to-image` is loaded only
+  on the first export, so it never affects page load. Verified in Chromium; may fall back to sRGB
+  in Safari (a known `foreignObject`-to-canvas bug), which the FAQ notes
 - **Copy as Mermaid** (plan.md §20.3, §20.8) — a button on the AST and plan panels (in the
   Playground and the stage explainers) that copies the tree as a Mermaid `flowchart` in a fenced
   code block, ready to paste into a pull request or a doc. Pure, unit-tested conversion in

@@ -170,6 +170,27 @@ test('compare scores the same query with and without the index', async ({ page }
   await expect(page.getByText(/first pick a different victim/)).toBeVisible();
 });
 
+test('a diagram panel exports itself as a PNG with real bytes', async ({ page }) => {
+  await page.goto('/stages/index'); // the B+Tree panel — a real diagram
+  const button = page.getByRole('button', { name: 'Download PNG' });
+
+  const downloadPromise = page.waitForEvent('download');
+  await button.click();
+  const download = await downloadPromise;
+
+  expect(download.suggestedFilename()).toBe('querylens-index.png');
+
+  const stream = await download.createReadStream();
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream) chunks.push(chunk as Buffer);
+  const bytes = Buffer.concat(chunks);
+  // PNG magic number, and it is not a stub.
+  expect(bytes.subarray(0, 8).toString('hex')).toBe('89504e470d0a1a0a');
+  expect(bytes.length).toBeGreaterThan(2000);
+
+  await expect(page.getByRole('button', { name: 'Saved ✓' })).toBeVisible();
+});
+
 test('the AST and plan panels copy themselves as a Mermaid diagram', async ({ page, context }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
 

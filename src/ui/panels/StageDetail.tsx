@@ -1,8 +1,10 @@
+import { useRef } from 'react';
 import { IMPLEMENTED_STAGES } from '../../engine/index.ts';
 import type { ReplacementPolicyName, Span, Stage, ViewState } from '../../engine/index.ts';
 import { astToMermaid, planToMermaid } from '../../export/index.ts';
 import { STAGE_META } from '../stageMeta.ts';
 import { CopyMermaidButton } from '../CopyMermaidButton.tsx';
+import { DownloadPngButton } from '../DownloadPngButton.tsx';
 import { AstTree } from './AstTree.tsx';
 import { BTreePanel } from './BTreePanel.tsx';
 import { LockPanel } from './LockPanel.tsx';
@@ -55,6 +57,7 @@ export function StageDetail({
 }: StageDetailProps) {
   const meta = STAGE_META[stage];
   const implemented = IMPLEMENTED_STAGES.includes(stage);
+  const panelRef = useRef<HTMLDivElement>(null);
 
   // Copy-as-Mermaid is offered on the two trees people actually paste (§20.3):
   // the AST and the plan. Not the B+Tree — Mermaid draws its sibling chain badly.
@@ -74,6 +77,7 @@ export function StageDetail({
         </div>
 
         <div className="ml-auto flex flex-wrap items-center gap-2">
+          {implemented && <DownloadPngButton target={panelRef} name={stage} />}
           {mermaid && <CopyMermaidButton text={mermaid} />}
 
           {/* Selecting a stage holds the panel there while the trace runs on,
@@ -93,7 +97,7 @@ export function StageDetail({
         </div>
       </header>
 
-      <div className="min-h-0 min-w-0 flex-1">
+      <div ref={panelRef} className="min-h-0 min-w-0 flex-1">
         {!implemented && <NotBuiltYet stage={stage} />}
 
         {implemented && stage === 'parse' && (
