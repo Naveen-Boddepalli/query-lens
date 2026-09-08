@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Copy as Mermaid** (plan.md §20.3, §20.8) — a button on the AST and plan panels (in the
+  Playground and the stage explainers) that copies the tree as a Mermaid `flowchart` in a fenced
+  code block, ready to paste into a pull request or a doc. Pure, unit-tested conversion in
+  `src/export/toMermaid.ts`; the B+Tree is deliberately excluded (Mermaid draws its sibling chain
+  badly)
 - **Guided path** at `/learn` (plan.md §17.2, §21.3) — four short, ordered lessons (run your first
   query; follow one row from disk to result; watch a page get evicted; make the planner change its
   mind). Each lesson's steps deep-link into the Playground at the exact point they describe — the

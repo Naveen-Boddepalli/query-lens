@@ -1,6 +1,8 @@
 import { IMPLEMENTED_STAGES } from '../../engine/index.ts';
 import type { ReplacementPolicyName, Span, Stage, ViewState } from '../../engine/index.ts';
+import { astToMermaid, planToMermaid } from '../../export/index.ts';
 import { STAGE_META } from '../stageMeta.ts';
+import { CopyMermaidButton } from '../CopyMermaidButton.tsx';
 import { AstTree } from './AstTree.tsx';
 import { BTreePanel } from './BTreePanel.tsx';
 import { LockPanel } from './LockPanel.tsx';
@@ -54,6 +56,15 @@ export function StageDetail({
   const meta = STAGE_META[stage];
   const implemented = IMPLEMENTED_STAGES.includes(stage);
 
+  // Copy-as-Mermaid is offered on the two trees people actually paste (§20.3):
+  // the AST and the plan. Not the B+Tree — Mermaid draws its sibling chain badly.
+  const mermaid =
+    stage === 'parse' && state.ast
+      ? astToMermaid(state.ast)
+      : (stage === 'plan' || stage === 'optimize') && state.plan
+        ? planToMermaid(state.plan)
+        : null;
+
   return (
     <section className="flex h-full flex-col gap-3">
       <header className="flex flex-wrap items-start gap-x-3 gap-y-1">
@@ -62,20 +73,24 @@ export function StageDetail({
           <p className="text-label text-ink-dim">{meta.blurb}</p>
         </div>
 
-        {/* Selecting a stage holds the panel there while the trace runs on,
-            which is the point — you can watch the buffer pool while execute
-            events stream past. But held silently it reads as a bug: step with
-            the arrows and nothing moves. So say so, and make leaving one
-            click. */}
-        {pinned && onFollow && (
-          <button
-            type="button"
-            onClick={onFollow}
-            className="ml-auto rounded-full border border-accent/70 bg-accent-soft px-3 py-1 text-label text-ink shadow-e1 transition hover:bg-accent/20"
-          >
-            Pinned to {meta.title} — follow the trace
-          </button>
-        )}
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          {mermaid && <CopyMermaidButton text={mermaid} />}
+
+          {/* Selecting a stage holds the panel there while the trace runs on,
+              which is the point — you can watch the buffer pool while execute
+              events stream past. But held silently it reads as a bug: step
+              with the arrows and nothing moves. So say so, and make leaving
+              one click. */}
+          {pinned && onFollow && (
+            <button
+              type="button"
+              onClick={onFollow}
+              className="rounded-full border border-accent/70 bg-accent-soft px-3 py-1 text-label text-ink shadow-e1 transition hover:bg-accent/20"
+            >
+              Pinned to {meta.title} — follow the trace
+            </button>
+          )}
+        </div>
       </header>
 
       <div className="min-h-0 min-w-0 flex-1">

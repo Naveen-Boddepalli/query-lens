@@ -1,5 +1,25 @@
 # Project Plan: QueryLens — Interactive Database Internals Visualizer
 
+> **v13 — 2026-09-08.** A **new §22** — the feature-and-tool backlog, counted against `src/` the way
+> §20 counted the spin-offs. §13 named *"expand SQL coverage: joins, cost estimates"* in one line and
+> §4 has a "deferred to v1+" list; §22 gives each item an address, a cost against the actual code and
+> a trigger, and scores it on §20.1's filter plus a fifth question — *does it deepen the §9 contrast
+> or widen away from it?* The engine-depth pass (§22.2): JOIN with a join-algorithm comparison as a
+> third `/compare` mode, `ORDER BY`/`LIMIT` with an external sort that spills through the buffer pool,
+> aggregates, a **cost-based optimizer** that justifies the index choice §9 rests on (the strongest
+> v1 engine item, gated on the study), the `INSERT`/`UPDATE`/`DELETE` write path, with MVCC and WAL
+> marked explicitly as *second products* sharing a codebase. New tools (§22.3): a planner sandbox, a
+> lock/transaction sandbox, an external-sort visualiser, a slotted-**page inspector**, a
+> parser-derived grammar diagram. Learning surfaces (§22.4): the six missing `/learn` lessons, a
+> client-side challenge mode, a progress dashboard — and an in-app quiz held until *after* the §9
+> study, because the study's own question bank shipped in the app would contaminate it. Reach
+> (§22.6): an `aria-live` narration track over the `label` every event already carries — the tool is
+> not usable by a screen-reader user today and the data to fix that exists. **§22 adds no milestone**
+> — §20 added M12 and §21 added M13 because each had a do-it-now core; §22's do-it-now items (an
+> ASCII-art trace export beside the Mermaid one, trace JSON import/export, the narration track) fold
+> into M12 or land incrementally in v1, and everything else is a backlog behind the one experiment
+> that decides whether it is worth building. No MVP change, no §9 change, no §2 non-goal crossed.
+>
 > **v12 — 2026-09-08.** Cleared most of the §21.6 v2 backlog. **`/tools/parser`** is built: a
 > live token ribbon over the existing tokenizer (`tokenize` now re-exported from
 > `src/engine/index.ts`), the Playground's AST view (`AstTree`, driven directly from
@@ -55,14 +75,20 @@
 > with the pipeline fails a test rather than shipping a dead link. Primary nav (eight items now).
 > The docs stay the reference; this is the walked-through version.
 >
-> Gate: typecheck, lint, 376 unit tests (+38: 13 policy, 12 B+Tree delete incl. 5 property tests,
-> 5 reveal-lock, 8 learn), build, bundle budget (`standalone-tools` 18→24 kB, new `learn` group,
-> total 335→348 — the parser/B+Tree/trace/learn routes plus the shared
+> **M12's first artefact** landed too: `src/export/toMermaid.ts` — a pure, unit-tested
+> `astToMermaid` / `planToMermaid` over the display trees (sequential `nN` ids, so no Mermaid
+> id-escaping) — behind a **Copy as Mermaid** button in `StageDetail`'s header, on the AST and plan
+> panels only (not the B+Tree; §20.3). §20.8's other two boxes — PNG export, `scripts/record.ts` —
+> stay open.
+>
+> Gate: typecheck, lint, 381 unit tests (+43: 13 policy, 12 B+Tree delete incl. 5 property tests,
+> 5 reveal-lock, 8 learn, 5 toMermaid), build, bundle budget (`standalone-tools` 18→24 kB, new
+> `learn` group, total 335→348 — the parser/B+Tree/trace/learn routes plus the shared
 > `FlowTree`/`BTreePanel`/`display` chunks that split out
-> once a second route imported them; `ComparePage` grew ~1.4 kB gzip for `runQuery`), 35 e2e (+9),
+> once a second route imported them; `ComparePage` grew ~1.4 kB gzip for `runQuery`), 36 e2e (+10),
 > zero axe violations on `/tools/parser`, `/tools/btree`, `/trace`, `/compare` (both modes),
-> `/tools`, `/tools/buffer-pool` (incl. midpoint), `/learn` and a lesson page, and the Playground
-> in assignment mode, in both themes (fixed a
+> `/tools`, `/tools/buffer-pool` (incl. midpoint), `/learn` and a lesson page, `/stages/*` with the
+> copy-as-Mermaid button, and the Playground in assignment mode, in both themes (fixed a
 > pre-existing `opacity-70` contrast failure on the Tools index card, and swapped the trace
 > inspector's stage colours off the
 > text — some `--color-stage-*` fall under 4.5:1 as 13px body text — onto a swatch).
@@ -247,6 +273,9 @@ An in-browser, self-built toy relational database engine that visually animates 
 - MVCC / transaction isolation visualization
 - User accounts, saved queries, progress tracking
 - WASM/Rust rewrite of the engine core for performance and "closer to real" feel
+
+*§22 gives each of these an address, a cost against `src/` and a trigger — most stay gated on the §9
+study.*
 
 ---
 
@@ -488,9 +517,9 @@ This event stream is the single contract between engine and UI — makes the UI 
 | M9 | **UI/UX readiness (§15):** first-run trace, Run feedback, native dialog, shareable URL, prompt placement, responsive height | ~1 day (P0) + 2-3 days (P1) — **both done** |
 | M10 | **Visual design maturity (§16) + landing page (§19):** self-hosted typefaces, named type/space/motion scales, hover states across every diagram panel, footer, first-screen framing | ~1.5 days (P0) + 1 week (P1) — **P0 done** |
 | M11 | **Docs, manual, licensing & governance (§17–§18):** docs site, Getting Started, the two manual pages the §9 study needs, `LICENSE-DOCS`, font licensing, README restructure | ~1 week (P0/P1) + ongoing — **docs site built, see note** |
-| M12 | **Portable artefacts (§20.3):** copy-as-Mermaid (AST, plan), PNG export of any panel, `scripts/record.ts` for launch GIFs/WebM. No backend, no new engine code — feeds the §18.2 launch post | ~1 week |
+| M12 | **Portable artefacts (§20.3):** ~~copy-as-Mermaid (AST, plan)~~ **done v12**; still to build — PNG export of any panel, `scripts/record.ts` for launch GIFs/WebM. No backend, no new engine code — feeds the §18.2 launch post | ~1 week |
 | M13 | **Site structure — routing consolidation (§21.5):** SPA rewrite so deep links resolve, delete the dead `src/router.tsx`, correct the "single page" 404 and the stale `index.html` title, code-split routes, one nav manifest. Gates every new page because a multi-page app whose links 404 is not one | ~1 day — **done (v9), + 3 regressions it uncovered** |
-| v1 | Expand SQL coverage: joins, cost estimates, InnoDB midpoint-LRU as a third policy. **§20/§21 v1 tranche — shipped (v10):** the non-SQL event driver (`src/engine/bufferTrace.ts`, ahead of schedule), the Buffer Pool standalone (`/tools/buffer-pool`, LRU/clock only — extra policies still open), assignment links (`/assignments/new`, no reveal-lock yet), the query gallery (`/gallery`), the comparison view (`/compare`, buffer-pool half only). **v12:** the parser and B+Tree standalones (`/tools/parser`, `/tools/btree` + B+Tree delete), `/trace`, `/learn`, four more buffer-pool policies (FIFO, second-chance, Bélády, InnoDB midpoint-LRU), the assignment reveal-lock, and the full-pipeline half of Compare. **Still open:** true vector SVG export (§20.3) | Post-MVP |
+| v1 | Expand SQL coverage: joins, cost estimates, InnoDB midpoint-LRU as a third policy. **§20/§21 v1 tranche — shipped (v10):** the non-SQL event driver (`src/engine/bufferTrace.ts`, ahead of schedule), the Buffer Pool standalone (`/tools/buffer-pool`, LRU/clock only — extra policies still open), assignment links (`/assignments/new`, no reveal-lock yet), the query gallery (`/gallery`), the comparison view (`/compare`, buffer-pool half only). **v12:** the parser and B+Tree standalones (`/tools/parser`, `/tools/btree` + B+Tree delete), `/trace`, `/learn`, four more buffer-pool policies (FIFO, second-chance, Bélády, InnoDB midpoint-LRU), the assignment reveal-lock, the full-pipeline half of Compare, and M12's copy-as-Mermaid. **Still open:** M12's PNG export and `scripts/record.ts`, and true vector SVG export (§20.3) | Post-MVP |
 | v2+ | **Each its own plan (§20.5–§20.6):** graded submission (first backend), the interactive-embed package, the Visual `EXPLAIN` viewer. The B+Tree standalone (§20.4) is here until B+Tree delete exists | Not committed |
 
 M8 sits between "the app works" and "the URL is public." It is not polish — every item on the P0 list in
@@ -521,6 +550,12 @@ the stage pages, but the deploy config never caught up: without an SPA rewrite, 
 break when shared. M13 is the day that closes, and it is a hard prerequisite for every route §21
 adds after it — there is no point publishing `/tools/buffer-pool` to a URL that only works if you
 navigated there from inside the app.
+
+**§22 adds no milestone either.** It is the feature-and-tool backlog behind the §9 study — engine
+depth (joins, a cost model, the write path), more `/tools/*` sandboxes, and the learning and reach
+surfaces a returning visitor needs. The two or three items cheap enough to fold into M12 — an
+ASCII-art trace export, trace JSON import/export, the `aria-live` narration track — are flagged as
+such in §22.9; everything else waits on the experiment.
 
 ---
 
@@ -581,6 +616,11 @@ Two places where a decision in §14 could introduce a bill, both optional and bo
 **§20 takes the export, spin-off and classroom items further** — analysed against the code,
 sequenced, and mostly deferred with named triggers. The bullets above are the one-line form; the
 course-packaging and query-sharing lines in particular are expanded there (§20.4–§20.5).
+
+**§22 takes the engine line** — "expand SQL coverage: joins, cost estimates" — and the
+learning-surface ideas, counted against `src/` the same way: JOIN with a join-algorithm comparison,
+an external sort that spills through the buffer pool, a cost-based optimizer that justifies the index
+choice §9 rests on, the write path, and MVCC/WAL marked as second products.
 
 ---
 
@@ -1543,7 +1583,7 @@ export.
 
 | Item | Verdict | Cost against this codebase | What a generic version gets wrong |
 |---|---|---|---|
-| **Copy as Mermaid** (AST, plan) | **Build — M12** | ½ day. `toMermaid(ASTNode \| PlanNode)` is ~30 pure lines each; the clipboard path already exists (`copyLink` in the playground) | Including the B+Tree — Mermaid lays out a B+Tree with a sibling chain badly. AST and plan are where PR-and-Notion pasting actually happens |
+| **Copy as Mermaid** (AST, plan) | **Done — v12** | `src/export/toMermaid.ts` + a button in `StageDetail`'s header. The B+Tree is deliberately left out — Mermaid lays out a sibling chain badly | Including the B+Tree — Mermaid lays out a B+Tree with a sibling chain badly. AST and plan are where PR-and-Notion pasting actually happens |
 | **PNG export of any panel** | **Build — M12** | ½ day. `html-to-image` (~15 kB) against the panel's DOM node; `img-src 'self' data:` already permits the result; a blob download is same-origin and unblocked by the CSP | Assuming it is caveat-free — the self-hosted woff2 has to be inlined into the capture, and `oklch()` fills need a renderer that rasterises through `foreignObject`. Test in Safari, where that path has known bugs |
 | **True vector SVG export** (papers, slides) | **v1** | ~2–3 days. A dedicated `renderSvg` emitting real `<rect>/<text>/<path>` from the d3 layout `FlowTree` already computes — the grid and lock rows are trivial; the three trees share one renderer because they share `FlowNode` | `html-to-image`'s `toSvg` produces HTML wrapped in `<foreignObject>`, which Illustrator, Inkscape and PowerPoint all import inconsistently. That is not "a high-quality SVG" — it is a screenshot with extra steps |
 | **Animation export (GIF/WebM)** | **Build as a script, not a button — M12** | ½ day. `scripts/record.ts <shareUrl> --from N --to M`, driven by Playwright (already a dependency), frame-stepping the real built app and muxing with ffmpeg | Doing it in-browser: a GIF encoder is ~40 kB of bundle for a feature used monthly, 256 colours wreck the OKLCH palette and the anti-aliased type, and a 131-step scan takes 20–30 s to encode client-side. The script gets the real fonts and colours, and it *is* the §18.2 launch artefact |
@@ -1630,7 +1670,7 @@ query debugging / APM use case" as out of scope, possibly forever.
 
 | Item | Verdict | Earliest | Trigger to revisit |
 |---|---|---|---|
-| Copy as Mermaid (AST, plan) | Build | M12 | — |
+| Copy as Mermaid (AST, plan) | **Done, v12** | M12 | — |
 | PNG export of a panel | Build | M12 | — |
 | `scripts/record.ts` (GIF/WebM) | Build | M12 | — |
 | True vector SVG export | Build | v1 | A paper or a course deck needs it |
@@ -1648,8 +1688,11 @@ else waits behind the experiment that decides whether it is worth building.
 
 ### 20.8 Definition of done — M12 only
 
-- [ ] `src/export/toMermaid.ts` is a pure function with unit tests, and a **Copy as Mermaid** action
-      on the AST and plan panels writes a valid `mermaid` fenced block to the clipboard.
+- [x] **v12.** `src/export/toMermaid.ts` is a pure, unit-tested function (`astToMermaid` /
+      `planToMermaid` over the display trees; sequential `nN` ids sidestep Mermaid id-escaping), and
+      a **Copy as Mermaid** action in the AST and plan panel headers (`StageDetail`, so both the
+      Playground and the stage explainers) writes a valid ` ```mermaid ` fenced block to the
+      clipboard. Not the B+Tree, per §20.3.
 - [ ] A **Download PNG** action on every diagram panel produces an image with the real fonts and
       colours embedded, verified in Chrome, Firefox and Safari, and the download is not blocked by
       the CSP.
@@ -1966,3 +2009,216 @@ found and fixed alongside (see the status note under §21).
 - [x] The bundle budget covers the entry chunk and the lazy chunks. *`entry` 24 kB (was a stale
       34 that had been failing since `5c7ef5d`), plus new `trace-ui`, `routes` and `docs` groups so
       a page that stops being lazy fails the build.*
+
+---
+
+## 22. Feature Depth & the Tool Catalogue — the post-validation backlog
+
+> New in v13. §20 counted a spin-off list against `src/` and sequenced it; §21 gave every route an
+> address. Neither took §13's first future — *"expand SQL coverage: joins, cost estimates"* — or
+> §4's "explicitly deferred to v1+" list and did the same work on them. This section is that pass,
+> together with the smaller tool, learning and reach ideas that have accrued since v8. It is a
+> **backlog, not a commitment.** The MVP is unchanged, the §9 study still gates almost everything
+> here (§12's first risk, played straight), and M12/M13 are untouched. Each item is scored on
+> §20.1's filter and carries a trigger rather than a milestone unless it is called out as a promote.
+
+### 22.1 The filter — §20.1's four questions, plus one
+
+§20.1 asks: does it serve the §9 study, does it serve the §18.2 launch, does it need a backend or
+break "nothing leaves your browser", does it fork the audience. All four apply unchanged.
+Feature-depth items get a fifth, because they are the ones most able to dilute the product without
+looking like they do:
+
+5. **Does it deepen the §9 contrast, or widen away from it?** The product shows one thing well: an
+   indexed point lookup against a sequential scan, and — on the eviction that falls out of the scan
+   — LRU against clock sweep (§9). An item that sharpens that contrast, or gives it a second
+   instance at another layer (a hash join beside a nested-loop join; a cost estimate that
+   *justifies* the index choice the optimizer already makes), earns its place. An item that adds a
+   parallel subject — MVCC, WAL, window functions — is a second product sharing a codebase, and is
+   not worth starting before the §9 result is in.
+
+### 22.2 Engine depth — SQL and pipeline coverage
+
+The engine today is one table, `SELECT` only, `=`/`<`/`>`/`AND`, one index (`src/engine/seed.ts`,
+`planner/plan.ts`, `exec/operators.ts`). Everything below extends that. Most is v1-or-later and
+gated on §9; the cost model is the one engine item worth doing first if the study validates.
+
+| Item | Cost against `src/` | Earliest | What a generic version gets wrong |
+|---|---|---|---|
+| **JOIN + a join-algorithm comparison** — a `Join` plan node and nested-loop / hash / sort-merge operators, join order in `optimize.ts`, a third `/compare` mode | 2–3 wk, and needs the multi-table schema (§22.7) first | v1 core (already §4/§13) | Showing the three as interchangeable. The lesson is *when each wins* — small build side → hash; inputs already sorted, or sorted output needed → merge; tiny outer with an index on the inner → nested-loop |
+| **`ORDER BY` / `LIMIT` + external merge sort** — a `Sort` operator whose runs spill to simulated pages, and `LIMIT` as a visible Volcano short-circuit (the scan beneath it never runs to completion) | ~1 wk | v1 | An in-memory `.sort()` with a cap. The spill *is* the teaching — it puts sequential writes and merge-pass reads through the buffer pool, a shape the current single query cannot make |
+| **Aggregates + `GROUP BY` — hash aggregate vs. sort aggregate** | ~1 wk after `Sort` | v1 | Only one strategy, so there is nothing to compare — the `/compare` axis is the point |
+| **Cost-based optimizer with visible estimates** (§7.3's v1 stretch) — row-count and selectivity heuristics annotated on plan nodes; index selection stops being unconditional and becomes justified | ~1 wk; no new operator, no schema change, no backend | **v1 — the first engine item if §9 validates** | Inventing costs with a decimal point the model cannot defend — §12's "plausible but false". The honest version shows the heuristic *and* the actual count together, the way the `EXPLAIN` row below does |
+| **Write path — `INSERT` / `UPDATE` / `DELETE`** — puts B+Tree insert/split and `deleteKey` (built v12) *in the pipeline*, not just `/tools/btree`, plus dirty-page writeback | ~1.5 wk | v1 | Skipping the writeback. "The page is now dirty, so evicting it costs a disk write" is the buffer pool's other half |
+| **More optimizer rules, each a visible before/after** — projection pushdown, constant folding, `col = col`, `OR`→`IN` | ~½ day each behind the existing `Rule` seam in `optimize.ts` | v1 | Stopping too late and rewriting a query into something the learner can no longer recognise as theirs |
+| **In-app `EXPLAIN` / `EXPLAIN ANALYZE`** — a text plan dump with estimated-vs-actual rows, over data the engine already holds | ~½ day once the cost model exists | v1 | Confusing it with §20.6's paste-in-real-Postgres viewer (declined, own product). This explains *QueryLens's own* query — no dialect parser, no bottleneck heuristic |
+| **Composite & covering indexes** — an index-only scan (never touches the heap), and two candidate indexes the optimizer must choose between | ~1 wk, rides the cost model | v1 | Treating "index-only" as a footnote. It is a third point on the lookup-vs-scan line §9 draws |
+| **Enforced concurrency** — a second transaction, a waiter queue on the lock manager (`locks/lockManager.ts` tracks holders but not waiters), real blocking, deadlock detection with victim selection | ~1.5 wk | v1–v2; powers `/tools/locks` (§22.3) | Drawing the deadlock without the victim choice. Deciding whom to abort — youngest transaction, fewest locks held — is the interesting half |
+| **MVCC / snapshot isolation** (§4 deferred) — tuple versions, `xmin`/`xmax`, a visible snapshot, vacuum; the natural home for the lock panel to become real | large | **v2, hard-gated on §9** — a second product by question 5 | — |
+| **WAL + crash recovery** — a redo log, checkpoint, replay-after-crash; pairs with steal/no-steal and force/no-force in the buffer pool | large | **v2, hard-gated on §9** — a second product | — |
+
+### 22.3 New standalone tools (`/tools/*`)
+
+Every one renders through §20.2's primitives — `PanelPage` and the non-SQL `StepEvent` driver
+(`bufferTrace.ts` is the worked example) — and slots into §21.3's catalogue with a route and a
+URL-state schema. None needs a backend.
+
+| Route | What it is | Cost | Earliest |
+|---|---|---|---|
+| `/tools/planner` | Toggle optimizer rules and table stats, hand-author a predicate, watch the plan rewrite | ~2 days — the rules already exist; it needs the non-SQL driver | v1 |
+| `/tools/locks` | Two transaction timelines; place lock requests, watch a wait-for edge form and a deadlock resolve | rides §22.2's enforced lock manager | v1–v2 |
+| `/tools/sort` | External merge sort — run generation, k-way merge, an I/O counter | ~3 days, or free once §22.2's `Sort` exists | v1 |
+| `/tools/hash-join` | Build and probe phases, hash collisions, partition spill (Grace hash join) | own driver, ~3 days | v1–v2 |
+| `/tools/page` | A slotted-page inspector: header, slot array, tuple data, free space, for one 4 KB page | ~2 days, a pure view over `storage/page.ts` | **v1 — cheap, and a 15-445 syllabus teaches slotted pages explicitly.** "Rows per page" is an abstract number today |
+| `/tools/grammar` | A railroad diagram of the supported subset, generated from the parser's own structure so it cannot drift (`GalleryPage`'s discipline) | ~2 days | v1–v2; pairs with `/tools/parser` |
+
+### 22.4 Learning & classroom surfaces
+
+- **The six missing `/learn` lessons.** The track is four (§21.3); §17.2 lists ten manual pages.
+  Add: watch a B+Tree split, make the planner change its mind, edit the seed data, predict before
+  you look, share a moment, when something goes wrong. Each is an ordered lesson whose deep links
+  are engine-computed (`src/pages/learn/lessons.tsx`'s existing rule). **Promote — v1, incremental**,
+  ~½ day each, no engine change; pure content for the returning visitor §21.2 is built around.
+- **Challenge mode.** Goal-shaped puzzles with a client-side check — "make this query use the
+  index", "cause an eviction storm in ≤ N accesses", "construct seed data where predicate pushdown
+  changes the row count". Engagement (§12's core risk) with no backend and no new engine surface: a
+  challenge is a predicate over an existing `RunResult`. ~1 wk. v1, and a natural §18.2 launch
+  artefact ("solve it in six steps").
+- **Progress dashboard.** Stages visited, lessons done, prediction hit-rate — `localStorage`,
+  degrades to empty. ~2 days. v1, feeds the second visit.
+- **In-app quiz / self-check.** A bank of mechanism questions scored client-side, with a streak in
+  `localStorage`. **The caveat is the whole decision:** the §9 post-test is exactly this shape, so
+  shipping the study's own bank in the app contaminates the study. A disjoint bank is fine; the same
+  one is not. Trigger: after the §9 study runs, not before.
+- **Assignment sets.** Bundle several `/assignments/new` links into one sheet with a class code, as
+  a URL or a downloadable JSON. Stops short of graded submission — §20.5's backend line is
+  unchanged. ~3 days. v1.
+
+### 22.5 Export & presentation (extends §20.3)
+
+- **Copy as text / ASCII trace.** A pure function beside `src/export/toMermaid.ts` that renders the
+  AST, plan or tree as monospace art for a code review or an email — no renderer, no CSP question.
+  **Fold into M12's open list**: it is the Mermaid export's twin and lands the same way.
+- **Trace export / import as JSON.** "Download this trace", "load a trace from a file". §14.1 item 4
+  already assembles the crashing state for the error boundary; this generalises it, and hands the §9
+  study reproducible instruments and bug reports a payload. **Fold near M12 / §14** — a file, no
+  backend, no engine change.
+- **Presenter mode.** Full-screen, larger type, auto-advance on an adjustable dwell, prediction
+  suppressible, keyboard-only. §17.2 already asks "how to skip prediction when demonstrating to a
+  room"; this is the room-facing surface. ~3 days, no engine change. v1.
+- **B+Tree copy-as-Mermaid.** §20.3 left it out because Mermaid lays a sibling chain out badly —
+  still true for `graph`; a `classDiagram` with explicit rank hints is a maybe. Low priority, v1+.
+- **`@querylens/embed` component package.** §20.3's v1+ item, gated on a named author asking for an
+  in-page embed. Unchanged; listed here for completeness.
+
+### 22.6 Accessibility & reach
+
+- **Live narration track (`aria-live`).** Every `StepEvent` already carries a `label` written as
+  narration (§7.8); routing it to a polite live region lets a screen-reader user step the trace and
+  hear each event. The data exists — this is wiring and testing. **Strongest reach promote — v1,
+  ~2 days**, no engine change, and it makes the tool usable by a population that cannot use it today.
+  Add a one-line pointer from §8's accessibility bullet.
+- **Full text transcript.** The narration lines as a numbered, linkable, printable list, each line a
+  deep link into the Playground. Overlaps `/trace` but prose, not JSON — and it doubles as a
+  control-group artefact for §9. ~2 days. v1.
+- **Non-colour encoding for the storage hues.** Hit/miss/evict and internal/leaf are hue-only today.
+  Add a shape or texture channel — always on, not a mode — for colour-vision deficiency and
+  projector wash-out (§15.3's two reasons for the light theme apply here). ~2 days. v1. A separate
+  "colourblind palette" toggle is the generic answer and the worse one: a redundant second channel
+  that is always present beats a mode nobody finds.
+- **Print stylesheet.** A query and its trace as a printable worksheet, for a room without laptops.
+  ~1 day. v1–v2.
+- **i18n scaffold.** §17.3's licence position already contemplates translation. String extraction
+  plus one non-English locale is v2 — do not build the machinery before someone commits to
+  maintaining a locale.
+
+### 22.7 Data & input
+
+- **Multi-table schema editor.** The hard prerequisite for JOIN (§22.2): add and rename tables and
+  columns, declare an index. `src/engine/seed.ts` is one table today. ~1 wk, with JOIN. v1.
+- **Preset dataset library.** `users`, `orders`, a small `lineitem`, and a deliberately skewed
+  distribution for the selectivity/cost story. §19.2's preset *query* chips have a companion in
+  preset *tables*. **Note alongside §19.2**, ~2 days, rather than fresh scope.
+- **CSV / paste import into the seed grid.** A bounded row count, parsed as untrusted input — the
+  §15.2 rule for the URL applies. ~2 days. v1.
+- **Larger datasets + the Web Worker.** §5 keeps the engine worker-ready for exactly this: a
+  depth-3–4 B+Tree and a genuinely thrashing pool need more than 48 rows, and past some size the
+  main-thread fold may jank. Trigger: a lesson or the cost model needs a tree taller than two. The
+  worker move is designed (§5), not new design work.
+
+### 22.8 Platform & ecosystem
+
+- **`@querylens/engine` as a published package.** `src/engine/` is already pure, synchronous,
+  React-free and serialisable (§5); publishing it lets others build lessons, graders and embeds on
+  the same trace contract. Zero backend. Trigger: a second consumer exists. Do not publish an API
+  before there is a caller — every export becomes a compatibility promise.
+- **`npx querylens "SELECT …"`.** A CLI that prints the trace in the §22.5 ASCII form.
+  `scripts/trace.ts` is already this internally; publishing it is packaging, ~2 days. v1–v2, a
+  launch-post nicety.
+- **Operator / stage plugin seam.** §17.1's "how to add an operator or a stage" is a docs page; a
+  real registration API turns QueryLens into a teaching *platform*. v2+, and only if the two items
+  above find users.
+- **`tokens.json`.** Already §16.4 P2; repeated here only as the shared dependency of the embed
+  package, the CLI's coloured output and any future course theme.
+
+### 22.9 Decision log
+
+| Item | Verdict | Earliest | Trigger to revisit |
+|---|---|---|---|
+| Copy-as-text / ASCII trace | **Promote — M12** | M12 | — |
+| Trace JSON export / import | **Promote — M12 / §14** | M12 | — |
+| `aria-live` narration track | **Promote — v1** | v1 | — (do it; add the §8 pointer) |
+| The six missing `/learn` lessons | **Promote — v1, incremental** | v1 | — |
+| Full text transcript | Build | v1 | — |
+| Non-colour hue encoding | Build | v1 | — |
+| Cost-based optimizer | Build | v1 | §9 validates the format |
+| More optimizer rules | Build | v1 | §9 validates the format |
+| In-app `EXPLAIN` | Build | v1 | Cost model lands |
+| `ORDER BY` / `LIMIT` + external sort | Build | v1 | §9 validates the format |
+| Aggregates / `GROUP BY` | Build | v1 | `Sort` lands |
+| Write path (`INSERT`/`UPDATE`/`DELETE`) | Build | v1 | §9 validates the format |
+| Composite / covering indexes | Build | v1 | Cost model lands |
+| JOIN + join-algorithm compare | Build | v1 | Multi-table schema lands |
+| Multi-table schema editor | Build | v1 | JOIN is scheduled |
+| CSV / paste import | Build | v1 | — |
+| Preset dataset library | Build | v1 (with §19.2) | — |
+| `/tools/planner` | Build | v1 | Non-SQL driver generalised |
+| `/tools/page` (slotted-page inspector) | Build | v1 | — |
+| `/tools/sort` | Build | v1 | `Sort` lands, or its own driver |
+| `/tools/grammar` | Build | v1–v2 | — |
+| `/tools/locks` | Build | v1–v2 | Enforced lock manager lands |
+| `/tools/hash-join` | Build | v1–v2 | — |
+| Challenge mode | Build | v1 | — |
+| Progress dashboard | Build | v1 | — |
+| Assignment sets | Build | v1 | — |
+| Presenter mode | Build | v1 | — |
+| Print stylesheet | Build | v1–v2 | — |
+| In-app quiz / self-check | Deferred | post-§9 | The §9 study has run (contamination) |
+| Enforced concurrency + deadlocks | Build | v1–v2 | §9 validates the format |
+| `npx querylens` CLI | Build | v1–v2 | — |
+| `@querylens/engine` package | Deferred | v1+ | A second consumer exists |
+| Operator / stage plugin seam | Deferred | v2+ | The package and CLI find users |
+| MVCC / snapshot isolation | Own product | v2+ | §9 validates, then a separate surface |
+| WAL / crash recovery | Own product | v2+ | §9 validates, then a separate surface |
+| B+Tree copy-as-Mermaid | Maybe | v1+ | A `classDiagram` layout proves acceptable |
+| `@querylens/embed` | Own plan | v1+ | A named author needs an in-page embed (§20.3) |
+| i18n | Deferred | v2 | A maintainer commits to a locale |
+| Window functions / CTEs / full grammar | Declined | — | §4's subset stops teaching something it should |
+| Visual `EXPLAIN` (paste-in real plans) | Declined here | — | §20.6 — a decision to serve DBAs, not this plan |
+
+### 22.10 What this section deliberately does not add
+
+In the discipline of §20 and [RESEARCH.md §21](RESEARCH.md#21-what-i-deliberately-left-out):
+
+- **No milestone.** §20 added M12 and §21 added M13 because each had a small, launch-facing,
+  do-it-now core. §22's do-it-now items — the ASCII trace export, trace JSON import/export, the
+  narration track, the `/learn` lessons — fold into M12 or land incrementally in v1. The rest is a
+  backlog behind the §9 study.
+- **No MVP change and no §9 change.** The indexed-lookup-vs-sequential-scan build and the post-test
+  that validates it are exactly as §9 leaves them.
+- **No reversal of "nothing leaves your browser"** beyond the surface §20.5 already isolated (graded
+  submission, its own privacy statement, its own subdomain).
+- **No bigger parser than the teaching needs.** Window functions, recursive CTEs, a real dialect —
+  out, for §4's reason: more grammar is more surface with no intuition the v0 subset does not
+  already deliver.
+- **No APM / production-plan tooling.** §2's non-goal and §20.6's separate-product line both stand.

@@ -170,6 +170,26 @@ test('compare scores the same query with and without the index', async ({ page }
   await expect(page.getByText(/first pick a different victim/)).toBeVisible();
 });
 
+test('the AST and plan panels copy themselves as a Mermaid diagram', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+
+  await page.goto('/stages/optimize');
+  await page.getByRole('button', { name: 'Copy as Mermaid' }).click();
+  await expect(page.getByRole('button', { name: 'Copied ✓' })).toBeVisible();
+
+  const plan = await page.evaluate(() => navigator.clipboard.readText());
+  expect(plan.startsWith('```mermaid\nflowchart TD\n')).toBe(true);
+  expect(plan.trimEnd().endsWith('```')).toBe(true);
+  expect(plan).toContain('IndexScan');
+  expect(plan).toMatch(/n\d+ --> n\d+/);
+
+  await page.goto('/stages/parse');
+  await page.getByRole('button', { name: 'Copy as Mermaid' }).click();
+  const ast = await page.evaluate(() => navigator.clipboard.readText());
+  expect(ast).toContain('flowchart TD');
+  expect(ast).toContain('"SELECT"');
+});
+
 test('the trace inspector filters the raw event stream and links into the Playground', async ({ page }) => {
   await page.goto('/trace');
   await expect(page.getByText(/of \d+ events/)).toBeVisible();
