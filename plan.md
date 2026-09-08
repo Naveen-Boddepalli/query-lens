@@ -48,13 +48,21 @@
 > is about is the *aggregate* work, and the Playground is where you step. A range query that cannot
 > use the index says so instead of scoring twins.
 >
-> Gate: typecheck, lint, 368 unit tests (+30: 13 policy, 12 B+Tree delete incl. 5 property tests,
-> 5 reveal-lock), build, bundle budget (`standalone-tools` 18→24 kB, total 335→342 — the
-> parser/B+Tree/trace routes plus the shared `FlowTree`/`BTreePanel`/`display` chunks that split out
-> once a second route imported them; `ComparePage` grew ~1.4 kB gzip for `runQuery`), 34 e2e (+8),
+> **`/learn` shipped** — the last named v2 route. Four of §17.2's tasks as an ordered track: an
+> index with a `localStorage` completion mark, and `/learn/:lessonId` rendering the task as
+> numbered steps. Each step's "open in the Playground" button is a deep link whose step number is
+> *computed* from a real engine run — `GalleryPage`'s discipline — so a lesson going out of sync
+> with the pipeline fails a test rather than shipping a dead link. Primary nav (eight items now).
+> The docs stay the reference; this is the walked-through version.
+>
+> Gate: typecheck, lint, 376 unit tests (+38: 13 policy, 12 B+Tree delete incl. 5 property tests,
+> 5 reveal-lock, 8 learn), build, bundle budget (`standalone-tools` 18→24 kB, new `learn` group,
+> total 335→348 — the parser/B+Tree/trace/learn routes plus the shared
+> `FlowTree`/`BTreePanel`/`display` chunks that split out
+> once a second route imported them; `ComparePage` grew ~1.4 kB gzip for `runQuery`), 35 e2e (+9),
 > zero axe violations on `/tools/parser`, `/tools/btree`, `/trace`, `/compare` (both modes),
-> `/tools`, `/tools/buffer-pool` (incl. midpoint) and the Playground in assignment mode, in both
-> themes (fixed a
+> `/tools`, `/tools/buffer-pool` (incl. midpoint), `/learn` and a lesson page, and the Playground
+> in assignment mode, in both themes (fixed a
 > pre-existing `opacity-70` contrast failure on the Tools index card, and swapped the trace
 > inspector's stage colours off the
 > text — some `--color-stage-*` fall under 4.5:1 as 13px body text — onto a swatch).
@@ -482,7 +490,7 @@ This event stream is the single contract between engine and UI — makes the UI 
 | M11 | **Docs, manual, licensing & governance (§17–§18):** docs site, Getting Started, the two manual pages the §9 study needs, `LICENSE-DOCS`, font licensing, README restructure | ~1 week (P0/P1) + ongoing — **docs site built, see note** |
 | M12 | **Portable artefacts (§20.3):** copy-as-Mermaid (AST, plan), PNG export of any panel, `scripts/record.ts` for launch GIFs/WebM. No backend, no new engine code — feeds the §18.2 launch post | ~1 week |
 | M13 | **Site structure — routing consolidation (§21.5):** SPA rewrite so deep links resolve, delete the dead `src/router.tsx`, correct the "single page" 404 and the stale `index.html` title, code-split routes, one nav manifest. Gates every new page because a multi-page app whose links 404 is not one | ~1 day — **done (v9), + 3 regressions it uncovered** |
-| v1 | Expand SQL coverage: joins, cost estimates, InnoDB midpoint-LRU as a third policy. **§20/§21 v1 tranche — shipped (v10):** the non-SQL event driver (`src/engine/bufferTrace.ts`, ahead of schedule), the Buffer Pool standalone (`/tools/buffer-pool`, LRU/clock only — extra policies still open), assignment links (`/assignments/new`, no reveal-lock yet), the query gallery (`/gallery`), the comparison view (`/compare`, buffer-pool half only). **v12:** the parser and B+Tree standalones (`/tools/parser`, `/tools/btree` + B+Tree delete), `/trace`, four more buffer-pool policies (FIFO, second-chance, Bélády, InnoDB midpoint-LRU), the assignment reveal-lock, and the full-pipeline half of Compare. **Still open:** true vector SVG export (§20.3), `/learn` | Post-MVP |
+| v1 | Expand SQL coverage: joins, cost estimates, InnoDB midpoint-LRU as a third policy. **§20/§21 v1 tranche — shipped (v10):** the non-SQL event driver (`src/engine/bufferTrace.ts`, ahead of schedule), the Buffer Pool standalone (`/tools/buffer-pool`, LRU/clock only — extra policies still open), assignment links (`/assignments/new`, no reveal-lock yet), the query gallery (`/gallery`), the comparison view (`/compare`, buffer-pool half only). **v12:** the parser and B+Tree standalones (`/tools/parser`, `/tools/btree` + B+Tree delete), `/trace`, `/learn`, four more buffer-pool policies (FIFO, second-chance, Bélády, InnoDB midpoint-LRU), the assignment reveal-lock, and the full-pipeline half of Compare. **Still open:** true vector SVG export (§20.3) | Post-MVP |
 | v2+ | **Each its own plan (§20.5–§20.6):** graded submission (first backend), the interactive-embed package, the Visual `EXPLAIN` viewer. The B+Tree standalone (§20.4) is here until B+Tree delete exists | Not committed |
 
 M8 sits between "the app works" and "the URL is public." It is not polish — every item on the P0 list in
@@ -1755,8 +1763,8 @@ Grouped by area. **Status** is `built` / a milestone / `v1` / `v2` / `own plan`,
 |---|---|---|---|---|
 | `/stages` | Pipeline index | Eight stage cards, grouped Query Processing / Runtime / Concurrency / Output | — | built |
 | `/stages/:stageId` | Stage explainer | Prose + one isolated live panel over a canned trace; prev/next through the pipeline | `:stageId` | built |
-| `/learn` | Guided path | The §17.2 manual tasks as an ordered, in-app interactive track; progress in `localStorage` | — | v2 |
-| `/learn/:lessonId` | One lesson | A single task ("Follow one row from disk to result"), the app driven to each step, a "try this" at the end | `:lessonId`, step | v2 |
+| `/learn` | Guided path | Four §17.2 tasks as an ordered track — run your first query, follow one row disk-to-result, watch a page get evicted, make the planner change its mind — with a `localStorage` completion mark (`querylens:learn`; a convenience, degrades to unmarked). Primary nav | — | **built** — v12 |
+| `/learn/:lessonId` | One lesson | The task as numbered steps; each step's "open this in the Playground" link is a deep link whose step is computed from a real engine run (`GalleryPage`'s discipline), and each lesson ends with a "try this" that changes one variable. An unknown id redirects to `/learn` | `:lessonId` | **built** — v12 |
 
 **Explore**
 
@@ -1883,14 +1891,18 @@ went in, kept for the record, plus what is left.
    tabular figures turned out not to be per-visitor settings once considered (§21.3's row explains
    why).
 
-P2 / v2: `/learn`. Own plan: `/classroom`, `/embed/*`.
+P2 / v2: all shipped in v12. Still open (own plans / v1+): true vector SVG export (§20.3),
+`/classroom`, `/embed/*`, and the deferred stepping additions (parser cursor, B+Tree restructure —
+new event kinds).
 
-**v12 landed all three `/tools/*` sandboxes plus `/trace`.** `/tools/parser` is the live token
-ribbon + `AstTree` + recursion depth + the parser's own errors (§21.3's row). `/tools/btree` is the
-number-pad REPL over `insert` / `deleteKey` / `search`, and the B+Tree **deletion** it needed was
-built with it (borrow / merge / root-collapse / separator rewrite, with §7.6's property tests).
-`/trace` is the raw-event inspector — filterable table, per-row JSON, jump-to-step links — running
-the same `runQuery` as the Playground, footer-only. **Assignment links** gained the reveal-lock
+**v12 cleared the rest of the §21.6 list.** `/tools/parser` is the live token ribbon + `AstTree` +
+recursion depth + the parser's own errors (§21.3's row). `/tools/btree` is the number-pad REPL over
+`insert` / `deleteKey` / `search`, and the B+Tree **deletion** it needed was built with it (borrow /
+merge / root-collapse / separator rewrite, with §7.6's property tests). `/trace` is the raw-event
+inspector — filterable table, per-row JSON, jump-to-step links — running the same `runQuery` as the
+Playground, footer-only. **`/learn`** is four §17.2 tasks as an ordered track, each step deep-linking
+into the Playground at an engine-computed step, with `localStorage` completion marks. **Assignment
+links** gained the reveal-lock
 they were always missing: `&l=1` seals the trace at the landing step until the learner answers
 (`usePlayback` `ceiling`, no "skip"). **`/compare`** gained a second mode — index vs. sequential
 scan on the same query, scored side by side — closing §13's full-pipeline half. The buffer-pool

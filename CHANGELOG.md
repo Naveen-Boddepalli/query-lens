@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Guided path** at `/learn` (plan.md §17.2, §21.3) — four short, ordered lessons (run your first
+  query; follow one row from disk to result; watch a page get evicted; make the planner change its
+  mind). Each lesson's steps deep-link into the Playground at the exact point they describe — the
+  step number computed from a real engine run, so a lesson can't drift out of sync — and each ends
+  with one variable to change and re-run. Completion is marked per-browser in `localStorage`
 - **Midpoint-LRU buffer policy** (plan.md §7.5) — InnoDB's midpoint-insertion LRU as a sixth
   replacement policy in the buffer-pool sandbox and Compare: a page read from disk enters an "old"
   sublist and only reaches the "young" one when it is read again, so a one-pass sequential scan

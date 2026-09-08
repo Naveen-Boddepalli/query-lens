@@ -91,6 +91,12 @@ const ComparePage = lazy(() =>
 const TracePage = lazy(() =>
   import('./pages/TracePage.tsx').then((m) => ({ default: m.TracePage })),
 );
+const LearnPage = lazy(() =>
+  import('./pages/LearnPage.tsx').then((m) => ({ default: m.LearnPage })),
+);
+const LessonPage = lazy(() =>
+  import('./pages/LessonPage.tsx').then((m) => ({ default: m.LessonPage })),
+);
 const SettingsPage = lazy(() =>
   import('./pages/SettingsPage.tsx').then((m) => ({ default: m.SettingsPage })),
 );
@@ -129,6 +135,11 @@ export default function App() {
             <Route path="stages" element={suspended(StagesLayout)}>
               <Route index element={<StagesIndex />} />
               <Route path=":stageId" element={<StagePage />} />
+            </Route>
+
+            <Route path="learn">
+              <Route index element={suspended(LearnPage)} />
+              <Route path=":lessonId" element={suspended(LessonPage)} />
             </Route>
 
             <Route path="examples" element={suspended(ExamplesPage)} />

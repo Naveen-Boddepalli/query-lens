@@ -45,6 +45,11 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
   // thin `preferences`/`urlState` helpers. None of it loads unless one of
   // these routes is visited.
   { name: 'standalone-tools', test: /^(GalleryPage|ComparePage|SettingsPage|AssignmentsNewPage|TracePage|BufferPoolToolPage|ParserToolPage|BTreeToolPage|BufferPoolPanel|bufferTrace|preferences|urlState)-/, kb: 24, note: 'Gallery, Tools, Compare, Settings, Assignments, the trace inspector, and the buffer-pool / parser / B+Tree sandboxes (plan.md §21.3, §20.4)' },
+  // The `/learn` guided track (plan.md §21.3): the index, one lesson page, the
+  // localStorage progress helper, and `lessons.tsx` — the lesson prose plus the
+  // link-builder that computes each step from a real engine run. Lazy; loads
+  // only when someone visits `/learn`.
+  { name: 'learn', test: /^(LearnPage|LessonPage|learnProgress|lessons)-/, kb: 8, note: 'the /learn track: index, lesson page, progress, and the lesson content' },
   // The nine docs pages, folded into one async chunk by vite.config.ts. Loads
   // on the first `/docs` hit, never at first paint.
   { name: 'docs', test: /^docs-.*\.js$/, kb: 16, note: 'integrated MDX docs (plan.md §17.1), lazy' },
@@ -66,10 +71,12 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
  * Raised 335 → 342 for the §20.4 standalone tools — the parser and B+Tree
  * sandboxes, plus the shared panel renderers (FlowTree, BTreePanel, the two
  * display transformers) that split into their own chunks once a second route
- * imported them. None of it is first-paint: a chunk loads only when its route
+ * imported them.
+ * Raised 342 → 348 for the `/learn` guided track (two routes plus the lesson
+ * content). None of it is first-paint: a chunk loads only when its route
  * is visited.
  */
-const TOTAL_KB = 342;
+const TOTAL_KB = 348;
 
 const gzipKb = (bytes: Buffer): number => gzipSync(bytes, { level: 9 }).length / 1024;
 

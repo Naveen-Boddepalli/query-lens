@@ -370,6 +370,8 @@ test('every route renders the app on a cold load, not the 404 page', async ({ pa
     ['/playground', /steps in this trace/],
     ['/stages', /Pipeline stages/i],
     ['/stages/parse', /Parser/],
+    ['/learn', /ordered path through the pipeline/],
+    ['/learn/one-row', /Follow one row from disk to result/],
     ['/examples', /Examples/],
     ['/docs/faq', /Frequently Asked|FAQ|data/i],
     // The §21.3 feature routes (built after M13, on the same manifest/lazy

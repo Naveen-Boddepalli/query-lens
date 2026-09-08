@@ -206,6 +206,36 @@ test('the trace inspector filters the raw event stream and links into the Playgr
   );
 });
 
+test('the learn track opens lessons that deep-link into the Playground and remembers progress', async ({ page }) => {
+  await page.goto('/learn');
+  await expect(page.getByText('0 of 4 complete')).toBeVisible();
+
+  await page.getByRole('link', { name: /Follow one row from disk to result/ }).click();
+  await expect(page).toHaveURL(/\/learn\/one-row$/);
+  await expect(page.getByText('Lesson 2 of 4')).toBeVisible();
+
+  // A step link carries a computed Playground step.
+  const jump = page.getByRole('link', { name: /Jump to the optimiser rewrite/ });
+  await expect(jump).toHaveAttribute('href', /\/playground\?q=.*&s=\d+/);
+  const href = await jump.getAttribute('href');
+  await page.goto(href ?? '');
+  await expect(page.getByText(/showing step/)).not.toContainText('showing step 0');
+
+  // Mark complete → persists → shows on the index.
+  await page.goto('/learn/one-row');
+  await page.getByRole('button', { name: 'Mark this lesson complete' }).click();
+  await expect(page.getByRole('button', { name: /Completed/ })).toBeVisible();
+
+  await page.goto('/learn');
+  await expect(page.getByText('1 of 4 complete')).toBeVisible();
+  await page.getByRole('button', { name: 'Reset progress' }).click();
+  await expect(page.getByText('0 of 4 complete')).toBeVisible();
+
+  // An unknown lesson id lands back on the index rather than erroring.
+  await page.goto('/learn/no-such-lesson');
+  await expect(page).toHaveURL(/\/learn$/);
+});
+
 test('a settings preference becomes the Playground default on a bare visit', async ({ page }) => {
   await page.goto('/settings');
   await page.getByRole('radio', { name: 'Clock sweep' }).click();

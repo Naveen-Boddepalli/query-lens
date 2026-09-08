@@ -28,6 +28,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
   // (App.tsx's IndexRoute).
   { path: '/playground', label: 'Playground', nav: true },
   { path: '/stages', label: 'Stages', nav: true },
+  { path: '/learn', label: 'Learn', nav: true },
   { path: '/gallery', label: 'Gallery', nav: true },
   { path: '/tools', label: 'Tools', nav: true },
   { path: '/compare', label: 'Compare', nav: true },
