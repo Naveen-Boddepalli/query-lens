@@ -51,6 +51,29 @@ test('the buffer-pool sandbox runs a policy the SQL pipeline never offers', asyn
   await expect(page).toHaveURL(/policy=fifo/);
 });
 
+test('midpoint LRU keeps the hot set where plain LRU flushes it', async ({ page }) => {
+  await page.goto('/tools/buffer-pool');
+  // Pages 0 and 1 go hot, then a scan of fresh pages, then page 0 once more.
+  await page.getByLabel(/Reference string/).fill('0 1 0 1 2 3 4 5 0');
+
+  const stepToEnd = async () => {
+    const fwd = page.getByRole('button', { name: 'Step forward' });
+    for (let i = 0; i < 40 && !(await fwd.isDisabled()); i++) await fwd.click();
+  };
+
+  await page.getByLabel('Policy').selectOption('midpoint');
+  await page.getByRole('button', { name: 'Run' }).click();
+  await stepToEnd();
+  // Page 0 rode out the scan in the young sublist — the last read is a hit.
+  await expect(page.getByText(/Page 0 is already in frame .* a buffer hit/)).toBeVisible();
+
+  await page.getByLabel('Policy').selectOption('lru');
+  await page.getByRole('button', { name: 'Run' }).click();
+  await stepToEnd();
+  // Plain LRU evicted page 0 during the scan — the same last read hits disk.
+  await expect(page.getByText(/Read page 0 from disk/)).toBeVisible();
+});
+
 test('the parser sandbox shows the token stream and the parser\'s own errors', async ({ page }) => {
   await page.goto('/tools/parser');
   const src = page.getByLabel('SQL source');

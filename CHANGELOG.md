@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Midpoint-LRU buffer policy** (plan.md §7.5) — InnoDB's midpoint-insertion LRU as a sixth
+  replacement policy in the buffer-pool sandbox and Compare: a page read from disk enters an "old"
+  sublist and only reaches the "young" one when it is read again, so a one-pass sequential scan
+  evicts only its own pages and never the hot set — the failure plain LRU has that this fixes
 - **`/compare` — index vs. sequential scan** (plan.md §13) — a second mode alongside the
   replacement-policy comparison: the same query run once with the `id` index and once with it
   removed, scored side by side (trace steps, disk reads, evictions, B+Tree node reads, locks, rows).

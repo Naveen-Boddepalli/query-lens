@@ -77,7 +77,7 @@ describe('runBufferTrace', () => {
   });
 
   it('no policy ever reads a page that is not referenced by the string', () => {
-    for (const policy of ['fifo', 'second-chance', 'optimal'] as const) {
+    for (const policy of ['fifo', 'second-chance', 'optimal', 'midpoint'] as const) {
       const refs = [0, 1, 2, 3, 4, 2, 1, 5, 0];
       const { events } = runBufferTrace(refs, opts({ bufferFrames: 3, policy }));
       const loaded = events.flatMap((e) =>

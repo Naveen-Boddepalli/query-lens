@@ -189,7 +189,8 @@ export type ReplacementPolicyName =
   | 'clock'
   | 'fifo'
   | 'second-chance'
-  | 'optimal';
+  | 'optimal'
+  | 'midpoint';
 
 export interface Database {
   tables: Record<string, Table>;

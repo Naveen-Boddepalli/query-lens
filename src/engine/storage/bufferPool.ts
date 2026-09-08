@@ -55,6 +55,8 @@ function evictionReason(policy: ReplacementPolicyName): string {
       return 'Second-chance picked it: the oldest frame whose reference bit was already clear.';
     case 'optimal':
       return "The optimal policy picked it because its next use is farthest away — the choice no real policy can make, since it needs the future.";
+    case 'midpoint':
+      return 'Midpoint LRU picked the least-recently-used page in the old sublist — a page read once and never touched again, which is exactly what it is built to evict first.';
   }
 }
 
@@ -159,7 +161,9 @@ export function createBufferPool(
     target.usageCount = 0;
     target.loadedAt = state.now;
     target.pinCount += 1;
-    policy.onAccess(state, target.frameId);
+    // A load is a miss, not a hit: `onLoad` (default `onAccess`) lets a policy
+    // treat the two differently — midpoint-LRU inserts at the old sublist.
+    (policy.onLoad ?? policy.onAccess)(state, target.frameId);
 
     emit(
       `Read page ${pageId} from disk into frame ${target.frameId}. This is the expensive part — everything else is memory.`,

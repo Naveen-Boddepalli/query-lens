@@ -62,6 +62,13 @@ export interface ReplacementPolicy {
   /** Record that a resident frame was just used. */
   onAccess: (state: BufferState, frameId: number) => void;
   /**
+   * Record that a page was just *loaded* into a frame (a miss, not a hit).
+   * Defaults to `onAccess`, which is right for every policy but midpoint-LRU:
+   * InnoDB inserts a freshly read page at the head of the *old* sublist, not
+   * the young one, so a one-pass scan cannot flush the hot set.
+   */
+  onLoad?: (state: BufferState, frameId: number) => void;
+  /**
    * Choose a frame to evict. May emit its own reasoning steps — the clock
    * sweep's decrement walk is the interesting part, so it is not hidden.
    * Returns null when every frame is pinned.
@@ -259,12 +266,54 @@ const optimal: ReplacementPolicy = {
   },
 };
 
+/**
+ * InnoDB's midpoint-insertion LRU. The buffer pool's LRU list is split into a
+ * *young* (hot) sublist and an *old* sublist; a page read from disk lands at
+ * the head of the *old* sublist, and only reaches the young sublist if it is
+ * touched again. A sequential scan touches each page once, so its pages ride
+ * through the old sublist and evict one another without ever displacing the
+ * hot set — the flaw in plain LRU that this exists to fix (plan.md §7.5).
+ *
+ * Modelled without InnoDB's `innodb_old_blocks_time` delay: `usageCount` is a
+ * 1-bit "which sublist" flag — 0 = old, 1 = young — and one re-access promotes.
+ * Eviction takes the least-recently-used frame in the old sublist, falling
+ * back to the overall LRU frame only when every unpinned frame is young.
+ */
+const midpoint: ReplacementPolicy = {
+  onLoad(state, frameId) {
+    const f = frame(state, frameId);
+    if (!f) return;
+    state.now += 1;
+    f.lastUsedAt = state.now; // recency, but it stays in the old sublist
+  },
+  name: 'midpoint',
+  onAccess(state, frameId) {
+    const f = frame(state, frameId);
+    if (!f) return;
+    state.now += 1;
+    f.lastUsedAt = state.now;
+    f.usageCount = 1; // a re-access promotes it to the young sublist
+  },
+  selectVictim(state) {
+    let old: Frame | undefined;
+    let overall: Frame | undefined;
+    for (const f of state.frames) {
+      if (f.pinCount > 0) continue;
+      if (!overall || f.lastUsedAt < overall.lastUsedAt) overall = f;
+      if (f.usageCount === 0 && (!old || f.lastUsedAt < old.lastUsedAt)) old = f;
+    }
+    const victim = old ?? overall;
+    return victim ? { frameId: victim.frameId } : null;
+  },
+};
+
 const POLICIES: Record<ReplacementPolicyName, ReplacementPolicy> = {
   lru,
   clock,
   fifo,
   'second-chance': secondChance,
   optimal,
+  midpoint,
 };
 
 export function policyFor(name: ReplacementPolicyName): ReplacementPolicy {
@@ -278,6 +327,7 @@ export const REPLACEMENT_POLICY_NAMES = [
   'fifo',
   'second-chance',
   'optimal',
+  'midpoint',
 ] as const satisfies readonly ReplacementPolicyName[];
 
 /** Short label for each policy, for `<select>`s and column headers. */
@@ -287,4 +337,5 @@ export const REPLACEMENT_POLICY_LABELS: Record<ReplacementPolicyName, string> = 
   fifo: 'FIFO',
   'second-chance': 'Second-chance',
   optimal: 'Optimal (Bélády)',
+  midpoint: 'Midpoint LRU (InnoDB)',
 };

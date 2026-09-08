@@ -48,11 +48,13 @@ They only diverge once some pages are read more often than others, which is exac
 lookup vs. sequential scan contrast on the [Getting started](/docs/getting-started) page is built to show.
 
 The pipeline offers these two because they are the contrast that teaches. The standalone
-[buffer-pool sandbox](/tools/buffer-pool) adds three more to line up against them — **FIFO** (evict
+[buffer-pool sandbox](/tools/buffer-pool) adds four more to line up against them — **FIFO** (evict
 the oldest page, however hot), **second-chance** (FIFO with a reference bit — clock sweep's
-ancestor), and **optimal** (evict the page used farthest in the future; unbuildable for real, but
-the fewest-misses bound every other policy is measured against). [Compare](/compare) puts any two of
-the five side by side on one access pattern.
+ancestor), **optimal** (evict the page used farthest in the future; unbuildable for real, but the
+fewest-misses bound every other policy is measured against), and **midpoint LRU** (what InnoDB does:
+a page read from disk enters an "old" sublist and only reaches the "young" one on a re-access, so a
+one-pass scan flushes only itself). [Compare](/compare) puts any two of the six side by side on one
+access pattern, or the same query with and without an index.
 
 ## Where this simplifies
 

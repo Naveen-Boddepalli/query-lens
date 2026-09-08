@@ -86,6 +86,15 @@ const POLICY_NOTE: Record<ReplacementPolicyName, ReactNode> = {
       measured against.
     </>
   ),
+  midpoint: (
+    <>
+      <span className="text-ink">Midpoint LRU</span> is what InnoDB (MySQL) does. The LRU list has a
+      young half and an old half; a page read from disk enters the <em>old</em> half and only
+      reaches the young half if it is read again. A sequential scan touches each page once, so its
+      pages evict one another out of the old half and never displace the hot set — the failure
+      plain LRU has that this fixes.
+    </>
+  ),
 };
 
 export function BufferPoolPanel({

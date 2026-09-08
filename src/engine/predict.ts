@@ -24,6 +24,7 @@ const POLICY_LABEL: Record<ReplacementPolicyName, string> = {
   fifo: 'FIFO',
   'second-chance': 'second-chance',
   optimal: 'the optimal policy',
+  midpoint: 'midpoint LRU',
 };
 
 const POLICY_WHY: Record<ReplacementPolicyName, string> = {
@@ -35,6 +36,8 @@ const POLICY_WHY: Record<ReplacementPolicyName, string> = {
     'Second-chance is FIFO with a reprieve: a page used since it loaded is passed over once, its reference bit cleared, and sent to the back of the queue. The victim is the oldest page that has not been touched.',
   optimal:
     'The optimal policy evicts the page whose next use is farthest in the future. It cannot be built for real — nothing knows the future — but it is the fewest-misses bound every real policy is judged against.',
+  midpoint:
+    'Midpoint LRU keeps an "old" sublist of pages read but not yet re-used. New pages land there, and eviction takes the least-recently-used one — so a one-pass scan flushes only itself, never the hot pages in the young sublist.',
 };
 
 /** "Which frame gets evicted?" — the canonical prompt from the research. */

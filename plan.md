@@ -1,17 +1,19 @@
 # Project Plan: QueryLens — Interactive Database Internals Visualizer
 
-> **v12 — 2026-09-07.** Two more of §21.3's tool routes shipped. **`/tools/parser`** is built: a
+> **v12 — 2026-09-08.** Cleared most of the §21.6 v2 backlog. **`/tools/parser`** is built: a
 > live token ribbon over the existing tokenizer (`tokenize` now re-exported from
 > `src/engine/index.ts`), the Playground's AST view (`AstTree`, driven directly from
 > `toDisplayTree`), a recursion-depth readout, and the parser's own error messages for both
 > tokenize and parse failures — no engine change, since the parse half already existed (§20.4).
-> **Three replacement policies** joined the buffer-pool sandbox and Compare: `fifo`,
-> `second-chance` (emitting the same `sweep` events clock does) and `optimal` (Bélády's MIN —
+> **Four replacement policies** joined the buffer-pool sandbox and Compare: `fifo`,
+> `second-chance` (emitting the same `sweep` events clock does), `optimal` (Bélády's MIN —
 > `runBufferTrace` now hands `createBufferPool` the whole reference string as lookahead;
-> `optimal` degrades to FIFO without one, which is all the SQL path ever sees). `ReplacementPolicyName`
-> widened to the five; the Playground `<select>`, `urlState` and `/settings` still allow-list
+> `optimal` degrades to FIFO without one, which is all the SQL path ever sees), and `midpoint`
+> (InnoDB midpoint-insertion LRU, §7.5 — an optional `onLoad` hook on `ReplacementPolicy` lets a
+> load land in the "old" sublist so a one-pass scan cannot flush the hot set). `ReplacementPolicyName`
+> widened to six; the Playground `<select>`, `urlState` and `/settings` still allow-list
 > `lru`/`clock` only, so the pipeline's contrast (§9) and every shared link are unchanged.
-> `ComparePage` now picks either side from the five rather than being fixed on LRU-vs-clock.
+> `ComparePage` now picks either side from the six rather than being fixed on LRU-vs-clock.
 > **`/tools/btree`** shipped in the same push — the last of the three §21.3 tool routes, and the
 > only one gated on an engine build. **B+Tree deletion** now exists (`deleteKey` in
 > `src/engine/index/btree.ts`): leaf underflow → borrow from a sibling or merge; internal underflow
@@ -29,7 +31,7 @@
 > (per-stage toggles, a narration text filter) with per-row JSON and a Copy-JSON of the filtered
 > set. It runs the same `runQuery` the Playground does, so what you inspect is exactly what the
 > panels fold; each row's `#` opens the Playground at that step. Reads the Playground's `q`/`p`/`d`
-> keys (its `p` also takes the three buffer-pool-only policies); footer-only nav, next to Settings
+> keys (its `p` also takes the four buffer-pool-only policies); footer-only nav, next to Settings
 > and Assignments per §21.2. No engine change.
 >
 > **The assignment reveal-lock** shipped too — the last gap in a v10 feature. `/assignments/new`
@@ -46,12 +48,13 @@
 > is about is the *aggregate* work, and the Playground is where you step. A range query that cannot
 > use the index says so instead of scoring twins.
 >
-> Gate: typecheck, lint, 365 unit tests (+27: 10 policy, 12 B+Tree delete incl. 5 property tests,
+> Gate: typecheck, lint, 368 unit tests (+30: 13 policy, 12 B+Tree delete incl. 5 property tests,
 > 5 reveal-lock), build, bundle budget (`standalone-tools` 18→24 kB, total 335→342 — the
 > parser/B+Tree/trace routes plus the shared `FlowTree`/`BTreePanel`/`display` chunks that split out
-> once a second route imported them; `ComparePage` grew ~1.4 kB gzip for `runQuery`), 33 e2e (+7),
+> once a second route imported them; `ComparePage` grew ~1.4 kB gzip for `runQuery`), 34 e2e (+8),
 > zero axe violations on `/tools/parser`, `/tools/btree`, `/trace`, `/compare` (both modes),
-> `/tools`, `/tools/buffer-pool` and the Playground in assignment mode, in both themes (fixed a
+> `/tools`, `/tools/buffer-pool` (incl. midpoint) and the Playground in assignment mode, in both
+> themes (fixed a
 > pre-existing `opacity-70` contrast failure on the Tools index card, and swapped the trace
 > inspector's stage colours off the
 > text — some `--color-stage-*` fall under 4.5:1 as 13px body text — onto a swatch).
@@ -348,7 +351,8 @@ still needs are §21. The docs (`/docs`) are MDX routes inside this same build (
   "eviction = LRU" would create exactly the misconception §12 warns about. Offering both turns the honesty
   problem into the product's best teaching moment ("same access pattern, two policies, different victim"),
   and clock sweep — a hand rotating around a ring of frames — animates better than a reordering list.
-  InnoDB-style midpoint LRU is a good v1 third option.
+  InnoDB-style midpoint LRU **shipped v12** as `midpoint` — a fresh page enters an "old" sublist and
+  only reaches the "young" one on a re-access, so a one-pass scan flushes only itself.
 - "Disk" is simulated as a simple in-memory array/map standing in for persistent storage — page fetch introduces a simulated latency to visually distinguish "buffer hit" vs "disk read."
 
 ### 7.6 Index (B+Tree)
@@ -478,7 +482,7 @@ This event stream is the single contract between engine and UI — makes the UI 
 | M11 | **Docs, manual, licensing & governance (§17–§18):** docs site, Getting Started, the two manual pages the §9 study needs, `LICENSE-DOCS`, font licensing, README restructure | ~1 week (P0/P1) + ongoing — **docs site built, see note** |
 | M12 | **Portable artefacts (§20.3):** copy-as-Mermaid (AST, plan), PNG export of any panel, `scripts/record.ts` for launch GIFs/WebM. No backend, no new engine code — feeds the §18.2 launch post | ~1 week |
 | M13 | **Site structure — routing consolidation (§21.5):** SPA rewrite so deep links resolve, delete the dead `src/router.tsx`, correct the "single page" 404 and the stale `index.html` title, code-split routes, one nav manifest. Gates every new page because a multi-page app whose links 404 is not one | ~1 day — **done (v9), + 3 regressions it uncovered** |
-| v1 | Expand SQL coverage: joins, cost estimates, InnoDB midpoint-LRU as a third policy. **§20/§21 v1 tranche — shipped (v10):** the non-SQL event driver (`src/engine/bufferTrace.ts`, ahead of schedule), the Buffer Pool standalone (`/tools/buffer-pool`, LRU/clock only — extra policies still open), assignment links (`/assignments/new`, no reveal-lock yet), the query gallery (`/gallery`), the comparison view (`/compare`, buffer-pool half only). **v12:** the parser and B+Tree standalones (`/tools/parser`, `/tools/btree` + B+Tree delete), `/trace`, three more buffer-pool policies, the assignment reveal-lock, and the full-pipeline half of Compare. **Still open:** true vector SVG export (§20.3), `/learn`, InnoDB midpoint-LRU | Post-MVP |
+| v1 | Expand SQL coverage: joins, cost estimates, InnoDB midpoint-LRU as a third policy. **§20/§21 v1 tranche — shipped (v10):** the non-SQL event driver (`src/engine/bufferTrace.ts`, ahead of schedule), the Buffer Pool standalone (`/tools/buffer-pool`, LRU/clock only — extra policies still open), assignment links (`/assignments/new`, no reveal-lock yet), the query gallery (`/gallery`), the comparison view (`/compare`, buffer-pool half only). **v12:** the parser and B+Tree standalones (`/tools/parser`, `/tools/btree` + B+Tree delete), `/trace`, four more buffer-pool policies (FIFO, second-chance, Bélády, InnoDB midpoint-LRU), the assignment reveal-lock, and the full-pipeline half of Compare. **Still open:** true vector SVG export (§20.3), `/learn` | Post-MVP |
 | v2+ | **Each its own plan (§20.5–§20.6):** graded submission (first backend), the interactive-embed package, the Visual `EXPLAIN` viewer. The B+Tree standalone (§20.4) is here until B+Tree delete exists | Not committed |
 
 M8 sits between "the app works" and "the URL is public." It is not polish — every item on the P0 list in
@@ -1551,10 +1555,10 @@ for any of them being linkable.
   feature: the pool already runs LRU and clock and emits `hit/load/miss/evict/sweep`. "A mock stream
   of page requests" is an array of page IDs fed to `pool.pin` in a loop — a ~40-line driver. It
   fills a real gap (LRU vs clock is a notoriously hard lecture), and it *is* §9's contrast, so it
-  doubles as a tighter study instrument than the whole pipeline. To be worth an OS student's hour it
-  wants more policies — FIFO, Second-Chance, Bélády-optimal — which the `ReplacementPolicy`
-  interface (`name`, `onAccess`, `selectVictim`) already makes a per-file addition. This is also
-  where §7.5's promised InnoDB midpoint-LRU finally lands.
+  doubles as a tighter study instrument than the whole pipeline. **Done, v10; v12 added the four
+  policies this called for** — FIFO, second-chance, Bélády-optimal, and §7.5's promised InnoDB
+  midpoint-LRU — each a per-file addition behind the `ReplacementPolicy` interface (`onLoad` was
+  added to it for midpoint, so a load can insert at the old sublist rather than the young one).
 - **B+Tree as a DSA-course tool — done, v12.** The visualisation, the animated traversal and the
   display transformer already existed; the missing half was B+Tree **deletion**, which
   `src/engine/index/btree.ts` now has — `deleteKey`: leaf and internal underflow (borrow-from-
@@ -1622,7 +1626,7 @@ query debugging / APM use case" as out of scope, possibly forever.
 | PNG export of a panel | Build | M12 | — |
 | `scripts/record.ts` (GIF/WebM) | Build | M12 | — |
 | True vector SVG export | Build | v1 | A paper or a course deck needs it |
-| Buffer Pool standalone | **Done, v10; FIFO / Second-Chance / Bélády added v12** | v1 | InnoDB midpoint-LRU (§7.5) is the one policy still open |
+| Buffer Pool standalone | **Done, v10; FIFO / Second-Chance / Bélády / midpoint-LRU added v12** | v1 | — |
 | B+Tree standalone | **Done, v12** (delete + property tests built with it) | v1 | Stepping the split / borrow / merge restructure (new `index` event kinds) is the obvious extension |
 | Parser standalone (token ribbon) | **Done, v12** | v2 | Stepping the parser's cursor through the ribbon (new event kinds) is the obvious extension |
 | Assignment links (client-side) | **Done, v10; reveal-lock added v12** | v1 | — |
@@ -1768,7 +1772,7 @@ Grouped by area. **Status** is `built` / a milestone / `v1` / `v2` / `own plan`,
 | Route | Page | Primary feature | URL state | Status |
 |---|---|---|---|---|
 | `/tools` | Tools index | What each standalone is for, and who it is for, and which are not built yet | — | **built** |
-| `/tools/buffer-pool` | Buffer pool sandbox | Type or generate a page-reference string; step it against any of five policies — LRU, clock sweep, FIFO, second-chance, optimal (Bélády) — through the exact `BufferPoolPanel` the Playground uses, driven by `runBufferTrace`. No SQL, no table. `optimal` reads the whole reference string as lookahead (the SQL path has none, so it degrades to FIFO there) | reference string, frames, policy | **built** — v12 added the three non-pipeline policies |
+| `/tools/buffer-pool` | Buffer pool sandbox | Type or generate a page-reference string; step it against any of six policies — LRU, clock sweep, FIFO, second-chance, optimal (Bélády), midpoint-LRU (InnoDB) — through the exact `BufferPoolPanel` the Playground uses, driven by `runBufferTrace`. No SQL, no table. `optimal` reads the whole reference string as lookahead (the SQL path has none, so it degrades to FIFO there) | reference string, frames, policy | **built** — v12 added the four non-pipeline policies |
 | `/tools/btree` | B+Tree sandbox | `insert` / `delete` / `find` number pad; watch it split on insert and borrow or merge on delete; fan-out slider; structural invariants re-checked and shown after every edit | `keys`, `fanout` | **built** — v12; B+Tree deletion (`deleteKey`) built with it |
 | `/tools/parser` | Parser sandbox | Arbitrary text → live token ribbon → live AST (the Playground's `AstTree`, from `toDisplayTree`) with recursion depth and the parser's own tokenize/parse error messages | source text (`src`) | **built** — v12 |
 
@@ -1890,12 +1894,13 @@ the same `runQuery` as the Playground, footer-only. **Assignment links** gained 
 they were always missing: `&l=1` seals the trace at the landing step until the learner answers
 (`usePlayback` `ceiling`, no "skip"). **`/compare`** gained a second mode — index vs. sequential
 scan on the same query, scored side by side — closing §13's full-pipeline half. The buffer-pool
-tool and Compare's policy mode gained `fifo`,
-`second-chance` and `optimal` behind the existing `ReplacementPolicy` interface — `optimal` needed
-one new seam, an optional lookahead array on `BufferState` that `runBufferTrace` fills and the SQL
-path leaves empty. `ReplacementPolicyName` is now the five, but the Playground picker, `urlState`
-and `/settings` still allow-list `lru`/`clock`, so §9's contrast and every shared link are
-untouched. Still open there: InnoDB midpoint-LRU (§7.5).
+tool and Compare's policy mode gained four policies behind the existing `ReplacementPolicy`
+interface — `fifo`, `second-chance`, `optimal` (Bélády; needs an optional lookahead array on
+`BufferState` that `runBufferTrace` fills and the SQL path leaves empty), and `midpoint` (InnoDB
+midpoint-insertion LRU, §7.5; needs an optional `onLoad` hook so a load can enter the old sublist
+rather than the young one). `ReplacementPolicyName` is now these six, but the Playground picker,
+`urlState` and `/settings` still allow-list `lru`/`clock`, so §9's contrast and every shared link
+are untouched.
 
 ### 21.7 Risks specific to going multi-page
 

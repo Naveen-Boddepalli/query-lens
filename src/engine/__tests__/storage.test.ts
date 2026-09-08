@@ -231,7 +231,7 @@ describe('clock sweep', () => {
 });
 
 describe('policy interface', () => {
-  const ALL = ['lru', 'clock', 'fifo', 'second-chance', 'optimal'] as const;
+  const ALL = ['lru', 'clock', 'fifo', 'second-chance', 'optimal', 'midpoint'] as const;
 
   it('every policy is reachable by name', () => {
     for (const name of ALL) expect(policyFor(name).name).toBe(name);
@@ -334,6 +334,50 @@ describe('second-chance', () => {
   });
 });
 
+describe('midpoint LRU (InnoDB)', () => {
+  const bufferActionsOf = (accesses: number[], frames: number, policy: 'lru' | 'midpoint') => {
+    const o = opts({ bufferFrames: frames, policy });
+    const { pool: bp, drain } = pool(o);
+    for (const p of accesses) {
+      const f = bp.fetch(p);
+      if (f) bp.unpin(f.frameId);
+    }
+    const events = drain();
+    return {
+      victims: events.flatMap((e) =>
+        e.stage === 'buffer' && e.action === 'evict' ? [e.victimPageId] : [],
+      ),
+      hits: bp.stats.hits,
+      resident: bp.state.frames.map((f) => f.pageId).filter((p) => p !== null),
+    };
+  };
+
+  // Pages 0 and 1 are read, then re-read (so they reach the young sublist),
+  // then a run of fresh pages arrives and page 0 is asked for once more. Plain
+  // LRU evicts the hot pages first (0, then 1) and the closing read of 0 misses.
+  // Midpoint evicts only the scan's own pages and keeps 0 and 1 resident.
+  const HOT_THEN_SCAN = [0, 1, 0, 1, 2, 3, 4, 5, 0];
+
+  it('protects the young sublist from a one-pass scan', () => {
+    const mid = bufferActionsOf(HOT_THEN_SCAN, 4, 'midpoint');
+    const lru = bufferActionsOf(HOT_THEN_SCAN, 4, 'lru');
+
+    expect(mid.victims).toEqual([2, 3]);
+    expect(lru.victims).toEqual([0, 1, 2]);
+    expect(mid.resident).toContain(0);
+    expect(mid.resident).toContain(1);
+    expect(mid.hits).toBeGreaterThan(lru.hits);
+  });
+
+  it('behaves like LRU when every page is re-used (all young)', () => {
+    // Nothing stays in the old sublist, so the fallback — overall LRU — runs.
+    const refs = [0, 1, 2, 0, 1, 2, 3];
+    expect(bufferActionsOf(refs, 3, 'midpoint').victims).toEqual(
+      bufferActionsOf(refs, 3, 'lru').victims,
+    );
+  });
+});
+
 describe('optimal (Bélády)', () => {
   it('falls back to FIFO order when it has no lookahead', () => {
     // `createBufferPool` with no reference string — the SQL path. The farthest
@@ -357,7 +401,7 @@ describe('engine state and the UI fold agree — extra policies', () => {
   // The clock-only `usageCount` the fold reconstructs is meaningless for these
   // policies (the panel never renders it for them), so this pins the frame
   // *contents* and the stats rather than every field.
-  it.each(['fifo', 'second-chance', 'optimal'] as const)(
+  it.each(['fifo', 'second-chance', 'optimal', 'midpoint'] as const)(
     'folding the emitted events reproduces the resident pages (%s)',
     (policy) => {
       const o = opts({ policy });
