@@ -2113,8 +2113,11 @@ URL-state schema. None needs a backend.
   changes the row count". Engagement (§12's core risk) with no backend and no new engine surface: a
   challenge is a predicate over an existing `RunResult`. ~1 wk. v1, and a natural §18.2 launch
   artefact ("solve it in six steps").
-- **Progress dashboard.** Stages visited, lessons done, prediction hit-rate — `localStorage`,
-  degrades to empty. ~2 days. v1, feeds the second visit.
+- **Progress dashboard.** ~~Stages visited, lessons done, prediction hit-rate — `localStorage`,
+  degrades to empty. Feeds the second visit.~~ **Done, v13.** `/progress` (footer nav): lessons
+  complete (`learnProgress.ts`), pipeline stages seen (`src/ui/progress.ts` — the Playground unions
+  `visited` into `localStorage` each step), and the prediction record (recorded on each committed
+  answer). All degrade to a "nothing tracked yet" empty state; a Clear button wipes both stores.
 - **In-app quiz / self-check.** A bank of mechanism questions scored client-side, with a streak in
   `localStorage`. **The caveat is the whole decision:** the §9 post-test is exactly this shape, so
   shipping the study's own bank in the app contaminates the study. A disjoint bank is fine; the same
@@ -2237,7 +2240,7 @@ URL-state schema. None needs a backend.
 | `/tools/locks` | Build | v1–v2 | Enforced lock manager lands |
 | `/tools/hash-join` | Build | v1–v2 | — |
 | Challenge mode | Build | v1 | — |
-| Progress dashboard | Build | v1 | — |
+| Progress dashboard | **Done, v13** (`/progress` — lessons, stages seen, prediction record) | v1 | — |
 | Assignment sets | Build | v1 | — |
 | Presenter mode | **Done, v13** (`PresenterView.tsx` — `?present=1` overlay on the Playground) | v1 | — |
 | Print stylesheet | Build | v1–v2 | — |

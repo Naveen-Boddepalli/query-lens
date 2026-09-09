@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Progress dashboard** at `/progress` (plan.md §22.4) — a returning-visitor page: lessons marked
+  complete, which pipeline stages you have seen in a trace, and your prediction record (right / total,
+  hit rate). All read from `localStorage` and all degrade to a "nothing tracked yet" empty state; a
+  Clear button wipes it. The Playground records stages and prediction outcomes as you go
 - **Presenter mode** (plan.md §22.5, §17.2) — a **Present** button on the Playground (or `?present=1`)
   opens a full-viewport view of the current stage for a lecture hall: the diagram large, the narration
   at heading size, keyboard-driven (Space, ←/→, Esc), with an optional real full-screen toggle.

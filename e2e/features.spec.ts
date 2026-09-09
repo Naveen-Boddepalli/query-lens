@@ -262,6 +262,27 @@ test('the panels also copy themselves as monospace text', async ({ page, context
   expect(tree).toMatch(/(internal|leaf), page \d+/);
 });
 
+test('the progress dashboard fills in from real Playground activity', async ({ page }) => {
+  await page.goto('/progress');
+  await expect(page.getByText(/Nothing tracked yet/)).toBeVisible();
+
+  // Answer a prediction, which also runs the trace up to that step.
+  await page.goto('/playground?q=SELECT+*+FROM+users+WHERE+id+%3D+5&p=lru&x=1&s=8');
+  await page.getByRole('button', { name: /index lookup/i }).click();
+  // Step to the end so several stages are marked seen.
+  await page.getByLabel('Scrub to step').press('End');
+
+  await page.goto('/progress');
+  await expect(page.getByText(/Nothing tracked yet/)).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Pipeline stages seen' })).toBeVisible();
+  await expect(page.getByText(/1 right of 1 committed|0 right of 1 committed/)).toBeVisible();
+  // At least one stage chip is in the "seen" state.
+  await expect(page.locator('li', { hasText: /●\s*Parser/ })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Clear progress' }).click();
+  await expect(page.getByText(/Nothing tracked yet/)).toBeVisible();
+});
+
 test('presenter mode is a keyboard-driven overlay with prediction suppressed', async ({ page }) => {
   // A link with prediction ON, landing on the gated step.
   await page.goto('/playground?q=SELECT+*+FROM+users+WHERE+id+%3D+5&p=lru&x=1&s=8&present=1');

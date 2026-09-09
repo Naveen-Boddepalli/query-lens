@@ -41,4 +41,5 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { path: '/settings', label: 'Settings', footer: true },
   { path: '/assignments/new', label: 'Create an assignment', footer: true },
   { path: '/trace', label: 'Trace inspector', footer: true },
+  { path: '/progress', label: 'Your progress', footer: true },
 ] as const;

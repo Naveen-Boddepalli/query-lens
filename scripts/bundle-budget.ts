@@ -54,7 +54,7 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
   // localStorage progress helper, and `lessons.tsx` — the lesson prose plus the
   // link-builder that computes each step from a real engine run. Lazy; loads
   // only when someone visits `/learn`.
-  { name: 'learn', test: /^(LearnPage|LessonPage|learnProgress|lessons)-/, kb: 10, note: 'the /learn track: index, lesson page, progress, and nine lessons of content' },
+  { name: 'learn', test: /^(LearnPage|LessonPage|ProgressPage|learnProgress|progress|lessons)-/, kb: 10, note: 'the /learn track (index, lesson page, nine lessons) plus the /progress dashboard, which shares the lesson list' },
   // `html-to-image`, behind the panel "Download PNG" button (§20.3). `import()`ed
   // on the first export, never at route load — the one runtime dependency the
   // app adds beyond its framework and editor.
@@ -95,8 +95,10 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
  * growth, but it shows in the total.
  * Raised 360 → 362 for the presenter view (`PresenterView.tsx`, §22.5) — the
  * room-facing overlay, lazy with the Playground route.
+ * Raised 362 → 363 for the `/progress` dashboard (§22.4) and its `progress.ts`
+ * localStorage helper — a lazy route plus a few lines in the Playground.
  */
-const TOTAL_KB = 362;
+const TOTAL_KB = 363;
 
 const gzipKb = (bytes: Buffer): number => gzipSync(bytes, { level: 9 }).length / 1024;
 

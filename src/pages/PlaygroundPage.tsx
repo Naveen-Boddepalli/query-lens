@@ -22,6 +22,7 @@ import { DataEditor } from '../ui/DataEditor.tsx';
 import { PredictionCard } from '../ui/PredictionCard.tsx';
 import { PresenterView } from '../ui/PresenterView.tsx';
 import { ShortcutHints } from '../ui/ShortcutHints.tsx';
+import { recordPrediction, recordStages } from '../ui/progress.ts';
 import { stepAnnouncement } from '../ui/stepAnnouncement.ts';
 import { btnPrimary, btnSecondary, panelSurface } from '../ui/primitives.ts';
 import { useThemeContext } from '../ui/ThemeContext.tsx';
@@ -161,6 +162,10 @@ export function PlaygroundPage() {
     for (const e of result.events.slice(0, playback.step)) seen.add(e.stage);
     return seen;
   }, [result, playback.step]);
+
+  // plan.md §22.4: feed the `/progress` dashboard. A localStorage convenience,
+  // guarded, and a no-op once every stage in `visited` is already recorded.
+  useEffect(() => { recordStages(visited); }, [visited]);
 
   const activeStage = pinnedStage ?? (prompt ? upcoming?.stage : undefined) ?? state.stage ?? null;
 
@@ -460,6 +465,7 @@ export function PlaygroundPage() {
               canSkip={!ASSIGNMENT}
               onAnswer={(optionId) => {
                 setAnswers((current) => ({ ...current, [upcoming.id]: optionId }));
+                recordPrediction(optionId === prompt.correctOptionId);
               }}
               onSkip={() => {
                 setAnswers((current) => ({ ...current, [upcoming.id]: '' }));

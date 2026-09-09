@@ -97,6 +97,9 @@ const TracePage = lazy(() =>
 const LearnPage = lazy(() =>
   import('./pages/LearnPage.tsx').then((m) => ({ default: m.LearnPage })),
 );
+const ProgressPage = lazy(() =>
+  import('./pages/ProgressPage.tsx').then((m) => ({ default: m.ProgressPage })),
+);
 const LessonPage = lazy(() =>
   import('./pages/LessonPage.tsx').then((m) => ({ default: m.LessonPage })),
 );
@@ -149,6 +152,7 @@ export default function App() {
             <Route path="gallery" element={suspended(GalleryPage)} />
             <Route path="compare" element={suspended(ComparePage)} />
             <Route path="trace" element={suspended(TracePage)} />
+            <Route path="progress" element={suspended(ProgressPage)} />
             <Route path="settings" element={suspended(SettingsPage)} />
             <Route path="assignments/new" element={suspended(AssignmentsNewPage)} />
 
