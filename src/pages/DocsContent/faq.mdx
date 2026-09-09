@@ -73,6 +73,11 @@ app's real typeface and colours baked in; it renders correctly in Chrome and Fir
 back to plain sRGB in Safari, whose SVG-to-canvas path has known colour bugs. Both run entirely in
 your browser.
 
+A moving version — a GIF or a WebM of a trace playing over a range of steps — is produced by the
+project's own `pnpm record` script rather than an in-app button, because a GIF encoder is a poor
+fit for the browser (bundle weight, and 256 colours wreck the palette). Contributors can read
+`scripts/record.ts` for how it drives the built app.
+
 ## Why no joins, subqueries, or `GROUP BY`?
 
 They are out of scope for this release, not forgotten — see [Supported SQL](/docs/reference/sql) for

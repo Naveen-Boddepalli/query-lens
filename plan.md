@@ -75,14 +75,17 @@
 > with the pipeline fails a test rather than shipping a dead link. Primary nav (eight items now).
 > The docs stay the reference; this is the walked-through version.
 >
-> **Two of M12's three artefacts** landed (§20.8). `src/export/toMermaid.ts` — a pure, unit-tested
+> **M12 is complete (§20.8).** `src/export/toMermaid.ts` — a pure, unit-tested
 > `astToMermaid` / `planToMermaid` over the display trees (sequential `nN` ids, so no Mermaid
 > id-escaping) — behind a **Copy as Mermaid** button in `StageDetail`'s header, on the AST and plan
-> panels (not the B+Tree; §20.3). And **Download PNG** on every implemented stage's panel:
+> panels (not the B+Tree; §20.3). **Download PNG** on every implemented stage's panel:
 > `html-to-image@1.11.13` — the app's one runtime dependency past React / Router / CodeMirror —
 > `import()`ed on first use, into its own lazy chunk. Font inlining and `oklch()` verified in
 > Chromium (an e2e checks the PNG magic bytes); Safari's `foreignObject`→canvas colour bugs are
-> noted in the FAQ, not fought. `scripts/record.ts` (GIF/WebM) is the one box still open.
+> noted in the FAQ, not fought. And **`pnpm record`** (`scripts/record.ts`) — Playwright frame-steps
+> the built app over a `--from`/`--to` range and muxes a GIF + WebM, screenshotting the same live
+> panel DOM the PNG button uses; ffmpeg is `$FFMPEG_PATH` → `PATH` → Playwright's bundled copy, the
+> GIF degrading to "WebM + frames + the two commands" when only the bundled build is present.
 >
 > Gate: typecheck, lint, 381 unit tests (+43: 13 policy, 12 B+Tree delete incl. 5 property tests,
 > 5 reveal-lock, 8 learn, 5 toMermaid), build, bundle budget (`standalone-tools` 18→24 kB, new
@@ -522,9 +525,9 @@ This event stream is the single contract between engine and UI — makes the UI 
 | M9 | **UI/UX readiness (§15):** first-run trace, Run feedback, native dialog, shareable URL, prompt placement, responsive height | ~1 day (P0) + 2-3 days (P1) — **both done** |
 | M10 | **Visual design maturity (§16) + landing page (§19):** self-hosted typefaces, named type/space/motion scales, hover states across every diagram panel, footer, first-screen framing | ~1.5 days (P0) + 1 week (P1) — **P0 done** |
 | M11 | **Docs, manual, licensing & governance (§17–§18):** docs site, Getting Started, the two manual pages the §9 study needs, `LICENSE-DOCS`, font licensing, README restructure | ~1 week (P0/P1) + ongoing — **docs site built, see note** |
-| M12 | **Portable artefacts (§20.3):** ~~copy-as-Mermaid (AST, plan), PNG export of any panel~~ **done v12**; still to build — `scripts/record.ts` for launch GIFs/WebM. No backend, no new engine code — feeds the §18.2 launch post | ~1 week |
+| M12 | **Portable artefacts (§20.3):** ~~copy-as-Mermaid (AST, plan), PNG export of any panel~~ **done v12**; ~~`scripts/record.ts` for launch GIFs/WebM~~ **done v13**. Complete. No backend, no new engine code — feeds the §18.2 launch post | ~1 week |
 | M13 | **Site structure — routing consolidation (§21.5):** SPA rewrite so deep links resolve, delete the dead `src/router.tsx`, correct the "single page" 404 and the stale `index.html` title, code-split routes, one nav manifest. Gates every new page because a multi-page app whose links 404 is not one | ~1 day — **done (v9), + 3 regressions it uncovered** |
-| v1 | Expand SQL coverage: joins, cost estimates, InnoDB midpoint-LRU as a third policy. **§20/§21 v1 tranche — shipped (v10):** the non-SQL event driver (`src/engine/bufferTrace.ts`, ahead of schedule), the Buffer Pool standalone (`/tools/buffer-pool`, LRU/clock only — extra policies still open), assignment links (`/assignments/new`, no reveal-lock yet), the query gallery (`/gallery`), the comparison view (`/compare`, buffer-pool half only). **v12:** the parser and B+Tree standalones (`/tools/parser`, `/tools/btree` + B+Tree delete), `/trace`, `/learn`, four more buffer-pool policies (FIFO, second-chance, Bélády, InnoDB midpoint-LRU), the assignment reveal-lock, the full-pipeline half of Compare, and M12's copy-as-Mermaid and PNG export. **Still open:** M12's `scripts/record.ts`, and true vector SVG export (§20.3) | Post-MVP |
+| v1 | Expand SQL coverage: joins, cost estimates, InnoDB midpoint-LRU as a third policy. **§20/§21 v1 tranche — shipped (v10):** the non-SQL event driver (`src/engine/bufferTrace.ts`, ahead of schedule), the Buffer Pool standalone (`/tools/buffer-pool`, LRU/clock only — extra policies still open), assignment links (`/assignments/new`, no reveal-lock yet), the query gallery (`/gallery`), the comparison view (`/compare`, buffer-pool half only). **v12:** the parser and B+Tree standalones (`/tools/parser`, `/tools/btree` + B+Tree delete), `/trace`, `/learn`, four more buffer-pool policies (FIFO, second-chance, Bélády, InnoDB midpoint-LRU), the assignment reveal-lock, the full-pipeline half of Compare, and M12's copy-as-Mermaid and PNG export. **v13:** M12's `scripts/record.ts` (`pnpm record` — GIF/WebM of a trace range), completing M12. **Still open:** true vector SVG export (§20.3) | Post-MVP |
 | v2+ | **Each its own plan (§20.5–§20.6):** graded submission (first backend), the interactive-embed package, the Visual `EXPLAIN` viewer. The B+Tree standalone (§20.4) is here until B+Tree delete exists | Not committed |
 
 M8 sits between "the app works" and "the URL is public." It is not polish — every item on the P0 list in
@@ -1591,7 +1594,7 @@ export.
 | **Copy as Mermaid** (AST, plan) | **Done — v12** | `src/export/toMermaid.ts` + a button in `StageDetail`'s header. The B+Tree is deliberately left out — Mermaid lays out a sibling chain badly | Including the B+Tree — Mermaid lays out a B+Tree with a sibling chain badly. AST and plan are where PR-and-Notion pasting actually happens |
 | **PNG export of any panel** | **Done — v12** | `html-to-image@1.11.13`, lazy `import()`ed; a `Download PNG` button in the `StageDetail` header on every implemented stage. Font inlining and `oklch()` verified working in Chromium; Safari's known `foreignObject` bugs are documented in the FAQ, not fought | Assuming it is caveat-free — the self-hosted woff2 has to be inlined into the capture, and `oklch()` fills need a renderer that rasterises through `foreignObject`. Test in Safari, where that path has known bugs |
 | **True vector SVG export** (papers, slides) | **v1** | ~2–3 days. A dedicated `renderSvg` emitting real `<rect>/<text>/<path>` from the d3 layout `FlowTree` already computes — the grid and lock rows are trivial; the three trees share one renderer because they share `FlowNode` | `html-to-image`'s `toSvg` produces HTML wrapped in `<foreignObject>`, which Illustrator, Inkscape and PowerPoint all import inconsistently. That is not "a high-quality SVG" — it is a screenshot with extra steps |
-| **Animation export (GIF/WebM)** | **Build as a script, not a button — M12** | ½ day. `scripts/record.ts <shareUrl> --from N --to M`, driven by Playwright (already a dependency), frame-stepping the real built app and muxing with ffmpeg | Doing it in-browser: a GIF encoder is ~40 kB of bundle for a feature used monthly, 256 colours wreck the OKLCH palette and the anti-aliased type, and a 131-step scan takes 20–30 s to encode client-side. The script gets the real fonts and colours, and it *is* the §18.2 launch artefact |
+| **Animation export (GIF/WebM)** | **Done, v13 — a script, not a button.** `pnpm record "<link|q=…>" --from N --to M` (`scripts/record.ts`), Playwright frame-stepping the built app and muxing with ffmpeg (`$FFMPEG_PATH` → `PATH` → Playwright's bundled copy; GIF needs a full ffmpeg, WebM does not) | Doing it in-browser: a GIF encoder is ~40 kB of bundle for a feature used monthly, 256 colours wreck the OKLCH palette and the anti-aliased type, and a 131-step scan takes 20–30 s to encode client-side. The script gets the real fonts and colours, and it *is* the §18.2 launch artefact |
 | **Interactive embeds (iframes)** | **v1+, gated on demand** | The URL is already the embed: an author links "scrub through this trace" and it opens the real app at the step. A true in-page embed is either a CSP-relaxed `/embed` entry — safe *here* only because the app has no auth, no actions and no secrets to clickjack — or a published `@querylens/embed` component package. Both are real work; neither is warranted before someone asks | Treating `frame-ancestors 'none'` as an oversight. It is a decision (§14.3); relaxing it globally to make a blog embed work trades the project's cleanest security property for a cosmetic gain |
 
 M12 takes the three that need no backend and no engine change and that produce the launch artefacts
@@ -1677,7 +1680,7 @@ query debugging / APM use case" as out of scope, possibly forever.
 |---|---|---|---|
 | Copy as Mermaid (AST, plan) | **Done, v12** | M12 | — |
 | PNG export of a panel | **Done, v12** | M12 | — |
-| `scripts/record.ts` (GIF/WebM) | Build | M12 | — |
+| `scripts/record.ts` (GIF/WebM) | **Done, v13** (`pnpm record`) | M12 | — |
 | True vector SVG export | Build | v1 | A paper or a course deck needs it |
 | Buffer Pool standalone | **Done, v10; FIFO / Second-Chance / Bélády / midpoint-LRU added v12** | v1 | — |
 | B+Tree standalone | **Done, v12** (delete + property tests built with it) | v1 | Stepping the split / borrow / merge restructure (new `index` event kinds) is the obvious extension |
@@ -1705,12 +1708,20 @@ else waits behind the experiment that decides whether it is worth building.
       unblocked by `img-src 'self' data:`. Verified in Chromium (an e2e asserts the PNG magic bytes
       and size); Firefox untested here but the same path; Safari's `foreignObject`→canvas has known
       colour bugs, documented in the FAQ rather than worked around.
-- [ ] `scripts/record.ts` takes a shareable URL and a step range and emits a GIF and a WebM from the
-      built app, with the real typefaces loaded before the first frame — the `scripts/build-og.ts`
-      pattern, generalised.
-- [ ] The three share one renderer path where they can, so a token or layout change cannot make the
-      button and the script disagree (§20.2 #1).
-- [ ] `CHANGELOG.md` and the docs Reference note the export formats; no §2 non-goal is crossed.
+- [x] **v13.** `scripts/record.ts` (`pnpm record "<link|q=…>" --from N --to M`) frame-steps the
+      *built* app through Playwright — the `scripts/build-og.ts` pattern, generalised from one frame
+      to a range — waits on `document.fonts.ready`, screenshots each step, and muxes a GIF and a
+      WebM. ffmpeg is resolved `$FFMPEG_PATH` → `PATH` → the copy Playwright bundles; the WebM is
+      VP9 or (bundled build) VP8, and the GIF's two-pass `palettegen`/`paletteuse` runs only with a
+      full ffmpeg — without one the script still writes the WebM and the numbered frames and prints
+      the exact commands to finish the GIF. Prediction is forced off in the URL so no gate stalls
+      the playhead; an assignment `l=1` is stripped. Output lands in the git-ignored `build/`.
+- [x] **v13.** One renderer path: `record.ts` screenshots the same live panel DOM the **Download
+      PNG** button rasterises (same components, tokens, font files), so there is no second drawing
+      to drift — the guarantee §20.2 #1 asks for, held the same way `build-og.ts` holds it.
+- [x] **v13.** `CHANGELOG.md` has the `pnpm record` entry; the FAQ's "Can I get the diagrams out?"
+      now names the GIF/WebM script alongside the two in-app buttons. No §2 non-goal is crossed — it
+      is a maintainer script for docs/launch material, not an APM or production surface.
 
 ---
 

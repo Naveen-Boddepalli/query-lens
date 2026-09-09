@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`pnpm record`** (plan.md §20.3, §20.8) — `scripts/record.ts` drives the *built* app in a real
+  browser, frame-steps a shareable link over a `--from`/`--to` range, and muxes the result to a GIF
+  and a WebM with the shipped fonts and `oklch` colours — the completion of M12 and the moving-picture
+  half of the §18.2 launch material. It captures the same live panel DOM the **Download PNG** button
+  does, so there is no second renderer to drift (the still-frame sibling of `scripts/build-og.ts`).
+  The WebM uses whatever ffmpeg is found, falling back to the copy Playwright bundles (VP8); the GIF's
+  `palettegen`/`paletteuse` needs a full ffmpeg, and without one the script still writes the WebM plus
+  the numbered frames and prints the two commands to finish the GIF. Not an in-app button, by §20.3
 - **Download PNG** (plan.md §20.3, §20.8) — a button on every stage's panel that saves it as an
   image with the app's real typeface and `oklch` colours baked in. `html-to-image` is loaded only
   on the first export, so it never affects page load. Verified in Chromium; may fall back to sRGB
