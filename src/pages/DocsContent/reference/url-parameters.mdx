@@ -51,3 +51,14 @@ rather than erroring:
 Only appears once you've edited the seed data through **Edit data**, so a link to the default table
 stays short. It's a generated, compact encoding — not meant to be written by hand — that round-trips
 through the app: edit rows, copy the link, and reopening it reproduces exactly that table.
+
+## Trace files
+
+For a dataset too large to sit comfortably in a URL — or a bug report you want the seed data attached
+to — **Download trace** (next to *Copy link to this step*) saves the same moment as a small JSON
+file, and **Load trace** restores it. The file carries `sql`, `policy`, `predictOn`, `step`, the
+edited `rows` (or `null`), and a build stamp. It deliberately does **not** store the event stream:
+the engine is deterministic, so those re-derive exactly — use the [trace inspector](/trace)'s *Copy
+JSON* if you need them frozen. It is parsed with the same suspicion as the URL — a field that is
+missing, out of range, or a row that doesn't match the `users` schema fails the whole load rather
+than half-applying it.

@@ -232,6 +232,38 @@ test('the panels also copy themselves as monospace text', async ({ page, context
   expect(tree).toMatch(/(internal|leaf), page \d+/);
 });
 
+test('the Playground round-trips a moment through a downloaded trace file', async ({ page }) => {
+  await page.goto('/playground?q=SELECT+*+FROM+users+WHERE+age+%3E+30&p=clock&x=0&s=40');
+  await expect(page.getByLabel('Scrub to step')).toHaveValue('40');
+
+  const downloadPromise = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Download trace' }).click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toMatch(/^querylens-trace-.*\.json$/);
+  const path = await download.path();
+  expect(path).toBeTruthy();
+
+  // Land somewhere unrelated, then load the file and confirm it is restored.
+  await page.goto('/playground');
+  await expect(page.getByLabel('Scrub to step')).toHaveValue('1');
+
+  await page.locator('input[type=file]').setInputFiles(path);
+  await expect(page.getByRole('status')).toContainText('step 40');
+  await expect(page.getByLabel('Scrub to step')).toHaveValue('40');
+  await expect(page.getByLabel('Eviction')).toHaveValue('clock');
+
+  // A file that is not ours is refused with a message, not a broken page.
+  await page.evaluate(() => {
+    const dt = new DataTransfer();
+    dt.items.add(new File(['{"kind":"nope"}'], 'bad.json', { type: 'application/json' }));
+    const input = document.querySelector<HTMLInputElement>('input[type=file]')!;
+    input.files = dt.files;
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await expect(page.getByRole('status')).toContainText(/not a QueryLens trace file/i);
+  await expect(page.getByLabel('Scrub to step')).toHaveValue('40'); // unchanged
+});
+
 test('the trace inspector filters the raw event stream and links into the Playground', async ({ page }) => {
   await page.goto('/trace');
   await expect(page.getByText(/of \d+ events/)).toBeVisible();

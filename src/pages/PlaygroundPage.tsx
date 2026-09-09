@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   createSeedDatabase,
   createTraceProjector,
@@ -34,6 +34,8 @@ import {
   skippedAnswersBefore,
   writeShareState,
 } from '../ui/urlState.ts';
+import { parseTraceFile, serializeTraceFile } from '../ui/traceFile.ts';
+import type { TraceState } from '../ui/traceFile.ts';
 
 const INITIAL_SQL = 'SELECT *\nFROM users\nWHERE id = 5;';
 
@@ -210,6 +212,71 @@ export function PlaygroundPage() {
     run(fresh);
   }
 
+  // plan.md §22.5: the shareable moment as a file, for a dataset too big for a
+  // URL or a bug report that wants the seed data attached. `data:` + `<a
+  // download>`, the DownloadPngButton pattern — no `blob:` lifecycle, and the
+  // deployed CSP has no `navigate-to`, so a download link is unrestricted.
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [traceMsg, setTraceMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
+
+  function downloadTrace() {
+    const json = serializeTraceFile({
+      sql,
+      policy,
+      predictOn,
+      step: playback.step,
+      rows: rowsEdited && table ? table.rows : null,
+    });
+    const a = document.createElement('a');
+    a.href = `data:application/json;charset=utf-8,${encodeURIComponent(json)}`;
+    a.download = `querylens-trace-${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}.json`;
+    a.click();
+  }
+
+  /** Restore a parsed trace file the same way a shared link's `START` would. */
+  function applyTraceState(t: TraceState) {
+    const seed = createSeedDatabase();
+    const seedTable = seed.tables[TABLE];
+    const nextDb: Database =
+      t.rows && seedTable
+        ? { tables: { ...seed.tables, [TABLE]: { ...seedTable, rows: t.rows } } }
+        : seed;
+    const nextResult = runQuery(t.sql, nextDb, { ...DEFAULT_ENGINE_OPTIONS, policy: t.policy });
+    const step = Math.min(t.step, nextResult.events.length);
+
+    setSql(t.sql);
+    setPolicy(t.policy);
+    setPredictOn(t.predictOn);
+    setDb(nextDb);
+    setRowsEdited(t.rows !== null);
+    setEditingData(false);
+    setPinnedStage(null);
+    setResult(nextResult);
+    setAnswers(skippedAnswersBefore(nextResult.events, step));
+    playback.land(step);
+  }
+
+  async function loadTraceFile(file: File) {
+    let text: string;
+    try {
+      text = await file.text();
+    } catch {
+      setTraceMsg({ kind: 'err', text: 'Could not read that file.' });
+      return;
+    }
+    const parsed = parseTraceFile(text, SEED.tables[TABLE]?.columns ?? []);
+    if (!parsed.ok) {
+      setTraceMsg({ kind: 'err', text: parsed.error });
+      return;
+    }
+    applyTraceState(parsed.value);
+    setTraceMsg({
+      kind: 'ok',
+      text: `Loaded trace${parsed.value.rows ? ' with edited data' : ''} at step ${String(parsed.value.step)}.`,
+    });
+    window.setTimeout(() => { setTraceMsg(null); }, 4000);
+  }
+
   return (
     <>
       <main className="grid flex-1 gap-4 p-4 lg:min-h-0 lg:grid-cols-[minmax(300px,400px)_1fr]">
@@ -259,14 +326,50 @@ export function PlaygroundPage() {
                 </>
               )}
             </p>
-            <button
-              type="button"
-              onClick={() => { void copyLink(); }}
-              className="ml-auto underline-offset-2 transition-colors hover:text-ink hover:underline"
-            >
-              {copied ? 'Link copied ✓' : 'Copy link to this step'}
-            </button>
+            <span className="ml-auto flex flex-wrap items-baseline gap-x-3 gap-y-1">
+              <button
+                type="button"
+                onClick={() => { void copyLink(); }}
+                className="underline-offset-2 transition-colors hover:text-ink hover:underline"
+              >
+                {copied ? 'Link copied ✓' : 'Copy link to this step'}
+              </button>
+              <button
+                type="button"
+                onClick={downloadTrace}
+                className="underline-offset-2 transition-colors hover:text-ink hover:underline"
+              >
+                Download trace
+              </button>
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="underline-offset-2 transition-colors hover:text-ink hover:underline"
+              >
+                Load trace
+              </button>
+            </span>
           </div>
+
+          {traceMsg && (
+            <p
+              role="status"
+              className={`text-label ${traceMsg.kind === 'err' ? 'text-evict' : 'text-ink-dim'}`}
+            >
+              {traceMsg.text}
+            </p>
+          )}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="application/json,.json"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              e.target.value = '';
+              if (file) void loadTraceFile(file);
+            }}
+          />
 
           {ASSIGNMENT ? (
             <p className="rounded-lg border border-accent/40 bg-accent/[0.07] px-3 py-2 text-label text-ink-dim">

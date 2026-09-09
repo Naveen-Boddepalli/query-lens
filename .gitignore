@@ -24,4 +24,5 @@ playwright/.cache
 build/
 .pnpm-store/
 
-.pnpm-store/
+# test downloads
+querylens-trace-*.json

@@ -2122,10 +2122,13 @@ URL-state schema. None needs a backend.
   a `tree(1)`-style indented list in a bare ` ``` ` fence, behind a shared **Copy as text** button
   in `StageDetail`'s header. Landed as the Mermaid export's twin — and it *does* take the B+Tree,
   which a fixed-width tree renders fine where Mermaid could not (§20.3).
-- **Trace export / import as JSON.** "Download this trace", "load a trace from a file". §14.1 item 4
-  already assembles the crashing state for the error boundary; this generalises it, and hands the §9
-  study reproducible instruments and bug reports a payload. **Fold near M12 / §14** — a file, no
-  backend, no engine change.
+- **Trace export / import as JSON.** ~~"Download this trace", "load a trace from a file". §14.1 item 4
+  already assembles the crashing state for the error boundary; this generalises it.~~ **Done, v13.**
+  `src/ui/traceFile.ts` + **Download trace** / **Load trace** beside the Playground's *Copy link*.
+  The file is that reproducer made round-trippable — `sql` / `policy` / `predictOn` / `step` / `rows`
+  + a build stamp, and deliberately **no `events`** (the engine re-derives them; a second copy could
+  only drift — §15.2 one level up). Parsed as untrusted input on the way back in, failing the whole
+  load on a bad field. No backend, no engine change.
 - **Presenter mode.** Full-screen, larger type, auto-advance on an adjustable dwell, prediction
   suppressible, keyboard-only. §17.2 already asks "how to skip prediction when demonstrating to a
   room"; this is the room-facing surface. ~3 days, no engine change. v1.
@@ -2189,7 +2192,7 @@ URL-state schema. None needs a backend.
 | Item | Verdict | Earliest | Trigger to revisit |
 |---|---|---|---|
 | Copy-as-text / ASCII trace | **Done, v13** (`toText.ts`, "Copy as text" — AST, plan **and** B+Tree) | M12 | — |
-| Trace JSON export / import | **Promote — M12 / §14** | M12 | — |
+| Trace JSON export / import | **Done, v13** (`traceFile.ts` — Download / Load trace on the Playground) | M12 | — |
 | `aria-live` narration track | **Promote — v1** | v1 | — (do it; add the §8 pointer) |
 | The six missing `/learn` lessons | **Promote — v1, incremental** | v1 | — |
 | Full text transcript | Build | v1 | — |

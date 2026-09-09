@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Download trace / Load trace** (plan.md §22.5) — beside *Copy link to this step*, save the current
+  Playground moment as a small JSON file and restore it later. It is the shareable-URL state as a file
+  — `sql`, `policy`, `predictOn`, `step`, edited `rows`, plus a build stamp — for a dataset too big for
+  a URL, or a bug report that wants the seed data attached. No event stream in the file (the engine
+  re-derives it deterministically; use `/trace`'s *Copy JSON* for a frozen one), and it is parsed with
+  the same defensiveness as the URL: a missing, out-of-range or schema-mismatched field fails the whole
+  load. `src/ui/traceFile.ts`, unit-tested
 - **Copy as text** (plan.md §22.5) — a third panel-header action beside Copy as Mermaid and Download
   PNG: the AST, the plan, or the **B+Tree** as a `tree(1)`-style indented list in a bare ` ``` `
   fence, for a review comment or an email. Pure, unit-tested conversion in `src/export/toText.ts`;
