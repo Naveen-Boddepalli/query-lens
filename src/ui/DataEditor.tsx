@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Row, SqlValue, Table } from '../engine/index.ts';
-import { btnGhost, btnPrimary, btnSecondary } from './primitives.ts';
+import { parseSeedCsv } from './parseCsv.ts';
+import { btnGhost, btnPrimary, btnSecondary, inputField } from './primitives.ts';
 
 /**
  * "Construct their own input data sets" is named explicitly in the condition
@@ -28,7 +29,22 @@ function coerce(raw: string, previous: SqlValue): SqlValue {
 
 export function DataEditor({ table, onApply, onReset, onClose }: DataEditorProps) {
   const [rows, setRows] = useState<Row[]>(() => table.rows.map((r) => ({ ...r })));
+  const [csv, setCsv] = useState('');
+  const [importing, setImporting] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
   const dialog = useRef<HTMLDialogElement>(null);
+
+  function importCsv() {
+    const result = parseSeedCsv(csv, table);
+    if (!result.ok) {
+      setImportError(result.error);
+      return;
+    }
+    setRows(result.rows);
+    setImporting(false);
+    setImportError(null);
+    setCsv('');
+  }
 
   /**
    * plan.md §15.1 item 3. The hand-rolled overlay this replaces had three
@@ -101,6 +117,39 @@ export function DataEditor({ table, onApply, onReset, onClose }: DataEditorProps
           </button>
         </header>
 
+        {importing && (
+          <div className="border-b border-edge bg-surface-2/40 px-4 py-3">
+            <label htmlFor="csv-import" className="text-label text-ink-dim">
+              Paste CSV — <code className="font-mono">{table.columns.join(',')}</code>, one row per
+              line. A header row is optional; an empty field is NULL.
+            </label>
+            <textarea
+              id="csv-import"
+              value={csv}
+              onChange={(e) => { setCsv(e.target.value); setImportError(null); }}
+              rows={4}
+              spellCheck={false}
+              className={`${inputField} mt-1 w-full resize-y font-mono`}
+              placeholder={`${table.columns.join(',')}\n${table.columns.map((c) => (typeof table.rows[0]?.[c] === 'number' ? '0' : 'x')).join(',')}`}
+            />
+            {importError && (
+              <p role="alert" className="mt-1 text-label text-evict">{importError}</p>
+            )}
+            <div className="mt-2 flex gap-2">
+              <button type="button" onClick={importCsv} className={btnPrimary} disabled={csv.trim() === ''}>
+                Replace rows
+              </button>
+              <button
+                type="button"
+                onClick={() => { setImporting(false); setImportError(null); }}
+                className={btnGhost}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+
         <div className="min-h-0 flex-1 overflow-auto">
           <table className="w-full border-collapse text-left font-mono text-label">
             <thead className="sticky top-0 bg-surface-2/95 backdrop-blur-sm">
@@ -148,6 +197,14 @@ export function DataEditor({ table, onApply, onReset, onClose }: DataEditorProps
         <footer className="flex flex-wrap items-center gap-2 border-t border-edge bg-surface-2/40 px-4 py-3">
           <button type="button" onClick={addRow} className={btnSecondary}>
             + Add row
+          </button>
+          <button
+            type="button"
+            onClick={() => { setImporting((v) => !v); setImportError(null); }}
+            aria-expanded={importing}
+            className={btnSecondary}
+          >
+            Import CSV
           </button>
           <button type="button" onClick={() => { close(); onReset(); }} className={btnGhost}>
             Reset to seed

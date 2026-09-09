@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Import CSV** in the seed-data editor (plan.md §22.7) — paste a block of `id,name,email,age`
+  rows instead of typing them. A small quote-aware reader (`src/ui/parseCsv.ts`), bounded to 500
+  rows and per-column type-checked; an optional header row is skipped, and a malformed block is
+  rejected whole with a reason rather than half-imported — the same "untrusted input" discipline the
+  shareable URL follows
 - **Progress dashboard** at `/progress` (plan.md §22.4) — a returning-visitor page: lessons marked
   complete, which pipeline stages you have seen in a trace, and your prediction record (right / total,
   hit rate). All read from `localStorage` and all degrade to a "nothing tracked yet" empty state; a

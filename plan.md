@@ -2190,8 +2190,11 @@ URL-state schema. None needs a backend.
 - **Preset dataset library.** `users`, `orders`, a small `lineitem`, and a deliberately skewed
   distribution for the selectivity/cost story. §19.2's preset *query* chips have a companion in
   preset *tables*. **Note alongside §19.2**, ~2 days, rather than fresh scope.
-- **CSV / paste import into the seed grid.** A bounded row count, parsed as untrusted input — the
-  §15.2 rule for the URL applies. ~2 days. v1.
+- **CSV / paste import into the seed grid.** ~~A bounded row count, parsed as untrusted input — the
+  §15.2 rule for the URL applies.~~ **Done, v13.** An **Import CSV** panel in the seed editor:
+  `src/ui/parseCsv.ts` is a small RFC-4180-ish reader (quotes, `""`, embedded commas), total and
+  bounded (500 rows, per-column type-coerced, an optional header row skipped), rejecting a malformed
+  block whole with a reason — the §15.2 discipline. Unit-tested.
 - **Larger datasets + the Web Worker.** §5 keeps the engine worker-ready for exactly this: a
   depth-3–4 B+Tree and a genuinely thrashing pool need more than 48 rows, and past some size the
   main-thread fold may jank. Trigger: a lesson or the cost model needs a tree taller than two. The
@@ -2231,7 +2234,7 @@ URL-state schema. None needs a backend.
 | Composite / covering indexes | Build | v1 | Cost model lands |
 | JOIN + join-algorithm compare | Build | v1 | Multi-table schema lands |
 | Multi-table schema editor | Build | v1 | JOIN is scheduled |
-| CSV / paste import | Build | v1 | — |
+| CSV / paste import | **Done, v13** (`parseCsv.ts` + an Import CSV panel in the seed editor) | v1 | — |
 | Preset dataset library | Build | v1 (with §19.2) | — |
 | `/tools/planner` | Build | v1 | Non-SQL driver generalised |
 | `/tools/page` (slotted-page inspector) | **Done, v13** (`slottedPage.ts` + `/tools/page`) | v1 | — |

@@ -97,8 +97,10 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
  * room-facing overlay, lazy with the Playground route.
  * Raised 362 → 363 for the `/progress` dashboard (§22.4) and its `progress.ts`
  * localStorage helper — a lazy route plus a few lines in the Playground.
+ * Raised 363 → 364 for CSV paste-import in the seed editor (`parseCsv.ts`, §22.7)
+ * — a small reader plus the panel in `DataEditor`, both in the Playground chunk.
  */
-const TOTAL_KB = 363;
+const TOTAL_KB = 364;
 
 const gzipKb = (bytes: Buffer): number => gzipSync(bytes, { level: 9 }).length / 1024;
 

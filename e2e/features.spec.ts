@@ -262,6 +262,30 @@ test('the panels also copy themselves as monospace text', async ({ page, context
   expect(tree).toMatch(/(internal|leaf), page \d+/);
 });
 
+test('the seed editor imports rows from pasted CSV', async ({ page }) => {
+  await page.goto('/playground');
+  await page.getByRole('button', { name: /^Edit data/ }).click();
+  await page.getByRole('button', { name: 'Import CSV' }).click();
+
+  const box = page.getByLabel(/Paste CSV/);
+
+  // A malformed block is rejected whole, with a reason, and changes nothing.
+  await box.fill('1,ada,ada@x.dev');
+  await page.getByRole('button', { name: 'Replace rows' }).click();
+  await expect(page.getByRole('alert')).toContainText(/expected 4/);
+  await expect(page.locator('dialog')).toBeVisible();
+  expect(await page.locator('dialog tbody tr').count()).toBe(48);
+
+  // A good block replaces the grid.
+  await box.fill('id,name,email,age\n1,ada,ada@x.dev,36\n2,bo,bo@x.dev,41\n3,cy,cy@x.dev,29');
+  await page.getByRole('button', { name: 'Replace rows' }).click();
+  await expect(page.locator('dialog tbody tr')).toHaveCount(3);
+
+  await page.getByRole('button', { name: /Apply .* re-run/ }).click();
+  await expect(page.getByRole('button', { name: 'Edit data (3)' })).toBeVisible();
+  await expect(page.getByText(/steps in this trace/)).toBeVisible();
+});
+
 test('the progress dashboard fills in from real Playground activity', async ({ page }) => {
   await page.goto('/progress');
   await expect(page.getByText(/Nothing tracked yet/)).toBeVisible();
