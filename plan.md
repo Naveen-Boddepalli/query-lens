@@ -1849,6 +1849,7 @@ Grouped by area. **Status** is `built` / a milestone / `v1` / `v2` / `own plan`,
 | `/tools/buffer-pool` | Buffer pool sandbox | Type or generate a page-reference string; step it against any of six policies — LRU, clock sweep, FIFO, second-chance, optimal (Bélády), midpoint-LRU (InnoDB) — through the exact `BufferPoolPanel` the Playground uses, driven by `runBufferTrace`. No SQL, no table. `optimal` reads the whole reference string as lookahead (the SQL path has none, so it degrades to FIFO there) | reference string, frames, policy | **built** — v12 added the four non-pipeline policies |
 | `/tools/btree` | B+Tree sandbox | `insert` / `delete` / `find` number pad; watch it split on insert and borrow or merge on delete; fan-out slider; structural invariants re-checked and shown after every edit | `keys`, `fanout` | **built** — v12; B+Tree deletion (`deleteKey`) built with it |
 | `/tools/parser` | Parser sandbox | Arbitrary text → live token ribbon → live AST (the Playground's `AstTree`, from `toDisplayTree`) with recursion depth and the parser's own tokenize/parse error messages | source text (`src`) | **built** — v12 |
+| `/tools/page` | Slotted page inspector | One heap page of `users` laid out to the byte — header, line-pointer array, tuple data packed from the far end, free space between — with a page-size slider that shows how much a real 4 KB page would hold. `src/ui/slottedPage.ts` synthesises the layout (the engine's `Page` is only a `Row[]`, §7); a tuple cell in the map cross-highlights its table row | `page`, `bytes` | **built** — v13 |
 
 **Classroom** (§20.5)
 
@@ -2094,7 +2095,7 @@ URL-state schema. None needs a backend.
 | `/tools/locks` | Two transaction timelines; place lock requests, watch a wait-for edge form and a deadlock resolve | rides §22.2's enforced lock manager | v1–v2 |
 | `/tools/sort` | External merge sort — run generation, k-way merge, an I/O counter | ~3 days, or free once §22.2's `Sort` exists | v1 |
 | `/tools/hash-join` | Build and probe phases, hash collisions, partition spill (Grace hash join) | own driver, ~3 days | v1–v2 |
-| `/tools/page` | A slotted-page inspector: header, slot array, tuple data, free space, for one 4 KB page | ~2 days, a pure view over `storage/page.ts` | **v1 — cheap, and a 15-445 syllabus teaches slotted pages explicitly.** "Rows per page" is an abstract number today |
+| `/tools/page` | ~~A slotted-page inspector: header, slot array, tuple data, free space, for one 4 KB page~~ **Done, v13.** `src/ui/slottedPage.ts` synthesises the layout (the engine's `Page` is only a `Row[]`, §7 — not "a pure view over `storage/page.ts`" as scoped, but no engine change); the tool is the map + a per-tuple byte table with cross-highlight, and a page-size slider so four toy rows visibly fill 5% of a 4 KB page | ~2 days | **Done — v13** |
 | `/tools/grammar` | A railroad diagram of the supported subset, generated from the parser's own structure so it cannot drift (`GalleryPage`'s discipline) | ~2 days | v1–v2; pairs with `/tools/parser` |
 
 ### 22.4 Learning & classroom surfaces
@@ -2224,7 +2225,7 @@ URL-state schema. None needs a backend.
 | CSV / paste import | Build | v1 | — |
 | Preset dataset library | Build | v1 (with §19.2) | — |
 | `/tools/planner` | Build | v1 | Non-SQL driver generalised |
-| `/tools/page` (slotted-page inspector) | Build | v1 | — |
+| `/tools/page` (slotted-page inspector) | **Done, v13** (`slottedPage.ts` + `/tools/page`) | v1 | — |
 | `/tools/sort` | Build | v1 | `Sort` lands, or its own driver |
 | `/tools/grammar` | Build | v1–v2 | — |
 | `/tools/locks` | Build | v1–v2 | Enforced lock manager lands |

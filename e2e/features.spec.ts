@@ -141,6 +141,27 @@ test('the B+Tree sandbox inserts, deletes with rebalancing, and finds', async ({
   await expect(page.getByText('invariants hold')).toBeVisible();
 });
 
+test('the slotted-page inspector lays a heap page out to the byte', async ({ page }) => {
+  await page.goto('/tools/page');
+
+  // The byte accounting, and one tuple row per row on the page.
+  await expect(page.getByText(/\d+% used ·/)).toBeVisible();
+  await expect(page.getByText(/slot array 4 × 4 B = 16 B/)).toBeVisible();
+  expect(await page.locator('tbody tr').count()).toBe(4);
+  await expect(page.getByText(/more rows of\s+this size would fit/)).toBeVisible();
+
+  // Clicking a tuple cell in the map selects the matching table row.
+  await page.getByRole('button', { name: '#0' }).click();
+  await expect(page.locator('tbody tr[aria-selected="true"]')).toHaveCount(1);
+  await expect(page.locator('tbody tr').first()).toHaveAttribute('aria-selected', 'true');
+
+  // Shrink the page until the rows no longer fit; the state rides in the URL.
+  await page.getByLabel('Page size (bytes)').fill('128');
+  await expect(page.getByText(/do not fit a 128 B page/)).toBeVisible();
+  await expect(page).toHaveURL(/[?&]bytes=128/);
+  await expect(page).toHaveURL(/[?&]page=0/);
+});
+
 test('compare finds the point where LRU and clock sweep pick different victims', async ({ page }) => {
   await page.goto('/compare');
   await expect(page.getByText(/first pick a different victim/)).toBeVisible();

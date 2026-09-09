@@ -85,6 +85,9 @@ const ParserToolPage = lazy(() =>
 const BTreeToolPage = lazy(() =>
   import('./pages/tools/BTreeToolPage.tsx').then((m) => ({ default: m.BTreeToolPage })),
 );
+const PageToolPage = lazy(() =>
+  import('./pages/tools/PageToolPage.tsx').then((m) => ({ default: m.PageToolPage })),
+);
 const ComparePage = lazy(() =>
   import('./pages/ComparePage.tsx').then((m) => ({ default: m.ComparePage })),
 );
@@ -154,6 +157,7 @@ export default function App() {
               <Route path="buffer-pool" element={suspended(BufferPoolToolPage)} />
               <Route path="parser" element={suspended(ParserToolPage)} />
               <Route path="btree" element={suspended(BTreeToolPage)} />
+              <Route path="page" element={suspended(PageToolPage)} />
             </Route>
 
             <Route path="docs" element={suspended(DocsLayout)}>

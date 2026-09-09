@@ -29,6 +29,13 @@ const TOOLS = [
       'insert, delete and find against a live B+Tree — watch it split on insert, and borrow from a sibling or merge on delete, with a fan-out slider and the structural invariants checked after every edit.',
     available: true,
   },
+  {
+    title: 'Slotted page inspector',
+    href: '/tools/page',
+    description:
+      'One heap page laid out to the byte — header, slot array, tuple data and the free space between. A size slider shows how much a real 4 KB page would actually hold, next to the handful of rows the engine keeps per page for legibility.',
+    available: true,
+  },
 ] as const;
 
 export function ToolsIndexPage() {

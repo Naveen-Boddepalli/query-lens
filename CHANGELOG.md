@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Slotted page inspector** at `/tools/page` (plan.md §22.3) — one heap page of `users` laid out to
+  the byte: a fixed header, a line-pointer array, tuples packed from the far end of the page backward,
+  and the free space between. A page-size slider makes "rows per page" concrete — four toy rows fill
+  about 5% of a 4 KB page, and roughly 87 more would fit. `src/ui/slottedPage.ts` synthesises the
+  layout (the engine models a page as just a list of rows, §7); pure and unit-tested. A tuple in the
+  map cross-highlights its row in the per-tuple byte table
 - **Colour-independent shape cues** (plan.md §22.6, §8) — internal vs leaf B+Tree nodes now carry a
   filled disc / hollow ring glyph before the label, and the buffer-pool moods and stat counts carry
   `✓ / ↓ / ✕ / ↻`, so hit/miss/evict and internal/leaf read without relying on hue — for colour-vision

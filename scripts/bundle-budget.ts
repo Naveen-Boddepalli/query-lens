@@ -34,7 +34,7 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
   // module into its own chunk the moment a second entry point needs it, which
   // is why `seed-*.js` and `trace-*.js` exist as their own files rather than
   // being duplicated into every page that touches the demo database.
-  { name: 'trace-ui', test: /^(PlaygroundPage|StageDetail|stageMeta|types|seed|trace|PlaybackControls|AstTree|BTreePanel|FlowTree|display)-/, kb: 32, note: 'Playground + the shared panel/tree renderers (AstTree, BTreePanel, FlowTree, the two display transformers) that split out once the parser and B+Tree sandboxes became second importers' },
+  { name: 'trace-ui', test: /^(PlaygroundPage|StageDetail|stageMeta|types|seed|trace|runQuery|PlaybackControls|AstTree|BTreePanel|FlowTree|display)-/, kb: 32, note: 'Playground + the shared panel/tree renderers (AstTree, BTreePanel, FlowTree, the two display transformers) plus the engine core (runQuery split into its own chunk once /tools/page became a third importer)' },
   // The small per-route shells: landing hub, stage index, examples, docs shell,
   // 404, tools index — plus the redesign's shared UI kit (primitives.ts,
   // PageHeader, Hero) that two or more of them import.
@@ -44,7 +44,9 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
   // driver (src/engine/bufferTrace.ts), the panel it renders through, and the
   // thin `preferences`/`urlState` helpers. None of it loads unless one of
   // these routes is visited.
-  { name: 'standalone-tools', test: /^(GalleryPage|ComparePage|SettingsPage|AssignmentsNewPage|TracePage|BufferPoolToolPage|ParserToolPage|BTreeToolPage|BufferPoolPanel|bufferTrace|preferences|urlState)-/, kb: 24, note: 'Gallery, Tools, Compare, Settings, Assignments, the trace inspector, and the buffer-pool / parser / B+Tree sandboxes (plan.md §21.3, §20.4)' },
+  // Raised 24 → 26 for the slotted-page inspector (`/tools/page`, plan.md §22.3)
+  // and its `slottedPage.ts` layout module — a fourth `/tools/*` sandbox, lazy.
+  { name: 'standalone-tools', test: /^(GalleryPage|ComparePage|SettingsPage|AssignmentsNewPage|TracePage|BufferPoolToolPage|ParserToolPage|BTreeToolPage|PageToolPage|BufferPoolPanel|bufferTrace|slottedPage|preferences|urlState)-/, kb: 26, note: 'Gallery, Tools, Compare, Settings, Assignments, the trace inspector, and the buffer-pool / parser / B+Tree / slotted-page sandboxes (plan.md §21.3, §20.4, §22.3)' },
   // The `/learn` guided track (plan.md §21.3): the index, one lesson page, the
   // localStorage progress helper, and `lessons.tsx` — the lesson prose plus the
   // link-builder that computes each step from a real engine run. Lazy; loads
@@ -84,8 +86,12 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
  * the seed data, predict, share a moment, when something goes wrong): pure
  * teaching prose in the lazy `learn` chunk, never first-paint, plus small
  * additions to `stepAnnouncement`/`traceFile` from the same v13 batch.
+ * Raised 357 → 360 for `/tools/page`, the slotted-page inspector (§22.3): its
+ * own lazy chunk plus `runQuery-*.js`, which rolldown hoisted out of `trace-ui`
+ * once a third route imported the engine core — a move between groups, not
+ * growth, but it shows in the total.
  */
-const TOTAL_KB = 357;
+const TOTAL_KB = 360;
 
 const gzipKb = (bytes: Buffer): number => gzipSync(bytes, { level: 9 }).length / 1024;
 
