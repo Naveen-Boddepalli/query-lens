@@ -262,6 +262,31 @@ test('the panels also copy themselves as monospace text', async ({ page, context
   expect(tree).toMatch(/(internal|leaf), page \d+/);
 });
 
+test('presenter mode is a keyboard-driven overlay with prediction suppressed', async ({ page }) => {
+  // A link with prediction ON, landing on the gated step.
+  await page.goto('/playground?q=SELECT+*+FROM+users+WHERE+id+%3D+5&p=lru&x=1&s=8&present=1');
+
+  const dialog = page.getByRole('dialog', { name: 'Presenter view' });
+  await expect(dialog).toBeVisible();
+
+  // No prediction card in here, and the playhead is not gated: → advances.
+  await expect(page.getByText('Predict before revealing')).toHaveCount(0);
+  const forward = dialog.getByRole('button', { name: 'Step forward' });
+  await expect(forward).toBeEnabled();
+  await page.keyboard.press('ArrowRight');
+  await expect(dialog.getByText(/step 9 \//)).toBeVisible();
+
+  // Esc leaves it, and the flag drops out of the URL.
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+  await expect(page).not.toHaveURL(/present=1/);
+
+  // The "Present" button re-opens it.
+  await page.getByRole('button', { name: 'Present', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'Presenter view' })).toBeVisible();
+  await expect(page).toHaveURL(/[?&]present=1/);
+});
+
 test('the Playground round-trips a moment through a downloaded trace file', async ({ page }) => {
   await page.goto('/playground?q=SELECT+*+FROM+users+WHERE+age+%3E+30&p=clock&x=0&s=40');
   await expect(page.getByLabel('Scrub to step')).toHaveValue('40');

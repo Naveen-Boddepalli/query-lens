@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Presenter mode** (plan.md §22.5, §17.2) — a **Present** button on the Playground (or `?present=1`)
+  opens a full-viewport view of the current stage for a lecture hall: the diagram large, the narration
+  at heading size, keyboard-driven (Space, ←/→, Esc), with an optional real full-screen toggle.
+  Prediction prompts are suppressed while it is open — a "commit before the reveal" card stops a room
+  rather than helps it. It is a `role="dialog"` overlay over the same live playback, axe-checked
 - **Slotted page inspector** at `/tools/page` (plan.md §22.3) — one heap page of `users` laid out to
   the byte: a fixed header, a line-pointer array, tuples packed from the far end of the page backward,
   and the free space between. A page-size slider makes "rows per page" concrete — four toy rows fill

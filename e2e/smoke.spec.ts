@@ -156,6 +156,18 @@ test('has no detectable WCAG A/AA violations on the Playground', async ({ page }
   expect(
     results.violations.map((v) => `${v.id}: ${v.nodes.length} node(s) — ${v.help}`),
   ).toEqual([]);
+
+  // ...and in the presenter overlay (plan.md §22.5).
+  await page.getByRole('button', { name: 'Present', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'Presenter view' })).toBeVisible();
+
+  const presenter = await new AxeBuilder({ page })
+    .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+    .analyze();
+
+  expect(
+    presenter.violations.map((v) => `${v.id}: ${v.nodes.length} node(s) — ${v.help}`),
+  ).toEqual([]);
 });
 
 test('has no detectable WCAG A/AA violations in the light theme either', async ({ page }) => {

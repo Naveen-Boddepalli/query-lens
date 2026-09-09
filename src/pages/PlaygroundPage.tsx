@@ -20,6 +20,7 @@ import { PlaybackControls } from '../ui/PlaybackControls.tsx';
 import { SqlEditor } from '../ui/SqlEditor.tsx';
 import { DataEditor } from '../ui/DataEditor.tsx';
 import { PredictionCard } from '../ui/PredictionCard.tsx';
+import { PresenterView } from '../ui/PresenterView.tsx';
 import { ShortcutHints } from '../ui/ShortcutHints.tsx';
 import { stepAnnouncement } from '../ui/stepAnnouncement.ts';
 import { btnPrimary, btnSecondary, panelSurface } from '../ui/primitives.ts';
@@ -61,6 +62,10 @@ const SHARED = readShareState(
  */
 const ASSIGNMENT = SHARED.lockReveal === true;
 
+/** plan.md §22.5: `?present=1` opens the room-facing presenter view on load. */
+const PRESENT_INITIAL =
+  typeof location !== 'undefined' && new URLSearchParams(location.search).get('present') === '1';
+
 const START = {
   sql: SHARED.sql ?? INITIAL_SQL,
   // The URL wins when present; a `/settings` preference (plan.md §21.3) is the
@@ -90,9 +95,14 @@ export function PlaygroundPage() {
   const [result, setResult] = useState<RunResult>(INITIAL_RESULT);
 
   const [predictOn, setPredictOn] = useState(START.predictOn);
+  const [presenting, setPresenting] = useState(PRESENT_INITIAL);
   const [answers, setAnswers] = useState<Record<number, string>>(() =>
     skippedAnswersBefore(INITIAL_RESULT.events, SHARED.step ?? 0),
   );
+
+  // Presenting a demo to a room: a prediction prompt mid-flow stops it rather
+  // than helps (plan.md §17.2). Suppress the gate and the card while presenting.
+  const askToPredict = predictOn && !presenting;
 
   const options = useMemo(() => ({ ...DEFAULT_ENGINE_OPTIONS, policy }), [policy]);
   const table = db.tables[TABLE];
@@ -109,9 +119,9 @@ export function PlaygroundPage() {
   const gates = useMemo(
     () =>
       result.events.map(
-        (e) => predictOn && e.predictable !== undefined && answers[e.id] === undefined,
+        (e) => askToPredict && e.predictable !== undefined && answers[e.id] === undefined,
       ),
-    [result, predictOn, answers],
+    [result, askToPredict, answers],
   );
 
   // In assignment mode the playhead cannot pass the first unanswered prompt by
@@ -134,7 +144,7 @@ export function PlaygroundPage() {
   const state = projector.at(playback.step);
 
   const upcoming = result.events[playback.step];
-  const prompt = predictOn ? upcoming?.predictable : undefined;
+  const prompt = askToPredict ? upcoming?.predictable : undefined;
 
   // plan.md §22.6: what a screen reader hears on this step. The narration `<p>`
   // below is the live region and is kept permanently mounted for it — the
@@ -168,21 +178,22 @@ export function PlaygroundPage() {
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      writeShareState(
-        encodeShareState(
-          {
-            sql,
-            policy,
-            predictOn,
-            step: playback.step,
-            ...(rowsEdited && table ? { rows: table.rows } : {}),
-          },
-          table,
-        ),
+      const query = encodeShareState(
+        {
+          sql,
+          policy,
+          predictOn,
+          step: playback.step,
+          ...(rowsEdited && table ? { rows: table.rows } : {}),
+        },
+        table,
       );
+      // `present` is a view flag, not part of the shared moment — appended after
+      // `encodeShareState` so a copied link still opens the presenter.
+      writeShareState(presenting ? `${query}&present=1` : query);
     }, 250);
     return () => { window.clearTimeout(timer); };
-  }, [sql, policy, predictOn, playback.step, rowsEdited, table]);
+  }, [sql, policy, predictOn, playback.step, rowsEdited, table, presenting]);
 
   const [copied, setCopied] = useState(false);
   async function copyLink() {
@@ -359,6 +370,13 @@ export function PlaygroundPage() {
               >
                 Load trace
               </button>
+              <button
+                type="button"
+                onClick={() => { setPresenting(true); }}
+                className="underline-offset-2 transition-colors hover:text-ink hover:underline"
+              >
+                Present
+              </button>
             </span>
           </div>
 
@@ -492,6 +510,22 @@ export function PlaygroundPage() {
           onApply={applyRows}
           onReset={resetData}
           onClose={() => { setEditingData(false); }}
+        />
+      )}
+
+      {presenting && (
+        <PresenterView
+          playback={playback}
+          length={result.events.length}
+          maxStep={ceiling ?? result.events.length}
+          activeStage={activeStage}
+          state={state}
+          policy={policy}
+          activeSpan={activeSpan}
+          currentStage={state?.stage ?? null}
+          visited={visited}
+          narration={announcement}
+          onExit={() => { setPresenting(false); }}
         />
       )}
     </>

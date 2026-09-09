@@ -34,7 +34,10 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
   // module into its own chunk the moment a second entry point needs it, which
   // is why `seed-*.js` and `trace-*.js` exist as their own files rather than
   // being duplicated into every page that touches the demo database.
-  { name: 'trace-ui', test: /^(PlaygroundPage|StageDetail|stageMeta|types|seed|trace|runQuery|PlaybackControls|AstTree|BTreePanel|FlowTree|display)-/, kb: 32, note: 'Playground + the shared panel/tree renderers (AstTree, BTreePanel, FlowTree, the two display transformers) plus the engine core (runQuery split into its own chunk once /tools/page became a third importer)' },
+  // Raised 32 → 34 for the presenter view (`PresenterView.tsx`, plan.md §22.5) —
+  // a room-facing overlay over the same playback and panels, lazy with the
+  // Playground route.
+  { name: 'trace-ui', test: /^(PlaygroundPage|StageDetail|stageMeta|types|seed|trace|runQuery|PlaybackControls|PresenterView|AstTree|BTreePanel|FlowTree|display)-/, kb: 34, note: 'Playground + the presenter view + the shared panel/tree renderers (AstTree, BTreePanel, FlowTree, the two display transformers) plus the engine core (runQuery split into its own chunk once /tools/page became a third importer)' },
   // The small per-route shells: landing hub, stage index, examples, docs shell,
   // 404, tools index — plus the redesign's shared UI kit (primitives.ts,
   // PageHeader, Hero) that two or more of them import.
@@ -90,8 +93,10 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
  * own lazy chunk plus `runQuery-*.js`, which rolldown hoisted out of `trace-ui`
  * once a third route imported the engine core — a move between groups, not
  * growth, but it shows in the total.
+ * Raised 360 → 362 for the presenter view (`PresenterView.tsx`, §22.5) — the
+ * room-facing overlay, lazy with the Playground route.
  */
-const TOTAL_KB = 360;
+const TOTAL_KB = 362;
 
 const gzipKb = (bytes: Buffer): number => gzipSync(bytes, { level: 9 }).length / 1024;
 

@@ -1278,7 +1278,8 @@ comprehensive narrative, and a wall of text is abandoned rather than skimmed. So
 5. **Make the planner change its mind** — edit a predicate, watch predicate pushdown fire or not.
 6. **Edit the seed data** — add, edit, delete rows; what changes downstream and what does not.
 7. **Predict before you look** — what prediction mode is, the evidence it rests on (RESEARCH.md),
-   how to skip it when demonstrating to a room.
+   how to skip it when demonstrating to a room (the checkbox, `x=0`, or **presenter mode** —
+   `?present=1` / the *Present* button — which suppresses it and enlarges the view, §22.5).
 8. **Share a moment** — what the URL encodes, how to link to an exact step, and why a malformed URL
    drops the dataset rather than half-restoring it.
 9. **Keyboard reference** — the full table; the in-app hints are a reminder, not a reference.
@@ -2137,9 +2138,14 @@ URL-state schema. None needs a backend.
   + a build stamp, and deliberately **no `events`** (the engine re-derives them; a second copy could
   only drift — §15.2 one level up). Parsed as untrusted input on the way back in, failing the whole
   load on a bad field. No backend, no engine change.
-- **Presenter mode.** Full-screen, larger type, auto-advance on an adjustable dwell, prediction
-  suppressible, keyboard-only. §17.2 already asks "how to skip prediction when demonstrating to a
-  room"; this is the room-facing surface. ~3 days, no engine change. v1.
+- **Presenter mode.** ~~Full-screen, larger type, auto-advance on an adjustable dwell, prediction
+  suppressible, keyboard-only.~~ **Done, v13.** `src/ui/PresenterView.tsx` — a full-viewport overlay
+  on the Playground (`?present=1` opens it on load, a **Present** button otherwise) over the same
+  live `playback` and trace: the current stage panel large, the narration at `text-heading`, the
+  transport, and a `role="dialog"` with a focus trap and `Esc` to leave. Prediction is suppressed
+  while it is open (`askToPredict = predictOn && !presenting`) — a prompt card mid-demo stops the
+  room. "Auto-advance on a dwell" is the existing Play + speed selector; the browser Fullscreen API
+  is offered where available. Axe-clean (the smoke suite now checks the overlay too). No engine change.
 - **B+Tree copy-as-Mermaid.** §20.3 left it out because Mermaid lays a sibling chain out badly —
   still true for `graph`; a `classDiagram` with explicit rank hints is a maybe. Low priority, v1+.
 - **`@querylens/embed` component package.** §20.3's v1+ item, gated on a named author asking for an
@@ -2233,7 +2239,7 @@ URL-state schema. None needs a backend.
 | Challenge mode | Build | v1 | — |
 | Progress dashboard | Build | v1 | — |
 | Assignment sets | Build | v1 | — |
-| Presenter mode | Build | v1 | — |
+| Presenter mode | **Done, v13** (`PresenterView.tsx` — `?present=1` overlay on the Playground) | v1 | — |
 | Print stylesheet | Build | v1–v2 | — |
 | In-app quiz / self-check | Deferred | post-§9 | The §9 study has run (contamination) |
 | Enforced concurrency + deadlocks | Build | v1–v2 | §9 validates the format |
