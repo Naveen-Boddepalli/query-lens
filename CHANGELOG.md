@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Colour-independent shape cues** (plan.md §22.6, §8) — internal vs leaf B+Tree nodes now carry a
+  filled disc / hollow ring glyph before the label, and the buffer-pool moods and stat counts carry
+  `✓ / ↓ / ✕ / ↻`, so hit/miss/evict and internal/leaf read without relying on hue — for colour-vision
+  deficiency and washed-out projectors. Always on, not a toggle
 - **`/trace` transcript view** (plan.md §22.6) — beside the JSON-shaped table, a **Transcript**: a
   numbered list of every step's narration, each line a link into the Playground at that step. A
   **Print** button and an `@media print` rule turn it into a paper worksheet — the one thing in the

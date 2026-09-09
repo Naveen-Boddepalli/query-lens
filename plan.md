@@ -2160,11 +2160,13 @@ URL-state schema. None needs a backend.
   table (`v=transcript` opens straight to it): a numbered `<ol>` of every event's `label`, each row
   a Playground link, with a **Print** button and an `@media print` block (`src/index.css`) that
   drops everything but the list so it prints as a paper worksheet. No new route.
-- **Non-colour encoding for the storage hues.** Hit/miss/evict and internal/leaf are hue-only today.
-  Add a shape or texture channel — always on, not a mode — for colour-vision deficiency and
-  projector wash-out (§15.3's two reasons for the light theme apply here). ~2 days. v1. A separate
-  "colourblind palette" toggle is the generic answer and the worse one: a redundant second channel
-  that is always present beats a mode nobody finds.
+- **Non-colour encoding for the storage hues.** ~~Hit/miss/evict and internal/leaf are hue-only
+  today. Add a shape or texture channel — always on, not a mode — for colour-vision deficiency and
+  projector wash-out.~~ **Done, v13.** The redesign's node/mood *labels* (`INTERNAL`/`LEAF`,
+  `HIT`/`DISK READ`/`EVICTED`/`SWEPT`) already carried a text channel; v13 adds a pre-attentive
+  glyph in front of each — a filled disc vs a hollow ring for internal vs leaf (`FlowTree`
+  `kindIcons`), and `✓ / ↓ / ✕ / ↻` on the buffer moods and the stat counts — so the distinction
+  survives a washed-out projector at the back of a lecture hall. Always on, no mode.
 - **Print stylesheet.** A query and its trace as a printable worksheet, for a room without laptops.
   ~1 day. v1–v2.
 - **i18n scaffold.** §17.3's licence position already contemplates translation. String extraction
@@ -2209,7 +2211,7 @@ URL-state schema. None needs a backend.
 | `aria-live` narration track | **Done, v13** (`stepAnnouncement.ts` + the permanent narration live region; §8 pointer added) | v1 | — |
 | The six missing `/learn` lessons | **Done, v13** (five added → nine lessons; keyboard ref stays a docs page) | v1 | — |
 | Full text transcript | **Done, v13** (`/trace` Transcript view + print stylesheet) | v1 | — |
-| Non-colour hue encoding | Build | v1 | — |
+| Non-colour hue encoding | **Done, v13** (glyph channel on B+Tree nodes + buffer moods/stats) | v1 | — |
 | Cost-based optimizer | Build | v1 | §9 validates the format |
 | More optimizer rules | Build | v1 | §9 validates the format |
 | In-app `EXPLAIN` | Build | v1 | Cost model lands |

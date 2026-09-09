@@ -32,11 +32,14 @@ const MOOD_CLASS: Record<Exclude<FrameMood, null>, string> = {
   sweep: 'border-accent bg-accent/10 shadow-glow hover:bg-accent/20',
 };
 
+// A leading glyph so the mood reads without relying on the border hue — the
+// always-on second channel plan.md §22.6 asks for (colour-vision deficiency,
+// projector wash-out). `✓` resident, `↓` came from disk, `✕` dropped, `↻` swept.
 const MOOD_TAG: Record<Exclude<FrameMood, null>, string> = {
-  hit: 'hit',
-  load: 'disk read',
-  evict: 'evicted',
-  sweep: 'swept',
+  hit: '✓ hit',
+  load: '↓ disk read',
+  evict: '✕ evicted',
+  sweep: '↻ swept',
 };
 
 /**
@@ -177,21 +180,23 @@ export function BufferPoolPanel({
         })}
       </div>
 
+      {/* The counts echo the frame glyphs (§22.6), so the green/amber/red on the
+          numbers is a third channel, not the only one. */}
       <dl className="flex flex-wrap gap-x-5 gap-y-1 text-label">
         <div>
-          <dt className="text-ink-dim">hits</dt>
+          <dt className="text-ink-dim"><span aria-hidden>✓ </span>hits</dt>
           <dd className="font-mono text-hit">{stats.hits}</dd>
         </div>
         <div>
-          <dt className="text-ink-dim">misses</dt>
+          <dt className="text-ink-dim"><span aria-hidden>↓ </span>misses</dt>
           <dd className="font-mono text-miss">{stats.misses}</dd>
         </div>
         <div>
-          <dt className="text-ink-dim">disk reads</dt>
+          <dt className="text-ink-dim"><span aria-hidden>↓ </span>disk reads</dt>
           <dd className="font-mono text-miss">{stats.misses}</dd>
         </div>
         <div>
-          <dt className="text-ink-dim">evictions</dt>
+          <dt className="text-ink-dim"><span aria-hidden>✕ </span>evictions</dt>
           <dd className="font-mono text-evict">{stats.evictions}</dd>
         </div>
         <div>

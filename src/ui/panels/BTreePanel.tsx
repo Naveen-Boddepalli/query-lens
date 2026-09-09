@@ -6,6 +6,11 @@ import type { IndexNode } from '../../engine/index.ts';
 /**
  * Pink internal, green leaf — the convention CMU 15-445 students already have
  * in their heads from BusTub's tree printer. Free familiarity (RESEARCH.md §4).
+ *
+ * `ICONS` is the always-on second channel that does not lean on that hue
+ * (plan.md §22.6): a filled disc for internal, a hollow ring for leaf — a
+ * textbook colour-vision-safe pair — shown before the INTERNAL / LEAF label in
+ * every node and echoed in the legend.
  */
 const TONES: Record<string, string> = {
   internal:
@@ -19,6 +24,8 @@ const TONES: Record<string, string> = {
     'border-[var(--color-node-leaf)]/70 bg-[var(--color-node-leaf)]/10 text-[var(--color-node-leaf)] ' +
     'hover:border-[var(--color-node-leaf)] hover:bg-[var(--color-node-leaf)]/20',
 };
+
+const ICONS: Record<string, string> = { internal: '●', leaf: '○' };
 
 function toFlow(node: IndexNode, path: ReadonlySet<string>): FlowNode {
   return {
@@ -67,11 +74,14 @@ export function BTreePanel({ tree, path, outcome }: BTreePanelProps) {
   return (
     <div className="flex h-full flex-col gap-2">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-label text-ink-dim">
+        {/* Filled disc vs hollow ring — a colour-independent pair (plan.md
+            §22.6), carried in the glyph so the legend teaches hue and shape at
+            once, and echoed before the label inside every node. */}
         <span className="flex items-center gap-1.5">
-          <span className="h-2 w-2 rounded-full bg-[var(--color-node-internal)]" /> internal
+          <span aria-hidden className="text-[var(--color-node-internal)]">●</span> internal
         </span>
         <span className="flex items-center gap-1.5">
-          <span className="h-2 w-2 rounded-full bg-[var(--color-node-leaf)]" /> leaf
+          <span aria-hidden className="text-[var(--color-node-leaf)]">○</span> leaf
         </span>
         <span className="flex items-center gap-1.5">
           <span className="h-px w-4 border-t border-dashed border-[var(--color-node-leaf)]" />
@@ -101,6 +111,7 @@ export function BTreePanel({ tree, path, outcome }: BTreePanelProps) {
         <FlowTree
           root={root}
           tones={TONES}
+          kindIcons={ICONS}
           sideEdges={sideEdges}
           /* Only the current hop: the whole root-to-leaf path spans nearly the
              full width of a wide tree, so framing all of it is unreadable.

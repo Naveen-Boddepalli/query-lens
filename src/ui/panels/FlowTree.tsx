@@ -32,6 +32,8 @@ export interface FlowNode {
 
 interface NodeData extends Record<string, unknown> {
   kind: string;
+  /** A colour-independent glyph before the kind label (plan.md §22.6). */
+  kindIcon?: string;
   label: string;
   detail?: string;
   highlighted: boolean;
@@ -65,7 +67,10 @@ function NodeView({ data }: NodeProps<TreeFlowNode>) {
       <Handle id="in" type="target" position={Position.Top} className="!opacity-0" />
       <Handle id="prev" type="target" position={Position.Left} className="!opacity-0" />
       <div className="font-mono text-label leading-tight break-words">{data.label}</div>
-      <div className="text-label tracking-wide text-ink-dim uppercase">{data.kind}</div>
+      <div className="text-label tracking-wide text-ink-dim uppercase">
+        {data.kindIcon && <span aria-hidden>{data.kindIcon} </span>}
+        {data.kind}
+      </div>
       {data.detail && (
         <div className="mt-0.5 font-mono text-label break-words text-ink-dim">{data.detail}</div>
       )}
@@ -96,6 +101,13 @@ export interface FlowTreeProps {
   root: FlowNode | null;
   /** kind → Tailwind classes. */
   tones: Record<string, string>;
+  /**
+   * kind → a short glyph shown before the kind label — a colour-independent
+   * second channel for readers with colour-vision deficiency or a washed-out
+   * projector (plan.md §22.6). Only supplied where the kinds are otherwise told
+   * apart by hue alone (the B+Tree's internal vs leaf).
+   */
+  kindIcons?: Record<string, string>;
   activeSpan?: Span | undefined;
   /** Wider nodes for plan operators, which carry longer detail lines. */
   wide?: boolean;
@@ -123,7 +135,12 @@ export interface FlowTreeProps {
 
 function build(
   root: FlowNode,
-  props: { tones: Record<string, string>; wide: boolean; compact: boolean },
+  props: {
+    tones: Record<string, string>;
+    kindIcons: Record<string, string>;
+    wide: boolean;
+    compact: boolean;
+  },
   activeSpan: Span | undefined,
   sideEdges: readonly SideEdge[],
 ) {
@@ -138,6 +155,9 @@ function build(
     position: { x: d.x ?? 0, y: d.y ?? 0 },
     data: {
       kind: d.data.kind,
+      ...(props.kindIcons[d.data.kind] === undefined
+        ? {}
+        : { kindIcon: props.kindIcons[d.data.kind] }),
       label: d.data.label,
       ...(d.data.detail === undefined ? {} : { detail: d.data.detail }),
       highlighted: d.data.highlight === true || overlaps(d.data.span, activeSpan),
@@ -190,6 +210,7 @@ function build(
 function Canvas({
   root,
   tones,
+  kindIcons,
   wide,
   compact,
   activeSpan,
@@ -197,10 +218,15 @@ function Canvas({
   controls,
   toolbarTarget,
   focusIds,
-}: FlowTreeProps & { wide: boolean; compact: boolean; sideEdges: readonly SideEdge[] }) {
+}: FlowTreeProps & {
+  kindIcons: Record<string, string>;
+  wide: boolean;
+  compact: boolean;
+  sideEdges: readonly SideEdge[];
+}) {
   const { nodes, edges } = useMemo(
-    () => build(root!, { tones, wide, compact }, activeSpan, sideEdges),
-    [root, tones, wide, compact, activeSpan, sideEdges],
+    () => build(root!, { tones, kindIcons, wide, compact }, activeSpan, sideEdges),
+    [root, tones, kindIcons, wide, compact, activeSpan, sideEdges],
   );
   const { setViewport, zoomIn, zoomOut } = useReactFlow();
   const focusKey = focusIds?.join(',') ?? '';
@@ -422,10 +448,12 @@ function Canvas({
 }
 
 const NO_SIDE_EDGES: readonly SideEdge[] = [];
+const NO_KIND_ICONS: Record<string, string> = {};
 
 export function FlowTree({
   root,
   tones,
+  kindIcons = NO_KIND_ICONS,
   activeSpan,
   wide = false,
   compact = false,
@@ -444,6 +472,7 @@ export function FlowTree({
         <Canvas
           root={root}
           tones={tones}
+          kindIcons={kindIcons}
           wide={wide}
           compact={compact}
           activeSpan={activeSpan}

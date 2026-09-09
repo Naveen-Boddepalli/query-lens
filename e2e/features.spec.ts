@@ -32,6 +32,9 @@ test('the buffer-pool sandbox steps a typed reference string', async ({ page }) 
     await forward.click();
   }
   await expect(evicted).toBeVisible();
+  // The frame that lost its page is tagged with a glyph, not just a red border
+  // (plan.md §22.6).
+  await expect(page.getByText('✕ evicted')).toBeVisible();
 });
 
 test('the buffer-pool sandbox runs a policy the SQL pipeline never offers', async ({ page }) => {
@@ -98,6 +101,12 @@ test('the B+Tree sandbox inserts, deletes with rebalancing, and finds', async ({
   await page.getByRole('button', { name: 'Sample' }).click();
   await expect(page.getByText('invariants hold')).toBeVisible();
   expect(await page.locator('.react-flow__node').count()).toBeGreaterThan(3);
+
+  // Internal vs leaf carries a colour-independent glyph, not hue alone (§22.6):
+  // a filled disc on internal nodes, a hollow ring on leaves. (`text-transform`
+  // uppercases the label visually; the DOM text stays lowercase.)
+  await expect(page.locator('.react-flow__node').getByText(/●\s*internal/).first()).toBeVisible();
+  await expect(page.locator('.react-flow__node').getByText(/○\s*leaf/).first()).toBeVisible();
 
   const key = page.getByLabel('Key', { exact: true });
   const del = page.getByRole('button', { name: 'Delete', exact: true });
