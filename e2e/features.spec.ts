@@ -298,6 +298,24 @@ test('the trace inspector filters the raw event stream and links into the Playgr
     'href',
     /\/playground\?q=.*&p=clock&s=\d+/,
   );
+
+  // The Transcript view: a numbered prose list, every line a Playground link,
+  // and the choice rides in the URL.
+  await page.getByRole('radio', { name: 'Transcript' }).click();
+  await expect(page).toHaveURL(/[?&]v=transcript/);
+  await expect(page.locator('table')).toHaveCount(0);
+  const items = page.locator('[data-transcript] ol > li');
+  expect(await items.count()).toBeGreaterThan(10);
+  await expect(items.first().locator('a')).toHaveAttribute(
+    'href',
+    /\/playground\?q=.*&p=clock&s=\d+/,
+  );
+  await expect(page.getByRole('button', { name: 'Print' })).toBeVisible();
+
+  // A direct link opens straight into the transcript.
+  await page.goto('/trace?q=SELECT+*+FROM+users+WHERE+id+%3D+5&p=lru&v=transcript');
+  await expect(page.getByRole('radio', { name: 'Transcript', checked: true })).toBeVisible();
+  await expect(page.locator('[data-transcript] ol > li').first()).toContainText(/\S/);
 });
 
 test('the learn track opens lessons that deep-link into the Playground and remembers progress', async ({ page }) => {

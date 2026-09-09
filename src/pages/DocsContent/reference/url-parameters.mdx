@@ -25,7 +25,8 @@ just `?q=...`.
 The [trace inspector](/trace) reads the same `q`, `p` and `d` keys, so a link copied from the
 Playground opens there and shows the raw event stream for that exact query (it ignores `x` and `s` —
 the whole trace is on one screen). Its `p` also accepts the three buffer-pool-only policies
-(`fifo`, `second-chance`, `optimal`); the Playground still recognises only `lru` and `clock`.
+(`fifo`, `second-chance`, `optimal`); the Playground still recognises only `lru` and `clock`. Add
+`v=transcript` to open its numbered, printable prose view of the trace instead of the table.
 
 ## An example, assembled
 

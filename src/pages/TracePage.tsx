@@ -10,7 +10,15 @@ import {
 import type { Database, ReplacementPolicyName, Stage, StepEvent } from '../engine/index.ts';
 import { readShareState } from '../ui/urlState.ts';
 import { PageHeader } from '../ui/PageHeader.tsx';
-import { btnPrimary, btnSecondary, inputField, panelSurface } from '../ui/primitives.ts';
+import {
+  btnPrimary,
+  btnSecondary,
+  inputField,
+  panelSurface,
+  segBase,
+  segOff,
+  segOn,
+} from '../ui/primitives.ts';
 
 /**
  * plan.md §21.3, "Explore": the raw `StepEvent[]` for a query as a filterable
@@ -24,6 +32,12 @@ import { btnPrimary, btnSecondary, inputField, panelSurface } from '../ui/primit
  * defensive `readShareState` — the URL is still the one value from a stranger.
  * It does not carry a step (`s`) or predict flag (`x`): the whole trace is on
  * screen at once, and prediction is a playback gate, not an event.
+ *
+ * Two views (plan.md §22.6): the JSON-shaped **table**, and a **transcript** —
+ * the narration lines as a numbered, printable list, each a link into the
+ * Playground. The transcript is the §9 study's control-group artefact (read the
+ * steps rather than step them) and, via `@media print` (`src/index.css`), a
+ * paper worksheet. `v=transcript` opens straight to it.
  */
 
 const TABLE = 'users';
@@ -44,6 +58,9 @@ const START_POLICY: ReplacementPolicyName = (REPLACEMENT_POLICY_NAMES as readonl
 )
   ? (RAW_POLICY as ReplacementPolicyName)
   : DEFAULT_ENGINE_OPTIONS.policy;
+
+type View = 'table' | 'transcript';
+const START_VIEW: View = new URLSearchParams(search).get('v') === 'transcript' ? 'transcript' : 'table';
 
 const START = {
   sql: SHARED.sql ?? DEFAULT_SQL,
@@ -117,6 +134,7 @@ export function TracePage() {
   const [query, setQuery] = useState('');
   const [openRow, setOpenRow] = useState<number | null>(null);
   const [copied, setCopied] = useState(false);
+  const [view, setView] = useState<View>(START_VIEW);
 
   const result = useMemo(
     () => runQuery(ran.sql, START.db, { ...DEFAULT_ENGINE_OPTIONS, policy: ran.policy }),
@@ -144,11 +162,12 @@ export function TracePage() {
       params.set('q', sql);
       params.set('p', policy);
       if (RAW_ROWS_PARAM !== null) params.set('d', RAW_ROWS_PARAM);
+      if (view === 'transcript') params.set('v', 'transcript');
       const next = `${location.pathname}?${params.toString()}`;
       if (next !== `${location.pathname}${location.search}`) history.replaceState(null, '', next);
     }, 250);
     return () => { window.clearTimeout(timer); };
-  }, [sql, policy]);
+  }, [sql, policy, view]);
 
   function toggleStage(stage: Stage) {
     setStageOff((prev) => {
@@ -235,71 +254,138 @@ export function TracePage() {
         </div>
       ) : (
         <>
-          <div className="flex flex-wrap items-center gap-2">
-            {stagesPresent.map((stage) => {
-              const off = stageOff.has(stage);
-              return (
-                <button
-                  key={stage}
-                  type="button"
-                  aria-pressed={!off}
-                  onClick={() => { toggleStage(stage); }}
-                  className={`rounded-full border px-2.5 py-0.5 text-label transition ${
-                    off ? 'border-dashed border-edge' : 'border-edge bg-surface-3'
-                  }`}
-                >
-                  <StageTag stage={stage} dim={off} />
+          <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="View">
+            {(
+              [
+                ['table', 'Table'],
+                ['transcript', 'Transcript'],
+              ] as const
+            ).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                role="radio"
+                aria-checked={view === value}
+                onClick={() => { setView(value); }}
+                className={`${segBase} ${view === value ? segOn : segOff}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {view === 'table' ? (
+            <>
+              <div className="flex flex-wrap items-center gap-2">
+                {stagesPresent.map((stage) => {
+                  const off = stageOff.has(stage);
+                  return (
+                    <button
+                      key={stage}
+                      type="button"
+                      aria-pressed={!off}
+                      onClick={() => { toggleStage(stage); }}
+                      className={`rounded-full border px-2.5 py-0.5 text-label transition ${
+                        off ? 'border-dashed border-edge' : 'border-edge bg-surface-3'
+                      }`}
+                    >
+                      <StageTag stage={stage} dim={off} />
+                    </button>
+                  );
+                })}
+                <input
+                  type="text"
+                  value={query}
+                  onChange={(e) => { setQuery(e.target.value); }}
+                  placeholder="filter narration…"
+                  className={`${inputField} ml-auto w-48`}
+                  aria-label="Filter events by text"
+                />
+                <button type="button" onClick={() => { void copyJson(); }} className={btnSecondary}>
+                  {copied ? 'Copied ✓' : 'Copy JSON'}
                 </button>
-              );
-            })}
-            <input
-              type="text"
-              value={query}
-              onChange={(e) => { setQuery(e.target.value); }}
-              placeholder="filter narration…"
-              className={`${inputField} ml-auto w-48`}
-              aria-label="Filter events by text"
-            />
-            <button type="button" onClick={() => { void copyJson(); }} className={btnSecondary}>
-              {copied ? 'Copied ✓' : 'Copy JSON'}
-            </button>
-          </div>
+              </div>
 
-          <p className="text-label text-ink-dim tabular-nums">
-            {shown.length} of {result.events.length} events
-            {result.rows.length > 0 && ` · query returned ${result.rows.length} row${result.rows.length === 1 ? '' : 's'}`}
-          </p>
+              <p className="text-label text-ink-dim tabular-nums">
+                {shown.length} of {result.events.length} events
+                {result.rows.length > 0 && ` · query returned ${result.rows.length} row${result.rows.length === 1 ? '' : 's'}`}
+              </p>
 
-          <div className={`${panelSurface} min-h-0 flex-1 overflow-auto p-0`}>
-            <table className="w-full border-collapse text-label">
-              <thead className="sticky top-0 z-10 bg-surface-2 text-ink-dim">
-                <tr className="border-b border-edge text-left">
-                  <th className="px-3 py-2 font-medium tabular-nums">#</th>
-                  <th className="px-3 py-2 font-medium">stage</th>
-                  <th className="px-3 py-2 font-medium">detail</th>
-                  <th className="px-3 py-2 font-medium">narration</th>
-                </tr>
-              </thead>
-              <tbody>
-                {shown.length === 0 && (
-                  <tr>
-                    <td colSpan={4} className="px-3 py-6 text-center text-ink-dim">
-                      No events match the current filter.
-                    </td>
-                  </tr>
-                )}
-                {shown.map((e) => (
-                  <FragmentRow
-                    key={e.id}
-                    event={e}
-                    open={openRow === e.id}
-                    onToggle={() => { setOpenRow((cur) => (cur === e.id ? null : e.id)); }}
-                    href={playgroundLink(e.id)}
-                  />
-                ))}
-              </tbody>
-            </table>
-          </div>
+              <div className={`${panelSurface} min-h-0 flex-1 overflow-auto p-0`}>
+                <table className="w-full border-collapse text-label">
+                  <thead className="sticky top-0 z-10 bg-surface-2 text-ink-dim">
+                    <tr className="border-b border-edge text-left">
+                      <th className="px-3 py-2 font-medium tabular-nums">#</th>
+                      <th className="px-3 py-2 font-medium">stage</th>
+                      <th className="px-3 py-2 font-medium">detail</th>
+                      <th className="px-3 py-2 font-medium">narration</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {shown.length === 0 && (
+                      <tr>
+                        <td colSpan={4} className="px-3 py-6 text-center text-ink-dim">
+                          No events match the current filter.
+                        </td>
+                      </tr>
+                    )}
+                    {shown.map((e) => (
+                      <FragmentRow
+                        key={e.id}
+                        event={e}
+                        open={openRow === e.id}
+                        onToggle={() => { setOpenRow((cur) => (cur === e.id ? null : e.id)); }}
+                        href={playgroundLink(e.id)}
+                      />
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <p className="text-label text-ink-dim tabular-nums">
+                  {result.events.length} step{result.events.length === 1 ? '' : 's'}
+                  {result.rows.length > 0 && ` · ${result.rows.length} row${result.rows.length === 1 ? '' : 's'} returned`}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => { window.print(); }}
+                  className={btnSecondary}
+                >
+                  Print
+                </button>
+              </div>
+
+              <div data-transcript className={`${panelSurface} min-h-0 flex-1 overflow-auto p-4`}>
+                <h2 className="mb-1 font-mono text-label text-ink">
+                  {ran.sql.replace(/\s+/g, ' ').trim()}
+                </h2>
+                <p className="mb-4 text-label text-ink-dim">
+                  {REPLACEMENT_POLICY_LABELS[ran.policy]} · {result.events.length} steps · every line
+                  opens the Playground at that step
+                </p>
+                <ol className="space-y-2">
+                  {result.events.map((e) => (
+                    <li key={e.id} className="flex gap-3 text-body leading-relaxed">
+                      <Link
+                        to={playgroundLink(e.id)}
+                        className="shrink-0 font-mono text-label text-ink-dim tabular-nums underline-offset-2 hover:text-accent hover:underline"
+                        title="Open the Playground at this step"
+                      >
+                        {String(e.id).padStart(3, '0')}
+                      </Link>
+                      <span className="shrink-0">
+                        <StageTag stage={e.stage} />
+                      </span>
+                      <span className="min-w-0">{e.label}</span>
+                    </li>
+                  ))}
+                </ol>
+              </div>
+            </>
+          )}
         </>
       )}
     </div>

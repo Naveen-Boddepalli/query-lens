@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`/trace` transcript view** (plan.md §22.6) — beside the JSON-shaped table, a **Transcript**: a
+  numbered list of every step's narration, each line a link into the Playground at that step. A
+  **Print** button and an `@media print` rule turn it into a paper worksheet — the one thing in the
+  app that prints. `v=transcript` in the URL opens straight to it; it doubles as the §9 study's
+  control-group artefact (read the steps rather than step them)
 - **Five more `/learn` lessons** (plan.md §22.4, §17.2) — the guided track goes from four to nine:
   *Watch a B+Tree split* (in the `/tools/btree` sandbox — a full leaf, one more key, copy-up then
   push-up), *Edit the seed data* (what the trace changes and what it does not), *Predict before you

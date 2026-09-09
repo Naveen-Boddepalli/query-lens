@@ -1839,7 +1839,7 @@ Grouped by area. **Status** is `built` / a milestone / `v1` / `v2` / `own plan`,
 | `/examples` | Examples | Curated queries; each opens the Playground | — | built (3; grow it) |
 | `/gallery` | Moment gallery | Named, deep-linked traces — a point lookup, the eviction storm (LRU and clock), the optimizer's rewrite — each card computes its own step via `events.findIndex(...)` against a real run, so an engine change fails the page rather than shipping a stale link. The index-dropped contrast and a B+Tree split/merge moment are not here yet — both are now just one more moment to add (B+Tree delete landed in v12) | per-card share string | **built** |
 | `/compare` | Comparison view | Two modes. **Replacement policies**: two buffer-pool traces (`src/engine/bufferTrace.ts`) stepping together on one reference string, synced by *access index*, flagging the first differing victim — either side any of the five policies (v12). **Index vs. sequential scan** (v12): the same SQL run once with the `id` index and once with it removed (`indexedColumn` dropped from the table — the optimizer and `runQuery` both key off it), scored side by side — trace steps, disk reads, evictions, B+Tree node reads, locks, rows. This is §13's full-pipeline half, at the altitude of the numbers rather than stepped panels | reference string + both policies, or the query (session-local) | **built** |
-| `/trace` | Trace inspector | The raw `StepEvent[]` for a query as a filterable table (per-stage toggles + a narration text filter) with per-row JSON and a **Copy JSON** of the filtered set. Runs the same `runQuery` the Playground does; each row's `#` opens the Playground at that step (§21.4 #4). Reads `q`/`p`/`d`; footer-only nav (§21.2) | `q`, `p`, `d` | **built** — v12 |
+| `/trace` | Trace inspector | The raw `StepEvent[]` for a query as a filterable table (per-stage toggles + a narration text filter) with per-row JSON and a **Copy JSON** of the filtered set — plus a **Transcript** view (v13): a numbered, printable prose list of every step's narration, each a Playground link. Runs the same `runQuery` the Playground does; each row's `#` opens the Playground at that step (§21.4 #4). Reads `q`/`p`/`d`/`v`; footer-only nav (§21.2) | `q`, `p`, `d`, `v` | **built** — v12; transcript v13 |
 
 **Tools** (§20.4 — each renders through the §20.2 `PanelPage` primitive)
 
@@ -2154,9 +2154,12 @@ URL-state schema. None needs a backend.
   permanently mounted (`aria-atomic`), drops to `sr-only` while the card shows, and `stepAnnouncement`
   (pure, unit-tested) feeds it the position, then the narration, then the prediction question and its
   verdict. §8's accessibility bullet points at it.
-- **Full text transcript.** The narration lines as a numbered, linkable, printable list, each line a
-  deep link into the Playground. Overlaps `/trace` but prose, not JSON — and it doubles as a
-  control-group artefact for §9. ~2 days. v1.
+- **Full text transcript.** ~~The narration lines as a numbered, linkable, printable list, each line
+  a deep link into the Playground. Overlaps `/trace` but prose, not JSON — and it doubles as a
+  control-group artefact for §9.~~ **Done, v13.** A **Transcript** view on `/trace` beside the
+  table (`v=transcript` opens straight to it): a numbered `<ol>` of every event's `label`, each row
+  a Playground link, with a **Print** button and an `@media print` block (`src/index.css`) that
+  drops everything but the list so it prints as a paper worksheet. No new route.
 - **Non-colour encoding for the storage hues.** Hit/miss/evict and internal/leaf are hue-only today.
   Add a shape or texture channel — always on, not a mode — for colour-vision deficiency and
   projector wash-out (§15.3's two reasons for the light theme apply here). ~2 days. v1. A separate
@@ -2205,7 +2208,7 @@ URL-state schema. None needs a backend.
 | Trace JSON export / import | **Done, v13** (`traceFile.ts` — Download / Load trace on the Playground) | M12 | — |
 | `aria-live` narration track | **Done, v13** (`stepAnnouncement.ts` + the permanent narration live region; §8 pointer added) | v1 | — |
 | The six missing `/learn` lessons | **Done, v13** (five added → nine lessons; keyboard ref stays a docs page) | v1 | — |
-| Full text transcript | Build | v1 | — |
+| Full text transcript | **Done, v13** (`/trace` Transcript view + print stylesheet) | v1 | — |
 | Non-colour hue encoding | Build | v1 | — |
 | Cost-based optimizer | Build | v1 | §9 validates the format |
 | More optimizer rules | Build | v1 | §9 validates the format |

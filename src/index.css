@@ -692,6 +692,41 @@ select:disabled {
   }
 }
 
+/* plan.md §22.6: the `/trace` transcript prints as a paper worksheet — nothing
+   else on the page does. The classic "print only this element": hide everything,
+   re-show the marked subtree, and pull it to the top of the sheet. Links print
+   as plain text since a URL is no use on paper. */
+@media print {
+  :root {
+    color-scheme: light;
+  }
+
+  body * {
+    visibility: hidden;
+  }
+
+  [data-transcript],
+  [data-transcript] * {
+    visibility: visible;
+  }
+
+  [data-transcript] {
+    position: absolute;
+    inset: 0 auto auto 0;
+    width: 100%;
+    max-height: none;
+    overflow: visible;
+    border: 0;
+    box-shadow: none;
+    color: #000;
+  }
+
+  [data-transcript] a {
+    color: #000;
+    text-decoration: none;
+  }
+}
+
 .cm-editor {
   background: transparent !important;
   /* plan.md §15.1 item 7 applies here most of all: the SQL is the text a
