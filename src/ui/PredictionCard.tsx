@@ -22,10 +22,11 @@ export function PredictionCard({ prompt, answer, onAnswer, onSkip, canSkip = tru
   const correct = answer === prompt.correctOptionId;
 
   return (
-    <section
-      aria-live="polite"
-      className="ql-sheen rounded-xl border border-accent/50 bg-accent/[0.07] p-3 shadow-e2"
-    >
+    // Not a live region: the card mounts fresh on each gated step, and a
+    // screen reader does not announce a region that was not already there.
+    // The Playground's permanently-mounted narration `<p>` speaks the question
+    // and then the verdict instead (plan.md §22.6).
+    <section className="ql-sheen rounded-xl border border-accent/50 bg-accent/[0.07] p-3 shadow-e2">
       <div className="mb-2 flex items-baseline gap-2">
         <span className="inline-flex items-center gap-1.5 rounded-full border border-accent/60 bg-accent-soft px-2.5 py-0.5 text-label font-medium tracking-[0.12em] text-accent uppercase">
           <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-accent-strong shadow-[0_0_8px_var(--color-accent)]" />

@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Screen-reader narration track** (plan.md §22.6, §8) — the Playground's narration line is now a
+  permanently-mounted polite live region, so a screen-reader user stepping the trace hears every event:
+  the step position, the narration the event already carries, and — on a gated step, where the
+  prediction card previously replaced the narration and silenced it — the question, its options, and
+  the verdict. Wording is a pure, unit-tested `src/ui/stepAnnouncement.ts`
 - **Download trace / Load trace** (plan.md §22.5) — beside *Copy link to this step*, save the current
   Playground moment as a small JSON file and restore it later. It is the shareable-URL state as a file
   — `sql`, `policy`, `predictOn`, `step`, edited `rows`, plus a build stamp — for a dataset too big for

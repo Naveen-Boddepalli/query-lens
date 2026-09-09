@@ -148,6 +148,29 @@ test('prediction gates advancement and answering releases it', async ({ page }) 
   await expect(page.getByText(/showing step/)).toContainText('9');
 });
 
+test('a permanent live region narrates the step, the prediction and the verdict', async ({ page }) => {
+  await page.goto(`/playground?q=${LOOKUP}&p=lru&x=1&s=8`);
+
+  // Exactly one, and it is always in the DOM — a screen reader does not announce
+  // a region that mounted alongside the text it should have spoken.
+  const live = page.locator('[aria-live="polite"][aria-atomic="true"]');
+  await expect(live).toHaveCount(1);
+
+  // Landed on the gated step: it reads the position, the question and the options.
+  await expect(live).toContainText('Step 8 of');
+  await expect(live).toContainText(/predict before revealing/i);
+  await expect(live).toContainText(/options:/i);
+
+  // Answering updates the same node to the verdict — no remount.
+  await page.getByRole('button', { name: /index lookup/i }).click();
+  await expect(live).toContainText(/correct\.|not quite\./i);
+  await expect(page.locator('[aria-live="polite"][aria-atomic="true"]')).toHaveCount(1);
+
+  // The next ordinary step speaks its narration.
+  await page.getByRole('button', { name: 'Step forward' }).click();
+  await expect(live).toContainText(/^Step 9 of \d+\. \S/);
+});
+
 test('stepping does not pollute browser history', async ({ page }) => {
   await page.goto('/');
   await page.goto(`/playground?q=${LOOKUP}&p=lru&x=0&s=1`);

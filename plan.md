@@ -480,7 +480,10 @@ This event stream is the single contract between engine and UI — makes the UI 
 - **Accessibility** (cheap now, invasive later): the Play/Pause controls already satisfy WCAG 2.2.2
   (Pause, Stop, Hide). Honour `prefers-reduced-motion` by snapping between states instead of tweening —
   it does *not* replace the controls, both are required. Keyboard shortcuts throughout
-  (Space = play/pause, ←/→ = step); learners in training settings lean on them heavily.
+  (Space = play/pause, ←/→ = step); learners in training settings lean on them heavily. The narration
+  line is a permanently-mounted polite live region (§22.6), so a screen-reader user stepping the
+  trace hears each event — position, then the `label` the event already carries, then the prediction
+  question and its verdict on a gated step.
   A one-off contrast sweep decays on the next style change, so **axe runs in CI as a regression net**
   (§14) — but automated tooling catches only 30–57% of WCAG failures, so the manual sweep stays the
   real check and is repeated at each visual change, not annually.
@@ -2139,11 +2142,14 @@ URL-state schema. None needs a backend.
 
 ### 22.6 Accessibility & reach
 
-- **Live narration track (`aria-live`).** Every `StepEvent` already carries a `label` written as
+- **Live narration track (`aria-live`).** ~~Every `StepEvent` already carries a `label` written as
   narration (§7.8); routing it to a polite live region lets a screen-reader user step the trace and
-  hear each event. The data exists — this is wiring and testing. **Strongest reach promote — v1,
-  ~2 days**, no engine change, and it makes the tool usable by a population that cannot use it today.
-  Add a one-line pointer from §8's accessibility bullet.
+  hear each event.~~ **Done, v13.** The wiring existed but was subtly broken for the case that
+  matters most: the narration `<p>` was swapped out for the prediction card on a gated step, so it
+  re-mounted with the very text it needed to announce and a screen reader stayed silent. It is now
+  permanently mounted (`aria-atomic`), drops to `sr-only` while the card shows, and `stepAnnouncement`
+  (pure, unit-tested) feeds it the position, then the narration, then the prediction question and its
+  verdict. §8's accessibility bullet points at it.
 - **Full text transcript.** The narration lines as a numbered, linkable, printable list, each line a
   deep link into the Playground. Overlaps `/trace` but prose, not JSON — and it doubles as a
   control-group artefact for §9. ~2 days. v1.
@@ -2193,7 +2199,7 @@ URL-state schema. None needs a backend.
 |---|---|---|---|
 | Copy-as-text / ASCII trace | **Done, v13** (`toText.ts`, "Copy as text" — AST, plan **and** B+Tree) | M12 | — |
 | Trace JSON export / import | **Done, v13** (`traceFile.ts` — Download / Load trace on the Playground) | M12 | — |
-| `aria-live` narration track | **Promote — v1** | v1 | — (do it; add the §8 pointer) |
+| `aria-live` narration track | **Done, v13** (`stepAnnouncement.ts` + the permanent narration live region; §8 pointer added) | v1 | — |
 | The six missing `/learn` lessons | **Promote — v1, incremental** | v1 | — |
 | Full text transcript | Build | v1 | — |
 | Non-colour hue encoding | Build | v1 | — |

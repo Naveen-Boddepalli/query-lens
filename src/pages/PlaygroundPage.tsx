@@ -21,6 +21,7 @@ import { SqlEditor } from '../ui/SqlEditor.tsx';
 import { DataEditor } from '../ui/DataEditor.tsx';
 import { PredictionCard } from '../ui/PredictionCard.tsx';
 import { ShortcutHints } from '../ui/ShortcutHints.tsx';
+import { stepAnnouncement } from '../ui/stepAnnouncement.ts';
 import { btnPrimary, btnSecondary, panelSurface } from '../ui/primitives.ts';
 import { useThemeContext } from '../ui/ThemeContext.tsx';
 import { RUN_HINT, useIsTouch } from '../ui/platform.ts';
@@ -134,6 +135,16 @@ export function PlaygroundPage() {
 
   const upcoming = result.events[playback.step];
   const prompt = predictOn ? upcoming?.predictable : undefined;
+
+  // plan.md §22.6: what a screen reader hears on this step. The narration `<p>`
+  // below is the live region and is kept permanently mounted for it — the
+  // prediction card renders alongside rather than in its place, so the region
+  // is never re-created with the very text it needed to announce.
+  const announcement = stepAnnouncement({
+    narration: state.narration,
+    error: result.error !== undefined,
+    prediction: prompt && upcoming ? { prompt, answer: answers[upcoming.id] } : undefined,
+  });
 
   const visited = useMemo(() => {
     const seen = new Set<Stage>();
@@ -424,7 +435,7 @@ export function PlaygroundPage() {
             )}
           </div>
 
-          {prompt && upcoming ? (
+          {prompt && upcoming && (
             <PredictionCard
               prompt={prompt}
               answer={answers[upcoming.id]}
@@ -436,16 +447,33 @@ export function PlaygroundPage() {
                 setAnswers((current) => ({ ...current, [upcoming.id]: '' }));
               }}
             />
-          ) : (
-            <div className="ql-sheen rounded-xl border border-edge bg-surface-2 p-3 shadow-e1">
+          )}
+
+          {/* The narration line doubles as the trace's live region (plan.md
+              §22.6), so it stays mounted even while the prediction card is up —
+              a screen reader only announces a change to a region that was
+              already there. While the card shows, this drops to sr-only and the
+              card carries the visuals; `stepAnnouncement` puts the question and
+              then the verdict into it. */}
+          <div
+            className={
+              prompt
+                ? 'sr-only'
+                : 'ql-sheen rounded-xl border border-edge bg-surface-2 p-3 shadow-e1'
+            }
+          >
+            {!prompt && (
               <h2 className="mb-1 text-label font-medium tracking-[0.12em] text-ink-dim uppercase">
                 Narration
               </h2>
-              <p className="min-h-10 text-body leading-relaxed" aria-live="polite">
-                {state.narration || 'Step forward to start the trace.'}
-              </p>
-            </div>
-          )}
+            )}
+            <p className="min-h-10 text-body leading-relaxed" aria-live="polite" aria-atomic="true">
+              <span className="sr-only">
+                Step {playback.step} of {result.events.length}.{' '}
+              </span>
+              {announcement}
+            </p>
+          </div>
 
           <div className="sticky bottom-0 z-10 -mx-4 space-y-2 border-t border-edge bg-surface/85 px-4 py-2 backdrop-blur-md lg:static lg:mx-0 lg:space-y-3 lg:border-0 lg:bg-transparent lg:px-0 lg:py-0 lg:backdrop-blur-none">
             <PlaybackControls
