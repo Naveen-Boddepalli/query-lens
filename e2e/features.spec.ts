@@ -211,6 +211,27 @@ test('the AST and plan panels copy themselves as a Mermaid diagram', async ({ pa
   expect(ast).toContain('"SELECT"');
 });
 
+test('the panels also copy themselves as monospace text', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+
+  await page.goto('/stages/parse');
+  await page.getByRole('button', { name: 'Copy as text' }).click();
+  await expect(page.getByRole('button', { name: 'Copied ✓' })).toBeVisible();
+
+  const ast = await page.evaluate(() => navigator.clipboard.readText());
+  expect(ast.startsWith('```\n')).toBe(true);
+  expect(ast).not.toContain('```mermaid');
+  expect(ast).toContain('SELECT');
+  expect(ast).toMatch(/[├└]─ /); // tree(1) connectors
+
+  // The B+Tree panel — which has no "Copy as Mermaid" — still offers text.
+  await page.goto('/stages/index');
+  await expect(page.getByRole('button', { name: 'Copy as Mermaid' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Copy as text' }).click();
+  const tree = await page.evaluate(() => navigator.clipboard.readText());
+  expect(tree).toMatch(/(internal|leaf), page \d+/);
+});
+
 test('the trace inspector filters the raw event stream and links into the Playground', async ({ page }) => {
   await page.goto('/trace');
   await expect(page.getByText(/of \d+ events/)).toBeVisible();

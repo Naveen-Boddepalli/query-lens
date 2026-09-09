@@ -2116,9 +2116,12 @@ URL-state schema. None needs a backend.
 
 ### 22.5 Export & presentation (extends §20.3)
 
-- **Copy as text / ASCII trace.** A pure function beside `src/export/toMermaid.ts` that renders the
-  AST, plan or tree as monospace art for a code review or an email — no renderer, no CSP question.
-  **Fold into M12's open list**: it is the Mermaid export's twin and lands the same way.
+- **Copy as text / ASCII trace.** ~~A pure function beside `src/export/toMermaid.ts` that renders
+  the AST, plan or tree as monospace art for a code review or an email — no renderer, no CSP
+  question.~~ **Done, v13.** `src/export/toText.ts` (`astToText` / `planToText` / `indexTreeToText`),
+  a `tree(1)`-style indented list in a bare ` ``` ` fence, behind a shared **Copy as text** button
+  in `StageDetail`'s header. Landed as the Mermaid export's twin — and it *does* take the B+Tree,
+  which a fixed-width tree renders fine where Mermaid could not (§20.3).
 - **Trace export / import as JSON.** "Download this trace", "load a trace from a file". §14.1 item 4
   already assembles the crashing state for the error boundary; this generalises it, and hands the §9
   study reproducible instruments and bug reports a payload. **Fold near M12 / §14** — a file, no
@@ -2185,7 +2188,7 @@ URL-state schema. None needs a backend.
 
 | Item | Verdict | Earliest | Trigger to revisit |
 |---|---|---|---|
-| Copy-as-text / ASCII trace | **Promote — M12** | M12 | — |
+| Copy-as-text / ASCII trace | **Done, v13** (`toText.ts`, "Copy as text" — AST, plan **and** B+Tree) | M12 | — |
 | Trace JSON export / import | **Promote — M12 / §14** | M12 | — |
 | `aria-live` narration track | **Promote — v1** | v1 | — (do it; add the §8 pointer) |
 | The six missing `/learn` lessons | **Promote — v1, incremental** | v1 | — |

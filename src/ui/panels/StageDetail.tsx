@@ -1,9 +1,15 @@
 import { useRef } from 'react';
 import { IMPLEMENTED_STAGES } from '../../engine/index.ts';
 import type { ReplacementPolicyName, Span, Stage, ViewState } from '../../engine/index.ts';
-import { astToMermaid, planToMermaid } from '../../export/index.ts';
+import {
+  astToMermaid,
+  astToText,
+  indexTreeToText,
+  planToMermaid,
+  planToText,
+} from '../../export/index.ts';
 import { STAGE_META } from '../stageMeta.ts';
-import { CopyMermaidButton } from '../CopyMermaidButton.tsx';
+import { CopyButton } from '../CopyButton.tsx';
 import { DownloadPngButton } from '../DownloadPngButton.tsx';
 import { AstTree } from './AstTree.tsx';
 import { BTreePanel } from './BTreePanel.tsx';
@@ -68,6 +74,17 @@ export function StageDetail({
         ? planToMermaid(state.plan)
         : null;
 
+  // Copy-as-text (§22.5) is the plain-monospace twin, and it *can* take the
+  // B+Tree — a `tree(1)` list renders a sibling chain fine where Mermaid can't.
+  const plainText =
+    stage === 'parse' && state.ast
+      ? astToText(state.ast)
+      : (stage === 'plan' || stage === 'optimize') && state.plan
+        ? planToText(state.plan)
+        : stage === 'index' && state.indexTree
+          ? indexTreeToText(state.indexTree)
+          : null;
+
   return (
     <section className="flex h-full flex-col gap-3">
       <header className="flex flex-wrap items-start gap-x-3 gap-y-1">
@@ -78,7 +95,20 @@ export function StageDetail({
 
         <div className="ml-auto flex flex-wrap items-center gap-2">
           {implemented && <DownloadPngButton target={panelRef} name={stage} />}
-          {mermaid && <CopyMermaidButton text={mermaid} />}
+          {mermaid && (
+            <CopyButton
+              text={mermaid}
+              label="Copy as Mermaid"
+              title="Copy this tree as a Mermaid flowchart, ready to paste"
+            />
+          )}
+          {plainText && (
+            <CopyButton
+              text={plainText}
+              label="Copy as text"
+              title="Copy this tree as monospace text for a code review or an email"
+            />
+          )}
 
           {/* Selecting a stage holds the panel there while the trace runs on,
               which is the point — you can watch the buffer pool while execute

@@ -1,11 +1,21 @@
 import { useState } from 'react';
 
 /**
- * plan.md §20.8: a **Copy as Mermaid** action on the AST and plan panels.
- * `src/export/toMermaid.ts` does the pure work; this is just the clipboard
- * plumbing, on the same try/catch pattern as the Playground's "copy link".
+ * plan.md §20.8 / §22.5: the clipboard plumbing behind the "Copy as Mermaid"
+ * and "Copy as text" actions on the diagram panels. The pure work lives in
+ * `src/export/`; this is only the write plus the 2 s "Copied ✓" flip, on the
+ * same try/catch the Playground's "copy link" uses.
  */
-export function CopyMermaidButton({ text }: { text: string }) {
+export function CopyButton({
+  text,
+  label,
+  title,
+}: {
+  text: string;
+  /** Resting label, e.g. "Copy as text". Also the button's accessible name. */
+  label: string;
+  title: string;
+}) {
   const [copied, setCopied] = useState(false);
 
   async function copy() {
@@ -23,9 +33,9 @@ export function CopyMermaidButton({ text }: { text: string }) {
       type="button"
       onClick={() => { void copy(); }}
       className="rounded-full border border-edge bg-surface-2 px-3 py-1 text-label text-ink-dim shadow-e1 transition hover:border-ink-dim/50 hover:text-ink"
-      title="Copy this tree as a Mermaid flowchart, ready to paste"
+      title={title}
     >
-      {copied ? 'Copied ✓' : 'Copy as Mermaid'}
+      {copied ? 'Copied ✓' : label}
     </button>
   );
 }

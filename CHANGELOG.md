@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Copy as text** (plan.md §22.5) — a third panel-header action beside Copy as Mermaid and Download
+  PNG: the AST, the plan, or the **B+Tree** as a `tree(1)`-style indented list in a bare ` ``` `
+  fence, for a review comment or an email. Pure, unit-tested conversion in `src/export/toText.ts`;
+  unlike Mermaid it covers the B+Tree, because a fixed-width tree renders a sibling chain fine. The
+  clipboard button is now one shared `CopyButton` (was `CopyMermaidButton`)
 - **`pnpm record`** (plan.md §20.3, §20.8) — `scripts/record.ts` drives the *built* app in a real
   browser, frame-steps a shareable link over a `--from`/`--to` range, and muxes the result to a GIF
   and a WebM with the shipped fonts and `oklch` colours — the completion of M12 and the moving-picture

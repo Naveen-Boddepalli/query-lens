@@ -66,12 +66,14 @@ is how this documentation itself links out to worked examples.
 
 ## Can I get the diagrams out?
 
-Two ways, from the panel header on any stage. **Copy as Mermaid** puts the AST or the plan on your
+Three ways, from the panel header on any stage. **Copy as Mermaid** puts the AST or the plan on your
 clipboard as a `flowchart` in a fenced code block, ready to paste into a pull request or a doc —
-not the B+Tree, which Mermaid lays out badly. **Download PNG** saves any panel as an image with the
-app's real typeface and colours baked in; it renders correctly in Chrome and Firefox, and may fall
-back to plain sRGB in Safari, whose SVG-to-canvas path has known colour bugs. Both run entirely in
-your browser.
+not the B+Tree, which Mermaid lays out badly. **Copy as text** is the plain-monospace twin: a
+`tree`-style indented list in a bare code fence, for a review comment or an email — and it *does*
+take the B+Tree, which a fixed-width tree renders fine. **Download PNG** saves any panel as an image
+with the app's real typeface and colours baked in; it renders correctly in Chrome and Firefox, and
+may fall back to plain sRGB in Safari, whose SVG-to-canvas path has known colour bugs. All three run
+entirely in your browser.
 
 A moving version — a GIF or a WebM of a trace playing over a range of steps — is produced by the
 project's own `pnpm record` script rather than an in-app button, because a GIF encoder is a poor
