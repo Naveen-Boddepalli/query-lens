@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **First-visit hint** (plan.md §19.2) — one quiet line under the header, shown once to a cold
+  visitor at the app's own front door (`/playground` with nothing in the URL; a shared-moment link
+  carries its own context). It points at the keyboard route into the trace — `Space` to play, the
+  arrows to step — retires itself on mount so a reload never brings it back, and has a Dismiss button
+  for mid-session. Touch devices get a pointer-appropriate line
+- **Preset query chips** above the Playground editor (plan.md §19.2) — *Point lookup*, *Sequential
+  scan*, *Lookup, no index*. One click loads and runs, so a first visitor isn't asked to invent SQL.
+  The third is a `col = value` equality on a **non-indexed** column — the same shape as the point
+  lookup, but the planner can't turn it into a B+Tree lookup, which is the contrast the tool exists
+  to show
 - **Challenge mode** at `/challenges` (plan.md §22.4) — five goal-shaped puzzles: *make the planner
   use the index*, *force an eviction*, *return exactly one row*, *empty result but real work*, *two
   conditions that still match*. Each has a small editor whose Run result is checked against a pure

@@ -262,6 +262,41 @@ test('the panels also copy themselves as monospace text', async ({ page, context
   expect(tree).toMatch(/(internal|leaf), page \d+/);
 });
 
+test('the preset chips load and run a query in one click', async ({ page }) => {
+  await page.goto('/playground');
+
+  await page.getByRole('button', { name: 'Sequential scan' }).click();
+  await expect(page.getByLabel('SQL query')).toContainText('age > 30');
+  // A scan runs many more steps than the default point lookup.
+  await expect(page.getByText(/steps in this trace/)).not.toContainText('33 steps');
+
+  await page.getByRole('button', { name: 'Lookup, no index' }).click();
+  await expect(page.getByLabel('SQL query')).toContainText("name = 'grace'");
+  // Same equality shape as the point lookup, but no index for it to use.
+  await page.getByLabel('Scrub to step').press('End');
+  await expect(page.getByRole('cell', { name: 'grace', exact: true })).toBeVisible();
+});
+
+test('the first-visit hint shows once on the bare Playground, then never again', async ({ page }) => {
+  // A shared-moment link is someone else's onboarding — the hint stays out of it.
+  await page.goto('/playground?q=SELECT+*+FROM+users+WHERE+id+%3D+5&p=lru&x=0&s=1');
+  await expect(page.getByText(/steps in this trace/)).toBeVisible();
+  await expect(page.getByText(/New here\?/)).toHaveCount(0);
+
+  // The app's own front door: the one line appears.
+  await page.goto('/playground');
+  const hint = page.getByText(/New here\?/);
+  await expect(hint).toBeVisible();
+
+  await page.getByRole('button', { name: 'Dismiss' }).click();
+  await expect(hint).toHaveCount(0);
+
+  // Retired for good — a fresh visit to the bare front door never brings it back.
+  await page.goto('/playground');
+  await expect(page.getByText(/steps in this trace/)).toBeVisible();
+  await expect(page.getByText(/New here\?/)).toHaveCount(0);
+});
+
 test('a challenge checks the query on Run and remembers the solve', async ({ page }) => {
   await page.goto('/challenges');
   await expect(page.getByText('0 of 5 solved')).toBeVisible();

@@ -42,6 +42,18 @@ import type { TraceState } from '../ui/traceFile.ts';
 
 const INITIAL_SQL = 'SELECT *\nFROM users\nWHERE id = 5;';
 
+/**
+ * plan.md §19.2 P1: one-click starting points above the editor, so a first
+ * visitor is not asked to invent SQL before they know what the tool does with
+ * it. The third pair is the §9 contrast the product exists to show — the same
+ * equality shape, once on the indexed column and once not.
+ */
+const PRESETS: { label: string; sql: string }[] = [
+  { label: 'Point lookup', sql: 'SELECT *\nFROM users\nWHERE id = 5;' },
+  { label: 'Sequential scan', sql: 'SELECT *\nFROM users\nWHERE age > 30;' },
+  { label: 'Lookup, no index', sql: "SELECT *\nFROM users\nWHERE name = 'grace';" },
+];
+
 const TABLE = 'users';
 
 function landingStep(result: RunResult, predictOn: boolean): number {
@@ -239,6 +251,16 @@ export function PlaygroundPage() {
     run(fresh);
   }
 
+  /** A preset chip: load the query and run it in one click (plan.md §19.2). */
+  function loadPreset(presetSql: string) {
+    setSql(presetSql);
+    const next = runQuery(presetSql, db, options);
+    setResult(next);
+    setPinnedStage(null);
+    setAnswers({});
+    playback.land(landingStep(next, askToPredict));
+  }
+
   // plan.md §22.5: the shareable moment as a file, for a dataset too big for a
   // URL or a bug report that wants the seed data attached. `data:` + `<a
   // download>`, the DownloadPngButton pattern — no `blob:` lifecycle, and the
@@ -309,6 +331,24 @@ export function PlaygroundPage() {
       <main className="grid flex-1 gap-4 p-4 lg:min-h-0 lg:grid-cols-[minmax(300px,400px)_1fr]">
         {/* Authoring panel */}
         <div className="snap-section order-2 flex min-w-0 flex-col gap-3 lg:order-1 lg:min-h-0 lg:overflow-y-auto">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="mr-1 text-label text-ink-dim">Try:</span>
+            {PRESETS.map((p) => (
+              <button
+                key={p.label}
+                type="button"
+                onClick={() => { loadPreset(p.sql); }}
+                className={`rounded-full border px-2.5 py-0.5 text-label transition ${
+                  sql === p.sql
+                    ? 'border-accent bg-accent-soft text-ink'
+                    : 'border-edge text-ink-dim hover:border-ink-dim/50 hover:text-ink'
+                }`}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+
           <SqlEditor
             value={sql}
             onChange={setSql}

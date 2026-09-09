@@ -1,5 +1,6 @@
 import { Outlet, useLocation } from 'react-router-dom';
 import { DisclaimerBanner } from './DisclaimerBanner.tsx';
+import { FirstVisitHint } from './FirstVisitHint.tsx';
 import { TopNav } from './TopNav.tsx';
 import { Footer } from './Footer.tsx';
 
@@ -20,7 +21,12 @@ import { Footer } from './Footer.tsx';
  * PlaygroundPage's `.snap-section` children expect; it is inert elsewhere.
  */
 export function Layout() {
-  const isLanding = useLocation().pathname === '/';
+  const { pathname, search } = useLocation();
+  const isLanding = pathname === '/';
+  // The first-visit hint (plan.md §19.2) belongs on the app's own front door
+  // only: `/playground` with nothing in the URL. A shared-moment link
+  // (`?q=…`) is someone else's onboarding, not a cold first visit.
+  const showHint = pathname === '/playground' && search === '';
 
   return (
     <div className="flex min-h-dvh flex-col">
@@ -33,6 +39,7 @@ export function Layout() {
       >
         <DisclaimerBanner />
         <TopNav />
+        {showHint && <FirstVisitHint />}
         <div className="flex min-h-0 flex-1">
           <Outlet />
         </div>

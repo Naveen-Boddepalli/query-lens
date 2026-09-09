@@ -107,8 +107,11 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
  * Raised 364 → 368 for `/challenges` (§22.4): the two pages, the check list and
  * the solved-set, plus `SqlEditor-*.js` splitting out of `trace-ui` once the
  * challenge page became its second importer — a move, mostly, but visible here.
+ * Raised 368 → 369 for the first-visit hint (§19.2 P1): `FirstVisitHint.tsx` +
+ * `firstVisit.ts` in the entry chunk, since `Layout` mounts the one line under
+ * the header for a cold visitor to `/playground`.
  */
-const TOTAL_KB = 368;
+const TOTAL_KB = 369;
 
 const gzipKb = (bytes: Buffer): number => gzipSync(bytes, { level: 9 }).length / 1024;
 
