@@ -1966,8 +1966,10 @@ recursion depth + the parser's own errors (§21.3's row). `/tools/btree` is the 
 `insert` / `deleteKey` / `search`, and the B+Tree **deletion** it needed was built with it (borrow /
 merge / root-collapse / separator rewrite, with §7.6's property tests). `/trace` is the raw-event
 inspector — filterable table, per-row JSON, jump-to-step links — running the same `runQuery` as the
-Playground, footer-only. **`/learn`** is four §17.2 tasks as an ordered track, each step deep-linking
-into the Playground at an engine-computed step, with `localStorage` completion marks. **Assignment
+Playground, footer-only. **`/learn`** is the §17.2 tasks as an ordered track (four at v12, nine at
+v13 — B+Tree split, edit the seed data, predict, share a moment, when something goes wrong; the
+keyboard reference stays in the docs), each step deep-linking to an engine-computed Playground step
+or a `/tools/*` sandbox, with `localStorage` completion marks. **Assignment
 links** gained the reveal-lock
 they were always missing: `&l=1` seals the trace at the landing step until the learner answers
 (`usePlayback` `ceiling`, no "skip"). **`/compare`** gained a second mode — index vs. sequential
@@ -2097,11 +2099,13 @@ URL-state schema. None needs a backend.
 
 ### 22.4 Learning & classroom surfaces
 
-- **The six missing `/learn` lessons.** The track is four (§21.3); §17.2 lists ten manual pages.
-  Add: watch a B+Tree split, make the planner change its mind, edit the seed data, predict before
-  you look, share a moment, when something goes wrong. Each is an ordered lesson whose deep links
-  are engine-computed (`src/pages/learn/lessons.tsx`'s existing rule). **Promote — v1, incremental**,
-  ~½ day each, no engine change; pure content for the returning visitor §21.2 is built around.
+- **The six missing `/learn` lessons.** ~~The track is four (§21.3); §17.2 lists ten manual pages.~~
+  **Done, v13.** Five added — B+Tree split, edit the seed data, predict before you look, share a
+  moment, when something goes wrong (`make the planner change its mind` had already shipped as
+  lesson four; the keyboard reference stays a docs page, not a task). Each is an ordered lesson whose
+  Playground links are engine-computed (`src/pages/learn/lessons.tsx`'s existing rule); the B+Tree
+  split lesson links to `/tools/btree` instead, via a new fixed-link field on a step. No engine
+  change.
 - **Challenge mode.** Goal-shaped puzzles with a client-side check — "make this query use the
   index", "cause an eviction storm in ≤ N accesses", "construct seed data where predicate pushdown
   changes the row count". Engagement (§12's core risk) with no backend and no new engine surface: a
@@ -2200,7 +2204,7 @@ URL-state schema. None needs a backend.
 | Copy-as-text / ASCII trace | **Done, v13** (`toText.ts`, "Copy as text" — AST, plan **and** B+Tree) | M12 | — |
 | Trace JSON export / import | **Done, v13** (`traceFile.ts` — Download / Load trace on the Playground) | M12 | — |
 | `aria-live` narration track | **Done, v13** (`stepAnnouncement.ts` + the permanent narration live region; §8 pointer added) | v1 | — |
-| The six missing `/learn` lessons | **Promote — v1, incremental** | v1 | — |
+| The six missing `/learn` lessons | **Done, v13** (five added → nine lessons; keyboard ref stays a docs page) | v1 | — |
 | Full text transcript | Build | v1 | — |
 | Non-colour hue encoding | Build | v1 | — |
 | Cost-based optimizer | Build | v1 | §9 validates the format |

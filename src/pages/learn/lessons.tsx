@@ -33,7 +33,11 @@ interface OpenSpec {
 export interface LessonStep {
   heading: string;
   body: ReactNode;
+  /** Drives the Playground; the step is computed from a real run. */
   open?: OpenSpec;
+  /** A fixed link for a step that points somewhere other than the Playground —
+   *  a `/tools/*` sandbox, the docs — so it cannot carry a stale step number. */
+  link?: { href: string; label: string };
   tryThis?: ReactNode;
 }
 
@@ -209,6 +213,60 @@ export const LESSONS: Lesson[] = [
     ],
   },
   {
+    id: 'btree-split',
+    title: 'Watch a B+Tree split',
+    minutes: 4,
+    summary: 'Fill a leaf, add one key, and watch the tree grow a level — a copy-up, then a push-up.',
+    steps: [
+      {
+        heading: 'Start with a full leaf',
+        body: (
+          <>
+            Open the B+Tree sandbox with four keys and a fan-out of four, so this one leaf is exactly
+            full. There is no SQL here — you insert and delete keys directly and the tree rebalances
+            as you go.
+          </>
+        ),
+        link: { href: '/tools/btree?keys=1,2,3,4&fanout=4', label: 'Open the B+Tree sandbox' },
+      },
+      {
+        heading: 'Add one key',
+        body: (
+          <>
+            Type <code className="font-mono">5</code> and press Insert. The leaf overflows and
+            splits: <code className="font-mono">1, 2, 3</code> stay, <code className="font-mono">4</code>{' '}
+            and <code className="font-mono">5</code> move to a new leaf, and <code className="font-mono">4</code>{' '}
+            is <em>copied</em> up to become the root&apos;s separator. A leaf split copies its
+            separator up — the key still lives in a leaf, because a leaf is the only place a row
+            pointer can hang.
+          </>
+        ),
+      },
+      {
+        heading: 'Go deeper: an internal split',
+        body: (
+          <>
+            Open a taller tree and keep inserting — <code className="font-mono">16</code>,{' '}
+            <code className="font-mono">17</code>, <code className="font-mono">18</code>… — until the
+            root node itself overflows. This time the middle key is <em>pushed</em> up, not copied: a
+            separator is not a row, so it moves out entirely, and the tree gains a level.
+          </>
+        ),
+        link: {
+          href: '/tools/btree?keys=1,2,3,4,5,6,7,8,9,10,11,12,13,14,15&fanout=4',
+          label: 'Open a two-level tree',
+        },
+        tryThis: (
+          <>
+            The badge under the tree re-checks every B+Tree invariant after each edit (plan.md §7.6).
+            Now delete keys until a node drops below half full, and watch it borrow from a sibling or
+            merge — a split run backwards.
+          </>
+        ),
+      },
+    ],
+  },
+  {
     id: 'planner',
     title: 'Make the planner change its mind',
     minutes: 3,
@@ -248,6 +306,184 @@ export const LESSONS: Lesson[] = [
             Try <code className="font-mono">WHERE id &gt; 5</code> — a range on the{' '}
             <em>indexed</em> column. Does it become an <code className="font-mono">IndexScan</code>?
             (It does not: the rule needs an equality.)
+          </>
+        ),
+      },
+    ],
+  },
+  {
+    id: 'edit-data',
+    title: 'Edit the seed data',
+    minutes: 3,
+    summary: 'Change the rows and watch which parts of the trace change — and which do not.',
+    steps: [
+      {
+        heading: 'Open the data editor',
+        body: (
+          <>
+            Under the query, <strong>Edit data</strong> opens the 48 seed rows as a grid. Add a row,
+            change an <code className="font-mono">age</code>, delete one — then apply and re-run.
+          </>
+        ),
+        open: { sql: SEQ_SCAN, find: () => 1, label: 'Open the Playground' },
+      },
+      {
+        heading: 'What changes',
+        body: (
+          <>
+            More rows means more pages, so the sequential scan does more disk reads and evicts more
+            often — the buffer pool panel and the result count both move. The row you added shows up
+            in the result if it matches <code className="font-mono">age &gt; 30</code>.
+          </>
+        ),
+      },
+      {
+        heading: 'What does not',
+        body: (
+          <>
+            The parser and the planner never look at a single row — the AST and the plan tree are
+            identical no matter what the data says. Editing data changes <em>execution</em>, not the
+            shape of the query.
+          </>
+        ),
+        tryThis: (
+          <>
+            Delete every row with <code className="font-mono">age &gt; 30</code>, then run it. The
+            plan is unchanged, the scan still reads every remaining page, and the result is empty —
+            work done to prove there is nothing to return. Your edits ride in the link, so you can
+            share that exact table.
+          </>
+        ),
+      },
+    ],
+  },
+  {
+    id: 'predict',
+    title: 'Predict before you look',
+    minutes: 3,
+    summary: 'Commit to an answer before each reveal — the one habit the evidence backs.',
+    steps: [
+      {
+        heading: 'A question, before the step',
+        body: (
+          <>
+            With <strong>Ask me to predict</strong> on, the playhead stops just before a
+            consequential step and asks what will happen. Here it is the optimiser: sequential scan,
+            or index lookup?
+          </>
+        ),
+        open: {
+          sql: POINT_LOOKUP,
+          predictOn: true,
+          find: (e) => at(e, (x) => x.predictable !== undefined),
+          label: 'Open a step that asks you to predict',
+        },
+      },
+      {
+        heading: 'Commit, then reveal',
+        body: (
+          <>
+            Pick an option. The step runs and tells you whether you were right, with a sentence on
+            why. A wrong guess you committed to is worth more than a correct animation you watched —
+            that is the finding this mode rests on (see RESEARCH.md §1).
+          </>
+        ),
+      },
+      {
+        heading: 'Turning it off for a room',
+        body: (
+          <>
+            Demonstrating to a class, the prompts get in the way. Uncheck the box, or share a link
+            with <code className="font-mono">x=0</code>. An assignment link (<code className="font-mono">l=1</code>)
+            does the opposite — it seals the reveal until the learner answers.
+          </>
+        ),
+        tryThis: (
+          <>
+            Answer this one wrong on purpose and read the explanation. Then visit{' '}
+            <code className="font-mono">/assignments/new</code> to build a locked version to set as
+            homework.
+          </>
+        ),
+      },
+    ],
+  },
+  {
+    id: 'share',
+    title: 'Share a moment',
+    minutes: 2,
+    summary: 'The URL is the save file: a query, a dataset and a step, reproducible from a link.',
+    steps: [
+      {
+        heading: 'A link to an exact step',
+        body: (
+          <>
+            <strong>Copy link to this step</strong> under the editor captures where you are:{' '}
+            <code className="font-mono">q</code> the query, <code className="font-mono">p</code> the
+            policy, <code className="font-mono">s</code> the step,{' '}
+            <code className="font-mono">d</code> the rows if you edited them. Omit one and it falls
+            back to the default.
+          </>
+        ),
+        open: {
+          sql: SEQ_SCAN,
+          find: (e) => at(e, (x) => x.stage === 'buffer' && x.action === 'evict'),
+          label: 'Open the Playground at the first eviction',
+        },
+      },
+      {
+        heading: 'A stranger wrote this link',
+        body: (
+          <>
+            The URL is the one input the app takes from someone else, so it is parsed defensively: a
+            dataset that does not match the schema is dropped whole rather than half-restored, because
+            a half-restored table would render a trace that is simply a lie. The full parameter table
+            is in the docs, under{' '}
+            <code className="font-mono">/docs/reference/url-parameters</code>.
+          </>
+        ),
+        tryThis: (
+          <>
+            Copy the link, change <code className="font-mono">&amp;s=</code> to a smaller number by
+            hand, and open it. For a dataset too large for a URL, <strong>Download trace</strong>{' '}
+            saves the same moment as a file that <strong>Load trace</strong> restores.
+          </>
+        ),
+      },
+    ],
+  },
+  {
+    id: 'errors',
+    title: 'When something goes wrong',
+    minutes: 2,
+    summary: 'A panel that breaks does not lose your trace — and the report writes itself.',
+    steps: [
+      {
+        heading: 'The trace survives a broken panel',
+        body: (
+          <>
+            If one stage view hits a bug, only that panel is replaced — with a red box, not a blank
+            screen. The narration, the playback controls and the SQL you typed are all still there;
+            step away from that stage and the rest keeps working.
+          </>
+        ),
+        open: { sql: POINT_LOOKUP, find: () => 1, label: 'Open the Playground' },
+      },
+      {
+        heading: 'The report is already written',
+        body: (
+          <>
+            The box carries <strong>Copy report</strong> and <strong>Open an issue</strong>. Both
+            include a <code className="font-mono">Reproduce</code> block — the SQL, policy, step and
+            any edited rows. The engine is deterministic, so those four values reproduce the crash on
+            the first try. That block <em>is</em> the bug report.
+          </>
+        ),
+        tryThis: (
+          <>
+            A query that will not parse is not a crash — it shows an error beside the editor and the
+            trace simply does not build. The red box is for an unexpected failure while rendering a
+            panel; if you ever see one, paste the repro into an issue.
           </>
         ),
       },

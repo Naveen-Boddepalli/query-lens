@@ -302,11 +302,11 @@ test('the trace inspector filters the raw event stream and links into the Playgr
 
 test('the learn track opens lessons that deep-link into the Playground and remembers progress', async ({ page }) => {
   await page.goto('/learn');
-  await expect(page.getByText('0 of 4 complete')).toBeVisible();
+  await expect(page.getByText('0 of 9 complete')).toBeVisible();
 
   await page.getByRole('link', { name: /Follow one row from disk to result/ }).click();
   await expect(page).toHaveURL(/\/learn\/one-row$/);
-  await expect(page.getByText('Lesson 2 of 4')).toBeVisible();
+  await expect(page.getByText('Lesson 2 of 9')).toBeVisible();
 
   // A step link carries a computed Playground step.
   const jump = page.getByRole('link', { name: /Jump to the optimiser rewrite/ });
@@ -321,9 +321,9 @@ test('the learn track opens lessons that deep-link into the Playground and remem
   await expect(page.getByRole('button', { name: /Completed/ })).toBeVisible();
 
   await page.goto('/learn');
-  await expect(page.getByText('1 of 4 complete')).toBeVisible();
+  await expect(page.getByText('1 of 9 complete')).toBeVisible();
   await page.getByRole('button', { name: 'Reset progress' }).click();
-  await expect(page.getByText('0 of 4 complete')).toBeVisible();
+  await expect(page.getByText('0 of 9 complete')).toBeVisible();
 
   // An unknown lesson id lands back on the index rather than erroring.
   await page.goto('/learn/no-such-lesson');

@@ -41,4 +41,14 @@ describe('learn lessons', () => {
     const any = LESSONS.some((l) => l.steps.some((s) => s.open?.predictOn));
     expect(any).toBe(true);
   });
+
+  it('every fixed step link is an in-app path', () => {
+    for (const lesson of LESSONS) {
+      for (const step of lesson.steps) {
+        if (!step.link) continue;
+        expect(step.link.label.length).toBeGreaterThan(0);
+        expect(step.link.href.startsWith('/'), `${lesson.id}: ${step.link.href}`).toBe(true);
+      }
+    }
+  });
 });

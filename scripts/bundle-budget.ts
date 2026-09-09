@@ -49,7 +49,7 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
   // localStorage progress helper, and `lessons.tsx` — the lesson prose plus the
   // link-builder that computes each step from a real engine run. Lazy; loads
   // only when someone visits `/learn`.
-  { name: 'learn', test: /^(LearnPage|LessonPage|learnProgress|lessons)-/, kb: 8, note: 'the /learn track: index, lesson page, progress, and the lesson content' },
+  { name: 'learn', test: /^(LearnPage|LessonPage|learnProgress|lessons)-/, kb: 10, note: 'the /learn track: index, lesson page, progress, and nine lessons of content' },
   // `html-to-image`, behind the panel "Download PNG" button (§20.3). `import()`ed
   // on the first export, never at route load — the one runtime dependency the
   // app adds beyond its framework and editor.
@@ -80,8 +80,12 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
  * content).
  * Raised 348 → 354 for `html-to-image` behind the panel PNG export (§20.3) —
  * `import()`ed on first use, so still never first-paint.
+ * Raised 354 → 357 for five more `/learn` lessons (§22.4 — B+Tree split, edit
+ * the seed data, predict, share a moment, when something goes wrong): pure
+ * teaching prose in the lazy `learn` chunk, never first-paint, plus small
+ * additions to `stepAnnouncement`/`traceFile` from the same v13 batch.
  */
-const TOTAL_KB = 354;
+const TOTAL_KB = 357;
 
 const gzipKb = (bytes: Buffer): number => gzipSync(bytes, { level: 9 }).length / 1024;
 

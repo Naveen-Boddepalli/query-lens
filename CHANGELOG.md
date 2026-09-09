@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Five more `/learn` lessons** (plan.md §22.4, §17.2) — the guided track goes from four to nine:
+  *Watch a B+Tree split* (in the `/tools/btree` sandbox — a full leaf, one more key, copy-up then
+  push-up), *Edit the seed data* (what the trace changes and what it does not), *Predict before you
+  look* (prediction mode and the evidence behind it), *Share a moment* (what the URL encodes, and
+  why a bad one drops the dataset whole), and *When something goes wrong* (the panel error boundary
+  and its self-writing repro). Each Playground link is still computed from a real engine run
 - **Screen-reader narration track** (plan.md §22.6, §8) — the Playground's narration line is now a
   permanently-mounted polite live region, so a screen-reader user stepping the trace hears every event:
   the step position, the narration the event already carries, and — on a gated step, where the

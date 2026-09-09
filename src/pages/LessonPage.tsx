@@ -48,6 +48,11 @@ export function LessonPage() {
                 {link.label} →
               </Link>
             )}
+            {step.link && (
+              <Link to={step.link.href} className={`${btnSecondary} mt-3`}>
+                {step.link.label} →
+              </Link>
+            )}
             {step.tryThis && (
               <div className="mt-3 rounded-lg border border-accent/40 bg-accent-soft px-3 py-2 text-label text-ink">
                 <span className="font-medium">Try this. </span>
