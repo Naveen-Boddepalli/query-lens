@@ -1856,7 +1856,7 @@ Grouped by area. **Status** is `built` / a milestone / `v1` / `v2` / `own plan`,
 
 | Route | Page | Primary feature | URL state | Status |
 |---|---|---|---|---|
-| `/assignments/new` | Assignment author | Pick a preset or custom query, a policy and the step to land on; get a link with prediction forced on and (v12) **the reveal locked** — `&l=1` makes the Playground seal the trace at the landing step until the learner commits: no "skip" on the prompt, and `usePlayback`'s new `ceiling` stops the scrubber (which `gates` deliberately does not) from crossing an unanswered prompt. The lock lifts one prompt at a time. The author is warned when the chosen step carries no prompt | encoded in the produced link (`q`/`p`/`x`/`s`/`l`) | **built** — v12 |
+| `/assignments/new` | Assignment author | Pick a preset or custom query, a policy and the step to land on; get a link with prediction forced on and (v12) **the reveal locked** — `&l=1` makes the Playground seal the trace at the landing step until the learner commits: no "skip" on the prompt, and `usePlayback`'s new `ceiling` stops the scrubber (which `gates` deliberately does not) from crossing an unanswered prompt. The lock lifts one prompt at a time. The author is warned when the chosen step carries no prompt. **v13:** *Add to set* collects labelled links into a numbered Markdown worksheet + a JSON file (§22.4) | encoded in the produced link (`q`/`p`/`x`/`s`/`l`) | **built** — v12; assignment sets v13 |
 | `/a/:id` | Open an assignment | Superseded by the above — there is no server-side id to decode, so an assignment *is* a Playground link rather than a separate route. Kept here as the originally-planned shape, struck by the simpler one that shipped | — | not built, and not needed as specified |
 | `/classroom` | Graded track | Submit scored answers back to an instructor — its own plan, its own privacy statement, likely its own subdomain (§20.5) | — | own plan |
 
@@ -2122,9 +2122,11 @@ URL-state schema. None needs a backend.
   `localStorage`. **The caveat is the whole decision:** the §9 post-test is exactly this shape, so
   shipping the study's own bank in the app contaminates the study. A disjoint bank is fine; the same
   one is not. Trigger: after the §9 study runs, not before.
-- **Assignment sets.** Bundle several `/assignments/new` links into one sheet with a class code, as
-  a URL or a downloadable JSON. Stops short of graded submission — §20.5's backend line is
-  unchanged. ~3 days. v1.
+- **Assignment sets.** ~~Bundle several `/assignments/new` links into one sheet with a class code,
+  as a URL or a downloadable JSON.~~ **Done, v13.** An "Add to set" step on the authoring form
+  collects labelled links; the panel below emits a numbered **Markdown worksheet** (to paste into an
+  LMS or print) and a **JSON** file (`src/ui/assignmentSet.ts`, unit-tested). Stops short of graded
+  submission — §20.5's backend line is unchanged.
 
 ### 22.5 Export & presentation (extends §20.3)
 
@@ -2244,7 +2246,7 @@ URL-state schema. None needs a backend.
 | `/tools/hash-join` | Build | v1–v2 | — |
 | Challenge mode | Build | v1 | — |
 | Progress dashboard | **Done, v13** (`/progress` — lessons, stages seen, prediction record) | v1 | — |
-| Assignment sets | Build | v1 | — |
+| Assignment sets | **Done, v13** (`assignmentSet.ts` + a set panel on `/assignments/new` — Markdown worksheet + JSON) | v1 | — |
 | Presenter mode | **Done, v13** (`PresenterView.tsx` — `?present=1` overlay on the Playground) | v1 | — |
 | Print stylesheet | Build | v1–v2 | — |
 | In-app quiz / self-check | Deferred | post-§9 | The §9 study has run (contamination) |

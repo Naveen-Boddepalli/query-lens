@@ -49,7 +49,9 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
   // these routes is visited.
   // Raised 24 → 26 for the slotted-page inspector (`/tools/page`, plan.md §22.3)
   // and its `slottedPage.ts` layout module — a fourth `/tools/*` sandbox, lazy.
-  { name: 'standalone-tools', test: /^(GalleryPage|ComparePage|SettingsPage|AssignmentsNewPage|TracePage|BufferPoolToolPage|ParserToolPage|BTreeToolPage|PageToolPage|BufferPoolPanel|bufferTrace|slottedPage|preferences|urlState)-/, kb: 26, note: 'Gallery, Tools, Compare, Settings, Assignments, the trace inspector, and the buffer-pool / parser / B+Tree / slotted-page sandboxes (plan.md §21.3, §20.4, §22.3)' },
+  // Raised 26 → 27 for assignment sets (`assignmentSet.ts` + the set panel in
+  // `/assignments/new`, §22.4).
+  { name: 'standalone-tools', test: /^(GalleryPage|ComparePage|SettingsPage|AssignmentsNewPage|TracePage|BufferPoolToolPage|ParserToolPage|BTreeToolPage|PageToolPage|BufferPoolPanel|bufferTrace|slottedPage|assignmentSet|preferences|urlState)-/, kb: 27, note: 'Gallery, Tools, Compare, Settings, Assignments (+ assignment sets), the trace inspector, and the buffer-pool / parser / B+Tree / slotted-page sandboxes (plan.md §21.3, §20.4, §22.3, §22.4)' },
   // The `/learn` guided track (plan.md §21.3): the index, one lesson page, the
   // localStorage progress helper, and `lessons.tsx` — the lesson prose plus the
   // link-builder that computes each step from a real engine run. Lazy; loads

@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Assignment sets** (plan.md §22.4) — `/assignments/new` can now bundle several links: give each a
+  label, *Add to set*, and the panel below emits a numbered Markdown worksheet (paste into an LMS or
+  print) and a JSON file, both stamped with a class code. Still no submission and no backend — the
+  worksheet *is* the hand-out
 - **Import CSV** in the seed-data editor (plan.md §22.7) — paste a block of `id,name,email,age`
   rows instead of typing them. A small quote-aware reader (`src/ui/parseCsv.ts`), bounded to 500
   rows and per-column type-checked; an optional header row is skipped, and a malformed block is

@@ -6,8 +6,10 @@ import {
 } from '../engine/index.ts';
 import type { ReplacementPolicyName } from '../engine/index.ts';
 import { encodeShareState } from '../ui/urlState.ts';
+import { serializeSet, worksheet } from '../ui/assignmentSet.ts';
+import type { AssignmentItem } from '../ui/assignmentSet.ts';
 import { PageHeader } from '../ui/PageHeader.tsx';
-import { btnPrimary, card, inputField } from '../ui/primitives.ts';
+import { btnGhost, btnPrimary, btnSecondary, card, inputField } from '../ui/primitives.ts';
 
 /**
  * plan.md §20.5 / §21.3: "assignment links", the part of the EdTech idea that
@@ -33,6 +35,12 @@ export function AssignmentsNewPage() {
   const [step, setStep] = useState(1);
   const [lockReveal, setLockReveal] = useState(true);
   const [copied, setCopied] = useState(false);
+
+  // plan.md §22.4: bundle several links into one sheet.
+  const [label, setLabel] = useState('');
+  const [code, setCode] = useState('');
+  const [items, setItems] = useState<AssignmentItem[]>([]);
+  const [sheetCopied, setSheetCopied] = useState(false);
 
   const trace = useMemo(
     () => runQuery(sql, SEED, { ...DEFAULT_ENGINE_OPTIONS, policy }),
@@ -62,6 +70,29 @@ export function AssignmentsNewPage() {
     } catch {
       setCopied(false);
     }
+  }
+
+  function addToSet() {
+    if (!link) return;
+    setItems((prev) => [...prev, { label, link }]);
+    setLabel('');
+  }
+
+  async function copySheet() {
+    try {
+      await navigator.clipboard.writeText(worksheet(code, items));
+      setSheetCopied(true);
+      window.setTimeout(() => { setSheetCopied(false); }, 2000);
+    } catch {
+      setSheetCopied(false);
+    }
+  }
+
+  function downloadSet() {
+    const a = document.createElement('a');
+    a.href = `data:application/json;charset=utf-8,${encodeURIComponent(serializeSet(code, items))}`;
+    a.download = `${code.trim() || 'assignment'}-set.json`;
+    a.click();
   }
 
   return (
@@ -163,6 +194,75 @@ export function AssignmentsNewPage() {
           <button type="button" onClick={() => { void copyLink(); }} className={btnPrimary}>
             {copied ? 'Copied ✓' : 'Copy link'}
           </button>
+          <input
+            type="text"
+            value={label}
+            onChange={(e) => { setLabel(e.target.value); }}
+            placeholder="label (optional)"
+            aria-label="Assignment label"
+            className={`${inputField} w-40`}
+          />
+          <button type="button" onClick={addToSet} className={btnSecondary}>
+            Add to set
+          </button>
+        </div>
+      )}
+
+      {items.length > 0 && (
+        <div className={`mt-4 space-y-3 ${card}`}>
+          <div className="flex flex-wrap items-end gap-3">
+            <label className="flex flex-col gap-1 text-label text-ink-dim">
+              Class code
+              <input
+                type="text"
+                value={code}
+                onChange={(e) => { setCode(e.target.value); }}
+                placeholder="e.g. CS564-fall"
+                className={`${inputField} w-48`}
+              />
+            </label>
+            <p className="pb-1.5 text-label text-ink-dim">
+              {items.length} assignment{items.length === 1 ? '' : 's'} in this set
+            </p>
+          </div>
+
+          <ol className="space-y-1.5">
+            {items.map((item, i) => (
+              <li
+                key={`${String(i)}-${item.link}`}
+                className="flex items-baseline gap-2 rounded-lg border border-edge bg-surface-3 px-2.5 py-1.5 text-label"
+              >
+                <span className="font-mono text-ink-dim tabular-nums">{i + 1}</span>
+                <span className="min-w-0 flex-1 truncate text-ink">
+                  {item.label.trim() || `Assignment ${String(i + 1)}`}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => { setItems((prev) => prev.filter((_, j) => j !== i)); }}
+                  aria-label={`Remove assignment ${String(i + 1)}`}
+                  className="shrink-0 rounded px-1 text-ink-dim hover:text-evict"
+                >
+                  ×
+                </button>
+              </li>
+            ))}
+          </ol>
+
+          <div className="flex flex-wrap gap-2">
+            <button type="button" onClick={() => { void copySheet(); }} className={btnPrimary}>
+              {sheetCopied ? 'Copied ✓' : 'Copy worksheet'}
+            </button>
+            <button type="button" onClick={downloadSet} className={btnSecondary}>
+              Download JSON
+            </button>
+            <button type="button" onClick={() => { setItems([]); }} className={btnGhost}>
+              Clear set
+            </button>
+          </div>
+          <p className="text-label text-ink-dim">
+            The worksheet is Markdown — a numbered list of links to paste into your LMS or print.
+            The JSON keeps the same set for your records.
+          </p>
         </div>
       )}
     </div>

@@ -511,3 +511,29 @@ test('unchecking the lock produces an ordinary predict-on link', async ({ page }
   await page.goto(`${url.pathname}${url.search}`);
   await expect(page.getByLabel('Ask me to predict before each reveal')).toBeChecked();
 });
+
+test('assignments bundle into a set worksheet', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await page.goto('/assignments/new');
+
+  await page.getByLabel('Assignment label').fill('Follow the eviction');
+  await page.getByRole('button', { name: 'Add to set' }).click();
+  await page.getByLabel('Land on step').fill('8');
+  await page.getByLabel('Assignment label').fill('Predict the rewrite');
+  await page.getByRole('button', { name: 'Add to set' }).click();
+
+  await expect(page.getByText('2 assignments in this set')).toBeVisible();
+  await page.getByLabel('Class code').fill('CS564');
+
+  await page.getByRole('button', { name: 'Copy worksheet' }).click();
+  const sheet = await page.evaluate(() => navigator.clipboard.readText());
+  expect(sheet.startsWith('# CS564 — assignment set\n')).toBe(true);
+  expect(sheet).toMatch(/1\. \*\*Follow the eviction\*\* — http.*\/playground\?/);
+  expect(sheet).toMatch(/2\. \*\*Predict the rewrite\*\* — http.*s=8.*l=1/);
+
+  // Remove one, then clear.
+  await page.getByRole('button', { name: 'Remove assignment 1' }).click();
+  await expect(page.getByText('1 assignment in this set')).toBeVisible();
+  await page.getByRole('button', { name: 'Clear set' }).click();
+  await expect(page.getByText(/assignments? in this set/)).toHaveCount(0);
+});
