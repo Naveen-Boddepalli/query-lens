@@ -297,6 +297,83 @@ test('the first-visit hint shows once on the bare Playground, then never again',
   await expect(page.getByText(/New here\?/)).toHaveCount(0);
 });
 
+test('the panel `?` explains the stage and links to its concept page', async ({ page }) => {
+  await page.goto('/playground');
+
+  // The Parser panel is on screen at the landing step.
+  const parserHelp = page.getByRole('button', { name: 'What is the Parser panel?' });
+  await expect(parserHelp).toHaveAttribute('aria-expanded', 'false');
+  await parserHelp.click();
+  await expect(parserHelp).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.getByText(/never the original string/)).toBeVisible();
+  await expect(page.getByRole('link', { name: /Read the full explanation/ })).toHaveAttribute(
+    'href',
+    '/stages/parse',
+  );
+
+  // Pin the buffer pool from the pipeline rail: the disclosure closes with the
+  // stage, and the buffer panel's `?` points at its own concept page.
+  await page.getByRole('button', { name: 'Buffer Pool', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'What is the Parser panel?' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'What is the Buffer Pool panel?' }).click();
+  await expect(page.getByRole('link', { name: /Read the full explanation/ })).toHaveAttribute(
+    'href',
+    '/docs/concepts/buffer-pool',
+  );
+});
+
+test('the 60-second tour steps through the Playground and is skippable', async ({ page }) => {
+  await page.goto('/playground');
+
+  // The first-visit hint offers it; taking it dismisses the hint.
+  await page.getByRole('button', { name: 'Take the 60-second tour' }).click();
+  await expect(page.getByText(/New here\?/)).toHaveCount(0);
+
+  const tour = page.getByRole('dialog', { name: 'Playground tour' });
+  await expect(tour).toBeVisible();
+  await expect(tour.getByText('Step 1 of 5')).toBeVisible();
+  await expect(tour.getByRole('heading', { name: 'Your query' })).toBeVisible();
+
+  // Playback shortcuts are suspended while it is open: the arrows drive the
+  // tour, not the trace.
+  await expect(page.getByText(/showing step/)).toContainText('1');
+  await page.keyboard.press('ArrowRight');
+  await expect(tour.getByText('Step 2 of 5')).toBeVisible();
+  await expect(page.getByText(/showing step/)).toContainText('1');
+
+  await tour.getByRole('button', { name: 'Back' }).click();
+  await expect(tour.getByText('Step 1 of 5')).toBeVisible();
+
+  await tour.getByRole('button', { name: 'Next' }).click();
+  await tour.getByRole('button', { name: 'Next' }).click();
+  await tour.getByRole('button', { name: 'Next' }).click();
+  await tour.getByRole('button', { name: 'Next' }).click();
+  await expect(tour.getByText('Step 5 of 5')).toBeVisible();
+  await tour.getByRole('button', { name: 'Done' }).click();
+  await expect(page.getByRole('dialog', { name: 'Playground tour' })).toHaveCount(0);
+
+  // The permanent "Tour" link reopens it; Escape leaves.
+  await page.getByRole('button', { name: 'Tour', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'Playground tour' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog', { name: 'Playground tour' })).toHaveCount(0);
+});
+
+test('the tour degrades to a static numbered overlay under reduced motion', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.goto('/playground?tour=1');
+
+  const tour = page.getByRole('dialog', { name: 'Playground tour' });
+  await expect(tour).toBeVisible();
+  // A single list, no stepping.
+  await expect(tour.getByRole('listitem')).toHaveCount(5);
+  await expect(tour.getByText('Step 1 of 5')).toHaveCount(0);
+  await expect(tour.getByRole('button', { name: 'Next' })).toHaveCount(0);
+
+  await tour.getByRole('button', { name: 'Got it' }).click();
+  await expect(page.getByRole('dialog', { name: 'Playground tour' })).toHaveCount(0);
+});
+
 test('a challenge checks the query on Run and remembers the solve', async ({ page }) => {
   await page.goto('/challenges');
   await expect(page.getByText('0 of 5 solved')).toBeVisible();

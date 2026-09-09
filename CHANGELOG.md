@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **The 60-second tour** (plan.md §19.2) — five sequential spotlights over the real Playground
+  (editor, pipeline rail, stage panel, narration, transport), not a video or a modal carousel. Skip
+  or `Esc` at any point, `←/→` to walk it. It never auto-starts: it opens from the first-visit
+  hint's **Take the 60-second tour** link, a **Tour** link by *Present*, or `?tour=1`. Under
+  `prefers-reduced-motion` it degrades to a static numbered overlay — the five captions as a list,
+  no stepping, no moving spotlight
+- **Panel "what am I looking at?" affordance** (plan.md §19.2) — a small `?` next to each stage's
+  title in the Playground opens a two-sentence explanation of what that panel shows and a link to
+  the concept page (`/stages/:id`, or `/docs/concepts/*` for the buffer pool and the B+Tree). The
+  same per-stage text now feeds the `/stages` index, replacing a near-duplicate copy that lived there
 - **First-visit hint** (plan.md §19.2) — one quiet line under the header, shown once to a cold
   visitor at the app's own front door (`/playground` with nothing in the URL; a shared-moment link
   carries its own context). It points at the keyboard route into the trace — `Space` to play, the

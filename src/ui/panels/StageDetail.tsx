@@ -1,4 +1,5 @@
-import { useRef } from 'react';
+import { useId, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { IMPLEMENTED_STAGES } from '../../engine/index.ts';
 import type { ReplacementPolicyName, Span, Stage, ViewState } from '../../engine/index.ts';
 import {
@@ -27,6 +28,12 @@ export interface StageDetailProps {
   pinned?: boolean;
   /** Clears the pin, so the panel follows the trace again. */
   onFollow?: (() => void) | undefined;
+  /**
+   * Show the `?` "what am I looking at?" affordance next to the title (plan.md
+   * §19.2). The Playground passes it; `/stages/:id` and the presenter view do
+   * not — one is already the explainer, the other is a room-facing projection.
+   */
+  withHelp?: boolean;
 }
 
 /**
@@ -60,10 +67,17 @@ export function StageDetail({
   activeSpan,
   pinned = false,
   onFollow,
+  withHelp = false,
 }: StageDetailProps) {
   const meta = STAGE_META[stage];
   const implemented = IMPLEMENTED_STAGES.includes(stage);
   const panelRef = useRef<HTMLDivElement>(null);
+
+  // Tracked as "help open for which stage" rather than a bare boolean, so
+  // stepping to another stage closes it without an effect reaching for setState.
+  const [helpFor, setHelpFor] = useState<Stage | null>(null);
+  const helpOpen = withHelp && helpFor === stage;
+  const helpId = useId();
 
   // Copy-as-Mermaid is offered on the two trees people actually paste (§20.3):
   // the AST and the plan. Not the B+Tree — Mermaid draws its sibling chain badly.
@@ -89,7 +103,21 @@ export function StageDetail({
     <section className="flex h-full flex-col gap-3">
       <header className="flex flex-wrap items-start gap-x-3 gap-y-1">
         <div>
-          <h2 className={`text-heading font-semibold ${meta.tone}`}>{meta.title}</h2>
+          <div className="flex items-center gap-2">
+            <h2 className={`text-heading font-semibold ${meta.tone}`}>{meta.title}</h2>
+            {withHelp && (
+              <button
+                type="button"
+                onClick={() => { setHelpFor((s) => (s === stage ? null : stage)); }}
+                aria-expanded={helpOpen}
+                aria-controls={helpId}
+                className="grid h-5 w-5 shrink-0 place-items-center rounded-full border border-edge text-label leading-none text-ink-dim transition hover:border-ink-dim/50 hover:text-ink"
+              >
+                <span aria-hidden>?</span>
+                <span className="sr-only">What is the {meta.title} panel?</span>
+              </button>
+            )}
+          </div>
           <p className="text-label text-ink-dim">{meta.blurb}</p>
         </div>
 
@@ -126,6 +154,21 @@ export function StageDetail({
           )}
         </div>
       </header>
+
+      {helpOpen && (
+        <div
+          id={helpId}
+          className="rounded-lg border border-edge bg-surface-2 px-3 py-2 text-label leading-relaxed text-ink-dim"
+        >
+          <p>{meta.help}</p>
+          <Link
+            to={meta.doc}
+            className="mt-1.5 inline-block font-medium text-ink underline underline-offset-2 hover:no-underline"
+          >
+            Read the full explanation →
+          </Link>
+        </div>
+      )}
 
       <div ref={panelRef} className="min-h-0 min-w-0 flex-1">
         {!implemented && <NotBuiltYet stage={stage} />}

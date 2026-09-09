@@ -19,6 +19,7 @@ the current one. This page is for building one by hand.
 | `l` | Assignment lock — `l=1` seals the trace at step `s` until its prediction is answered (no skip, no scrubbing ahead); forces `x=1` | `l=1` |
 | `d` | Custom row data, only present when the seed rows have been edited | *(generated, not hand-written — see below)* |
 | `present` | `present=1` opens **presenter mode** — a full-viewport view of the current stage for a lecture hall, keyboard-driven, with prediction suppressed. `Esc` leaves it | `present=1` |
+| `tour` | `tour=1` opens the **60-second tour** on load — five spotlights over the real interface, for a course link or a first walkthrough. `Esc` or *Skip* leaves it; it is not written back into the URL | `tour=1` |
 
 A link that omits a parameter falls back to that setting's default, so the shortest working link is
 just `?q=...`.

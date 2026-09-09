@@ -21,6 +21,8 @@ import { SqlEditor } from '../ui/SqlEditor.tsx';
 import { DataEditor } from '../ui/DataEditor.tsx';
 import { PredictionCard } from '../ui/PredictionCard.tsx';
 import { PresenterView } from '../ui/PresenterView.tsx';
+import { PlaygroundTour } from '../ui/PlaygroundTour.tsx';
+import { START_TOUR_EVENT, takePendingTour } from '../ui/firstVisit.ts';
 import { ShortcutHints } from '../ui/ShortcutHints.tsx';
 import { recordPrediction, recordStages } from '../ui/progress.ts';
 import { stepAnnouncement } from '../ui/stepAnnouncement.ts';
@@ -79,6 +81,12 @@ const ASSIGNMENT = SHARED.lockReveal === true;
 const PRESENT_INITIAL =
   typeof location !== 'undefined' && new URLSearchParams(location.search).get('present') === '1';
 
+/** plan.md §19.2: `?tour=1` opens the 60-second tour on load — for a course
+ *  link or a doc, and the path the first-visit hint takes when its chunk
+ *  rendered before the Playground's. */
+const TOUR_INITIAL =
+  typeof location !== 'undefined' && new URLSearchParams(location.search).get('tour') === '1';
+
 const START = {
   sql: SHARED.sql ?? INITIAL_SQL,
   // The URL wins when present; a `/settings` preference (plan.md §21.3) is the
@@ -109,6 +117,7 @@ export function PlaygroundPage() {
 
   const [predictOn, setPredictOn] = useState(START.predictOn);
   const [presenting, setPresenting] = useState(PRESENT_INITIAL);
+  const [tourOpen, setTourOpen] = useState(() => TOUR_INITIAL || takePendingTour());
   const [answers, setAnswers] = useState<Record<number, string>>(() =>
     skippedAnswersBefore(INITIAL_RESULT.events, SHARED.step ?? 0),
   );
@@ -152,7 +161,17 @@ export function PlaygroundPage() {
     ...(ceiling === undefined ? {} : { ceiling }),
     initialStep: SHARED.step ?? landingStep(INITIAL_RESULT, START.predictOn),
   });
-  usePlaybackShortcuts(playback, !editingData);
+  // The tour binds ←/→ to Next/Back and Esc to leave, so the trace must not
+  // also step underneath it — same reason `editingData` suspends them.
+  usePlaybackShortcuts(playback, !editingData && !tourOpen);
+
+  // "Take the tour" in the first-visit hint (mounted by `Layout`, a different
+  // subtree) reaches the Playground as a window event once its chunk is live.
+  useEffect(() => {
+    const open = () => { setTourOpen(true); };
+    window.addEventListener(START_TOUR_EVENT, open);
+    return () => { window.removeEventListener(START_TOUR_EVENT, open); };
+  }, []);
 
   const state = projector.at(playback.step);
 
@@ -331,32 +350,34 @@ export function PlaygroundPage() {
       <main className="grid flex-1 gap-4 p-4 lg:min-h-0 lg:grid-cols-[minmax(300px,400px)_1fr]">
         {/* Authoring panel */}
         <div className="snap-section order-2 flex min-w-0 flex-col gap-3 lg:order-1 lg:min-h-0 lg:overflow-y-auto">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="mr-1 text-label text-ink-dim">Try:</span>
-            {PRESETS.map((p) => (
-              <button
-                key={p.label}
-                type="button"
-                onClick={() => { loadPreset(p.sql); }}
-                className={`rounded-full border px-2.5 py-0.5 text-label transition ${
-                  sql === p.sql
-                    ? 'border-accent bg-accent-soft text-ink'
-                    : 'border-edge text-ink-dim hover:border-ink-dim/50 hover:text-ink'
-                }`}
-              >
-                {p.label}
-              </button>
-            ))}
-          </div>
+          <div data-tour="editor" className="flex flex-col gap-3">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="mr-1 text-label text-ink-dim">Try:</span>
+              {PRESETS.map((p) => (
+                <button
+                  key={p.label}
+                  type="button"
+                  onClick={() => { loadPreset(p.sql); }}
+                  className={`rounded-full border px-2.5 py-0.5 text-label transition ${
+                    sql === p.sql
+                      ? 'border-accent bg-accent-soft text-ink'
+                      : 'border-edge text-ink-dim hover:border-ink-dim/50 hover:text-ink'
+                  }`}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
 
-          <SqlEditor
-            value={sql}
-            onChange={setSql}
-            onRun={run}
-            error={result.error}
-            activeSpan={activeSpan}
-            theme={theme}
-          />
+            <SqlEditor
+              value={sql}
+              onChange={setSql}
+              onRun={run}
+              error={result.error}
+              activeSpan={activeSpan}
+              theme={theme}
+            />
+          </div>
 
           <div className="flex flex-wrap items-center gap-2">
             <button type="button" onClick={() => { run(); }} className={btnPrimary}>
@@ -422,6 +443,13 @@ export function PlaygroundPage() {
               >
                 Present
               </button>
+              <button
+                type="button"
+                onClick={() => { setTourOpen(true); }}
+                className="underline-offset-2 transition-colors hover:text-ink hover:underline"
+              >
+                Tour
+              </button>
             </span>
           </div>
 
@@ -466,14 +494,19 @@ export function PlaygroundPage() {
 
         {/* Trace panel */}
         <div className="snap-section order-1 flex min-h-0 min-w-0 flex-col gap-3 lg:order-2 lg:overflow-hidden">
-          <PipelineTracker
-            current={state?.stage ?? null}
-            visited={visited}
-            selected={pinnedStage}
-            onSelect={(s) => { setPinnedStage((prev) => (prev === s ? null : s)); }}
-          />
+          <div data-tour="pipeline">
+            <PipelineTracker
+              current={state?.stage ?? null}
+              visited={visited}
+              selected={pinnedStage}
+              onSelect={(s) => { setPinnedStage((prev) => (prev === s ? null : s)); }}
+            />
+          </div>
 
-          <div className={`${panelSurface} max-h-[60dvh] min-h-80 min-w-0 flex-1 overflow-hidden p-4 lg:max-h-none`}>
+          <div
+            data-tour="panel"
+            className={`${panelSurface} max-h-[60dvh] min-h-80 min-w-0 flex-1 overflow-hidden p-4 lg:max-h-none`}
+          >
             {activeStage ? (
               <ErrorBoundary
                 variant="panel"
@@ -487,6 +520,7 @@ export function PlaygroundPage() {
                   activeSpan={activeSpan}
                   pinned={pinnedStage !== null && pinnedStage !== state.stage}
                   onFollow={() => { setPinnedStage(null); }}
+                  withHelp
                 />
               </ErrorBoundary>
             ) : (
@@ -520,6 +554,7 @@ export function PlaygroundPage() {
               card carries the visuals; `stepAnnouncement` puts the question and
               then the verdict into it. */}
           <div
+            data-tour="narration"
             className={
               prompt
                 ? 'sr-only'
@@ -539,7 +574,10 @@ export function PlaygroundPage() {
             </p>
           </div>
 
-          <div className="sticky bottom-0 z-10 -mx-4 space-y-2 border-t border-edge bg-surface/85 px-4 py-2 backdrop-blur-md lg:static lg:mx-0 lg:space-y-3 lg:border-0 lg:bg-transparent lg:px-0 lg:py-0 lg:backdrop-blur-none">
+          <div
+            data-tour="playback"
+            className="sticky bottom-0 z-10 -mx-4 space-y-2 border-t border-edge bg-surface/85 px-4 py-2 backdrop-blur-md lg:static lg:mx-0 lg:space-y-3 lg:border-0 lg:bg-transparent lg:px-0 lg:py-0 lg:backdrop-blur-none"
+          >
             <PlaybackControls
               playback={playback}
               length={result.events.length}
@@ -573,6 +611,10 @@ export function PlaygroundPage() {
           narration={announcement}
           onExit={() => { setPresenting(false); }}
         />
+      )}
+
+      {tourOpen && !presenting && (
+        <PlaygroundTour onClose={() => { setTourOpen(false); }} />
       )}
     </>
   );

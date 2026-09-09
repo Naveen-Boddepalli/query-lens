@@ -37,7 +37,16 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
   // Raised 32 → 34 for the presenter view (`PresenterView.tsx`, plan.md §22.5) —
   // a room-facing overlay over the same playback and panels, lazy with the
   // Playground route.
-  { name: 'trace-ui', test: /^(PlaygroundPage|StageDetail|stageMeta|types|seed|trace|runQuery|SqlEditor|PlaybackControls|PresenterView|AstTree|BTreePanel|FlowTree|display)-/, kb: 34, note: 'Playground + the presenter view + the SQL editor + the shared panel/tree renderers (AstTree, BTreePanel, FlowTree, the two display transformers) plus the engine core (runQuery split into its own chunk once /tools/page became a third importer; SqlEditor split once /challenges became a second)' },
+  // Raised 34 → 35 for the panel `?` "what am I looking at?" affordance (plan.md
+  // §19.2 P1): a disclosure in `StageDetail` plus a two-sentence `help` string
+  // and a concept-page `doc` link per stage in `stageMeta` — which also
+  // replaced the near-duplicate `STAGE_DESCRIPTIONS` on the `/stages` index, so
+  // `routes` shrank and the total barely moved.
+  // Raised 35 → 37 for the 60-second tour (`PlaygroundTour.tsx`, plan.md §19.2
+  // P1) — the last of §19.2's four onboarding items. Two render modes in the
+  // Playground chunk (same call as `PresenterView`): a stepped spotlight and,
+  // for `prefers-reduced-motion`, a static numbered overlay.
+  { name: 'trace-ui', test: /^(PlaygroundPage|PlaygroundTour|StageDetail|stageMeta|types|seed|trace|runQuery|SqlEditor|PlaybackControls|PresenterView|AstTree|BTreePanel|FlowTree|display)-/, kb: 37, note: 'Playground + the presenter view + the SQL editor + the shared panel/tree renderers (AstTree, BTreePanel, FlowTree, the two display transformers) plus the engine core (runQuery split into its own chunk once /tools/page became a third importer; SqlEditor split once /challenges became a second)' },
   // The small per-route shells: landing hub, stage index, examples, docs shell,
   // 404, tools index — plus the redesign's shared UI kit (primitives.ts,
   // PageHeader, Hero) that two or more of them import.
@@ -110,8 +119,11 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
  * Raised 368 → 369 for the first-visit hint (§19.2 P1): `FirstVisitHint.tsx` +
  * `firstVisit.ts` in the entry chunk, since `Layout` mounts the one line under
  * the header for a cold visitor to `/playground`.
+ * Raised 369 → 371 for the 60-second tour (`PlaygroundTour.tsx`, §19.2 P1) — a
+ * spotlight-over-the-real-UI mode and a static numbered-overlay fallback for
+ * reduced motion, in the Playground chunk; closes out §19.2's P1 list.
  */
-const TOTAL_KB = 369;
+const TOTAL_KB = 371;
 
 const gzipKb = (bytes: Buffer): number => gzipSync(bytes, { level: 9 }).length / 1024;
 
