@@ -262,6 +262,37 @@ test('the panels also copy themselves as monospace text', async ({ page, context
   expect(tree).toMatch(/(internal|leaf), page \d+/);
 });
 
+test('a challenge checks the query on Run and remembers the solve', async ({ page }) => {
+  await page.goto('/challenges');
+  await expect(page.getByText('0 of 5 solved')).toBeVisible();
+  await page.getByRole('link', { name: /Make the planner use the index/ }).click();
+  await expect(page).toHaveURL(/\/challenges\/use-the-index$/);
+
+  // The starter is a sequential scan — running it does not pass.
+  await page.getByRole('button', { name: 'Run & check' }).click();
+  await expect(page.getByText(/Not there yet/)).toBeVisible();
+  await expect(page.getByText('index used')).toBeVisible();
+
+  // A hint is available on demand.
+  await page.getByRole('button', { name: 'Show hint' }).click();
+  await expect(page.getByText(/index-selection rule fires only on an/)).toBeVisible();
+
+  // Edit to an equality on the indexed column and it passes.
+  const editor = page.locator('.cm-content');
+  await editor.click();
+  await page.keyboard.press('ControlOrMeta+A');
+  await page.keyboard.type('SELECT * FROM users WHERE id = 5;');
+  await page.getByRole('button', { name: 'Run & check' }).click();
+  await expect(page.getByText('✓ Solved.')).toBeVisible();
+  await expect(page.getByRole('link', { name: /Step through this run in the Playground/ })).toBeVisible();
+
+  // The solve persists to the index.
+  await page.goto('/challenges');
+  await expect(page.getByText('1 of 5 solved')).toBeVisible();
+  await page.getByRole('button', { name: 'Reset progress' }).click();
+  await expect(page.getByText('0 of 5 solved')).toBeVisible();
+});
+
 test('the seed editor imports rows from pasted CSV', async ({ page }) => {
   await page.goto('/playground');
   await page.getByRole('button', { name: /^Edit data/ }).click();

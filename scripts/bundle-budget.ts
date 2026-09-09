@@ -37,7 +37,7 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
   // Raised 32 → 34 for the presenter view (`PresenterView.tsx`, plan.md §22.5) —
   // a room-facing overlay over the same playback and panels, lazy with the
   // Playground route.
-  { name: 'trace-ui', test: /^(PlaygroundPage|StageDetail|stageMeta|types|seed|trace|runQuery|PlaybackControls|PresenterView|AstTree|BTreePanel|FlowTree|display)-/, kb: 34, note: 'Playground + the presenter view + the shared panel/tree renderers (AstTree, BTreePanel, FlowTree, the two display transformers) plus the engine core (runQuery split into its own chunk once /tools/page became a third importer)' },
+  { name: 'trace-ui', test: /^(PlaygroundPage|StageDetail|stageMeta|types|seed|trace|runQuery|SqlEditor|PlaybackControls|PresenterView|AstTree|BTreePanel|FlowTree|display)-/, kb: 34, note: 'Playground + the presenter view + the SQL editor + the shared panel/tree renderers (AstTree, BTreePanel, FlowTree, the two display transformers) plus the engine core (runQuery split into its own chunk once /tools/page became a third importer; SqlEditor split once /challenges became a second)' },
   // The small per-route shells: landing hub, stage index, examples, docs shell,
   // 404, tools index — plus the redesign's shared UI kit (primitives.ts,
   // PageHeader, Hero) that two or more of them import.
@@ -57,6 +57,9 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
   // link-builder that computes each step from a real engine run. Lazy; loads
   // only when someone visits `/learn`.
   { name: 'learn', test: /^(LearnPage|LessonPage|ProgressPage|learnProgress|progress|lessons)-/, kb: 10, note: 'the /learn track (index, lesson page, nine lessons) plus the /progress dashboard, which shares the lesson list' },
+  // The `/challenges` puzzles (plan.md §22.4): the index, one challenge page,
+  // the pure check list, and the localStorage solved-set. Lazy.
+  { name: 'challenges', test: /^(ChallengesPage|ChallengePage|challenges|challengeProgress)-/, kb: 8, note: '/challenges — index, challenge page, the check list, and solved-set storage (plan.md §22.4)' },
   // `html-to-image`, behind the panel "Download PNG" button (§20.3). `import()`ed
   // on the first export, never at route load — the one runtime dependency the
   // app adds beyond its framework and editor.
@@ -101,8 +104,11 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
  * localStorage helper — a lazy route plus a few lines in the Playground.
  * Raised 363 → 364 for CSV paste-import in the seed editor (`parseCsv.ts`, §22.7)
  * — a small reader plus the panel in `DataEditor`, both in the Playground chunk.
+ * Raised 364 → 368 for `/challenges` (§22.4): the two pages, the check list and
+ * the solved-set, plus `SqlEditor-*.js` splitting out of `trace-ui` once the
+ * challenge page became its second importer — a move, mostly, but visible here.
  */
-const TOTAL_KB = 364;
+const TOTAL_KB = 368;
 
 const gzipKb = (bytes: Buffer): number => gzipSync(bytes, { level: 9 }).length / 1024;
 

@@ -1831,7 +1831,8 @@ Grouped by area. **Status** is `built` / a milestone / `v1` / `v2` / `own plan`,
 | `/stages` | Pipeline index | Eight stage cards, grouped Query Processing / Runtime / Concurrency / Output | — | built |
 | `/stages/:stageId` | Stage explainer | Prose + one isolated live panel over a canned trace; prev/next through the pipeline | `:stageId` | built |
 | `/learn` | Guided path | Four §17.2 tasks as an ordered track — run your first query, follow one row disk-to-result, watch a page get evicted, make the planner change its mind — with a `localStorage` completion mark (`querylens:learn`; a convenience, degrades to unmarked). Primary nav | — | **built** — v12 |
-| `/learn/:lessonId` | One lesson | The task as numbered steps; each step's "open this in the Playground" link is a deep link whose step is computed from a real engine run (`GalleryPage`'s discipline), and each lesson ends with a "try this" that changes one variable. An unknown id redirects to `/learn` | `:lessonId` | **built** — v12 |
+| `/learn/:lessonId` | One lesson | The task as numbered steps; each step's "open this in the Playground" link is a deep link whose step is computed from a real engine run (`GalleryPage`'s discipline), and each lesson ends with a "try this" that changes one variable. An unknown id redirects to `/learn` | `:lessonId` | **built** — v12; nine lessons v13 |
+| `/challenges` · `/challenges/:id` | Challenge mode | Five goal-shaped puzzles (§22.4); each `:id` runs its query on a fixed engine config and checks a pure predicate over the `RunResult`, with a stats readout, a verdict, a solved-set (`querylens:challenges`) and a step-in-Playground link on a pass. Footer nav | `:id` | **built** — v13 |
 
 **Explore**
 
@@ -2108,11 +2109,13 @@ URL-state schema. None needs a backend.
   Playground links are engine-computed (`src/pages/learn/lessons.tsx`'s existing rule); the B+Tree
   split lesson links to `/tools/btree` instead, via a new fixed-link field on a step. No engine
   change.
-- **Challenge mode.** Goal-shaped puzzles with a client-side check — "make this query use the
-  index", "cause an eviction storm in ≤ N accesses", "construct seed data where predicate pushdown
-  changes the row count". Engagement (§12's core risk) with no backend and no new engine surface: a
-  challenge is a predicate over an existing `RunResult`. ~1 wk. v1, and a natural §18.2 launch
-  artefact ("solve it in six steps").
+- **Challenge mode.** ~~Goal-shaped puzzles with a client-side check~~ **First cut done, v13.**
+  `/challenges` — five puzzles, each a **pure predicate over a `RunResult`** (`use the index`,
+  `force an eviction`, `exactly one row`, `empty result but real work`, `AND that still matches`).
+  Each `/challenges/:id` has a `SqlEditor`, a Run-&-check button, a rows / disk-reads / evictions /
+  index-used readout, a pass/fail verdict, and — once solved — a link to step the run in the
+  Playground. Solved marks in `localStorage` (`challengeProgress.ts`); footer nav. No backend, no
+  engine change. §22.4 scoped the full set at a week; more puzzles can be appended to the list.
 - **Progress dashboard.** ~~Stages visited, lessons done, prediction hit-rate — `localStorage`,
   degrades to empty. Feeds the second visit.~~ **Done, v13.** `/progress` (footer nav): lessons
   complete (`learnProgress.ts`), pipeline stages seen (`src/ui/progress.ts` — the Playground unions
@@ -2244,7 +2247,7 @@ URL-state schema. None needs a backend.
 | `/tools/grammar` | Build | v1–v2 | — |
 | `/tools/locks` | Build | v1–v2 | Enforced lock manager lands |
 | `/tools/hash-join` | Build | v1–v2 | — |
-| Challenge mode | Build | v1 | — |
+| Challenge mode | **First cut done, v13** (`/challenges` — five `RunResult` predicates + solved-set) | v1 | — |
 | Progress dashboard | **Done, v13** (`/progress` — lessons, stages seen, prediction record) | v1 | — |
 | Assignment sets | **Done, v13** (`assignmentSet.ts` + a set panel on `/assignments/new` — Markdown worksheet + JSON) | v1 | — |
 | Presenter mode | **Done, v13** (`PresenterView.tsx` — `?present=1` overlay on the Playground) | v1 | — |

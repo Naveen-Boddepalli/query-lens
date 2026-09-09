@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Challenge mode** at `/challenges` (plan.md §22.4) — five goal-shaped puzzles: *make the planner
+  use the index*, *force an eviction*, *return exactly one row*, *empty result but real work*, *two
+  conditions that still match*. Each has a small editor whose Run result is checked against a pure
+  predicate — rows / disk reads / evictions / index-used are shown, with a pass/fail verdict and a
+  link to step the run in the Playground. Solved marks kept per-browser; no backend
 - **Assignment sets** (plan.md §22.4) — `/assignments/new` can now bundle several links: give each a
   label, *Add to set*, and the panel below emits a numbered Markdown worksheet (paste into an LMS or
   print) and a JSON file, both stamped with a class code. Still no submission and no backend — the
