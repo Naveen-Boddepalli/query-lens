@@ -363,7 +363,7 @@ export function TracePage() {
                 </button>
               </div>
 
-              <div data-transcript className={`${panelSurface} min-h-0 flex-1 overflow-auto p-4`}>
+              <div data-print className={`${panelSurface} min-h-0 flex-1 overflow-auto p-4`}>
                 <h2 className="mb-1 font-mono text-label text-ink">
                   {ran.sql.replace(/\s+/g, ' ').trim()}
                 </h2>

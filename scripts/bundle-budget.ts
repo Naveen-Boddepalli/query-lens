@@ -47,9 +47,14 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
   // Playground chunk (same call as `PresenterView`): a stepped spotlight and,
   // for `prefers-reduced-motion`, a static numbered overlay.
   // `datasets`/`datasetCatalogue` (plan.md §22.7's preset dataset library) join
-  // this group — the Playground and the trace inspector share both — and fit
-  // inside the existing 37 kB.
-  { name: 'trace-ui', test: /^(PlaygroundPage|PlaygroundTour|StageDetail|stageMeta|datasets|datasetCatalogue|types|seed|trace|runQuery|SqlEditor|PlaybackControls|PresenterView|AstTree|BTreePanel|FlowTree|display)-/, kb: 37, note: 'Playground + the presenter view + the SQL editor + the shared panel/tree renderers (AstTree, BTreePanel, FlowTree, the two display transformers) plus the engine core (runQuery split into its own chunk once /tools/page became a third importer; SqlEditor split once /challenges became a second) plus the preset dataset library' },
+  // this group — the Playground and the trace inspector share both.
+  // Raised 37 → 38 for the print worksheet (`TraceWorksheet.tsx`, §22.6) —
+  // bundled into the Playground chunk, rendered only while printing.
+  // `engine-*.js` joined this group once `/tools/planner` (§22.3) became a
+  // second importer of the planner + `buildPlan` + `toPlanDisplay`, so rolldown
+  // hoisted that shared engine code out of the Playground chunk into its own —
+  // a move between chunks, not growth, but it shows here.
+  { name: 'trace-ui', test: /^(PlaygroundPage|PlaygroundTour|TraceWorksheet|StageDetail|stageMeta|datasets|datasetCatalogue|types|seed|trace|runQuery|engine|SqlEditor|PlaybackControls|PresenterView|AstTree|BTreePanel|FlowTree|display)-/, kb: 38, note: 'Playground + the presenter view + the SQL editor + the shared panel/tree renderers (AstTree, BTreePanel, FlowTree, the two display transformers) plus the engine core (runQuery and the planner split into their own chunks once a third / second route imported them; SqlEditor split once /challenges became a second) plus the preset dataset library and the print worksheet' },
   // The small per-route shells: landing hub, stage index, examples, docs shell,
   // 404, tools index — plus the redesign's shared UI kit (primitives.ts,
   // PageHeader, Hero) that two or more of them import.
@@ -67,7 +72,7 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
   // `SortToolPage.tsx` + its `externalSort.ts` plan builder — a fifth `/tools/*`
   // sandbox, lazy, plus the `t=`-aware `urlState` from v13's dataset library
   // which also lands in this group.
-  { name: 'standalone-tools', test: /^(GalleryPage|ComparePage|SettingsPage|AssignmentsNewPage|TracePage|BufferPoolToolPage|ParserToolPage|BTreeToolPage|PageToolPage|SortToolPage|BufferPoolPanel|bufferTrace|slottedPage|externalSort|assignmentSet|preferences|urlState)-/, kb: 31, note: 'Gallery, Tools, Compare, Settings, Assignments (+ assignment sets), the trace inspector, and the buffer-pool / parser / B+Tree / slotted-page / external-merge-sort sandboxes (plan.md §21.3, §20.4, §22.3, §22.4)' },
+  { name: 'standalone-tools', test: /^(GalleryPage|ComparePage|SettingsPage|AssignmentsNewPage|TracePage|BufferPoolToolPage|ParserToolPage|BTreeToolPage|PageToolPage|SortToolPage|PlannerToolPage|BufferPoolPanel|bufferTrace|slottedPage|externalSort|assignmentSet|preferences|urlState)-/, kb: 33, note: 'Gallery, Tools, Compare, Settings, Assignments (+ assignment sets), the trace inspector, and the buffer-pool / parser / B+Tree / slotted-page / external-merge-sort / planner sandboxes (plan.md §21.3, §20.4, §22.3, §22.4)' },
   // The `/learn` guided track (plan.md §21.3): the index, one lesson page, the
   // localStorage progress helper, and `lessons.tsx` — the lesson prose plus the
   // link-builder that computes each step from a real engine run. Lazy; loads
@@ -135,8 +140,11 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
  * trace file all learned to carry a dataset id.
  * Raised 373 → 377 for `/tools/sort` (§22.3) — the external-merge-sort sandbox
  * (`SortToolPage.tsx` + `externalSort.ts`), a fifth lazy `/tools/*` route.
+ * Raised 377 → 379 for `/tools/planner` (§22.3) — the optimizer sandbox
+ * (`PlannerToolPage.tsx`); most of the delta is rolldown hoisting the shared
+ * planner code into `engine-*.js` rather than new bytes.
  */
-const TOTAL_KB = 377;
+const TOTAL_KB = 379;
 
 const gzipKb = (bytes: Buffer): number => gzipSync(bytes, { level: 9 }).length / 1024;
 

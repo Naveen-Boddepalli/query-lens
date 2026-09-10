@@ -38,7 +38,9 @@ export function DocsLayout() {
         {/* No `prose-invert`: `.prose` is themed onto the app's own semantic
             tokens in index.css, which already flip with the theme, so the
             docs read correctly in light and dark without a second variant. */}
-        <div className="prose">
+        {/* `data-print` (plan.md §22.6): Ctrl-P on a docs page prints the
+            article, not a blank sheet — the nav and sidebar drop away. */}
+        <div data-print className="prose">
           {/* Its own boundary, so moving between docs pages (each its own lazy
               chunk) does not drop this sidebar while the next page loads. The
               outer boundary in App.tsx only covers the first `/docs` hit. */}

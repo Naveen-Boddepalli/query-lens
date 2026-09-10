@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import {
   createTraceProjector,
   DATASET_IDS,
@@ -25,6 +26,7 @@ import { DataEditor } from '../ui/DataEditor.tsx';
 import { PredictionCard } from '../ui/PredictionCard.tsx';
 import { PresenterView } from '../ui/PresenterView.tsx';
 import { PlaygroundTour } from '../ui/PlaygroundTour.tsx';
+import { TraceWorksheet } from '../ui/TraceWorksheet.tsx';
 import { START_TOUR_EVENT, takePendingTour } from '../ui/firstVisit.ts';
 import { ShortcutHints } from '../ui/ShortcutHints.tsx';
 import { recordPrediction, recordStages } from '../ui/progress.ts';
@@ -168,6 +170,25 @@ export function PlaygroundPage() {
     const open = () => { setTourOpen(true); };
     window.addEventListener(START_TOUR_EVENT, open);
     return () => { window.removeEventListener(START_TOUR_EVENT, open); };
+  }, []);
+
+  // The print worksheet (plan.md §22.6) is mounted *only* while printing —
+  // keeping its copy of the whole trace out of the DOM the rest of the time.
+  // `flushSync` so the render lands before the browser snapshots the page.
+  const [printing, setPrinting] = useState(false);
+  useEffect(() => {
+    const on = () => { flushSync(() => { setPrinting(true); }); };
+    const off = () => { setPrinting(false); };
+    window.addEventListener('beforeprint', on);
+    window.addEventListener('afterprint', off);
+    const mq = window.matchMedia('print');
+    const onMq = (e: MediaQueryListEvent) => { if (e.matches) on(); else off(); };
+    mq.addEventListener('change', onMq);
+    return () => {
+      window.removeEventListener('beforeprint', on);
+      window.removeEventListener('afterprint', off);
+      mq.removeEventListener('change', onMq);
+    };
   }, []);
 
   const state = projector.at(playback.step);
@@ -495,6 +516,13 @@ export function PlaygroundPage() {
               >
                 Tour
               </button>
+              <button
+                type="button"
+                onClick={() => { window.print(); }}
+                className="underline-offset-2 transition-colors hover:text-ink hover:underline"
+              >
+                Print
+              </button>
             </span>
           </div>
 
@@ -632,6 +660,19 @@ export function PlaygroundPage() {
           </div>
         </div>
       </main>
+
+      {/* plan.md §22.6: mounted only while printing (see the `beforeprint`
+          effect), so its copy of the trace never sits in the on-screen DOM. */}
+      {printing && (
+        <TraceWorksheet
+          sql={sql}
+          policy={policy}
+          predictOn={predictOn}
+          dataset={datasetId}
+          events={result.events}
+          rowCount={result.rows.length}
+        />
+      )}
 
       {editingData && table && (
         <DataEditor

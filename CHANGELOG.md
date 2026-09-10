@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Planner sandbox** at `/tools/planner` (plan.md §22.3) — type a query and see its plan tree,
+  canonical next to optimized. Toggle each rewrite rule (predicate pushdown, index selection) and
+  the `id` index on or off; a ledger says for each rule whether it fired, found no match, or was
+  switched off — so the rule ordering is visible (index selection needs pushdown to have run first).
+  `optimize()` gained an optional enabled-rules set
+- **Print to a paper worksheet** (plan.md §22.6) — a **Print** link on the Playground (and Ctrl-P)
+  lays the current query and its whole trace out as a numbered worksheet: the SQL, the run's
+  settings, and every step's narration with the predict-then-reveal steps marked. The `@media print`
+  hook now also covers the `/trace` transcript and docs pages, so Ctrl-P on a docs page prints the
+  article instead of a blank sheet
 - **External merge sort sandbox** at `/tools/sort` (plan.md §22.3) — sort more records than fit in
   memory: run generation makes short sorted runs, then `(buffer pages − 1)`-way merge passes fold
   them into one, with the page-I/O cost (`2 × pages × passes`) broken out. Change the buffer budget

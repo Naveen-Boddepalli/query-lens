@@ -1886,6 +1886,7 @@ Grouped by area. **Status** is `built` / a milestone / `v1` / `v2` / `own plan`,
 | `/tools/parser` | Parser sandbox | Arbitrary text → live token ribbon → live AST (the Playground's `AstTree`, from `toDisplayTree`) with recursion depth and the parser's own tokenize/parse error messages | source text (`src`) | **built** — v12 |
 | `/tools/page` | Slotted page inspector | One heap page of `users` laid out to the byte — header, line-pointer array, tuple data packed from the far end, free space between — with a page-size slider that shows how much a real 4 KB page would hold. `src/ui/slottedPage.ts` synthesises the layout (the engine's `Page` is only a `Row[]`, §7); a tuple cell in the map cross-highlights its table row | `page`, `bytes` | **built** — v13 |
 | `/tools/sort` | External merge sort | Sort N shuffled records with a fixed memory budget: run generation → `(memPages−1)`-way merge passes → one sorted run, with the `2·pageCount·(1+passes)` page-I/O cost broken out. `src/ui/externalSort.ts` is the driver (no `Sort` operator yet, §22.2). Parameter-driven, no playback; click a merged run to colour its records by source and light the runs that fed it | `n`, `page`, `mem`, `seed` | **built** — v13 |
+| `/tools/planner` | Planner sandbox | Type a query; see its canonical plan tree next to the optimised one, with a checkbox per rewrite rule (predicate pushdown, index selection) and one for the `id` index, plus a ledger saying for each rule whether it fired, found no match, or was switched off. `optimize` takes an optional enabled-set; validation is `runQuery`'s own | `q`, `idx`, `rules` | **built** — v13 |
 
 **Classroom** (§20.5)
 
@@ -2127,7 +2128,7 @@ URL-state schema. None needs a backend.
 
 | Route | What it is | Cost | Earliest |
 |---|---|---|---|
-| `/tools/planner` | Toggle optimizer rules and table stats, hand-author a predicate, watch the plan rewrite | ~2 days — the rules already exist; it needs the non-SQL driver | v1 |
+| `/tools/planner` | ~~Toggle optimizer rules and table stats, hand-author a predicate, watch the plan rewrite~~ **Done, v13.** Takes SQL (like `/tools/parser` — the "non-SQL driver" is infrastructure that does not exist and a text box sidesteps it); shows the canonical plan next to the optimised one, a checkbox per rewrite rule (`optimize` gained an optional enabled-set; `OPTIMIZER_RULES` is exported) and one for the `id` index, and a ledger saying for each rule whether it fired, found no match, or was turned off. "Table stats" waits on the cost model (§7.3, §9). Validation is `runQuery`'s own | ~2 days — the rules already exist; it needs the non-SQL driver | v1 |
 | `/tools/locks` | Two transaction timelines; place lock requests, watch a wait-for edge form and a deadlock resolve | rides §22.2's enforced lock manager | v1–v2 |
 | `/tools/sort` | ~~External merge sort — run generation, k-way merge, an I/O counter~~ **Done, v13.** `src/ui/externalSort.ts` is the driver (§4 has no `Sort` operator yet): given a record count and a memory budget it lays out the whole plan — the sorted runs from run generation, every `(memPages−1)`-way merge pass after, and the `2·pageCount·(1+passes)` page I/O. `/tools/sort` renders it, no playback — parameter-driven and cross-highlighted like `/tools/page`: click a merged run to colour its records by source and light the runs that fed it. `memPages` clamped ≥ 3 so the fan-in makes progress | ~3 days, or free once §22.2's `Sort` exists | v1 |
 | `/tools/hash-join` | Build and probe phases, hash collisions, partition spill (Grace hash join) | own driver, ~3 days | v1–v2 |
@@ -2216,8 +2217,14 @@ URL-state schema. None needs a backend.
   glyph in front of each — a filled disc vs a hollow ring for internal vs leaf (`FlowTree`
   `kindIcons`), and `✓ / ↓ / ✕ / ↻` on the buffer moods and the stat counts — so the distinction
   survives a washed-out projector at the back of a lecture hall. Always on, no mode.
-- **Print stylesheet.** A query and its trace as a printable worksheet, for a room without laptops.
-  ~1 day. v1–v2.
+- ~~**Print stylesheet.** A query and its trace as a printable worksheet, for a room without laptops.
+  ~1 day. v1–v2.~~ **Done, v13.** A **Print** link on the Playground (and Ctrl-P) renders
+  `src/ui/TraceWorksheet.tsx` — the query, the run's settings, and a numbered list of every step's
+  narration with the predict-then-reveal steps marked. It is mounted *only* while printing (a
+  `beforeprint` / `matchMedia('print')` effect + `flushSync`), so its copy of the whole trace never
+  sits in the on-screen DOM. The `@media print` hook in `src/index.css` generalised from the
+  transcript's `[data-transcript]` to a shared `[data-print]`, which also picks up the `/trace`
+  transcript and the docs article — so Ctrl-P on a docs page now prints the page, not a blank sheet.
 - **i18n scaffold.** §17.3's licence position already contemplates translation. String extraction
   plus one non-English locale is v2 — do not build the machinery before someone commits to
   maintaining a locale.
@@ -2284,7 +2291,7 @@ URL-state schema. None needs a backend.
 | Multi-table schema editor | Build | v1 | JOIN is scheduled |
 | CSV / paste import | **Done, v13** (`parseCsv.ts` + an Import CSV panel in the seed editor) | v1 | — |
 | Preset dataset library | **Done, v13** (`datasets.ts` + `datasetCatalogue.ts` — `users` / `orders` / `logins`, a `Data:` chip row, a `t=` share key; `lineitem` dropped as JOIN-free filler) | v1 (with §19.2) | — |
-| `/tools/planner` | Build | v1 | Non-SQL driver generalised |
+| `/tools/planner` | **Done, v13** (takes SQL; canonical vs optimised plan, a switch per rewrite rule + the `id` index, a fired/no-match/off ledger; `optimize` gained an optional rule-set) | v1 | — |
 | `/tools/page` (slotted-page inspector) | **Done, v13** (`slottedPage.ts` + `/tools/page`) | v1 | — |
 | `/tools/sort` | **Done, v13** (`externalSort.ts` — its own driver; run generation, k-way merge passes, the page-I/O count, cross-highlighted) | v1 | — |
 | `/tools/grammar` | Build | v1–v2 | — |
@@ -2294,7 +2301,7 @@ URL-state schema. None needs a backend.
 | Progress dashboard | **Done, v13** (`/progress` — lessons, stages seen, prediction record) | v1 | — |
 | Assignment sets | **Done, v13** (`assignmentSet.ts` + a set panel on `/assignments/new` — Markdown worksheet + JSON) | v1 | — |
 | Presenter mode | **Done, v13** (`PresenterView.tsx` — `?present=1` overlay on the Playground) | v1 | — |
-| Print stylesheet | Build | v1–v2 | — |
+| Print stylesheet | **Done, v13** (`TraceWorksheet.tsx` + a **Print** link on the Playground; the `[data-print]` `@media print` hook also covers `/trace` and docs) | v1–v2 | — |
 | In-app quiz / self-check | Deferred | post-§9 | The §9 study has run (contamination) |
 | Enforced concurrency + deadlocks | Build | v1–v2 | §9 validates the format |
 | `npx querylens` CLI | Build | v1–v2 | — |

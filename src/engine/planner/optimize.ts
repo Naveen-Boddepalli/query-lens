@@ -93,15 +93,33 @@ const indexSelection: Rule = (plan, table) => {
   };
 };
 
-const RULES: Rule[] = [predicatePushdown, indexSelection];
+const RULES: { name: string; apply: Rule }[] = [
+  { name: 'predicate-pushdown', apply: predicatePushdown },
+  { name: 'index-selection', apply: indexSelection },
+];
 
-/** Applies every rule that fires, in order. Returns each step for animation. */
-export function optimize(plan: Plan, table: Table): Rewrite[] {
+/** Every rewrite rule's name, in the order the optimizer runs them. */
+export const OPTIMIZER_RULES: readonly string[] = RULES.map((r) => r.name);
+
+/**
+ * Applies every enabled rule that fires, in order. Returns each step for
+ * animation.
+ *
+ * `enabled` defaults to all rules — the pipeline (`emit.ts`) never passes it.
+ * `/tools/planner` (plan.md §22.3) passes a subset so a rule can be toggled
+ * off and its effect on the plan watched.
+ */
+export function optimize(
+  plan: Plan,
+  table: Table,
+  enabled: ReadonlySet<string> = new Set(OPTIMIZER_RULES),
+): Rewrite[] {
   const steps: Rewrite[] = [];
   let current = plan;
 
-  for (const rule of RULES) {
-    const rewrite = rule(current, table);
+  for (const { name, apply } of RULES) {
+    if (!enabled.has(name)) continue;
+    const rewrite = apply(current, table);
     if (!rewrite) continue;
     steps.push(rewrite);
     current = rewrite.plan;

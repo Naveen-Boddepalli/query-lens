@@ -43,6 +43,13 @@ const TOOLS = [
       'Sort more records than fit in memory: run generation, then k-way merge passes until one sorted run remains, with the page-I/O cost broken out. Change the buffer budget and watch the pass count and the I/O move — the classic "why sorting is expensive" lesson.',
     available: true,
   },
+  {
+    title: 'Planner sandbox',
+    href: '/tools/planner',
+    description:
+      'Type a query and see its plan tree, canonical next to optimized. Toggle each rewrite rule — predicate pushdown, index selection — and the id index on or off, and watch the plan change. The optimize stage from the pipeline, with the rules on switches.',
+    available: true,
+  },
 ] as const;
 
 export function ToolsIndexPage() {

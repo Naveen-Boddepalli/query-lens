@@ -692,10 +692,16 @@ select:disabled {
   }
 }
 
-/* plan.md §22.6: the `/trace` transcript prints as a paper worksheet — nothing
-   else on the page does. The classic "print only this element": hide everything,
-   re-show the marked subtree, and pull it to the top of the sheet. Links print
-   as plain text since a URL is no use on paper. */
+/* plan.md §22.6: a page that has something worth printing marks that one region
+   `data-print` — the Playground's trace worksheet, the `/trace` transcript, a
+   docs article. The classic "print only this element": hide everything, re-show
+   the marked subtree, and pull it to the top of the sheet. Links print as plain
+   text since a URL is no use on paper. A `[data-print].print-only` region is out
+   of flow on screen and only appears here. */
+.print-only {
+  display: none;
+}
+
 @media print {
   :root {
     color-scheme: light;
@@ -705,12 +711,12 @@ select:disabled {
     visibility: hidden;
   }
 
-  [data-transcript],
-  [data-transcript] * {
+  [data-print],
+  [data-print] * {
     visibility: visible;
   }
 
-  [data-transcript] {
+  [data-print] {
     position: absolute;
     inset: 0 auto auto 0;
     width: 100%;
@@ -721,7 +727,11 @@ select:disabled {
     color: #000;
   }
 
-  [data-transcript] a {
+  [data-print].print-only {
+    display: block;
+  }
+
+  [data-print] a {
     color: #000;
     text-decoration: none;
   }

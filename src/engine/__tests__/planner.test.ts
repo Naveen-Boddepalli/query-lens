@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { parse } from '../parser/parser.ts';
 import { buildPlan } from '../planner/buildPlan.ts';
-import { optimize, scanPredicate } from '../planner/optimize.ts';
+import { optimize, OPTIMIZER_RULES, scanPredicate } from '../planner/optimize.ts';
 import { conjoin, conjuncts, equalityOn, exprToSql } from '../planner/plan.ts';
 import type { Plan } from '../planner/plan.ts';
 import { createSeedDatabase } from '../seed.ts';
@@ -178,5 +178,35 @@ describe('optimize — general properties', () => {
   it('is idempotent — re-running the rules changes nothing further', () => {
     const once = final('SELECT * FROM users WHERE id = 5');
     expect(optimize(once, users)).toHaveLength(0);
+  });
+});
+
+describe('optimize — rule filter (plan.md §22.3 /tools/planner)', () => {
+  const sql = 'SELECT * FROM users WHERE id = 5';
+
+  it('OPTIMIZER_RULES lists both rules, in run order', () => {
+    expect([...OPTIMIZER_RULES]).toEqual(['predicate-pushdown', 'index-selection']);
+  });
+
+  it('an empty set runs no rules — the canonical plan is untouched', () => {
+    expect(optimize(plan(sql), users, new Set())).toHaveLength(0);
+  });
+
+  it('with only predicate-pushdown, the scan stays a SeqScan (no index step)', () => {
+    const steps = optimize(plan(sql), users, new Set(['predicate-pushdown']));
+    expect(steps.map((s) => s.rule)).toEqual(['predicate-pushdown']);
+    expect(shape(steps.at(-1)!.plan)).toEqual(['Project', 'SeqScan']);
+  });
+
+  it('index-selection cannot fire without pushdown — it needs the filter in the scan first', () => {
+    // A real ordering lesson for the sandbox: turning pushdown off strands
+    // index-selection with nothing to match (canonical is Project→Filter→SeqScan).
+    expect(optimize(plan(sql), users, new Set(['index-selection']))).toHaveLength(0);
+  });
+
+  it('omitting the argument runs every rule, unchanged from before', () => {
+    const withDefault = optimize(plan(sql), users);
+    const withAll = optimize(plan(sql), users, new Set(OPTIMIZER_RULES));
+    expect(withDefault.map((s) => s.rule)).toEqual(withAll.map((s) => s.rule));
   });
 });

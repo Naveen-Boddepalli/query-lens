@@ -183,6 +183,31 @@ test('the external merge sort sandbox trades memory for I/O', async ({ page }) =
   await expect(run).toHaveAttribute('aria-pressed', 'true');
 });
 
+test('the planner sandbox runs the rewrite rules one at a time', async ({ page }) => {
+  await page.goto('/tools/planner');
+  await expect(page.getByRole('heading', { name: 'Planner sandbox' })).toBeVisible();
+
+  const optimized = page.getByRole('figure').filter({ hasText: 'optimized' });
+
+  // Default: both rules on, index on → the scan becomes a B+Tree lookup.
+  await expect(optimized.getByText(/IndexScan/).first()).toBeVisible();
+  await expect(page.getByText(/index-selection — /)).toContainText(/indexed/);
+
+  // Drop the index → index-selection has nothing to match; the scan stays sequential.
+  await page.getByLabel('id index').uncheck();
+  await expect(optimized.getByText(/IndexScan/)).toHaveCount(0);
+  await expect(optimized.getByText(/SeqScan/).first()).toBeVisible();
+  await expect(page.getByText(/index-selection — no match/)).toBeVisible();
+  await expect.poll(() => page.url()).toMatch(/[?&]idx=0/);
+
+  // Turn predicate-pushdown off (index back on): nothing fires — the two plans match.
+  await page.getByLabel('id index').check();
+  await page.getByLabel('predicate-pushdown').uncheck();
+  await expect(page.getByText('optimized · unchanged')).toBeVisible();
+  await expect(page.getByText(/predicate-pushdown — turned off/)).toBeVisible();
+  await expect.poll(() => page.url()).toMatch(/rules=index-selection/);
+});
+
 test('compare finds the point where LRU and clock sweep pick different victims', async ({ page }) => {
   await page.goto('/compare');
   await expect(page.getByText(/first pick a different victim/)).toBeVisible();
@@ -612,7 +637,7 @@ test('the trace inspector filters the raw event stream and links into the Playgr
   await page.getByRole('radio', { name: 'Transcript' }).click();
   await expect(page).toHaveURL(/[?&]v=transcript/);
   await expect(page.locator('table')).toHaveCount(0);
-  const items = page.locator('[data-transcript] ol > li');
+  const items = page.locator('[data-print] ol > li');
   expect(await items.count()).toBeGreaterThan(10);
   await expect(items.first().locator('a')).toHaveAttribute(
     'href',
@@ -623,7 +648,27 @@ test('the trace inspector filters the raw event stream and links into the Playgr
   // A direct link opens straight into the transcript.
   await page.goto('/trace?q=SELECT+*+FROM+users+WHERE+id+%3D+5&p=lru&v=transcript');
   await expect(page.getByRole('radio', { name: 'Transcript', checked: true })).toBeVisible();
-  await expect(page.locator('[data-transcript] ol > li').first()).toContainText(/\S/);
+  await expect(page.locator('[data-print] ol > li').first()).toContainText(/\S/);
+});
+
+test('the Playground prints its trace as a paper worksheet', async ({ page }) => {
+  await page.goto('/playground?q=SELECT+*+FROM+users+WHERE+age+%3E+30&p=clock&x=1&s=1');
+  await expect(page.getByText(/steps in this trace/)).toBeVisible();
+
+  const sheet = page.locator('[data-print].print-only');
+  await expect(sheet).toBeHidden(); // display:none on screen
+
+  await page.emulateMedia({ media: 'print' });
+  await expect(sheet).toBeVisible();
+  await expect(sheet.getByRole('heading', { name: 'QueryLens trace worksheet' })).toBeVisible();
+  await expect(sheet).toContainText('age > 30');
+  await expect(sheet).toContainText(/table users · Clock sweep · prediction on/);
+  expect(await sheet.locator('ol > li').count()).toBeGreaterThan(10);
+  await expect(sheet.locator('ol > li', { hasText: 'predict first' }).first()).toBeVisible();
+
+  // Nothing else on the page prints.
+  await expect(page.getByRole('button', { name: /^Run/ })).toBeHidden();
+  await page.emulateMedia({ media: 'screen' });
 });
 
 test('the learn track opens lessons that deep-link into the Playground and remembers progress', async ({ page }) => {

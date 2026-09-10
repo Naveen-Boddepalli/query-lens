@@ -410,6 +410,7 @@ test('every route renders the app on a cold load, not the 404 page', async ({ pa
     ['/tools/btree', /B\+Tree sandbox/],
     ['/tools/page', /Slotted page inspector/],
     ['/tools/sort', /External merge sort/],
+    ['/tools/planner', /Planner sandbox/],
     ['/compare', /Index vs\. sequential scan/],
     ['/settings', /Settings/],
     ['/assignments/new', /Create an assignment/],
