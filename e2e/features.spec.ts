@@ -162,6 +162,27 @@ test('the slotted-page inspector lays a heap page out to the byte', async ({ pag
   await expect(page).toHaveURL(/[?&]page=0/);
 });
 
+test('the external merge sort sandbox trades memory for I/O', async ({ page }) => {
+  await page.goto('/tools/sort');
+  await expect(page.getByRole('heading', { name: 'External merge sort' })).toBeVisible();
+
+  // 32 records, 2/page, 3 buffer pages → 16 data pages, 3 merge passes, 128 I/Os.
+  const io = () => page.getByText('page I/Os', { exact: true }).locator('..');
+  await expect(io().getByText('128', { exact: true })).toBeVisible();
+  await expect(page.getByText(/3 merge passes then folds/)).toBeVisible();
+
+  // Wider merges with more buffer pages: fewer passes, less I/O.
+  await page.getByLabel('Buffer pages').selectOption('6');
+  await expect(io().getByText('64', { exact: true })).toBeVisible();
+  await expect(page.getByText(/1 merge pass then folds/)).toBeVisible();
+  await expect.poll(() => page.url()).toMatch(/[?&]mem=6/);
+
+  // A run is selectable (the cross-highlight handle).
+  const run = page.getByRole('button', { name: /^\d+ recs?\b/ }).first();
+  await run.click();
+  await expect(run).toHaveAttribute('aria-pressed', 'true');
+});
+
 test('compare finds the point where LRU and clock sweep pick different victims', async ({ page }) => {
   await page.goto('/compare');
   await expect(page.getByText(/first pick a different victim/)).toBeVisible();
@@ -372,6 +393,50 @@ test('the tour degrades to a static numbered overlay under reduced motion', asyn
 
   await tour.getByRole('button', { name: 'Got it' }).click();
   await expect(page.getByRole('dialog', { name: 'Playground tour' })).toHaveCount(0);
+});
+
+test('the preset dataset chips swap the table, the query and the URL', async ({ page }) => {
+  await page.goto('/playground');
+  await expect(page.getByLabel('SQL query')).toContainText('FROM users');
+
+  // Switch to orders: the starter query, the blurb and the preset chips all move.
+  await page.getByRole('button', { name: 'orders', exact: true }).click();
+  await expect(page.getByLabel('SQL query')).toContainText('FROM orders');
+  await expect(page.getByText(/120 rows, indexed on id/)).toBeVisible();
+  await expect(page.getByText(/steps in this trace/)).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Eviction storm' })).toBeVisible();
+  await expect.poll(() => page.url()).toContain('t=orders');
+
+  // A preset for this dataset runs its own query.
+  await page.getByRole('button', { name: 'Scan by customer' }).click();
+  await expect(page.getByLabel('SQL query')).toContainText("customer = 'acme'");
+
+  // The seed editor edits whichever table is active.
+  await page.getByRole('button', { name: /^Edit data/ }).click();
+  await expect(page.getByRole('heading', { name: 'Seed data · orders' })).toBeVisible();
+  await page.keyboard.press('Escape');
+
+  // Back to the default and the param drops out of the link again.
+  await page.getByRole('button', { name: 'users', exact: true }).click();
+  await expect(page.getByLabel('SQL query')).toContainText('FROM users');
+  await expect.poll(() => page.url()).not.toContain('t=');
+});
+
+test('a link that names a dataset reopens on it, in the Playground and the inspector', async ({
+  page,
+}) => {
+  const link = '/playground?q=SELECT+*+FROM+logins+WHERE+status+%3D+%27blocked%27&p=lru&x=0&s=9999&t=logins';
+  await page.goto(link);
+  await expect(page.getByRole('button', { name: 'logins', exact: true })).toHaveClass(/border-accent/);
+  await page.getByLabel('Scrub to step').press('End');
+  // The skewed dataset: `status = 'blocked'` is a small handful of rows.
+  await expect(page.getByText(/rows? returned/)).toBeVisible();
+
+  // The trace inspector reads the same `t` key: the query runs against `logins`
+  // rather than erroring on an unknown table.
+  await page.goto(link.replace('/playground', '/trace'));
+  await expect(page.getByText(/\d+ of \d+ events/)).toBeVisible();
+  await expect(page.getByText(/no table called/i)).toHaveCount(0);
 });
 
 test('a challenge checks the query on Run and remembers the solve', async ({ page }) => {

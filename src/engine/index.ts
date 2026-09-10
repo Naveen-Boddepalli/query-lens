@@ -7,6 +7,13 @@ export {
 } from './bufferTrace.ts';
 export type { BufferTraceResult } from './bufferTrace.ts';
 export { createSeedDatabase } from './seed.ts';
+export {
+  DATASETS,
+  DATASET_IDS,
+  DEFAULT_DATASET,
+  isDatasetId,
+} from './datasets.ts';
+export type { DatasetId, DatasetSpec } from './datasets.ts';
 export { createTracer } from './trace.ts';
 export { parse, toDisplayTree, columnsIn, tokenize } from './parser/index.ts';
 export type { Token, TokenType } from './parser/index.ts';

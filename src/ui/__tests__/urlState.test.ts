@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { createSeedDatabase } from '../../engine/index.ts';
 import type { Table } from '../../engine/index.ts';
-import { encodeShareState, readShareState, skippedAnswersBefore } from '../urlState.ts';
+import {
+  encodeShareState,
+  readDatasetParam,
+  readShareState,
+  skippedAnswersBefore,
+} from '../urlState.ts';
 
 const TABLE = createSeedDatabase().tables.users as Table;
 const COLUMNS = TABLE.columns;
@@ -48,6 +53,31 @@ describe('share state', () => {
     );
     expect(query).not.toContain('l=');
     expect(readShareState(query, COLUMNS).lockReveal).toBeUndefined();
+  });
+
+  it('names a non-default dataset in the link and reads it back', () => {
+    const query = encodeShareState(
+      { sql: 'SELECT * FROM orders WHERE id = 1;', policy: 'lru', predictOn: true, step: 0, dataset: 'orders' },
+      TABLE,
+    );
+    expect(query).toContain('t=orders');
+    expect(readShareState(query, COLUMNS).dataset).toBe('orders');
+    expect(readDatasetParam(query)).toBe('orders');
+  });
+
+  it('leaves the default dataset out of the link', () => {
+    const query = encodeShareState(
+      { sql: 'SELECT * FROM users;', policy: 'lru', predictOn: true, step: 0, dataset: 'users' },
+      TABLE,
+    );
+    expect(query).not.toContain('t=');
+    expect(readShareState(query, COLUMNS).dataset).toBeUndefined();
+    expect(readDatasetParam(query)).toBe('users');
+  });
+
+  it('falls back to users for an unknown dataset id', () => {
+    expect(readShareState('t=lineitem', COLUMNS).dataset).toBeUndefined();
+    expect(readDatasetParam('t=lineitem')).toBe('users');
   });
 
   it('carries edited rows, values and types intact', () => {

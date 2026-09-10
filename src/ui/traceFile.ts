@@ -1,5 +1,6 @@
 import { BUILD_SHA, BUILD_TIME } from '../buildInfo.ts';
-import type { ReplacementPolicyName, Row, SqlValue } from '../engine/index.ts';
+import { DATASETS, DEFAULT_DATASET, isDatasetId } from '../engine/index.ts';
+import type { DatasetId, ReplacementPolicyName, Row, SqlValue } from '../engine/index.ts';
 
 /**
  * plan.md §22.5: "Download this trace" / "load a trace from a file". This is the
@@ -8,11 +9,11 @@ import type { ReplacementPolicyName, Row, SqlValue } from '../engine/index.ts';
  * that re-runs to the exact moment, for a bug report or a §9 study instrument.
  *
  * It deliberately carries **no `events`**: the engine is deterministic, so the
- * event stream re-derives from `sql` + `policy` + `rows`, and a second copy in
- * the file could only ever drift from what the running engine produces — the
- * §15.2 rule, one level up (never ship a half-restore that renders a trace that
- * is a lie). The raw event array is `/trace`'s "Copy JSON" when you need it
- * frozen.
+ * event stream re-derives from `dataset` + `sql` + `policy` + `rows`, and a
+ * second copy in the file could only ever drift from what the running engine
+ * produces — the §15.2 rule, one level up (never ship a half-restore that
+ * renders a trace that is a lie). The raw event array is `/trace`'s "Copy JSON"
+ * when you need it frozen.
  *
  * On the way in it is untrusted input, exactly like the shareable URL: every
  * field is checked and a mismatch fails the whole load rather than half-applying
@@ -29,13 +30,17 @@ export interface TraceState {
   policy: ReplacementPolicyName;
   predictOn: boolean;
   step: number;
-  /** `null` when the dataset is the untouched seed set (kept out, like the URL's `d`). */
+  /** The preset dataset (plan.md §22.7); a v1 file without it means `users`. */
+  dataset: DatasetId;
+  /** `null` when the rows are that dataset's untouched set (kept out, like the URL's `d`). */
   rows: Row[] | null;
 }
 
-interface TraceFile extends TraceState {
+interface TraceFile extends Omit<TraceState, 'dataset'> {
   kind: typeof TRACE_FILE_KIND;
   version: number;
+  /** Written only for a non-default dataset; its absence means `users`. */
+  dataset?: DatasetId;
   meta: {
     app: 'QueryLens';
     build: string;
@@ -58,6 +63,8 @@ export function serializeTraceFile(state: TraceState): string {
     policy: state.policy,
     predictOn: state.predictOn,
     step: state.step,
+    // Omitted for the default, so a `users` file reads identically to a v1 one.
+    ...(state.dataset !== DEFAULT_DATASET ? { dataset: state.dataset } : {}),
     rows: state.rows,
     meta: {
       app: 'QueryLens',
@@ -74,7 +81,7 @@ export type TraceParseResult =
   | { ok: false; error: string };
 
 /** Parse a trace file's text. Total on any input; never throws. */
-export function parseTraceFile(text: string, columns: readonly string[]): TraceParseResult {
+export function parseTraceFile(text: string): TraceParseResult {
   let raw: unknown;
   try {
     raw = JSON.parse(text);
@@ -110,18 +117,28 @@ export function parseTraceFile(text: string, columns: readonly string[]): TraceP
     return { ok: false, error: 'The "step" field must be a whole number ≥ 0.' };
   }
 
+  // A missing `dataset` is a v1 file — `users`. A present one must be known;
+  // an unrecognised value fails the load rather than silently falling back.
+  if (o.dataset !== undefined && !isDatasetId(o.dataset)) {
+    const shown = typeof o.dataset === 'string' ? o.dataset : typeof o.dataset;
+    return { ok: false, error: `Unknown dataset: ${shown}.` };
+  }
+  const dataset: DatasetId = isDatasetId(o.dataset) ? o.dataset : DEFAULT_DATASET;
+  const spec = DATASETS[dataset];
+  const columns = spec.make().tables[spec.table]?.columns ?? [];
+
   let rows: Row[] | null = null;
   if (o.rows !== null && o.rows !== undefined) {
     const decoded = decodeRows(o.rows, columns);
     if (decoded === null) {
-      return { ok: false, error: 'The "rows" do not match the users table schema.' };
+      return { ok: false, error: `The "rows" do not match the ${dataset} table schema.` };
     }
     rows = decoded;
   }
 
   return {
     ok: true,
-    value: { sql: o.sql, policy: o.policy, predictOn: o.predictOn, step: o.step, rows },
+    value: { sql: o.sql, policy: o.policy, predictOn: o.predictOn, step: o.step, dataset, rows },
   };
 }
 

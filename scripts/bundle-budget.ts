@@ -46,7 +46,10 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
   // P1) — the last of §19.2's four onboarding items. Two render modes in the
   // Playground chunk (same call as `PresenterView`): a stepped spotlight and,
   // for `prefers-reduced-motion`, a static numbered overlay.
-  { name: 'trace-ui', test: /^(PlaygroundPage|PlaygroundTour|StageDetail|stageMeta|types|seed|trace|runQuery|SqlEditor|PlaybackControls|PresenterView|AstTree|BTreePanel|FlowTree|display)-/, kb: 37, note: 'Playground + the presenter view + the SQL editor + the shared panel/tree renderers (AstTree, BTreePanel, FlowTree, the two display transformers) plus the engine core (runQuery split into its own chunk once /tools/page became a third importer; SqlEditor split once /challenges became a second)' },
+  // `datasets`/`datasetCatalogue` (plan.md §22.7's preset dataset library) join
+  // this group — the Playground and the trace inspector share both — and fit
+  // inside the existing 37 kB.
+  { name: 'trace-ui', test: /^(PlaygroundPage|PlaygroundTour|StageDetail|stageMeta|datasets|datasetCatalogue|types|seed|trace|runQuery|SqlEditor|PlaybackControls|PresenterView|AstTree|BTreePanel|FlowTree|display)-/, kb: 37, note: 'Playground + the presenter view + the SQL editor + the shared panel/tree renderers (AstTree, BTreePanel, FlowTree, the two display transformers) plus the engine core (runQuery split into its own chunk once /tools/page became a third importer; SqlEditor split once /challenges became a second) plus the preset dataset library' },
   // The small per-route shells: landing hub, stage index, examples, docs shell,
   // 404, tools index — plus the redesign's shared UI kit (primitives.ts,
   // PageHeader, Hero) that two or more of them import.
@@ -60,7 +63,11 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
   // and its `slottedPage.ts` layout module — a fourth `/tools/*` sandbox, lazy.
   // Raised 26 → 27 for assignment sets (`assignmentSet.ts` + the set panel in
   // `/assignments/new`, §22.4).
-  { name: 'standalone-tools', test: /^(GalleryPage|ComparePage|SettingsPage|AssignmentsNewPage|TracePage|BufferPoolToolPage|ParserToolPage|BTreeToolPage|PageToolPage|BufferPoolPanel|bufferTrace|slottedPage|assignmentSet|preferences|urlState)-/, kb: 27, note: 'Gallery, Tools, Compare, Settings, Assignments (+ assignment sets), the trace inspector, and the buffer-pool / parser / B+Tree / slotted-page sandboxes (plan.md §21.3, §20.4, §22.3, §22.4)' },
+  // Raised 27 → 31 for the external-merge-sort sandbox (`/tools/sort`, §22.3):
+  // `SortToolPage.tsx` + its `externalSort.ts` plan builder — a fifth `/tools/*`
+  // sandbox, lazy, plus the `t=`-aware `urlState` from v13's dataset library
+  // which also lands in this group.
+  { name: 'standalone-tools', test: /^(GalleryPage|ComparePage|SettingsPage|AssignmentsNewPage|TracePage|BufferPoolToolPage|ParserToolPage|BTreeToolPage|PageToolPage|SortToolPage|BufferPoolPanel|bufferTrace|slottedPage|externalSort|assignmentSet|preferences|urlState)-/, kb: 31, note: 'Gallery, Tools, Compare, Settings, Assignments (+ assignment sets), the trace inspector, and the buffer-pool / parser / B+Tree / slotted-page / external-merge-sort sandboxes (plan.md §21.3, §20.4, §22.3, §22.4)' },
   // The `/learn` guided track (plan.md §21.3): the index, one lesson page, the
   // localStorage progress helper, and `lessons.tsx` — the lesson prose plus the
   // link-builder that computes each step from a real engine run. Lazy; loads
@@ -122,8 +129,14 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
  * Raised 369 → 371 for the 60-second tour (`PlaygroundTour.tsx`, §19.2 P1) — a
  * spotlight-over-the-real-UI mode and a static numbered-overlay fallback for
  * reduced motion, in the Playground chunk; closes out §19.2's P1 list.
+ * Raised 371 → 373 for the preset dataset library (§22.7): `datasets.ts` builds
+ * `orders` and `logins` alongside `users`, `datasetCatalogue.ts` holds their
+ * copy + preset queries, and the Playground / trace inspector / URL (`t=`) /
+ * trace file all learned to carry a dataset id.
+ * Raised 373 → 377 for `/tools/sort` (§22.3) — the external-merge-sort sandbox
+ * (`SortToolPage.tsx` + `externalSort.ts`), a fifth lazy `/tools/*` route.
  */
-const TOTAL_KB = 371;
+const TOTAL_KB = 377;
 
 const gzipKb = (bytes: Buffer): number => gzipSync(bytes, { level: 9 }).length / 1024;
 

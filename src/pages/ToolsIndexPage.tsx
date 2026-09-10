@@ -36,6 +36,13 @@ const TOOLS = [
       'One heap page laid out to the byte — header, slot array, tuple data and the free space between. A size slider shows how much a real 4 KB page would actually hold, next to the handful of rows the engine keeps per page for legibility.',
     available: true,
   },
+  {
+    title: 'External merge sort',
+    href: '/tools/sort',
+    description:
+      'Sort more records than fit in memory: run generation, then k-way merge passes until one sorted run remains, with the page-I/O cost broken out. Change the buffer budget and watch the pass count and the I/O move — the classic "why sorting is expensive" lesson.',
+    available: true,
+  },
 ] as const;
 
 export function ToolsIndexPage() {

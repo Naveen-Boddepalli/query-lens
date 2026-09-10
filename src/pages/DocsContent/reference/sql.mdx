@@ -48,6 +48,8 @@ so changing what's in the table happens by editing the seed rows directly rather
 
 ## The seed table
 
-Every query runs against one table, `users`, with columns `id`, `name`, `email`, `age`. Its rows are
-editable from the app (**Edit data**), and an edited set travels with a shareable link — see
-[URL parameters](/docs/reference/url-parameters).
+Every query runs against one table at a time. The default is `users`, with columns `id`, `name`,
+`email`, `age`; the **Data** chips above the editor also load `orders` (120 rows — a deeper index and
+a heavier scan) and `logins` (a lopsided `status` column, for selectivity). Rows are editable from
+the app (**Edit data**), and both the choice of dataset and any edits travel with a shareable link —
+see [URL parameters](/docs/reference/url-parameters).

@@ -1,18 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  createSeedDatabase,
   createTraceProjector,
+  DATASET_IDS,
+  DATASETS,
   DEFAULT_ENGINE_OPTIONS,
   runQuery,
 } from '../engine/index.ts';
 import type {
   Database,
+  DatasetId,
   ReplacementPolicyName,
   Row,
   RunResult,
   Span,
   Stage,
 } from '../engine/index.ts';
+import { DATASET_CATALOGUE } from '../ui/datasetCatalogue.ts';
 import { ErrorBoundary } from '../ui/ErrorBoundary.tsx';
 import { publishRepro } from '../ui/errorReport.ts';
 import { PipelineTracker } from '../ui/PipelineTracker.tsx';
@@ -35,6 +38,7 @@ import { STAGE_META } from '../ui/stageMeta.ts';
 import { usePlayback, usePlaybackShortcuts } from '../ui/usePlayback.ts';
 import {
   encodeShareState,
+  readDatasetParam,
   readShareState,
   skippedAnswersBefore,
   writeShareState,
@@ -42,32 +46,24 @@ import {
 import { parseTraceFile, serializeTraceFile } from '../ui/traceFile.ts';
 import type { TraceState } from '../ui/traceFile.ts';
 
-const INITIAL_SQL = 'SELECT *\nFROM users\nWHERE id = 5;';
-
-/**
- * plan.md §19.2 P1: one-click starting points above the editor, so a first
- * visitor is not asked to invent SQL before they know what the tool does with
- * it. The third pair is the §9 contrast the product exists to show — the same
- * equality shape, once on the indexed column and once not.
- */
-const PRESETS: { label: string; sql: string }[] = [
-  { label: 'Point lookup', sql: 'SELECT *\nFROM users\nWHERE id = 5;' },
-  { label: 'Sequential scan', sql: 'SELECT *\nFROM users\nWHERE age > 30;' },
-  { label: 'Lookup, no index', sql: "SELECT *\nFROM users\nWHERE name = 'grace';" },
-];
-
-const TABLE = 'users';
-
 function landingStep(result: RunResult, predictOn: boolean): number {
   if (result.events.length === 0) return 0;
   return predictOn && result.events[0]?.predictable !== undefined ? 0 : 1;
 }
 
-const SEED = createSeedDatabase();
-const SHARED = readShareState(
-  typeof location === 'undefined' ? '' : location.search,
-  SEED.tables[TABLE]?.columns ?? [],
-);
+const SEARCH = typeof location === 'undefined' ? '' : location.search;
+
+/**
+ * plan.md §22.7: the link may name a preset dataset (`?t=orders`). It is read
+ * first, on its own, because the dataset decides the table name every `FROM`
+ * must use and the columns the shared `d` rows are validated against.
+ */
+const DATASET_ID = readDatasetParam(SEARCH);
+const DATASET = DATASETS[DATASET_ID];
+const CATALOGUE = DATASET_CATALOGUE[DATASET_ID];
+
+const SEED = DATASET.make();
+const SHARED = readShareState(SEARCH, SEED.tables[DATASET.table]?.columns ?? []);
 
 /**
  * plan.md §20.5: an assignment link (`&l=1`) seals the trace at its landing
@@ -78,26 +74,24 @@ const SHARED = readShareState(
 const ASSIGNMENT = SHARED.lockReveal === true;
 
 /** plan.md §22.5: `?present=1` opens the room-facing presenter view on load. */
-const PRESENT_INITIAL =
-  typeof location !== 'undefined' && new URLSearchParams(location.search).get('present') === '1';
+const PRESENT_INITIAL = new URLSearchParams(SEARCH).get('present') === '1';
 
 /** plan.md §19.2: `?tour=1` opens the 60-second tour on load — for a course
  *  link or a doc, and the path the first-visit hint takes when its chunk
  *  rendered before the Playground's. */
-const TOUR_INITIAL =
-  typeof location !== 'undefined' && new URLSearchParams(location.search).get('tour') === '1';
+const TOUR_INITIAL = new URLSearchParams(SEARCH).get('tour') === '1';
 
 const START = {
-  sql: SHARED.sql ?? INITIAL_SQL,
+  sql: SHARED.sql ?? CATALOGUE.starterSql,
   // The URL wins when present; a `/settings` preference (plan.md §21.3) is the
   // fallback for a bare visit, and the engine's own default is the fallback
   // for that. Same precedence order the theme already follows.
   policy: SHARED.policy ?? readDefaultPolicy() ?? DEFAULT_ENGINE_OPTIONS.policy,
   predictOn: SHARED.predictOn ?? readDefaultPredictOn() ?? true,
   db: ((): Database => {
-    const table = SEED.tables[TABLE];
+    const table = SEED.tables[DATASET.table];
     if (!SHARED.rows || !table) return SEED;
-    return { tables: { ...SEED.tables, [TABLE]: { ...table, rows: SHARED.rows } } };
+    return { tables: { ...SEED.tables, [DATASET.table]: { ...table, rows: SHARED.rows } } };
   })(),
 };
 
@@ -110,6 +104,7 @@ export function PlaygroundPage() {
   const [sql, setSql] = useState(START.sql);
   const [policy, setPolicy] = useState<ReplacementPolicyName>(START.policy);
   const [pinnedStage, setPinnedStage] = useState<Stage | null>(null);
+  const [datasetId, setDatasetId] = useState<DatasetId>(DATASET_ID);
   const [db, setDb] = useState<Database>(START.db);
   const [editingData, setEditingData] = useState(false);
   const [rowsEdited, setRowsEdited] = useState(SHARED.rows !== undefined);
@@ -127,7 +122,9 @@ export function PlaygroundPage() {
   const askToPredict = predictOn && !presenting;
 
   const options = useMemo(() => ({ ...DEFAULT_ENGINE_OPTIONS, policy }), [policy]);
-  const table = db.tables[TABLE];
+  const tableName = DATASETS[datasetId].table;
+  const table = db.tables[tableName];
+  const presets = DATASET_CATALOGUE[datasetId].presets;
   const touch = useIsTouch();
   const { theme } = useThemeContext();
 
@@ -220,6 +217,7 @@ export function PlaygroundPage() {
           policy,
           predictOn,
           step: playback.step,
+          dataset: datasetId,
           ...(rowsEdited && table ? { rows: table.rows } : {}),
         },
         table,
@@ -229,7 +227,7 @@ export function PlaygroundPage() {
       writeShareState(presenting ? `${query}&present=1` : query);
     }, 250);
     return () => { window.clearTimeout(timer); };
-  }, [sql, policy, predictOn, playback.step, rowsEdited, table, presenting]);
+  }, [sql, policy, predictOn, playback.step, datasetId, rowsEdited, table, presenting]);
 
   const [copied, setCopied] = useState(false);
   async function copyLink() {
@@ -255,7 +253,7 @@ export function PlaygroundPage() {
 
   function applyRows(rows: Row[]) {
     if (!table) return;
-    const next: Database = { tables: { ...db.tables, [TABLE]: { ...table, rows } } };
+    const next: Database = { tables: { ...db.tables, [tableName]: { ...table, rows } } };
     setDb(next);
     setRowsEdited(true);
     setEditingData(false);
@@ -263,7 +261,7 @@ export function PlaygroundPage() {
   }
 
   function resetData() {
-    const fresh = createSeedDatabase();
+    const fresh = DATASETS[datasetId].make();
     setDb(fresh);
     setRowsEdited(false);
     setEditingData(false);
@@ -274,6 +272,28 @@ export function PlaygroundPage() {
   function loadPreset(presetSql: string) {
     setSql(presetSql);
     const next = runQuery(presetSql, db, options);
+    setResult(next);
+    setPinnedStage(null);
+    setAnswers({});
+    playback.land(landingStep(next, askToPredict));
+  }
+
+  /**
+   * Switch to another preset dataset (plan.md §22.7): swap the table, drop any
+   * row edits, and open on that dataset's starter query, run. Same shape as
+   * `loadPreset` — it computes `runQuery` explicitly rather than leaning on
+   * `run`, whose `useCallback` still closes over the old `sql`/`db`.
+   */
+  function switchDataset(id: DatasetId) {
+    if (id === datasetId) return;
+    const nextDb = DATASETS[id].make();
+    const nextSql = DATASET_CATALOGUE[id].starterSql;
+    setDatasetId(id);
+    setDb(nextDb);
+    setRowsEdited(false);
+    setEditingData(false);
+    setSql(nextSql);
+    const next = runQuery(nextSql, nextDb, options);
     setResult(next);
     setPinnedStage(null);
     setAnswers({});
@@ -293,6 +313,7 @@ export function PlaygroundPage() {
       policy,
       predictOn,
       step: playback.step,
+      dataset: datasetId,
       rows: rowsEdited && table ? table.rows : null,
     });
     const a = document.createElement('a');
@@ -303,11 +324,12 @@ export function PlaygroundPage() {
 
   /** Restore a parsed trace file the same way a shared link's `START` would. */
   function applyTraceState(t: TraceState) {
-    const seed = createSeedDatabase();
-    const seedTable = seed.tables[TABLE];
+    const spec = DATASETS[t.dataset];
+    const seed = spec.make();
+    const seedTable = seed.tables[spec.table];
     const nextDb: Database =
       t.rows && seedTable
-        ? { tables: { ...seed.tables, [TABLE]: { ...seedTable, rows: t.rows } } }
+        ? { tables: { ...seed.tables, [spec.table]: { ...seedTable, rows: t.rows } } }
         : seed;
     const nextResult = runQuery(t.sql, nextDb, { ...DEFAULT_ENGINE_OPTIONS, policy: t.policy });
     const step = Math.min(t.step, nextResult.events.length);
@@ -315,6 +337,7 @@ export function PlaygroundPage() {
     setSql(t.sql);
     setPolicy(t.policy);
     setPredictOn(t.predictOn);
+    setDatasetId(t.dataset);
     setDb(nextDb);
     setRowsEdited(t.rows !== null);
     setEditingData(false);
@@ -332,7 +355,7 @@ export function PlaygroundPage() {
       setTraceMsg({ kind: 'err', text: 'Could not read that file.' });
       return;
     }
-    const parsed = parseTraceFile(text, SEED.tables[TABLE]?.columns ?? []);
+    const parsed = parseTraceFile(text);
     if (!parsed.ok) {
       setTraceMsg({ kind: 'err', text: parsed.error });
       return;
@@ -351,9 +374,31 @@ export function PlaygroundPage() {
         {/* Authoring panel */}
         <div className="snap-section order-2 flex min-w-0 flex-col gap-3 lg:order-1 lg:min-h-0 lg:overflow-y-auto">
           <div data-tour="editor" className="flex flex-col gap-3">
+            <div className="flex flex-col gap-1">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="mr-1 text-label text-ink-dim">Data:</span>
+                {DATASET_IDS.map((id) => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => { switchDataset(id); }}
+                    title={DATASET_CATALOGUE[id].blurb}
+                    className={`rounded-full border px-2.5 py-0.5 text-label transition ${
+                      datasetId === id
+                        ? 'border-accent bg-accent-soft text-ink'
+                        : 'border-edge text-ink-dim hover:border-ink-dim/50 hover:text-ink'
+                    }`}
+                  >
+                    {DATASET_CATALOGUE[id].label}
+                  </button>
+                ))}
+              </div>
+              <p className="text-label text-ink-dim/80">{DATASET_CATALOGUE[datasetId].blurb}</p>
+            </div>
+
             <div className="flex flex-wrap items-center gap-1.5">
               <span className="mr-1 text-label text-ink-dim">Try:</span>
-              {PRESETS.map((p) => (
+              {presets.map((p) => (
                 <button
                   key={p.label}
                   type="button"

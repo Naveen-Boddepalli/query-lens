@@ -1,14 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  createSeedDatabase,
+  DATASETS,
   DEFAULT_ENGINE_OPTIONS,
   REPLACEMENT_POLICY_LABELS,
   REPLACEMENT_POLICY_NAMES,
   runQuery,
 } from '../engine/index.ts';
 import type { Database, ReplacementPolicyName, Stage, StepEvent } from '../engine/index.ts';
-import { readShareState } from '../ui/urlState.ts';
+import { readDatasetParam, readShareState } from '../ui/urlState.ts';
+import { DATASET_CATALOGUE } from '../ui/datasetCatalogue.ts';
 import { PageHeader } from '../ui/PageHeader.tsx';
 import {
   btnPrimary,
@@ -40,12 +41,16 @@ import {
  * paper worksheet. `v=transcript` opens straight to it.
  */
 
-const TABLE = 'users';
-const SEED = createSeedDatabase();
-const COLUMNS = SEED.tables[TABLE]?.columns ?? [];
-const DEFAULT_SQL = 'SELECT *\nFROM users\nWHERE id = 5;';
-
 const search = typeof location === 'undefined' ? '' : location.search;
+
+// The inspector honours the Playground's `t` (preset dataset, plan.md §22.7)
+// so a link copied from one opens usefully in the other.
+const DATASET = DATASETS[readDatasetParam(search)];
+const TABLE = DATASET.table;
+const SEED = DATASET.make();
+const COLUMNS = SEED.tables[TABLE]?.columns ?? [];
+const DEFAULT_SQL = DATASET_CATALOGUE[DATASET.id].starterSql;
+
 const SHARED = readShareState(search, COLUMNS);
 const RAW_ROWS_PARAM = new URLSearchParams(search).get('d');
 

@@ -16,6 +16,7 @@ the current one. This page is for building one by hand.
 | `p` | Eviction policy — `lru` or `clock` | `p=clock` |
 | `x` | Predict-then-reveal — `1` on, `0` off | `x=0` |
 | `s` | The step to land on | `s=25` |
+| `t` | Preset dataset — `users` (default), `orders`, or `logins`. Absent means `users`; an unknown value falls back to it | `t=orders` |
 | `l` | Assignment lock — `l=1` seals the trace at step `s` until its prediction is answered (no skip, no scrubbing ahead); forces `x=1` | `l=1` |
 | `d` | Custom row data, only present when the seed rows have been edited | *(generated, not hand-written — see below)* |
 | `present` | `present=1` opens **presenter mode** — a full-viewport view of the current stage for a lecture hall, keyboard-driven, with prediction suppressed. `Esc` leaves it | `present=1` |
@@ -24,7 +25,7 @@ the current one. This page is for building one by hand.
 A link that omits a parameter falls back to that setting's default, so the shortest working link is
 just `?q=...`.
 
-The [trace inspector](/trace) reads the same `q`, `p` and `d` keys, so a link copied from the
+The [trace inspector](/trace) reads the same `q`, `p`, `d` and `t` keys, so a link copied from the
 Playground opens there and shows the raw event stream for that exact query (it ignores `x` and `s` —
 the whole trace is on one screen). Its `p` also accepts the three buffer-pool-only policies
 (`fifo`, `second-chance`, `optimal`); the Playground still recognises only `lru` and `clock`. Add

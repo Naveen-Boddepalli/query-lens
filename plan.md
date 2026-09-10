@@ -1874,7 +1874,7 @@ Grouped by area. **Status** is `built` / a milestone / `v1` / `v2` / `own plan`,
 | `/examples` | Examples | Curated queries; each opens the Playground | — | built (3; grow it) |
 | `/gallery` | Moment gallery | Named, deep-linked traces — a point lookup, the eviction storm (LRU and clock), the optimizer's rewrite — each card computes its own step via `events.findIndex(...)` against a real run, so an engine change fails the page rather than shipping a stale link. The index-dropped contrast and a B+Tree split/merge moment are not here yet — both are now just one more moment to add (B+Tree delete landed in v12) | per-card share string | **built** |
 | `/compare` | Comparison view | Two modes. **Replacement policies**: two buffer-pool traces (`src/engine/bufferTrace.ts`) stepping together on one reference string, synced by *access index*, flagging the first differing victim — either side any of the five policies (v12). **Index vs. sequential scan** (v12): the same SQL run once with the `id` index and once with it removed (`indexedColumn` dropped from the table — the optimizer and `runQuery` both key off it), scored side by side — trace steps, disk reads, evictions, B+Tree node reads, locks, rows. This is §13's full-pipeline half, at the altitude of the numbers rather than stepped panels | reference string + both policies, or the query (session-local) | **built** |
-| `/trace` | Trace inspector | The raw `StepEvent[]` for a query as a filterable table (per-stage toggles + a narration text filter) with per-row JSON and a **Copy JSON** of the filtered set — plus a **Transcript** view (v13): a numbered, printable prose list of every step's narration, each a Playground link. Runs the same `runQuery` the Playground does; each row's `#` opens the Playground at that step (§21.4 #4). Reads `q`/`p`/`d`/`v`; footer-only nav (§21.2) | `q`, `p`, `d`, `v` | **built** — v12; transcript v13 |
+| `/trace` | Trace inspector | The raw `StepEvent[]` for a query as a filterable table (per-stage toggles + a narration text filter) with per-row JSON and a **Copy JSON** of the filtered set — plus a **Transcript** view (v13): a numbered, printable prose list of every step's narration, each a Playground link. Runs the same `runQuery` the Playground does; each row's `#` opens the Playground at that step (§21.4 #4). Reads `q`/`p`/`d`/`v`/`t`; footer-only nav (§21.2) | `q`, `p`, `d`, `v`, `t` | **built** — v12; transcript v13; `t` v13 |
 
 **Tools** (§20.4 — each renders through the §20.2 `PanelPage` primitive)
 
@@ -1885,6 +1885,7 @@ Grouped by area. **Status** is `built` / a milestone / `v1` / `v2` / `own plan`,
 | `/tools/btree` | B+Tree sandbox | `insert` / `delete` / `find` number pad; watch it split on insert and borrow or merge on delete; fan-out slider; structural invariants re-checked and shown after every edit | `keys`, `fanout` | **built** — v12; B+Tree deletion (`deleteKey`) built with it |
 | `/tools/parser` | Parser sandbox | Arbitrary text → live token ribbon → live AST (the Playground's `AstTree`, from `toDisplayTree`) with recursion depth and the parser's own tokenize/parse error messages | source text (`src`) | **built** — v12 |
 | `/tools/page` | Slotted page inspector | One heap page of `users` laid out to the byte — header, line-pointer array, tuple data packed from the far end, free space between — with a page-size slider that shows how much a real 4 KB page would hold. `src/ui/slottedPage.ts` synthesises the layout (the engine's `Page` is only a `Row[]`, §7); a tuple cell in the map cross-highlights its table row | `page`, `bytes` | **built** — v13 |
+| `/tools/sort` | External merge sort | Sort N shuffled records with a fixed memory budget: run generation → `(memPages−1)`-way merge passes → one sorted run, with the `2·pageCount·(1+passes)` page-I/O cost broken out. `src/ui/externalSort.ts` is the driver (no `Sort` operator yet, §22.2). Parameter-driven, no playback; click a merged run to colour its records by source and light the runs that fed it | `n`, `page`, `mem`, `seed` | **built** — v13 |
 
 **Classroom** (§20.5)
 
@@ -2128,7 +2129,7 @@ URL-state schema. None needs a backend.
 |---|---|---|---|
 | `/tools/planner` | Toggle optimizer rules and table stats, hand-author a predicate, watch the plan rewrite | ~2 days — the rules already exist; it needs the non-SQL driver | v1 |
 | `/tools/locks` | Two transaction timelines; place lock requests, watch a wait-for edge form and a deadlock resolve | rides §22.2's enforced lock manager | v1–v2 |
-| `/tools/sort` | External merge sort — run generation, k-way merge, an I/O counter | ~3 days, or free once §22.2's `Sort` exists | v1 |
+| `/tools/sort` | ~~External merge sort — run generation, k-way merge, an I/O counter~~ **Done, v13.** `src/ui/externalSort.ts` is the driver (§4 has no `Sort` operator yet): given a record count and a memory budget it lays out the whole plan — the sorted runs from run generation, every `(memPages−1)`-way merge pass after, and the `2·pageCount·(1+passes)` page I/O. `/tools/sort` renders it, no playback — parameter-driven and cross-highlighted like `/tools/page`: click a merged run to colour its records by source and light the runs that fed it. `memPages` clamped ≥ 3 so the fan-in makes progress | ~3 days, or free once §22.2's `Sort` exists | v1 |
 | `/tools/hash-join` | Build and probe phases, hash collisions, partition spill (Grace hash join) | own driver, ~3 days | v1–v2 |
 | `/tools/page` | ~~A slotted-page inspector: header, slot array, tuple data, free space, for one 4 KB page~~ **Done, v13.** `src/ui/slottedPage.ts` synthesises the layout (the engine's `Page` is only a `Row[]`, §7 — not "a pure view over `storage/page.ts`" as scoped, but no engine change); the tool is the map + a per-tuple byte table with cross-highlight, and a page-size slider so four toy rows visibly fill 5% of a 4 KB page | ~2 days | **Done — v13** |
 | `/tools/grammar` | A railroad diagram of the supported subset, generated from the parser's own structure so it cannot drift (`GalleryPage`'s discipline) | ~2 days | v1–v2; pairs with `/tools/parser` |
@@ -2225,9 +2226,18 @@ URL-state schema. None needs a backend.
 
 - **Multi-table schema editor.** The hard prerequisite for JOIN (§22.2): add and rename tables and
   columns, declare an index. `src/engine/seed.ts` is one table today. ~1 wk, with JOIN. v1.
-- **Preset dataset library.** `users`, `orders`, a small `lineitem`, and a deliberately skewed
+- ~~**Preset dataset library.** `users`, `orders`, a small `lineitem`, and a deliberately skewed
   distribution for the selectivity/cost story. §19.2's preset *query* chips have a companion in
-  preset *tables*. **Note alongside §19.2**, ~2 days, rather than fresh scope.
+  preset *tables*. **Note alongside §19.2**, ~2 days, rather than fresh scope.~~ **Done, v13.**
+  `src/engine/datasets.ts` builds three single-table shapes (`§4` is one table at a time, JOIN-free,
+  so `lineitem` without JOINs would just be "another table" — dropped): `users` (the 48-row
+  baseline), `orders` (120 rows — a deeper B+Tree and a scan that evicts far harder), and `logins`
+  (an 8:1 skew on `status`, so `= 'blocked'` returns 9 rows and `= 'ok'` returns 71 — the
+  selectivity contrast, without the §9-gated cost framing). `src/ui/datasetCatalogue.ts` carries
+  each one's label, blurb, starter query and preset *query* chips. A `Data:` chip row above the
+  editor switches them; a new `t=` share key (and a `dataset` field in the trace file, both absent
+  for the default) reproduces the choice, and `/trace` reads `t` too. The seed editor already took a
+  `table` prop, so it followed for free.
 - **CSV / paste import into the seed grid.** ~~A bounded row count, parsed as untrusted input — the
   §15.2 rule for the URL applies.~~ **Done, v13.** An **Import CSV** panel in the seed editor:
   `src/ui/parseCsv.ts` is a small RFC-4180-ish reader (quotes, `""`, embedded commas), total and
@@ -2273,10 +2283,10 @@ URL-state schema. None needs a backend.
 | JOIN + join-algorithm compare | Build | v1 | Multi-table schema lands |
 | Multi-table schema editor | Build | v1 | JOIN is scheduled |
 | CSV / paste import | **Done, v13** (`parseCsv.ts` + an Import CSV panel in the seed editor) | v1 | — |
-| Preset dataset library | Build | v1 (with §19.2) | — |
+| Preset dataset library | **Done, v13** (`datasets.ts` + `datasetCatalogue.ts` — `users` / `orders` / `logins`, a `Data:` chip row, a `t=` share key; `lineitem` dropped as JOIN-free filler) | v1 (with §19.2) | — |
 | `/tools/planner` | Build | v1 | Non-SQL driver generalised |
 | `/tools/page` (slotted-page inspector) | **Done, v13** (`slottedPage.ts` + `/tools/page`) | v1 | — |
-| `/tools/sort` | Build | v1 | `Sort` lands, or its own driver |
+| `/tools/sort` | **Done, v13** (`externalSort.ts` — its own driver; run generation, k-way merge passes, the page-I/O count, cross-highlighted) | v1 | — |
 | `/tools/grammar` | Build | v1–v2 | — |
 | `/tools/locks` | Build | v1–v2 | Enforced lock manager lands |
 | `/tools/hash-join` | Build | v1–v2 | — |

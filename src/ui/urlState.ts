@@ -1,4 +1,5 @@
-import type { ReplacementPolicyName, Row, SqlValue, Table } from '../engine/index.ts';
+import { DEFAULT_DATASET, isDatasetId } from '../engine/index.ts';
+import type { DatasetId, ReplacementPolicyName, Row, SqlValue, Table } from '../engine/index.ts';
 
 /**
  * The address bar as the app's only persistence layer (plan.md §8, §15.2).
@@ -18,6 +19,8 @@ export interface ShareState {
   policy: ReplacementPolicyName;
   predictOn: boolean;
   step: number;
+  /** The preset dataset (plan.md §22.7); absent means the default (`users`). */
+  dataset?: DatasetId;
   /** Present only when the rows differ from the seed set. */
   rows?: Row[];
   /**
@@ -35,7 +38,18 @@ const PARAM = {
   step: 's',
   rows: 'd',
   lock: 'l',
+  dataset: 't',
 } as const;
+
+/**
+ * The preset dataset a link names, or the default. Read on its own — before
+ * `readShareState` — because the dataset decides which columns the `d` (rows)
+ * blob is validated against.
+ */
+export function readDatasetParam(search: string): DatasetId {
+  const raw = new URLSearchParams(search).get(PARAM.dataset);
+  return isDatasetId(raw) ? raw : DEFAULT_DATASET;
+}
 
 // Caps, because the input is a link somebody else wrote. None of these is a
 // security boundary — the engine is pure and there is nothing to inject — they
@@ -108,6 +122,9 @@ export function readShareState(
   const predict = params.get(PARAM.predict);
   if (predict === '0' || predict === '1') state.predictOn = predict === '1';
 
+  const dataset = params.get(PARAM.dataset);
+  if (isDatasetId(dataset)) state.dataset = dataset;
+
   // An assignment link forces prediction on regardless of `x` — the lock is
   // meaningless without it.
   if (params.get(PARAM.lock) === '1') {
@@ -137,6 +154,11 @@ export function encodeShareState(state: ShareState, table: Table | undefined): s
   params.set(PARAM.predict, state.predictOn ? '1' : '0');
   params.set(PARAM.step, String(state.step));
   if (state.lockReveal) params.set(PARAM.lock, '1');
+  // The default dataset is reproducible from code, like the seed rows — only a
+  // non-default one goes in the link.
+  if (state.dataset && state.dataset !== DEFAULT_DATASET) {
+    params.set(PARAM.dataset, state.dataset);
+  }
   // Only when customised (plan.md §15.2). The seed set is 48 rows and is
   // reproducible from the code, so putting it in every link would be 2 kB of
   // URL saying "unchanged".

@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **External merge sort sandbox** at `/tools/sort` (plan.md §22.3) — sort more records than fit in
+  memory: run generation makes short sorted runs, then `(buffer pages − 1)`-way merge passes fold
+  them into one, with the page-I/O cost (`2 × pages × passes`) broken out. Change the buffer budget
+  and watch a whole pass drop. Click any merged run to colour its records by which run each came
+  from and light up the runs that fed it. Its own driver (`src/ui/externalSort.ts`) — the engine has
+  no `Sort` operator yet
+- **Preset dataset library** (plan.md §22.7) — a **Data** chip row above the editor loads `users`
+  (the 48-row baseline), `orders` (120 rows — a deeper B+Tree and a scan that evicts far harder), or
+  `logins` (an 8:1 skew on `status`, so the same `=` predicate returns 9 rows or 71). Each carries
+  its own starter query and preset query chips. The choice rides in the share link as `t=` and in a
+  downloaded trace file's `dataset` field (both omitted for the default), and `/trace` reads `t` too
 - **The 60-second tour** (plan.md §19.2) — five sequential spotlights over the real Playground
   (editor, pipeline rail, stage panel, narration, transport), not a video or a modal carousel. Skip
   or `Esc` at any point, `←/→` to walk it. It never auto-starts: it opens from the first-visit

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createSeedDatabase } from '../../engine/index.ts';
+import { DATASETS } from '../../engine/index.ts';
 import type { Row } from '../../engine/index.ts';
 import {
   parseTraceFile,
@@ -9,13 +9,12 @@ import {
 } from '../traceFile.ts';
 import type { TraceState } from '../traceFile.ts';
 
-const COLUMNS = createSeedDatabase().tables.users!.columns;
-
 const BASE: TraceState = {
   sql: 'SELECT * FROM users WHERE id = 5;',
   policy: 'clock',
   predictOn: false,
   step: 13,
+  dataset: 'users',
   rows: null,
 };
 
@@ -41,11 +40,19 @@ describe('serializeTraceFile', () => {
     expect(text.endsWith('\n')).toBe(true);
     expect(text).toContain('\n  "sql":');
   });
+
+  it('omits the dataset field for the default, so a users file reads like a v1 one', () => {
+    expect(asObject(BASE)).not.toHaveProperty('dataset');
+  });
+
+  it('writes the dataset field for a non-default preset', () => {
+    expect(asObject({ ...BASE, dataset: 'orders' }).dataset).toBe('orders');
+  });
 });
 
 describe('round-trip', () => {
   it('restores a moment with the seed dataset', () => {
-    const parsed = parseTraceFile(serializeTraceFile(BASE), COLUMNS);
+    const parsed = parseTraceFile(serializeTraceFile(BASE));
     expect(parsed).toEqual({ ok: true, value: BASE });
   });
 
@@ -54,9 +61,29 @@ describe('round-trip', () => {
       { id: 1, name: 'ada', email: 'ada@x.dev', age: 36 },
       { id: 2, name: 'bo', email: 'bo@x.dev', age: 41 },
     ];
-    const parsed = parseTraceFile(serializeTraceFile({ ...BASE, rows }), COLUMNS);
+    const parsed = parseTraceFile(serializeTraceFile({ ...BASE, rows }));
     expect(parsed.ok).toBe(true);
     if (parsed.ok) expect(parsed.value.rows).toEqual(rows);
+  });
+
+  it('restores a non-default dataset with its own edited rows', () => {
+    const rows = DATASETS.orders.make().tables.orders!.rows.slice(0, 3);
+    const parsed = parseTraceFile(
+      serializeTraceFile({ ...BASE, sql: 'SELECT * FROM orders WHERE id = 1;', dataset: 'orders', rows }),
+    );
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      expect(parsed.value.dataset).toBe('orders');
+      expect(parsed.value.rows).toEqual(rows);
+    }
+  });
+
+  it('a v1 file (no dataset field) restores as users', () => {
+    const o = asObject(BASE);
+    expect(o).not.toHaveProperty('dataset');
+    const parsed = parseTraceFile(JSON.stringify(o));
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.value.dataset).toBe('users');
   });
 });
 
@@ -70,6 +97,7 @@ describe('a hand-edited or hostile file', () => {
     { name: 'a non-boolean predictOn', mutate: (o) => (o.predictOn = 'yes') },
     { name: 'a fractional step', mutate: (o) => (o.step = 4.5) },
     { name: 'a negative step', mutate: (o) => (o.step = -1) },
+    { name: 'an unknown dataset', mutate: (o) => (o.dataset = 'lineitem') },
     { name: 'rows missing a column', mutate: (o) => (o.rows = [{ id: 1, name: 'ada' }]) },
     {
       name: 'rows with a typo’d extra column',
@@ -77,23 +105,31 @@ describe('a hand-edited or hostile file', () => {
         (o.rows = [{ id: 1, name: 'ada', email: 'a@x', age: 30, xtra: 1 }]),
     },
     { name: 'a row that is not an object', mutate: (o) => (o.rows = ['nope']) },
+    {
+      name: 'rows shaped for a different dataset',
+      mutate: (o) => {
+        o.dataset = 'orders';
+        o.sql = 'SELECT * FROM orders WHERE id = 1;';
+        o.rows = [{ id: 1, name: 'ada', email: 'a@x', age: 30 }];
+      },
+    },
   ];
 
   for (const { name, mutate } of cases) {
     it(`rejects the whole file: ${name}`, () => {
       const o = asObject(BASE);
       mutate(o);
-      const parsed = parseTraceFile(JSON.stringify(o), COLUMNS);
+      const parsed = parseTraceFile(JSON.stringify(o));
       expect(parsed.ok).toBe(false);
       if (!parsed.ok) expect(parsed.error).toMatch(/\S/);
     });
   }
 
   it('rejects text that is not JSON', () => {
-    expect(parseTraceFile('{ not json', COLUMNS).ok).toBe(false);
+    expect(parseTraceFile('{ not json').ok).toBe(false);
   });
 
   it('rejects a JSON array', () => {
-    expect(parseTraceFile('[]', COLUMNS).ok).toBe(false);
+    expect(parseTraceFile('[]').ok).toBe(false);
   });
 });
