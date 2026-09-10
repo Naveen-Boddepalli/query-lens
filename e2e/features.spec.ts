@@ -466,7 +466,7 @@ test('a link that names a dataset reopens on it, in the Playground and the inspe
 
 test('a challenge checks the query on Run and remembers the solve', async ({ page }) => {
   await page.goto('/challenges');
-  await expect(page.getByText('0 of 5 solved')).toBeVisible();
+  await expect(page.getByText('0 of 8 solved')).toBeVisible();
   await page.getByRole('link', { name: /Make the planner use the index/ }).click();
   await expect(page).toHaveURL(/\/challenges\/use-the-index$/);
 
@@ -490,9 +490,30 @@ test('a challenge checks the query on Run and remembers the solve', async ({ pag
 
   // The solve persists to the index.
   await page.goto('/challenges');
-  await expect(page.getByText('1 of 5 solved')).toBeVisible();
+  await expect(page.getByText('1 of 8 solved')).toBeVisible();
   await page.getByRole('button', { name: 'Reset progress' }).click();
-  await expect(page.getByText('0 of 5 solved')).toBeVisible();
+  await expect(page.getByText('0 of 8 solved')).toBeVisible();
+});
+
+test('a challenge can run against a non-default preset table', async ({ page }) => {
+  await page.goto('/challenges/needle-in-the-skew');
+  await expect(page.getByText(/runs against the .*logins.* table/)).toBeVisible();
+
+  // The starter returns the common `status = 'ok'` set — too many rows to pass.
+  await page.getByRole('button', { name: 'Run & check' }).click();
+  await expect(page.getByText(/Not there yet/)).toBeVisible();
+
+  const editor = page.locator('.cm-content');
+  await editor.click();
+  await page.keyboard.press('ControlOrMeta+A');
+  await page.keyboard.type("SELECT * FROM logins WHERE status = 'blocked';");
+  await page.getByRole('button', { name: 'Run & check' }).click();
+  await expect(page.getByText('✓ Solved.')).toBeVisible();
+
+  // The "step through" link carries the dataset so it opens on `logins`.
+  await expect(
+    page.getByRole('link', { name: /Step through this run in the Playground/ }),
+  ).toHaveAttribute('href', /[?&]t=logins/);
 });
 
 test('the seed editor imports rows from pasted CSV', async ({ page }) => {

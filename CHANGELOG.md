@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Three more `/challenges` puzzles** (plan.md §22.4) — *push the filter down* (get predicate
+  pushdown to fire without an index lookup), *a lookup on the big table* (an `IndexScan` on the
+  120-row `orders`, a level deeper than `users`), and *the selective end of a skew* (a `logins` scan
+  returning fewer than 20 rows). A challenge can now target a preset dataset; its check runs there
+  and the "step through in the Playground" link carries `t=`
+- **`querylens` command-line trace** (plan.md §22.8) — `bin/querylens.ts` runs a query through the
+  engine and prints the stage-by-stage trace, or `--json` for scripting. Flags: `--policy`,
+  `--dataset` (`users` / `orders` / `logins`), `--no-color` (also honours `NO_COLOR` and a non-TTY
+  stream); exit codes 0 / 1 (query error) / 2 (usage). `pnpm querylens` and `pnpm trace` both run it.
+  Not yet on npm — `npx querylens` awaits a publish
 - **Planner sandbox** at `/tools/planner` (plan.md §22.3) — type a query and see its plan tree,
   canonical next to optimized. Toggle each rewrite rule (predicate pushdown, index selection) and
   the `id` index on or off; a ledger says for each rule whether it fired, found no match, or was

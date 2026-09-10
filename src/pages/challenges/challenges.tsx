@@ -3,7 +3,8 @@
  * which is why the file is `.tsx`; nothing here is a hot-reloadable component.
  */
 import type { ReactNode } from 'react';
-import type { ASTNode, RunResult, StepEvent } from '../../engine/index.ts';
+import { DEFAULT_DATASET } from '../../engine/index.ts';
+import type { ASTNode, DatasetId, RunResult, StepEvent } from '../../engine/index.ts';
 
 /**
  * plan.md §22.4: goal-shaped puzzles with a client-side check. Each `check` is
@@ -19,8 +20,13 @@ export interface Challenge {
   hint: ReactNode;
   /** The query the editor opens on — usually one that does *not* pass yet. */
   starter: string;
+  /** Which preset table the check runs against (plan.md §22.7). Default `users`. */
+  dataset?: DatasetId;
   check: (result: RunResult) => boolean;
 }
+
+/** A challenge's dataset, defaulted. */
+export const challengeDataset = (c: Challenge): DatasetId => c.dataset ?? DEFAULT_DATASET;
 
 const diskReads = (events: readonly StepEvent[]): number =>
   events.filter((e) => e.stage === 'buffer' && e.action === 'miss').length;
@@ -138,6 +144,70 @@ export const CHALLENGES: Challenge[] = [
     ),
     starter: "SELECT * FROM users WHERE id = 5 AND name = 'zzz';",
     check: (r) => !r.error && r.rows.length >= 1 && astHasKind(lastAst(r.events), 'And'),
+  },
+  {
+    id: 'push-it-down',
+    title: 'Push the filter down',
+    brief: (
+      <>
+        The optimiser&rsquo;s first move is <em>predicate pushdown</em>: folding the{' '}
+        <code className="font-mono">WHERE</code> into the scan so rows are dropped as they are read.
+        Get it to fire — <strong>without</strong> the query also turning into an index lookup.
+      </>
+    ),
+    hint: (
+      <>
+        Pushdown fires on any <code className="font-mono">WHERE</code>. Index selection only fires on
+        an equality on <code className="font-mono">id</code> — so filter on something else, like{' '}
+        <code className="font-mono">age</code>.
+      </>
+    ),
+    starter: 'SELECT * FROM users;',
+    check: (r) =>
+      !r.error &&
+      r.events.some((e) => e.stage === 'optimize' && e.rule === 'predicate-pushdown') &&
+      !usesIndex(r.events),
+  },
+  {
+    id: 'deep-descent',
+    title: 'A lookup on the big table',
+    dataset: 'orders',
+    brief: (
+      <>
+        <code className="font-mono">orders</code> has 120 rows, so its B+Tree is a level deeper than{' '}
+        <code className="font-mono">users</code>&rsquo;s. Get the planner to answer a query with a
+        single-row index lookup on it.
+      </>
+    ),
+    hint: (
+      <>
+        Same rule as on <code className="font-mono">users</code>: an equality on the indexed column,{' '}
+        <code className="font-mono">id</code>. <code className="font-mono">orders.id</code> runs 1 to
+        120.
+      </>
+    ),
+    starter: "SELECT * FROM orders WHERE customer = 'acme';",
+    check: (r) => !r.error && usesIndex(r.events) && r.rows.length === 1,
+  },
+  {
+    id: 'needle-in-the-skew',
+    title: 'The selective end of a skew',
+    dataset: 'logins',
+    brief: (
+      <>
+        In <code className="font-mono">logins</code>, <code className="font-mono">status</code> is{' '}
+        <code className="font-mono">&apos;ok&apos;</code> for about nine rows in ten. Write a scan
+        that returns <strong>fewer than 20</strong> rows — the rare end.
+      </>
+    ),
+    hint: (
+      <>
+        <code className="font-mono">status = &apos;blocked&apos;</code> is the small set. Those rows
+        also have a higher <code className="font-mono">attempts</code> count.
+      </>
+    ),
+    starter: "SELECT * FROM logins WHERE status = 'ok';",
+    check: (r) => !r.error && r.rows.length > 0 && r.rows.length < 20 && !usesIndex(r.events),
   },
 ];
 

@@ -131,7 +131,7 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
-    // Scoped to src/: `e2e/` is Playwright's, and Vitest cannot run it.
-    include: ['src/**/*.{test,spec}.{ts,tsx}'],
+    // `src/` plus the `bin/` CLI; `e2e/` is Playwright's and Vitest cannot run it.
+    include: ['src/**/*.{test,spec}.{ts,tsx}', 'bin/**/*.{test,spec}.ts'],
   },
 });

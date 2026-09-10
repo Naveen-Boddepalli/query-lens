@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { Link, Navigate, useParams } from 'react-router-dom';
-import { createSeedDatabase, DEFAULT_ENGINE_OPTIONS, runQuery } from '../engine/index.ts';
+import { DATASETS, DEFAULT_ENGINE_OPTIONS, runQuery } from '../engine/index.ts';
 import type { RunResult } from '../engine/index.ts';
-import { CHALLENGES, challengeById, challengeStats } from './challenges/challenges.tsx';
+import { CHALLENGES, challengeById, challengeDataset, challengeStats } from './challenges/challenges.tsx';
 import { markSolved, readSolved } from '../ui/challengeProgress.ts';
 import { PageHeader } from '../ui/PageHeader.tsx';
 import { SqlEditor } from '../ui/SqlEditor.tsx';
@@ -10,13 +10,12 @@ import { useThemeContext } from '../ui/ThemeContext.tsx';
 import { encodeShareState } from '../ui/urlState.ts';
 import { btnPrimary, btnSecondary, card, panelSurface } from '../ui/primitives.ts';
 
-const SEED = createSeedDatabase();
-
 /** One `/challenges/:id`. Runs the query on a fixed engine config and checks it. */
 export function ChallengePage() {
   const { challengeId } = useParams();
   const challenge = challengeById(challengeId);
   const { theme } = useThemeContext();
+  const dataset = challenge ? challengeDataset(challenge) : 'users';
 
   const [sql, setSql] = useState(challenge?.starter ?? '');
   const [run, setRun] = useState<{ sql: string; result: RunResult } | null>(null);
@@ -25,7 +24,7 @@ export function ChallengePage() {
 
   function check() {
     if (!challenge) return;
-    const result = runQuery(sql, SEED, DEFAULT_ENGINE_OPTIONS);
+    const result = runQuery(sql, DATASETS[dataset].make(), DEFAULT_ENGINE_OPTIONS);
     setRun({ sql, result });
     if (!result.error && challenge.check(result) && !solved) {
       markSolved(challenge.id);
@@ -44,7 +43,13 @@ export function ChallengePage() {
   const playgroundLink =
     run !== null && !run.result.error
       ? `/playground?${encodeShareState(
-          { sql: run.sql, policy: DEFAULT_ENGINE_OPTIONS.policy, predictOn: false, step: run.result.events.length },
+          {
+            sql: run.sql,
+            policy: DEFAULT_ENGINE_OPTIONS.policy,
+            predictOn: false,
+            step: run.result.events.length,
+            dataset,
+          },
           undefined,
         )}`
       : null;
@@ -79,6 +84,11 @@ export function ChallengePage() {
       </div>
 
       <div className="mt-4 space-y-3">
+        {dataset !== 'users' && (
+          <p className="text-label text-ink-dim">
+            This one runs against the <code className="font-mono text-ink">{dataset}</code> table.
+          </p>
+        )}
         <SqlEditor value={sql} onChange={setSql} onRun={check} theme={theme} />
         <button type="button" onClick={check} className={btnPrimary}>
           Run &amp; check

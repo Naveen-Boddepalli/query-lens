@@ -1865,7 +1865,7 @@ Grouped by area. **Status** is `built` / a milestone / `v1` / `v2` / `own plan`,
 | `/stages/:stageId` | Stage explainer | Prose + one isolated live panel over a canned trace; prev/next through the pipeline | `:stageId` | built |
 | `/learn` | Guided path | Four §17.2 tasks as an ordered track — run your first query, follow one row disk-to-result, watch a page get evicted, make the planner change its mind — with a `localStorage` completion mark (`querylens:learn`; a convenience, degrades to unmarked). Primary nav | — | **built** — v12 |
 | `/learn/:lessonId` | One lesson | The task as numbered steps; each step's "open this in the Playground" link is a deep link whose step is computed from a real engine run (`GalleryPage`'s discipline), and each lesson ends with a "try this" that changes one variable. An unknown id redirects to `/learn` | `:lessonId` | **built** — v12; nine lessons v13 |
-| `/challenges` · `/challenges/:id` | Challenge mode | Five goal-shaped puzzles (§22.4); each `:id` runs its query on a fixed engine config and checks a pure predicate over the `RunResult`, with a stats readout, a verdict, a solved-set (`querylens:challenges`) and a step-in-Playground link on a pass. Footer nav | `:id` | **built** — v13 |
+| `/challenges` · `/challenges/:id` | Challenge mode | Eight goal-shaped puzzles (§22.4); each `:id` runs its query against its dataset (`users` by default, or an `orders` / `logins` preset) and checks a pure predicate over the `RunResult`, with a stats readout, a verdict, a solved-set (`querylens:challenges`) and a step-in-Playground link (carrying `t=`) on a pass. Footer nav | `:id` | **built** — v13 |
 
 **Explore**
 
@@ -2144,13 +2144,17 @@ URL-state schema. None needs a backend.
   Playground links are engine-computed (`src/pages/learn/lessons.tsx`'s existing rule); the B+Tree
   split lesson links to `/tools/btree` instead, via a new fixed-link field on a step. No engine
   change.
-- **Challenge mode.** ~~Goal-shaped puzzles with a client-side check~~ **First cut done, v13.**
-  `/challenges` — five puzzles, each a **pure predicate over a `RunResult`** (`use the index`,
-  `force an eviction`, `exactly one row`, `empty result but real work`, `AND that still matches`).
-  Each `/challenges/:id` has a `SqlEditor`, a Run-&-check button, a rows / disk-reads / evictions /
-  index-used readout, a pass/fail verdict, and — once solved — a link to step the run in the
-  Playground. Solved marks in `localStorage` (`challengeProgress.ts`); footer nav. No backend, no
-  engine change. §22.4 scoped the full set at a week; more puzzles can be appended to the list.
+- **Challenge mode.** ~~Goal-shaped puzzles with a client-side check~~ **Done, v13 — eight puzzles.**
+  `/challenges`, each a **pure predicate over a `RunResult`**: the first cut of five (`use the
+  index`, `force an eviction`, `exactly one row`, `empty result but real work`, `AND that still
+  matches`) plus three more that lean on v13 — `push the filter down` (predicate-pushdown fires but
+  index-selection does not, the inverse of `use the index`), `a lookup on the big table` (an
+  `IndexScan` on `orders`, a level deeper than `users`), and `the selective end of a skew` (a scan
+  on `logins` that returns fewer than twenty rows). A `Challenge` may now name a `dataset` (§22.7);
+  the check runs against it and the "step through in the Playground" link carries `t=`. Each
+  `/challenges/:id` has a `SqlEditor`, a Run-&-check button, a rows / disk-reads / evictions /
+  index-used readout and a verdict; solved marks in `localStorage` (`challengeProgress.ts`); footer
+  nav. No backend, no engine change.
 - **Progress dashboard.** ~~Stages visited, lessons done, prediction hit-rate — `localStorage`,
   degrades to empty. Feeds the second visit.~~ **Done, v13.** `/progress` (footer nav): lessons
   complete (`learnProgress.ts`), pipeline stages seen (`src/ui/progress.ts` — the Playground unions
@@ -2261,9 +2265,16 @@ URL-state schema. None needs a backend.
   React-free and serialisable (§5); publishing it lets others build lessons, graders and embeds on
   the same trace contract. Zero backend. Trigger: a second consumer exists. Do not publish an API
   before there is a caller — every export becomes a compatibility promise.
-- **`npx querylens "SELECT …"`.** A CLI that prints the trace in the §22.5 ASCII form.
-  `scripts/trace.ts` is already this internally; publishing it is packaging, ~2 days. v1–v2, a
-  launch-post nicety.
+- **`npx querylens "SELECT …"`.** ~~A CLI that prints the trace in the §22.5 ASCII form.
+  `scripts/trace.ts` is already this internally; publishing it is packaging, ~2 days.~~ **Built,
+  v13 — not yet published.** `bin/querylens.ts` is the CLI: a positional query, `--policy`,
+  `--dataset` (the §22.7 presets), `--json` for scripting, `NO_COLOR` / non-TTY colour suppression,
+  and exit codes (0 ok, 1 query error, 2 usage). It is a thin wrapper over `runQuery` — the render
+  functions and the arg parser are pure and unit-tested (`bin/__tests__/querylens.test.ts`).
+  `package.json` has the `bin` entry; `pnpm querylens` and `pnpm trace` both run it, and the old
+  `scripts/trace.ts` is gone. The remaining step is a deliberate one: a `dist/` build so it runs
+  without `--experimental-strip-types`, a `files` allow-list, and `npm publish` — until then
+  `npx querylens` is `node bin/querylens.ts` for anyone with the repo.
 - **Operator / stage plugin seam.** §17.1's "how to add an operator or a stage" is a docs page; a
   real registration API turns QueryLens into a teaching *platform*. v2+, and only if the two items
   above find users.
@@ -2297,14 +2308,14 @@ URL-state schema. None needs a backend.
 | `/tools/grammar` | Build | v1–v2 | — |
 | `/tools/locks` | Build | v1–v2 | Enforced lock manager lands |
 | `/tools/hash-join` | Build | v1–v2 | — |
-| Challenge mode | **First cut done, v13** (`/challenges` — five `RunResult` predicates + solved-set) | v1 | — |
+| Challenge mode | **Done, v13** (`/challenges` — eight `RunResult` predicates, three of them on the `orders` / `logins` presets, + solved-set) | v1 | — |
 | Progress dashboard | **Done, v13** (`/progress` — lessons, stages seen, prediction record) | v1 | — |
 | Assignment sets | **Done, v13** (`assignmentSet.ts` + a set panel on `/assignments/new` — Markdown worksheet + JSON) | v1 | — |
 | Presenter mode | **Done, v13** (`PresenterView.tsx` — `?present=1` overlay on the Playground) | v1 | — |
 | Print stylesheet | **Done, v13** (`TraceWorksheet.tsx` + a **Print** link on the Playground; the `[data-print]` `@media print` hook also covers `/trace` and docs) | v1–v2 | — |
 | In-app quiz / self-check | Deferred | post-§9 | The §9 study has run (contamination) |
 | Enforced concurrency + deadlocks | Build | v1–v2 | §9 validates the format |
-| `npx querylens` CLI | Build | v1–v2 | — |
+| `npx querylens` CLI | **Built, v13; unpublished** (`bin/querylens.ts` — query + `--policy` / `--dataset` / `--json`, pure render + arg-parse unit-tested; `npm publish` is the deliberate remaining step) | v1–v2 | — |
 | `@querylens/engine` package | Deferred | v1+ | A second consumer exists |
 | Operator / stage plugin seam | Deferred | v2+ | The package and CLI find users |
 | MVCC / snapshot isolation | Own product | v2+ | §9 validates, then a separate surface |
