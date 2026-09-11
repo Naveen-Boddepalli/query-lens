@@ -172,6 +172,73 @@ describe('buffer pool — write (Sort spill, plan.md §22.2)', () => {
   });
 });
 
+describe('buffer pool — markDirty and the writeback cost (DELETE, plan.md §22.2)', () => {
+  it('a clean page evicts for free — no writeback, no extra write charged', () => {
+    const o = opts({ bufferFrames: 1 });
+    const { emit, drain } = createTracer();
+    const bp = createBufferPool(10, o, emit);
+    bp.fetch(0);
+    bp.unpin(0);
+    bp.fetch(1); // evicts page 0, which was never marked dirty
+    const evict = bufferActions(drain()).filter((a) => a === 'evict');
+    expect(evict).toHaveLength(1);
+    expect(bp.stats).toMatchObject({ evictions: 1, writes: 0 });
+  });
+
+  it('a dirty page costs a write when it is actually evicted', () => {
+    const o = opts({ bufferFrames: 1 });
+    const { emit, drain } = createTracer();
+    const bp = createBufferPool(10, o, emit);
+    bp.fetch(0);
+    bp.unpin(0);
+    bp.markDirty(0);
+    bp.fetch(1); // now it must be written back before eviction
+    expect(bp.stats).toMatchObject({ evictions: 1, writes: 1 });
+    const evictEvent = drain().find((e) => e.stage === 'buffer' && e.action === 'evict');
+    expect(evictEvent?.stage === 'buffer' && evictEvent.action === 'evict' && evictEvent.writtenBack).toBe(true);
+  });
+
+  it('marking a page dirty has no cost by itself — only eviction charges for it', () => {
+    const { emit, drain } = createTracer();
+    const bp = createBufferPool(10, opts(), emit);
+    bp.fetch(0);
+    bp.unpin(0);
+    bp.markDirty(0);
+    expect(drain().some((e) => e.stage === 'buffer' && e.action !== 'miss' && e.action !== 'load')).toBe(false);
+    expect(bp.stats.writes).toBe(0);
+  });
+
+  it('the writeback is charged once — evicting the same page id again does not double-charge', () => {
+    const o = opts({ bufferFrames: 1 });
+    const { emit } = createTracer();
+    const bp = createBufferPool(10, o, emit);
+    bp.unpin(bp.fetch(0)!.frameId);
+    bp.markDirty(0);
+    bp.unpin(bp.fetch(1)!.frameId); // writes page 0 back, clearing its dirty flag
+    bp.unpin(bp.fetch(0)!.frameId); // brings page 0 back in — clean again
+    bp.fetch(1); // evicts page 0 again — should be free this time
+    expect(bp.stats.writes).toBe(1);
+  });
+
+  it('ignores a page id outside the pool, like every other method', () => {
+    const { emit } = createTracer();
+    const bp = createBufferPool(4, opts(), emit);
+    expect(() => { bp.markDirty(9999); }).not.toThrow();
+    expect(() => { bp.markDirty(-1); }).not.toThrow();
+  });
+
+  it('a dirty page never resident yet — marked before its first fetch — still costs a writeback later', () => {
+    const o = opts({ bufferFrames: 1 });
+    const { emit } = createTracer();
+    const bp = createBufferPool(10, o, emit);
+    bp.markDirty(5); // dirtied before it was ever loaded — a DELETE can do this via an IndexScan
+    const loaded = bp.fetch(5);
+    bp.unpin(loaded!.frameId);
+    bp.fetch(6); // evicts page 5
+    expect(bp.stats.writes).toBe(1);
+  });
+});
+
 describe('buffer pool — pinning', () => {
   it('will not evict a pinned frame', () => {
     const o = opts({ bufferFrames: 2 });
@@ -537,4 +604,22 @@ describe('engine state and the UI fold agree', () => {
       if (policy === 'clock') expect(folded.clockHand).toBe(bp.state.hand);
     },
   );
+
+  it('agrees on writes too — Sort spill and a dirty-page writeback (plan.md §22.2)', () => {
+    const o = opts({ bufferFrames: 2 });
+    const { emit, drain } = createTracer();
+    const bp = createBufferPool(10, o, emit);
+
+    // A Sort-style spill write, then a DELETE-style dirty page evicted by it.
+    bp.unpin(bp.fetch(0)!.frameId);
+    bp.markDirty(0);
+    bp.unpin(bp.fetch(1)!.frameId);
+    bp.write(2); // fills the second frame, still nothing evicted
+    bp.write(3); // now something must go — page 0 or 1, and page 0 is dirty
+
+    const events = drain();
+    const folded = stateAt(events, events.length, o);
+    expect(folded.bufferStats).toEqual(bp.stats);
+    expect(bp.stats.writes).toBeGreaterThan(0);
+  });
 });

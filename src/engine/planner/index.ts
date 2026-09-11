@@ -1,4 +1,4 @@
-export { buildPlan } from './buildPlan.ts';
+export { buildDeletePlan, buildPlan } from './buildPlan.ts';
 export {
   estimateIndexLevels,
   estimatePlan,
@@ -9,6 +9,7 @@ export {
 } from './cost.ts';
 export type { CostEstimate, PlanCost } from './cost.ts';
 export { emitPlanEvents } from './emit.ts';
+export { emitDeletePlanEvents } from './emitDelete.ts';
 export { optimize, OPTIMIZER_RULES, scanPredicate } from './optimize.ts';
 export type { Rewrite } from './optimize.ts';
 export {

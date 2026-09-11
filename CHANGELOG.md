@@ -8,6 +8,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`DELETE`, the write path's first statement** (plan.md §22.2) — `DELETE FROM table [WHERE ...]`
+  removes rows for real, persisted in the Playground the same way the seed-data editor already
+  persists an edit. A new parser entry point, `parseStatement`, dispatches to `SELECT` or `DELETE`
+  through a shared `Cursor` abstraction (`parse` stays `SELECT`-only for its existing callers).
+  Execution is a dedicated find-then-mutate pass (`exec/delete.ts`), not a reused Volcano
+  operator — a delete has to find every match before it mutates anything, since removing mid-scan
+  could shift what a later step reads — but it narrates through the same `execute`-stage shape
+  (`SeqScan`/`IndexScan`, then `Delete`) so the Execute panel reads the same way a `SELECT`'s does.
+  It takes real exclusive locks on the heap pages it touches, and removes each row's key from the
+  B+Tree with the actual `deleteKey` algorithm — real borrows, merges, and root-collapses, narrated.
+  `predicate-pushdown`/`index-selection` are reused unchanged, by wrapping the delete's scan in a
+  throwaway `Project *` for optimization and unwrapping it again for both execution and display.
+  `BufferPool` gained `markDirty()`: a page a `DELETE` removed a row from now costs a write back to
+  disk on eviction, not just a discard — completing the read/write pair `Sort`'s `write()` started,
+  shown in the Buffer Pool panel's `writes` stat and the eviction narration ("Page N is dirty — a
+  row was deleted from it — so evicting it costs a write back to disk first"). 25 unit tests
+  (`__tests__/delete.test.ts`), 1 e2e
 - **`ORDER BY` with a real external-merge-sort `Sort` operator** (plan.md §22.2, completing
   `ORDER BY`/`LIMIT` + external sort) — the run-generation-then-merge algorithm already worked out
   for `/tools/sort` (`src/ui/externalSort.ts`), now over real table rows and, unlike that sandbox,

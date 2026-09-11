@@ -1,9 +1,10 @@
 /**
  * Recursive-descent parser for the v0 SQL subset (plan.md §4):
  *
- *   statement  := select [';'] EOF
+ *   statement  := select | delete
  *   select     := SELECT selectList FROM identifier [WHERE expr]
- *                 [ORDER BY identifier [ASC|DESC]] [LIMIT number]
+ *                 [ORDER BY identifier [ASC|DESC]] [LIMIT number] [';'] EOF
+ *   delete     := DELETE FROM identifier [WHERE expr] [';'] EOF
  *   selectList := '*' | identifier (',' identifier)*
  *   expr       := comparison (AND comparison)*
  *   comparison := operand ('=' | '<' | '>') operand
@@ -11,10 +12,24 @@
  *
  * Hand-written rather than generated: the error messages are half the teaching
  * value, and they need to name the v0 scope explicitly.
+ *
+ * `parse` stays the SELECT-only entry point every existing caller (the
+ * Playground, the standalone tools, the CLI) already expects. `parseStatement`
+ * is the broader one `runQuery.ts` needs now that `DELETE` is real — the two
+ * share every helper below; nothing about SELECT parsing changed.
  */
 
 import type { QueryError } from '../types.ts';
-import type { CompareOp, Expr, SelectList, SelectStatement, Span, TableRef } from './ast.ts';
+import type {
+  CompareOp,
+  DeleteStatement,
+  Expr,
+  SelectList,
+  SelectStatement,
+  Span,
+  Statement,
+  TableRef,
+} from './ast.ts';
 import { TokenizeError, tokenize } from './tokenizer.ts';
 import type { Token } from './tokenizer.ts';
 
@@ -47,43 +62,30 @@ const OUT_OF_SCOPE: Record<string, string> = {
   UNION: 'UNION is not in the v0 subset.',
   OR: 'v0 supports AND only. Combine predicates with AND.',
   NOT: 'v0 supports =, < and > only, combined with AND.',
-  INSERT: 'QueryLens only runs SELECT — it visualises reads, not writes.',
-  UPDATE: 'QueryLens only runs SELECT — it visualises reads, not writes.',
-  DELETE: 'QueryLens only runs SELECT — it visualises reads, not writes.',
-  CREATE: 'QueryLens only runs SELECT. Edit the seed data to change the table.',
-  DROP: 'QueryLens only runs SELECT. Edit the seed data to change the table.',
+  INSERT: 'INSERT is not in the v0 write path yet — DELETE is.',
+  UPDATE: 'UPDATE is not in the v0 write path yet — DELETE is.',
+  CREATE: 'QueryLens only runs SELECT and DELETE. Edit the seed data to change the table.',
+  DROP: 'QueryLens only runs SELECT and DELETE. Edit the seed data to change the table.',
 };
 
 const describe = (t: Token): string =>
   t.type === 'eof' ? 'the end of the query' : `\`${t.value}\``;
 
-export type ParseOutcome =
-  | { ok: true; ast: SelectStatement }
-  | { ok: false; error: QueryError };
+/* -------------------------------------------------------------------------- */
+/* Shared cursor + grammar pieces — every statement form parses through these */
+/* -------------------------------------------------------------------------- */
 
-export function parse(sql: string): ParseOutcome {
-  try {
-    return { ok: true, ast: parseOrThrow(sql) };
-  } catch (err) {
-    if (err instanceof ParseError || err instanceof TokenizeError) {
-      return {
-        ok: false,
-        error: {
-          message: err.message,
-          from: err.from,
-          to: err.to,
-          ...(err.hint === undefined ? {} : { hint: err.hint }),
-        },
-      };
-    }
-    throw err;
-  }
+interface Cursor {
+  peek: () => Token;
+  next: () => Token;
+  atEnd: () => boolean;
+  guardScope: (token: Token) => void;
+  expectKeyword: (word: string, what: string) => Token;
+  expectIdentifier: (what: string) => Token;
 }
 
-function parseOrThrow(sql: string): SelectStatement {
-  const tokens = tokenize(sql);
+function makeCursor(tokens: Token[]): Cursor {
   let pos = 0;
-
   const peek = (): Token => tokens[pos]!;
   const next = (): Token => tokens[pos++]!;
   const atEnd = (): boolean => peek().type === 'eof';
@@ -116,151 +118,152 @@ function parseOrThrow(sql: string): SelectStatement {
     throw new ParseError(`Expected ${what}, found ${describe(token)}.`, token);
   }
 
-  function parseSelectList(): SelectList {
-    const first = peek();
+  return { peek, next, atEnd, guardScope, expectKeyword, expectIdentifier };
+}
 
-    if (first.type === 'star') {
-      next();
-      return { kind: 'star', span: { from: first.from, to: first.to } };
-    }
+function parseSelectList(c: Cursor): SelectList {
+  const first = c.peek();
 
-    const names: { name: string; span: Span }[] = [];
-    for (;;) {
-      const token = expectIdentifier('a column name or `*`');
-      names.push({ name: token.value, span: { from: token.from, to: token.to } });
-      if (peek().type !== 'comma') break;
-      next();
-    }
-    const last = names[names.length - 1]!;
-    return { kind: 'columns', names, span: { from: first.from, to: last.span.to } };
+  if (first.type === 'star') {
+    c.next();
+    return { kind: 'star', span: { from: first.from, to: first.to } };
   }
 
-  function parseTableRef(): TableRef {
-    const token = expectIdentifier('a table name');
-    return { name: token.value, span: { from: token.from, to: token.to } };
+  const names: { name: string; span: Span }[] = [];
+  for (;;) {
+    const token = c.expectIdentifier('a column name or `*`');
+    names.push({ name: token.value, span: { from: token.from, to: token.to } });
+    if (c.peek().type !== 'comma') break;
+    c.next();
   }
+  const last = names[names.length - 1]!;
+  return { kind: 'columns', names, span: { from: first.from, to: last.span.to } };
+}
 
-  function parseOperand(): Expr {
-    const token = peek();
+function parseTableRef(c: Cursor): TableRef {
+  const token = c.expectIdentifier('a table name');
+  return { name: token.value, span: { from: token.from, to: token.to } };
+}
 
-    if (token.type === 'identifier') {
-      next();
-      return { kind: 'column', name: token.value, span: { from: token.from, to: token.to } };
-    }
-    if (token.type === 'number') {
-      next();
-      return {
-        kind: 'literal',
-        value: Number(token.value),
-        raw: token.value,
-        span: { from: token.from, to: token.to },
-      };
-    }
-    if (token.type === 'string') {
-      next();
-      return {
-        kind: 'literal',
-        value: token.value,
-        raw: `'${token.value}'`,
-        span: { from: token.from, to: token.to },
-      };
-    }
-    if (token.type === 'keyword' && ['NULL', 'TRUE', 'FALSE'].includes(token.upper)) {
-      next();
-      const value = token.upper === 'NULL' ? null : token.upper === 'TRUE';
-      return {
-        kind: 'literal',
-        value,
-        raw: token.upper,
-        span: { from: token.from, to: token.to },
-      };
-    }
-    if (token.type === 'lparen') {
-      throw new ParseError(
-        'Parenthesised expressions are not supported yet.',
-        token,
-        'v0 predicates are a flat chain of comparisons joined by AND.',
-      );
-    }
+function parseOperand(c: Cursor): Expr {
+  const token = c.peek();
 
-    guardScope(token);
+  if (token.type === 'identifier') {
+    c.next();
+    return { kind: 'column', name: token.value, span: { from: token.from, to: token.to } };
+  }
+  if (token.type === 'number') {
+    c.next();
+    return {
+      kind: 'literal',
+      value: Number(token.value),
+      raw: token.value,
+      span: { from: token.from, to: token.to },
+    };
+  }
+  if (token.type === 'string') {
+    c.next();
+    return {
+      kind: 'literal',
+      value: token.value,
+      raw: `'${token.value}'`,
+      span: { from: token.from, to: token.to },
+    };
+  }
+  if (token.type === 'keyword' && ['NULL', 'TRUE', 'FALSE'].includes(token.upper)) {
+    c.next();
+    const value = token.upper === 'NULL' ? null : token.upper === 'TRUE';
+    return {
+      kind: 'literal',
+      value,
+      raw: token.upper,
+      span: { from: token.from, to: token.to },
+    };
+  }
+  if (token.type === 'lparen') {
     throw new ParseError(
-      `Expected a column name or a value, found ${describe(token)}.`,
+      'Parenthesised expressions are not supported yet.',
       token,
+      'v0 predicates are a flat chain of comparisons joined by AND.',
     );
   }
 
-  function parseComparison(): Expr {
-    const left = parseOperand();
-    const opToken = peek();
+  c.guardScope(token);
+  throw new ParseError(`Expected a column name or a value, found ${describe(token)}.`, token);
+}
 
-    if (opToken.type !== 'operator') {
-      guardScope(opToken);
-      throw new ParseError(
-        `Expected \`=\`, \`<\` or \`>\`, found ${describe(opToken)}.`,
-        opToken,
-      );
-    }
-    if (!['=', '<', '>'].includes(opToken.value)) {
-      throw new ParseError(
-        `\`${opToken.value}\` is not supported yet.`,
-        opToken,
-        'v0 supports `=`, `<` and `>`.',
-      );
-    }
-    next();
+function parseComparison(c: Cursor): Expr {
+  const left = parseOperand(c);
+  const opToken = c.peek();
 
-    const right = parseOperand();
-    return {
-      kind: 'compare',
-      op: opToken.value as CompareOp,
-      left,
-      right,
-      span: { from: left.span.from, to: right.span.to },
-    };
+  if (opToken.type !== 'operator') {
+    c.guardScope(opToken);
+    throw new ParseError(`Expected \`=\`, \`<\` or \`>\`, found ${describe(opToken)}.`, opToken);
   }
-
-  function parseExpr(): Expr {
-    let left = parseComparison();
-    while (peek().type === 'keyword' && peek().upper === 'AND') {
-      next();
-      const right = parseComparison();
-      left = {
-        kind: 'and',
-        left,
-        right,
-        span: { from: left.span.from, to: right.span.to },
-      };
-    }
-    return left;
+  if (!['=', '<', '>'].includes(opToken.value)) {
+    throw new ParseError(`\`${opToken.value}\` is not supported yet.`, opToken, 'v0 supports `=`, `<` and `>`.');
   }
+  c.next();
 
-  // --- statement ---------------------------------------------------------
+  const right = parseOperand(c);
+  return {
+    kind: 'compare',
+    op: opToken.value as CompareOp,
+    left,
+    right,
+    span: { from: left.span.from, to: right.span.to },
+  };
+}
 
-  if (atEnd()) {
-    throw new ParseError('Nothing to run — the query is empty.', peek());
+function parseExpr(c: Cursor): Expr {
+  let left = parseComparison(c);
+  while (c.peek().type === 'keyword' && c.peek().upper === 'AND') {
+    c.next();
+    const right = parseComparison(c);
+    left = { kind: 'and', left, right, span: { from: left.span.from, to: right.span.to } };
   }
+  return left;
+}
 
-  const selectToken = expectKeyword('SELECT', 'to begin the query');
-  const select = parseSelectList();
-  expectKeyword('FROM', 'after the column list');
-  const from = parseTableRef();
-
-  let where: Expr | undefined;
-  if (peek().type === 'keyword' && peek().upper === 'WHERE') {
-    next();
-    where = parseExpr();
+/** `WHERE expr`, if present. Shared by every statement form that allows one. */
+function parseOptionalWhere(c: Cursor): Expr | undefined {
+  if (c.peek().type === 'keyword' && c.peek().upper === 'WHERE') {
+    c.next();
+    return parseExpr(c);
   }
+  return undefined;
+}
+
+/** Trailing `;` (optional) then EOF, or a "trailing junk" error naming why. */
+function expectStatementEnd(c: Cursor): void {
+  if (c.peek().type === 'semicolon') c.next();
+  if (!c.atEnd()) {
+    const token = c.peek();
+    c.guardScope(token);
+    throw new ParseError(`Unexpected ${describe(token)} after the end of the query.`, token);
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/* SELECT                                                                      */
+/* -------------------------------------------------------------------------- */
+
+function parseSelectBody(c: Cursor): SelectStatement {
+  const selectToken = c.expectKeyword('SELECT', 'to begin the query');
+  const select = parseSelectList(c);
+  c.expectKeyword('FROM', 'after the column list');
+  const from = parseTableRef(c);
+  const where = parseOptionalWhere(c);
 
   let orderBy: SelectStatement['orderBy'];
-  if (peek().type === 'keyword' && peek().upper === 'ORDER') {
-    const orderToken = next();
-    expectKeyword('BY', 'after ORDER');
-    const col = expectIdentifier('a column name to sort by');
+  if (c.peek().type === 'keyword' && c.peek().upper === 'ORDER') {
+    const orderToken = c.next();
+    c.expectKeyword('BY', 'after ORDER');
+    const col = c.expectIdentifier('a column name to sort by');
     let direction: 'asc' | 'desc' = 'asc';
     let end = col.to;
-    if (peek().type === 'keyword' && (peek().upper === 'ASC' || peek().upper === 'DESC')) {
-      const dir = next();
+    if (c.peek().type === 'keyword' && (c.peek().upper === 'ASC' || c.peek().upper === 'DESC')) {
+      const dir = c.next();
       direction = dir.upper === 'ASC' ? 'asc' : 'desc';
       end = dir.to;
     }
@@ -269,28 +272,19 @@ function parseOrThrow(sql: string): SelectStatement {
     orderBy = { column: col.value, direction, span: { from: orderToken.from, to: end } };
   }
 
-  const limitToken = peek().type === 'keyword' && peek().upper === 'LIMIT' ? next() : undefined;
+  const limitToken = c.peek().type === 'keyword' && c.peek().upper === 'LIMIT' ? c.next() : undefined;
   let limit: SelectStatement['limit'];
   if (limitToken) {
-    const token = peek();
+    const token = c.peek();
     if (token.type !== 'number' || token.value.includes('.')) {
-      guardScope(token);
-      throw new ParseError(
-        `Expected a whole number after LIMIT, found ${describe(token)}.`,
-        token,
-      );
+      c.guardScope(token);
+      throw new ParseError(`Expected a whole number after LIMIT, found ${describe(token)}.`, token);
     }
-    next();
+    c.next();
     limit = { value: Number(token.value), span: { from: limitToken.from, to: token.to } };
   }
 
-  if (peek().type === 'semicolon') next();
-
-  if (!atEnd()) {
-    const token = peek();
-    guardScope(token);
-    throw new ParseError(`Unexpected ${describe(token)} after the end of the query.`, token);
-  }
+  expectStatementEnd(c);
 
   const end = limit?.span.to ?? orderBy?.span.to ?? where?.span.to ?? from.span.to;
   return {
@@ -302,4 +296,71 @@ function parseOrThrow(sql: string): SelectStatement {
     ...(limit === undefined ? {} : { limit }),
     span: { from: selectToken.from, to: end },
   };
+}
+
+export type ParseOutcome = { ok: true; ast: SelectStatement } | { ok: false; error: QueryError };
+
+/** The SELECT-only entry point — every existing caller's contract, unchanged. */
+export function parse(sql: string): ParseOutcome {
+  return runParse(sql, (c) => {
+    if (c.atEnd()) throw new ParseError('Nothing to run — the query is empty.', c.peek());
+    return parseSelectBody(c);
+  });
+}
+
+/* -------------------------------------------------------------------------- */
+/* DELETE                                                                      */
+/* -------------------------------------------------------------------------- */
+
+function parseDeleteBody(c: Cursor): DeleteStatement {
+  const deleteToken = c.expectKeyword('DELETE', 'to begin a delete');
+  c.expectKeyword('FROM', 'after DELETE');
+  const from = parseTableRef(c);
+  const where = parseOptionalWhere(c);
+  expectStatementEnd(c);
+
+  const end = where?.span.to ?? from.span.to;
+  return {
+    kind: 'delete',
+    from,
+    ...(where === undefined ? {} : { where }),
+    span: { from: deleteToken.from, to: end },
+  };
+}
+
+export type StatementOutcome = { ok: true; ast: Statement } | { ok: false; error: QueryError };
+
+/**
+ * The broader entry point: SELECT or DELETE, dispatched on the first keyword.
+ * `runQuery.ts` uses this one; every SELECT-only caller keeps using `parse`.
+ */
+export function parseStatement(sql: string): StatementOutcome {
+  return runParse(sql, (c) => {
+    if (c.atEnd()) throw new ParseError('Nothing to run — the query is empty.', c.peek());
+    const first = c.peek();
+    if (first.type === 'keyword' && first.upper === 'DELETE') return parseDeleteBody(c);
+    return parseSelectBody(c);
+  });
+}
+
+/* -------------------------------------------------------------------------- */
+
+function runParse<T>(sql: string, body: (c: Cursor) => T): { ok: true; ast: T } | { ok: false; error: QueryError } {
+  try {
+    const tokens = tokenize(sql);
+    return { ok: true, ast: body(makeCursor(tokens)) };
+  } catch (err) {
+    if (err instanceof ParseError || err instanceof TokenizeError) {
+      return {
+        ok: false,
+        error: {
+          message: err.message,
+          from: err.from,
+          to: err.to,
+          ...(err.hint === undefined ? {} : { hint: err.hint }),
+        },
+      };
+    }
+    throw err;
+  }
 }

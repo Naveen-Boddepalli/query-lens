@@ -268,6 +268,20 @@ export function PlaygroundPage() {
       setPinnedStage(null);
       setAnswers({});
       playback.land(landingStep(next, predictOn));
+
+      // A DELETE has nowhere else to leave its effect (plan.md §22.2): the
+      // engine holds no state between calls, so persisting the new row set
+      // is this session's whole memory of the write — the same mechanism
+      // the seed editor's `applyRows` already uses.
+      if (next.write) {
+        const target = database.tables[next.write.table];
+        if (target) {
+          setDb({
+            tables: { ...database.tables, [next.write.table]: { ...target, rows: next.write.rows } },
+          });
+          setRowsEdited(true);
+        }
+      }
     },
     [sql, db, options, playback, predictOn],
   );

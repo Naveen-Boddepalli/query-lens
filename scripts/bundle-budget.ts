@@ -150,8 +150,14 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
  * a `Limit`/`Sort` plan node and executor operator each, `exec/sort.ts` (the
  * external-merge-sort driver), the buffer pool's new `write` path for spill
  * pages, and the matching additions to `PlanTree`/`AstTree`/`BufferPoolPanel`.
+ * Raised 383 → 385 for the write path's first statement, `DELETE` (§22.2):
+ * a second parser entry point (`parseStatement`, SELECT or DELETE) sharing
+ * every grammar rule with `parse`, `exec/delete.ts` (finds matches, then runs
+ * the real `deleteKey` B+Tree algorithm and marks heap pages dirty), and the
+ * buffer pool's `markDirty` — a dirty page's eviction now costs a write, not
+ * just a discard, completing the read/write pair `write()` started.
  */
-const TOTAL_KB = 383;
+const TOTAL_KB = 385;
 
 const gzipKb = (bytes: Buffer): number => gzipSync(bytes, { level: 9 }).length / 1024;
 

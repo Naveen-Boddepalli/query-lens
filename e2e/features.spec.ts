@@ -356,6 +356,40 @@ test('ORDER BY sorts the result and spills through the real buffer pool', async 
   await expect(page.getByText(/writes/)).toBeVisible();
 });
 
+test('DELETE removes a row for real — the Playground persists it across the next query', async ({
+  page,
+}) => {
+  await page.goto('/playground');
+  await expect(page.getByRole('button', { name: /^Edit data/ })).toHaveText('Edit data (48)');
+
+  const editor = page.locator('.cm-content');
+  await editor.click();
+  await page.keyboard.press('ControlOrMeta+A');
+  await page.keyboard.type('DELETE FROM users WHERE id = 5;');
+  await page.getByRole('button', { name: 'Run' }).click();
+  await page.getByLabel('Scrub to step').press('End');
+
+  await expect(page.getByText(/1 row deleted/)).toBeVisible();
+  await expect(page.getByText(/users now has 47 rows/)).toBeVisible();
+  // The seed editor's own count is the same `db` state DELETE just wrote to.
+  await expect(page.getByRole('button', { name: /^Edit data/ })).toHaveText('Edit data (47)');
+
+  // Persisted, not just narrated: a fresh SELECT for the same id finds nothing.
+  await editor.click();
+  await page.keyboard.press('ControlOrMeta+A');
+  await page.keyboard.type('SELECT * FROM users WHERE id = 5;');
+  await page.getByRole('button', { name: 'Run' }).click();
+  await page.getByLabel('Scrub to step').press('End');
+  await expect(page.getByText('0 rows returned')).toBeVisible();
+
+  await editor.click();
+  await page.keyboard.press('ControlOrMeta+A');
+  await page.keyboard.type('SELECT * FROM users;');
+  await page.getByRole('button', { name: 'Run' }).click();
+  await page.getByLabel('Scrub to step').press('End');
+  await expect(page.getByText('47 rows returned')).toBeVisible();
+});
+
 test('the preset chips load and run a query in one click', async ({ page }) => {
   await page.goto('/playground');
 

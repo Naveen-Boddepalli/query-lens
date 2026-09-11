@@ -28,6 +28,14 @@ export interface BufferPool {
    * full. Returns `null` only when every frame is pinned.
    */
   write: (pageId: number) => FetchResult | null;
+  /**
+   * Marks a resident page as modified — a `DELETE` that removed a row from it
+   * (plan.md §22.2, the write path's other half). A clean page's eviction is
+   * free: the disk already holds the same bytes. A dirty page's is not — it
+   * has to be written back first, which `claimFrame` charges for and narrates
+   * the moment the page is actually evicted, not when it was marked.
+   */
+  markDirty: (pageId: number) => void;
   unpin: (frameId: number) => void;
   readonly state: BufferState;
   readonly stats: { hits: number; misses: number; evictions: number; writes: number };
@@ -94,6 +102,10 @@ export function createBufferPool(
   // Only the first eviction asks. After that the learner has the rule, and a
   // prompt on every one of them would be nagging rather than teaching.
   let evictionAsked = false;
+  // Pages a DELETE (or a future write) has modified since they were read —
+  // resident or not, since a page can be marked dirty and evicted later in
+  // the same query. Cleared once the writeback happens.
+  const dirty = new Set<number>();
 
   const resident = (pageId: number): Frame | undefined =>
     state.frames.find((f) => f.pageId === pageId);
@@ -117,6 +129,12 @@ export function createBufferPool(
 
     stats.evictions += 1;
 
+    // A clean page's eviction is free — the disk already holds the same
+    // bytes. A dirty one costs a write first, charged and narrated here,
+    // at the moment it is actually paid, not when the page was marked.
+    const writtenBack = dirty.delete(evicted);
+    if (writtenBack) stats.writes += 1;
+
     // The eviction question is asked once regardless of which path triggers
     // it — a write can just as easily be the first eviction a trace shows.
     const prompt = evictionAsked ? null : evictionPrompt(state.frames, victimId, incoming, options.policy);
@@ -125,7 +143,11 @@ export function createBufferPool(
     emit(
       `The pool is full, so page ${evicted} is evicted from frame ${victimId} to make room ${
         forWrite ? 'for a freshly written page' : ''
-      }. ${evictionReason(options.policy)}`,
+      }. ${
+        writtenBack
+          ? `Page ${evicted} is dirty — a row was deleted from it — so evicting it costs a write back to disk first. `
+          : ''
+      }${evictionReason(options.policy)}`,
       {
         stage: 'buffer',
         action: 'evict',
@@ -133,6 +155,7 @@ export function createBufferPool(
         victimPageId: evicted,
         pageId: incoming,
         ...(choice.clockHand === undefined ? {} : { clockHand: choice.clockHand }),
+        ...(writtenBack ? { writtenBack } : {}),
       },
       prompt ? { predictable: prompt } : undefined,
     );
@@ -141,6 +164,10 @@ export function createBufferPool(
     victim.usageCount = 0;
     victim.loadedAt = -1;
     return victim;
+  }
+
+  function markDirty(pageId: number): void {
+    if (Number.isInteger(pageId) && pageId >= 0 && pageId < pageCount) dirty.add(pageId);
   }
 
   function fetch(pageId: number): FetchResult | null {
@@ -228,5 +255,5 @@ export function createBufferPool(
     if (f && f.pinCount > 0) f.pinCount -= 1;
   }
 
-  return { fetch, write, unpin, state, stats };
+  return { fetch, write, markDirty, unpin, state, stats };
 }

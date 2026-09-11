@@ -12,8 +12,18 @@
  * legible when the two are shown side by side.
  */
 
-import type { SelectStatement } from '../parser/index.ts';
+import type { DeleteStatement, SelectStatement } from '../parser/index.ts';
 import type { Plan, ProjectList } from './plan.ts';
+
+/**
+ * A `DELETE`'s canonical plan is just the scan that finds the rows to
+ * remove — `Filter → SeqScan`, or a bare `SeqScan` with no `WHERE`. No
+ * `Project`: a delete produces no columns for a client to read.
+ */
+export function buildDeletePlan(ast: DeleteStatement): Plan {
+  const scan: Plan = { op: 'SeqScan', table: ast.from.name };
+  return ast.where ? { op: 'Filter', predicate: ast.where, child: scan } : scan;
+}
 
 export function buildPlan(ast: SelectStatement): Plan {
   const scan: Plan = { op: 'SeqScan', table: ast.from.name };

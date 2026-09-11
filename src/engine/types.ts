@@ -134,6 +134,8 @@ export type StepEventBody =
       pageId: number;
       /** Where the clock hand ended up. Absent under LRU, which has no hand. */
       clockHand?: number;
+      /** The victim was dirty, so eviction cost a writeback, not just a discard. */
+      writtenBack?: boolean;
     }
   /**
    * One tick of the clock-sweep hand. Emitted only by the `clock` policy, so
@@ -227,8 +229,21 @@ export interface QueryError {
 
 export interface RunResult {
   events: StepEvent[];
+  /** `SELECT`'s result rows; the rows a `DELETE` removed, for `write`. */
   rows: Row[];
   error?: QueryError;
+  /**
+   * Present only for a successful write (`DELETE` — plan.md §22.2). The
+   * caller persists `rows` as the table's new contents; nothing in the
+   * engine holds state between calls, so this is the only way a write has
+   * any effect beyond its own trace.
+   */
+  write?: {
+    table: string;
+    deletedCount: number;
+    /** The table's full row set after the delete. */
+    rows: Row[];
+  };
 }
 
 /**

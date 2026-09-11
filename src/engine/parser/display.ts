@@ -6,9 +6,17 @@
  * instead of remounting on every event.
  */
 
-import type { ASTNode } from '../types.ts';
+import type { ASTNode, Span } from '../types.ts';
 import type { Emit } from '../trace.ts';
-import type { Expr, LimitClause, OrderByClause, SelectList, SelectStatement, TableRef } from './ast.ts';
+import type {
+  DeleteStatement,
+  Expr,
+  LimitClause,
+  OrderByClause,
+  SelectList,
+  SelectStatement,
+  TableRef,
+} from './ast.ts';
 
 function selectListNode(select: SelectList): ASTNode {
   if (select.kind === 'star') {
@@ -103,8 +111,14 @@ function limitNode(limit: LimitClause): ASTNode {
   };
 }
 
-function root(children: ASTNode[], span: SelectStatement['span']): ASTNode {
-  return { id: 'select-stmt', kind: 'SelectStatement', label: 'SELECT', span, children };
+function root(children: ASTNode[], span: Span, label: 'SELECT' | 'DELETE' = 'SELECT'): ASTNode {
+  return {
+    id: 'select-stmt',
+    kind: label === 'SELECT' ? 'SelectStatement' : 'DeleteStatement',
+    label,
+    span,
+    children,
+  };
 }
 
 /** The complete display tree for a parsed statement. */
@@ -168,6 +182,37 @@ export function emitParseEvents(emit: Emit, ast: SelectStatement): void {
   }
 
   const tree = root([...children], ast.span);
+  emit(
+    `Parsing is done: ${countNodes(tree)} AST nodes and no data touched. The planner turns this shape into a plan next.`,
+    { stage: 'parse', ast: tree, span: ast.span },
+  );
+}
+
+/** The complete display tree for a parsed `DELETE`. */
+export function deleteDisplayTree(ast: DeleteStatement): ASTNode {
+  const children = [fromNode(ast.from)];
+  if (ast.where) children.push(whereNode(ast.where));
+  return root(children, ast.span, 'DELETE');
+}
+
+/** Emit the parse stage for a `DELETE`, one clause at a time — mirrors `emitParseEvents`. */
+export function emitDeleteParseEvents(emit: Emit, ast: DeleteStatement): void {
+  const children: ASTNode[] = [fromNode(ast.from)];
+  emit(`Read the FROM clause: DELETE removes rows from the \`${ast.from.name}\` table.`, {
+    stage: 'parse',
+    ast: root([...children], ast.span, 'DELETE'),
+    span: ast.from.span,
+  });
+
+  if (ast.where) {
+    children.push(whereNode(ast.where));
+    emit(
+      'Read the WHERE clause and build the predicate tree. Nothing has been removed yet — this is still only structure.',
+      { stage: 'parse', ast: root([...children], ast.span, 'DELETE'), span: ast.where.span },
+    );
+  }
+
+  const tree = root([...children], ast.span, 'DELETE');
   emit(
     `Parsing is done: ${countNodes(tree)} AST nodes and no data touched. The planner turns this shape into a plan next.`,
     { stage: 'parse', ast: tree, span: ast.span },

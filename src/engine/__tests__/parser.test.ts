@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { parse } from '../parser/parser.ts';
-import { toDisplayTree } from '../parser/display.ts';
-import type { SelectStatement } from '../parser/ast.ts';
+import { parse, parseStatement } from '../parser/parser.ts';
+import { deleteDisplayTree, toDisplayTree } from '../parser/display.ts';
+import type { DeleteStatement, SelectStatement } from '../parser/ast.ts';
 
 function ok(sql: string): SelectStatement {
   const out = parse(sql);
@@ -11,6 +11,24 @@ function ok(sql: string): SelectStatement {
 
 function err(sql: string) {
   const out = parse(sql);
+  if (out.ok) throw new Error('expected a parse error');
+  return out.error;
+}
+
+function okStatement(sql: string) {
+  const out = parseStatement(sql);
+  if (!out.ok) throw new Error(`expected a parse, got: ${out.error.message}`);
+  return out.ast;
+}
+
+function okDelete(sql: string): DeleteStatement {
+  const ast = okStatement(sql);
+  if (ast.kind !== 'delete') throw new Error(`expected a delete, got ${ast.kind}`);
+  return ast;
+}
+
+function errStatement(sql: string) {
+  const out = parseStatement(sql);
   if (out.ok) throw new Error('expected a parse error');
   return out.error;
 }
@@ -183,6 +201,61 @@ describe('parse — LIMIT', () => {
   });
 });
 
+describe('parseStatement — DELETE', () => {
+  it('parses a bare DELETE FROM', () => {
+    const ast = okDelete('DELETE FROM users');
+    expect(ast).toMatchObject({ kind: 'delete', from: { name: 'users' } });
+    expect(ast.where).toBeUndefined();
+  });
+
+  it('parses a DELETE with a WHERE', () => {
+    const ast = okDelete('DELETE FROM users WHERE age > 30');
+    expect(ast.where).toMatchObject({ kind: 'compare', op: '>' });
+  });
+
+  it('parses a compound WHERE, same grammar as SELECT', () => {
+    const ast = okDelete('DELETE FROM users WHERE id = 5 AND age > 0');
+    expect(ast.where).toMatchObject({ kind: 'and' });
+  });
+
+  it('is case-insensitive and tolerates a trailing semicolon', () => {
+    expect(okDelete('delete from users;').from.name).toBe('users');
+  });
+
+  it('still parses ordinary SELECT queries through the same entry point', () => {
+    const ast = okStatement('SELECT * FROM users WHERE id = 5');
+    expect(ast.kind).toBe('select');
+  });
+
+  it('spans the whole statement, from DELETE to the end of the WHERE', () => {
+    const sql = 'DELETE FROM users WHERE id = 5';
+    expect(okDelete(sql).span).toEqual({ from: 0, to: sql.length });
+  });
+
+  it('rejects a missing table name', () => {
+    expect(errStatement('DELETE FROM').message).toMatch(/expected a table name/i);
+  });
+
+  it('rejects a missing FROM', () => {
+    const e = errStatement('DELETE users');
+    expect(e.message).toMatch(/expected `from`/i);
+  });
+
+  it('rejects trailing junk, same as SELECT', () => {
+    const e = errStatement('DELETE FROM users garbage');
+    expect(e.message).toMatch(/unexpected/i);
+  });
+
+  it('still rejects INSERT and UPDATE, naming DELETE as what does work', () => {
+    expect(errStatement('INSERT INTO users VALUES (1)').hint).toMatch(/DELETE is/);
+    expect(errStatement('UPDATE users SET age = 1').hint).toMatch(/DELETE is/);
+  });
+
+  it('rejects an empty query the same way SELECT does', () => {
+    expect(errStatement('').message).toMatch(/empty/i);
+  });
+});
+
 describe('parse — errors point at the right text', () => {
   it('rejects an empty query', () => {
     expect(err('').message).toMatch(/empty/i);
@@ -222,12 +295,17 @@ describe('parse — errors point at the right text', () => {
     ['SELECT * FROM a JOIN b ON a.id = b.id', /JOIN/, /v1/],
     ['SELECT * FROM users GROUP BY id', /GROUP/, /v0 subset/],
     ['SELECT * FROM users LIMIT 5 OFFSET 10', /OFFSET/, /LIMIT on its own is/],
-    ['INSERT INTO users VALUES (1)', /INSERT/, /only runs SELECT/],
-    ['DELETE FROM users', /DELETE/, /only runs SELECT/],
+    ['INSERT INTO users VALUES (1)', /INSERT/, /DELETE is/],
+    ['UPDATE users SET age = 1', /UPDATE/, /DELETE is/],
   ])('explains out-of-scope SQL: %s', (sql, message, hint) => {
     const e = err(sql);
     expect(e.message).toMatch(message);
     expect(e.hint).toMatch(hint);
+  });
+
+  it('rejects DELETE too — parse() is the SELECT-only entry point; parseStatement() is where DELETE lives', () => {
+    const e = err('DELETE FROM users');
+    expect(e.message).toMatch(/expected `select`/i);
   });
 
   it('rejects parentheses with a scope explanation', () => {
@@ -276,6 +354,15 @@ describe('toDisplayTree', () => {
     expect(tree.children?.map((c) => c.kind)).toEqual(['SelectList', 'From', 'Where', 'OrderBy', 'Limit']);
     const orderBy = tree.children?.[3];
     expect(orderBy).toMatchObject({ label: 'ORDER BY', detail: 'age DESC' });
+  });
+
+  it('deleteDisplayTree mirrors DELETE — From, then Where when present, no SelectList', () => {
+    const bare = deleteDisplayTree(okDelete('DELETE FROM users'));
+    expect(bare.label).toBe('DELETE');
+    expect(bare.children?.map((c) => c.kind)).toEqual(['From']);
+
+    const withWhere = deleteDisplayTree(okDelete('DELETE FROM users WHERE id = 5'));
+    expect(withWhere.children?.map((c) => c.kind)).toEqual(['From', 'Where']);
   });
 
   it('gives every node a unique id, so a progressive reveal can animate', () => {

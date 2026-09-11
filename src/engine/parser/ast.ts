@@ -47,6 +47,21 @@ export interface OrderByClause {
   span: Span;
 }
 
+/**
+ * `DELETE FROM table [WHERE expr]` (plan.md §22.2, the write path). Shares
+ * `TableRef`/`Expr` with `SelectStatement` — a delete's WHERE is the same
+ * predicate grammar, found the same way.
+ */
+export interface DeleteStatement {
+  kind: 'delete';
+  from: TableRef;
+  where?: Expr;
+  span: Span;
+}
+
+/** Every statement form `parseStatement` can produce. `parse` stays SELECT-only. */
+export type Statement = SelectStatement | DeleteStatement;
+
 /** Depth-first walk, parents before children. */
 export function walkExpr(expr: Expr, visit: (e: Expr) => void): void {
   visit(expr);

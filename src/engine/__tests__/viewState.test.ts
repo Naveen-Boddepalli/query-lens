@@ -100,6 +100,26 @@ describe('applyEvent', () => {
     );
     expect(s.frames[2]).toMatchObject({ pageId: null, usageCount: 0 });
     expect(s.bufferStats.evictions).toBe(1);
+    expect(s.bufferStats.writes).toBe(0); // a clean eviction charges no write
+  });
+
+  it('a written-back eviction (a dirty page, DELETE) also counts as a write', () => {
+    let s = applyEvent(
+      initialViewState(opts),
+      ev(0, { stage: 'buffer', action: 'load', pageId: 4, frameId: 2 }),
+    );
+    s = applyEvent(
+      s,
+      ev(1, {
+        stage: 'buffer',
+        action: 'evict',
+        frameId: 2,
+        victimPageId: 4,
+        pageId: 9,
+        writtenBack: true,
+      }),
+    );
+    expect(s.bufferStats).toMatchObject({ evictions: 1, writes: 1 });
   });
 
   it('a sweep decrements one frame and moves the clock hand', () => {

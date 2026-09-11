@@ -12,6 +12,8 @@ import type { ASTNode, Span } from '../../engine/index.ts';
 const TONES: Record<string, string> = {
   SelectStatement:
     'border-hue-sky/70 bg-hue-sky/10 text-hue-sky-ink hover:border-hue-sky hover:bg-hue-sky/20',
+  DeleteStatement:
+    'border-hue-sky/70 bg-hue-sky/10 text-hue-sky-ink hover:border-hue-sky hover:bg-hue-sky/20',
   SelectList:
     'border-hue-sky/50 bg-hue-sky/5 text-hue-sky-ink hover:border-hue-sky/80 hover:bg-hue-sky/15',
   From: 'border-hue-violet/60 bg-hue-violet/10 text-hue-violet-ink hover:border-hue-violet/90 hover:bg-hue-violet/20',

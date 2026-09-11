@@ -178,6 +178,10 @@ export function applyEvent(state: ViewState, event: StepEvent): ViewState {
           next.bufferStats = {
             ...state.bufferStats,
             evictions: state.bufferStats.evictions + 1,
+            // A dirty victim costs a write on the way out — the pool's own
+            // `stats.writes` counts it too (bufferPool.ts), so the fold must
+            // match or the panel and the engine would silently disagree.
+            writes: state.bufferStats.writes + (event.writtenBack ? 1 : 0),
           };
           if (event.clockHand !== undefined) next.clockHand = event.clockHand;
           return next;

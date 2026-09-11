@@ -8,11 +8,13 @@
  * UI holds the whole array a worker boundary buys nothing.
  */
 
-import { emitParseEvents, parse } from './parser/index.ts';
-import { emitPlanEvents, findSort } from './planner/index.ts';
+import { emitDeleteParseEvents, emitParseEvents, parseStatement } from './parser/index.ts';
+import type { Statement } from './parser/index.ts';
+import { emitDeletePlanEvents, emitPlanEvents, findSort } from './planner/index.ts';
 import { buildHeap, createBufferPool } from './storage/index.ts';
 import { buildIndex, pageCountFor } from './index/index.ts';
 import { execute } from './exec/index.ts';
+import { executeDelete } from './exec/delete.ts';
 import { sortTempPageCount } from './exec/sort.ts';
 import { createLockManager } from './locks/index.ts';
 import { createTracer } from './trace.ts';
@@ -26,29 +28,28 @@ export function runQuery(
 ): RunResult {
   const { emit, drain } = createTracer();
 
-  const parsed = parse(sql);
+  const parsed = parseStatement(sql);
   if (!parsed.ok) {
     return { events: drain(), rows: [], error: parsed.error };
   }
+  const ast = parsed.ast;
 
-  const table = db.tables[parsed.ast.from.name];
+  const table = db.tables[ast.from.name];
   if (!table) {
     const known = Object.keys(db.tables);
     return {
       events: drain(),
       rows: [],
       error: {
-        message: `There is no table called \`${parsed.ast.from.name}\`.`,
+        message: `There is no table called \`${ast.from.name}\`.`,
         hint: known.length === 1 ? `The only table is \`${known[0]}\`.` : `Tables: ${known.join(', ')}.`,
-        from: parsed.ast.from.span.from,
-        to: parsed.ast.from.span.to,
+        from: ast.from.span.from,
+        to: ast.from.span.to,
       },
     };
   }
 
-  const unknownColumn = referencedColumns(parsed.ast).find(
-    (c) => !table.columns.includes(c.name),
-  );
+  const unknownColumn = referencedColumns(ast).find((c) => !table.columns.includes(c.name));
   if (unknownColumn) {
     return {
       events: drain(),
@@ -62,13 +63,37 @@ export function runQuery(
     };
   }
 
-  emitParseEvents(emit, parsed.ast);
-  const plan = emitPlanEvents(emit, parsed.ast, table, options.rowsPerPage);
-
-  // Building the heap and the index is setup, not execution — it emits nothing.
-  // The trace describes running your query, not preparing the database.
   const heap = buildHeap(table, options.rowsPerPage);
   const tree = table.indexedColumn ? buildIndex(heap, table.indexedColumn) : null;
+  const locks = createLockManager(emit);
+
+  if (ast.kind === 'delete') {
+    emitDeleteParseEvents(emit, ast);
+    const plan = emitDeletePlanEvents(emit, ast, table, options.rowsPerPage);
+    const pool = createBufferPool(pageCountFor(heap, tree), options, emit);
+
+    const { deleted } = executeDelete(plan, { emit, pool, locks, heap, tree, table, options });
+    const removed = new Set(deleted);
+    const rows = table.rows.filter((r) => !removed.has(r));
+
+    emit(
+      `${deleted.length} row${deleted.length === 1 ? '' : 's'} deleted, from ${pool.stats.misses} disk read${
+        pool.stats.misses === 1 ? '' : 's'
+      } and ${pool.stats.evictions} eviction${pool.stats.evictions === 1 ? '' : 's'}. ${table.name} now has ${
+        rows.length
+      } row${rows.length === 1 ? '' : 's'}.`,
+      { stage: 'result', rows: deleted },
+    );
+
+    return {
+      events: drain(),
+      rows: deleted,
+      write: { table: table.name, deletedCount: deleted.length, rows },
+    };
+  }
+
+  emitParseEvents(emit, ast);
+  const plan = emitPlanEvents(emit, ast, table, options.rowsPerPage);
 
   // A Sort's spill needs its own page ids, reserved up front — sized against
   // the whole table (the worst case; a WHERE clause can only shrink what
@@ -79,15 +104,14 @@ export function runQuery(
     : 0;
   const pool = createBufferPool(pageCountFor(heap, tree) + sortTemp, options, emit);
 
-  const locks = createLockManager(emit);
   const rows = execute(plan, { emit, pool, locks, heap, tree, table, options });
 
   return { events: drain(), rows };
 }
 
-function referencedColumns(ast: import('./parser/index.ts').SelectStatement) {
+function referencedColumns(ast: Statement): { name: string; span: { from: number; to: number } }[] {
   const refs: { name: string; span: { from: number; to: number } }[] = [];
-  if (ast.select.kind === 'columns') refs.push(...ast.select.names);
+  if (ast.kind === 'select' && ast.select.kind === 'columns') refs.push(...ast.select.names);
   if (ast.where) {
     const stack = [ast.where];
     while (stack.length > 0) {
@@ -96,6 +120,6 @@ function referencedColumns(ast: import('./parser/index.ts').SelectStatement) {
       if (e.kind === 'compare' || e.kind === 'and') stack.push(e.left, e.right);
     }
   }
-  if (ast.orderBy) refs.push({ name: ast.orderBy.column, span: ast.orderBy.span });
+  if (ast.kind === 'select' && ast.orderBy) refs.push({ name: ast.orderBy.column, span: ast.orderBy.span });
   return refs;
 }
