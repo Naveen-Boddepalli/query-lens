@@ -11,6 +11,9 @@ import type { Emit } from '../trace.ts';
 import type {
   DeleteStatement,
   Expr,
+  InsertColumnList,
+  InsertStatement,
+  InsertValues,
   LimitClause,
   OrderByClause,
   SelectList,
@@ -111,14 +114,52 @@ function limitNode(limit: LimitClause): ASTNode {
   };
 }
 
-function root(children: ASTNode[], span: Span, label: 'SELECT' | 'DELETE' = 'SELECT'): ASTNode {
+function intoNode(into: TableRef): ASTNode {
   return {
-    id: 'select-stmt',
-    kind: label === 'SELECT' ? 'SelectStatement' : 'DeleteStatement',
-    label,
-    span,
-    children,
+    id: 'into',
+    kind: 'Into',
+    label: 'INTO',
+    detail: into.name,
+    span: into.span,
+    children: [{ id: 'into.table', kind: 'Table', label: into.name, span: into.span }],
   };
+}
+
+function insertColumnsNode(columns: InsertColumnList): ASTNode {
+  return {
+    id: 'columns',
+    kind: 'ColumnList',
+    label: 'columns',
+    detail: `${columns.names.length} named`,
+    span: columns.span,
+    children: columns.names.map((c, i) => ({
+      id: `columns.col${i}`,
+      kind: 'Column',
+      label: c.name,
+      span: c.span,
+    })),
+  };
+}
+
+function valuesNode(values: InsertValues): ASTNode {
+  return {
+    id: 'values',
+    kind: 'Values',
+    label: 'VALUES',
+    detail: `${values.items.length} value${values.items.length === 1 ? '' : 's'}`,
+    span: values.span,
+    children: values.items.map((v, i) => exprNode(v, `values.v${i}`)),
+  };
+}
+
+function root(
+  children: ASTNode[],
+  span: Span,
+  label: 'SELECT' | 'DELETE' | 'INSERT' = 'SELECT',
+): ASTNode {
+  const kind =
+    label === 'SELECT' ? 'SelectStatement' : label === 'DELETE' ? 'DeleteStatement' : 'InsertStatement';
+  return { id: 'select-stmt', kind, label, span, children };
 }
 
 /** The complete display tree for a parsed statement. */
@@ -215,6 +256,46 @@ export function emitDeleteParseEvents(emit: Emit, ast: DeleteStatement): void {
   const tree = root([...children], ast.span, 'DELETE');
   emit(
     `Parsing is done: ${countNodes(tree)} AST nodes and no data touched. The planner turns this shape into a plan next.`,
+    { stage: 'parse', ast: tree, span: ast.span },
+  );
+}
+
+/** The complete display tree for a parsed `INSERT`. */
+export function insertDisplayTree(ast: InsertStatement): ASTNode {
+  const children = [intoNode(ast.into)];
+  if (ast.columns) children.push(insertColumnsNode(ast.columns));
+  children.push(valuesNode(ast.values));
+  return root(children, ast.span, 'INSERT');
+}
+
+/** Emit the parse stage for an `INSERT`, one clause at a time — mirrors `emitParseEvents`. */
+export function emitInsertParseEvents(emit: Emit, ast: InsertStatement): void {
+  const children: ASTNode[] = [intoNode(ast.into)];
+  emit(`Read the INTO clause: INSERT adds a row to the \`${ast.into.name}\` table.`, {
+    stage: 'parse',
+    ast: root([...children], ast.span, 'INSERT'),
+    span: ast.into.span,
+  });
+
+  if (ast.columns) {
+    children.push(insertColumnsNode(ast.columns));
+    emit(
+      `Read the column list: ${ast.columns.names.map((c) => `\`${c.name}\``).join(', ')}.`,
+      { stage: 'parse', ast: root([...children], ast.span, 'INSERT'), span: ast.columns.span },
+    );
+  }
+
+  children.push(valuesNode(ast.values));
+  emit(
+    `Read the VALUES list: ${ast.values.items.length} value${
+      ast.values.items.length === 1 ? '' : 's'
+    }. Nothing has been written yet — this is still only structure.`,
+    { stage: 'parse', ast: root([...children], ast.span, 'INSERT'), span: ast.values.span },
+  );
+
+  const tree = root([...children], ast.span, 'INSERT');
+  emit(
+    `Parsing is done: ${countNodes(tree)} AST nodes and no data touched. There is nothing to plan or optimize — an INSERT with only literal values goes straight to execution.`,
     { stage: 'parse', ast: tree, span: ast.span },
   );
 }

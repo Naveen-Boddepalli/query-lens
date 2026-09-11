@@ -59,8 +59,34 @@ export interface DeleteStatement {
   span: Span;
 }
 
+/**
+ * `INSERT INTO table [(col, col, ...)] VALUES (value, value, ...)` (plan.md
+ * §22.2, the write path's second statement). Values are literals only — v0
+ * has no expressions or subqueries in a `VALUES` list — and there is exactly
+ * one row per statement. Omitting the column list means every column, in
+ * table order, same as standard SQL.
+ */
+export interface InsertColumnList {
+  names: { name: string; span: Span }[];
+  span: Span;
+}
+
+export interface InsertValues {
+  items: Extract<Expr, { kind: 'literal' }>[];
+  span: Span;
+}
+
+export interface InsertStatement {
+  kind: 'insert';
+  into: TableRef;
+  /** Explicit column list, if given. Omitted means every column, in table order. */
+  columns?: InsertColumnList;
+  values: InsertValues;
+  span: Span;
+}
+
 /** Every statement form `parseStatement` can produce. `parse` stays SELECT-only. */
-export type Statement = SelectStatement | DeleteStatement;
+export type Statement = SelectStatement | DeleteStatement | InsertStatement;
 
 /** Depth-first walk, parents before children. */
 export function walkExpr(expr: Expr, visit: (e: Expr) => void): void {

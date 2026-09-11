@@ -1,10 +1,14 @@
 /**
  * Recursive-descent parser for the v0 SQL subset (plan.md §4):
  *
- *   statement  := select | delete
+ *   statement  := select | delete | insert
  *   select     := SELECT selectList FROM identifier [WHERE expr]
  *                 [ORDER BY identifier [ASC|DESC]] [LIMIT number] [';'] EOF
  *   delete     := DELETE FROM identifier [WHERE expr] [';'] EOF
+ *   insert     := INSERT INTO identifier [columnList] VALUES valueList [';'] EOF
+ *   columnList := '(' identifier (',' identifier)* ')'
+ *   valueList  := '(' value (',' value)* ')'
+ *   value      := number | string | NULL | TRUE | FALSE
  *   selectList := '*' | identifier (',' identifier)*
  *   expr       := comparison (AND comparison)*
  *   comparison := operand ('=' | '<' | '>') operand
@@ -15,8 +19,9 @@
  *
  * `parse` stays the SELECT-only entry point every existing caller (the
  * Playground, the standalone tools, the CLI) already expects. `parseStatement`
- * is the broader one `runQuery.ts` needs now that `DELETE` is real — the two
- * share every helper below; nothing about SELECT parsing changed.
+ * is the broader one `runQuery.ts` needs now that `DELETE` and `INSERT` are
+ * real — the three share every helper below; nothing about SELECT parsing
+ * changed.
  */
 
 import type { QueryError } from '../types.ts';
@@ -24,6 +29,7 @@ import type {
   CompareOp,
   DeleteStatement,
   Expr,
+  InsertStatement,
   SelectList,
   SelectStatement,
   Span,
@@ -38,11 +44,11 @@ class ParseError extends Error {
   to: number;
   hint?: string;
 
-  constructor(message: string, token: Token, hint?: string) {
+  constructor(message: string, at: { from: number; to: number }, hint?: string) {
     super(message);
     this.name = 'ParseError';
-    this.from = token.from;
-    this.to = Math.max(token.to, token.from + 1);
+    this.from = at.from;
+    this.to = Math.max(at.to, at.from + 1);
     if (hint !== undefined) this.hint = hint;
   }
 }
@@ -62,10 +68,9 @@ const OUT_OF_SCOPE: Record<string, string> = {
   UNION: 'UNION is not in the v0 subset.',
   OR: 'v0 supports AND only. Combine predicates with AND.',
   NOT: 'v0 supports =, < and > only, combined with AND.',
-  INSERT: 'INSERT is not in the v0 write path yet — DELETE is.',
-  UPDATE: 'UPDATE is not in the v0 write path yet — DELETE is.',
-  CREATE: 'QueryLens only runs SELECT and DELETE. Edit the seed data to change the table.',
-  DROP: 'QueryLens only runs SELECT and DELETE. Edit the seed data to change the table.',
+  UPDATE: 'UPDATE is not in the v0 write path yet — DELETE and INSERT are.',
+  CREATE: 'QueryLens only runs SELECT, DELETE and INSERT. Edit the seed data to change the table.',
+  DROP: 'QueryLens only runs SELECT, DELETE and INSERT. Edit the seed data to change the table.',
 };
 
 const describe = (t: Token): string =>
@@ -234,6 +239,74 @@ function parseOptionalWhere(c: Cursor): Expr | undefined {
   return undefined;
 }
 
+/** A `VALUES` entry — a literal only; v0 has no expressions or subqueries in an INSERT. */
+function parseInsertValue(c: Cursor): Extract<Expr, { kind: 'literal' }> {
+  const token = c.peek();
+
+  if (token.type === 'number') {
+    c.next();
+    return {
+      kind: 'literal',
+      value: Number(token.value),
+      raw: token.value,
+      span: { from: token.from, to: token.to },
+    };
+  }
+  if (token.type === 'string') {
+    c.next();
+    return {
+      kind: 'literal',
+      value: token.value,
+      raw: `'${token.value}'`,
+      span: { from: token.from, to: token.to },
+    };
+  }
+  if (token.type === 'keyword' && ['NULL', 'TRUE', 'FALSE'].includes(token.upper)) {
+    c.next();
+    const value = token.upper === 'NULL' ? null : token.upper === 'TRUE';
+    return { kind: 'literal', value, raw: token.upper, span: { from: token.from, to: token.to } };
+  }
+  if (token.type === 'identifier') {
+    throw new ParseError(
+      `Expected a value, found \`${token.value}\`.`,
+      token,
+      'Column names go in the column list before VALUES, not inside it.',
+    );
+  }
+
+  c.guardScope(token);
+  throw new ParseError(`Expected a value, found ${describe(token)}.`, token);
+}
+
+/** `( item (',' item)* )` — shared by INSERT's column list and its VALUES list. */
+function parseParenList<T>(
+  c: Cursor,
+  what: string,
+  parseItem: (c: Cursor) => T,
+): { items: T[]; from: number; to: number } {
+  const open = c.peek();
+  if (open.type !== 'lparen') {
+    c.guardScope(open);
+    throw new ParseError(`Expected \`(\` before the ${what}, found ${describe(open)}.`, open);
+  }
+  c.next();
+
+  const items: T[] = [parseItem(c)];
+  while (c.peek().type === 'comma') {
+    c.next();
+    items.push(parseItem(c));
+  }
+
+  const close = c.peek();
+  if (close.type !== 'rparen') {
+    c.guardScope(close);
+    throw new ParseError(`Expected \`)\` after the ${what}, found ${describe(close)}.`, close);
+  }
+  c.next();
+
+  return { items, from: open.from, to: close.to };
+}
+
 /** Trailing `;` (optional) then EOF, or a "trailing junk" error naming why. */
 function expectStatementEnd(c: Cursor): void {
   if (c.peek().type === 'semicolon') c.next();
@@ -328,17 +401,61 @@ function parseDeleteBody(c: Cursor): DeleteStatement {
   };
 }
 
+/* -------------------------------------------------------------------------- */
+/* INSERT                                                                      */
+/* -------------------------------------------------------------------------- */
+
+function parseInsertBody(c: Cursor): InsertStatement {
+  const insertToken = c.expectKeyword('INSERT', 'to begin an insert');
+  c.expectKeyword('INTO', 'after INSERT');
+  const into = parseTableRef(c);
+
+  let columns: InsertStatement['columns'];
+  if (c.peek().type === 'lparen') {
+    const parsed = parseParenList(c, 'column list', (cc) => {
+      const token = cc.expectIdentifier('a column name');
+      return { name: token.value, span: { from: token.from, to: token.to } };
+    });
+    columns = { names: parsed.items, span: { from: parsed.from, to: parsed.to } };
+  }
+
+  c.expectKeyword('VALUES', columns ? 'after the column list' : 'after the table name');
+  const parsedValues = parseParenList(c, 'value list', parseInsertValue);
+  const values = { items: parsedValues.items, span: { from: parsedValues.from, to: parsedValues.to } };
+
+  if (columns && columns.names.length !== values.items.length) {
+    throw new ParseError(
+      `${columns.names.length} column${columns.names.length === 1 ? '' : 's'} but ${
+        values.items.length
+      } value${values.items.length === 1 ? '' : 's'} — INSERT needs exactly one value per column.`,
+      values.span,
+    );
+  }
+
+  expectStatementEnd(c);
+
+  return {
+    kind: 'insert',
+    into,
+    ...(columns === undefined ? {} : { columns }),
+    values,
+    span: { from: insertToken.from, to: values.span.to },
+  };
+}
+
 export type StatementOutcome = { ok: true; ast: Statement } | { ok: false; error: QueryError };
 
 /**
- * The broader entry point: SELECT or DELETE, dispatched on the first keyword.
- * `runQuery.ts` uses this one; every SELECT-only caller keeps using `parse`.
+ * The broader entry point: SELECT, DELETE or INSERT, dispatched on the first
+ * keyword. `runQuery.ts` uses this one; every SELECT-only caller keeps using
+ * `parse`.
  */
 export function parseStatement(sql: string): StatementOutcome {
   return runParse(sql, (c) => {
     if (c.atEnd()) throw new ParseError('Nothing to run — the query is empty.', c.peek());
     const first = c.peek();
     if (first.type === 'keyword' && first.upper === 'DELETE') return parseDeleteBody(c);
+    if (first.type === 'keyword' && first.upper === 'INSERT') return parseInsertBody(c);
     return parseSelectBody(c);
   });
 }

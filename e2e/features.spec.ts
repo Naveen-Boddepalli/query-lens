@@ -390,6 +390,34 @@ test('DELETE removes a row for real — the Playground persists it across the ne
   await expect(page.getByText('47 rows returned')).toBeVisible();
 });
 
+test('INSERT adds a row for real — the Playground persists it across the next query', async ({
+  page,
+}) => {
+  await page.goto('/playground');
+  await expect(page.getByRole('button', { name: /^Edit data/ })).toHaveText('Edit data (48)');
+
+  const editor = page.locator('.cm-content');
+  await editor.click();
+  await page.keyboard.press('ControlOrMeta+A');
+  await page.keyboard.type("INSERT INTO users (id, name, email, age) VALUES (999, 'zeta', 'zeta@example.com', 50);");
+  await page.getByRole('button', { name: 'Run' }).click();
+  await page.getByLabel('Scrub to step').press('End');
+
+  await expect(page.getByText(/1 row inserted/)).toBeVisible();
+  await expect(page.getByText(/users now has 49 rows/)).toBeVisible();
+  // The seed editor's own count is the same `db` state INSERT just wrote to.
+  await expect(page.getByRole('button', { name: /^Edit data/ })).toHaveText('Edit data (49)');
+
+  // Persisted, not just narrated: a fresh SELECT for the new id finds it.
+  await editor.click();
+  await page.keyboard.press('ControlOrMeta+A');
+  await page.keyboard.type('SELECT * FROM users WHERE id = 999;');
+  await page.getByRole('button', { name: 'Run' }).click();
+  await page.getByLabel('Scrub to step').press('End');
+  await expect(page.getByText('1 row returned')).toBeVisible();
+  await expect(page.getByText('zeta@example.com')).toBeVisible();
+});
+
 test('the preset chips load and run a query in one click', async ({ page }) => {
   await page.goto('/playground');
 

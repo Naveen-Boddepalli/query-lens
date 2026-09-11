@@ -8,6 +8,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`INSERT`, the write path's second statement** (plan.md §22.2) — `INSERT INTO table [(col, ...)]
+  VALUES (value, ...)` adds a row for real, persisted in the Playground the same way `DELETE`
+  already persists a removal. `parseStatement` grows a third grammar: an optional column list
+  (omitted means every column, in table order, same as standard SQL) and a `VALUES` list of
+  literals only — v0 has no expressions or subqueries in an INSERT — sharing the
+  parenthesised-list parsing and error handling between the two lists. The new row lands on the
+  last heap page if it has room, or a fresh one otherwise (`BufferPool.write()`, the same
+  fresh-page path `Sort`'s spill already uses), and if the table is indexed, its key goes into the
+  B+Tree through the actual `insert` algorithm — real leaf/internal splits, narrated by comparing
+  the tree's node count and height before and after, the same technique `/tools/btree`'s own
+  insert narration already used. An `INSERT` with only literal values has no predicate and nothing
+  to scan, so — unlike `SELECT` and `DELETE` — it skips the Planner and Optimizer stages entirely
+  and goes straight from parse to execute; the pipeline tracker shows this honestly rather than
+  inventing a trivial plan with nothing in it. 20 unit tests (`__tests__/insert.test.ts`), plus new
+  `parseStatement`/`insertDisplayTree` coverage in `__tests__/parser.test.ts`, 1 e2e
 - **`DELETE`, the write path's first statement** (plan.md §22.2) — `DELETE FROM table [WHERE ...]`
   removes rows for real, persisted in the Playground the same way the seed-data editor already
   persists an edit. A new parser entry point, `parseStatement`, dispatches to `SELECT` or `DELETE`

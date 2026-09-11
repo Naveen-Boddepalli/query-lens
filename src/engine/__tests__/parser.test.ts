@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { parse, parseStatement } from '../parser/parser.ts';
-import { deleteDisplayTree, toDisplayTree } from '../parser/display.ts';
-import type { DeleteStatement, SelectStatement } from '../parser/ast.ts';
+import { deleteDisplayTree, insertDisplayTree, toDisplayTree } from '../parser/display.ts';
+import type { DeleteStatement, InsertStatement, SelectStatement } from '../parser/ast.ts';
 
 function ok(sql: string): SelectStatement {
   const out = parse(sql);
@@ -24,6 +24,12 @@ function okStatement(sql: string) {
 function okDelete(sql: string): DeleteStatement {
   const ast = okStatement(sql);
   if (ast.kind !== 'delete') throw new Error(`expected a delete, got ${ast.kind}`);
+  return ast;
+}
+
+function okInsert(sql: string): InsertStatement {
+  const ast = okStatement(sql);
+  if (ast.kind !== 'insert') throw new Error(`expected an insert, got ${ast.kind}`);
   return ast;
 }
 
@@ -246,13 +252,72 @@ describe('parseStatement — DELETE', () => {
     expect(e.message).toMatch(/unexpected/i);
   });
 
-  it('still rejects INSERT and UPDATE, naming DELETE as what does work', () => {
-    expect(errStatement('INSERT INTO users VALUES (1)').hint).toMatch(/DELETE is/);
-    expect(errStatement('UPDATE users SET age = 1').hint).toMatch(/DELETE is/);
+  it('still rejects UPDATE, naming DELETE and INSERT as what does work', () => {
+    expect(errStatement('UPDATE users SET age = 1').hint).toMatch(/DELETE and INSERT are/);
   });
 
   it('rejects an empty query the same way SELECT does', () => {
     expect(errStatement('').message).toMatch(/empty/i);
+  });
+});
+
+describe('parseStatement — INSERT', () => {
+  it('parses INSERT with an explicit column list', () => {
+    const ast = okInsert("INSERT INTO users (id, name) VALUES (1, 'ada')");
+    expect(ast).toMatchObject({ kind: 'insert', into: { name: 'users' } });
+    expect(ast.columns?.names.map((c) => c.name)).toEqual(['id', 'name']);
+    expect(ast.values.items.map((v) => v.value)).toEqual([1, 'ada']);
+  });
+
+  it('parses INSERT with no column list — every value, in table order', () => {
+    const ast = okInsert("INSERT INTO users VALUES (1, 'ada', 30)");
+    expect(ast.columns).toBeUndefined();
+    expect(ast.values.items.map((v) => v.value)).toEqual([1, 'ada', 30]);
+  });
+
+  it('parses every literal kind a VALUES list can hold', () => {
+    const ast = okInsert('INSERT INTO t (a, b, c, d) VALUES (1, NULL, TRUE, FALSE)');
+    expect(ast.values.items.map((v) => v.value)).toEqual([1, null, true, false]);
+  });
+
+  it('is case-insensitive and tolerates a trailing semicolon', () => {
+    expect(okInsert("insert into users values (1, 'a');").into.name).toBe('users');
+  });
+
+  it('spans the whole statement, from INSERT to the closing paren', () => {
+    const sql = "INSERT INTO users VALUES (1, 'a')";
+    expect(okInsert(sql).span).toEqual({ from: 0, to: sql.length });
+  });
+
+  it('rejects a missing INTO', () => {
+    expect(errStatement('INSERT users VALUES (1)').message).toMatch(/expected `into`/i);
+  });
+
+  it('rejects a missing table name', () => {
+    expect(errStatement('INSERT INTO').message).toMatch(/expected a table name/i);
+  });
+
+  it('rejects a missing VALUES', () => {
+    expect(errStatement('INSERT INTO users (id)').message).toMatch(/expected `values`/i);
+  });
+
+  it('rejects an empty VALUES list', () => {
+    expect(errStatement('INSERT INTO users VALUES ()').message).toMatch(/expected a value/i);
+  });
+
+  it('rejects a column name written where a value belongs, with a hint', () => {
+    const e = errStatement('INSERT INTO users (id) VALUES (age)');
+    expect(e.message).toMatch(/expected a value/i);
+    expect(e.hint).toMatch(/before VALUES/);
+  });
+
+  it('rejects a column count that does not match the value count', () => {
+    const e = errStatement('INSERT INTO users (id, name) VALUES (1)');
+    expect(e.message).toMatch(/2 columns but 1 value/);
+  });
+
+  it('rejects trailing junk, same as SELECT and DELETE', () => {
+    expect(errStatement("INSERT INTO users VALUES (1) garbage").message).toMatch(/unexpected/i);
   });
 });
 
@@ -295,17 +360,16 @@ describe('parse — errors point at the right text', () => {
     ['SELECT * FROM a JOIN b ON a.id = b.id', /JOIN/, /v1/],
     ['SELECT * FROM users GROUP BY id', /GROUP/, /v0 subset/],
     ['SELECT * FROM users LIMIT 5 OFFSET 10', /OFFSET/, /LIMIT on its own is/],
-    ['INSERT INTO users VALUES (1)', /INSERT/, /DELETE is/],
-    ['UPDATE users SET age = 1', /UPDATE/, /DELETE is/],
+    ['UPDATE users SET age = 1', /UPDATE/, /DELETE and INSERT are/],
   ])('explains out-of-scope SQL: %s', (sql, message, hint) => {
     const e = err(sql);
     expect(e.message).toMatch(message);
     expect(e.hint).toMatch(hint);
   });
 
-  it('rejects DELETE too — parse() is the SELECT-only entry point; parseStatement() is where DELETE lives', () => {
-    const e = err('DELETE FROM users');
-    expect(e.message).toMatch(/expected `select`/i);
+  it('rejects DELETE and INSERT too — parse() is the SELECT-only entry point; parseStatement() is where they live', () => {
+    expect(err('DELETE FROM users').message).toMatch(/expected `select`/i);
+    expect(err('INSERT INTO users VALUES (1)').message).toMatch(/expected `select`/i);
   });
 
   it('rejects parentheses with a scope explanation', () => {
@@ -363,6 +427,15 @@ describe('toDisplayTree', () => {
 
     const withWhere = deleteDisplayTree(okDelete('DELETE FROM users WHERE id = 5'));
     expect(withWhere.children?.map((c) => c.kind)).toEqual(['From', 'Where']);
+  });
+
+  it('insertDisplayTree mirrors INSERT — Into, then ColumnList when present, then Values', () => {
+    const bare = insertDisplayTree(okInsert("INSERT INTO users VALUES (1, 'ada')"));
+    expect(bare.label).toBe('INSERT');
+    expect(bare.children?.map((c) => c.kind)).toEqual(['Into', 'Values']);
+
+    const withColumns = insertDisplayTree(okInsert("INSERT INTO users (id, name) VALUES (1, 'ada')"));
+    expect(withColumns.children?.map((c) => c.kind)).toEqual(['Into', 'ColumnList', 'Values']);
   });
 
   it('gives every node a unique id, so a progressive reveal can animate', () => {

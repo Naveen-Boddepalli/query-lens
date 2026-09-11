@@ -54,7 +54,7 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
   // second importer of the planner + `buildPlan` + `toPlanDisplay`, so rolldown
   // hoisted that shared engine code out of the Playground chunk into its own —
   // a move between chunks, not growth, but it shows here.
-  { name: 'trace-ui', test: /^(PlaygroundPage|PlaygroundTour|TraceWorksheet|StageDetail|stageMeta|datasets|datasetCatalogue|types|seed|trace|runQuery|engine|SqlEditor|PlaybackControls|PresenterView|AstTree|BTreePanel|FlowTree|display)-/, kb: 41, note: 'Playground + the presenter view + the SQL editor + the shared panel/tree renderers (AstTree, BTreePanel, FlowTree, the two display transformers) plus the engine core (runQuery and the planner split into their own chunks once a third / second route imported them; SqlEditor split once /challenges became a second) plus the preset dataset library, the print worksheet, LIMIT, and ORDER BY + the Sort operator (plan.md §22.2)' },
+  { name: 'trace-ui', test: /^(PlaygroundPage|PlaygroundTour|TraceWorksheet|StageDetail|stageMeta|datasets|datasetCatalogue|types|seed|trace|runQuery|engine|SqlEditor|PlaybackControls|PresenterView|AstTree|BTreePanel|FlowTree|display)-/, kb: 43, note: 'Playground + the presenter view + the SQL editor + the shared panel/tree renderers (AstTree, BTreePanel, FlowTree, the two display transformers) plus the engine core (runQuery and the planner split into their own chunks once a third / second route imported them; SqlEditor split once /challenges became a second) plus the preset dataset library, the print worksheet, LIMIT, ORDER BY + the Sort operator, and DELETE + INSERT (plan.md §22.2)' },
   // The small per-route shells: landing hub, stage index, examples, docs shell,
   // 404, tools index — plus the redesign's shared UI kit (primitives.ts,
   // PageHeader, Hero) that two or more of them import.
@@ -156,8 +156,17 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
  * the real `deleteKey` B+Tree algorithm and marks heap pages dirty), and the
  * buffer pool's `markDirty` — a dirty page's eviction now costs a write, not
  * just a discard, completing the read/write pair `write()` started.
+ * Raised 385 → 387 for the write path's second statement, `INSERT` (§22.2):
+ * `parseStatement` grows a third grammar (an optional column list, a VALUES
+ * list of literals, sharing the parenthesised-list plumbing with the column
+ * list), `exec/insert.ts` (writes the new row onto the last heap page or a
+ * fresh one, then runs the real `insert` B+Tree algorithm — real leaf/internal
+ * splits, narrated the same way `/tools/btree` narrates its own), and the
+ * matching additions to `AstTree`/`display.ts`. INSERT has no predicate to
+ * plan or optimize, so it is also the first statement to skip straight from
+ * parse to execute — a real, honest gap in the pipeline tracker, not a bug.
  */
-const TOTAL_KB = 385;
+const TOTAL_KB = 387;
 
 const gzipKb = (bytes: Buffer): number => gzipSync(bytes, { level: 9 }).length / 1024;
 

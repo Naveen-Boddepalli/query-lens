@@ -7,12 +7,17 @@ import type { StepEvent } from '../types.ts';
 const db = () => createSeedDatabase();
 const run = (sql: string) => runQuery(sql, db());
 
+/** Narrows `RunResult['write']` to the `delete` branch, for `deletedCount`. */
+function asDelete(write: ReturnType<typeof run>['write']) {
+  return write?.kind === 'delete' ? write : undefined;
+}
+
 describe('DELETE — correctness', () => {
   it('removes exactly the matching row, via an indexed equality', () => {
     const { rows, write } = run('DELETE FROM users WHERE id = 5');
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ id: 5 });
-    expect(write?.deletedCount).toBe(1);
+    expect(asDelete(write)?.deletedCount).toBe(1);
     expect(write?.rows).toHaveLength(47);
     expect(write?.rows.some((r) => r.id === 5)).toBe(false);
   });
@@ -35,7 +40,7 @@ describe('DELETE — correctness', () => {
   it('deletes nothing, and reports nothing, for a key that does not exist', () => {
     const { rows, write } = run('DELETE FROM users WHERE id = 9999');
     expect(rows).toEqual([]);
-    expect(write?.deletedCount).toBe(0);
+    expect(asDelete(write)?.deletedCount).toBe(0);
     expect(write?.rows).toHaveLength(48);
   });
 

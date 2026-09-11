@@ -8,18 +8,24 @@
  * UI holds the whole array a worker boundary buys nothing.
  */
 
-import { emitDeleteParseEvents, emitParseEvents, parseStatement } from './parser/index.ts';
-import type { Statement } from './parser/index.ts';
+import {
+  emitDeleteParseEvents,
+  emitInsertParseEvents,
+  emitParseEvents,
+  parseStatement,
+} from './parser/index.ts';
+import type { InsertStatement, Statement } from './parser/index.ts';
 import { emitDeletePlanEvents, emitPlanEvents, findSort } from './planner/index.ts';
 import { buildHeap, createBufferPool } from './storage/index.ts';
 import { buildIndex, pageCountFor } from './index/index.ts';
 import { execute } from './exec/index.ts';
 import { executeDelete } from './exec/delete.ts';
+import { executeInsert } from './exec/insert.ts';
 import { sortTempPageCount } from './exec/sort.ts';
 import { createLockManager } from './locks/index.ts';
 import { createTracer } from './trace.ts';
 import { DEFAULT_ENGINE_OPTIONS } from './types.ts';
-import type { Database, EngineOptions, RunResult } from './types.ts';
+import type { Database, EngineOptions, Row, RunResult, Table } from './types.ts';
 
 export function runQuery(
   sql: string,
@@ -33,18 +39,19 @@ export function runQuery(
     return { events: drain(), rows: [], error: parsed.error };
   }
   const ast = parsed.ast;
+  const tableRef = ast.kind === 'insert' ? ast.into : ast.from;
 
-  const table = db.tables[ast.from.name];
+  const table = db.tables[tableRef.name];
   if (!table) {
     const known = Object.keys(db.tables);
     return {
       events: drain(),
       rows: [],
       error: {
-        message: `There is no table called \`${ast.from.name}\`.`,
+        message: `There is no table called \`${tableRef.name}\`.`,
         hint: known.length === 1 ? `The only table is \`${known[0]}\`.` : `Tables: ${known.join(', ')}.`,
-        from: ast.from.span.from,
-        to: ast.from.span.to,
+        from: tableRef.span.from,
+        to: tableRef.span.to,
       },
     };
   }
@@ -63,9 +70,51 @@ export function runQuery(
     };
   }
 
+  if (ast.kind === 'insert' && !ast.columns && ast.values.items.length !== table.columns.length) {
+    return {
+      events: drain(),
+      rows: [],
+      error: {
+        message: `\`${table.name}\` has ${table.columns.length} column${
+          table.columns.length === 1 ? '' : 's'
+        }, but this INSERT gives ${ast.values.items.length} value${ast.values.items.length === 1 ? '' : 's'}.`,
+        hint: `Columns: ${table.columns.join(', ')}. Name the columns you're setting if you don't want to supply all of them, e.g. INSERT INTO ${table.name} (${table.columns[0]}) VALUES (...).`,
+        from: ast.values.span.from,
+        to: ast.values.span.to,
+      },
+    };
+  }
+
   const heap = buildHeap(table, options.rowsPerPage);
   const tree = table.indexedColumn ? buildIndex(heap, table.indexedColumn) : null;
   const locks = createLockManager(emit);
+
+  if (ast.kind === 'insert') {
+    emitInsertParseEvents(emit, ast);
+    const row = buildInsertRow(ast, table);
+
+    const lastPage = heap.pages[heap.pages.length - 1]!;
+    const insertNeedsNewPage = lastPage.rows.length >= options.rowsPerPage;
+    const pool = createBufferPool(pageCountFor(heap, tree) + (insertNeedsNewPage ? 1 : 0), options, emit);
+
+    const { row: inserted } = executeInsert(row, { emit, pool, locks, heap, tree, table, options });
+    const rows = [...table.rows, inserted];
+
+    emit(
+      `1 row inserted, from ${pool.stats.misses} disk read${pool.stats.misses === 1 ? '' : 's'} and ${
+        pool.stats.writes
+      } write${pool.stats.writes === 1 ? '' : 's'}. ${table.name} now has ${rows.length} row${
+        rows.length === 1 ? '' : 's'
+      }.`,
+      { stage: 'result', rows: [inserted] },
+    );
+
+    return {
+      events: drain(),
+      rows: [inserted],
+      write: { kind: 'insert', table: table.name, insertedCount: 1, rows },
+    };
+  }
 
   if (ast.kind === 'delete') {
     emitDeleteParseEvents(emit, ast);
@@ -88,7 +137,7 @@ export function runQuery(
     return {
       events: drain(),
       rows: deleted,
-      write: { table: table.name, deletedCount: deleted.length, rows },
+      write: { kind: 'delete', table: table.name, deletedCount: deleted.length, rows },
     };
   }
 
@@ -112,7 +161,7 @@ export function runQuery(
 function referencedColumns(ast: Statement): { name: string; span: { from: number; to: number } }[] {
   const refs: { name: string; span: { from: number; to: number } }[] = [];
   if (ast.kind === 'select' && ast.select.kind === 'columns') refs.push(...ast.select.names);
-  if (ast.where) {
+  if (ast.kind !== 'insert' && ast.where) {
     const stack = [ast.where];
     while (stack.length > 0) {
       const e = stack.pop()!;
@@ -121,5 +170,19 @@ function referencedColumns(ast: Statement): { name: string; span: { from: number
     }
   }
   if (ast.kind === 'select' && ast.orderBy) refs.push({ name: ast.orderBy.column, span: ast.orderBy.span });
+  if (ast.kind === 'insert' && ast.columns) refs.push(...ast.columns.names);
   return refs;
+}
+
+/** Builds the new row: every table column defaults to `null`, then the given values overwrite it. */
+function buildInsertRow(ast: InsertStatement, table: Table): Row {
+  const row: Row = {};
+  for (const column of table.columns) row[column] = null;
+
+  const names = ast.columns ? ast.columns.names.map((c) => c.name) : table.columns;
+  names.forEach((name, i) => {
+    row[name] = ast.values.items[i]!.value;
+  });
+
+  return row;
 }
