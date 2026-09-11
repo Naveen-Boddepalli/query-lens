@@ -168,6 +168,22 @@ test('the locks sandbox blocks a conflicting request, then detects and resolves 
   await expect(page.getByText('page 1 · exclusive · release')).toBeVisible();
 });
 
+test('the grammar sandbox diagrams every rule, and a rule reference jumps to its own row', async ({
+  page,
+}) => {
+  await page.goto('/tools/grammar');
+  await expect(page.getByRole('heading', { name: 'Grammar sandbox' })).toBeVisible();
+
+  // Every rule the grammar data names gets its own row.
+  for (const rule of ['statement', 'select', 'delete', 'insert', 'update', 'aggregateCall']) {
+    await expect(page.locator(`#rule-${rule}`)).toBeAttached();
+  }
+
+  // Clicking a rule reference (not the heading of the same name) jumps to that rule's own row.
+  await page.locator('#rule-operand a', { hasText: 'identifier' }).click();
+  await expect(page.locator('#rule-identifier')).toBeInViewport();
+});
+
 test('the slotted-page inspector lays a heap page out to the byte', async ({ page }) => {
   await page.goto('/tools/page');
 

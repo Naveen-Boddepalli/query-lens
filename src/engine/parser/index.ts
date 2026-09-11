@@ -1,4 +1,4 @@
-export { parse, parseStatement } from './parser.ts';
+export { AGGREGATE_FNS, parse, parseStatement } from './parser.ts';
 export type { ParseOutcome, StatementOutcome } from './parser.ts';
 export { tokenize, KEYWORDS, TokenizeError } from './tokenizer.ts';
 export type { Token, TokenType } from './tokenizer.ts';

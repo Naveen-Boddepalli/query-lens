@@ -72,7 +72,10 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
   // `SortToolPage.tsx` + its `externalSort.ts` plan builder — a fifth `/tools/*`
   // sandbox, lazy, plus the `t=`-aware `urlState` from v13's dataset library
   // which also lands in this group.
-  { name: 'standalone-tools', test: /^(GalleryPage|ComparePage|SettingsPage|AssignmentsNewPage|TracePage|BufferPoolToolPage|ParserToolPage|BTreeToolPage|PageToolPage|SortToolPage|PlannerToolPage|LocksToolPage|lockSimulation|BufferPoolPanel|bufferTrace|slottedPage|externalSort|assignmentSet|preferences|urlState)-/, kb: 36, note: 'Gallery, Tools, Compare, Settings, Assignments (+ assignment sets), the trace inspector, and the buffer-pool / parser / B+Tree / slotted-page / external-merge-sort / planner / locks sandboxes (plan.md §21.3, §20.4, §22.3, §22.4)' },
+  // Raised 36 → 37 for the grammar sandbox (`/tools/grammar`, §22.3):
+  // `GrammarToolPage.tsx` + `grammar.ts`'s pure rule data — a seventh
+  // `/tools/*` sandbox, lazy, and the smallest of the set.
+  { name: 'standalone-tools', test: /^(GalleryPage|ComparePage|SettingsPage|AssignmentsNewPage|TracePage|BufferPoolToolPage|ParserToolPage|BTreeToolPage|PageToolPage|SortToolPage|PlannerToolPage|LocksToolPage|lockSimulation|GrammarToolPage|grammar|BufferPoolPanel|bufferTrace|slottedPage|externalSort|assignmentSet|preferences|urlState)-/, kb: 37, note: 'Gallery, Tools, Compare, Settings, Assignments (+ assignment sets), the trace inspector, and the buffer-pool / parser / B+Tree / slotted-page / external-merge-sort / planner / locks / grammar sandboxes (plan.md §21.3, §20.4, §22.3, §22.4)' },
   // The `/learn` guided track (plan.md §21.3): the index, one lesson page, the
   // localStorage progress helper, and `lessons.tsx` — the lesson prose plus the
   // link-builder that computes each step from a real engine run. Lazy; loads
@@ -193,8 +196,11 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
  * blocking, a wait-for graph, deadlock detection and victim selection — with
  * its own driver, the same way `/tools/sort` has one; the SQL pipeline itself
  * stays single-query on purpose, so nothing there needed to change.
+ * Raised 393 → 394 for `/tools/grammar` (§22.3): `grammar.ts`'s rule data plus
+ * `GrammarToolPage.tsx`'s chip-diagram renderer — the smallest `/tools/*`
+ * sandbox yet, since it is pure display over data the parser already defines.
  */
-const TOTAL_KB = 393;
+const TOTAL_KB = 394;
 
 const gzipKb = (bytes: Buffer): number => gzipSync(bytes, { level: 9 }).length / 1024;
 

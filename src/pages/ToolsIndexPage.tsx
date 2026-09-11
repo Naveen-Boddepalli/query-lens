@@ -57,6 +57,13 @@ const TOOLS = [
       'Two transactions placing real lock requests against each other — unlike the Playground, which runs one query at a time and never contends with itself. A conflicting request genuinely blocks; block each other in a cycle and watch the wait-for graph resolve, aborting the transaction that arrived more recently.',
     available: true,
   },
+  {
+    title: 'Grammar sandbox',
+    href: '/tools/grammar',
+    description:
+      'Every rule the parser accepts, diagrammed straight from the same data its own test checks against the real tokenizer and parser — a keyword pill, a clickable box for a rule it calls, a dashed bracket for anything optional, a loop glyph for anything repeated.',
+    available: true,
+  },
 ] as const;
 
 export function ToolsIndexPage() {

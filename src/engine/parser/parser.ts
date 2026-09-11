@@ -1,20 +1,27 @@
 /**
  * Recursive-descent parser for the v0 SQL subset (plan.md §4):
  *
- *   statement  := select | delete | insert | update
- *   select     := SELECT selectList FROM identifier [WHERE expr]
- *                 [ORDER BY identifier [ASC|DESC]] [LIMIT number] [';'] EOF
- *   delete     := DELETE FROM identifier [WHERE expr] [';'] EOF
- *   insert     := INSERT INTO identifier [columnList] VALUES valueList [';'] EOF
- *   update     := UPDATE identifier SET assignment (',' assignment)* [WHERE expr] [';'] EOF
- *   assignment := identifier '=' value
- *   columnList := '(' identifier (',' identifier)* ')'
- *   valueList  := '(' value (',' value)* ')'
- *   value      := number | string | NULL | TRUE | FALSE
- *   selectList := '*' | identifier (',' identifier)*
- *   expr       := comparison (AND comparison)*
- *   comparison := operand ('=' | '<' | '>') operand
- *   operand    := identifier | number | string | NULL | TRUE | FALSE
+ *   statement     := select | delete | insert | update
+ *   select        := SELECT selectList FROM identifier [WHERE expr]
+ *                     [GROUP BY identifier (',' identifier)*]
+ *                     [ORDER BY identifier [ASC|DESC]] [LIMIT number] [';'] EOF
+ *   delete        := DELETE FROM identifier [WHERE expr] [';'] EOF
+ *   insert        := INSERT INTO identifier [columnList] VALUES valueList [';'] EOF
+ *   update        := UPDATE identifier SET assignment (',' assignment)* [WHERE expr] [';'] EOF
+ *   assignment    := identifier '=' value
+ *   columnList    := '(' identifier (',' identifier)* ')'
+ *   valueList     := '(' value (',' value)* ')'
+ *   value         := number | string | NULL | TRUE | FALSE
+ *   selectList    := '*' | selectItem (',' selectItem)*
+ *   selectItem    := identifier | aggregateCall
+ *   aggregateCall := ('COUNT'|'SUM'|'AVG'|'MIN'|'MAX') '(' ('*' | identifier) ')'
+ *   expr          := comparison (AND comparison)*
+ *   comparison    := operand ('=' | '<' | '>') operand
+ *   operand       := identifier | number | string | NULL | TRUE | FALSE
+ *
+ * `GROUP BY` and `ORDER BY` are mutually exclusive — the parser rejects a
+ * query with both, so despite both appearing under `select` above, no query
+ * this grammar accepts ever has both clauses at once (see `checkGroupingValidity`).
  *
  * Hand-written rather than generated: the error messages are half the teaching
  * value, and they need to name the v0 scope explicitly.
@@ -131,7 +138,8 @@ function makeCursor(tokens: Token[]): Cursor {
   return { peek, next, atEnd, guardScope, expectKeyword, expectIdentifier };
 }
 
-const AGGREGATE_FNS = new Set(['COUNT', 'SUM', 'AVG', 'MIN', 'MAX']);
+/** The v0 aggregate functions. Not tokenizer keywords — they parse as identifiers, recognised by name here. */
+export const AGGREGATE_FNS = new Set(['COUNT', 'SUM', 'AVG', 'MIN', 'MAX']);
 
 /** A plain column, or an aggregate call — `COUNT(*)`, `SUM(age)`, and so on. */
 function parseSelectItem(c: Cursor): SelectItem {

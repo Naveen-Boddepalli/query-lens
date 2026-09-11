@@ -1,0 +1,78 @@
+import { describe, expect, it } from 'vitest';
+import { GRAMMAR, ruleNamed } from '../grammar.ts';
+import type { GrammarPart } from '../grammar.ts';
+import { KEYWORDS } from '../../engine/parser/tokenizer.ts';
+import { AGGREGATE_FNS, parseStatement } from '../../engine/parser/parser.ts';
+
+/** Every literal and rule-reference part, anywhere in the grammar, depth-first. */
+function walk(parts: GrammarPart[], visit: (part: GrammarPart) => void): void {
+  for (const part of parts) {
+    visit(part);
+    if (part.kind === 'optional') walk(part.parts, visit);
+    else if (part.kind === 'repeat') walk([part.separator, ...part.parts], visit);
+    else if (part.kind === 'choice') for (const option of part.options) walk(option, visit);
+  }
+}
+
+describe('grammar data — structural consistency', () => {
+  it('every rule reference points at a rule that actually exists', () => {
+    for (const r of GRAMMAR) {
+      walk(r.parts, (part) => {
+        if (part.kind === 'rule') {
+          expect(ruleNamed(part.name), `${r.name} references undefined rule "${part.name}"`).toBeDefined();
+        }
+      });
+    }
+  });
+
+  it('every all-caps literal is either a real keyword or a real aggregate function name', () => {
+    for (const r of GRAMMAR) {
+      walk(r.parts, (part) => {
+        if (part.kind === 'literal' && /^[A-Z]+$/.test(part.text)) {
+          expect(
+            KEYWORDS.has(part.text) || AGGREGATE_FNS.has(part.text),
+            `${r.name} claims "${part.text}" is a keyword or aggregate function`,
+          ).toBe(true);
+        }
+      });
+    }
+  });
+
+  it('no rule is defined twice', () => {
+    const names = GRAMMAR.map((r) => r.name);
+    expect(new Set(names).size).toBe(names.length);
+  });
+});
+
+/**
+ * The real guard against drift: one representative query per rule, each
+ * exercising the part of the grammar that rule names, run through the real
+ * parser. If a rule stops being true — a keyword renamed, a clause dropped —
+ * one of these fails, rather than the diagram quietly going on claiming
+ * something the parser no longer does.
+ */
+describe('grammar data — every rule is demonstrated by a query the real parser accepts', () => {
+  it.each([
+    ['statement (select)', 'SELECT * FROM users'],
+    ['statement (delete)', 'DELETE FROM users'],
+    ['statement (insert)', "INSERT INTO users VALUES (1, 'a')"],
+    ['statement (update)', 'UPDATE users SET age = 1'],
+    ['select — every optional clause at once', 'SELECT age, COUNT(*) FROM users WHERE age > 30 GROUP BY age LIMIT 5'],
+    ['select — ORDER BY with ASC/DESC', 'SELECT * FROM users ORDER BY age DESC'],
+    ['delete — with WHERE', 'DELETE FROM users WHERE id = 5'],
+    ['insert — with an explicit columnList', "INSERT INTO users (id, name) VALUES (1, 'a')"],
+    ['insert — valueList with more than one value', 'INSERT INTO users VALUES (1, 2, 3)'],
+    ['update — assignment repeated', "UPDATE users SET age = 1, name = 'a'"],
+    ['value — every literal kind', "INSERT INTO t VALUES (1, 'a', NULL, TRUE, FALSE)"],
+    ['selectList — star', 'SELECT * FROM users'],
+    ['selectList — repeated selectItem', 'SELECT id, name, age FROM users'],
+    ['selectItem — aggregateCall', 'SELECT COUNT(*) FROM users'],
+    ['aggregateCall — every function', 'SELECT COUNT(id), SUM(age), AVG(age), MIN(age), MAX(age) FROM users'],
+    ['expr — AND repeated', 'SELECT * FROM users WHERE id = 5 AND age > 1 AND age < 99'],
+    ['comparison — every operator', 'SELECT * FROM users WHERE id = 1'],
+    ['operand — identifier and every literal kind', "SELECT * FROM users WHERE name = 'a'"],
+  ] as const)('%s: %s', (_label, sql) => {
+    const result = parseStatement(sql);
+    expect(result.ok, result.ok ? undefined : result.error.message).toBe(true);
+  });
+});

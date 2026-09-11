@@ -8,6 +8,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`/tools/grammar`, a grammar sandbox diagramming the v0 SQL subset** (plan.md §22.3) —
+  `src/ui/grammar.ts` holds the grammar as data (a `GrammarPart` union: literal, rule reference,
+  choice, optional, repeat), deliberately mirroring `parser.ts`'s own BNF comment line-for-line
+  rather than a curved-arrow railroad diagram: a filled pill for a keyword, an outlined box for a
+  reference to another rule that jumps to that rule's own row on click, a dashed bracket around
+  anything optional, and a loop glyph with its separator next to anything repeated. The page is
+  `GalleryPage`'s discipline applied to the grammar itself — `ui/__tests__/grammar.test.ts` checks
+  the data against the *real* tokenizer and parser rather than trusting it by hand: every rule
+  reference must resolve to a rule that exists, every all-caps literal must be a real keyword or a
+  real aggregate function name, and one representative query per rule is run through the real
+  `parseStatement`. That last check caught two genuine bugs while the data was being written —
+  three missing terminal rules for `identifier`/`number`/`string`, and `COUNT`/`SUM`/`AVG`/`MIN`/`MAX`
+  not being tokenizer keywords at all (they parse as ordinary identifiers, recognised by name only
+  when followed by `(`; `AGGREGATE_FNS` is now exported from `parser.ts` so the test can check
+  against it too) — and along the way caught a real, pre-existing drift bug in `parser.ts`'s own
+  header comment, which had gone stale missing `GROUP BY` entirely from before aggregates existed.
+  21 unit tests, 1 e2e
 - **`/tools/locks`, with enforced concurrency as its own driver** (plan.md §22.2, §22.3) — two named
   transactions (`T1`/`T2`) placing real `shared`/`exclusive` lock requests against four numbered
   pages, with real blocking: `src/ui/lockSimulation.ts` is a pure, total simulator, in the same
