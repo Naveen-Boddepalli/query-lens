@@ -72,7 +72,7 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
   // `SortToolPage.tsx` + its `externalSort.ts` plan builder — a fifth `/tools/*`
   // sandbox, lazy, plus the `t=`-aware `urlState` from v13's dataset library
   // which also lands in this group.
-  { name: 'standalone-tools', test: /^(GalleryPage|ComparePage|SettingsPage|AssignmentsNewPage|TracePage|BufferPoolToolPage|ParserToolPage|BTreeToolPage|PageToolPage|SortToolPage|PlannerToolPage|BufferPoolPanel|bufferTrace|slottedPage|externalSort|assignmentSet|preferences|urlState)-/, kb: 33, note: 'Gallery, Tools, Compare, Settings, Assignments (+ assignment sets), the trace inspector, and the buffer-pool / parser / B+Tree / slotted-page / external-merge-sort / planner sandboxes (plan.md §21.3, §20.4, §22.3, §22.4)' },
+  { name: 'standalone-tools', test: /^(GalleryPage|ComparePage|SettingsPage|AssignmentsNewPage|TracePage|BufferPoolToolPage|ParserToolPage|BTreeToolPage|PageToolPage|SortToolPage|PlannerToolPage|LocksToolPage|lockSimulation|BufferPoolPanel|bufferTrace|slottedPage|externalSort|assignmentSet|preferences|urlState)-/, kb: 36, note: 'Gallery, Tools, Compare, Settings, Assignments (+ assignment sets), the trace inspector, and the buffer-pool / parser / B+Tree / slotted-page / external-merge-sort / planner / locks sandboxes (plan.md §21.3, §20.4, §22.3, §22.4)' },
   // The `/learn` guided track (plan.md §21.3): the index, one lesson page, the
   // localStorage progress helper, and `lessons.tsx` — the lesson prose plus the
   // link-builder that computes each step from a real engine run. Lazy; loads
@@ -186,8 +186,15 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
  * always applies before aggregation, so pushing a predicate underneath one is
  * never a shortcut. One strategy only; a sort aggregate and the `/compare`
  * mode plan.md names as the point of the pair are a later milestone.
+ * Index-only scan (a fourth optimizer rule) fit within the existing budget —
+ * no bump needed.
+ * Raised 390 → 393 for `/tools/locks` (§22.2 "enforced concurrency" / §22.3):
+ * `src/ui/lockSimulation.ts`, a pure two-transaction lock simulator — real
+ * blocking, a wait-for graph, deadlock detection and victim selection — with
+ * its own driver, the same way `/tools/sort` has one; the SQL pipeline itself
+ * stays single-query on purpose, so nothing there needed to change.
  */
-const TOTAL_KB = 390;
+const TOTAL_KB = 393;
 
 const gzipKb = (bytes: Buffer): number => gzipSync(bytes, { level: 9 }).length / 1024;
 

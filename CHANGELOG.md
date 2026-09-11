@@ -8,6 +8,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`/tools/locks`, with enforced concurrency as its own driver** (plan.md §22.2, §22.3) — two named
+  transactions (`T1`/`T2`) placing real `shared`/`exclusive` lock requests against four numbered
+  pages, with real blocking: `src/ui/lockSimulation.ts` is a pure, total simulator, in the same
+  shape as `externalSort.ts` — a conflicting request joins a real FIFO waiter queue per page
+  (batching consecutive compatible `shared` waiters together, stopping at the first `exclusive`,
+  the standard fairness trade-off every lock manager makes), and every request rebuilds the
+  wait-for graph fresh and checks for a cycle back to itself. A cycle is a deadlock: the *youngest*
+  transaction in it — the one whose first request came later — is aborted, its locks released and
+  any requests it was blocking promoted wherever that now makes room. The page renders a request
+  form, a per-page state grid (holders and waiters sit side by side, so the wait-for edge is
+  legible without a separate graph drawing), a per-transaction "release" button on each held lock,
+  a **Deadlock example** button that seeds the classic two-cycle in one click, and a narrated
+  timeline coloured by what each line actually says rather than by which call produced it — a
+  single deadlocked request's own narration bundles the bad news (the cycle) with the good (the
+  survivor's blocked request finally granted), and painting the whole bundle one colour would get
+  that backwards. The SQL pipeline's own lock manager (`engine/locks/lockManager.ts`) is untouched
+  on purpose: v0 runs one query at a time, so nothing there ever contends. 24 unit tests
+  (`ui/__tests__/lockSimulation.test.ts`), 1 e2e
 - **Index-only scan, a fourth optimizer rule** (plan.md §22.2) — when a query's SELECT list needs
   nothing but the indexed column itself (`SELECT id FROM users WHERE id = 5`), the B+Tree leaf's
   key already *is* the answer: `index-only-scan` rewrites the `IndexScan` `index-selection` just

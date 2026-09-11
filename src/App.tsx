@@ -94,6 +94,9 @@ const SortToolPage = lazy(() =>
 const PlannerToolPage = lazy(() =>
   import('./pages/tools/PlannerToolPage.tsx').then((m) => ({ default: m.PlannerToolPage })),
 );
+const LocksToolPage = lazy(() =>
+  import('./pages/tools/LocksToolPage.tsx').then((m) => ({ default: m.LocksToolPage })),
+);
 const ComparePage = lazy(() =>
   import('./pages/ComparePage.tsx').then((m) => ({ default: m.ComparePage })),
 );
@@ -180,6 +183,7 @@ export default function App() {
               <Route path="page" element={suspended(PageToolPage)} />
               <Route path="sort" element={suspended(SortToolPage)} />
               <Route path="planner" element={suspended(PlannerToolPage)} />
+              <Route path="locks" element={suspended(LocksToolPage)} />
             </Route>
 
             <Route path="docs" element={suspended(DocsLayout)}>

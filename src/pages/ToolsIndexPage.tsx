@@ -50,6 +50,13 @@ const TOOLS = [
       'Type a query and see its plan tree, canonical next to optimized. Toggle each rewrite rule — predicate pushdown, index selection — and the id index on or off, and watch the plan change. The optimize stage from the pipeline, with the rules on switches.',
     available: true,
   },
+  {
+    title: 'Locks sandbox',
+    href: '/tools/locks',
+    description:
+      'Two transactions placing real lock requests against each other — unlike the Playground, which runs one query at a time and never contends with itself. A conflicting request genuinely blocks; block each other in a cycle and watch the wait-for graph resolve, aborting the transaction that arrived more recently.',
+    available: true,
+  },
 ] as const;
 
 export function ToolsIndexPage() {

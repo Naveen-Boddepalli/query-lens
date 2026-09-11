@@ -141,6 +141,33 @@ test('the B+Tree sandbox inserts, deletes with rebalancing, and finds', async ({
   await expect(page.getByText('invariants hold')).toBeVisible();
 });
 
+test('the locks sandbox blocks a conflicting request, then detects and resolves a deadlock', async ({
+  page,
+}) => {
+  await page.goto('/tools/locks');
+
+  // T1 shared, T2 shared: no conflict, both granted.
+  await page.getByRole('radio', { name: 'T1' }).click();
+  await page.getByRole('button', { name: 'Request' }).click();
+  await page.getByRole('radio', { name: 'T2' }).click();
+  await page.getByRole('button', { name: 'Request' }).click();
+  await expect(page.getByText('T1 holds shared')).toBeVisible();
+  await expect(page.getByText('T2 holds shared')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Reset' }).click();
+
+  // The built-in example: two transactions each holding what the other wants,
+  // in exclusive mode — a real cycle the sandbox must detect and resolve.
+  await page.getByRole('button', { name: 'Deadlock example' }).click();
+  await expect(page.getByText(/Deadlock: T2 → T1 → T2/)).toBeVisible();
+  await expect(page.getByText('aborted', { exact: true })).toBeVisible();
+  // The survivor's long-blocked request is granted the moment the victim's lock frees
+  // up: T1 ends up holding both pages (T2, the victim, holds nothing — the only
+  // transaction either "release" button can belong to).
+  await expect(page.getByText('page 0 · exclusive · release')).toBeVisible();
+  await expect(page.getByText('page 1 · exclusive · release')).toBeVisible();
+});
+
 test('the slotted-page inspector lays a heap page out to the byte', async ({ page }) => {
   await page.goto('/tools/page');
 
