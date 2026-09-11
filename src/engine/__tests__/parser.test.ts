@@ -83,6 +83,53 @@ describe('parse — the v0 subset', () => {
   });
 });
 
+describe('parse — LIMIT', () => {
+  it('parses a bare LIMIT', () => {
+    const ast = ok('SELECT * FROM users LIMIT 5');
+    expect(ast.limit).toMatchObject({ value: 5 });
+  });
+
+  it('parses LIMIT after a WHERE', () => {
+    const ast = ok('SELECT * FROM users WHERE age > 30 LIMIT 5');
+    expect(ast.where).toBeDefined();
+    expect(ast.limit).toMatchObject({ value: 5 });
+  });
+
+  it('accepts LIMIT 0', () => {
+    expect(ok('SELECT * FROM users LIMIT 0').limit).toMatchObject({ value: 0 });
+  });
+
+  it('omits limit when there is none', () => {
+    expect(ok('SELECT * FROM users').limit).toBeUndefined();
+  });
+
+  it('is case-insensitive and tolerates a trailing semicolon', () => {
+    expect(ok('select * from users limit 3;').limit).toMatchObject({ value: 3 });
+  });
+
+  it('spans exactly the LIMIT clause, and the statement span includes it', () => {
+    const sql = 'SELECT * FROM users LIMIT 5';
+    const ast = ok(sql);
+    expect(sql.slice(ast.limit!.span.from, ast.limit!.span.to)).toBe('LIMIT 5');
+    expect(ast.span).toEqual({ from: 0, to: sql.length });
+  });
+
+  it('rejects a non-numeric LIMIT, pointing at the bad token', () => {
+    const e = err('SELECT * FROM users LIMIT ada');
+    expect(e.message).toMatch(/expected a whole number after limit/i);
+    expect(e.from).toBe(26);
+  });
+
+  it('rejects a fractional LIMIT', () => {
+    const e = err('SELECT * FROM users LIMIT 5.5');
+    expect(e.message).toMatch(/whole number/i);
+  });
+
+  it('rejects a missing LIMIT count', () => {
+    expect(err('SELECT * FROM users LIMIT').message).toMatch(/expected a whole number/i);
+  });
+});
+
 describe('parse — errors point at the right text', () => {
   it('rejects an empty query', () => {
     expect(err('').message).toMatch(/empty/i);
@@ -122,7 +169,7 @@ describe('parse — errors point at the right text', () => {
     ['SELECT * FROM a JOIN b ON a.id = b.id', /JOIN/, /v1/],
     ['SELECT * FROM users GROUP BY id', /GROUP/, /v0 subset/],
     ['SELECT * FROM users ORDER BY id', /ORDER/, /v0 subset/],
-    ['SELECT * FROM users LIMIT 5', /LIMIT/, /v0 subset/],
+    ['SELECT * FROM users LIMIT 5 OFFSET 10', /OFFSET/, /LIMIT on its own is/],
     ['INSERT INTO users VALUES (1)', /INSERT/, /only runs SELECT/],
     ['DELETE FROM users', /DELETE/, /only runs SELECT/],
   ])('explains out-of-scope SQL: %s', (sql, message, hint) => {
@@ -164,6 +211,12 @@ describe('toDisplayTree', () => {
   it('omits WHERE when there is no predicate', () => {
     const tree = toDisplayTree(ok('SELECT * FROM users'));
     expect(tree.children?.map((c) => c.kind)).toEqual(['SelectList', 'From']);
+  });
+
+  it('includes a Limit node, in clause order, when LIMIT is present', () => {
+    const tree = toDisplayTree(ok('SELECT * FROM users WHERE id = 5 LIMIT 5'));
+    expect(tree.children?.map((c) => c.kind)).toEqual(['SelectList', 'From', 'Where', 'Limit']);
+    expect(tree.children?.at(-1)).toMatchObject({ label: 'LIMIT', detail: '5' });
   });
 
   it('gives every node a unique id, so a progressive reveal can animate', () => {

@@ -26,6 +26,8 @@ const TONES: Record<string, string> = {
     'border-hue-violet/50 bg-hue-violet/5 text-hue-violet-ink hover:border-hue-violet/80 hover:bg-hue-violet/15',
   Literal: 'border-edge bg-surface-3 text-ink hover:border-ink-dim/50 hover:bg-surface-4',
   Star: 'border-edge bg-surface-3 text-ink hover:border-ink-dim/50 hover:bg-surface-4',
+  Limit:
+    'border-hue-orange/60 bg-hue-orange/10 text-hue-orange-ink hover:border-hue-orange/90 hover:bg-hue-orange/20',
 };
 
 export function AstTree({ root, highlight }: { root: ASTNode | null; highlight?: Span | undefined }) {

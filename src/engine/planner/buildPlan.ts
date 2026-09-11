@@ -1,9 +1,10 @@
 /**
  * AST → canonical logical plan, built bottom-up:
  *
- *   Project [columns]
- *     └─ Filter (predicate)          -- only when there is a WHERE
- *          └─ SeqScan table
+ *   Limit n                          -- only when there is a LIMIT
+ *     └─ Project [columns]
+ *          └─ Filter (predicate)     -- only when there is a WHERE
+ *               └─ SeqScan table
  *
  * This is the *unoptimised* shape on purpose. It is a direct, obvious
  * translation of the query text, which is what makes the optimizer's rewrite
@@ -25,5 +26,9 @@ export function buildPlan(ast: SelectStatement): Plan {
       ? { kind: 'star' }
       : { kind: 'columns', names: ast.select.names.map((c) => c.name) };
 
-  return { op: 'Project', columns, child: filtered };
+  const projected: Plan = { op: 'Project', columns, child: filtered };
+
+  return ast.limit === undefined
+    ? projected
+    : { op: 'Limit', count: ast.limit.value, child: projected };
 }

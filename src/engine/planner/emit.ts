@@ -54,6 +54,17 @@ export function emitPlanEvents(
     { stage: 'plan', planTree: display(current) },
   );
 
+  if (ast.limit !== undefined) {
+    const count = ast.limit.value;
+    current = { op: 'Limit', count, child: current };
+    emit(
+      `LIMIT becomes a Limit on top: it stops pulling rows once ${plural(count, 'row')} ${
+        count === 1 ? 'has' : 'have'
+      } come through — whatever is beneath it is never asked for the rest.`,
+      { stage: 'plan', planTree: display(current) },
+    );
+  }
+
   // The canonical plan is a direct translation of the query text. Everything
   // below is the optimizer earning its keep.
   const canonical = buildPlan(ast);

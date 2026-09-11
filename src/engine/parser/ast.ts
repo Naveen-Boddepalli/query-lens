@@ -28,6 +28,22 @@ export interface SelectStatement {
   select: SelectList;
   from: TableRef;
   where?: Expr;
+  /** `ORDER BY column [ASC|DESC]` — v0 sorts on one column. plan.md §22.2. */
+  orderBy?: OrderByClause;
+  /** `LIMIT n` — a non-negative whole number, checked at parse time. */
+  limit?: LimitClause;
+  span: Span;
+}
+
+export interface LimitClause {
+  value: number;
+  span: Span;
+}
+
+export interface OrderByClause {
+  column: string;
+  direction: 'asc' | 'desc';
+  /** Span of the column name, for the "no column called X" check. */
   span: Span;
 }
 

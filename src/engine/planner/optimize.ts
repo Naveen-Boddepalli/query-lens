@@ -30,6 +30,19 @@ export interface Rewrite {
 type Rule = (plan: Plan, table: Table) => Rewrite | null;
 
 /**
+ * `LIMIT` wraps the whole plan (`buildPlan.ts`), outside `Project` — but
+ * neither rewrite below cares about it. Stripping it here, and rewrapping the
+ * result, means `predicatePushdown` and `indexSelection` stay written against
+ * `Project → … → scan`, whether or not a `LIMIT` sits above it.
+ */
+function unwrapLimit(plan: Plan): { limit: number | null; rest: Plan } {
+  return plan.op === 'Limit' ? { limit: plan.count, rest: plan.child } : { limit: null, rest: plan };
+}
+function rewrapLimit(limit: number | null, plan: Plan): Plan {
+  return limit === null ? plan : { op: 'Limit', count: limit, child: plan };
+}
+
+/**
  * Fold `Filter` into the scan beneath it.
  *
  * In a single-table query the filter already sits directly above the scan, so
@@ -37,7 +50,8 @@ type Rule = (plan: Plan, table: Table) => Rewrite | null;
  * scan: the scan then discards non-matching rows as it reads them, instead of
  * materialising every row for a separate operator to throw away.
  */
-const predicatePushdown: Rule = (plan) => {
+const predicatePushdown: Rule = (input) => {
+  const { limit, rest: plan } = unwrapLimit(input);
   if (plan.op !== 'Project') return null;
   const filter = plan.child;
   if (filter.op !== 'Filter') return null;
@@ -45,7 +59,7 @@ const predicatePushdown: Rule = (plan) => {
   if (scan.op !== 'SeqScan' || scan.filter) return null;
 
   const pushed: Plan = { op: 'SeqScan', table: scan.table, filter: filter.predicate };
-  const root: Plan = { op: 'Project', columns: plan.columns, child: pushed };
+  const root = rewrapLimit(limit, { op: 'Project', columns: plan.columns, child: pushed });
 
   return {
     rule: 'predicate-pushdown',
@@ -61,7 +75,8 @@ const predicatePushdown: Rule = (plan) => {
  * indexed column. Conjuncts the index cannot answer stay behind as a recheck —
  * the index narrows the search, it does not verify the whole predicate.
  */
-const indexSelection: Rule = (plan, table) => {
+const indexSelection: Rule = (input, table) => {
+  const { limit, rest: plan } = unwrapLimit(input);
   if (plan.op !== 'Project') return null;
   const scan = plan.child;
   if (scan.op !== 'SeqScan' || !scan.filter) return null;
@@ -83,7 +98,7 @@ const indexSelection: Rule = (plan, table) => {
     key,
     ...(residual ? { residual } : {}),
   };
-  const root: Plan = { op: 'Project', columns: plan.columns, child: indexScan };
+  const root = rewrapLimit(limit, { op: 'Project', columns: plan.columns, child: indexScan });
 
   return {
     rule: 'index-selection',
@@ -135,5 +150,7 @@ export function optimize(
 export function scanPredicate(plan: Plan): Expr | undefined {
   if (plan.op === 'SeqScan') return plan.filter;
   if (plan.op === 'IndexScan') return plan.residual;
-  return plan.op === 'Filter' || plan.op === 'Project' ? scanPredicate(plan.child) : undefined;
+  return plan.op === 'Filter' || plan.op === 'Project' || plan.op === 'Limit'
+    ? scanPredicate(plan.child)
+    : undefined;
 }

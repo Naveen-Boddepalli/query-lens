@@ -169,6 +169,15 @@ function estimateNode(plan: Plan, table: Table, rowsPerPage: number, into: PlanC
       estimate = { estRows: child.estRows, estPages: child.estPages, basis: child.basis };
       break;
     }
+    case 'Limit': {
+      const child = estimateNode(plan.child, table, rowsPerPage, into);
+      estimate = {
+        estRows: Math.min(child.estRows, plan.count),
+        estPages: child.estPages,
+        basis: `min(${String(child.estRows)}, LIMIT ${String(plan.count)})`,
+      };
+      break;
+    }
   }
 
   into.set(plan, estimate);

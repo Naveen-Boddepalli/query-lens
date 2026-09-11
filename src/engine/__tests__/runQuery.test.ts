@@ -123,6 +123,18 @@ describe('runQuery', () => {
     expect(indexEvents.filter((e) => e.action === 'open')).toHaveLength(1);
     expect(indexEvents[0]?.action).toBe('open');
   });
+
+  it('a LIMIT reads fewer pages than the unbounded scan it caps', () => {
+    const pagesLoaded = (sql: string) =>
+      run(sql).events.filter((e) => e.stage === 'buffer' && e.action === 'load').length;
+    expect(pagesLoaded('SELECT * FROM users LIMIT 1')).toBeLessThan(pagesLoaded('SELECT * FROM users'));
+  });
+
+  it('a LIMIT past the whole table reads exactly as many pages as the unbounded scan', () => {
+    const pagesLoaded = (sql: string) =>
+      run(sql).events.filter((e) => e.stage === 'buffer' && e.action === 'load').length;
+    expect(pagesLoaded('SELECT * FROM users LIMIT 9999')).toBe(pagesLoaded('SELECT * FROM users'));
+  });
 });
 
 describe('runQuery — errors', () => {

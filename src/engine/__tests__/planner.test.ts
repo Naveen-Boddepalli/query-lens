@@ -23,7 +23,7 @@ const plan = (sql: string) => buildPlan(ast(sql));
 function shape(p: Plan): string[] {
   const ops = [p.op];
   let node = p;
-  while (node.op === 'Filter' || node.op === 'Project') {
+  while (node.op === 'Filter' || node.op === 'Project' || node.op === 'Limit') {
     node = node.child;
     ops.push(node.op);
   }
@@ -84,6 +84,21 @@ describe('buildPlan — the canonical shape', () => {
     expect(scan).toMatchObject({ op: 'SeqScan' });
     expect(scan).not.toHaveProperty('filter');
   });
+
+  it('wraps everything in a Limit, outermost, when there is a LIMIT', () => {
+    expect(shape(plan('SELECT * FROM users WHERE id = 5 LIMIT 3'))).toEqual([
+      'Limit',
+      'Project',
+      'Filter',
+      'SeqScan',
+    ]);
+    const p = plan('SELECT * FROM users LIMIT 3');
+    expect(p).toMatchObject({ op: 'Limit', count: 3 });
+  });
+
+  it('omits the Limit when there is no LIMIT', () => {
+    expect(shape(plan('SELECT * FROM users'))).not.toContain('Limit');
+  });
 });
 
 describe('optimize — predicate pushdown', () => {
@@ -139,6 +154,26 @@ describe('optimize — index selection', () => {
       'Project',
       'SeqScan',
     ]);
+  });
+});
+
+describe('optimize — LIMIT stays transparent to the rewrites', () => {
+  it('predicate pushdown still fires underneath a LIMIT', () => {
+    const p = final('SELECT * FROM users WHERE age > 30 LIMIT 3');
+    expect(shape(p)).toEqual(['Limit', 'Project', 'SeqScan']);
+    expect(p).toMatchObject({ op: 'Limit', count: 3 });
+    expect(exprToSql(scanPredicate(p)!)).toBe('age > 30');
+  });
+
+  it('index selection still fires underneath a LIMIT, and the count survives', () => {
+    const p = final('SELECT * FROM users WHERE id = 5 LIMIT 1');
+    expect(shape(p)).toEqual(['Limit', 'Project', 'IndexScan']);
+    expect(p).toMatchObject({ op: 'Limit', count: 1 });
+  });
+
+  it('a bare LIMIT with no WHERE fires no rule, and the count is preserved', () => {
+    expect(optimize(plan('SELECT * FROM users LIMIT 3'), users)).toHaveLength(0);
+    expect(plan('SELECT * FROM users LIMIT 3')).toMatchObject({ op: 'Limit', count: 3 });
   });
 });
 

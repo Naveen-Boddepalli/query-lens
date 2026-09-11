@@ -25,6 +25,9 @@ const QUERIES = [
   'SELECT * FROM users WHERE id = 9999',
   'SELECT id FROM users WHERE id = 5 AND age > 0',
   "SELECT * FROM users WHERE name = 'ada'",
+  'SELECT * FROM users LIMIT 5',
+  'SELECT * FROM users WHERE age > 30 LIMIT 3',
+  'SELECT * FROM users LIMIT 0',
 ] as const;
 
 function run(sql: string, over: Partial<EngineOptions> = {}) {

@@ -133,6 +133,56 @@ describe('execution results are correct', () => {
   });
 });
 
+describe('LIMIT — the Volcano short-circuit', () => {
+  it('caps the row count', () => {
+    expect(run('SELECT * FROM users LIMIT 5').rows).toHaveLength(5);
+    expect(run('SELECT * FROM users LIMIT 5').rows).toEqual(users.rows.slice(0, 5));
+  });
+
+  it('LIMIT 0 returns nothing', () => {
+    expect(run('SELECT * FROM users LIMIT 0').rows).toEqual([]);
+  });
+
+  it('a LIMIT past the row count returns everything, not an error', () => {
+    expect(run('SELECT * FROM users LIMIT 9999').rows).toEqual(users.rows);
+  });
+
+  it('applies after WHERE, on the filtered rows', () => {
+    const filtered = expected((r) => (r.age as number) > 30);
+    expect(run('SELECT * FROM users WHERE age > 30 LIMIT 3').rows).toEqual(filtered.slice(0, 3));
+  });
+
+  it('composes with an indexed lookup, which already returns at most one row', () => {
+    expect(run('SELECT * FROM users WHERE id = 5 LIMIT 1').rows).toEqual(
+      run('SELECT * FROM users WHERE id = 5').rows,
+    );
+  });
+
+  it('is the visible short-circuit: fewer pages load than an unbounded scan', () => {
+    const diskReads = (sql: string) =>
+      run(sql).events.filter((e) => e.stage === 'buffer' && e.action === 'load').length;
+    expect(diskReads('SELECT * FROM users LIMIT 1')).toBeLessThan(diskReads('SELECT * FROM users'));
+  });
+
+  it('the scan never produces more rows than the cap, even though more exist', () => {
+    const { events } = run('SELECT * FROM users LIMIT 3');
+    const seqScanRows = events.filter((e) => e.stage === 'execute' && e.op === 'SeqScan');
+    expect(seqScanRows.length).toBeLessThanOrEqual(3);
+    const last = seqScanRows.at(-1);
+    expect(last?.stage === 'execute' && last.rowsProduced).toBe(3);
+  });
+
+  it('releases the lock it was holding when the cap cuts the scan off', () => {
+    const { events } = run('SELECT * FROM users LIMIT 1');
+    let held = 0;
+    for (const e of events) {
+      if (e.stage !== 'lock') continue;
+      held += e.action === 'acquire' ? 1 : -1;
+    }
+    expect(held).toBe(0);
+  });
+});
+
 describe('execution events', () => {
   const executeEvents = (events: StepEvent[]) =>
     events.flatMap((e) => (e.stage === 'execute' ? [e] : []));

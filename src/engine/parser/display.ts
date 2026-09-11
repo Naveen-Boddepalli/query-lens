@@ -8,7 +8,7 @@
 
 import type { ASTNode } from '../types.ts';
 import type { Emit } from '../trace.ts';
-import type { Expr, SelectList, SelectStatement, TableRef } from './ast.ts';
+import type { Expr, LimitClause, SelectList, SelectStatement, TableRef } from './ast.ts';
 
 function selectListNode(select: SelectList): ASTNode {
   if (select.kind === 'star') {
@@ -82,6 +82,16 @@ function whereNode(where: Expr): ASTNode {
   };
 }
 
+function limitNode(limit: LimitClause): ASTNode {
+  return {
+    id: 'limit',
+    kind: 'Limit',
+    label: 'LIMIT',
+    detail: String(limit.value),
+    span: limit.span,
+  };
+}
+
 function root(children: ASTNode[], span: SelectStatement['span']): ASTNode {
   return { id: 'select-stmt', kind: 'SelectStatement', label: 'SELECT', span, children };
 }
@@ -90,6 +100,7 @@ function root(children: ASTNode[], span: SelectStatement['span']): ASTNode {
 export function toDisplayTree(ast: SelectStatement): ASTNode {
   const children = [selectListNode(ast.select), fromNode(ast.from)];
   if (ast.where) children.push(whereNode(ast.where));
+  if (ast.limit) children.push(limitNode(ast.limit));
   return root(children, ast.span);
 }
 
@@ -123,6 +134,15 @@ export function emitParseEvents(emit: Emit, ast: SelectStatement): void {
       'Read the WHERE clause and build the predicate tree. Nothing has been executed yet — this is still only structure.',
       { stage: 'parse', ast: root([...children], ast.span), span: ast.where.span },
     );
+  }
+
+  if (ast.limit) {
+    children.push(limitNode(ast.limit));
+    emit(`Read the LIMIT clause: cap the result at ${ast.limit.value}.`, {
+      stage: 'parse',
+      ast: root([...children], ast.span),
+      span: ast.limit.span,
+    });
   }
 
   const tree = root([...children], ast.span);

@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`LIMIT`** (plan.md §22.2, first half of `ORDER BY`/`LIMIT` + external sort) — a real `Limit`
+  plan node and Volcano operator: it stops pulling from the operator tree beneath it once the cap
+  is reached and closes it, so `SELECT * FROM users LIMIT 1` genuinely never reads the rest of the
+  table — fewer buffer `load` events than the unbounded scan, not just a shorter result. The
+  optimizer's `predicate-pushdown` and `index-selection` rules see past an outer `LIMIT`
+  transparently, the cost model estimates `min(child, LIMIT n)`, and the AST/plan trees and the
+  Parser/Planner/Optimizer panels all show it as a real node. `ORDER BY` and the `Sort` operator are
+  next
 - **In-app EXPLAIN** (plan.md §22.2) — a **Copy as EXPLAIN** button next to Copy as text/Mermaid,
   offered once a query has actually run (the result stage — `EXPLAIN ANALYZE` needs an execution,
   same as Postgres). Prints the final plan tree with the cost model's `est ~N rows` next to the

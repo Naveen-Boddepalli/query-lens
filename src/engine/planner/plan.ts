@@ -22,10 +22,14 @@ export type Plan =
       residual?: Expr;
     }
   | { op: 'Filter'; predicate: Expr; child: Plan }
-  | { op: 'Project'; columns: ProjectList; child: Plan };
+  | { op: 'Project'; columns: ProjectList; child: Plan }
+  /** `LIMIT n`, always the outermost node when present: `Limit → Project → …`. */
+  | { op: 'Limit'; count: number; child: Plan };
 
 export function childOf(plan: Plan): Plan | undefined {
-  return plan.op === 'Filter' || plan.op === 'Project' ? plan.child : undefined;
+  return plan.op === 'Filter' || plan.op === 'Project' || plan.op === 'Limit'
+    ? plan.child
+    : undefined;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -146,6 +150,15 @@ function convert(
         op: 'Project',
         label: 'Project',
         detail: plan.columns.kind === 'star' ? '*' : plan.columns.names.join(', '),
+        ...(highlight ? { highlight } : {}),
+        ...cost,
+        children: kid(plan.child),
+      };
+    case 'Limit':
+      return {
+        id,
+        op: 'Limit',
+        label: `Limit ${String(plan.count)}`,
         ...(highlight ? { highlight } : {}),
         ...cost,
         children: kid(plan.child),

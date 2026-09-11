@@ -2,7 +2,7 @@
  * Recursive-descent parser for the v0 SQL subset (plan.md §4):
  *
  *   statement  := select [';'] EOF
- *   select     := SELECT selectList FROM identifier [WHERE expr]
+ *   select     := SELECT selectList FROM identifier [WHERE expr] [LIMIT number]
  *   selectList := '*' | identifier (',' identifier)*
  *   expr       := comparison (AND comparison)*
  *   comparison := operand ('=' | '<' | '>') operand
@@ -42,7 +42,7 @@ const OUT_OF_SCOPE: Record<string, string> = {
   GROUP: 'GROUP BY is not in the v0 subset.',
   ORDER: 'ORDER BY is not in the v0 subset.',
   HAVING: 'HAVING is not in the v0 subset.',
-  LIMIT: 'LIMIT is not in the v0 subset.',
+  OFFSET: 'OFFSET is not in the v0 subset — LIMIT on its own is.',
   DISTINCT: 'DISTINCT is not in the v0 subset.',
   UNION: 'UNION is not in the v0 subset.',
   OR: 'v0 supports AND only. Combine predicates with AND.',
@@ -252,6 +252,21 @@ function parseOrThrow(sql: string): SelectStatement {
     where = parseExpr();
   }
 
+  const limitToken = peek().type === 'keyword' && peek().upper === 'LIMIT' ? next() : undefined;
+  let limit: SelectStatement['limit'];
+  if (limitToken) {
+    const token = peek();
+    if (token.type !== 'number' || token.value.includes('.')) {
+      guardScope(token);
+      throw new ParseError(
+        `Expected a whole number after LIMIT, found ${describe(token)}.`,
+        token,
+      );
+    }
+    next();
+    limit = { value: Number(token.value), span: { from: limitToken.from, to: token.to } };
+  }
+
   if (peek().type === 'semicolon') next();
 
   if (!atEnd()) {
@@ -260,12 +275,13 @@ function parseOrThrow(sql: string): SelectStatement {
     throw new ParseError(`Unexpected ${describe(token)} after the end of the query.`, token);
   }
 
-  const end = where?.span.to ?? from.span.to;
+  const end = limit?.span.to ?? where?.span.to ?? from.span.to;
   return {
     kind: 'select',
     select,
     from,
     ...(where === undefined ? {} : { where }),
+    ...(limit === undefined ? {} : { limit }),
     span: { from: selectToken.from, to: end },
   };
 }

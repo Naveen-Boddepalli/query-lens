@@ -331,6 +331,16 @@ test('the result stage offers an in-app EXPLAIN — estimate next to actual', as
   expect(explain).toMatch(/actual 1 rows/);
 });
 
+test('LIMIT caps the result and shows as a Limit node in the plan', async ({ page }) => {
+  await page.goto('/playground?q=SELECT+*+FROM+users+LIMIT+3&p=lru&x=0&s=9999');
+  await expect(page.getByText(/3 rows returned/)).toBeVisible();
+  await expect(page.getByText(/cost model guessed ~3/)).toBeVisible();
+
+  await page.getByRole('button', { name: 'Optimizer' }).click();
+  // Present in both the before and after trees — LIMIT isn't touched by either rewrite rule.
+  await expect(page.getByText('Limit 3', { exact: true }).first()).toBeVisible();
+});
+
 test('the preset chips load and run a query in one click', async ({ page }) => {
   await page.goto('/playground');
 

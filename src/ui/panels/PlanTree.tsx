@@ -19,6 +19,8 @@ const TONES: Record<string, string> = {
     'border-hue-orange/60 bg-hue-orange/10 text-hue-orange-ink hover:border-hue-orange/90 hover:bg-hue-orange/20',
   IndexScan:
     'border-hue-emerald/60 bg-hue-emerald/10 text-hue-emerald-ink hover:border-hue-emerald/90 hover:bg-hue-emerald/20',
+  Limit:
+    'border-hue-violet/60 bg-hue-violet/10 text-hue-violet-ink hover:border-hue-violet/90 hover:bg-hue-violet/20',
 };
 
 function toFlow(node: PlanNode): FlowNode {

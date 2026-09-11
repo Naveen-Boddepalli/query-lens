@@ -211,6 +211,42 @@ function project(columns: ProjectList, child: Operator, ctx: ExecContext): Opera
   };
 }
 
+/**
+ * Stops pulling from the child once `count` rows have been produced — the
+ * visible Volcano short-circuit (plan.md §22.2). Everything below a `Limit`
+ * that has not been pulled yet is simply never asked: a `SeqScan` beneath one
+ * can leave most of the table unread, which `close()` on the child makes
+ * final rather than merely paused.
+ */
+function limit(count: number, child: Operator, ctx: ExecContext): Operator {
+  const produced = counter(ctx, 'Limit');
+  let taken = 0;
+  let stopped = false;
+
+  return {
+    name: 'Limit',
+    open: child.open,
+    next() {
+      if (stopped || taken >= count) return null;
+      const row = child.next();
+      if (!row) return null;
+      taken += 1;
+      const capped = taken >= count;
+      if (capped) stopped = true;
+      produced(
+        `Limit passes row ${taken} of ${count} through${
+          capped ? ' — the cap is reached, so the rows beneath it are never pulled again' : ''
+        }.`,
+      );
+      if (capped) child.close();
+      return row;
+    },
+    close() {
+      if (!stopped) child.close();
+    },
+  };
+}
+
 /** Turns a plan tree into an operator tree of the same shape. */
 export function buildOperator(plan: Plan, ctx: ExecContext): Operator {
   switch (plan.op) {
@@ -222,5 +258,7 @@ export function buildOperator(plan: Plan, ctx: ExecContext): Operator {
       return filter(plan.predicate, buildOperator(plan.child, ctx), ctx);
     case 'Project':
       return project(plan.columns, buildOperator(plan.child, ctx), ctx);
+    case 'Limit':
+      return limit(plan.count, buildOperator(plan.child, ctx), ctx);
   }
 }

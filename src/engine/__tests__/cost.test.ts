@@ -113,6 +113,13 @@ describe('estimatePlan', () => {
     }
   });
 
+  it('LIMIT estimates the smaller of the child estimate and the cap', () => {
+    const under = rootEstimate(optimised('SELECT * FROM users LIMIT 3'), users, RPP);
+    expect(under.estRows).toBe(3);
+    const over = rootEstimate(optimised('SELECT * FROM users LIMIT 9999'), users, RPP);
+    expect(over.estRows).toBe(users.rows.length);
+  });
+
   it('a bare scan estimates the whole table, every page', () => {
     const est = rootEstimate(canonical('SELECT * FROM users'), users, RPP);
     expect(est.estRows).toBe(users.rows.length);
