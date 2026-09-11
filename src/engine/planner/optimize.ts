@@ -10,10 +10,10 @@
  * `optimize` event carrying the before and after trees.
  */
 
-import type { PredictionPrompt, Table } from '../types.ts';
+import type { PredictionPrompt, SqlValue, Table } from '../types.ts';
 import { indexSelectionPrompt } from '../predict.ts';
-import type { Expr } from '../parser/index.ts';
-import { conjoin, conjuncts, equalityOn } from './plan.ts';
+import type { CompareOp, Expr } from '../parser/index.ts';
+import { conjoin, conjuncts, equalityOn, exprToSql } from './plan.ts';
 import type { Plan } from './plan.ts';
 
 export interface Rewrite {
@@ -56,6 +56,89 @@ function unwrapSort(plan: Plan): { sort: SortSpec | null; rest: Plan } {
 function rewrapSort(sort: SortSpec | null, plan: Plan): Plan {
   return sort === null ? plan : { op: 'Sort', column: sort.column, direction: sort.direction, child: plan };
 }
+
+/**
+ * Statically compares two literals — the same three-valued logic
+ * `exec/evaluate.ts`'s `compare` uses at runtime (kept as a small separate
+ * copy rather than an import, since `planner/` never depends on `exec/`).
+ * NULL on either side is UNKNOWN, not foldable.
+ */
+function foldLiteralCompare(op: CompareOp, left: SqlValue, right: SqlValue): boolean | null {
+  if (left === null || right === null) return null;
+  if (typeof left === 'number' && typeof right === 'number') {
+    return op === '=' ? left === right : op === '<' ? left < right : left > right;
+  }
+  const a = typeof left === 'boolean' ? String(Number(left)) : String(left);
+  const b = typeof right === 'boolean' ? String(Number(right)) : String(right);
+  return op === '=' ? a === b : op === '<' ? a < b : a > b;
+}
+
+/**
+ * A comparison whose truth value does not depend on the row at all: two
+ * literals (`5 > 3`), or the same column compared with itself (`age = age`
+ * is always true; `age < age` is always false). Anything else — a column
+ * against a literal, or two different columns — depends on the data and
+ * cannot be folded.
+ */
+function foldComparison(expr: Extract<Expr, { kind: 'compare' }>): 'true' | 'false' | null {
+  const { op, left, right } = expr;
+
+  if (left.kind === 'literal' && right.kind === 'literal') {
+    const result = foldLiteralCompare(op, left.value, right.value);
+    return result === null ? null : result ? 'true' : 'false';
+  }
+
+  if (left.kind === 'column' && right.kind === 'column' && left.name === right.name) {
+    return op === '=' ? 'true' : 'false';
+  }
+
+  return null;
+}
+
+/**
+ * Drops any conjunct that folds to always-true — `X AND true` is just `X`.
+ *
+ * Deliberately does not act on an always-false conjunct: `X AND false` is
+ * `false`, but v0's plan shape has no node for "this scan produces no rows"
+ * without inventing one, so a `1 = 2`-shaped clause is left exactly as
+ * written. The query still runs correctly either way — this rule only ever
+ * removes work that was already redundant, never changes what a query
+ * returns.
+ */
+const constantFolding: Rule = (input) => {
+  const { limit, rest: plan } = unwrapLimit(input);
+  if (plan.op !== 'Project') return null;
+  const { sort, rest: belowProject } = unwrapSort(plan.child);
+  if (belowProject.op !== 'Filter') return null;
+
+  const parts = conjuncts(belowProject.predicate);
+  const alwaysTrue = parts
+    .map((p, i) => ({ i, expr: p }))
+    .filter(({ expr }) => expr.kind === 'compare' && foldComparison(expr) === 'true');
+  if (alwaysTrue.length === 0) return null;
+
+  const dropped = new Set(alwaysTrue.map((f) => f.i));
+  const residual = conjoin(parts.filter((_, i) => !dropped.has(i)));
+
+  const rewrittenFilter: Plan = residual
+    ? { op: 'Filter', predicate: residual, child: belowProject.child }
+    : belowProject.child;
+  const root = rewrapLimit(
+    limit,
+    { op: 'Project', columns: plan.columns, child: rewrapSort(sort, rewrittenFilter) },
+  );
+
+  const clauses = alwaysTrue.map((f) => `\`${exprToSql(f.expr)}\``).join(', ');
+  const verb = alwaysTrue.length === 1 ? 'is' : 'are';
+  return {
+    rule: 'constant-folding',
+    label: residual
+      ? `Constant folding: ${clauses} ${verb} always true, whatever the row — it drops out of the predicate, leaving only the part that actually depends on data.`
+      : `Constant folding: ${clauses} ${verb} always true, whatever the row — with nothing else in the WHERE clause, the filter disappears entirely.`,
+    plan: root,
+    changed: new Set<Plan>([rewrittenFilter]),
+  };
+};
 
 /**
  * Fold `Filter` into the scan beneath it.
@@ -133,6 +216,7 @@ const indexSelection: Rule = (input, table) => {
 };
 
 const RULES: { name: string; apply: Rule }[] = [
+  { name: 'constant-folding', apply: constantFolding },
   { name: 'predicate-pushdown', apply: predicatePushdown },
   { name: 'index-selection', apply: indexSelection },
 ];

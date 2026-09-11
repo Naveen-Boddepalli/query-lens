@@ -8,6 +8,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`constant-folding`, a third optimizer rule** (plan.md §22.2) — a comparison whose truth value
+  never depends on the row folds to a boolean at optimize time: two literals (`5 > 3`), or a column
+  compared with itself (`age = age`, the `col = col` case). An always-true conjunct drops out of the
+  predicate (`X AND true` is just `X`), narrated per clause and, when nothing is left, removing the
+  `Filter` entirely. Deliberately does not act on an always-false conjunct — v0's plan shape has no
+  node for "this scan returns no rows" without inventing one, so a `1 = 2`-shaped clause is left
+  exactly as written; the query still returns the right answer either way, just without the
+  optimization. Runs first, ahead of `predicate-pushdown`, so a folded predicate is what the later
+  rules and the cost model see — folding away a redundant `1 = 1` also sharpens the estimate, since
+  the cost model no longer has to guess at a clause that was never real. Reused automatically by
+  `DELETE`/`UPDATE`, which share `optimize()` with `SELECT`. `NULL = NULL` is UNKNOWN, not `TRUE`,
+  and correctly does not fold — SQL's three-valued logic, preserved. `projection pushdown` and
+  `OR`→`IN` stay out of scope: the former has no real I/O to save in v0's row-oriented heap, the
+  latter needs `OR` in the grammar first. 8 unit tests (`optimize — constant folding` in
+  `__tests__/planner.test.ts`), 1 e2e
 - **`UPDATE`, the write path's third and last statement** (plan.md §22.2) — `UPDATE table SET col =
   value [, col = value ...] [WHERE ...]` changes rows for real, completing the write path
   (`INSERT`/`UPDATE`/`DELETE` are now all real in the pipeline, not just `/tools/btree`).

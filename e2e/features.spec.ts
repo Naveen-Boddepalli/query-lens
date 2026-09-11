@@ -189,7 +189,7 @@ test('the planner sandbox runs the rewrite rules one at a time', async ({ page }
 
   const optimized = page.getByRole('figure').filter({ hasText: 'optimized' });
 
-  // Default: both rules on, index on → the scan becomes a B+Tree lookup.
+  // Default: every rule on, index on → the scan becomes a B+Tree lookup.
   await expect(optimized.getByText(/IndexScan/).first()).toBeVisible();
   await expect(page.getByText(/index-selection — /)).toContainText(/indexed/);
 
@@ -205,7 +205,13 @@ test('the planner sandbox runs the rewrite rules one at a time', async ({ page }
   await page.getByLabel('predicate-pushdown').uncheck();
   await expect(page.getByText('optimized · unchanged')).toBeVisible();
   await expect(page.getByText(/predicate-pushdown — turned off/)).toBeVisible();
-  await expect.poll(() => page.url()).toMatch(/rules=index-selection/);
+  await expect.poll(() => page.url()).toMatch(/rules=constant-folding%2Cindex-selection/);
+});
+
+test('the planner sandbox folds an always-true comparison out of the predicate', async ({ page }) => {
+  await page.goto('/tools/planner?q=SELECT%20*%20FROM%20users%20WHERE%201%20%3D%201%20AND%20id%20%3D%205');
+  await expect(page.getByText(/constant-folding — Constant folding:/)).toBeVisible();
+  await expect(page.getByText(/index-selection — /)).toContainText(/indexed/);
 });
 
 test('compare finds the point where LRU and clock sweep pick different victims', async ({ page }) => {

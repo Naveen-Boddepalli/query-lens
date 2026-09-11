@@ -132,6 +132,63 @@ describe('buildPlan — the canonical shape', () => {
   });
 });
 
+describe('optimize — constant folding', () => {
+  it('drops an always-true literal comparison, keeping the rest of the predicate', () => {
+    const steps = optimize(plan('SELECT * FROM users WHERE 1 = 1 AND id = 5'), users);
+    const folded = steps.find((s) => s.rule === 'constant-folding');
+    expect(folded).toBeDefined();
+    // constant-folding runs before predicate-pushdown, so the predicate still
+    // sits on a Filter node here, not yet pushed into the scan.
+    const root = folded!.plan;
+    const filterNode = root.op === 'Project' && root.child.op === 'Filter' ? root.child : null;
+    expect(filterNode && exprToSql(filterNode.predicate)).toBe('id = 5');
+  });
+
+  it('drops an always-true self-comparison (col = col)', () => {
+    const p = final('SELECT * FROM users WHERE age = age');
+    expect(shape(p)).toEqual(['Project', 'SeqScan']);
+    expect(scanPredicate(p)).toBeUndefined();
+  });
+
+  it('removes the Filter entirely when nothing else is left', () => {
+    const p = final('SELECT * FROM users WHERE 5 > 3');
+    expect(shape(p)).toEqual(['Project', 'SeqScan']);
+    expect(scanPredicate(p)).toBeUndefined();
+  });
+
+  it('still lets a later rule pick up what folding left behind', () => {
+    const p = final('SELECT * FROM users WHERE 1 = 1 AND id = 5');
+    expect(shape(p)).toEqual(['Project', 'IndexScan']);
+  });
+
+  it('does not fold an always-false comparison — v0 has no "no rows" plan shape', () => {
+    const p = final('SELECT * FROM users WHERE 1 = 2');
+    expect(shape(p)).toEqual(['Project', 'SeqScan']);
+    expect(exprToSql(scanPredicate(p)!)).toBe('1 = 2');
+  });
+
+  it('does not fold a column against a literal, or two different columns', () => {
+    expect(
+      optimize(plan('SELECT * FROM users WHERE age > 30'), users).some((s) => s.rule === 'constant-folding'),
+    ).toBe(false);
+    expect(
+      optimize(plan('SELECT * FROM users WHERE id = age'), users).some((s) => s.rule === 'constant-folding'),
+    ).toBe(false);
+  });
+
+  it('does not fold a comparison against NULL — UNKNOWN, not foldable', () => {
+    const steps = optimize(plan('SELECT * FROM users WHERE NULL = NULL AND id = 5'), users);
+    expect(steps.some((s) => s.rule === 'constant-folding')).toBe(false);
+  });
+
+  it('does not fire when there is no WHERE, or nothing foldable', () => {
+    expect(optimize(plan('SELECT * FROM users'), users)).toHaveLength(0);
+    expect(optimize(plan('SELECT * FROM users WHERE age > 30'), users).map((s) => s.rule)).toEqual([
+      'predicate-pushdown',
+    ]);
+  });
+});
+
 describe('optimize — predicate pushdown', () => {
   it('folds the Filter into the scan', () => {
     const steps = optimize(plan('SELECT * FROM users WHERE age > 30'), users);
@@ -278,8 +335,8 @@ describe('optimize — general properties', () => {
 describe('optimize — rule filter (plan.md §22.3 /tools/planner)', () => {
   const sql = 'SELECT * FROM users WHERE id = 5';
 
-  it('OPTIMIZER_RULES lists both rules, in run order', () => {
-    expect([...OPTIMIZER_RULES]).toEqual(['predicate-pushdown', 'index-selection']);
+  it('OPTIMIZER_RULES lists every rule, in run order', () => {
+    expect([...OPTIMIZER_RULES]).toEqual(['constant-folding', 'predicate-pushdown', 'index-selection']);
   });
 
   it('an empty set runs no rules — the canonical plan is untouched', () => {
