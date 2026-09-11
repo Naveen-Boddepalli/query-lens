@@ -124,6 +124,8 @@ export type StepEventBody =
   | { stage: 'buffer'; action: 'hit' | 'load'; pageId: number; frameId: number }
   /** A miss names no frame: nothing has been chosen to hold the page yet. */
   | { stage: 'buffer'; action: 'miss'; pageId: number }
+  /** A page a `Sort` produced (a run, or a merge-pass output) rather than read off disk. */
+  | { stage: 'buffer'; action: 'write'; pageId: number; frameId: number }
   | {
       stage: 'buffer';
       action: 'evict';

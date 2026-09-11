@@ -120,6 +120,58 @@ describe('buffer pool — hits and misses', () => {
   });
 });
 
+describe('buffer pool — write (Sort spill, plan.md §22.2)', () => {
+  it('occupies a free frame and counts as a write, not a hit or a miss', () => {
+    const { emit, drain } = createTracer();
+    const bp = createBufferPool(10, opts(), emit);
+    const result = bp.write(5);
+    expect(result).toEqual({ frameId: 0, hit: false });
+    expect(bufferActions(drain())).toEqual(['write']);
+    expect(bp.stats).toMatchObject({ writes: 1, hits: 0, misses: 0, evictions: 0 });
+  });
+
+  it('evicts under the same policy a read would, once every frame is full', () => {
+    const o = opts({ bufferFrames: 2 });
+    const { emit, drain } = createTracer();
+    const bp = createBufferPool(10, o, emit);
+    bp.write(0);
+    bp.unpin(0);
+    bp.write(1);
+    bp.unpin(1);
+    bp.write(2); // both frames full — this must evict
+    expect(bufferActions(drain())).toEqual(['write', 'write', 'evict', 'write']);
+    expect(bp.stats).toMatchObject({ writes: 3, evictions: 1 });
+  });
+
+  it('a write and a read compete for the same frames', () => {
+    const o = opts({ bufferFrames: 1 });
+    const { emit } = createTracer();
+    const bp = createBufferPool(10, o, emit);
+    const written = bp.write(0);
+    bp.unpin(written!.frameId);
+    // The pool has one frame, already holding the written page — a fetch of
+    // a different page must evict it.
+    bp.fetch(1);
+    expect(bp.stats.evictions).toBe(1);
+    expect(bp.state.frames[0]?.pageId).toBe(1);
+  });
+
+  it('rejects a page id outside the pool, exactly like fetch', () => {
+    const { emit } = createTracer();
+    const bp = createBufferPool(4, opts(), emit);
+    expect(bp.write(4)).toBeNull();
+    expect(bp.write(-1)).toBeNull();
+  });
+
+  it('returns null rather than evict when every frame is pinned', () => {
+    const o = opts({ bufferFrames: 1 });
+    const { emit } = createTracer();
+    const bp = createBufferPool(10, o, emit);
+    bp.write(0); // stays pinned — never unpinned
+    expect(bp.write(1)).toBeNull();
+  });
+});
+
 describe('buffer pool — pinning', () => {
   it('will not evict a pinned frame', () => {
     const o = opts({ bufferFrames: 2 });

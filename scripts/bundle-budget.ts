@@ -54,7 +54,7 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
   // second importer of the planner + `buildPlan` + `toPlanDisplay`, so rolldown
   // hoisted that shared engine code out of the Playground chunk into its own —
   // a move between chunks, not growth, but it shows here.
-  { name: 'trace-ui', test: /^(PlaygroundPage|PlaygroundTour|TraceWorksheet|StageDetail|stageMeta|datasets|datasetCatalogue|types|seed|trace|runQuery|engine|SqlEditor|PlaybackControls|PresenterView|AstTree|BTreePanel|FlowTree|display)-/, kb: 39, note: 'Playground + the presenter view + the SQL editor + the shared panel/tree renderers (AstTree, BTreePanel, FlowTree, the two display transformers) plus the engine core (runQuery and the planner split into their own chunks once a third / second route imported them; SqlEditor split once /challenges became a second) plus the preset dataset library, the print worksheet, and LIMIT (plan.md §22.2)' },
+  { name: 'trace-ui', test: /^(PlaygroundPage|PlaygroundTour|TraceWorksheet|StageDetail|stageMeta|datasets|datasetCatalogue|types|seed|trace|runQuery|engine|SqlEditor|PlaybackControls|PresenterView|AstTree|BTreePanel|FlowTree|display)-/, kb: 41, note: 'Playground + the presenter view + the SQL editor + the shared panel/tree renderers (AstTree, BTreePanel, FlowTree, the two display transformers) plus the engine core (runQuery and the planner split into their own chunks once a third / second route imported them; SqlEditor split once /challenges became a second) plus the preset dataset library, the print worksheet, LIMIT, and ORDER BY + the Sort operator (plan.md §22.2)' },
   // The small per-route shells: landing hub, stage index, examples, docs shell,
   // 404, tools index — plus the redesign's shared UI kit (primitives.ts,
   // PageHeader, Hero) that two or more of them import.
@@ -146,8 +146,12 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
  * Raised 379 → 381 for the cost model (`planner/cost.ts`, §22.2, §7.3) — per-node
  * row/page estimates in the `engine-*.js` chunk, the `~N rows` line in `FlowTree`,
  * and the estimate-vs-actual reconciliation in the plan/optimize/result narration.
+ * Raised 381 → 383 for `LIMIT` and `ORDER BY` + a real `Sort` operator (§22.2):
+ * a `Limit`/`Sort` plan node and executor operator each, `exec/sort.ts` (the
+ * external-merge-sort driver), the buffer pool's new `write` path for spill
+ * pages, and the matching additions to `PlanTree`/`AstTree`/`BufferPoolPanel`.
  */
-const TOTAL_KB = 381;
+const TOTAL_KB = 383;
 
 const gzipKb = (bytes: Buffer): number => gzipSync(bytes, { level: 9 }).length / 1024;
 

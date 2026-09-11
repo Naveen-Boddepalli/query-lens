@@ -41,6 +41,21 @@ export function emitPlanEvents(
     );
   }
 
+  if (ast.orderBy) {
+    current = {
+      op: 'Sort',
+      column: ast.orderBy.column,
+      direction: ast.orderBy.direction,
+      child: current,
+    };
+    emit(
+      `ORDER BY becomes a Sort above that: every row, ordered by \`${ast.orderBy.column}\` ${
+        ast.orderBy.direction === 'asc' ? 'ascending' : 'descending'
+      }. Unlike everything below it, Sort cannot produce a row until it has seen all of them.`,
+      { stage: 'plan', planTree: display(current) },
+    );
+  }
+
   const columns: ProjectList =
     ast.select.kind === 'star'
       ? { kind: 'star' }

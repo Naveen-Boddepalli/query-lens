@@ -68,6 +68,15 @@ describe('applyEvent', () => {
     expect(s.frames[0]?.pageId).toBeNull();
   });
 
+  it('writes a page into the named frame, exactly like a load, and counts it separately', () => {
+    const s = applyEvent(
+      initialViewState(opts),
+      ev(0, { stage: 'buffer', action: 'write', pageId: 7, frameId: 1 }),
+    );
+    expect(s.frames[1]).toMatchObject({ pageId: 7, usageCount: 1, lastTouchedAt: 0 });
+    expect(s.bufferStats).toMatchObject({ writes: 1, hits: 0, misses: 0, evictions: 0 });
+  });
+
   it('counts hits and caps usageCount at 5', () => {
     let s = applyEvent(
       initialViewState(opts),
@@ -187,7 +196,7 @@ describe('stateAt', () => {
     expect(final.rows).toEqual([{ id: 5, name: 'ada' }]);
     expect(final.stage).toBe('result');
     expect(final.indexOutcome).toBe('found');
-    expect(final.bufferStats).toEqual({ hits: 1, misses: 2, evictions: 0 });
+    expect(final.bufferStats).toEqual({ hits: 1, misses: 2, evictions: 0, writes: 0 });
     expect(final.locks).toEqual([]);
   });
 });

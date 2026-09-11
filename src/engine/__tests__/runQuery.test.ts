@@ -135,6 +135,48 @@ describe('runQuery', () => {
       run(sql).events.filter((e) => e.stage === 'buffer' && e.action === 'load').length;
     expect(pagesLoaded('SELECT * FROM users LIMIT 9999')).toBe(pagesLoaded('SELECT * FROM users'));
   });
+
+  it('an ORDER BY still walks the same named stages — Sort adds no new stage of its own', () => {
+    expect(stages(run('SELECT * FROM users ORDER BY age').events)).toEqual([
+      'parse',
+      'plan',
+      'optimize',
+      'lock',
+      'buffer',
+      'execute',
+      'result',
+    ]);
+  });
+
+  it('an ORDER BY on the indexed equality still walks the index', () => {
+    expect(stages(run('SELECT * FROM users WHERE id = 5 ORDER BY age').events)).toEqual([
+      'parse',
+      'plan',
+      'optimize',
+      'index',
+      'lock',
+      'buffer',
+      'execute',
+      'result',
+    ]);
+  });
+
+  it('ORDER BY writes real spill pages through the buffer pool, competing with the heap for frames', () => {
+    const { events } = run('SELECT * FROM users ORDER BY age');
+    const writes = events.filter((e) => e.stage === 'buffer' && e.action === 'write');
+    const evictions = events.filter((e) => e.stage === 'buffer' && e.action === 'evict');
+    expect(writes.length).toBeGreaterThan(0);
+    // Every write has a distinct page id — never overwrites a still-needed page.
+    const writtenIds = writes.map((e) => (e.stage === 'buffer' && e.action === 'write' ? e.pageId : -1));
+    expect(new Set(writtenIds).size).toBe(writtenIds.length);
+    // The spill and the heap scan share only 8 frames, so eviction is real.
+    expect(evictions.length).toBeGreaterThan(0);
+  });
+
+  it('a plain query with no ORDER BY writes nothing', () => {
+    const { events } = run('SELECT * FROM users WHERE id = 5');
+    expect(events.filter((e) => e.stage === 'buffer' && e.action === 'write')).toHaveLength(0);
+  });
 });
 
 describe('runQuery — errors', () => {

@@ -341,6 +341,21 @@ test('LIMIT caps the result and shows as a Limit node in the plan', async ({ pag
   await expect(page.getByText('Limit 3', { exact: true }).first()).toBeVisible();
 });
 
+test('ORDER BY sorts the result and spills through the real buffer pool', async ({ page }) => {
+  await page.goto('/playground?q=SELECT+*+FROM+users+ORDER+BY+age+DESC&p=lru&x=0&s=9999');
+  await expect(page.getByText(/48 rows returned/)).toBeVisible();
+  // The first row after a DESC sort by age is the oldest user in the seed data.
+  const firstRow = page.locator('table tbody tr').first();
+  await expect(firstRow).toContainText('matz');
+
+  await page.getByRole('button', { name: 'Optimizer' }).click();
+  await expect(page.getByText('Sort', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText('age DESC', { exact: true }).first()).toBeVisible();
+
+  await page.getByRole('button', { name: 'Buffer Pool' }).click();
+  await expect(page.getByText(/writes/)).toBeVisible();
+});
+
 test('the preset chips load and run a query in one click', async ({ page }) => {
   await page.goto('/playground');
 

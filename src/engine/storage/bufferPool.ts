@@ -21,9 +21,16 @@ export interface FetchResult {
 
 export interface BufferPool {
   fetch: (pageId: number) => FetchResult | null;
+  /**
+   * Claims a frame for a page this caller is producing, not reading off disk
+   * — a `Sort` operator's spill (plan.md §22.2). Competes for the same frames
+   * as every heap/index read, evicting under the same policy when the pool is
+   * full. Returns `null` only when every frame is pinned.
+   */
+  write: (pageId: number) => FetchResult | null;
   unpin: (frameId: number) => void;
   readonly state: BufferState;
-  readonly stats: { hits: number; misses: number; evictions: number };
+  readonly stats: { hits: number; misses: number; evictions: number; writes: number };
 }
 
 function emptyState(frameCount: number): BufferState {
@@ -80,7 +87,7 @@ export function createBufferPool(
   const state = emptyState(options.bufferFrames);
   if (lookahead !== undefined) state.lookahead = lookahead;
   const policy: ReplacementPolicy = policyFor(options.policy);
-  const stats = { hits: 0, misses: 0, evictions: 0 };
+  const stats = { hits: 0, misses: 0, evictions: 0, writes: 0 };
   // Which access `fetch` is resolving, so `optimal` can look past it. Advances
   // once per successful `fetch`, staying aligned with the reference index.
   let accessIndex = -1;
@@ -90,6 +97,51 @@ export function createBufferPool(
 
   const resident = (pageId: number): Frame | undefined =>
     state.frames.find((f) => f.pageId === pageId);
+
+  /**
+   * A free frame, or the policy's eviction victim — shared between a disk
+   * read's miss and a fresh write, since both need "a frame for this page"
+   * and both may have to evict for it under the same policy. `incoming` is
+   * narration only: what the emitted `evict` event says is displacing the
+   * victim.
+   */
+  function claimFrame(incoming: number, forWrite: boolean): Frame | null {
+    const free = state.frames.find((f) => f.pageId === null);
+    if (free) return free;
+
+    const choice = policy.selectVictim(state, emit);
+    if (choice === null) return null; // every frame pinned
+    const victimId = choice.frameId;
+    const victim = state.frames.find((f) => f.frameId === victimId)!;
+    const evicted = victim.pageId!;
+
+    stats.evictions += 1;
+
+    // The eviction question is asked once regardless of which path triggers
+    // it — a write can just as easily be the first eviction a trace shows.
+    const prompt = evictionAsked ? null : evictionPrompt(state.frames, victimId, incoming, options.policy);
+    evictionAsked = true;
+
+    emit(
+      `The pool is full, so page ${evicted} is evicted from frame ${victimId} to make room ${
+        forWrite ? 'for a freshly written page' : ''
+      }. ${evictionReason(options.policy)}`,
+      {
+        stage: 'buffer',
+        action: 'evict',
+        frameId: victimId,
+        victimPageId: evicted,
+        pageId: incoming,
+        ...(choice.clockHand === undefined ? {} : { clockHand: choice.clockHand }),
+      },
+      prompt ? { predictable: prompt } : undefined,
+    );
+
+    victim.pageId = null;
+    victim.usageCount = 0;
+    victim.loadedAt = -1;
+    return victim;
+  }
 
   function fetch(pageId: number): FetchResult | null {
     if (!Number.isInteger(pageId) || pageId < 0 || pageId >= pageCount) return null;
@@ -116,42 +168,8 @@ export function createBufferPool(
       pageId,
     });
 
-    let target = state.frames.find((f) => f.pageId === null);
-
-    if (!target) {
-      const choice = policy.selectVictim(state, emit);
-      if (choice === null) return null; // every frame pinned
-      const victimId = choice.frameId;
-      const victim = state.frames.find((f) => f.frameId === victimId)!;
-      const evicted = victim.pageId!;
-
-      stats.evictions += 1;
-
-      const prompt = evictionAsked
-        ? null
-        : evictionPrompt(state.frames, victimId, pageId, options.policy);
-      evictionAsked = true;
-
-      emit(
-        `The pool is full, so page ${evicted} is evicted from frame ${victimId} to make room. ${evictionReason(
-          options.policy,
-        )}`,
-        {
-          stage: 'buffer',
-          action: 'evict',
-          frameId: victimId,
-          victimPageId: evicted,
-          pageId,
-          ...(choice.clockHand === undefined ? {} : { clockHand: choice.clockHand }),
-        },
-        prompt ? { predictable: prompt } : undefined,
-      );
-
-      victim.pageId = null;
-      victim.usageCount = 0;
-      victim.loadedAt = -1;
-      target = victim;
-    }
+    const target = claimFrame(pageId, false);
+    if (!target) return null;
 
     // Bump the clock on every load, not only in `onAccess` — FIFO and
     // second-chance order frames by `loadedAt`, and FIFO's `onAccess` is a
@@ -174,10 +192,41 @@ export function createBufferPool(
     return { frameId: target.frameId, hit: false };
   }
 
+  /**
+   * A page a caller is *producing* — a `Sort` run or merge-pass output — not
+   * reading off disk. Always a fresh page id (a `Sort` operator never reuses
+   * one within a run), so unlike `fetch` there is no hit path: it either
+   * takes a free frame or evicts, exactly the way a disk read does, and the
+   * two kinds of page genuinely compete for the same pool.
+   */
+  function write(pageId: number): FetchResult | null {
+    if (!Number.isInteger(pageId) || pageId < 0 || pageId >= pageCount) return null;
+
+    stats.writes += 1;
+    const target = claimFrame(pageId, true);
+    if (!target) return null;
+
+    state.now += 1;
+    target.pageId = pageId;
+    target.usageCount = 0;
+    target.loadedAt = state.now;
+    target.pinCount += 1;
+    (policy.onLoad ?? policy.onAccess)(state, target.frameId);
+
+    emit(`Write page ${pageId} into frame ${target.frameId} — a fresh page, not a disk read.`, {
+      stage: 'buffer',
+      action: 'write',
+      pageId,
+      frameId: target.frameId,
+    });
+
+    return { frameId: target.frameId, hit: false };
+  }
+
   function unpin(frameId: number): void {
     const f = state.frames.find((x) => x.frameId === frameId);
     if (f && f.pinCount > 0) f.pinCount -= 1;
   }
 
-  return { fetch, unpin, state, stats };
+  return { fetch, write, unpin, state, stats };
 }

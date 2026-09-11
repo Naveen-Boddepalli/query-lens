@@ -4,13 +4,13 @@ import type { BufferFrame, ReplacementPolicyName, StepEvent } from '../../engine
 
 export interface BufferPoolPanelProps {
   frames: BufferFrame[];
-  stats: { hits: number; misses: number; evictions: number };
+  stats: { hits: number; misses: number; evictions: number; writes: number };
   clockHand: number;
   policy: ReplacementPolicyName;
   lastEvent: StepEvent | null;
 }
 
-type FrameMood = 'hit' | 'load' | 'evict' | 'sweep' | null;
+type FrameMood = 'hit' | 'load' | 'write' | 'evict' | 'sweep' | null;
 
 function moodOf(frame: BufferFrame, lastEvent: StepEvent | null): FrameMood {
   if (lastEvent?.stage !== 'buffer') return null;
@@ -28,16 +28,22 @@ function moodOf(frame: BufferFrame, lastEvent: StepEvent | null): FrameMood {
 const MOOD_CLASS: Record<Exclude<FrameMood, null>, string> = {
   hit: 'border-hit bg-hit/15 shadow-[0_0_26px_-4px_var(--color-hit)] hover:bg-hit/25',
   load: 'border-miss bg-miss/15 shadow-[0_0_26px_-4px_var(--color-miss)] hover:bg-miss/25',
+  // Violet, not one of the read-path colours — a write is neither a hit nor a
+  // disk read, and it shares its tone with the Sort plan node that causes it.
+  write:
+    'border-hue-violet bg-hue-violet/15 shadow-[0_0_26px_-4px_var(--color-hue-violet)] hover:bg-hue-violet/25',
   evict: 'border-evict bg-evict/20 shadow-[0_0_28px_-4px_var(--color-evict)] hover:bg-evict/30',
   sweep: 'border-accent bg-accent/10 shadow-glow hover:bg-accent/20',
 };
 
 // A leading glyph so the mood reads without relying on the border hue — the
 // always-on second channel plan.md §22.6 asks for (colour-vision deficiency,
-// projector wash-out). `✓` resident, `↓` came from disk, `✕` dropped, `↻` swept.
+// projector wash-out). `✓` resident, `↓` came from disk, `✎` freshly written,
+// `✕` dropped, `↻` swept.
 const MOOD_TAG: Record<Exclude<FrameMood, null>, string> = {
   hit: '✓ hit',
   load: '↓ disk read',
+  write: '✎ written',
   evict: '✕ evicted',
   sweep: '↻ swept',
 };
@@ -199,6 +205,12 @@ export function BufferPoolPanel({
           <dt className="text-ink-dim"><span aria-hidden>✕ </span>evictions</dt>
           <dd className="font-mono text-evict">{stats.evictions}</dd>
         </div>
+        {stats.writes > 0 && (
+          <div>
+            <dt className="text-ink-dim"><span aria-hidden>✎ </span>writes</dt>
+            <dd className="font-mono text-hue-violet-ink">{stats.writes}</dd>
+          </div>
+        )}
         <div>
           <dt className="text-ink-dim">hit rate</dt>
           <dd className="font-mono">{hitRate}</dd>

@@ -3,8 +3,9 @@
  *
  *   Limit n                          -- only when there is a LIMIT
  *     └─ Project [columns]
- *          └─ Filter (predicate)     -- only when there is a WHERE
- *               └─ SeqScan table
+ *          └─ Sort column [ASC|DESC] -- only when there is an ORDER BY
+ *               └─ Filter (predicate)     -- only when there is a WHERE
+ *                    └─ SeqScan table
  *
  * This is the *unoptimised* shape on purpose. It is a direct, obvious
  * translation of the query text, which is what makes the optimizer's rewrite
@@ -21,12 +22,16 @@ export function buildPlan(ast: SelectStatement): Plan {
     ? { op: 'Filter', predicate: ast.where, child: scan }
     : scan;
 
+  const sorted: Plan = ast.orderBy
+    ? { op: 'Sort', column: ast.orderBy.column, direction: ast.orderBy.direction, child: filtered }
+    : filtered;
+
   const columns: ProjectList =
     ast.select.kind === 'star'
       ? { kind: 'star' }
       : { kind: 'columns', names: ast.select.names.map((c) => c.name) };
 
-  const projected: Plan = { op: 'Project', columns, child: filtered };
+  const projected: Plan = { op: 'Project', columns, child: sorted };
 
   return ast.limit === undefined
     ? projected

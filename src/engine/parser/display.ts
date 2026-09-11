@@ -8,7 +8,7 @@
 
 import type { ASTNode } from '../types.ts';
 import type { Emit } from '../trace.ts';
-import type { Expr, LimitClause, SelectList, SelectStatement, TableRef } from './ast.ts';
+import type { Expr, LimitClause, OrderByClause, SelectList, SelectStatement, TableRef } from './ast.ts';
 
 function selectListNode(select: SelectList): ASTNode {
   if (select.kind === 'star') {
@@ -82,6 +82,17 @@ function whereNode(where: Expr): ASTNode {
   };
 }
 
+function orderByNode(orderBy: OrderByClause): ASTNode {
+  return {
+    id: 'orderBy',
+    kind: 'OrderBy',
+    label: 'ORDER BY',
+    detail: `${orderBy.column} ${orderBy.direction === 'asc' ? 'ASC' : 'DESC'}`,
+    span: orderBy.span,
+    children: [{ id: 'orderBy.col', kind: 'Column', label: orderBy.column, span: orderBy.span }],
+  };
+}
+
 function limitNode(limit: LimitClause): ASTNode {
   return {
     id: 'limit',
@@ -100,6 +111,7 @@ function root(children: ASTNode[], span: SelectStatement['span']): ASTNode {
 export function toDisplayTree(ast: SelectStatement): ASTNode {
   const children = [selectListNode(ast.select), fromNode(ast.from)];
   if (ast.where) children.push(whereNode(ast.where));
+  if (ast.orderBy) children.push(orderByNode(ast.orderBy));
   if (ast.limit) children.push(limitNode(ast.limit));
   return root(children, ast.span);
 }
@@ -133,6 +145,16 @@ export function emitParseEvents(emit: Emit, ast: SelectStatement): void {
     emit(
       'Read the WHERE clause and build the predicate tree. Nothing has been executed yet — this is still only structure.',
       { stage: 'parse', ast: root([...children], ast.span), span: ast.where.span },
+    );
+  }
+
+  if (ast.orderBy) {
+    children.push(orderByNode(ast.orderBy));
+    emit(
+      `Read the ORDER BY clause: sort by \`${ast.orderBy.column}\`, ${
+        ast.orderBy.direction === 'asc' ? 'ascending' : 'descending'
+      }.`,
+      { stage: 'parse', ast: root([...children], ast.span), span: ast.orderBy.span },
     );
   }
 

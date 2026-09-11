@@ -22,14 +22,34 @@ export type Plan =
       residual?: Expr;
     }
   | { op: 'Filter'; predicate: Expr; child: Plan }
+  /** `ORDER BY column [ASC|DESC]`, between Filter and Project: `Project → Sort → Filter → …`. */
+  | { op: 'Sort'; column: string; direction: 'asc' | 'desc'; child: Plan }
   | { op: 'Project'; columns: ProjectList; child: Plan }
   /** `LIMIT n`, always the outermost node when present: `Limit → Project → …`. */
   | { op: 'Limit'; count: number; child: Plan };
 
 export function childOf(plan: Plan): Plan | undefined {
-  return plan.op === 'Filter' || plan.op === 'Project' || plan.op === 'Limit'
+  return plan.op === 'Filter' ||
+    plan.op === 'Sort' ||
+    plan.op === 'Project' ||
+    plan.op === 'Limit'
     ? plan.child
     : undefined;
+}
+
+/**
+ * The `Sort` node, wherever it sits in the chain — `runQuery.ts` needs to
+ * know before the buffer pool exists, to reserve its spill's page ids. v0's
+ * plan is always a single chain (no joins yet), so walking `childOf` visits
+ * every node.
+ */
+export function findSort(plan: Plan): Extract<Plan, { op: 'Sort' }> | null {
+  let node: Plan | undefined = plan;
+  while (node) {
+    if (node.op === 'Sort') return node;
+    node = childOf(node);
+  }
+  return null;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -140,6 +160,16 @@ function convert(
         op: 'Filter',
         label: 'Filter',
         detail: exprToSql(plan.predicate),
+        ...(highlight ? { highlight } : {}),
+        ...cost,
+        children: kid(plan.child),
+      };
+    case 'Sort':
+      return {
+        id,
+        op: 'Sort',
+        label: 'Sort',
+        detail: `${plan.column} ${plan.direction === 'asc' ? 'ASC' : 'DESC'}`,
         ...(highlight ? { highlight } : {}),
         ...cost,
         children: kid(plan.child),

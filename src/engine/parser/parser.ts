@@ -2,7 +2,8 @@
  * Recursive-descent parser for the v0 SQL subset (plan.md §4):
  *
  *   statement  := select [';'] EOF
- *   select     := SELECT selectList FROM identifier [WHERE expr] [LIMIT number]
+ *   select     := SELECT selectList FROM identifier [WHERE expr]
+ *                 [ORDER BY identifier [ASC|DESC]] [LIMIT number]
  *   selectList := '*' | identifier (',' identifier)*
  *   expr       := comparison (AND comparison)*
  *   comparison := operand ('=' | '<' | '>') operand
@@ -40,7 +41,6 @@ const OUT_OF_SCOPE: Record<string, string> = {
   FULL: 'Joins arrive in v1 — v0 reads a single table.',
   CROSS: 'Joins arrive in v1 — v0 reads a single table.',
   GROUP: 'GROUP BY is not in the v0 subset.',
-  ORDER: 'ORDER BY is not in the v0 subset.',
   HAVING: 'HAVING is not in the v0 subset.',
   OFFSET: 'OFFSET is not in the v0 subset — LIMIT on its own is.',
   DISTINCT: 'DISTINCT is not in the v0 subset.',
@@ -252,6 +252,23 @@ function parseOrThrow(sql: string): SelectStatement {
     where = parseExpr();
   }
 
+  let orderBy: SelectStatement['orderBy'];
+  if (peek().type === 'keyword' && peek().upper === 'ORDER') {
+    const orderToken = next();
+    expectKeyword('BY', 'after ORDER');
+    const col = expectIdentifier('a column name to sort by');
+    let direction: 'asc' | 'desc' = 'asc';
+    let end = col.to;
+    if (peek().type === 'keyword' && (peek().upper === 'ASC' || peek().upper === 'DESC')) {
+      const dir = next();
+      direction = dir.upper === 'ASC' ? 'asc' : 'desc';
+      end = dir.to;
+    }
+    // Spans the whole clause including the keyword, like LIMIT — unlike
+    // WHERE, whose span is its Expr's own and never includes "WHERE" itself.
+    orderBy = { column: col.value, direction, span: { from: orderToken.from, to: end } };
+  }
+
   const limitToken = peek().type === 'keyword' && peek().upper === 'LIMIT' ? next() : undefined;
   let limit: SelectStatement['limit'];
   if (limitToken) {
@@ -275,12 +292,13 @@ function parseOrThrow(sql: string): SelectStatement {
     throw new ParseError(`Unexpected ${describe(token)} after the end of the query.`, token);
   }
 
-  const end = limit?.span.to ?? where?.span.to ?? from.span.to;
+  const end = limit?.span.to ?? orderBy?.span.to ?? where?.span.to ?? from.span.to;
   return {
     kind: 'select',
     select,
     from,
     ...(where === undefined ? {} : { where }),
+    ...(orderBy === undefined ? {} : { orderBy }),
     ...(limit === undefined ? {} : { limit }),
     span: { from: selectToken.from, to: end },
   };

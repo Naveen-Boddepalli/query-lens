@@ -83,6 +83,59 @@ describe('parse — the v0 subset', () => {
   });
 });
 
+describe('parse — ORDER BY', () => {
+  it('parses a bare column, defaulting to ascending', () => {
+    const ast = ok('SELECT * FROM users ORDER BY age');
+    expect(ast.orderBy).toMatchObject({ column: 'age', direction: 'asc' });
+  });
+
+  it('parses an explicit ASC or DESC', () => {
+    expect(ok('SELECT * FROM users ORDER BY age ASC').orderBy).toMatchObject({ direction: 'asc' });
+    expect(ok('SELECT * FROM users ORDER BY age DESC').orderBy).toMatchObject({ direction: 'desc' });
+  });
+
+  it('is case-insensitive', () => {
+    expect(ok('select * from users order by age desc').orderBy).toMatchObject({
+      column: 'age',
+      direction: 'desc',
+    });
+  });
+
+  it('composes with WHERE and LIMIT, in clause order', () => {
+    const ast = ok('SELECT * FROM users WHERE age > 30 ORDER BY age DESC LIMIT 3');
+    expect(ast.where).toBeDefined();
+    expect(ast.orderBy).toMatchObject({ column: 'age', direction: 'desc' });
+    expect(ast.limit).toMatchObject({ value: 3 });
+  });
+
+  it('omits orderBy when there is none', () => {
+    expect(ok('SELECT * FROM users').orderBy).toBeUndefined();
+  });
+
+  it('spans the whole clause, like LIMIT — from ORDER through the column and direction', () => {
+    const bare = 'SELECT * FROM users ORDER BY age';
+    const withDir = 'SELECT * FROM users ORDER BY age DESC';
+    expect(bare.slice(ok(bare).orderBy!.span.from, ok(bare).orderBy!.span.to)).toBe('ORDER BY age');
+    expect(withDir.slice(ok(withDir).orderBy!.span.from, ok(withDir).orderBy!.span.to)).toBe(
+      'ORDER BY age DESC',
+    );
+  });
+
+  it('rejects ORDER without BY', () => {
+    const e = err('SELECT * FROM users ORDER age');
+    expect(e.message).toMatch(/expected `by`/i);
+  });
+
+  it('rejects a missing column after BY', () => {
+    expect(err('SELECT * FROM users ORDER BY').message).toMatch(/expected a column name/i);
+  });
+
+  it('rejects ordering by more than one column — v0 sorts on one', () => {
+    const e = err('SELECT * FROM users ORDER BY age, name');
+    expect(e.message).toMatch(/unexpected/i);
+  });
+});
+
 describe('parse — LIMIT', () => {
   it('parses a bare LIMIT', () => {
     const ast = ok('SELECT * FROM users LIMIT 5');
@@ -168,7 +221,6 @@ describe('parse — errors point at the right text', () => {
   it.each([
     ['SELECT * FROM a JOIN b ON a.id = b.id', /JOIN/, /v1/],
     ['SELECT * FROM users GROUP BY id', /GROUP/, /v0 subset/],
-    ['SELECT * FROM users ORDER BY id', /ORDER/, /v0 subset/],
     ['SELECT * FROM users LIMIT 5 OFFSET 10', /OFFSET/, /LIMIT on its own is/],
     ['INSERT INTO users VALUES (1)', /INSERT/, /only runs SELECT/],
     ['DELETE FROM users', /DELETE/, /only runs SELECT/],
@@ -217,6 +269,13 @@ describe('toDisplayTree', () => {
     const tree = toDisplayTree(ok('SELECT * FROM users WHERE id = 5 LIMIT 5'));
     expect(tree.children?.map((c) => c.kind)).toEqual(['SelectList', 'From', 'Where', 'Limit']);
     expect(tree.children?.at(-1)).toMatchObject({ label: 'LIMIT', detail: '5' });
+  });
+
+  it('includes an OrderBy node, before Limit, when ORDER BY is present', () => {
+    const tree = toDisplayTree(ok('SELECT * FROM users WHERE id = 5 ORDER BY age DESC LIMIT 5'));
+    expect(tree.children?.map((c) => c.kind)).toEqual(['SelectList', 'From', 'Where', 'OrderBy', 'Limit']);
+    const orderBy = tree.children?.[3];
+    expect(orderBy).toMatchObject({ label: 'ORDER BY', detail: 'age DESC' });
   });
 
   it('gives every node a unique id, so a progressive reveal can animate', () => {

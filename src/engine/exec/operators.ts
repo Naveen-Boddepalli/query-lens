@@ -15,8 +15,9 @@ import type { Plan, ProjectList } from '../planner/index.ts';
 import type { BufferPool, Heap } from '../storage/index.ts';
 import type { LockManager } from '../locks/index.ts';
 import type { BPlusTree } from '../index/index.ts';
-import { emitIndexLookup } from '../index/index.ts';
+import { emitIndexLookup, pageCountFor } from '../index/index.ts';
 import { passes } from './evaluate.ts';
+import { externalMergeSort } from './sort.ts';
 
 export interface Operator {
   readonly name: string;
@@ -212,6 +213,60 @@ function project(columns: ProjectList, child: Operator, ctx: ExecContext): Opera
 }
 
 /**
+ * `ORDER BY` — the one operator here that cannot stream. Volcano pulls a row
+ * at a time, but a sort cannot hand back its first row until it has seen
+ * every one, so the first `next()` call materialises the whole child, runs
+ * `externalMergeSort` (its own driver, plan.md §22.2 — real page I/O through
+ * `ctx.pool`, not `Array.prototype.sort`), and every later call just streams
+ * the already-sorted result. A `LIMIT` above an `ORDER BY` therefore caps the
+ * *output*, not the scan: the sort has already read everything by the time
+ * `Limit` sees a row.
+ */
+function sort(plan: Extract<Plan, { op: 'Sort' }>, child: Operator, ctx: ExecContext): Operator {
+  let rows: Row[] | null = null;
+  let index = 0;
+  const produced = counter(ctx, 'Sort');
+
+  return {
+    name: 'Sort',
+    open() {
+      child.open();
+      rows = null;
+      index = 0;
+    },
+    next() {
+      if (rows === null) {
+        const materialised: Row[] = [];
+        for (;;) {
+          const row = child.next();
+          if (!row) break;
+          materialised.push(row);
+        }
+        child.close();
+        rows = externalMergeSort(materialised, (r) => r[plan.column] ?? null, plan.direction, {
+          pool: ctx.pool,
+          emit: ctx.emit,
+          base: pageCountFor(ctx.heap, ctx.tree),
+          memPages: ctx.options.bufferFrames,
+          rowsPerPage: ctx.options.rowsPerPage,
+        });
+      }
+
+      const row = rows[index];
+      if (!row) return null;
+      index += 1;
+      produced(
+        `Sort returns row ${index} of ${rows.length}, in ${plan.direction === 'asc' ? 'ascending' : 'descending'} ${plan.column} order.`,
+      );
+      return row;
+    },
+    close() {
+      if (rows === null) child.close();
+    },
+  };
+}
+
+/**
  * Stops pulling from the child once `count` rows have been produced — the
  * visible Volcano short-circuit (plan.md §22.2). Everything below a `Limit`
  * that has not been pulled yet is simply never asked: a `SeqScan` beneath one
@@ -256,6 +311,8 @@ export function buildOperator(plan: Plan, ctx: ExecContext): Operator {
       return indexScan(plan, ctx);
     case 'Filter':
       return filter(plan.predicate, buildOperator(plan.child, ctx), ctx);
+    case 'Sort':
+      return sort(plan, buildOperator(plan.child, ctx), ctx);
     case 'Project':
       return project(plan.columns, buildOperator(plan.child, ctx), ctx);
     case 'Limit':

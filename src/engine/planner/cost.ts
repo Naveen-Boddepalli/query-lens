@@ -164,6 +164,19 @@ function estimateNode(plan: Plan, table: Table, rowsPerPage: number, into: PlanC
       estimate = { estRows: clampRows(child.estRows * fraction), estPages: child.estPages, basis };
       break;
     }
+    case 'Sort': {
+      // Row order changes, not row count — but Sort's own I/O is the honest
+      // number to surface here: a spill writes and re-reads the data, so its
+      // page cost is real disk activity a Filter/Project never adds.
+      const child = estimateNode(plan.child, table, rowsPerPage, into);
+      const spillPages = Math.max(1, Math.ceil(child.estRows / rowsPerPage));
+      estimate = {
+        estRows: child.estRows,
+        estPages: 2 * spillPages,
+        basis: `sorts ${String(child.estRows)} rows; at least ${String(2 * spillPages)} spill pages (run generation alone)`,
+      };
+      break;
+    }
     case 'Project': {
       const child = estimateNode(plan.child, table, rowsPerPage, into);
       estimate = { estRows: child.estRows, estPages: child.estPages, basis: child.basis };

@@ -3,6 +3,7 @@ import { parse } from '../parser/parser.ts';
 import { evaluatePredicate, passes } from '../exec/evaluate.ts';
 import { runQuery } from '../runQuery.ts';
 import { createSeedDatabase } from '../seed.ts';
+import { DATASETS } from '../datasets.ts';
 import { DEFAULT_ENGINE_OPTIONS } from '../types.ts';
 import type { Row, StepEvent } from '../types.ts';
 
@@ -180,6 +181,114 @@ describe('LIMIT — the Volcano short-circuit', () => {
       held += e.action === 'acquire' ? 1 : -1;
     }
     expect(held).toBe(0);
+  });
+});
+
+describe('ORDER BY — a real external merge sort', () => {
+  it('sorts ascending, matching a plain JS sort of the same rows', () => {
+    const reference = [...users.rows].sort((a, b) => (a.age as number) - (b.age as number));
+    expect(run('SELECT * FROM users ORDER BY age').rows).toEqual(reference);
+  });
+
+  it('sorts descending', () => {
+    const reference = [...users.rows].sort((a, b) => (b.age as number) - (a.age as number));
+    expect(run('SELECT * FROM users ORDER BY age DESC').rows).toEqual(reference);
+  });
+
+  it('is stable: two rows with the same age keep their table order', () => {
+    // Two seed rows share age 20 (`ada`, id 1, and `turing`, id 46) — ada
+    // comes first in the table, and should stay first in the tie.
+    const rows = run('SELECT * FROM users ORDER BY age').rows;
+    const tied = rows.filter((r) => r.age === 20).map((r) => r.id);
+    expect(tied).toEqual([1, 46]);
+  });
+
+  it('sorts a string column lexicographically', () => {
+    const reference = [...users.rows].sort((a, b) => ((a.name as string) < (b.name as string) ? -1 : 1));
+    expect(run('SELECT * FROM users ORDER BY name').rows).toEqual(reference);
+  });
+
+  it('composes with WHERE — sorts only the filtered rows', () => {
+    const reference = users.rows
+      .filter((r) => (r.age as number) > 30)
+      .sort((a, b) => (a.age as number) - (b.age as number));
+    expect(run('SELECT * FROM users WHERE age > 30 ORDER BY age').rows).toEqual(reference);
+  });
+
+  it('composes with LIMIT — caps the fully-sorted output, not a partial scan', () => {
+    const reference = [...users.rows].sort((a, b) => (b.age as number) - (a.age as number)).slice(0, 3);
+    expect(run('SELECT * FROM users ORDER BY age DESC LIMIT 3').rows).toEqual(reference);
+  });
+
+  it('projects after sorting — a narrowed SELECT list still sorts correctly', () => {
+    const reference = [...users.rows]
+      .sort((a, b) => (a.age as number) - (b.age as number))
+      .map((r) => ({ name: r.name }));
+    expect(run('SELECT name FROM users ORDER BY age').rows).toEqual(reference);
+  });
+
+  it('composes with an indexed equality — one row, trivially "sorted"', () => {
+    expect(run('SELECT * FROM users WHERE id = 5 ORDER BY age').rows).toEqual(
+      run('SELECT * FROM users WHERE id = 5').rows,
+    );
+  });
+
+  it('rejects an unknown ORDER BY column, pointing at it', () => {
+    const out = run('SELECT * FROM users ORDER BY nope');
+    expect(out.error?.message).toMatch(/no column called `nope`/);
+    expect(out.error?.hint).toMatch(/id, name, email, age/);
+  });
+
+  it('is a real spill: buffer write events appear, and only when ORDER BY is used', () => {
+    const writes = (events: StepEvent[]) =>
+      events.filter((e) => e.stage === 'buffer' && e.action === 'write');
+    expect(writes(run('SELECT * FROM users ORDER BY age').events).length).toBeGreaterThan(0);
+    expect(writes(run('SELECT * FROM users').events)).toHaveLength(0);
+  });
+
+  it('the Sort operator produces nothing while it is still spilling, then streams every row once', () => {
+    const { events } = run('SELECT * FROM users ORDER BY age');
+    const counts = events.flatMap((e) =>
+      e.stage === 'execute' && e.op === 'Sort' ? [e.rowsProduced] : [],
+    );
+    // Materialising and spilling narrates as a run of `rowsProduced: 0`
+    // events — Sort has nothing to show yet — then streaming climbs by one
+    // per row, ending at the row count.
+    const firstNonZero = counts.findIndex((n) => n > 0);
+    expect(firstNonZero).toBeGreaterThan(0);
+    expect(counts.slice(0, firstNonZero).every((n) => n === 0)).toBe(true);
+    expect(counts.slice(firstNonZero)).toEqual(
+      Array.from({ length: users.rows.length }, (_, i) => i + 1),
+    );
+  });
+
+  it('handles NULLs: last ascending, first descending, over a constructed table', () => {
+    const withNulls = {
+      tables: {
+        t: {
+          name: 't',
+          columns: ['id', 'v'],
+          rows: [
+            { id: 1, v: 3 },
+            { id: 2, v: null },
+            { id: 3, v: 1 },
+          ],
+        },
+      },
+    };
+    expect(runQuery('SELECT * FROM t ORDER BY v', withNulls).rows.map((r) => r.id)).toEqual([3, 1, 2]);
+    expect(runQuery('SELECT * FROM t ORDER BY v DESC', withNulls).rows.map((r) => r.id)).toEqual([
+      2, 1, 3,
+    ]);
+  });
+
+  it('works on a larger table too — the reserved spill space is enough', () => {
+    const orders = DATASETS.orders.make();
+    const { rows, error } = runQuery('SELECT * FROM orders ORDER BY total DESC', orders);
+    expect(error).toBeUndefined();
+    expect(rows).toEqual(
+      [...orders.tables.orders!.rows].sort((a, b) => (b.total as number) - (a.total as number)),
+    );
   });
 });
 

@@ -9,10 +9,11 @@
  */
 
 import { emitParseEvents, parse } from './parser/index.ts';
-import { emitPlanEvents } from './planner/index.ts';
+import { emitPlanEvents, findSort } from './planner/index.ts';
 import { buildHeap, createBufferPool } from './storage/index.ts';
 import { buildIndex, pageCountFor } from './index/index.ts';
 import { execute } from './exec/index.ts';
+import { sortTempPageCount } from './exec/sort.ts';
 import { createLockManager } from './locks/index.ts';
 import { createTracer } from './trace.ts';
 import { DEFAULT_ENGINE_OPTIONS } from './types.ts';
@@ -68,7 +69,15 @@ export function runQuery(
   // The trace describes running your query, not preparing the database.
   const heap = buildHeap(table, options.rowsPerPage);
   const tree = table.indexedColumn ? buildIndex(heap, table.indexedColumn) : null;
-  const pool = createBufferPool(pageCountFor(heap, tree), options, emit);
+
+  // A Sort's spill needs its own page ids, reserved up front — sized against
+  // the whole table (the worst case; a WHERE clause can only shrink what
+  // actually reaches Sort) so the reservation is never too small to discover
+  // only at runtime.
+  const sortTemp = findSort(plan)
+    ? sortTempPageCount(table.rows.length, options.rowsPerPage, options.bufferFrames)
+    : 0;
+  const pool = createBufferPool(pageCountFor(heap, tree) + sortTemp, options, emit);
 
   const locks = createLockManager(emit);
   const rows = execute(plan, { emit, pool, locks, heap, tree, table, options });
@@ -87,5 +96,6 @@ function referencedColumns(ast: import('./parser/index.ts').SelectStatement) {
       if (e.kind === 'compare' || e.kind === 'and') stack.push(e.left, e.right);
     }
   }
+  if (ast.orderBy) refs.push({ name: ast.orderBy.column, span: ast.orderBy.span });
   return refs;
 }

@@ -58,7 +58,8 @@ export type {
   DeleteStep,
   RowPointer,
 } from './index/index.ts';
-export { evaluatePredicate, passes } from './exec/index.ts';
+export { evaluatePredicate, externalMergeSort, passes, sortPassCount, sortTempPageCount } from './exec/index.ts';
+export type { SortIO } from './exec/index.ts';
 export { createLockManager } from './locks/index.ts';
 export type { HeldLock, LockManager, LockMode } from './locks/index.ts';
 export type { Plan } from './planner/index.ts';

@@ -8,14 +8,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **`LIMIT`** (plan.md §22.2, first half of `ORDER BY`/`LIMIT` + external sort) — a real `Limit`
+- **`ORDER BY` with a real external-merge-sort `Sort` operator** (plan.md §22.2, completing
+  `ORDER BY`/`LIMIT` + external sort) — the run-generation-then-merge algorithm already worked out
+  for `/tools/sort` (`src/ui/externalSort.ts`), now over real table rows and, unlike that sandbox,
+  with every page it writes or re-reads flowing through the *actual* buffer pool: `BufferPool` gained
+  a `write()` path alongside `fetch()`, so a Sort's spill pages compete for the same frames a heap
+  scan uses — real evictions of heap pages by spill pages and back, shown in the Buffer Pool panel as
+  a new violet "✎ written" mood and a `writes` stat. Page ids are never reused (`sortTempPageCount`
+  reserves a fresh block per pass before the pool exists, sized generously above the
+  perfectly-packed count — a bound it can defend, not a precise figure it can't, per §12).
+  `predicate-pushdown`/`index-selection` see past a `Sort` exactly as they already saw past a
+  `Limit`. Sort is the one operator here that cannot stream — combined with `LIMIT` it caps the
+  *output*, not the scan, and the narration says so. `exec/sort.ts`, pure and unit-tested; NULLs
+  sort last ascending / first descending, Postgres's own default
+- **`LIMIT`** (plan.md §22.2, first half of the same backlog item) — a real `Limit`
   plan node and Volcano operator: it stops pulling from the operator tree beneath it once the cap
   is reached and closes it, so `SELECT * FROM users LIMIT 1` genuinely never reads the rest of the
   table — fewer buffer `load` events than the unbounded scan, not just a shorter result. The
   optimizer's `predicate-pushdown` and `index-selection` rules see past an outer `LIMIT`
   transparently, the cost model estimates `min(child, LIMIT n)`, and the AST/plan trees and the
-  Parser/Planner/Optimizer panels all show it as a real node. `ORDER BY` and the `Sort` operator are
-  next
+  Parser/Planner/Optimizer panels all show it as a real node
 - **In-app EXPLAIN** (plan.md §22.2) — a **Copy as EXPLAIN** button next to Copy as text/Mermaid,
   offered once a query has actually run (the result stage — `EXPLAIN ANALYZE` needs an execution,
   same as Postgres). Prints the final plan tree with the cost model's `est ~N rows` next to the

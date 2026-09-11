@@ -46,7 +46,7 @@ export interface ViewState {
 
   frames: BufferFrame[];
   clockHand: number;
-  bufferStats: { hits: number; misses: number; evictions: number };
+  bufferStats: { hits: number; misses: number; evictions: number; writes: number };
 
   indexTree: IndexNode | null;
   indexPath: string[];
@@ -76,7 +76,7 @@ export function initialViewState(options: EngineOptions): ViewState {
       lastTouchedAt: -1,
     })),
     clockHand: 0,
-    bufferStats: { hits: 0, misses: 0, evictions: 0 },
+    bufferStats: { hits: 0, misses: 0, evictions: 0, writes: 0 },
     indexTree: null,
     indexPath: [],
     indexOutcome: null,
@@ -160,6 +160,14 @@ export function applyEvent(state: ViewState, event: StepEvent): ViewState {
             usageCount: 1,
             lastTouchedAt: event.id,
           });
+          return next;
+        case 'write':
+          next.frames = touchFrame(state.frames, event.frameId, {
+            pageId: event.pageId,
+            usageCount: 1,
+            lastTouchedAt: event.id,
+          });
+          next.bufferStats = { ...state.bufferStats, writes: state.bufferStats.writes + 1 };
           return next;
         case 'evict':
           next.frames = touchFrame(state.frames, event.frameId, {

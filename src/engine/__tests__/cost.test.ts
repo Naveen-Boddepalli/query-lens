@@ -103,6 +103,8 @@ describe('estimatePlan', () => {
       'SELECT * FROM users WHERE id = 5 AND age > 30',
       "SELECT * FROM users WHERE name = 'ada'",
       'SELECT * FROM users WHERE age > 999',
+      'SELECT * FROM users ORDER BY age',
+      'SELECT * FROM users WHERE id = 5 ORDER BY age DESC LIMIT 1',
     ]) {
       for (const est of estimatePlan(optimised(sql), users, RPP).values()) {
         expect(Number.isInteger(est.estRows)).toBe(true);
@@ -111,6 +113,18 @@ describe('estimatePlan', () => {
         expect(est.basis.length).toBeGreaterThan(0);
       }
     }
+  });
+
+  it('Sort keeps the row estimate but adds its own spill page cost', () => {
+    const unsorted = rootEstimate(optimised('SELECT * FROM users WHERE age > 30'), users, RPP);
+    const sorted = rootEstimate(
+      optimised('SELECT * FROM users WHERE age > 30 ORDER BY age'),
+      users,
+      RPP,
+    );
+    expect(sorted.estRows).toBe(unsorted.estRows);
+    // A Sort's own I/O is real disk activity a Filter alone never adds.
+    expect(sorted.estPages).toBeGreaterThan(unsorted.estPages);
   });
 
   it('LIMIT estimates the smaller of the child estimate and the cap', () => {

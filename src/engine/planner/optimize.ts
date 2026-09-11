@@ -43,6 +43,21 @@ function rewrapLimit(limit: number | null, plan: Plan): Plan {
 }
 
 /**
+ * Same idea for `Sort`, which sits directly under `Project` when `ORDER BY`
+ * is present. Neither rewrite touches row order, so both work underneath it
+ * exactly as they do without it.
+ */
+type SortSpec = { column: string; direction: 'asc' | 'desc' };
+function unwrapSort(plan: Plan): { sort: SortSpec | null; rest: Plan } {
+  return plan.op === 'Sort'
+    ? { sort: { column: plan.column, direction: plan.direction }, rest: plan.child }
+    : { sort: null, rest: plan };
+}
+function rewrapSort(sort: SortSpec | null, plan: Plan): Plan {
+  return sort === null ? plan : { op: 'Sort', column: sort.column, direction: sort.direction, child: plan };
+}
+
+/**
  * Fold `Filter` into the scan beneath it.
  *
  * In a single-table query the filter already sits directly above the scan, so
@@ -53,13 +68,16 @@ function rewrapLimit(limit: number | null, plan: Plan): Plan {
 const predicatePushdown: Rule = (input) => {
   const { limit, rest: plan } = unwrapLimit(input);
   if (plan.op !== 'Project') return null;
-  const filter = plan.child;
-  if (filter.op !== 'Filter') return null;
-  const scan = filter.child;
+  const { sort, rest: belowProject } = unwrapSort(plan.child);
+  if (belowProject.op !== 'Filter') return null;
+  const scan = belowProject.child;
   if (scan.op !== 'SeqScan' || scan.filter) return null;
 
-  const pushed: Plan = { op: 'SeqScan', table: scan.table, filter: filter.predicate };
-  const root = rewrapLimit(limit, { op: 'Project', columns: plan.columns, child: pushed });
+  const pushed: Plan = { op: 'SeqScan', table: scan.table, filter: belowProject.predicate };
+  const root = rewrapLimit(
+    limit,
+    { op: 'Project', columns: plan.columns, child: rewrapSort(sort, pushed) },
+  );
 
   return {
     rule: 'predicate-pushdown',
@@ -78,7 +96,7 @@ const predicatePushdown: Rule = (input) => {
 const indexSelection: Rule = (input, table) => {
   const { limit, rest: plan } = unwrapLimit(input);
   if (plan.op !== 'Project') return null;
-  const scan = plan.child;
+  const { sort, rest: scan } = unwrapSort(plan.child);
   if (scan.op !== 'SeqScan' || !scan.filter) return null;
 
   const indexed = table.indexedColumn;
@@ -98,7 +116,10 @@ const indexSelection: Rule = (input, table) => {
     key,
     ...(residual ? { residual } : {}),
   };
-  const root = rewrapLimit(limit, { op: 'Project', columns: plan.columns, child: indexScan });
+  const root = rewrapLimit(
+    limit,
+    { op: 'Project', columns: plan.columns, child: rewrapSort(sort, indexScan) },
+  );
 
   return {
     rule: 'index-selection',
@@ -150,7 +171,7 @@ export function optimize(
 export function scanPredicate(plan: Plan): Expr | undefined {
   if (plan.op === 'SeqScan') return plan.filter;
   if (plan.op === 'IndexScan') return plan.residual;
-  return plan.op === 'Filter' || plan.op === 'Project' || plan.op === 'Limit'
+  return plan.op === 'Filter' || plan.op === 'Sort' || plan.op === 'Project' || plan.op === 'Limit'
     ? scanPredicate(plan.child)
     : undefined;
 }

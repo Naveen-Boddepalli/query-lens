@@ -12,10 +12,12 @@ export { emitPlanEvents } from './emit.ts';
 export { optimize, OPTIMIZER_RULES, scanPredicate } from './optimize.ts';
 export type { Rewrite } from './optimize.ts';
 export {
+  childOf,
   conjoin,
   conjuncts,
   equalityOn,
   exprToSql,
+  findSort,
   toPlanDisplay,
 } from './plan.ts';
 export type { Plan, ProjectList } from './plan.ts';

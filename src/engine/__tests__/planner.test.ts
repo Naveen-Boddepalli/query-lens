@@ -23,7 +23,12 @@ const plan = (sql: string) => buildPlan(ast(sql));
 function shape(p: Plan): string[] {
   const ops = [p.op];
   let node = p;
-  while (node.op === 'Filter' || node.op === 'Project' || node.op === 'Limit') {
+  while (
+    node.op === 'Filter' ||
+    node.op === 'Sort' ||
+    node.op === 'Project' ||
+    node.op === 'Limit'
+  ) {
     node = node.child;
     ops.push(node.op);
   }
@@ -98,6 +103,32 @@ describe('buildPlan — the canonical shape', () => {
 
   it('omits the Limit when there is no LIMIT', () => {
     expect(shape(plan('SELECT * FROM users'))).not.toContain('Limit');
+  });
+
+  it('inserts a Sort between Filter and Project when there is an ORDER BY', () => {
+    expect(shape(plan('SELECT * FROM users WHERE id = 5 ORDER BY age'))).toEqual([
+      'Project',
+      'Sort',
+      'Filter',
+      'SeqScan',
+    ]);
+    const p = plan('SELECT * FROM users ORDER BY age DESC');
+    expect(shape(p)).toEqual(['Project', 'Sort', 'SeqScan']);
+    expect(p).toMatchObject({ op: 'Project', child: { op: 'Sort', column: 'age', direction: 'desc' } });
+  });
+
+  it('every clause together: Limit → Project → Sort → Filter → SeqScan', () => {
+    expect(shape(plan('SELECT * FROM users WHERE id = 5 ORDER BY age DESC LIMIT 3'))).toEqual([
+      'Limit',
+      'Project',
+      'Sort',
+      'Filter',
+      'SeqScan',
+    ]);
+  });
+
+  it('omits the Sort when there is no ORDER BY', () => {
+    expect(shape(plan('SELECT * FROM users'))).not.toContain('Sort');
   });
 });
 
@@ -174,6 +205,34 @@ describe('optimize — LIMIT stays transparent to the rewrites', () => {
   it('a bare LIMIT with no WHERE fires no rule, and the count is preserved', () => {
     expect(optimize(plan('SELECT * FROM users LIMIT 3'), users)).toHaveLength(0);
     expect(plan('SELECT * FROM users LIMIT 3')).toMatchObject({ op: 'Limit', count: 3 });
+  });
+});
+
+describe('optimize — Sort stays transparent to the rewrites', () => {
+  it('predicate pushdown still fires underneath a Sort', () => {
+    const p = final('SELECT * FROM users WHERE age > 30 ORDER BY age');
+    expect(shape(p)).toEqual(['Project', 'Sort', 'SeqScan']);
+    expect(p).toMatchObject({ op: 'Project', child: { op: 'Sort', column: 'age', direction: 'asc' } });
+    expect(exprToSql(scanPredicate(p)!)).toBe('age > 30');
+  });
+
+  it('index selection still fires underneath a Sort, and the Sort survives above the IndexScan', () => {
+    const p = final('SELECT * FROM users WHERE id = 5 ORDER BY age DESC');
+    expect(shape(p)).toEqual(['Project', 'Sort', 'IndexScan']);
+    expect(p).toMatchObject({ op: 'Project', child: { op: 'Sort', column: 'age', direction: 'desc' } });
+  });
+
+  it('composes with LIMIT too: Limit → Project → Sort → IndexScan', () => {
+    const p = final('SELECT * FROM users WHERE id = 5 ORDER BY age LIMIT 1');
+    expect(shape(p)).toEqual(['Limit', 'Project', 'Sort', 'IndexScan']);
+  });
+
+  it('a bare ORDER BY with no WHERE fires no rule, and the Sort is preserved', () => {
+    expect(optimize(plan('SELECT * FROM users ORDER BY age'), users)).toHaveLength(0);
+    expect(plan('SELECT * FROM users ORDER BY age')).toMatchObject({
+      op: 'Project',
+      child: { op: 'Sort', column: 'age' },
+    });
   });
 });
 
