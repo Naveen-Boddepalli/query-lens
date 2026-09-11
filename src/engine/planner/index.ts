@@ -1,4 +1,4 @@
-export { buildDeletePlan, buildPlan, buildUpdatePlan } from './buildPlan.ts';
+export { buildAggregatePlan, buildDeletePlan, buildPlan, buildUpdatePlan, isAggregateQuery } from './buildPlan.ts';
 export {
   estimateIndexLevels,
   estimatePlan,
@@ -22,4 +22,4 @@ export {
   findSort,
   toPlanDisplay,
 } from './plan.ts';
-export type { Plan, ProjectList } from './plan.ts';
+export type { AggregateSpec, Plan, ProjectList } from './plan.ts';

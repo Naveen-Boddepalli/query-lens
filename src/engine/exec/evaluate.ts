@@ -28,7 +28,8 @@ export function evaluateValue(expr: Expr, row: Row): SqlValue {
   }
 }
 
-function compare(op: '=' | '<' | '>', left: SqlValue, right: SqlValue): Truth {
+/** Exported for `operators.ts`'s `HashAggregate` — MIN/MAX order values the same way a `<`/`>` predicate does. */
+export function compare(op: '=' | '<' | '>', left: SqlValue, right: SqlValue): Truth {
   if (left === null || right === null) return null; // UNKNOWN
 
   if (typeof left === 'number' && typeof right === 'number') {

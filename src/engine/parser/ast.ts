@@ -14,12 +14,47 @@ export type Expr =
   | { kind: 'compare'; op: CompareOp; left: Expr; right: Expr; span: Span }
   | { kind: 'and'; left: Expr; right: Expr; span: Span };
 
+/** The aggregate functions v0 supports (plan.md §22.2). */
+export type AggregateFn = 'COUNT' | 'SUM' | 'AVG' | 'MIN' | 'MAX';
+
+/** One entry of a SELECT list: a plain column, or an aggregate call over one. */
+export type SelectItem =
+  | { kind: 'column'; name: string; span: Span }
+  | {
+      kind: 'aggregate';
+      fn: AggregateFn;
+      /** `*` only appears on `COUNT` — every other function needs a real column. */
+      arg: { kind: 'star'; span: Span } | { kind: 'column'; name: string; span: Span };
+      span: Span;
+    };
+
+/** The column an aggregate reads, or `null` for `COUNT(*)`. */
+export function selectItemArgColumn(item: Extract<SelectItem, { kind: 'aggregate' }>): string | null {
+  return item.arg.kind === 'star' ? null : item.arg.name;
+}
+
+/** Canonical display key for a SELECT item — its own name, or e.g. `COUNT(*)`, `SUM(age)`. */
+export function selectItemKey(item: SelectItem): string {
+  if (item.kind === 'column') return item.name;
+  return `${item.fn}(${item.arg.kind === 'star' ? '*' : item.arg.name})`;
+}
+
 export type SelectList =
   | { kind: 'star'; span: Span }
-  | { kind: 'columns'; names: { name: string; span: Span }[]; span: Span };
+  | { kind: 'columns'; items: SelectItem[]; span: Span };
 
 export interface TableRef {
   name: string;
+  span: Span;
+}
+
+/**
+ * `GROUP BY col [, col ...]` (plan.md §22.2). No `HAVING` — v0 doesn't have
+ * it (same scope line as always: the plumbing to filter *after* aggregation
+ * is a different predicate evaluator, not this one).
+ */
+export interface GroupByClause {
+  columns: { name: string; span: Span }[];
   span: Span;
 }
 
@@ -28,7 +63,12 @@ export interface SelectStatement {
   select: SelectList;
   from: TableRef;
   where?: Expr;
-  /** `ORDER BY column [ASC|DESC]` — v0 sorts on one column. plan.md §22.2. */
+  groupBy?: GroupByClause;
+  /**
+   * `ORDER BY column [ASC|DESC]` — v0 sorts on one column, and not together
+   * with `GROUP BY` (checked at parse time; `groupBy` and `orderBy` are
+   * mutually exclusive on every `SelectStatement` this parser produces).
+   */
   orderBy?: OrderByClause;
   /** `LIMIT n` — a non-negative whole number, checked at parse time. */
   limit?: LimitClause;

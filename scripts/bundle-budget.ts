@@ -54,7 +54,7 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
   // second importer of the planner + `buildPlan` + `toPlanDisplay`, so rolldown
   // hoisted that shared engine code out of the Playground chunk into its own —
   // a move between chunks, not growth, but it shows here.
-  { name: 'trace-ui', test: /^(PlaygroundPage|PlaygroundTour|TraceWorksheet|StageDetail|stageMeta|datasets|datasetCatalogue|types|seed|trace|runQuery|engine|SqlEditor|PlaybackControls|PresenterView|AstTree|BTreePanel|FlowTree|display)-/, kb: 44, note: 'Playground + the presenter view + the SQL editor + the shared panel/tree renderers (AstTree, BTreePanel, FlowTree, the two display transformers) plus the engine core (runQuery and the planner split into their own chunks once a third / second route imported them; SqlEditor split once /challenges became a second) plus the preset dataset library, the print worksheet, LIMIT, ORDER BY + the Sort operator, and the full DELETE + INSERT + UPDATE write path (plan.md §22.2)' },
+  { name: 'trace-ui', test: /^(PlaygroundPage|PlaygroundTour|TraceWorksheet|StageDetail|stageMeta|datasets|datasetCatalogue|types|seed|trace|runQuery|engine|SqlEditor|PlaybackControls|PresenterView|AstTree|BTreePanel|FlowTree|display)-/, kb: 46, note: 'Playground + the presenter view + the SQL editor + the shared panel/tree renderers (AstTree, BTreePanel, FlowTree, the two display transformers) plus the engine core (runQuery and the planner split into their own chunks once a third / second route imported them; SqlEditor split once /challenges became a second) plus the preset dataset library, the print worksheet, LIMIT, ORDER BY + the Sort operator, the full DELETE + INSERT + UPDATE write path, and GROUP BY + aggregates (plan.md §22.2)' },
   // The small per-route shells: landing hub, stage index, examples, docs shell,
   // 404, tools index — plus the redesign's shared UI kit (primitives.ts,
   // PageHeader, Hero) that two or more of them import.
@@ -175,8 +175,19 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
  * `planner/emitUpdate.ts` reusing the same optimizer-wrapping trick
  * `DELETE`'s plan does. The full `INSERT`/`UPDATE`/`DELETE` write path is
  * now real, in the pipeline, not just `/tools/btree`.
+ * Raised 388 → 390 for aggregates and `GROUP BY` (§22.2), the largest single
+ * addition to the SELECT grammar since v0: a `SelectItem` union (a plain
+ * column, or `COUNT`/`SUM`/`AVG`/`MIN`/`MAX` over one), a `HashAggregate`
+ * plan node between `Filter` and `Project`, and its operator — the second
+ * one here that cannot stream, for the same reason `Sort` cannot, building
+ * one hash-table bucket per distinct `GROUP BY` combination. `constant-folding`,
+ * `predicate-pushdown` and `index-selection` all learned to see past a
+ * `HashAggregate` the same way they already saw past `Sort`/`Limit` — WHERE
+ * always applies before aggregation, so pushing a predicate underneath one is
+ * never a shortcut. One strategy only; a sort aggregate and the `/compare`
+ * mode plan.md names as the point of the pair are a later milestone.
  */
-const TOTAL_KB = 388;
+const TOTAL_KB = 390;
 
 const gzipKb = (bytes: Buffer): number => gzipSync(bytes, { level: 9 }).length / 1024;
 

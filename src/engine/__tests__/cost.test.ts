@@ -172,6 +172,31 @@ describe('estimatePlan', () => {
   });
 });
 
+describe('estimatePlan — HashAggregate', () => {
+  it('with no GROUP BY, estimates exactly one row — the whole input is one group', () => {
+    const est = rootEstimate(optimised('SELECT COUNT(*) FROM users'), users, RPP);
+    expect(est.estRows).toBe(1);
+  });
+
+  it('with a GROUP BY, estimates the product of each column\'s distinct-value count, capped at the input', () => {
+    const est = rootEstimate(optimised('SELECT age, COUNT(*) FROM users GROUP BY age'), users, RPP);
+    expect(est.estRows).toBeGreaterThan(0);
+    expect(est.estRows).toBeLessThanOrEqual(users.rows.length);
+  });
+
+  it('lands close to the actual distinct-group count the executor produces', () => {
+    const est = rootEstimate(optimised('SELECT age, COUNT(*) FROM users GROUP BY age'), users, RPP).estRows;
+    const actual = actualRows('SELECT age, COUNT(*) FROM users GROUP BY age');
+    expect(Math.abs(est - actual)).toBeLessThanOrEqual(4);
+  });
+
+  it('is deterministic', () => {
+    const a = rootEstimate(optimised('SELECT age, COUNT(*) FROM users GROUP BY age'), users, RPP);
+    const b = rootEstimate(optimised('SELECT age, COUNT(*) FROM users GROUP BY age'), users, RPP);
+    expect(a).toEqual(b);
+  });
+});
+
 describe('toPlanDisplay with estimates', () => {
   it('carries estRows and estBasis as plain primitives', () => {
     const plan = canonical('SELECT * FROM users WHERE age > 30');

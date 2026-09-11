@@ -86,8 +86,8 @@ test('the parser sandbox shows the token stream and the parser\'s own errors', a
   await expect(page.getByText(/Parsed ·/)).toContainText('recursion depth');
 
   // Unsupported SQL tokenizes fine but the parser rejects it by name.
-  await src.fill('SELECT * FROM users GROUP BY id');
-  await expect(page.getByText(/`GROUP` is not supported yet/)).toBeVisible();
+  await src.fill('SELECT * FROM users HAVING id > 5');
+  await expect(page.getByText(/`HAVING` is not supported yet/)).toBeVisible();
   await expect(page.getByText(/not in the v0 subset/)).toBeVisible();
 
   // A lexing failure is reported where it happens, not swallowed — the ribbon
@@ -360,6 +360,20 @@ test('ORDER BY sorts the result and spills through the real buffer pool', async 
 
   await page.getByRole('button', { name: 'Buffer Pool' }).click();
   await expect(page.getByText(/writes/)).toBeVisible();
+});
+
+test('GROUP BY aggregates and shows as a HashAggregate node in the plan', async ({ page }) => {
+  await page.goto(
+    '/playground?t=orders&q=SELECT+status,+COUNT(*)+FROM+orders+GROUP+BY+status&p=lru&x=0&s=9999',
+  );
+  await expect(page.getByText(/3 rows returned/)).toBeVisible();
+  await expect(page.getByRole('cell', { name: 'paid', exact: true })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Planner' }).click();
+  await expect(page.getByText('HashAggregate', { exact: true }).first()).toBeVisible();
+
+  await page.getByRole('button', { name: 'Execution' }).click();
+  await expect(page.getByText('HashAggregate', { exact: true }).first()).toBeVisible();
 });
 
 test('DELETE removes a row for real — the Playground persists it across the next query', async ({

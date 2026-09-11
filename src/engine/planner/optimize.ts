@@ -58,6 +58,24 @@ function rewrapSort(sort: SortSpec | null, plan: Plan): Plan {
 }
 
 /**
+ * Same idea for `HashAggregate`. `Sort` and `HashAggregate` never both sit
+ * above the same `Filter` — `GROUP BY` and `ORDER BY` are mutually exclusive
+ * (the parser enforces it) — but unwrapping each independently, in sequence,
+ * needs no special case for that: whichever is absent is simply a no-op.
+ * WHERE always applies before aggregation in SQL regardless, so pushing a
+ * predicate underneath a `HashAggregate` is always valid, not a shortcut.
+ */
+type AggregateSpecShape = Extract<Plan, { op: 'HashAggregate' }>;
+function unwrapAggregate(plan: Plan): { aggregate: AggregateSpecShape | null; rest: Plan } {
+  return plan.op === 'HashAggregate' ? { aggregate: plan, rest: plan.child } : { aggregate: null, rest: plan };
+}
+function rewrapAggregate(aggregate: AggregateSpecShape | null, plan: Plan): Plan {
+  return aggregate === null
+    ? plan
+    : { op: 'HashAggregate', groupBy: aggregate.groupBy, aggregates: aggregate.aggregates, child: plan };
+}
+
+/**
  * Statically compares two literals — the same three-valued logic
  * `exec/evaluate.ts`'s `compare` uses at runtime (kept as a small separate
  * copy rather than an import, since `planner/` never depends on `exec/`).
@@ -108,7 +126,8 @@ function foldComparison(expr: Extract<Expr, { kind: 'compare' }>): 'true' | 'fal
 const constantFolding: Rule = (input) => {
   const { limit, rest: plan } = unwrapLimit(input);
   if (plan.op !== 'Project') return null;
-  const { sort, rest: belowProject } = unwrapSort(plan.child);
+  const { sort, rest: belowSort } = unwrapSort(plan.child);
+  const { aggregate, rest: belowProject } = unwrapAggregate(belowSort);
   if (belowProject.op !== 'Filter') return null;
 
   const parts = conjuncts(belowProject.predicate);
@@ -125,7 +144,11 @@ const constantFolding: Rule = (input) => {
     : belowProject.child;
   const root = rewrapLimit(
     limit,
-    { op: 'Project', columns: plan.columns, child: rewrapSort(sort, rewrittenFilter) },
+    {
+      op: 'Project',
+      columns: plan.columns,
+      child: rewrapSort(sort, rewrapAggregate(aggregate, rewrittenFilter)),
+    },
   );
 
   const clauses = alwaysTrue.map((f) => `\`${exprToSql(f.expr)}\``).join(', ');
@@ -151,7 +174,8 @@ const constantFolding: Rule = (input) => {
 const predicatePushdown: Rule = (input) => {
   const { limit, rest: plan } = unwrapLimit(input);
   if (plan.op !== 'Project') return null;
-  const { sort, rest: belowProject } = unwrapSort(plan.child);
+  const { sort, rest: belowSort } = unwrapSort(plan.child);
+  const { aggregate, rest: belowProject } = unwrapAggregate(belowSort);
   if (belowProject.op !== 'Filter') return null;
   const scan = belowProject.child;
   if (scan.op !== 'SeqScan' || scan.filter) return null;
@@ -159,7 +183,7 @@ const predicatePushdown: Rule = (input) => {
   const pushed: Plan = { op: 'SeqScan', table: scan.table, filter: belowProject.predicate };
   const root = rewrapLimit(
     limit,
-    { op: 'Project', columns: plan.columns, child: rewrapSort(sort, pushed) },
+    { op: 'Project', columns: plan.columns, child: rewrapSort(sort, rewrapAggregate(aggregate, pushed)) },
   );
 
   return {
@@ -179,7 +203,8 @@ const predicatePushdown: Rule = (input) => {
 const indexSelection: Rule = (input, table) => {
   const { limit, rest: plan } = unwrapLimit(input);
   if (plan.op !== 'Project') return null;
-  const { sort, rest: scan } = unwrapSort(plan.child);
+  const { sort, rest: belowSort } = unwrapSort(plan.child);
+  const { aggregate, rest: scan } = unwrapAggregate(belowSort);
   if (scan.op !== 'SeqScan' || !scan.filter) return null;
 
   const indexed = table.indexedColumn;
@@ -201,7 +226,11 @@ const indexSelection: Rule = (input, table) => {
   };
   const root = rewrapLimit(
     limit,
-    { op: 'Project', columns: plan.columns, child: rewrapSort(sort, indexScan) },
+    {
+      op: 'Project',
+      columns: plan.columns,
+      child: rewrapSort(sort, rewrapAggregate(aggregate, indexScan)),
+    },
   );
 
   return {
@@ -255,7 +284,11 @@ export function optimize(
 export function scanPredicate(plan: Plan): Expr | undefined {
   if (plan.op === 'SeqScan') return plan.filter;
   if (plan.op === 'IndexScan') return plan.residual;
-  return plan.op === 'Filter' || plan.op === 'Sort' || plan.op === 'Project' || plan.op === 'Limit'
+  return plan.op === 'Filter' ||
+    plan.op === 'HashAggregate' ||
+    plan.op === 'Sort' ||
+    plan.op === 'Project' ||
+    plan.op === 'Limit'
     ? scanPredicate(plan.child)
     : undefined;
 }

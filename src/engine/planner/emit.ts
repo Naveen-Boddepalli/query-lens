@@ -1,7 +1,8 @@
 import type { Emit } from '../trace.ts';
 import type { Table } from '../types.ts';
 import type { SelectStatement } from '../parser/index.ts';
-import { buildPlan } from './buildPlan.ts';
+import { selectItemKey } from '../parser/index.ts';
+import { buildAggregatePlan, buildPlan, isAggregateQuery } from './buildPlan.ts';
 import { estimatePlan, rootEstimate } from './cost.ts';
 import { optimize } from './optimize.ts';
 import { exprToSql, toPlanDisplay } from './plan.ts';
@@ -41,6 +42,21 @@ export function emitPlanEvents(
     );
   }
 
+  if (isAggregateQuery(ast)) {
+    current = buildAggregatePlan(ast, current);
+    const groupBy = ast.groupBy?.columns.map((c) => c.name) ?? [];
+    const aggregateLabels =
+      current.op === 'HashAggregate' ? current.aggregates.map((a) => a.key).join(', ') : '';
+    emit(
+      groupBy.length > 0
+        ? `GROUP BY becomes a HashAggregate above that: rows are grouped by ${groupBy.join(', ')}${
+            aggregateLabels ? `, computing ${aggregateLabels} per group` : ''
+          }. Like Sort, it cannot produce a row until it has seen every one — the last group is not known to be complete until the input runs out.`
+        : `${aggregateLabels} becomes a HashAggregate above that: with no GROUP BY, the whole table is one group, so it collapses every row into one. Like Sort, it cannot produce a row until it has seen all of them.`,
+      { stage: 'plan', planTree: display(current) },
+    );
+  }
+
   if (ast.orderBy) {
     current = {
       op: 'Sort',
@@ -59,7 +75,7 @@ export function emitPlanEvents(
   const columns: ProjectList =
     ast.select.kind === 'star'
       ? { kind: 'star' }
-      : { kind: 'columns', names: ast.select.names.map((c) => c.name) };
+      : { kind: 'columns', names: ast.select.items.map(selectItemKey) };
 
   current = { op: 'Project', columns, child: current };
   emit(

@@ -12,16 +12,19 @@ export {
   toDisplayTree,
   updateDisplayTree,
 } from './display.ts';
-export { columnsIn, walkExpr } from './ast.ts';
+export { columnsIn, selectItemArgColumn, selectItemKey, walkExpr } from './ast.ts';
 export type {
+  AggregateFn,
   CompareOp,
   DeleteStatement,
   Expr,
+  GroupByClause,
   InsertColumnList,
   InsertStatement,
   InsertValues,
   LimitClause,
   OrderByClause,
+  SelectItem,
   SelectList,
   SelectStatement,
   Span,

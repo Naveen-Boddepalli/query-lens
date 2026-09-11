@@ -60,10 +60,10 @@ describe('parse — the v0 subset', () => {
 
   it('parses a named column list', () => {
     const ast = ok('SELECT id, name FROM users');
-    expect(ast.select.kind === 'columns' && ast.select.names.map((c) => c.name)).toEqual([
-      'id',
-      'name',
-    ]);
+    expect(
+      ast.select.kind === 'columns' &&
+        ast.select.items.map((item) => item.kind === 'column' && item.name),
+    ).toEqual(['id', 'name']);
   });
 
   it('parses a comparison predicate', () => {
@@ -215,6 +215,96 @@ describe('parse — LIMIT', () => {
 
   it('rejects a missing LIMIT count', () => {
     expect(err('SELECT * FROM users LIMIT').message).toMatch(/expected a whole number/i);
+  });
+});
+
+describe('parse — GROUP BY and aggregates', () => {
+  it('parses a plain aggregate with no GROUP BY', () => {
+    const ast = ok('SELECT COUNT(*) FROM users');
+    expect(ast.select.kind).toBe('columns');
+    const item = ast.select.kind === 'columns' ? ast.select.items[0] : null;
+    expect(item).toMatchObject({ kind: 'aggregate', fn: 'COUNT', arg: { kind: 'star' } });
+    expect(ast.groupBy).toBeUndefined();
+  });
+
+  it('parses every aggregate function over a column', () => {
+    const ast = ok('SELECT SUM(age), AVG(age), MIN(age), MAX(age), COUNT(age) FROM users');
+    expect(ast.select.kind === 'columns' && ast.select.items.map((i) => i.kind === 'aggregate' && i.fn)).toEqual([
+      'SUM',
+      'AVG',
+      'MIN',
+      'MAX',
+      'COUNT',
+    ]);
+  });
+
+  it('parses a GROUP BY on one column', () => {
+    const ast = ok('SELECT age, COUNT(*) FROM users GROUP BY age');
+    expect(ast.groupBy?.columns.map((c) => c.name)).toEqual(['age']);
+  });
+
+  it('parses a GROUP BY on multiple columns', () => {
+    const ast = ok('SELECT age, name, COUNT(*) FROM users GROUP BY age, name');
+    expect(ast.groupBy?.columns.map((c) => c.name)).toEqual(['age', 'name']);
+  });
+
+  it('parses GROUP BY with no aggregate function at all — plain deduplication', () => {
+    const ast = ok('SELECT age FROM users GROUP BY age');
+    expect(ast.groupBy?.columns.map((c) => c.name)).toEqual(['age']);
+  });
+
+  it('treats a bare identifier named like an aggregate function as a plain column', () => {
+    const ast = ok('SELECT count FROM users');
+    expect(ast.select.kind === 'columns' && ast.select.items[0]).toMatchObject({ kind: 'column', name: 'count' });
+  });
+
+  it('is case-insensitive on the function name', () => {
+    const ast = ok('SELECT count(*) FROM users');
+    expect(ast.select.kind === 'columns' && ast.select.items[0]).toMatchObject({ fn: 'COUNT' });
+  });
+
+  it('rejects `*` for anything but COUNT', () => {
+    const e = err('SELECT SUM(*) FROM users');
+    expect(e.message).toMatch(/SUM\(\*\).*not supported/);
+    expect(e.hint).toMatch(/SUM\(age\)/);
+  });
+
+  it('rejects a missing closing paren', () => {
+    expect(err('SELECT COUNT(* FROM users').message).toMatch(/expected `\)`/i);
+  });
+
+  it('rejects a missing GROUP BY column', () => {
+    expect(err('SELECT COUNT(*) FROM users GROUP BY').message).toMatch(/a column name to group by/i);
+  });
+
+  it('rejects a missing BY after GROUP', () => {
+    expect(err('SELECT COUNT(*) FROM users GROUP age').message).toMatch(/expected `by`/i);
+  });
+
+  it('rejects a plain column mixed with an aggregate, with no GROUP BY', () => {
+    const e = err('SELECT name, COUNT(*) FROM users');
+    expect(e.message).toMatch(/`name` is not aggregated/);
+    expect(e.hint).toMatch(/GROUP BY/);
+  });
+
+  it('rejects a plain column not covered by GROUP BY', () => {
+    const e = err('SELECT name, age, COUNT(*) FROM users GROUP BY name');
+    expect(e.message).toMatch(/`age` is not aggregated and is not in the GROUP BY list/);
+  });
+
+  it('rejects SELECT * with GROUP BY', () => {
+    const e = err('SELECT * FROM users GROUP BY age');
+    expect(e.message).toMatch(/SELECT \*.*GROUP BY/);
+  });
+
+  it('rejects ORDER BY combined with GROUP BY', () => {
+    const e = err('SELECT age, COUNT(*) FROM users GROUP BY age ORDER BY age');
+    expect(e.message).toMatch(/ORDER BY with GROUP BY/);
+  });
+
+  it('still allows LIMIT with GROUP BY', () => {
+    const ast = ok('SELECT age, COUNT(*) FROM users GROUP BY age LIMIT 3');
+    expect(ast.limit).toMatchObject({ value: 3 });
   });
 });
 
@@ -426,7 +516,7 @@ describe('parse — errors point at the right text', () => {
 
   it.each([
     ['SELECT * FROM a JOIN b ON a.id = b.id', /JOIN/, /v1/],
-    ['SELECT * FROM users GROUP BY id', /GROUP/, /v0 subset/],
+    ['SELECT dept, COUNT(*) FROM users GROUP BY dept HAVING COUNT(*) > 1', /HAVING/, /WHERE instead/],
     ['SELECT * FROM users LIMIT 5 OFFSET 10', /OFFSET/, /LIMIT on its own is/],
   ])('explains out-of-scope SQL: %s', (sql, message, hint) => {
     const e = err(sql);

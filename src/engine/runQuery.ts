@@ -198,7 +198,12 @@ export function runQuery(
 
 function referencedColumns(ast: Statement): { name: string; span: { from: number; to: number } }[] {
   const refs: { name: string; span: { from: number; to: number } }[] = [];
-  if (ast.kind === 'select' && ast.select.kind === 'columns') refs.push(...ast.select.names);
+  if (ast.kind === 'select' && ast.select.kind === 'columns') {
+    for (const item of ast.select.items) {
+      if (item.kind === 'column') refs.push({ name: item.name, span: item.span });
+      else if (item.arg.kind === 'column') refs.push({ name: item.arg.name, span: item.arg.span });
+    }
+  }
   if (ast.kind !== 'insert' && ast.where) {
     const stack = [ast.where];
     while (stack.length > 0) {
@@ -207,6 +212,7 @@ function referencedColumns(ast: Statement): { name: string; span: { from: number
       if (e.kind === 'compare' || e.kind === 'and') stack.push(e.left, e.right);
     }
   }
+  if (ast.kind === 'select' && ast.groupBy) refs.push(...ast.groupBy.columns);
   if (ast.kind === 'select' && ast.orderBy) refs.push({ name: ast.orderBy.column, span: ast.orderBy.span });
   if (ast.kind === 'insert' && ast.columns) refs.push(...ast.columns.names);
   if (ast.kind === 'update') {

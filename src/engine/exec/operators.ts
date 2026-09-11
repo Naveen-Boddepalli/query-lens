@@ -11,12 +11,12 @@
 import type { Emit } from '../trace.ts';
 import type { EngineOptions, Row, SqlValue, Table } from '../types.ts';
 import type { Expr } from '../parser/index.ts';
-import type { Plan, ProjectList } from '../planner/index.ts';
+import type { AggregateSpec, Plan, ProjectList } from '../planner/index.ts';
 import type { BufferPool, Heap } from '../storage/index.ts';
 import type { LockManager } from '../locks/index.ts';
 import type { BPlusTree } from '../index/index.ts';
 import { emitIndexLookup, pageCountFor } from '../index/index.ts';
-import { passes } from './evaluate.ts';
+import { compare, passes } from './evaluate.ts';
 import { externalMergeSort } from './sort.ts';
 
 export interface Operator {
@@ -212,6 +212,114 @@ function project(columns: ProjectList, child: Operator, ctx: ExecContext): Opera
   };
 }
 
+/** A NULL-safe composite key for a group — collision-free via JSON, unlike joining with a separator. */
+function groupKeyOf(row: Row, groupBy: readonly string[]): string {
+  return JSON.stringify(groupBy.map((col) => row[col] ?? null));
+}
+
+function computeAggregate(spec: AggregateSpec, rows: readonly Row[]): SqlValue {
+  if (spec.fn === 'COUNT') {
+    return spec.column === null
+      ? rows.length
+      : rows.filter((r) => (r[spec.column!] ?? null) !== null).length;
+  }
+
+  const values = rows.map((r) => r[spec.column!] ?? null).filter((v) => v !== null);
+  if (values.length === 0) return null;
+
+  switch (spec.fn) {
+    case 'SUM': {
+      const nums = values.filter((v): v is number => typeof v === 'number');
+      return nums.length === 0 ? null : nums.reduce((a, b) => a + b, 0);
+    }
+    case 'AVG': {
+      const nums = values.filter((v): v is number => typeof v === 'number');
+      return nums.length === 0 ? null : nums.reduce((a, b) => a + b, 0) / nums.length;
+    }
+    case 'MIN':
+      return values.reduce((min, v) => (compare('<', v, min) === true ? v : min));
+    case 'MAX':
+      return values.reduce((max, v) => (compare('>', v, max) === true ? v : max));
+  }
+}
+
+/** Groups `rows` by `groupBy` (or one group over everything, if empty) and computes each aggregate per group. */
+function runHashAggregate(rows: readonly Row[], groupBy: readonly string[], aggregates: readonly AggregateSpec[]): Row[] {
+  if (groupBy.length === 0) {
+    const groupRow: Row = {};
+    for (const spec of aggregates) groupRow[spec.key] = computeAggregate(spec, rows);
+    return [groupRow];
+  }
+
+  const groups = new Map<string, { key: Row; rows: Row[] }>();
+  for (const row of rows) {
+    const groupKey = groupKeyOf(row, groupBy);
+    let bucket = groups.get(groupKey);
+    if (!bucket) {
+      bucket = { key: Object.fromEntries(groupBy.map((col) => [col, row[col] ?? null])), rows: [] };
+      groups.set(groupKey, bucket);
+    }
+    bucket.rows.push(row);
+  }
+
+  return [...groups.values()].map(({ key, rows: groupRows }) => {
+    const groupRow: Row = { ...key };
+    for (const spec of aggregates) groupRow[spec.key] = computeAggregate(spec, groupRows);
+    return groupRow;
+  });
+}
+
+/**
+ * `GROUP BY` / aggregate functions, computed with a hash table — the other
+ * operator here that cannot stream, for the same reason `Sort` cannot: a
+ * group is not known to be complete until the whole input has been seen, so
+ * the first `next()` call materialises the child, builds one hash-table
+ * bucket per distinct `groupBy` combination (a single bucket, if there is no
+ * `GROUP BY`), and every later call just streams the finished groups
+ * (plan.md §22.2 — the point of comparison for a future sort aggregate).
+ */
+function hashAggregate(plan: Extract<Plan, { op: 'HashAggregate' }>, child: Operator, ctx: ExecContext): Operator {
+  let rows: Row[] | null = null;
+  let index = 0;
+  const produced = counter(ctx, 'HashAggregate');
+
+  return {
+    name: 'HashAggregate',
+    open() {
+      child.open();
+      rows = null;
+      index = 0;
+    },
+    next() {
+      if (rows === null) {
+        const materialised: Row[] = [];
+        for (;;) {
+          const row = child.next();
+          if (!row) break;
+          materialised.push(row);
+        }
+        child.close();
+        rows = runHashAggregate(materialised, plan.groupBy, plan.aggregates);
+      }
+
+      const row = rows[index];
+      if (!row) return null;
+      index += 1;
+      produced(
+        plan.groupBy.length > 0
+          ? `HashAggregate returns group ${index} of ${rows.length} (${plan.groupBy
+              .map((col) => `${col} = ${JSON.stringify(row[col] ?? null)}`)
+              .join(', ')}).`
+          : 'HashAggregate returns the one row the whole table collapses into.',
+      );
+      return row;
+    },
+    close() {
+      if (rows === null) child.close();
+    },
+  };
+}
+
 /**
  * `ORDER BY` — the one operator here that cannot stream. Volcano pulls a row
  * at a time, but a sort cannot hand back its first row until it has seen
@@ -311,6 +419,8 @@ export function buildOperator(plan: Plan, ctx: ExecContext): Operator {
       return indexScan(plan, ctx);
     case 'Filter':
       return filter(plan.predicate, buildOperator(plan.child, ctx), ctx);
+    case 'HashAggregate':
+      return hashAggregate(plan, buildOperator(plan.child, ctx), ctx);
     case 'Sort':
       return sort(plan, buildOperator(plan.child, ctx), ctx);
     case 'Project':

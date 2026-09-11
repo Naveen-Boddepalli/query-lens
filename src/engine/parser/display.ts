@@ -11,17 +11,26 @@ import type { Emit } from '../trace.ts';
 import type {
   DeleteStatement,
   Expr,
+  GroupByClause,
   InsertColumnList,
   InsertStatement,
   InsertValues,
   LimitClause,
   OrderByClause,
+  SelectItem,
   SelectList,
   SelectStatement,
   TableRef,
   UpdateAssignment,
   UpdateStatement,
 } from './ast.ts';
+import { selectItemKey } from './ast.ts';
+
+function selectItemNode(item: SelectItem, id: string): ASTNode {
+  return item.kind === 'column'
+    ? { id, kind: 'Column', label: item.name, span: item.span }
+    : { id, kind: 'Aggregate', label: selectItemKey(item), span: item.span };
+}
 
 function selectListNode(select: SelectList): ASTNode {
   if (select.kind === 'star') {
@@ -38,10 +47,21 @@ function selectListNode(select: SelectList): ASTNode {
     id: 'select',
     kind: 'SelectList',
     label: 'columns',
-    detail: `${select.names.length} named`,
+    detail: `${select.items.length} named`,
     span: select.span,
-    children: select.names.map((c, i) => ({
-      id: `select.col${i}`,
+    children: select.items.map((item, i) => selectItemNode(item, `select.col${i}`)),
+  };
+}
+
+function groupByNode(groupBy: GroupByClause): ASTNode {
+  return {
+    id: 'groupBy',
+    kind: 'GroupBy',
+    label: 'GROUP BY',
+    detail: groupBy.columns.map((c) => c.name).join(', '),
+    span: groupBy.span,
+    children: groupBy.columns.map((c, i) => ({
+      id: `groupBy.col${i}`,
       kind: 'Column',
       label: c.name,
       span: c.span,
@@ -198,6 +218,7 @@ function root(
 export function toDisplayTree(ast: SelectStatement): ASTNode {
   const children = [selectListNode(ast.select), fromNode(ast.from)];
   if (ast.where) children.push(whereNode(ast.where));
+  if (ast.groupBy) children.push(groupByNode(ast.groupBy));
   if (ast.orderBy) children.push(orderByNode(ast.orderBy));
   if (ast.limit) children.push(limitNode(ast.limit));
   return root(children, ast.span);
@@ -216,7 +237,7 @@ export function emitParseEvents(emit: Emit, ast: SelectStatement): void {
   emit(
     ast.select.kind === 'star'
       ? 'Read the SELECT list: `*`, meaning every column of the table.'
-      : `Read the SELECT list: ${ast.select.names.map((c) => `\`${c.name}\``).join(', ')}.`,
+      : `Read the SELECT list: ${ast.select.items.map((item) => `\`${selectItemKey(item)}\``).join(', ')}.`,
     { stage: 'parse', ast: root([...children], ast.span), span: ast.select.span },
   );
 
@@ -232,6 +253,16 @@ export function emitParseEvents(emit: Emit, ast: SelectStatement): void {
     emit(
       'Read the WHERE clause and build the predicate tree. Nothing has been executed yet — this is still only structure.',
       { stage: 'parse', ast: root([...children], ast.span), span: ast.where.span },
+    );
+  }
+
+  if (ast.groupBy) {
+    children.push(groupByNode(ast.groupBy));
+    emit(
+      `Read the GROUP BY clause: rows are grouped by ${ast.groupBy.columns
+        .map((c) => `\`${c.name}\``)
+        .join(', ')}. Nothing has been computed yet — this is still only structure.`,
+      { stage: 'parse', ast: root([...children], ast.span), span: ast.groupBy.span },
     );
   }
 

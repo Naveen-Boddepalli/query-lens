@@ -5,10 +5,18 @@
  */
 
 import type { PlanNode, SqlValue } from '../types.ts';
-import type { Expr } from '../parser/index.ts';
+import type { AggregateFn, Expr } from '../parser/index.ts';
 import type { PlanCost } from './cost.ts';
 
 export type ProjectList = { kind: 'star' } | { kind: 'columns'; names: string[] };
+
+/** One aggregate a `HashAggregate` computes, keyed by its canonical SQL text (e.g. `COUNT(*)`). */
+export interface AggregateSpec {
+  key: string;
+  fn: AggregateFn;
+  /** The column it reads, or `null` only for `COUNT(*)`. */
+  column: string | null;
+}
 
 export type Plan =
   | { op: 'SeqScan'; table: string; filter?: Expr }
@@ -22,6 +30,15 @@ export type Plan =
       residual?: Expr;
     }
   | { op: 'Filter'; predicate: Expr; child: Plan }
+  /**
+   * `GROUP BY` / aggregate functions, between Filter and Sort or Project:
+   * `Project → HashAggregate → Filter → …`. Builds one group per distinct
+   * combination of `groupBy` values (or a single group over everything when
+   * `groupBy` is empty) with a hash table keyed on that combination —
+   * plan.md §22.2 names a sort aggregate as the point of comparison this
+   * makes, once it exists.
+   */
+  | { op: 'HashAggregate'; groupBy: string[]; aggregates: AggregateSpec[]; child: Plan }
   /** `ORDER BY column [ASC|DESC]`, between Filter and Project: `Project → Sort → Filter → …`. */
   | { op: 'Sort'; column: string; direction: 'asc' | 'desc'; child: Plan }
   | { op: 'Project'; columns: ProjectList; child: Plan }
@@ -30,6 +47,7 @@ export type Plan =
 
 export function childOf(plan: Plan): Plan | undefined {
   return plan.op === 'Filter' ||
+    plan.op === 'HashAggregate' ||
     plan.op === 'Sort' ||
     plan.op === 'Project' ||
     plan.op === 'Limit'
@@ -160,6 +178,21 @@ function convert(
         op: 'Filter',
         label: 'Filter',
         detail: exprToSql(plan.predicate),
+        ...(highlight ? { highlight } : {}),
+        ...cost,
+        children: kid(plan.child),
+      };
+    case 'HashAggregate':
+      return {
+        id,
+        op: 'HashAggregate',
+        label: 'HashAggregate',
+        detail:
+          plan.groupBy.length > 0
+            ? `GROUP BY ${plan.groupBy.join(', ')}${
+                plan.aggregates.length > 0 ? `; ${plan.aggregates.map((a) => a.key).join(', ')}` : ''
+              }`
+            : plan.aggregates.map((a) => a.key).join(', '),
         ...(highlight ? { highlight } : {}),
         ...cost,
         children: kid(plan.child),

@@ -8,6 +8,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Aggregates and `GROUP BY`, with a hash aggregate** (plan.md §22.2) — `COUNT`/`SUM`/`AVG`/`MIN`/
+  `MAX` in the SELECT list, and `GROUP BY` on one or more columns, are real. A `SelectItem` union
+  (a plain column, or an aggregate call like `COUNT(*)`/`SUM(age)`) replaces the old flat
+  column-name list; standard SQL's grouping rule is enforced at parse time — a plain column in the
+  SELECT list must be one you group by, or wrapped in an aggregate, whether or not `GROUP BY` is
+  written at all. A `HashAggregate` plan node sits between `Filter` and `Project`, computed by an
+  operator that — like `Sort` — cannot stream: a group is not known to be complete until the whole
+  input has been seen, so it builds one hash-table bucket per distinct `GROUP BY` combination (a
+  single bucket, with no `GROUP BY`, over the whole input) on its first pull, then streams the
+  finished groups. `constant-folding`/`predicate-pushdown`/`index-selection` all learned to see past
+  a `HashAggregate` the same way they already see past `Sort`/`Limit` — `WHERE` always applies
+  before aggregation in SQL, so pushing a predicate underneath one is never a shortcut — and the
+  cost model gained a group-count estimate (the product of each `GROUP BY` column's distinct-value
+  count, capped at the input, the same independence assumption an `AND`'s selectivity already
+  makes). `ORDER BY` combined with `GROUP BY` is not supported yet, rejected with a clear hint;
+  `LIMIT` still works. One strategy only — a sort aggregate and the `/compare` mode plan.md names as
+  the actual point of the pair are the next milestone. 25 unit tests (`__tests__/aggregate.test.ts`),
+  plus new parser, planner and cost-model coverage, 1 e2e
 - **`constant-folding`, a third optimizer rule** (plan.md §22.2) — a comparison whose truth value
   never depends on the row folds to a boolean at optimize time: two literals (`5 > 3`), or a column
   compared with itself (`age = age`, the `col = col` case). An always-true conjunct drops out of the

@@ -28,10 +28,13 @@
 
 import type { QueryError } from '../types.ts';
 import type {
+  AggregateFn,
   CompareOp,
   DeleteStatement,
   Expr,
+  GroupByClause,
   InsertStatement,
+  SelectItem,
   SelectList,
   SelectStatement,
   Span,
@@ -65,8 +68,7 @@ const OUT_OF_SCOPE: Record<string, string> = {
   RIGHT: 'Joins arrive in v1 — v0 reads a single table.',
   FULL: 'Joins arrive in v1 — v0 reads a single table.',
   CROSS: 'Joins arrive in v1 — v0 reads a single table.',
-  GROUP: 'GROUP BY is not in the v0 subset.',
-  HAVING: 'HAVING is not in the v0 subset.',
+  HAVING: 'HAVING is not in the v0 subset — filter before GROUP BY with WHERE instead.',
   OFFSET: 'OFFSET is not in the v0 subset — LIMIT on its own is.',
   DISTINCT: 'DISTINCT is not in the v0 subset.',
   UNION: 'UNION is not in the v0 subset.',
@@ -129,6 +131,45 @@ function makeCursor(tokens: Token[]): Cursor {
   return { peek, next, atEnd, guardScope, expectKeyword, expectIdentifier };
 }
 
+const AGGREGATE_FNS = new Set(['COUNT', 'SUM', 'AVG', 'MIN', 'MAX']);
+
+/** A plain column, or an aggregate call — `COUNT(*)`, `SUM(age)`, and so on. */
+function parseSelectItem(c: Cursor): SelectItem {
+  const token = c.expectIdentifier('a column name or an aggregate like COUNT(*)');
+  const upper = token.value.toUpperCase();
+
+  if (!AGGREGATE_FNS.has(upper) || c.peek().type !== 'lparen') {
+    return { kind: 'column', name: token.value, span: { from: token.from, to: token.to } };
+  }
+
+  c.next(); // '('
+  const argToken = c.peek();
+  let arg: Extract<SelectItem, { kind: 'aggregate' }>['arg'];
+  if (argToken.type === 'star') {
+    c.next();
+    if (upper !== 'COUNT') {
+      throw new ParseError(
+        `\`${upper}(*)\` is not supported — \`*\` only works with COUNT.`,
+        argToken,
+        `Give ${upper} a column to aggregate, e.g. ${upper}(age).`,
+      );
+    }
+    arg = { kind: 'star', span: { from: argToken.from, to: argToken.to } };
+  } else {
+    const colToken = c.expectIdentifier(`a column name, or \`*\` for COUNT`);
+    arg = { kind: 'column', name: colToken.value, span: { from: colToken.from, to: colToken.to } };
+  }
+
+  const close = c.peek();
+  if (close.type !== 'rparen') {
+    c.guardScope(close);
+    throw new ParseError(`Expected \`)\` after the aggregate's argument, found ${describe(close)}.`, close);
+  }
+  c.next();
+
+  return { kind: 'aggregate', fn: upper as AggregateFn, arg, span: { from: token.from, to: close.to } };
+}
+
 function parseSelectList(c: Cursor): SelectList {
   const first = c.peek();
 
@@ -137,15 +178,68 @@ function parseSelectList(c: Cursor): SelectList {
     return { kind: 'star', span: { from: first.from, to: first.to } };
   }
 
-  const names: { name: string; span: Span }[] = [];
+  const items: SelectItem[] = [];
   for (;;) {
-    const token = c.expectIdentifier('a column name or `*`');
-    names.push({ name: token.value, span: { from: token.from, to: token.to } });
+    items.push(parseSelectItem(c));
     if (c.peek().type !== 'comma') break;
     c.next();
   }
-  const last = names[names.length - 1]!;
-  return { kind: 'columns', names, span: { from: first.from, to: last.span.to } };
+  const last = items[items.length - 1]!;
+  return { kind: 'columns', items, span: { from: first.from, to: last.span.to } };
+}
+
+/** `GROUP BY col [, col ...]`, if present. */
+function parseGroupBy(c: Cursor): GroupByClause | undefined {
+  if (!(c.peek().type === 'keyword' && c.peek().upper === 'GROUP')) return undefined;
+  const groupToken = c.next();
+  c.expectKeyword('BY', 'after GROUP');
+
+  const columns: { name: string; span: Span }[] = [];
+  for (;;) {
+    const token = c.expectIdentifier('a column name to group by');
+    columns.push({ name: token.value, span: { from: token.from, to: token.to } });
+    if (c.peek().type !== 'comma') break;
+    c.next();
+  }
+  const last = columns[columns.length - 1]!;
+  return { columns, span: { from: groupToken.from, to: last.span.to } };
+}
+
+/**
+ * Standard SQL's rule: a plain column in the SELECT list must be one the
+ * query groups by, or wrapped in an aggregate — otherwise which of the many
+ * rows in a group would it come from is not defined. Applies whether or not
+ * `GROUP BY` is written at all: `SELECT dept, COUNT(*) FROM t` is invalid for
+ * the same reason `SELECT dept, COUNT(*) FROM t GROUP BY status` is.
+ */
+function checkGroupingValidity(select: SelectList, groupBy: GroupByClause | undefined): void {
+  if (select.kind === 'star') {
+    if (groupBy) {
+      throw new ParseError(
+        '`SELECT *` cannot be combined with GROUP BY.',
+        groupBy.span,
+        'Name the columns you want — each one either grouped or wrapped in an aggregate.',
+      );
+    }
+    return;
+  }
+
+  const hasAggregate = select.items.some((item) => item.kind === 'aggregate');
+  if (!hasAggregate && !groupBy) return;
+
+  const groupNames = new Set(groupBy?.columns.map((c) => c.name) ?? []);
+  const ungrouped = select.items.find((item) => item.kind === 'column' && !groupNames.has(item.name));
+  if (ungrouped) {
+    throw new ParseError(
+      `\`${(ungrouped as Extract<SelectItem, { kind: 'column' }>).name}\` is not aggregated${
+        groupBy ? ' and is not in the GROUP BY list' : ''
+      }.`,
+      ungrouped.span,
+      groupBy
+        ? 'Every plain column in the SELECT list must be one you GROUP BY, or wrapped in an aggregate like COUNT(...).'
+        : 'Mixing a plain column with an aggregate needs a GROUP BY — add one, or wrap the column in an aggregate too.',
+    );
+  }
 }
 
 function parseTableRef(c: Cursor): TableRef {
@@ -334,9 +428,18 @@ function parseSelectBody(c: Cursor): SelectStatement {
   c.expectKeyword('FROM', 'after the column list');
   const from = parseTableRef(c);
   const where = parseOptionalWhere(c);
+  const groupBy = parseGroupBy(c);
+  checkGroupingValidity(select, groupBy);
 
   let orderBy: SelectStatement['orderBy'];
   if (c.peek().type === 'keyword' && c.peek().upper === 'ORDER') {
+    if (groupBy) {
+      throw new ParseError(
+        'ORDER BY with GROUP BY is not supported yet.',
+        c.peek(),
+        'GROUP BY on its own still works — sort the grouped results yourself for now.',
+      );
+    }
     const orderToken = c.next();
     c.expectKeyword('BY', 'after ORDER');
     const col = c.expectIdentifier('a column name to sort by');
@@ -366,12 +469,13 @@ function parseSelectBody(c: Cursor): SelectStatement {
 
   expectStatementEnd(c);
 
-  const end = limit?.span.to ?? orderBy?.span.to ?? where?.span.to ?? from.span.to;
+  const end = limit?.span.to ?? orderBy?.span.to ?? groupBy?.span.to ?? where?.span.to ?? from.span.to;
   return {
     kind: 'select',
     select,
     from,
     ...(where === undefined ? {} : { where }),
+    ...(groupBy === undefined ? {} : { groupBy }),
     ...(orderBy === undefined ? {} : { orderBy }),
     ...(limit === undefined ? {} : { limit }),
     span: { from: selectToken.from, to: end },

@@ -25,6 +25,7 @@ function shape(p: Plan): string[] {
   let node = p;
   while (
     node.op === 'Filter' ||
+    node.op === 'HashAggregate' ||
     node.op === 'Sort' ||
     node.op === 'Project' ||
     node.op === 'Limit'
@@ -129,6 +130,54 @@ describe('buildPlan — the canonical shape', () => {
 
   it('omits the Sort when there is no ORDER BY', () => {
     expect(shape(plan('SELECT * FROM users'))).not.toContain('Sort');
+  });
+});
+
+describe('buildPlan — HashAggregate', () => {
+  it('inserts a HashAggregate between Project and the scan for a GROUP BY', () => {
+    expect(shape(plan('SELECT age, COUNT(*) FROM users GROUP BY age'))).toEqual([
+      'Project',
+      'HashAggregate',
+      'SeqScan',
+    ]);
+  });
+
+  it('inserts a HashAggregate for a bare aggregate with no GROUP BY too', () => {
+    expect(shape(plan('SELECT COUNT(*) FROM users'))).toEqual(['Project', 'HashAggregate', 'SeqScan']);
+  });
+
+  it('sits above Filter when there is also a WHERE', () => {
+    expect(shape(plan('SELECT age, COUNT(*) FROM users WHERE age > 30 GROUP BY age'))).toEqual([
+      'Project',
+      'HashAggregate',
+      'Filter',
+      'SeqScan',
+    ]);
+  });
+
+  it('carries the group columns and the aggregate specs', () => {
+    const p = plan('SELECT age, SUM(id) FROM users GROUP BY age');
+    const agg = p.op === 'Project' ? p.child : null;
+    expect(agg).toMatchObject({
+      op: 'HashAggregate',
+      groupBy: ['age'],
+      aggregates: [{ key: 'SUM(id)', fn: 'SUM', column: 'id' }],
+    });
+  });
+
+  it('COUNT(*) carries a null column, not the string "*"', () => {
+    const p = plan('SELECT COUNT(*) FROM users');
+    const agg = p.op === 'Project' ? p.child : null;
+    expect(agg).toMatchObject({ op: 'HashAggregate', aggregates: [{ fn: 'COUNT', column: null }] });
+  });
+
+  it('omits the HashAggregate for an ordinary SELECT with neither GROUP BY nor an aggregate', () => {
+    expect(shape(plan('SELECT * FROM users'))).not.toContain('HashAggregate');
+  });
+
+  it("Project's columns are each item's canonical key, in SELECT-list order", () => {
+    const p = plan('SELECT COUNT(*), age FROM users GROUP BY age');
+    expect(p).toMatchObject({ op: 'Project', columns: { kind: 'columns', names: ['COUNT(*)', 'age'] } });
   });
 });
 
@@ -289,6 +338,33 @@ describe('optimize — Sort stays transparent to the rewrites', () => {
     expect(plan('SELECT * FROM users ORDER BY age')).toMatchObject({
       op: 'Project',
       child: { op: 'Sort', column: 'age' },
+    });
+  });
+});
+
+describe('optimize — HashAggregate stays transparent to the rewrites', () => {
+  it('predicate pushdown still fires underneath a HashAggregate — WHERE always applies before GROUP BY', () => {
+    const p = final('SELECT age, COUNT(*) FROM users WHERE age > 30 GROUP BY age');
+    expect(shape(p)).toEqual(['Project', 'HashAggregate', 'SeqScan']);
+    expect(exprToSql(scanPredicate(p)!)).toBe('age > 30');
+  });
+
+  it('index selection still fires underneath a HashAggregate, and the aggregate survives above the IndexScan', () => {
+    const p = final('SELECT id, COUNT(*) FROM users WHERE id = 5 GROUP BY id');
+    expect(shape(p)).toEqual(['Project', 'HashAggregate', 'IndexScan']);
+    expect(p).toMatchObject({ op: 'Project', child: { op: 'HashAggregate', groupBy: ['id'] } });
+  });
+
+  it('composes with LIMIT too: Limit → Project → HashAggregate → IndexScan', () => {
+    const p = final('SELECT id, COUNT(*) FROM users WHERE id = 5 GROUP BY id LIMIT 1');
+    expect(shape(p)).toEqual(['Limit', 'Project', 'HashAggregate', 'IndexScan']);
+  });
+
+  it('a bare GROUP BY with no WHERE fires no rule, and the HashAggregate is preserved', () => {
+    expect(optimize(plan('SELECT age, COUNT(*) FROM users GROUP BY age'), users)).toHaveLength(0);
+    expect(plan('SELECT age, COUNT(*) FROM users GROUP BY age')).toMatchObject({
+      op: 'Project',
+      child: { op: 'HashAggregate', groupBy: ['age'] },
     });
   });
 });
