@@ -28,6 +28,8 @@ function toFlow(node: PlanNode): FlowNode {
     label: node.label,
     ...(node.detail === undefined ? {} : { detail: node.detail }),
     ...(node.highlight === undefined ? {} : { highlight: node.highlight }),
+    ...(node.estRows === undefined ? {} : { estRows: node.estRows }),
+    ...(node.estBasis === undefined ? {} : { estBasis: node.estBasis }),
     ...(node.children ? { children: node.children.map(toFlow) } : {}),
   };
 }

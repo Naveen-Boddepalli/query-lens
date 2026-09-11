@@ -27,6 +27,10 @@ export interface FlowNode {
   span?: Span;
   /** Set directly by the producer, e.g. a node an optimizer rule created. */
   highlight?: boolean;
+  /** Cost model's estimated output rows for this node (plan.md §22.2). */
+  estRows?: number;
+  /** The heuristic behind `estRows`, in a few words. */
+  estBasis?: string;
   children?: FlowNode[];
 }
 
@@ -36,6 +40,8 @@ interface NodeData extends Record<string, unknown> {
   kindIcon?: string;
   label: string;
   detail?: string;
+  estRows?: number;
+  estBasis?: string;
   highlighted: boolean;
   tone: string;
   wide: boolean;
@@ -73,6 +79,12 @@ function NodeView({ data }: NodeProps<TreeFlowNode>) {
       </div>
       {data.detail && (
         <div className="mt-0.5 font-mono text-label break-words text-ink-dim">{data.detail}</div>
+      )}
+      {data.estRows !== undefined && (
+        <div className="mt-0.5 text-label break-words text-ink-dim/80" title={data.estBasis}>
+          <span className="font-mono">~{data.estRows} row{data.estRows === 1 ? '' : 's'}</span>
+          {data.estBasis && <span className="opacity-70"> · {data.estBasis}</span>}
+        </div>
       )}
       <Handle id="out" type="source" position={Position.Bottom} className="!opacity-0" />
       <Handle id="next" type="source" position={Position.Right} className="!opacity-0" />
@@ -160,6 +172,8 @@ function build(
         : { kindIcon: props.kindIcons[d.data.kind] }),
       label: d.data.label,
       ...(d.data.detail === undefined ? {} : { detail: d.data.detail }),
+      ...(d.data.estRows === undefined ? {} : { estRows: d.data.estRows }),
+      ...(d.data.estBasis === undefined ? {} : { estBasis: d.data.estBasis }),
       highlighted: d.data.highlight === true || overlaps(d.data.span, activeSpan),
       tone: props.tones[d.data.kind] ?? 'border-edge bg-surface-3 text-ink',
       wide: props.wide,

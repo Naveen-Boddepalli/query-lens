@@ -8,6 +8,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **In-app EXPLAIN** (plan.md §22.2) — a **Copy as EXPLAIN** button next to Copy as text/Mermaid,
+  offered once a query has actually run (the result stage — `EXPLAIN ANALYZE` needs an execution,
+  same as Postgres). Prints the final plan tree with the cost model's `est ~N rows` next to the
+  `actual N rows` each operator really produced, e.g. `IndexScan users.id  key: id = 5  ·  est ~1
+  rows  ·  actual 1 rows`. Pure (`explainToText` in `src/export/toText.ts`), reusing `ViewState`'s
+  existing per-operator counts — no new engine surface
+- **Cost-based optimizer** (plan.md §7.3, §22.2) — the first engine item off the now-lifted §9 gate
+  (see §9's v14 note). Every plan and optimize node carries a `~N rows` estimate and the heuristic
+  behind it — an equality is `1 / ndistinct`, an open range is linear over the column's min–max, an
+  `AND` multiplies its parts and assumes independence — rendered on the Playground panels and in
+  `/tools/planner`. The optimizer's rules still fire without consulting the numbers; the numbers
+  *justify* the rewrite: the index-selection narration now reads "the sequential scan reads all 12
+  pages to return about 1 row; the index lookup reads about 4", and the result narration reconciles
+  the guess against the exact count ("the cost model guessed ~37 … the estimate is a heuristic").
+  `src/engine/planner/cost.ts`, pure and unit-tested (`src/engine/__tests__/cost.test.ts`)
 - **Three more `/challenges` puzzles** (plan.md §22.4) — *push the filter down* (get predicate
   pushdown to fire without an index lookup), *a lookup on the big table* (an `IndexScan` on the
   120-row `orders`, a level deeper than `users`), and *the selective end of a skew* (a `logins` scan

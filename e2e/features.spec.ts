@@ -308,6 +308,29 @@ test('the panels also copy themselves as monospace text', async ({ page, context
   expect(tree).toMatch(/(internal|leaf), page \d+/);
 });
 
+test('the result stage offers an in-app EXPLAIN — estimate next to actual', async ({
+  page,
+  context,
+}) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+
+  // Not offered before the query has actually run.
+  await page.goto('/stages/optimize');
+  await expect(page.getByRole('button', { name: 'Copy as EXPLAIN' })).toHaveCount(0);
+
+  // The default demo query is `id = 5` — an exact index lookup, so the
+  // estimate and the actual count agree.
+  await page.goto('/stages/result');
+  await page.getByRole('button', { name: 'Copy as EXPLAIN' }).click();
+  await expect(page.getByRole('button', { name: 'Copied ✓' })).toBeVisible();
+
+  const explain = await page.evaluate(() => navigator.clipboard.readText());
+  expect(explain.startsWith('```\n')).toBe(true);
+  expect(explain).toContain('IndexScan');
+  expect(explain).toMatch(/est ~1 rows/);
+  expect(explain).toMatch(/actual 1 rows/);
+});
+
 test('the preset chips load and run a query in one click', async ({ page }) => {
   await page.goto('/playground');
 

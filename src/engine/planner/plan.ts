@@ -6,6 +6,7 @@
 
 import type { PlanNode, SqlValue } from '../types.ts';
 import type { Expr } from '../parser/index.ts';
+import type { PlanCost } from './cost.ts';
 
 export type ProjectList = { kind: 'star' } | { kind: 'columns'; names: string[] };
 
@@ -82,14 +83,31 @@ export function exprToSql(expr: Expr): string {
  * `changed` holds the Plan objects a rewrite produced. Identity comparison is
  * exact — no id bookkeeping to drift — and lets the UI highlight precisely
  * what the rule touched.
+ *
+ * `estimates` is optional per-node cost (plan.md §22.2). When supplied, each
+ * node carries `estRows` and the heuristic behind it; the pipeline always
+ * passes it, callers that only want the tree shape can leave it out.
  */
-export function toPlanDisplay(plan: Plan, changed: ReadonlySet<Plan> = new Set()): PlanNode {
-  return convert(plan, 'p', changed);
+export function toPlanDisplay(
+  plan: Plan,
+  changed: ReadonlySet<Plan> = new Set(),
+  estimates?: PlanCost,
+): PlanNode {
+  return convert(plan, 'p', changed, estimates);
 }
 
-function convert(plan: Plan, id: string, changed: ReadonlySet<Plan>): PlanNode {
+function convert(
+  plan: Plan,
+  id: string,
+  changed: ReadonlySet<Plan>,
+  estimates: PlanCost | undefined,
+): PlanNode {
   const highlight = changed.has(plan);
-  const kid = (child: Plan) => [convert(child, `${id}.0`, changed)];
+  const kid = (child: Plan) => [convert(child, `${id}.0`, changed, estimates)];
+  const estimate = estimates?.get(plan);
+  const cost = estimate
+    ? { estRows: estimate.estRows, estBasis: estimate.basis }
+    : {};
 
   switch (plan.op) {
     case 'SeqScan':
@@ -99,6 +117,7 @@ function convert(plan: Plan, id: string, changed: ReadonlySet<Plan>): PlanNode {
         label: `SeqScan ${plan.table}`,
         ...(plan.filter ? { detail: `filter: ${exprToSql(plan.filter)}` } : {}),
         ...(highlight ? { highlight } : {}),
+        ...cost,
       };
     case 'IndexScan':
       return {
@@ -109,6 +128,7 @@ function convert(plan: Plan, id: string, changed: ReadonlySet<Plan>): PlanNode {
           ? `key: ${plan.column} = ${format(plan.key)} · recheck: ${exprToSql(plan.residual)}`
           : `key: ${plan.column} = ${format(plan.key)}`,
         ...(highlight ? { highlight } : {}),
+        ...cost,
       };
     case 'Filter':
       return {
@@ -117,6 +137,7 @@ function convert(plan: Plan, id: string, changed: ReadonlySet<Plan>): PlanNode {
         label: 'Filter',
         detail: exprToSql(plan.predicate),
         ...(highlight ? { highlight } : {}),
+        ...cost,
         children: kid(plan.child),
       };
     case 'Project':
@@ -126,6 +147,7 @@ function convert(plan: Plan, id: string, changed: ReadonlySet<Plan>): PlanNode {
         label: 'Project',
         detail: plan.columns.kind === 'star' ? '*' : plan.columns.names.join(', '),
         ...(highlight ? { highlight } : {}),
+        ...cost,
         children: kid(plan.child),
       };
   }

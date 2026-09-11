@@ -5,6 +5,7 @@ import type { ReplacementPolicyName, Span, Stage, ViewState } from '../../engine
 import {
   astToMermaid,
   astToText,
+  explainToText,
   indexTreeToText,
   planToMermaid,
   planToText,
@@ -99,6 +100,17 @@ export function StageDetail({
           ? indexTreeToText(state.indexTree)
           : null;
 
+  // In-app EXPLAIN (§22.2): estimate next to actual, offered once the query
+  // has actually run — `state.operators` is only complete by the result
+  // stage, the same way real `EXPLAIN ANALYZE` needs the query to finish.
+  const explainText =
+    stage === 'result' && state.plan
+      ? explainToText(
+          state.plan,
+          new Map(state.operators.map((o) => [o.op, o.rowsProduced])),
+        )
+      : null;
+
   return (
     <section className="flex h-full flex-col gap-3">
       <header className="flex flex-wrap items-start gap-x-3 gap-y-1">
@@ -135,6 +147,13 @@ export function StageDetail({
               text={plainText}
               label="Copy as text"
               title="Copy this tree as monospace text for a code review or an email"
+            />
+          )}
+          {explainText && (
+            <CopyButton
+              text={explainText}
+              label="Copy as EXPLAIN"
+              title="Copy the plan with the cost model's estimate next to the actual row count for every operator — this query's own EXPLAIN ANALYZE"
             />
           )}
 

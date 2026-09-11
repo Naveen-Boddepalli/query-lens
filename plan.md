@@ -375,7 +375,7 @@ still needs are §21. The docs (`/docs`) are MDX routes inside this same build (
 
 ### 7.3 Optimizer
 - v0: rule-based only, deterministic, no cost model.
-- v1 stretch: simple cost estimates (row count heuristics) to justify plan choices, shown as annotated numbers on plan nodes.
+- ~~v1 stretch: simple cost estimates (row count heuristics) to justify plan choices, shown as annotated numbers on plan nodes.~~ **Done, v14.** `src/engine/planner/cost.ts` — per-node row and page estimates from named textbook heuristics (equality = `1/ndistinct`, open range = linear over the column min–max, `AND` = product under independence), annotated onto every plan/optimize tree as a `~N rows` line with its basis, and reconciled against the executor's real count in the result narration. The rules still fire without consulting the numbers; the numbers justify the rewrite in words.
 
 ### 7.4 Execution Engine
 - Iterator/Volcano-style execution model (`next()` pull-based) — classic and easy to animate step-by-step, since each `next()` call is a natural visualization tick.
@@ -508,6 +508,15 @@ This event stream is the single contract between engine and UI — makes the UI 
    good blog post, that is the signal to have **before** spending ten weeks on animation polish.
 5. Only after validating the format, expand to: `WHERE` on other non-indexed columns, then joins.
 
+**v14 — the gate is lifted, deliberately.** The post-test study (steps 4–5) has not run, and this
+section still describes the experiment worth running. What has changed is that it is no longer a
+*blocker*: building the §22 engine-depth backlog behind an unscheduled study left the roadmap
+stalled, so the decision is to build breadth now and run the study against the deeper engine when it
+happens. §12's first risk — breadth before validation — is accepted with eyes open. The MVP contrast
+(indexed lookup vs. sequential scan) is unchanged and remains the thing the study measures; the
+cost model (§7.3), `Sort` / `ORDER BY` (§22.2), the write path, multi-table + JOIN, and the
+remaining `/tools/*` sandboxes are now the active queue, not "post-§9".
+
 ---
 
 ## 10. Milestones & Rough Timeline (solo, part-time)
@@ -530,7 +539,7 @@ This event stream is the single contract between engine and UI — makes the UI 
 | M11 | **Docs, manual, licensing & governance (§17–§18):** docs site, Getting Started, the two manual pages the §9 study needs, `LICENSE-DOCS`, font licensing, README restructure | ~1 week (P0/P1) + ongoing — **docs site built, see note** |
 | M12 | **Portable artefacts (§20.3):** ~~copy-as-Mermaid (AST, plan), PNG export of any panel~~ **done v12**; ~~`scripts/record.ts` for launch GIFs/WebM~~ **done v13**. Complete. No backend, no new engine code — feeds the §18.2 launch post | ~1 week |
 | M13 | **Site structure — routing consolidation (§21.5):** SPA rewrite so deep links resolve, delete the dead `src/router.tsx`, correct the "single page" 404 and the stale `index.html` title, code-split routes, one nav manifest. Gates every new page because a multi-page app whose links 404 is not one | ~1 day — **done (v9), + 3 regressions it uncovered** |
-| v1 | Expand SQL coverage: joins, cost estimates, InnoDB midpoint-LRU as a third policy. **§20/§21 v1 tranche — shipped (v10):** the non-SQL event driver (`src/engine/bufferTrace.ts`, ahead of schedule), the Buffer Pool standalone (`/tools/buffer-pool`, LRU/clock only — extra policies still open), assignment links (`/assignments/new`, no reveal-lock yet), the query gallery (`/gallery`), the comparison view (`/compare`, buffer-pool half only). **v12:** the parser and B+Tree standalones (`/tools/parser`, `/tools/btree` + B+Tree delete), `/trace`, `/learn`, four more buffer-pool policies (FIFO, second-chance, Bélády, InnoDB midpoint-LRU), the assignment reveal-lock, the full-pipeline half of Compare, and M12's copy-as-Mermaid and PNG export. **v13:** M12's `scripts/record.ts` (`pnpm record` — GIF/WebM of a trace range), completing M12. **Still open:** true vector SVG export (§20.3) | Post-MVP |
+| v1 | Expand SQL coverage: joins, cost estimates, InnoDB midpoint-LRU as a third policy. **§20/§21 v1 tranche — shipped (v10):** the non-SQL event driver (`src/engine/bufferTrace.ts`, ahead of schedule), the Buffer Pool standalone (`/tools/buffer-pool`, LRU/clock only — extra policies still open), assignment links (`/assignments/new`, no reveal-lock yet), the query gallery (`/gallery`), the comparison view (`/compare`, buffer-pool half only). **v12:** the parser and B+Tree standalones (`/tools/parser`, `/tools/btree` + B+Tree delete), `/trace`, `/learn`, four more buffer-pool policies (FIFO, second-chance, Bélády, InnoDB midpoint-LRU), the assignment reveal-lock, the full-pipeline half of Compare, and M12's copy-as-Mermaid and PNG export. **v13:** M12's `scripts/record.ts` (`pnpm record` — GIF/WebM of a trace range), completing M12. **v14 — §9 gate lifted (§9's v14 note):** the cost-based optimizer (`planner/cost.ts` — cost estimates on plan nodes) and, riding it, in-app **EXPLAIN** (`explainToText`, estimate next to actual on the result stage) — both of the §22.2 engine-depth queue; `Sort`/`ORDER BY`, the write path and the multi-table schema + JOIN follow. **Still open:** true vector SVG export (§20.3) | Post-MVP |
 | v2+ | **Each its own plan (§20.5–§20.6):** graded submission (first backend), the interactive-embed package, the Visual `EXPLAIN` viewer. The B+Tree standalone (§20.4) is here until B+Tree delete exists | Not committed |
 
 M8 sits between "the app works" and "the URL is public." It is not polish — every item on the P0 list in
@@ -1886,7 +1895,7 @@ Grouped by area. **Status** is `built` / a milestone / `v1` / `v2` / `own plan`,
 | `/tools/parser` | Parser sandbox | Arbitrary text → live token ribbon → live AST (the Playground's `AstTree`, from `toDisplayTree`) with recursion depth and the parser's own tokenize/parse error messages | source text (`src`) | **built** — v12 |
 | `/tools/page` | Slotted page inspector | One heap page of `users` laid out to the byte — header, line-pointer array, tuple data packed from the far end, free space between — with a page-size slider that shows how much a real 4 KB page would hold. `src/ui/slottedPage.ts` synthesises the layout (the engine's `Page` is only a `Row[]`, §7); a tuple cell in the map cross-highlights its table row | `page`, `bytes` | **built** — v13 |
 | `/tools/sort` | External merge sort | Sort N shuffled records with a fixed memory budget: run generation → `(memPages−1)`-way merge passes → one sorted run, with the `2·pageCount·(1+passes)` page-I/O cost broken out. `src/ui/externalSort.ts` is the driver (no `Sort` operator yet, §22.2). Parameter-driven, no playback; click a merged run to colour its records by source and light the runs that fed it | `n`, `page`, `mem`, `seed` | **built** — v13 |
-| `/tools/planner` | Planner sandbox | Type a query; see its canonical plan tree next to the optimised one, with a checkbox per rewrite rule (predicate pushdown, index selection) and one for the `id` index, plus a ledger saying for each rule whether it fired, found no match, or was switched off. `optimize` takes an optional enabled-set; validation is `runQuery`'s own | `q`, `idx`, `rules` | **built** — v13 |
+| `/tools/planner` | Planner sandbox | Type a query; see its canonical plan tree next to the optimised one, with a checkbox per rewrite rule (predicate pushdown, index selection) and one for the `id` index, plus a ledger saying for each rule whether it fired, found no match, or was switched off. Every node is annotated with the cost model's `~N rows` estimate and its heuristic (v14). `optimize` takes an optional enabled-set; validation is `runQuery`'s own | `q`, `idx`, `rules` | **built** — v13 |
 
 **Classroom** (§20.5)
 
@@ -2080,10 +2089,14 @@ found and fixed alongside (see the status note under §21).
 > New in v13. §20 counted a spin-off list against `src/` and sequenced it; §21 gave every route an
 > address. Neither took §13's first future — *"expand SQL coverage: joins, cost estimates"* — or
 > §4's "explicitly deferred to v1+" list and did the same work on them. This section is that pass,
-> together with the smaller tool, learning and reach ideas that have accrued since v8. It is a
-> **backlog, not a commitment.** The MVP is unchanged, the §9 study still gates almost everything
-> here (§12's first risk, played straight), and M12/M13 are untouched. Each item is scored on
-> §20.1's filter and carries a trigger rather than a milestone unless it is called out as a promote.
+> together with the smaller tool, learning and reach ideas that have accrued since v8.
+>
+> **v14: the §9 gate is lifted (§9's v14 note).** This stops being a "post-validation" backlog and
+> becomes the active build queue — the cost model landed first (§22.2), and `Sort`, the write path,
+> the multi-table schema + JOIN, and the remaining `/tools/*` sandboxes follow in roughly that
+> order. The MVP contrast and M12/M13 are still untouched; §12's breadth-before-validation risk is
+> accepted explicitly. Items still marked **Deferred** / **Own product** below (MVCC, WAL, the
+> in-app quiz, the published packages) stay deferred on their *own* triggers, not on §9.
 
 ### 22.1 The filter — §20.1's four questions, plus one
 
@@ -2103,18 +2116,19 @@ looking like they do:
 ### 22.2 Engine depth — SQL and pipeline coverage
 
 The engine today is one table, `SELECT` only, `=`/`<`/`>`/`AND`, one index (`src/engine/seed.ts`,
-`planner/plan.ts`, `exec/operators.ts`). Everything below extends that. Most is v1-or-later and
-gated on §9; the cost model is the one engine item worth doing first if the study validates.
+`planner/plan.ts`, `exec/operators.ts`). Everything below extends that. With the §9 gate lifted
+(v14) this is the active queue: the cost model went first (done, v14), and `Sort` / `ORDER BY`, the
+write path, and the multi-table schema that JOIN needs follow.
 
 | Item | Cost against `src/` | Earliest | What a generic version gets wrong |
 |---|---|---|---|
 | **JOIN + a join-algorithm comparison** — a `Join` plan node and nested-loop / hash / sort-merge operators, join order in `optimize.ts`, a third `/compare` mode | 2–3 wk, and needs the multi-table schema (§22.7) first | v1 core (already §4/§13) | Showing the three as interchangeable. The lesson is *when each wins* — small build side → hash; inputs already sorted, or sorted output needed → merge; tiny outer with an index on the inner → nested-loop |
 | **`ORDER BY` / `LIMIT` + external merge sort** — a `Sort` operator whose runs spill to simulated pages, and `LIMIT` as a visible Volcano short-circuit (the scan beneath it never runs to completion) | ~1 wk | v1 | An in-memory `.sort()` with a cap. The spill *is* the teaching — it puts sequential writes and merge-pass reads through the buffer pool, a shape the current single query cannot make |
 | **Aggregates + `GROUP BY` — hash aggregate vs. sort aggregate** | ~1 wk after `Sort` | v1 | Only one strategy, so there is nothing to compare — the `/compare` axis is the point |
-| **Cost-based optimizer with visible estimates** (§7.3's v1 stretch) — row-count and selectivity heuristics annotated on plan nodes; index selection stops being unconditional and becomes justified | ~1 wk; no new operator, no schema change, no backend | **v1 — the first engine item if §9 validates** | Inventing costs with a decimal point the model cannot defend — §12's "plausible but false". The honest version shows the heuristic *and* the actual count together, the way the `EXPLAIN` row below does |
+| ~~**Cost-based optimizer with visible estimates**~~ **Done, v14.** `planner/cost.ts` — per-node row/page estimates from named heuristics (equality `1/ndistinct`, open range linear over the column min–max, `AND` = product/independent), rendered as a `~N rows` line with its basis on every plan/optimize tree and in `/tools/planner`, and reconciled against the executor's real count in the result narration. The rules do not consult the numbers; `emit.ts` annotates the trees and the index-selection step's narration carries the scan-vs-lookup page comparison. 19 unit tests (`__tests__/cost.test.ts`) | ~1 wk; no new operator, no schema change, no backend | **Done, v14** — first engine item off the lifted §9 gate | Inventing costs with a decimal point the model cannot defend — §12's "plausible but false". The honest version shows the heuristic *and* the actual count together, the way the `EXPLAIN` row below does |
 | **Write path — `INSERT` / `UPDATE` / `DELETE`** — puts B+Tree insert/split and `deleteKey` (built v12) *in the pipeline*, not just `/tools/btree`, plus dirty-page writeback | ~1.5 wk | v1 | Skipping the writeback. "The page is now dirty, so evicting it costs a disk write" is the buffer pool's other half |
 | **More optimizer rules, each a visible before/after** — projection pushdown, constant folding, `col = col`, `OR`→`IN` | ~½ day each behind the existing `Rule` seam in `optimize.ts` | v1 | Stopping too late and rewriting a query into something the learner can no longer recognise as theirs |
-| **In-app `EXPLAIN` / `EXPLAIN ANALYZE`** — a text plan dump with estimated-vs-actual rows, over data the engine already holds | ~½ day once the cost model exists | v1 | Confusing it with §20.6's paste-in-real-Postgres viewer (declined, own product). This explains *QueryLens's own* query — no dialect parser, no bottleneck heuristic |
+| ~~**In-app `EXPLAIN` / `EXPLAIN ANALYZE`**~~ **Done, v14.** A **Copy as EXPLAIN** button beside Copy as text/Mermaid, offered once the query has actually run (the result stage — `EXPLAIN ANALYZE` needs an execution, same as Postgres). `explainToText` (`src/export/toText.ts`) walks the final annotated plan tree and, for each operator, prints the cost model's `est ~N rows` next to the `actual N rows` `ViewState.operators` already tracked — no new engine surface, no new `RunResult` field. 7 unit tests, 1 e2e | ~½ day once the cost model exists | **Done, v14** | Confusing it with §20.6's paste-in-real-Postgres viewer (declined, own product). This explains *QueryLens's own* query — no dialect parser, no bottleneck heuristic |
 | **Composite & covering indexes** — an index-only scan (never touches the heap), and two candidate indexes the optimizer must choose between | ~1 wk, rides the cost model | v1 | Treating "index-only" as a footnote. It is a third point on the lookup-vs-scan line §9 draws |
 | **Enforced concurrency** — a second transaction, a waiter queue on the lock manager (`locks/lockManager.ts` tracks holders but not waiters), real blocking, deadlock detection with victim selection | ~1.5 wk | v1–v2; powers `/tools/locks` (§22.3) | Drawing the deadlock without the victim choice. Deciding whom to abort — youngest transaction, fewest locks held — is the interesting half |
 | **MVCC / snapshot isolation** (§4 deferred) — tuple versions, `xmin`/`xmax`, a visible snapshot, vacuum; the natural home for the lock panel to become real | large | **v2, hard-gated on §9** — a second product by question 5 | — |
@@ -2128,7 +2142,7 @@ URL-state schema. None needs a backend.
 
 | Route | What it is | Cost | Earliest |
 |---|---|---|---|
-| `/tools/planner` | ~~Toggle optimizer rules and table stats, hand-author a predicate, watch the plan rewrite~~ **Done, v13.** Takes SQL (like `/tools/parser` — the "non-SQL driver" is infrastructure that does not exist and a text box sidesteps it); shows the canonical plan next to the optimised one, a checkbox per rewrite rule (`optimize` gained an optional enabled-set; `OPTIMIZER_RULES` is exported) and one for the `id` index, and a ledger saying for each rule whether it fired, found no match, or was turned off. "Table stats" waits on the cost model (§7.3, §9). Validation is `runQuery`'s own | ~2 days — the rules already exist; it needs the non-SQL driver | v1 |
+| `/tools/planner` | ~~Toggle optimizer rules and table stats, hand-author a predicate, watch the plan rewrite~~ **Done, v13.** Takes SQL (like `/tools/parser` — the "non-SQL driver" is infrastructure that does not exist and a text box sidesteps it); shows the canonical plan next to the optimised one, a checkbox per rewrite rule (`optimize` gained an optional enabled-set; `OPTIMIZER_RULES` is exported) and one for the `id` index, and a ledger saying for each rule whether it fired, found no match, or was turned off. **v14:** every node now carries the cost model's `~N rows` estimate and its heuristic — the "table stats" this row deferred. Validation is `runQuery`'s own | ~2 days — the rules already exist; it needs the non-SQL driver | v1 |
 | `/tools/locks` | Two transaction timelines; place lock requests, watch a wait-for edge form and a deadlock resolve | rides §22.2's enforced lock manager | v1–v2 |
 | `/tools/sort` | ~~External merge sort — run generation, k-way merge, an I/O counter~~ **Done, v13.** `src/ui/externalSort.ts` is the driver (§4 has no `Sort` operator yet): given a record count and a memory budget it lays out the whole plan — the sorted runs from run generation, every `(memPages−1)`-way merge pass after, and the `2·pageCount·(1+passes)` page I/O. `/tools/sort` renders it, no playback — parameter-driven and cross-highlighted like `/tools/page`: click a merged run to colour its records by source and light the runs that fed it. `memPages` clamped ≥ 3 so the fan-in makes progress | ~3 days, or free once §22.2's `Sort` exists | v1 |
 | `/tools/hash-join` | Build and probe phases, hash collisions, partition spill (Grace hash join) | own driver, ~3 days | v1–v2 |
@@ -2291,18 +2305,18 @@ URL-state schema. None needs a backend.
 | The six missing `/learn` lessons | **Done, v13** (five added → nine lessons; keyboard ref stays a docs page) | v1 | — |
 | Full text transcript | **Done, v13** (`/trace` Transcript view + print stylesheet) | v1 | — |
 | Non-colour hue encoding | **Done, v13** (glyph channel on B+Tree nodes + buffer moods/stats) | v1 | — |
-| Cost-based optimizer | Build | v1 | §9 validates the format |
-| More optimizer rules | Build | v1 | §9 validates the format |
-| In-app `EXPLAIN` | Build | v1 | Cost model lands |
-| `ORDER BY` / `LIMIT` + external sort | Build | v1 | §9 validates the format |
+| Cost-based optimizer | **Done, v14** (`planner/cost.ts` — `~N rows` + heuristic on every plan/optimize node and in `/tools/planner`, estimate-vs-actual in the result narration; `__tests__/cost.test.ts`) | v1 | — |
+| More optimizer rules | Build | v1 | **§9 gate lifted (v14) — queued** |
+| In-app `EXPLAIN` | **Done, v14** (**Copy as EXPLAIN** on the result stage — `explainToText`, estimate next to actual per operator) | v1 | — |
+| `ORDER BY` / `LIMIT` + external sort | Build | v1 | **§9 gate lifted (v14) — next engine item after the cost model** |
 | Aggregates / `GROUP BY` | Build | v1 | `Sort` lands |
-| Write path (`INSERT`/`UPDATE`/`DELETE`) | Build | v1 | §9 validates the format |
-| Composite / covering indexes | Build | v1 | Cost model lands |
+| Write path (`INSERT`/`UPDATE`/`DELETE`) | Build | v1 | **§9 gate lifted (v14) — queued** |
+| Composite / covering indexes | Build | v1 | **Cost model landed (v14) — ready** |
 | JOIN + join-algorithm compare | Build | v1 | Multi-table schema lands |
-| Multi-table schema editor | Build | v1 | JOIN is scheduled |
+| Multi-table schema editor | Build | v1 | **§9 gate lifted (v14); the prerequisite for JOIN** |
 | CSV / paste import | **Done, v13** (`parseCsv.ts` + an Import CSV panel in the seed editor) | v1 | — |
 | Preset dataset library | **Done, v13** (`datasets.ts` + `datasetCatalogue.ts` — `users` / `orders` / `logins`, a `Data:` chip row, a `t=` share key; `lineitem` dropped as JOIN-free filler) | v1 (with §19.2) | — |
-| `/tools/planner` | **Done, v13** (takes SQL; canonical vs optimised plan, a switch per rewrite rule + the `id` index, a fired/no-match/off ledger; `optimize` gained an optional rule-set) | v1 | — |
+| `/tools/planner` | **Done, v13**; **v14** adds the cost model's `~N rows` + heuristic on every node (the "table stats" it had deferred) | v1 | — |
 | `/tools/page` (slotted-page inspector) | **Done, v13** (`slottedPage.ts` + `/tools/page`) | v1 | — |
 | `/tools/sort` | **Done, v13** (`externalSort.ts` — its own driver; run generation, k-way merge passes, the page-I/O count, cross-highlighted) | v1 | — |
 | `/tools/grammar` | Build | v1–v2 | — |
@@ -2314,7 +2328,7 @@ URL-state schema. None needs a backend.
 | Presenter mode | **Done, v13** (`PresenterView.tsx` — `?present=1` overlay on the Playground) | v1 | — |
 | Print stylesheet | **Done, v13** (`TraceWorksheet.tsx` + a **Print** link on the Playground; the `[data-print]` `@media print` hook also covers `/trace` and docs) | v1–v2 | — |
 | In-app quiz / self-check | Deferred | post-§9 | The §9 study has run (contamination) |
-| Enforced concurrency + deadlocks | Build | v1–v2 | §9 validates the format |
+| Enforced concurrency + deadlocks | Build | v1–v2 | **§9 gate lifted (v14); powers `/tools/locks`** |
 | `npx querylens` CLI | **Built, v13; unpublished** (`bin/querylens.ts` — query + `--policy` / `--dataset` / `--json`, pure render + arg-parse unit-tested; `npm publish` is the deliberate remaining step) | v1–v2 | — |
 | `@querylens/engine` package | Deferred | v1+ | A second consumer exists |
 | Operator / stage plugin seam | Deferred | v2+ | The package and CLI find users |

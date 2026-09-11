@@ -17,7 +17,17 @@ export type { DatasetId, DatasetSpec } from './datasets.ts';
 export { createTracer } from './trace.ts';
 export { parse, toDisplayTree, columnsIn, tokenize } from './parser/index.ts';
 export type { Token, TokenType } from './parser/index.ts';
-export { buildPlan, exprToSql, optimize, OPTIMIZER_RULES, toPlanDisplay } from './planner/index.ts';
+export {
+  buildPlan,
+  estimatePlan,
+  exprToSql,
+  optimize,
+  OPTIMIZER_RULES,
+  rootEstimate,
+  selectivityOf,
+  toPlanDisplay,
+} from './planner/index.ts';
+export type { CostEstimate, PlanCost } from './planner/index.ts';
 export {
   buildHeap,
   createBufferPool,

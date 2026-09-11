@@ -60,16 +60,43 @@ export function planToText(root: PlanNode): string {
   return fenced(render(root));
 }
 
-/** The B+Tree as fenced monospace text — the one panel the Mermaid export skips. */
-export function indexTreeToText(root: IndexNode): string {
-  return fenced(render(toTextNode(root)));
-}
-
 /** `IndexNode` carries no `detail`; fold its kind and page id into one. */
 function toTextNode(node: IndexNode): TextNode {
   return {
     label: node.label,
     detail: `${node.kind}, page ${String(node.pageId)}`,
     ...(node.children ? { children: node.children.map(toTextNode) } : {}),
+  };
+}
+
+/** The B+Tree as fenced monospace text — the one panel the Mermaid export skips. */
+export function indexTreeToText(root: IndexNode): string {
+  return fenced(render(toTextNode(root)));
+}
+
+/**
+ * In-app EXPLAIN (plan.md §22.2): the final plan tree with the cost model's
+ * `est ~N rows` next to the executor's `actual N rows`, one operator per line.
+ * `actual` is keyed by operator name (`PlanNode.op` matches the `Operator.name`
+ * `execute` events carry), so it only needs `ViewState.operators` — no new
+ * engine surface. Offered once the query has actually run (the result stage),
+ * the same way real `EXPLAIN ANALYZE` output only exists after execution.
+ */
+export function explainToText(root: PlanNode, actualRows: ReadonlyMap<string, number>): string {
+  return fenced(render(toExplainNode(root, actualRows)));
+}
+
+function toExplainNode(node: PlanNode, actualRows: ReadonlyMap<string, number>): TextNode {
+  const actual = actualRows.get(node.op);
+  const parts = [
+    node.detail,
+    node.estRows === undefined ? undefined : `est ~${String(node.estRows)} rows`,
+    actual === undefined ? undefined : `actual ${String(actual)} rows`,
+  ].filter((p): p is string => p !== undefined);
+
+  return {
+    label: node.label,
+    ...(parts.length > 0 ? { detail: parts.join('  ·  ') } : {}),
+    ...(node.children ? { children: node.children.map((c) => toExplainNode(c, actualRows)) } : {}),
   };
 }

@@ -1,7 +1,10 @@
 /**
- * Rule-based rewrites. Deterministic, no cost model — plan.md §7.3 defers cost
- * estimates to v1, and inventing costs we cannot justify would be exactly the
- * kind of plausible-but-false detail §12 warns about.
+ * Rule-based rewrites. Deterministic, and the rules themselves consult no cost
+ * model: index selection fires whenever an equality on the indexed column is
+ * present, not when a cheaper plan is costed. The cost *estimates* live in
+ * `cost.ts` and are annotated onto the trees by `emit.ts` — they justify the
+ * rewrite in the narration without the rule depending on a number §12 would
+ * call plausible-but-false.
  *
  * Rules run in order, each on the output of the last, and each produces one
  * `optimize` event carrying the before and after trees.
@@ -86,7 +89,7 @@ const indexSelection: Rule = (plan, table) => {
     rule: 'index-selection',
     label: residual
       ? `\`${indexed}\` is indexed, so the equality becomes an index lookup. The rest of the predicate cannot be answered by the index and is rechecked on each row the index returns.`
-      : `\`${indexed}\` is indexed and the predicate is an equality on it, so the scan becomes a B+Tree lookup — three pages instead of the whole table.`,
+      : `\`${indexed}\` is indexed and the predicate is an equality on it, so the scan becomes a B+Tree lookup — a handful of pages instead of the whole table.`,
     plan: root,
     changed: new Set<Plan>([indexScan]),
     prompt: indexSelectionPrompt(indexed, key),

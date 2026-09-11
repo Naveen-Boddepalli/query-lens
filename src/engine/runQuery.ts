@@ -62,7 +62,7 @@ export function runQuery(
   }
 
   emitParseEvents(emit, parsed.ast);
-  const plan = emitPlanEvents(emit, parsed.ast, table);
+  const plan = emitPlanEvents(emit, parsed.ast, table, options.rowsPerPage);
 
   // Building the heap and the index is setup, not execution — it emits nothing.
   // The trace describes running your query, not preparing the database.

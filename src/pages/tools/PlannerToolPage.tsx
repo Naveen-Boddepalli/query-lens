@@ -4,6 +4,7 @@ import {
   buildPlan,
   createSeedDatabase,
   DEFAULT_ENGINE_OPTIONS,
+  estimatePlan,
   OPTIMIZER_RULES,
   optimize,
   parse,
@@ -26,6 +27,10 @@ import { inputField, panelSurface } from '../../ui/primitives.ts';
  * wants is infrastructure that does not exist, and a text box sidesteps it.
  * Validation is `runQuery`'s own — an unknown column or table fails the same
  * way it does in the Playground.
+ *
+ * Each node carries the cost model's `~N rows` estimate and the heuristic
+ * behind it (plan.md §22.2) — which is the "table stats" this tool's §22.3
+ * entry left for later.
  *
  * URL state: `q` (the query), `idx` (`1`/`0`, the index), `rules` (a
  * comma-separated subset of the rule names). All parsed defensively.
@@ -75,9 +80,10 @@ export function PlannerToolPage() {
     const last = steps.at(-1);
     const optimised = last ? last.plan : canonical;
     const lastChanged: ReadonlySet<Plan> = last ? last.changed : new Set<Plan>();
+    const rpp = DEFAULT_ENGINE_OPTIONS.rowsPerPage;
     return {
-      canonical: toPlanDisplay(canonical),
-      optimised: toPlanDisplay(optimised, lastChanged),
+      canonical: toPlanDisplay(canonical, new Set<Plan>(), estimatePlan(canonical, table, rpp)),
+      optimised: toPlanDisplay(optimised, lastChanged, estimatePlan(optimised, table, rpp)),
       firedRules: new Set(steps.map((s) => s.rule)),
       steps,
     };
@@ -113,7 +119,8 @@ export function PlannerToolPage() {
         <Link to="/playground" className="underline underline-offset-2 hover:text-ink">
           Playground
         </Link>
-        , with the rules on switches.
+        , with the rules on switches. Each node also shows the cost model&rsquo;s{' '}
+        <code className="font-mono text-ink">~N rows</code> estimate and the heuristic it used.
       </PageHeader>
 
       <label htmlFor="q" className="mt-4 flex flex-col gap-1 text-label text-ink-dim">

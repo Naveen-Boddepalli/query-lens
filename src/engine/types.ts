@@ -69,6 +69,10 @@ export interface PlanNode {
   detail?: string;
   /** Set on the nodes a rewrite rule produced. */
   highlight?: boolean;
+  /** Cost model's estimated output rows for this node (plan.md §22.2). */
+  estRows?: number;
+  /** The heuristic behind `estRows`, in a few words. */
+  estBasis?: string;
   children?: PlanNode[];
 }
 

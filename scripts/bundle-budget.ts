@@ -143,8 +143,11 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
  * Raised 377 → 379 for `/tools/planner` (§22.3) — the optimizer sandbox
  * (`PlannerToolPage.tsx`); most of the delta is rolldown hoisting the shared
  * planner code into `engine-*.js` rather than new bytes.
+ * Raised 379 → 381 for the cost model (`planner/cost.ts`, §22.2, §7.3) — per-node
+ * row/page estimates in the `engine-*.js` chunk, the `~N rows` line in `FlowTree`,
+ * and the estimate-vs-actual reconciliation in the plan/optimize/result narration.
  */
-const TOTAL_KB = 379;
+const TOTAL_KB = 381;
 
 const gzipKb = (bytes: Buffer): number => gzipSync(bytes, { level: 9 }).length / 1024;
 
