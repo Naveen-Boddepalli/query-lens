@@ -6,7 +6,7 @@ export {
   runBufferTrace,
 } from './bufferTrace.ts';
 export type { BufferTraceResult } from './bufferTrace.ts';
-export { createSeedDatabase } from './seed.ts';
+export { createJoinDemoDatabase, createSeedDatabase } from './seed.ts';
 export {
   DATASETS,
   DATASET_IDS,

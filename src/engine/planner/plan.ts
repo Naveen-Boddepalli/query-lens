@@ -20,6 +20,29 @@ export interface AggregateSpec {
 
 export type Plan =
   | { op: 'SeqScan'; table: string; filter?: Expr }
+  /**
+   * `FROM t1 JOIN t2 ON t1.a = t2.b` (plan.md §22.2), always the bottom of
+   * the tree — `left`/`right` are always a bare `SeqScan` in v1 (no
+   * predicate pushdown into either side yet, so both are always full scans).
+   * `leftColumn`/`rightColumn` are the ON equality's two columns, resolved
+   * once at build time to `left`'s side and `right`'s side respectively —
+   * the parser's `checkJoinOn` already guarantees the ON clause is exactly
+   * one equality between a qualified column on each side, whichever order
+   * it was written in, so no consumer here has to re-figure out which
+   * column belongs to which table. `nested-loop` is the only algorithm so
+   * far; hash join and sort-merge join are the natural next strategies, the
+   * same pair `HashAggregate`/`SortAggregate` already are for `GROUP BY`.
+   */
+  | {
+      op: 'Join';
+      algorithm: 'nested-loop';
+      left: Plan;
+      right: Plan;
+      leftTable: string;
+      rightTable: string;
+      leftColumn: string;
+      rightColumn: string;
+    }
   | {
       op: 'IndexScan';
       table: string;
@@ -201,6 +224,19 @@ function convert(
         ...(plan.filter ? { detail: `filter: ${exprToSql(plan.filter)}` } : {}),
         ...(highlight ? { highlight } : {}),
         ...cost,
+      };
+    case 'Join':
+      return {
+        id,
+        op: 'Join',
+        label: `Join (nested-loop) ${plan.leftTable} × ${plan.rightTable}`,
+        detail: `on: ${plan.leftTable}.${plan.leftColumn} = ${plan.rightTable}.${plan.rightColumn}`,
+        ...(highlight ? { highlight } : {}),
+        ...cost,
+        children: [
+          convert(plan.left, `${id}.0`, changed, estimates),
+          convert(plan.right, `${id}.1`, changed, estimates),
+        ],
       };
     case 'IndexScan':
       return {

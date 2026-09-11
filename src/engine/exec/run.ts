@@ -19,7 +19,8 @@ export function execute(plan: Plan, ctx: ExecContext): Row[] {
   root.close();
 
   const { hits, misses, evictions } = ctx.pool.stats;
-  const estimate = rootEstimate(plan, ctx.table, ctx.options.rowsPerPage);
+  const otherTables = ctx.joinRight ? { [ctx.joinRight.table.name]: ctx.joinRight.table } : undefined;
+  const estimate = rootEstimate(plan, ctx.table, ctx.options.rowsPerPage, otherTables);
   const reconcile =
     estimate.estRows === rows.length
       ? ` The cost model guessed ~${estimate.estRows} — on the nose (${estimate.basis}).`

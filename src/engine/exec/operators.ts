@@ -30,10 +30,18 @@ export interface ExecContext {
   emit: Emit;
   pool: BufferPool;
   locks: LockManager;
+  /** The `FROM` table — or a `Join`'s left side, when the plan has one. */
   heap: Heap;
   tree: BPlusTree | null;
   table: Table;
   options: EngineOptions;
+  /**
+   * A `Join`'s right-hand table (plan.md §22.2) — its own heap, page ids
+   * numbered right after `heap`'s so both share the one real buffer pool.
+   * `undefined` for every query without a `Join`, which is every operator
+   * here except `join()` itself.
+   */
+  joinRight?: { table: Table; heap: Heap; tree: BPlusTree | null };
 }
 
 /** Counts rows an operator has produced, so `execute` events stay cumulative. */
@@ -557,6 +565,87 @@ function limit(count: number, child: Operator, ctx: ExecContext): Operator {
   };
 }
 
+/** Merges a left and right row into one, qualifying every key `table.column` so the two can never collide. */
+function mergeJoinedRow(leftTable: string, leftRow: Row, rightTable: string, rightRow: Row): Row {
+  const merged: Row = {};
+  for (const [key, value] of Object.entries(leftRow)) merged[`${leftTable}.${key}`] = value;
+  for (const [key, value] of Object.entries(rightRow)) merged[`${rightTable}.${key}`] = value;
+  return merged;
+}
+
+/**
+ * Nested-loop join — the simplest algorithm, and the only one v1 has (plan.md
+ * §22.2). For every row the left (outer) side produces, the right (inner)
+ * side is rescanned from scratch looking for a match: `right`'s operator is
+ * only ever built once and re-opened per outer row, exactly the reset
+ * `open()` already means for every other operator here. `ctx.joinRight`
+ * carries the right table's own heap (built by `runQuery.ts`, its pages
+ * numbered right after the left's), so `right`'s `SeqScan` reads through a
+ * genuinely different table than `left`'s — the one thing an `ExecContext`
+ * never had to represent before a query could name two tables at once.
+ */
+function join(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): Operator {
+  const joinRight = ctx.joinRight;
+  if (!joinRight) throw new Error('unreachable: a Join plan implies ExecContext.joinRight is set');
+
+  const left = buildOperator(plan.left, ctx);
+  const right = buildOperator(plan.right, {
+    ...ctx,
+    table: joinRight.table,
+    heap: joinRight.heap,
+    tree: joinRight.tree,
+  });
+
+  const produced = counter(ctx, 'Join');
+  let leftRow: Row | null = null;
+  let rightOpen = false;
+  let checked = 0;
+
+  return {
+    name: 'Join',
+    open() {
+      left.open();
+      leftRow = null;
+      rightOpen = false;
+      checked = 0;
+    },
+    next() {
+      for (;;) {
+        if (!rightOpen) {
+          leftRow = left.next();
+          if (!leftRow) return null;
+          right.open();
+          rightOpen = true;
+        }
+
+        const rightRow = right.next();
+        if (!rightRow) {
+          rightOpen = false;
+          continue;
+        }
+        checked += 1;
+
+        // NULL never matches NULL — the same three-valued rule an ordinary
+        // `=` predicate follows, so a NULL join key simply finds no partner.
+        if (compare('=', leftRow![plan.leftColumn] ?? null, rightRow[plan.rightColumn] ?? null) !== true) {
+          continue;
+        }
+
+        produced(
+          `Join matches a row from ${plan.leftTable} with one from ${plan.rightTable} (${checked} candidate${
+            checked === 1 ? '' : 's'
+          } checked so far).`,
+        );
+        return mergeJoinedRow(plan.leftTable, leftRow!, plan.rightTable, rightRow);
+      }
+    },
+    close() {
+      left.close();
+      right.close();
+    },
+  };
+}
+
 /** Turns a plan tree into an operator tree of the same shape. */
 export function buildOperator(plan: Plan, ctx: ExecContext): Operator {
   switch (plan.op) {
@@ -566,6 +655,8 @@ export function buildOperator(plan: Plan, ctx: ExecContext): Operator {
       return indexScan(plan, ctx);
     case 'IndexOnlyScan':
       return indexOnlyScan(plan, ctx);
+    case 'Join':
+      return join(plan, ctx);
     case 'Filter':
       return filter(plan.predicate, buildOperator(plan.child, ctx), ctx);
     case 'HashAggregate':

@@ -59,6 +59,8 @@ describe('grammar data — every rule is demonstrated by a query the real parser
     ['statement (update)', 'UPDATE users SET age = 1'],
     ['select — every optional clause at once', 'SELECT age, COUNT(*) FROM users WHERE age > 30 GROUP BY age LIMIT 5'],
     ['select — ORDER BY with ASC/DESC', 'SELECT * FROM users ORDER BY age DESC'],
+    ['select — with a join', 'SELECT * FROM authors JOIN posts ON authors.id = posts.authorId'],
+    ['join', 'SELECT * FROM authors JOIN posts ON authors.id = posts.authorId'],
     ['delete — with WHERE', 'DELETE FROM users WHERE id = 5'],
     ['insert — with an explicit columnList', "INSERT INTO users (id, name) VALUES (1, 'a')"],
     ['insert — valueList with more than one value', 'INSERT INTO users VALUES (1, 2, 3)'],
@@ -70,7 +72,11 @@ describe('grammar data — every rule is demonstrated by a query the real parser
     ['aggregateCall — every function', 'SELECT COUNT(id), SUM(age), AVG(age), MIN(age), MAX(age) FROM users'],
     ['expr — AND repeated', 'SELECT * FROM users WHERE id = 5 AND age > 1 AND age < 99'],
     ['comparison — every operator', 'SELECT * FROM users WHERE id = 1'],
-    ['operand — identifier and every literal kind', "SELECT * FROM users WHERE name = 'a'"],
+    ['operand — a bare identifier, one form of qualifiedColumn', "SELECT * FROM users WHERE name = 'a'"],
+    [
+      'qualifiedColumn — the table-qualified form',
+      "SELECT authors.name FROM authors JOIN posts ON authors.id = posts.authorId WHERE authors.name = 'a'",
+    ],
   ] as const)('%s: %s', (_label, sql) => {
     const result = parseStatement(sql);
     expect(result.ok, result.ok ? undefined : result.error.message).toBe(true);

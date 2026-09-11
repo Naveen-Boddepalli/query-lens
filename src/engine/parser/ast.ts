@@ -8,8 +8,15 @@ export interface Span {
 /** The comparison operators v0 supports. plan.md §4. */
 export type CompareOp = '=' | '<' | '>';
 
+/**
+ * `table` is set only by a qualified reference (`authors.id`) — v0 requires
+ * one whenever a query joins two tables (plan.md §22.2), so a bare `column`
+ * reference alone can never be ambiguous. A single-table query may still
+ * qualify redundantly (`SELECT users.id FROM users`), validated against the
+ * one table in scope.
+ */
 export type Expr =
-  | { kind: 'column'; name: string; span: Span }
+  | { kind: 'column'; name: string; table?: string; span: Span }
   | { kind: 'literal'; value: SqlValue; raw: string; span: Span }
   | { kind: 'compare'; op: CompareOp; left: Expr; right: Expr; span: Span }
   | { kind: 'and'; left: Expr; right: Expr; span: Span };
@@ -19,24 +26,29 @@ export type AggregateFn = 'COUNT' | 'SUM' | 'AVG' | 'MIN' | 'MAX';
 
 /** One entry of a SELECT list: a plain column, or an aggregate call over one. */
 export type SelectItem =
-  | { kind: 'column'; name: string; span: Span }
+  | { kind: 'column'; name: string; table?: string; span: Span }
   | {
       kind: 'aggregate';
       fn: AggregateFn;
       /** `*` only appears on `COUNT` — every other function needs a real column. */
-      arg: { kind: 'star'; span: Span } | { kind: 'column'; name: string; span: Span };
+      arg: { kind: 'star'; span: Span } | { kind: 'column'; name: string; table?: string; span: Span };
       span: Span;
     };
 
-/** The column an aggregate reads, or `null` for `COUNT(*)`. */
+/** A qualified reference's row key — `authors.id` — or the bare name when unqualified. */
+export function columnKey(ref: { name: string; table?: string }): string {
+  return ref.table ? `${ref.table}.${ref.name}` : ref.name;
+}
+
+/** The row key an aggregate reads, or `null` for `COUNT(*)`. */
 export function selectItemArgColumn(item: Extract<SelectItem, { kind: 'aggregate' }>): string | null {
-  return item.arg.kind === 'star' ? null : item.arg.name;
+  return item.arg.kind === 'star' ? null : columnKey(item.arg);
 }
 
 /** Canonical display key for a SELECT item — its own name, or e.g. `COUNT(*)`, `SUM(age)`. */
 export function selectItemKey(item: SelectItem): string {
-  if (item.kind === 'column') return item.name;
-  return `${item.fn}(${item.arg.kind === 'star' ? '*' : item.arg.name})`;
+  if (item.kind === 'column') return columnKey(item);
+  return `${item.fn}(${item.arg.kind === 'star' ? '*' : columnKey(item.arg)})`;
 }
 
 export type SelectList =
@@ -45,6 +57,21 @@ export type SelectList =
 
 export interface TableRef {
   name: string;
+  span: Span;
+}
+
+/**
+ * `JOIN table ON t1.col = t2.col` (plan.md §22.2). Exactly one join, an
+ * implicit inner join (bare `JOIN`, no `LEFT`/`RIGHT`/`FULL` yet), and `on`
+ * is always a single equality between one qualified column from each side —
+ * checked at parse time (`checkJoinOn`), so the planner never has to. v1 of
+ * JOIN does not combine with `GROUP BY`, `ORDER BY` or an aggregate SELECT
+ * item — each checked at parse time too, the same way `GROUP BY`/`ORDER BY`
+ * already exclude each other.
+ */
+export interface JoinClause {
+  table: TableRef;
+  on: Extract<Expr, { kind: 'compare' }>;
   span: Span;
 }
 
@@ -62,6 +89,7 @@ export interface SelectStatement {
   kind: 'select';
   select: SelectList;
   from: TableRef;
+  join?: JoinClause;
   where?: Expr;
   groupBy?: GroupByClause;
   /**

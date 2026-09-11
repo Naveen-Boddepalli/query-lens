@@ -2,9 +2,10 @@
  * Recursive-descent parser for the v0 SQL subset (plan.md §4):
  *
  *   statement     := select | delete | insert | update
- *   select        := SELECT selectList FROM identifier [WHERE expr]
+ *   select        := SELECT selectList FROM identifier [join] [WHERE expr]
  *                     [GROUP BY identifier (',' identifier)*]
  *                     [ORDER BY identifier [ASC|DESC]] [LIMIT number] [';'] EOF
+ *   join          := JOIN identifier ON qualifiedColumn '=' qualifiedColumn
  *   delete        := DELETE FROM identifier [WHERE expr] [';'] EOF
  *   insert        := INSERT INTO identifier [columnList] VALUES valueList [';'] EOF
  *   update        := UPDATE identifier SET assignment (',' assignment)* [WHERE expr] [';'] EOF
@@ -13,15 +14,24 @@
  *   valueList     := '(' value (',' value)* ')'
  *   value         := number | string | NULL | TRUE | FALSE
  *   selectList    := '*' | selectItem (',' selectItem)*
- *   selectItem    := identifier | aggregateCall
- *   aggregateCall := ('COUNT'|'SUM'|'AVG'|'MIN'|'MAX') '(' ('*' | identifier) ')'
+ *   selectItem    := qualifiedColumn | aggregateCall
+ *   aggregateCall := ('COUNT'|'SUM'|'AVG'|'MIN'|'MAX') '(' ('*' | qualifiedColumn) ')'
  *   expr          := comparison (AND comparison)*
  *   comparison    := operand ('=' | '<' | '>') operand
- *   operand       := identifier | number | string | NULL | TRUE | FALSE
+ *   operand       := qualifiedColumn | number | string | NULL | TRUE | FALSE
+ *   qualifiedColumn := identifier ['.' identifier]
  *
  * `GROUP BY` and `ORDER BY` are mutually exclusive — the parser rejects a
  * query with both, so despite both appearing under `select` above, no query
  * this grammar accepts ever has both clauses at once (see `checkGroupingValidity`).
+ *
+ * A `join` is exactly one, an implicit inner join (bare `JOIN`, no
+ * `LEFT`/`RIGHT`/`FULL` yet — `INNER`/`OUTER`/`CROSS` stay out of scope), and
+ * never combines with `GROUP BY`, `ORDER BY`, or an aggregate `selectItem` —
+ * each rejected at parse time (`checkJoinValidity`). A `qualifiedColumn`'s
+ * `table` half is required on every column reference once a `join` is
+ * present (there is no ambiguity resolution — v0 asks the query to say which
+ * table), and validated against the tables the query actually names.
  *
  * Hand-written rather than generated: the error messages are half the teaching
  * value, and they need to name the v0 scope explicitly.
@@ -41,6 +51,7 @@ import type {
   Expr,
   GroupByClause,
   InsertStatement,
+  JoinClause,
   SelectItem,
   SelectList,
   SelectStatement,
@@ -50,6 +61,7 @@ import type {
   UpdateAssignment,
   UpdateStatement,
 } from './ast.ts';
+import { walkExpr } from './ast.ts';
 import { TokenizeError, tokenize } from './tokenizer.ts';
 import type { Token } from './tokenizer.ts';
 
@@ -69,12 +81,13 @@ class ParseError extends Error {
 
 /** Keywords that tokenise cleanly but land outside the v0 subset. */
 const OUT_OF_SCOPE: Record<string, string> = {
-  JOIN: 'Joins arrive in v1 — v0 reads a single table.',
-  INNER: 'Joins arrive in v1 — v0 reads a single table.',
-  LEFT: 'Joins arrive in v1 — v0 reads a single table.',
-  RIGHT: 'Joins arrive in v1 — v0 reads a single table.',
-  FULL: 'Joins arrive in v1 — v0 reads a single table.',
-  CROSS: 'Joins arrive in v1 — v0 reads a single table.',
+  INNER: 'v0 supports a bare JOIN only — write JOIN without INNER.',
+  LEFT: 'Outer joins are not in the v0 subset — only an inner JOIN.',
+  RIGHT: 'Outer joins are not in the v0 subset — only an inner JOIN.',
+  OUTER: 'Outer joins are not in the v0 subset — only an inner JOIN.',
+  FULL: 'Outer joins are not in the v0 subset — only an inner JOIN.',
+  CROSS: 'CROSS JOIN is not in the v0 subset — JOIN ... ON needs an equality.',
+  USING: 'USING is not in the v0 subset — write the equality out: JOIN t ON a.x = t.y.',
   HAVING: 'HAVING is not in the v0 subset — filter before GROUP BY with WHERE instead.',
   OFFSET: 'OFFSET is not in the v0 subset — LIMIT on its own is.',
   DISTINCT: 'DISTINCT is not in the v0 subset.',
@@ -110,9 +123,9 @@ function makeCursor(tokens: Token[]): Cursor {
   function guardScope(token: Token): void {
     if (token.type === 'dot') {
       throw new ParseError(
-        'Qualified names like `a.id` are not supported yet.',
+        'Unexpected `.` here.',
         token,
-        'They arrive with joins in v1 — v0 reads a single table, so plain column names are enough.',
+        'A qualified name is `table.column` — exactly one dot, right after the table name.',
       );
     }
     const reason = token.type === 'keyword' ? OUT_OF_SCOPE[token.upper] : undefined;
@@ -141,13 +154,37 @@ function makeCursor(tokens: Token[]): Cursor {
 /** The v0 aggregate functions. Not tokenizer keywords — they parse as identifiers, recognised by name here. */
 export const AGGREGATE_FNS = new Set(['COUNT', 'SUM', 'AVG', 'MIN', 'MAX']);
 
+/**
+ * `identifier ['.' identifier]` — `first` is the identifier token already
+ * consumed by the caller; this only looks for an optional `.column` after it.
+ * Shared by every place a column reference can appear: a `selectItem`, an
+ * `operand`, and an aggregate's argument.
+ */
+function parseQualifiedColumnTail(
+  c: Cursor,
+  first: Token,
+): { name: string; table?: string; from: number; to: number } {
+  if (c.peek().type !== 'dot') {
+    return { name: first.value, from: first.from, to: first.to };
+  }
+  c.next(); // '.'
+  const col = c.expectIdentifier('a column name after the table qualifier');
+  return { table: first.value, name: col.value, from: first.from, to: col.to };
+}
+
 /** A plain column, or an aggregate call — `COUNT(*)`, `SUM(age)`, and so on. */
 function parseSelectItem(c: Cursor): SelectItem {
   const token = c.expectIdentifier('a column name or an aggregate like COUNT(*)');
   const upper = token.value.toUpperCase();
 
   if (!AGGREGATE_FNS.has(upper) || c.peek().type !== 'lparen') {
-    return { kind: 'column', name: token.value, span: { from: token.from, to: token.to } };
+    const ref = parseQualifiedColumnTail(c, token);
+    return {
+      kind: 'column',
+      name: ref.name,
+      ...(ref.table === undefined ? {} : { table: ref.table }),
+      span: { from: ref.from, to: ref.to },
+    };
   }
 
   c.next(); // '('
@@ -165,7 +202,13 @@ function parseSelectItem(c: Cursor): SelectItem {
     arg = { kind: 'star', span: { from: argToken.from, to: argToken.to } };
   } else {
     const colToken = c.expectIdentifier(`a column name, or \`*\` for COUNT`);
-    arg = { kind: 'column', name: colToken.value, span: { from: colToken.from, to: colToken.to } };
+    const ref = parseQualifiedColumnTail(c, colToken);
+    arg = {
+      kind: 'column',
+      name: ref.name,
+      ...(ref.table === undefined ? {} : { table: ref.table }),
+      span: { from: ref.from, to: ref.to },
+    };
   }
 
   const close = c.peek();
@@ -255,12 +298,122 @@ function parseTableRef(c: Cursor): TableRef {
   return { name: token.value, span: { from: token.from, to: token.to } };
 }
 
+/** `JOIN identifier ON qualifiedColumn '=' qualifiedColumn`, if present. */
+function parseJoin(c: Cursor): JoinClause | undefined {
+  if (!(c.peek().type === 'keyword' && c.peek().upper === 'JOIN')) return undefined;
+  const joinToken = c.next();
+  const table = parseTableRef(c);
+  c.expectKeyword('ON', 'after the joined table name');
+  const on = parseComparison(c);
+  checkJoinOn(on);
+  return { table, on, span: { from: joinToken.from, to: on.span.to } };
+}
+
+/** `ON` is always a single equality between one qualified column from each side — an equi-join. */
+function checkJoinOn(on: Extract<Expr, { kind: 'compare' }>): void {
+  if (on.op !== '=') {
+    throw new ParseError(
+      'JOIN ... ON only supports an equality between two columns.',
+      on.span,
+      'v0 joins are equi-joins: `table.column = table.column`.',
+    );
+  }
+  if (on.left.kind !== 'column' || on.left.table === undefined) {
+    throw new ParseError(
+      'The left side of ON must be a qualified column, like `authors.id`.',
+      on.left.span,
+      'Every column in a JOIN needs its table name, so it is never ambiguous which side it comes from.',
+    );
+  }
+  if (on.right.kind !== 'column' || on.right.table === undefined) {
+    throw new ParseError(
+      'The right side of ON must be a qualified column, like `posts.authorId`.',
+      on.right.span,
+      'Every column in a JOIN needs its table name, so it is never ambiguous which side it comes from.',
+    );
+  }
+}
+
+/** Every column reference anywhere in the SELECT list or WHERE, in source order. */
+function collectColumnRefs(select: SelectList, where: Expr | undefined): Extract<Expr, { kind: 'column' }>[] {
+  const refs: Extract<Expr, { kind: 'column' }>[] = [];
+  if (select.kind === 'columns') {
+    for (const item of select.items) {
+      if (item.kind === 'column') refs.push(item);
+      else if (item.arg.kind === 'column') refs.push(item.arg);
+    }
+  }
+  if (where) walkExpr(where, (e) => { if (e.kind === 'column') refs.push(e); });
+  return refs;
+}
+
+/**
+ * Two checks, both about column qualifiers: a `join` combined with an
+ * aggregate SELECT item is not supported yet (v1 restriction), and every
+ * column reference's `table` — required at all once a `join` is present, so
+ * no reference can ever be ambiguous between the two tables — must actually
+ * name a table this query knows about (`FROM` or `JOIN`).
+ */
+function checkJoinValidity(
+  select: SelectList,
+  join: JoinClause | undefined,
+  where: Expr | undefined,
+  from: TableRef,
+): void {
+  if (join && select.kind === 'columns') {
+    const aggregate = select.items.find((item): item is Extract<SelectItem, { kind: 'aggregate' }> =>
+      item.kind === 'aggregate',
+    );
+    if (aggregate) {
+      throw new ParseError(
+        'An aggregate function is not supported yet in a query with JOIN.',
+        aggregate.span,
+        'JOIN queries return plain rows for now — aggregate the result in a later version.',
+      );
+    }
+  }
+
+  for (const ref of collectColumnRefs(select, where)) {
+    if (join && ref.table === undefined) {
+      throw new ParseError(
+        `\`${ref.name}\` needs a table name now that this query joins two tables.`,
+        ref.span,
+        `Write \`${from.name}.${ref.name}\` or \`${join.table.name}.${ref.name}\`, whichever table it is actually on.`,
+      );
+    }
+    if (!join && ref.table !== undefined) {
+      // A single-table query's rows are never qualified — `authors.id` would
+      // look up a key that does not exist, since the row is just `{id, ...}`.
+      // Rather than special-case a self-qualification that happens to name
+      // the one table right, v0 asks for the plain name instead.
+      throw new ParseError(
+        `\`${ref.table}.${ref.name}\` does not need a table name — this query only has one table.`,
+        ref.span,
+        `Write \`${ref.name}\` on its own.`,
+      );
+    }
+    if (join && ref.table !== undefined && ref.table !== from.name && ref.table !== join.table.name) {
+      throw new ParseError(
+        `There is no table called \`${ref.table}\` in this query.`,
+        ref.span,
+        `This query only knows about \`${from.name}\` and \`${join.table.name}\`.`,
+      );
+    }
+  }
+}
+
 function parseOperand(c: Cursor): Expr {
   const token = c.peek();
 
   if (token.type === 'identifier') {
     c.next();
-    return { kind: 'column', name: token.value, span: { from: token.from, to: token.to } };
+    const ref = parseQualifiedColumnTail(c, token);
+    return {
+      kind: 'column',
+      name: ref.name,
+      ...(ref.table === undefined ? {} : { table: ref.table }),
+      span: { from: ref.from, to: ref.to },
+    };
   }
   if (token.type === 'number') {
     c.next();
@@ -302,7 +455,7 @@ function parseOperand(c: Cursor): Expr {
   throw new ParseError(`Expected a column name or a value, found ${describe(token)}.`, token);
 }
 
-function parseComparison(c: Cursor): Expr {
+function parseComparison(c: Cursor): Extract<Expr, { kind: 'compare' }> {
   const left = parseOperand(c);
   const opToken = c.peek();
 
@@ -326,7 +479,7 @@ function parseComparison(c: Cursor): Expr {
 }
 
 function parseExpr(c: Cursor): Expr {
-  let left = parseComparison(c);
+  let left: Expr = parseComparison(c);
   while (c.peek().type === 'keyword' && c.peek().upper === 'AND') {
     c.next();
     const right = parseComparison(c);
@@ -435,9 +588,18 @@ function parseSelectBody(c: Cursor): SelectStatement {
   const select = parseSelectList(c);
   c.expectKeyword('FROM', 'after the column list');
   const from = parseTableRef(c);
+  const join = parseJoin(c);
   const where = parseOptionalWhere(c);
   const groupBy = parseGroupBy(c);
+  if (join && groupBy) {
+    throw new ParseError(
+      'GROUP BY is not supported yet in a query with JOIN.',
+      groupBy.span,
+      'JOIN queries return plain rows for now — group the result in a later version.',
+    );
+  }
   checkGroupingValidity(select, groupBy);
+  checkJoinValidity(select, join, where, from);
 
   let orderBy: SelectStatement['orderBy'];
   if (c.peek().type === 'keyword' && c.peek().upper === 'ORDER') {
@@ -446,6 +608,13 @@ function parseSelectBody(c: Cursor): SelectStatement {
         'ORDER BY with GROUP BY is not supported yet.',
         c.peek(),
         'GROUP BY on its own still works — sort the grouped results yourself for now.',
+      );
+    }
+    if (join) {
+      throw new ParseError(
+        'ORDER BY is not supported yet in a query with JOIN.',
+        c.peek(),
+        'JOIN queries return plain rows for now — sort the result in a later version.',
       );
     }
     const orderToken = c.next();
@@ -477,11 +646,13 @@ function parseSelectBody(c: Cursor): SelectStatement {
 
   expectStatementEnd(c);
 
-  const end = limit?.span.to ?? orderBy?.span.to ?? groupBy?.span.to ?? where?.span.to ?? from.span.to;
+  const end =
+    limit?.span.to ?? orderBy?.span.to ?? groupBy?.span.to ?? where?.span.to ?? join?.span.to ?? from.span.to;
   return {
     kind: 'select',
     select,
     from,
+    ...(join === undefined ? {} : { join }),
     ...(where === undefined ? {} : { where }),
     ...(groupBy === undefined ? {} : { groupBy }),
     ...(orderBy === undefined ? {} : { orderBy }),

@@ -8,6 +8,7 @@
  * than flattened to booleans.
  */
 
+import { columnKey } from '../parser/index.ts';
 import type { Expr } from '../parser/index.ts';
 import type { Row, SqlValue } from '../types.ts';
 
@@ -19,7 +20,7 @@ export function evaluateValue(expr: Expr, row: Row): SqlValue {
     case 'literal':
       return expr.value;
     case 'column':
-      return row[expr.name] ?? null;
+      return row[columnKey(expr)] ?? null;
     case 'compare':
     case 'and': {
       const truth = evaluatePredicate(expr, row);
@@ -59,7 +60,7 @@ export function evaluatePredicate(expr: Expr, row: Row): Truth {
       return expr.value === null ? null : Boolean(expr.value);
 
     case 'column': {
-      const value = row[expr.name] ?? null;
+      const value = row[columnKey(expr)] ?? null;
       return value === null ? null : Boolean(value);
     }
   }

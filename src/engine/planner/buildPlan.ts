@@ -12,7 +12,7 @@
  * legible when the two are shown side by side.
  */
 
-import type { DeleteStatement, SelectItem, SelectStatement, UpdateStatement } from '../parser/index.ts';
+import type { DeleteStatement, JoinClause, SelectItem, SelectStatement, UpdateStatement } from '../parser/index.ts';
 import { selectItemArgColumn, selectItemKey } from '../parser/index.ts';
 import type { AggregateSpec, Plan, ProjectList } from './plan.ts';
 
@@ -68,8 +68,39 @@ export function buildAggregatePlan(
   return { op: strategy === 'sort' ? 'SortAggregate' : 'HashAggregate', groupBy, aggregates, child };
 }
 
+/**
+ * Builds the `Join` node for a `FROM t1 JOIN t2 ON ...` — a bare `SeqScan` on
+ * each side (v1 never pushes a predicate into either, plan.md §22.2) and the
+ * ON equality's two columns resolved to `left`'s side and `right`'s side,
+ * whichever order they were written in. The parser's `checkJoinOn` already
+ * guarantees both `on` operands are qualified columns; the `kind` check
+ * below is just how the type system is told what that check already ensures.
+ * Shared with `emit.ts`'s progressive plan-tree narration, like
+ * `buildAggregatePlan` already is, so the two never drift.
+ */
+export function buildJoinPlan(join: JoinClause, fromTable: string): Plan {
+  const { left, right } = join.on;
+  if (left.kind !== 'column' || right.kind !== 'column') {
+    throw new Error('unreachable: checkJoinOn guarantees a JOIN ON is column = column');
+  }
+  const leftColumn = left.table === fromTable ? left.name : right.name;
+  const rightColumn = left.table === join.table.name ? left.name : right.name;
+  return {
+    op: 'Join',
+    algorithm: 'nested-loop',
+    left: { op: 'SeqScan', table: fromTable },
+    right: { op: 'SeqScan', table: join.table.name },
+    leftTable: fromTable,
+    rightTable: join.table.name,
+    leftColumn,
+    rightColumn,
+  };
+}
+
 export function buildPlan(ast: SelectStatement, aggregateStrategy: 'hash' | 'sort' = 'hash'): Plan {
-  const scan: Plan = { op: 'SeqScan', table: ast.from.name };
+  const scan: Plan = ast.join
+    ? buildJoinPlan(ast.join, ast.from.name)
+    : { op: 'SeqScan', table: ast.from.name };
 
   const filtered: Plan = ast.where
     ? { op: 'Filter', predicate: ast.where, child: scan }

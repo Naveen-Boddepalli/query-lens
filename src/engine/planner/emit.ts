@@ -2,7 +2,7 @@ import type { Emit } from '../trace.ts';
 import type { Table } from '../types.ts';
 import type { SelectStatement } from '../parser/index.ts';
 import { selectItemKey } from '../parser/index.ts';
-import { buildAggregatePlan, buildPlan, isAggregateQuery } from './buildPlan.ts';
+import { buildAggregatePlan, buildJoinPlan, buildPlan, isAggregateQuery } from './buildPlan.ts';
 import { estimatePlan, rootEstimate } from './cost.ts';
 import { optimize } from './optimize.ts';
 import { exprToSql, toPlanDisplay } from './plan.ts';
@@ -15,7 +15,9 @@ import type { Plan, ProjectList } from './plan.ts';
  *
  * Every emitted tree carries the cost model's per-node estimates (plan.md
  * §22.2), which is also why `rowsPerPage` is threaded down: a scan's estimated
- * page count depends on it.
+ * page count depends on it. `joinTable` is the `JOIN`'d table's own data,
+ * needed only so the cost model can estimate that side of a `Join` too —
+ * `undefined` for every query without one.
  */
 export function emitPlanEvents(
   emit: Emit,
@@ -23,17 +25,28 @@ export function emitPlanEvents(
   table: Table,
   rowsPerPage: number,
   aggregateStrategy: 'hash' | 'sort' = 'hash',
+  joinTable?: Table,
 ): Plan {
+  const otherTables = joinTable ? { [joinTable.name]: joinTable } : undefined;
   const display = (plan: Plan, changed?: ReadonlySet<Plan>) =>
-    toPlanDisplay(plan, changed, estimatePlan(plan, table, rowsPerPage));
+    toPlanDisplay(plan, changed, estimatePlan(plan, table, rowsPerPage, otherTables));
 
-  const scan: Plan = { op: 'SeqScan', table: ast.from.name };
+  const leftScan: Plan = { op: 'SeqScan', table: ast.from.name };
   emit(
     `Start at the bottom: every plan begins by reading a table, so the base of the tree is a sequential scan of \`${ast.from.name}\`.`,
-    { stage: 'plan', planTree: display(scan) },
+    { stage: 'plan', planTree: display(leftScan) },
   );
 
-  let current: Plan = scan;
+  let current: Plan = leftScan;
+
+  if (ast.join) {
+    current = buildJoinPlan(ast.join, ast.from.name);
+    const join = current.op === 'Join' ? current : undefined;
+    emit(
+      `JOIN adds a second scan of \`${ast.join.table.name}\` and a Join above both: for every row \`${ast.from.name}\` produces, it rescans all of \`${ast.join.table.name}\` looking for a match on \`${join?.leftColumn}\` = \`${join?.rightColumn}\` — nested-loop, the simplest join algorithm, and the most expensive once neither side has an index to speed the inner scan up.`,
+      { stage: 'plan', planTree: display(current) },
+    );
+  }
 
   if (ast.where) {
     current = { op: 'Filter', predicate: ast.where, child: current };
@@ -130,10 +143,12 @@ export function emitPlanEvents(
   }
 
   if (optimised === canonical) {
-    const rows = rootEstimate(canonical, table, rowsPerPage).estRows;
-    const note = ast.where
-      ? `The cost model estimates about ${plural(rows, 'row')} out of ${String(table.rows.length)}, and no access path beats reading the table.`
-      : 'With no WHERE there is nothing to narrow the scan — every row is returned.';
+    const rows = rootEstimate(canonical, table, rowsPerPage, otherTables).estRows;
+    const note = ast.join
+      ? 'No rewrite rule reaches into a JOIN yet — nested-loop over two full scans is the only plan v1 has.'
+      : ast.where
+        ? `The cost model estimates about ${plural(rows, 'row')} out of ${String(table.rows.length)}, and no access path beats reading the table.`
+        : 'With no WHERE there is nothing to narrow the scan — every row is returned.';
     emit(
       `No rewrite rule fires on this plan — the optimizer leaves it exactly as written. ${note}`,
       {
@@ -150,8 +165,8 @@ export function emitPlanEvents(
   /** Appends the scan-vs-index page estimate that makes the rewrite a decision, not a reflex. */
   function withCostJustification(label: string, chosen: Plan): string {
     const scanPages = Math.max(1, Math.ceil(table.rows.length / rowsPerPage));
-    const rows = rootEstimate(canonical, table, rowsPerPage).estRows;
-    const indexPages = rootEstimate(chosen, table, rowsPerPage).estPages;
+    const rows = rootEstimate(canonical, table, rowsPerPage, otherTables).estRows;
+    const indexPages = rootEstimate(chosen, table, rowsPerPage, otherTables).estPages;
     return `${label} Estimated cost decides it: the sequential scan reads all ${String(scanPages)} pages to return about ${plural(rows, 'row')}; the index lookup reads about ${String(indexPages)}.`;
   }
 }

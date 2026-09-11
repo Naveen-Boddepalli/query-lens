@@ -8,6 +8,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`JOIN`, v1's first join algorithm** (plan.md §22.2) — `FROM t1 JOIN t2 ON t1.a = t2.b`: an
+  implicit inner join (bare `JOIN`, no `LEFT`/`RIGHT`/`FULL`/`CROSS`/`INNER`/`OUTER`/`USING` yet,
+  each still rejected by name), exactly one per query, computed by nested-loop — the only algorithm
+  v1 has. The real new grammar surface is a qualified `table.column` reference: `Expr`'s and
+  `SelectItem`'s `column` variant gained an optional `table`, required on *every* column reference
+  once a query joins two tables (there is no ambiguity resolution — v0 asks the query to say which
+  table) and validated at parse time against the tables the query actually names, so a bare `id` or
+  a qualifier naming a third table both fail immediately with a specific message rather than an
+  execution-time surprise. A `JoinClause` AST node carries the `ON` equality, checked at parse time
+  to be exactly one comparison between a qualified column on each side (`checkJoinOn`); `GROUP BY`,
+  `ORDER BY` and an aggregate SELECT item all stay unsupported combined with a `JOIN` for now, each
+  rejected the same way `GROUP BY`+`ORDER BY` already reject each other.
+
+  The `Join` plan node's two children are always a bare `SeqScan` — v1 pushes no predicate into
+  either side, so a `WHERE` clause is always a residual `Filter` above the join, never inside either
+  scan — and its executor rescans the right side whole for every row the left produces, reusing the
+  exact reset every operator's `open()` already means rather than rebuilding an operator per row.
+  `ExecContext` gained `joinRight`, the first time it has ever needed to represent two tables at
+  once: the right table's own heap, its pages numbered right after the left's, so both genuinely
+  share one real buffer pool — the rescans' cost is counted disk activity, not a claimed number. The
+  joined row is fully qualified (`table.column` for every column on both sides), so same-named
+  columns from either table never collide, including under `SELECT *`. The cost model prices a
+  `Join` at `left × right / ndistinct(right key)` rows and `leftPages + leftRows × rightPages` —
+  nested-loop's honest, unflattering number, the same discipline every other estimate here already
+  follows. `constant-folding`'s "column compared with itself" fold now also checks the table
+  qualifier, so `authors.id = posts.id` across a join is never mistaken for the same column.
+
+  Reachable today via `/tools/planner`'s two small fixed tables, `authors`/`posts`
+  (`createJoinDemoDatabase`), sitting alongside `users` without touching its own index toggle — not
+  yet wired into the Playground's own dataset picker (needs the multi-table schema editor, plan.md
+  §22.7) or into a `/compare` mode (needs a second join algorithm to name against nested-loop
+  first). 38 new unit tests, 1 e2e.
 - **A sort aggregate, and a third `/compare` mode naming it against the hash aggregate**
   (plan.md §22.2) — `GROUP BY`/aggregate queries had exactly one execution strategy; this adds the
   second, so there is finally something to compare. `SortAggregate` computes the identical

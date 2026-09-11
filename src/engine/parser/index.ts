@@ -12,7 +12,7 @@ export {
   toDisplayTree,
   updateDisplayTree,
 } from './display.ts';
-export { columnsIn, selectItemArgColumn, selectItemKey, walkExpr } from './ast.ts';
+export { columnKey, columnsIn, selectItemArgColumn, selectItemKey, walkExpr } from './ast.ts';
 export type {
   AggregateFn,
   CompareOp,
@@ -22,6 +22,7 @@ export type {
   InsertColumnList,
   InsertStatement,
   InsertValues,
+  JoinClause,
   LimitClause,
   OrderByClause,
   SelectItem,

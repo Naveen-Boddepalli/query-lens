@@ -54,7 +54,12 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
   // second importer of the planner + `buildPlan` + `toPlanDisplay`, so rolldown
   // hoisted that shared engine code out of the Playground chunk into its own —
   // a move between chunks, not growth, but it shows here.
-  { name: 'trace-ui', test: /^(PlaygroundPage|PlaygroundTour|TraceWorksheet|StageDetail|stageMeta|datasets|datasetCatalogue|types|seed|trace|runQuery|engine|SqlEditor|PlaybackControls|PresenterView|AstTree|BTreePanel|FlowTree|display)-/, kb: 46, note: 'Playground + the presenter view + the SQL editor + the shared panel/tree renderers (AstTree, BTreePanel, FlowTree, the two display transformers) plus the engine core (runQuery and the planner split into their own chunks once a third / second route imported them; SqlEditor split once /challenges became a second) plus the preset dataset library, the print worksheet, LIMIT, ORDER BY + the Sort operator, the full DELETE + INSERT + UPDATE write path, and GROUP BY + aggregates (plan.md §22.2)' },
+  // Raised 46 → 48 for JOIN (§22.2): a `Join` plan node and its nested-loop
+  // operator, `createJoinDemoDatabase`'s small `authors`/`posts` fixture, and
+  // the cost model's/parser's growth to carry a second table through —
+  // `engine-*.js` is the largest single mover, `/tools/planner` (this group)
+  // and `/tools/grammar` (`standalone-tools`) both import it.
+  { name: 'trace-ui', test: /^(PlaygroundPage|PlaygroundTour|TraceWorksheet|StageDetail|stageMeta|datasets|datasetCatalogue|types|seed|trace|runQuery|engine|SqlEditor|PlaybackControls|PresenterView|AstTree|BTreePanel|FlowTree|display)-/, kb: 48, note: 'Playground + the presenter view + the SQL editor + the shared panel/tree renderers (AstTree, BTreePanel, FlowTree, the two display transformers) plus the engine core (runQuery and the planner split into their own chunks once a third / second route imported them; SqlEditor split once /challenges became a second) plus the preset dataset library, the print worksheet, LIMIT, ORDER BY + the Sort operator, the full DELETE + INSERT + UPDATE write path, GROUP BY + aggregates, and JOIN (plan.md §22.2)' },
   // The small per-route shells: landing hub, stage index, examples, docs shell,
   // 404, tools index — plus the redesign's shared UI kit (primitives.ts,
   // PageHeader, Hero) that two or more of them import.
@@ -208,8 +213,16 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
  * plus a new streaming collapse pass over the now-sorted rows), and
  * `ComparePage.tsx`'s `AggregateCompare` panel forcing each strategy in turn
  * via `EngineOptions.aggregateStrategy` and scoring the two side by side.
+ * Raised 396 → 399 for JOIN (§22.2) — v1's first: a qualified `table.column`
+ * reference throughout the parser (`Expr`/`SelectItem` gain an optional
+ * `table`), a `JoinClause` AST node and its parse-time validity checks, a
+ * `Join` plan node and nested-loop operator (the executor's first two-table
+ * `ExecContext`, `joinRight`, sharing one real buffer pool with the FROM
+ * table's own heap), and the cost model's join estimate. `/tools/planner`
+ * gained a small fixed `authors`/`posts` pair (`createJoinDemoDatabase`) to
+ * try it against, without touching `users`' own index toggle.
  */
-const TOTAL_KB = 396;
+const TOTAL_KB = 399;
 
 const gzipKb = (bytes: Buffer): number => gzipSync(bytes, { level: 9 }).length / 1024;
 

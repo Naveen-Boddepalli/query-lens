@@ -51,11 +51,23 @@ export const GRAMMAR: GrammarRule[] = [
       rule('selectList'),
       lit('FROM'),
       rule('identifier'),
+      opt(rule('join')),
       opt(lit('WHERE'), rule('expr')),
       opt(lit('GROUP'), lit('BY'), rule('identifier'), repeat(lit(','), rule('identifier'))),
       opt(lit('ORDER'), lit('BY'), rule('identifier'), opt(choice([lit('ASC')], [lit('DESC')]))),
       opt(lit('LIMIT'), rule('number')),
       opt(lit(';')),
+    ],
+  },
+  {
+    name: 'join',
+    parts: [
+      lit('JOIN'),
+      rule('identifier'),
+      lit('ON'),
+      rule('qualifiedColumn'),
+      lit('='),
+      rule('qualifiedColumn'),
     ],
   },
   {
@@ -97,13 +109,13 @@ export const GRAMMAR: GrammarRule[] = [
     name: 'selectList',
     parts: [choice([lit('*')], [rule('selectItem'), repeat(lit(','), rule('selectItem'))])],
   },
-  { name: 'selectItem', parts: [choice([rule('identifier')], [rule('aggregateCall')])] },
+  { name: 'selectItem', parts: [choice([rule('qualifiedColumn')], [rule('aggregateCall')])] },
   {
     name: 'aggregateCall',
     parts: [
       choice([lit('COUNT')], [lit('SUM')], [lit('AVG')], [lit('MIN')], [lit('MAX')]),
       lit('('),
-      choice([lit('*')], [rule('identifier')]),
+      choice([lit('*')], [rule('qualifiedColumn')]),
       lit(')'),
     ],
   },
@@ -115,8 +127,19 @@ export const GRAMMAR: GrammarRule[] = [
   {
     name: 'operand',
     parts: [
-      choice([rule('identifier')], [rule('number')], [rule('string')], [lit('NULL')], [lit('TRUE')], [lit('FALSE')]),
+      choice(
+        [rule('qualifiedColumn')],
+        [rule('number')],
+        [rule('string')],
+        [lit('NULL')],
+        [lit('TRUE')],
+        [lit('FALSE')],
+      ),
     ],
+  },
+  {
+    name: 'qualifiedColumn',
+    parts: [rule('identifier'), opt(lit('.'), rule('identifier'))],
   },
   // Terminals — lexical categories the tokenizer itself produces, not composed
   // of other rules. Each is its own trivial "rule" purely so a `rule()`

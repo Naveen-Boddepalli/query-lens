@@ -24,6 +24,8 @@ import {
 } from './planner/index.ts';
 import { buildHeap, createBufferPool } from './storage/index.ts';
 import { buildIndex, pageCountFor } from './index/index.ts';
+import type { Heap } from './storage/index.ts';
+import type { BPlusTree } from './index/index.ts';
 import { execute } from './exec/index.ts';
 import { executeDelete } from './exec/delete.ts';
 import { executeInsert } from './exec/insert.ts';
@@ -63,14 +65,36 @@ export function runQuery(
     };
   }
 
-  const unknownColumn = referencedColumns(ast).find((c) => !table.columns.includes(c.name));
-  if (unknownColumn) {
+  // A JOIN's second table — resolved here, alongside the FROM/INTO table
+  // above, so both go through the same "no table called X" shape.
+  const joinTableRef = ast.kind === 'select' ? ast.join?.table : undefined;
+  const joinTable = joinTableRef ? db.tables[joinTableRef.name] : undefined;
+  if (joinTableRef && !joinTable) {
+    const known = Object.keys(db.tables);
     return {
       events: drain(),
       rows: [],
       error: {
-        message: `\`${table.name}\` has no column called \`${unknownColumn.name}\`.`,
-        hint: `Columns: ${table.columns.join(', ')}.`,
+        message: `There is no table called \`${joinTableRef.name}\`.`,
+        hint: known.length === 1 ? `The only table is \`${known[0]}\`.` : `Tables: ${known.join(', ')}.`,
+        from: joinTableRef.span.from,
+        to: joinTableRef.span.to,
+      },
+    };
+  }
+
+  const unknownColumn = referencedColumns(ast).find((c) => {
+    const named = c.table ? db.tables[c.table] : table;
+    return !named || !named.columns.includes(c.name);
+  });
+  if (unknownColumn) {
+    const named = (unknownColumn.table ? db.tables[unknownColumn.table] : table)!;
+    return {
+      events: drain(),
+      rows: [],
+      error: {
+        message: `\`${named.name}\` has no column called \`${unknownColumn.name}\`.`,
+        hint: `Columns: ${named.columns.join(', ')}.`,
         from: unknownColumn.span.from,
         to: unknownColumn.span.to,
       },
@@ -180,7 +204,16 @@ export function runQuery(
   }
 
   emitParseEvents(emit, ast);
-  const plan = emitPlanEvents(emit, ast, table, options.rowsPerPage, options.aggregateStrategy ?? 'hash');
+  const plan = emitPlanEvents(emit, ast, table, options.rowsPerPage, options.aggregateStrategy ?? 'hash', joinTable);
+
+  // A JOIN's second table gets its own heap, its pages numbered right after
+  // the FROM table's — so both compete for the same buffer frames, the same
+  // way a Sort's spill pages do. v1's nested-loop `Join` never consults
+  // either side's index (that is "index nested-loop join," a later
+  // strategy), so there is no second B+Tree to build here.
+  const rightHeap: Heap | undefined = joinTable
+    ? buildHeap(joinTable, options.rowsPerPage, heap.pages.length)
+    : undefined;
 
   // A Sort's (or a SortAggregate's own internal sort's) spill needs its own
   // page ids, reserved up front — sized against the whole table (the worst
@@ -189,28 +222,55 @@ export function runQuery(
   const sortTemp = needsSortSpill(plan)
     ? sortTempPageCount(table.rows.length, options.rowsPerPage, options.bufferFrames)
     : 0;
-  const pool = createBufferPool(pageCountFor(heap, tree) + sortTemp, options, emit);
+  const pool = createBufferPool(
+    pageCountFor(heap, tree) + (rightHeap ? rightHeap.pages.length : 0) + sortTemp,
+    options,
+    emit,
+  );
 
-  const rows = execute(plan, { emit, pool, locks, heap, tree, table, options });
+  const rows = execute(plan, {
+    emit,
+    pool,
+    locks,
+    heap,
+    tree,
+    table,
+    options,
+    ...(joinTable && rightHeap ? { joinRight: { table: joinTable, heap: rightHeap, tree: null as BPlusTree | null } } : {}),
+  });
 
   return { events: drain(), rows };
 }
 
-function referencedColumns(ast: Statement): { name: string; span: { from: number; to: number } }[] {
-  const refs: { name: string; span: { from: number; to: number } }[] = [];
+interface ColumnRef {
+  name: string;
+  /** Which table it names, for a qualified reference — only ever set once a query has a JOIN. */
+  table?: string;
+  span: { from: number; to: number };
+}
+
+function referencedColumns(ast: Statement): ColumnRef[] {
+  const refs: ColumnRef[] = [];
+  const push = (ref: { name: string; table?: string; span: { from: number; to: number } }) =>
+    refs.push({ name: ref.name, ...(ref.table === undefined ? {} : { table: ref.table }), span: ref.span });
+
   if (ast.kind === 'select' && ast.select.kind === 'columns') {
     for (const item of ast.select.items) {
-      if (item.kind === 'column') refs.push({ name: item.name, span: item.span });
-      else if (item.arg.kind === 'column') refs.push({ name: item.arg.name, span: item.arg.span });
+      if (item.kind === 'column') push(item);
+      else if (item.arg.kind === 'column') push(item.arg);
     }
   }
   if (ast.kind !== 'insert' && ast.where) {
     const stack = [ast.where];
     while (stack.length > 0) {
       const e = stack.pop()!;
-      if (e.kind === 'column') refs.push({ name: e.name, span: e.span });
+      if (e.kind === 'column') push(e);
       if (e.kind === 'compare' || e.kind === 'and') stack.push(e.left, e.right);
     }
+  }
+  if (ast.kind === 'select' && ast.join) {
+    if (ast.join.on.left.kind === 'column') push(ast.join.on.left);
+    if (ast.join.on.right.kind === 'column') push(ast.join.on.right);
   }
   if (ast.kind === 'select' && ast.groupBy) refs.push(...ast.groupBy.columns);
   if (ast.kind === 'select' && ast.orderBy) refs.push({ name: ast.orderBy.column, span: ast.orderBy.span });

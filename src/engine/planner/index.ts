@@ -1,4 +1,11 @@
-export { buildAggregatePlan, buildDeletePlan, buildPlan, buildUpdatePlan, isAggregateQuery } from './buildPlan.ts';
+export {
+  buildAggregatePlan,
+  buildDeletePlan,
+  buildJoinPlan,
+  buildPlan,
+  buildUpdatePlan,
+  isAggregateQuery,
+} from './buildPlan.ts';
 export {
   estimateIndexLevels,
   estimatePlan,

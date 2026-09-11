@@ -126,12 +126,46 @@ export function estimateIndexLevels(rowCount: number): number {
   return levels;
 }
 
-function estimateNode(plan: Plan, table: Table, rowsPerPage: number, into: PlanCost): CostEstimate {
+/**
+ * `otherTables` is consulted only by the `Join` case, for whichever side of
+ * the join is not `table` itself — every other case estimates against the
+ * one table a v0 query without a JOIN ever has. A `Join`'s own two children
+ * are always a bare `SeqScan` in v1 (plan.md §22.2: no predicate pushdown
+ * into either side yet), so each side's own row/column data is exactly one
+ * table's, found by name in `table`/`otherTables` rather than threaded down
+ * through every other case that never needs a second table at all.
+ */
+function estimateNode(
+  plan: Plan,
+  table: Table,
+  rowsPerPage: number,
+  into: PlanCost,
+  otherTables: Record<string, Table> = {},
+): CostEstimate {
   const rowCount = table.rows.length;
   const heapPages = Math.max(1, Math.ceil(rowCount / rowsPerPage));
+  const tableNamed = (name: string): Table => (name === table.name ? table : otherTables[name]!);
 
   let estimate: CostEstimate;
   switch (plan.op) {
+    case 'Join': {
+      const left = estimateNode(plan.left, tableNamed(plan.leftTable), rowsPerPage, into, otherTables);
+      const right = estimateNode(plan.right, tableNamed(plan.rightTable), rowsPerPage, into, otherTables);
+      // Foreign-key assumption: each left row matches about 1/ndistinct(right
+      // key) of the right table — the same independence heuristic an
+      // equality WHERE already makes, just applied to a join key instead of a
+      // literal. Nested-loop's own cost is the honest, unflattering number:
+      // the outer read once, plus a full rescan of the inner for every outer
+      // row — no index taken advantage of yet, since `left`/`right` are
+      // always a bare SeqScan in v1.
+      const rightDistinct = ndistinct(tableNamed(plan.rightTable).rows, plan.rightColumn);
+      estimate = {
+        estRows: clampRows((left.estRows * right.estRows) / rightDistinct),
+        estPages: left.estPages + left.estRows * right.estPages,
+        basis: `${String(left.estRows)} × ${String(right.estRows)} / ndistinct(${plan.rightTable}.${plan.rightColumn}); nested-loop rescans ${plan.rightTable} once per ${plan.leftTable} row`,
+      };
+      break;
+    }
     case 'SeqScan': {
       if (plan.filter) {
         const { fraction, basis } = selectivityOf(plan.filter, table);
@@ -171,14 +205,14 @@ function estimateNode(plan: Plan, table: Table, rowsPerPage: number, into: PlanC
       break;
     }
     case 'Filter': {
-      const child = estimateNode(plan.child, table, rowsPerPage, into);
+      const child = estimateNode(plan.child, table, rowsPerPage, into, otherTables);
       const { fraction, basis } = selectivityOf(plan.predicate, table);
       estimate = { estRows: clampRows(child.estRows * fraction), estPages: child.estPages, basis };
       break;
     }
     case 'HashAggregate':
     case 'SortAggregate': {
-      const child = estimateNode(plan.child, table, rowsPerPage, into);
+      const child = estimateNode(plan.child, table, rowsPerPage, into, otherTables);
       // A hash table adds no I/O of its own — everything happens in memory —
       // but a sort aggregate spills exactly like `Sort` does, on top of
       // whatever the child already costs to read; that extra spill, priced
@@ -218,7 +252,7 @@ function estimateNode(plan: Plan, table: Table, rowsPerPage: number, into: PlanC
       // Row order changes, not row count — but Sort's own I/O is the honest
       // number to surface here: a spill writes and re-reads the data, so its
       // page cost is real disk activity a Filter/Project never adds.
-      const child = estimateNode(plan.child, table, rowsPerPage, into);
+      const child = estimateNode(plan.child, table, rowsPerPage, into, otherTables);
       const spillPages = Math.max(1, Math.ceil(child.estRows / rowsPerPage));
       estimate = {
         estRows: child.estRows,
@@ -228,12 +262,12 @@ function estimateNode(plan: Plan, table: Table, rowsPerPage: number, into: PlanC
       break;
     }
     case 'Project': {
-      const child = estimateNode(plan.child, table, rowsPerPage, into);
+      const child = estimateNode(plan.child, table, rowsPerPage, into, otherTables);
       estimate = { estRows: child.estRows, estPages: child.estPages, basis: child.basis };
       break;
     }
     case 'Limit': {
-      const child = estimateNode(plan.child, table, rowsPerPage, into);
+      const child = estimateNode(plan.child, table, rowsPerPage, into, otherTables);
       estimate = {
         estRows: Math.min(child.estRows, plan.count),
         estPages: child.estPages,
@@ -247,14 +281,28 @@ function estimateNode(plan: Plan, table: Table, rowsPerPage: number, into: PlanC
   return estimate;
 }
 
-/** Per-node estimates for a plan tree. */
-export function estimatePlan(plan: Plan, table: Table, rowsPerPage: number): PlanCost {
+/**
+ * Per-node estimates for a plan tree. `otherTables` is the join partner's
+ * `Table`, keyed by name — needed only when `plan` contains a `Join`; every
+ * other caller (no JOIN in the query) omits it.
+ */
+export function estimatePlan(
+  plan: Plan,
+  table: Table,
+  rowsPerPage: number,
+  otherTables?: Record<string, Table>,
+): PlanCost {
   const cost: PlanCost = new Map();
-  estimateNode(plan, table, rowsPerPage, cost);
+  estimateNode(plan, table, rowsPerPage, cost, otherTables);
   return cost;
 }
 
 /** The estimate for the plan's root node — the query's estimated output. */
-export function rootEstimate(plan: Plan, table: Table, rowsPerPage: number): CostEstimate {
-  return estimateNode(plan, table, rowsPerPage, new Map());
+export function rootEstimate(
+  plan: Plan,
+  table: Table,
+  rowsPerPage: number,
+  otherTables?: Record<string, Table>,
+): CostEstimate {
+  return estimateNode(plan, table, rowsPerPage, new Map(), otherTables);
 }

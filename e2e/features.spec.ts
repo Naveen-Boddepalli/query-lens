@@ -175,13 +175,13 @@ test('the grammar sandbox diagrams every rule, and a rule reference jumps to its
   await expect(page.getByRole('heading', { name: 'Grammar sandbox' })).toBeVisible();
 
   // Every rule the grammar data names gets its own row.
-  for (const rule of ['statement', 'select', 'delete', 'insert', 'update', 'aggregateCall']) {
+  for (const rule of ['statement', 'select', 'join', 'delete', 'insert', 'update', 'aggregateCall', 'qualifiedColumn']) {
     await expect(page.locator(`#rule-${rule}`)).toBeAttached();
   }
 
   // Clicking a rule reference (not the heading of the same name) jumps to that rule's own row.
-  await page.locator('#rule-operand a', { hasText: 'identifier' }).click();
-  await expect(page.locator('#rule-identifier')).toBeInViewport();
+  await page.locator('#rule-operand a', { hasText: 'qualifiedColumn' }).click();
+  await expect(page.locator('#rule-qualifiedColumn')).toBeInViewport();
 });
 
 test('the slotted-page inspector lays a heap page out to the byte', async ({ page }) => {
@@ -255,6 +255,22 @@ test('the planner sandbox folds an always-true comparison out of the predicate',
   await page.goto('/tools/planner?q=SELECT%20*%20FROM%20users%20WHERE%201%20%3D%201%20AND%20id%20%3D%205');
   await expect(page.getByText(/constant-folding — Constant folding:/)).toBeVisible();
   await expect(page.getByText(/index-selection — /)).toContainText(/indexed/);
+});
+
+test('the planner sandbox plans a real JOIN against its authors/posts demo tables', async ({ page }) => {
+  await page.goto(
+    '/tools/planner?q=SELECT%20authors.name%2C%20posts.title%20FROM%20authors%20JOIN%20posts%20ON%20authors.id%20%3D%20posts.authorId',
+  );
+  const canonical = page.getByRole('figure').filter({ hasText: 'canonical' });
+  await expect(canonical.getByText(/Join \(nested-loop\)/)).toBeVisible();
+  await expect(canonical.getByText(/SeqScan authors/)).toBeVisible();
+  await expect(canonical.getByText(/SeqScan posts/)).toBeVisible();
+  // No rule reaches into a JOIN yet — the optimized tree is identical.
+  await expect(page.getByText('optimized · unchanged')).toBeVisible();
+
+  // An unqualified column once the query joins two tables is a real parse error.
+  await page.getByLabel('SQL query').fill('SELECT name FROM authors JOIN posts ON authors.id = posts.authorId');
+  await expect(page.getByText(/needs a table name/)).toBeVisible();
 });
 
 test('compare finds the point where LRU and clock sweep pick different victims', async ({ page }) => {

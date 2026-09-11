@@ -101,7 +101,9 @@ function foldLiteralCompare(op: CompareOp, left: SqlValue, right: SqlValue): boo
  * literals (`5 > 3`), or the same column compared with itself (`age = age`
  * is always true; `age < age` is always false). Anything else — a column
  * against a literal, or two different columns — depends on the data and
- * cannot be folded.
+ * cannot be folded. "Same column" checks the table qualifier too: once a
+ * JOIN is in play, `authors.id = posts.id` names the *same* column on two
+ * *different* tables, and folding that to `true` would be wrong.
  */
 function foldComparison(expr: Extract<Expr, { kind: 'compare' }>): 'true' | 'false' | null {
   const { op, left, right } = expr;
@@ -111,7 +113,7 @@ function foldComparison(expr: Extract<Expr, { kind: 'compare' }>): 'true' | 'fal
     return result === null ? null : result ? 'true' : 'false';
   }
 
-  if (left.kind === 'column' && right.kind === 'column' && left.name === right.name) {
+  if (left.kind === 'column' && right.kind === 'column' && left.name === right.name && left.table === right.table) {
     return op === '=' ? 'true' : 'false';
   }
 

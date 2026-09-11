@@ -515,7 +515,7 @@ describe('parse — errors point at the right text', () => {
   });
 
   it.each([
-    ['SELECT * FROM a JOIN b ON a.id = b.id', /JOIN/, /v1/],
+    ['SELECT * FROM a LEFT JOIN b ON a.id = b.id', /LEFT.*not supported/, /inner JOIN/],
     ['SELECT dept, COUNT(*) FROM users GROUP BY dept HAVING COUNT(*) > 1', /HAVING/, /WHERE instead/],
     ['SELECT * FROM users LIMIT 5 OFFSET 10', /OFFSET/, /LIMIT on its own is/],
   ])('explains out-of-scope SQL: %s', (sql, message, hint) => {

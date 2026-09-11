@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   buildPlan,
+  createJoinDemoDatabase,
   createSeedDatabase,
   DEFAULT_ENGINE_OPTIONS,
   estimatePlan,
@@ -43,6 +44,14 @@ const SEED = createSeedDatabase();
 const USERS = SEED.tables.users!;
 const { indexedColumn: _dropped, ...USERS_NO_INDEX } = USERS;
 
+// `authors`/`posts` sit alongside `users` (plan.md §22.2) purely so a typed
+// query can JOIN them — small on purpose, so a full unfiltered join stays
+// legible. They never move with the `id`-index toggle above; only `users`
+// does.
+const JOIN_DEMO = createJoinDemoDatabase();
+const AUTHORS = JOIN_DEMO.tables.authors!;
+const POSTS = JOIN_DEMO.tables.posts!;
+
 function readInitial() {
   const p = new URLSearchParams(typeof location === 'undefined' ? '' : location.search);
   const q = p.get('q');
@@ -65,7 +74,12 @@ export function PlannerToolPage() {
   const [rules, setRules] = useState<Set<string>>(INITIAL.rules);
 
   const table: Table = indexed ? USERS : USERS_NO_INDEX;
-  const db: Database = useMemo(() => ({ tables: { users: table } }), [table]);
+  // `authors`/`posts` sit alongside `users` so a typed query can JOIN them;
+  // only `users` moves with the index toggle above.
+  const db: Database = useMemo(
+    () => ({ tables: { users: table, authors: AUTHORS, posts: POSTS } }),
+    [table],
+  );
 
   // `runQuery` is the app's own validator — parse errors, unknown table, unknown
   // column all surface here exactly as they do in the Playground.
@@ -75,19 +89,23 @@ export function PlannerToolPage() {
     if (validation.error) return null;
     const parsed = parse(sql);
     if (!parsed.ok) return null;
+    // The rules and the cost model both key off the table the query is
+    // actually against — `users` by default, but `authors`/`posts` once a
+    // typed query names one of those instead (plan.md §22.2's JOIN).
+    const fromTable = db.tables[parsed.ast.from.name] ?? table;
     const canonical = buildPlan(parsed.ast);
-    const steps = optimize(canonical, table, rules);
+    const steps = optimize(canonical, fromTable, rules);
     const last = steps.at(-1);
     const optimised = last ? last.plan : canonical;
     const lastChanged: ReadonlySet<Plan> = last ? last.changed : new Set<Plan>();
     const rpp = DEFAULT_ENGINE_OPTIONS.rowsPerPage;
     return {
-      canonical: toPlanDisplay(canonical, new Set<Plan>(), estimatePlan(canonical, table, rpp)),
-      optimised: toPlanDisplay(optimised, lastChanged, estimatePlan(optimised, table, rpp)),
+      canonical: toPlanDisplay(canonical, new Set<Plan>(), estimatePlan(canonical, fromTable, rpp, db.tables)),
+      optimised: toPlanDisplay(optimised, lastChanged, estimatePlan(optimised, fromTable, rpp, db.tables)),
       firedRules: new Set(steps.map((s) => s.rule)),
       steps,
     };
-  }, [validation.error, sql, table, rules]);
+  }, [validation.error, sql, db, table, rules]);
 
   useEffect(() => {
     const t = window.setTimeout(() => {
@@ -120,7 +138,11 @@ export function PlannerToolPage() {
           Playground
         </Link>
         , with the rules on switches. Each node also shows the cost model&rsquo;s{' '}
-        <code className="font-mono text-ink">~N rows</code> estimate and the heuristic it used.
+        <code className="font-mono text-ink">~N rows</code> estimate and the heuristic it used. Two
+        more tables, <code className="font-mono text-ink">authors</code> and{' '}
+        <code className="font-mono text-ink">posts</code>, sit alongside <code className="font-mono text-ink">users</code> just
+        for trying a <code className="font-mono text-ink">JOIN</code> — e.g.{' '}
+        <code className="font-mono text-ink">SELECT * FROM authors JOIN posts ON authors.id = posts.authorId</code>.
       </PageHeader>
 
       <label htmlFor="q" className="mt-4 flex flex-col gap-1 text-label text-ink-dim">

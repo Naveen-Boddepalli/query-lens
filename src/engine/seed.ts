@@ -40,3 +40,43 @@ export function createSeedDatabase(): Database {
     },
   };
 }
+
+const AUTHOR_NAMES = ['ada', 'alan', 'grace', 'donald', 'barbara'] as const;
+
+// `authorId` is a real foreign key shape: two authors with several posts,
+// one with exactly one, and one with none at all — the ordinary distribution
+// a real join produces, not every row matching neatly. Small on purpose: v1
+// JOIN is nested-loop only, so every row on one side rescans the *other*
+// side whole — small tables keep that honest even before an index-aware join
+// strategy exists to speed it up.
+const POST_AUTHORS = [1, 1, 1, 2, 2, 3, 3, 3, 3, 4] as const;
+
+/**
+ * A small second table, joinable against a small first one (plan.md §22.2) —
+ * `authors`/`posts` rather than reusing the 48-row `users`, so a full,
+ * unfiltered join stays small enough to read as a trace. Not part of
+ * `datasets.ts`'s preset library: those are each one table by design (§22.7);
+ * this pair exists to give `/tools/planner` something to JOIN against.
+ */
+export function createJoinDemoDatabase(): Database {
+  return {
+    tables: {
+      authors: {
+        name: 'authors',
+        columns: ['id', 'name'],
+        rows: AUTHOR_NAMES.map((name, i) => ({ id: i + 1, name })),
+        indexedColumn: 'id',
+      },
+      posts: {
+        name: 'posts',
+        columns: ['id', 'authorId', 'title'],
+        rows: POST_AUTHORS.map((authorId, i) => ({
+          id: i + 1,
+          authorId,
+          title: `${AUTHOR_NAMES[authorId - 1]}'s post ${String(i + 1)}`,
+        })),
+        indexedColumn: 'id',
+      },
+    },
+  };
+}
