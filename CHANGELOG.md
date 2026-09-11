@@ -8,6 +8,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **A sort aggregate, and a third `/compare` mode naming it against the hash aggregate**
+  (plan.md §22.2) — `GROUP BY`/aggregate queries had exactly one execution strategy; this adds the
+  second, so there is finally something to compare. `SortAggregate` computes the identical
+  `groupBy`/`aggregates` a `HashAggregate` does, but by sorting the input on the `GROUP BY` columns
+  first — `externalMergeSort` (`ORDER BY`'s own driver) is generalised from a single-column key to a
+  composite tuple so both operators share it rather than duplicating the algorithm — spilling
+  through the real buffer pool exactly as `Sort` does, then a single streaming pass collapses each
+  run of equal keys into a group. Same output, same row count either way; the difference is entirely
+  in the I/O. Nothing in the pipeline picks a strategy on its own: `EngineOptions.aggregateStrategy`
+  (`'hash'` by default, so every existing caller is unaffected) is the seam `/compare`'s new
+  **Hash aggregate vs. sort aggregate** mode uses to force each side explicitly and score them —
+  trace steps, disk reads, pages written, evictions, groups produced — the same way its
+  index-vs-sequential-scan mode forces "no index" by dropping `indexedColumn`. `constant-folding`,
+  `predicate-pushdown` and `index-selection` all learned to see past *either* aggregate node
+  (`unwrapAggregate`/`rewrapAggregate` now cover both `HashAggregate` and `SortAggregate`), and the
+  cost model prices a `SortAggregate`'s own spill on top of `HashAggregate`'s existing group-count
+  estimate. 19 new unit tests, 1 e2e
 - **`/tools/grammar`, a grammar sandbox diagramming the v0 SQL subset** (plan.md §22.3) —
   `src/ui/grammar.ts` holds the grammar as data (a `GrammarPart` union: literal, rule reference,
   choice, optional, repeat), deliberately mirroring `parser.ts`'s own BNF comment line-for-line

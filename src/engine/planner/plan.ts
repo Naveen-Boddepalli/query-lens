@@ -48,11 +48,20 @@ export type Plan =
    * `GROUP BY` / aggregate functions, between Filter and Sort or Project:
    * `Project → HashAggregate → Filter → …`. Builds one group per distinct
    * combination of `groupBy` values (or a single group over everything when
-   * `groupBy` is empty) with a hash table keyed on that combination —
-   * plan.md §22.2 names a sort aggregate as the point of comparison this
-   * makes, once it exists.
+   * `groupBy` is empty) with a hash table keyed on that combination — the
+   * default strategy; `SortAggregate` below is the point of comparison
+   * plan.md §22.2 names, now that it exists.
    */
   | { op: 'HashAggregate'; groupBy: string[]; aggregates: AggregateSpec[]; child: Plan }
+  /**
+   * The second aggregate strategy (plan.md §22.2): the same `groupBy` /
+   * `aggregates` a `HashAggregate` computes, but by sorting the input on the
+   * `groupBy` columns first — spilling through the real buffer pool exactly
+   * as `Sort` does — and then collapsing runs of equal keys in one pass,
+   * rather than building a hash table. Same output, same row count; the
+   * difference `/compare`'s third mode shows is entirely in the I/O.
+   */
+  | { op: 'SortAggregate'; groupBy: string[]; aggregates: AggregateSpec[]; child: Plan }
   /** `ORDER BY column [ASC|DESC]`, between Filter and Project: `Project → Sort → Filter → …`. */
   | { op: 'Sort'; column: string; direction: 'asc' | 'desc'; child: Plan }
   | { op: 'Project'; columns: ProjectList; child: Plan }
@@ -62,6 +71,7 @@ export type Plan =
 export function childOf(plan: Plan): Plan | undefined {
   return plan.op === 'Filter' ||
     plan.op === 'HashAggregate' ||
+    plan.op === 'SortAggregate' ||
     plan.op === 'Sort' ||
     plan.op === 'Project' ||
     plan.op === 'Limit'
@@ -82,6 +92,23 @@ export function findSort(plan: Plan): Extract<Plan, { op: 'Sort' }> | null {
     node = childOf(node);
   }
   return null;
+}
+
+/**
+ * Whether `plan` contains a node whose executor spills through the buffer
+ * pool via `externalMergeSort` — `Sort` itself, or a `SortAggregate` (which
+ * runs the same algorithm internally to order its groups). `runQuery.ts`
+ * needs this before the buffer pool exists, to reserve the spill's page ids;
+ * `Sort` and `SortAggregate` never both appear in one plan (`ORDER BY` and
+ * `GROUP BY` are mutually exclusive), but the check does not depend on that.
+ */
+export function needsSortSpill(plan: Plan): boolean {
+  let node: Plan | undefined = plan;
+  while (node) {
+    if (node.op === 'Sort' || node.op === 'SortAggregate') return true;
+    node = childOf(node);
+  }
+  return false;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -206,10 +233,11 @@ function convert(
         children: kid(plan.child),
       };
     case 'HashAggregate':
+    case 'SortAggregate':
       return {
         id,
-        op: 'HashAggregate',
-        label: 'HashAggregate',
+        op: plan.op,
+        label: plan.op,
         detail:
           plan.groupBy.length > 0
             ? `GROUP BY ${plan.groupBy.join(', ')}${

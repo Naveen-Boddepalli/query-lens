@@ -75,7 +75,10 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
   // Raised 36 → 37 for the grammar sandbox (`/tools/grammar`, §22.3):
   // `GrammarToolPage.tsx` + `grammar.ts`'s pure rule data — a seventh
   // `/tools/*` sandbox, lazy, and the smallest of the set.
-  { name: 'standalone-tools', test: /^(GalleryPage|ComparePage|SettingsPage|AssignmentsNewPage|TracePage|BufferPoolToolPage|ParserToolPage|BTreeToolPage|PageToolPage|SortToolPage|PlannerToolPage|LocksToolPage|lockSimulation|GrammarToolPage|grammar|BufferPoolPanel|bufferTrace|slottedPage|externalSort|assignmentSet|preferences|urlState)-/, kb: 37, note: 'Gallery, Tools, Compare, Settings, Assignments (+ assignment sets), the trace inspector, and the buffer-pool / parser / B+Tree / slotted-page / external-merge-sort / planner / locks / grammar sandboxes (plan.md §21.3, §20.4, §22.3, §22.4)' },
+  // Raised 37 → 38 for `/compare`'s third mode, hash aggregate vs. sort
+  // aggregate (§22.2): `ComparePage.tsx` grows an `AggregateCompare` panel,
+  // the same shape as `IndexCompare`'s scorecards.
+  { name: 'standalone-tools', test: /^(GalleryPage|ComparePage|SettingsPage|AssignmentsNewPage|TracePage|BufferPoolToolPage|ParserToolPage|BTreeToolPage|PageToolPage|SortToolPage|PlannerToolPage|LocksToolPage|lockSimulation|GrammarToolPage|grammar|BufferPoolPanel|bufferTrace|slottedPage|externalSort|assignmentSet|preferences|urlState)-/, kb: 38, note: 'Gallery, Tools, Compare, Settings, Assignments (+ assignment sets), the trace inspector, and the buffer-pool / parser / B+Tree / slotted-page / external-merge-sort / planner / locks / grammar sandboxes (plan.md §21.3, §20.4, §22.3, §22.4)' },
   // The `/learn` guided track (plan.md §21.3): the index, one lesson page, the
   // localStorage progress helper, and `lessons.tsx` — the lesson prose plus the
   // link-builder that computes each step from a real engine run. Lazy; loads
@@ -199,8 +202,14 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
  * Raised 393 → 394 for `/tools/grammar` (§22.3): `grammar.ts`'s rule data plus
  * `GrammarToolPage.tsx`'s chip-diagram renderer — the smallest `/tools/*`
  * sandbox yet, since it is pure display over data the parser already defines.
+ * Raised 394 → 396 for the sort aggregate and `/compare`'s third mode
+ * (§22.2): `SortAggregate`, a second aggregate strategy in `engine-*.js`
+ * (a composite-key generalisation of `externalMergeSort`, shared with `Sort`,
+ * plus a new streaming collapse pass over the now-sorted rows), and
+ * `ComparePage.tsx`'s `AggregateCompare` panel forcing each strategy in turn
+ * via `EngineOptions.aggregateStrategy` and scoring the two side by side.
  */
-const TOTAL_KB = 394;
+const TOTAL_KB = 396;
 
 const gzipKb = (bytes: Buffer): number => gzipSync(bytes, { level: 9 }).length / 1024;
 

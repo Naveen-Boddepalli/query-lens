@@ -145,16 +145,31 @@ function mergeRuns(
  * Runs a full external merge sort and returns the rows in final order. Runs
  * to completion before returning a single row — `Sort` is the one operator
  * in this engine that cannot stream, and the narration says so.
+ *
+ * `keyOf` returns a *tuple* — compared lexicographically, left column first —
+ * rather than a single `SqlValue`, so this same driver serves `Sort`'s
+ * one-column `ORDER BY` (a one-element tuple) and `SortAggregate`'s
+ * potentially multi-column `GROUP BY` key without duplicating the algorithm.
+ * `subject` and `op` name the caller in the narration and in the emitted
+ * `execute` events (`'Sort'` by default; `SortAggregate` passes its own name
+ * so its internal sort phase is not mistaken for a top-level `Sort` node).
  */
 export function externalMergeSort(
   rows: readonly Row[],
-  keyOf: (row: Row) => SqlValue,
+  keyOf: (row: Row) => SqlValue[],
   direction: 'asc' | 'desc',
   io: SortIO,
+  subject = 'Sort',
+  op = 'Sort',
 ): Row[] {
   const cmp = (a: Row, b: Row): number => {
-    const c = compareAsc(keyOf(a), keyOf(b));
-    return direction === 'desc' ? -c : c;
+    const ka = keyOf(a);
+    const kb = keyOf(b);
+    for (let i = 0; i < ka.length; i++) {
+      const c = compareAsc(ka[i] ?? null, kb[i] ?? null);
+      if (c !== 0) return direction === 'desc' ? -c : c;
+    }
+    return 0;
   };
 
   const spill = new Map<number, Row[]>();
@@ -164,8 +179,8 @@ export function externalMergeSort(
   const chunk = io.memPages * io.rowsPerPage;
 
   io.emit(
-    `Sort has to see every row before it can produce one — the one operator here that cannot stream. ${plural(rows.length, 'row')} to sort, ${plural(io.memPages, 'page')} of memory at a time.`,
-    { stage: 'execute', op: 'Sort', rowsProduced: 0 },
+    `${subject} has to see every row before it can produce one — the one operator here that cannot stream. ${plural(rows.length, 'row')} to sort, ${plural(io.memPages, 'page')} of memory at a time.`,
+    { stage: 'execute', op, rowsProduced: 0 },
   );
 
   let runs: Run[] = [];
@@ -179,7 +194,7 @@ export function externalMergeSort(
   const pagesWritten = runs.reduce((n, r) => n + r.pages.length, 0);
   io.emit(
     `Run generation: ${plural(runs.length, 'sorted run')} written, ${plural(pagesWritten, 'page')} total.`,
-    { stage: 'execute', op: 'Sort', rowsProduced: 0 },
+    { stage: 'execute', op, rowsProduced: 0 },
   );
 
   let passIndex = 1;
@@ -191,7 +206,7 @@ export function externalMergeSort(
     }
     io.emit(
       `Merge pass ${String(passIndex)}: ${plural(runs.length, 'run')} become ${plural(next.length, 'run')}.`,
-      { stage: 'execute', op: 'Sort', rowsProduced: 0 },
+      { stage: 'execute', op, rowsProduced: 0 },
     );
     runs = next;
     passIndex += 1;

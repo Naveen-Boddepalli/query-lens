@@ -176,21 +176,40 @@ function estimateNode(plan: Plan, table: Table, rowsPerPage: number, into: PlanC
       estimate = { estRows: clampRows(child.estRows * fraction), estPages: child.estPages, basis };
       break;
     }
-    case 'HashAggregate': {
+    case 'HashAggregate':
+    case 'SortAggregate': {
       const child = estimateNode(plan.child, table, rowsPerPage, into);
+      // A hash table adds no I/O of its own — everything happens in memory —
+      // but a sort aggregate spills exactly like `Sort` does, on top of
+      // whatever the child already costs to read; that extra spill, priced
+      // the same way `Sort`'s own case below prices it, is the entire point
+      // of comparison `/compare`'s third mode shows (plan.md §22.2).
+      const spillPages =
+        plan.op === 'SortAggregate' ? 2 * Math.max(1, Math.ceil(child.estRows / rowsPerPage)) : 0;
       if (plan.groupBy.length === 0) {
         // No GROUP BY: the whole input is one group — even zero input rows
         // still produce one, since COUNT(*) of nothing is 0, not absent.
-        estimate = { estRows: 1, estPages: child.estPages, basis: 'no GROUP BY — the whole input is one group' };
+        estimate = {
+          estRows: 1,
+          estPages: child.estPages + spillPages,
+          basis:
+            plan.op === 'SortAggregate'
+              ? `no GROUP BY — one group, but sorted first anyway (${String(spillPages)} spill pages)`
+              : 'no GROUP BY — the whole input is one group',
+        };
       } else {
         // Textbook independence assumption, same as an AND's selectivity:
         // the product of each column's distinct-value count, capped at the
         // rows actually going in — there cannot be more groups than rows.
         const groups = plan.groupBy.reduce((product, col) => product * ndistinct(table.rows, col), 1);
+        const groupBasis = `${plan.groupBy.map((c) => `ndistinct(${c})`).join(' × ')}, capped at the input`;
         estimate = {
           estRows: Math.max(1, Math.min(child.estRows, clampRows(groups))),
-          estPages: child.estPages,
-          basis: `${plan.groupBy.map((c) => `ndistinct(${c})`).join(' × ')}, capped at the input`,
+          estPages: child.estPages + spillPages,
+          basis:
+            plan.op === 'SortAggregate'
+              ? `${groupBasis}; sorts ${String(child.estRows)} rows first (${String(spillPages)} spill pages)`
+              : groupBasis,
         };
       }
       break;

@@ -20,7 +20,7 @@ import {
   emitDeletePlanEvents,
   emitPlanEvents,
   emitUpdatePlanEvents,
-  findSort,
+  needsSortSpill,
 } from './planner/index.ts';
 import { buildHeap, createBufferPool } from './storage/index.ts';
 import { buildIndex, pageCountFor } from './index/index.ts';
@@ -180,13 +180,13 @@ export function runQuery(
   }
 
   emitParseEvents(emit, ast);
-  const plan = emitPlanEvents(emit, ast, table, options.rowsPerPage);
+  const plan = emitPlanEvents(emit, ast, table, options.rowsPerPage, options.aggregateStrategy ?? 'hash');
 
-  // A Sort's spill needs its own page ids, reserved up front — sized against
-  // the whole table (the worst case; a WHERE clause can only shrink what
-  // actually reaches Sort) so the reservation is never too small to discover
-  // only at runtime.
-  const sortTemp = findSort(plan)
+  // A Sort's (or a SortAggregate's own internal sort's) spill needs its own
+  // page ids, reserved up front — sized against the whole table (the worst
+  // case; a WHERE clause can only shrink what actually reaches it) so the
+  // reservation is never too small to discover only at runtime.
+  const sortTemp = needsSortSpill(plan)
     ? sortTempPageCount(table.rows.length, options.rowsPerPage, options.bufferFrames)
     : 0;
   const pool = createBufferPool(pageCountFor(heap, tree) + sortTemp, options, emit);

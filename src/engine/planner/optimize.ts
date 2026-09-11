@@ -58,21 +58,26 @@ function rewrapSort(sort: SortSpec | null, plan: Plan): Plan {
 }
 
 /**
- * Same idea for `HashAggregate`. `Sort` and `HashAggregate` never both sit
- * above the same `Filter` — `GROUP BY` and `ORDER BY` are mutually exclusive
- * (the parser enforces it) — but unwrapping each independently, in sequence,
- * needs no special case for that: whichever is absent is simply a no-op.
- * WHERE always applies before aggregation in SQL regardless, so pushing a
- * predicate underneath a `HashAggregate` is always valid, not a shortcut.
+ * Same idea for the aggregate node — `HashAggregate` or `SortAggregate`,
+ * whichever strategy built this plan. `Sort` and an aggregate node never both
+ * sit above the same `Filter` — `GROUP BY` and `ORDER BY` are mutually
+ * exclusive (the parser enforces it) — but unwrapping each independently, in
+ * sequence, needs no special case for that: whichever is absent is simply a
+ * no-op. WHERE always applies before aggregation in SQL regardless, so
+ * pushing a predicate underneath either aggregate strategy is always valid,
+ * not a shortcut.
  */
-type AggregateSpecShape = Extract<Plan, { op: 'HashAggregate' }>;
-function unwrapAggregate(plan: Plan): { aggregate: AggregateSpecShape | null; rest: Plan } {
-  return plan.op === 'HashAggregate' ? { aggregate: plan, rest: plan.child } : { aggregate: null, rest: plan };
+type AggregateNode = Extract<Plan, { op: 'HashAggregate' }> | Extract<Plan, { op: 'SortAggregate' }>;
+function unwrapAggregate(plan: Plan): { aggregate: AggregateNode | null; rest: Plan } {
+  return plan.op === 'HashAggregate' || plan.op === 'SortAggregate'
+    ? { aggregate: plan, rest: plan.child }
+    : { aggregate: null, rest: plan };
 }
-function rewrapAggregate(aggregate: AggregateSpecShape | null, plan: Plan): Plan {
-  return aggregate === null
-    ? plan
-    : { op: 'HashAggregate', groupBy: aggregate.groupBy, aggregates: aggregate.aggregates, child: plan };
+function rewrapAggregate(aggregate: AggregateNode | null, plan: Plan): Plan {
+  if (aggregate === null) return plan;
+  return aggregate.op === 'HashAggregate'
+    ? { op: 'HashAggregate', groupBy: aggregate.groupBy, aggregates: aggregate.aggregates, child: plan }
+    : { op: 'SortAggregate', groupBy: aggregate.groupBy, aggregates: aggregate.aggregates, child: plan };
 }
 
 /**
@@ -250,7 +255,7 @@ const indexSelection: Rule = (input, table) => {
  * there is no leftover conjunct to recheck against the row — the leaf's key
  * *is* the answer. Runs after `index-selection`, since it rewrites the
  * `IndexScan` that rule just produced; deliberately narrow (no `Sort` or
- * `HashAggregate` in between) rather than reaching through them the way the
+ * aggregate node in between) rather than reaching through them the way the
  * earlier rules do, since an index-only result is always exactly one row and
  * there is nothing there yet worth the extra cases.
  */
@@ -317,6 +322,7 @@ export function scanPredicate(plan: Plan): Expr | undefined {
   if (plan.op === 'IndexScan') return plan.residual;
   return plan.op === 'Filter' ||
     plan.op === 'HashAggregate' ||
+    plan.op === 'SortAggregate' ||
     plan.op === 'Sort' ||
     plan.op === 'Project' ||
     plan.op === 'Limit'

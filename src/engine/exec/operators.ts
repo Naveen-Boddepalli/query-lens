@@ -315,7 +315,8 @@ function runHashAggregate(rows: readonly Row[], groupBy: readonly string[], aggr
  * the first `next()` call materialises the child, builds one hash-table
  * bucket per distinct `groupBy` combination (a single bucket, if there is no
  * `GROUP BY`), and every later call just streams the finished groups
- * (plan.md §22.2 — the point of comparison for a future sort aggregate).
+ * (plan.md §22.2 — `sortAggregate` below is the second strategy this is
+ * compared against).
  */
 function hashAggregate(plan: Extract<Plan, { op: 'HashAggregate' }>, child: Operator, ctx: ExecContext): Operator {
   let rows: Row[] | null = null;
@@ -359,6 +360,113 @@ function hashAggregate(plan: Extract<Plan, { op: 'HashAggregate' }>, child: Oper
   };
 }
 
+/** One streaming pass over rows already sorted by `groupBy`: each run of equal keys collapses into one group. */
+function collapseSortedGroups(
+  sorted: readonly Row[],
+  groupBy: readonly string[],
+  aggregates: readonly AggregateSpec[],
+): Row[] {
+  if (groupBy.length === 0) {
+    const groupRow: Row = {};
+    for (const spec of aggregates) groupRow[spec.key] = computeAggregate(spec, sorted);
+    return [groupRow];
+  }
+
+  const finishBucket = (bucket: readonly Row[]): Row => {
+    const groupRow: Row = {};
+    for (const col of groupBy) groupRow[col] = bucket[0]![col] ?? null;
+    for (const spec of aggregates) groupRow[spec.key] = computeAggregate(spec, bucket);
+    return groupRow;
+  };
+
+  const result: Row[] = [];
+  let bucket: Row[] = [];
+  let bucketKey: string | null = null;
+  for (const row of sorted) {
+    const key = groupKeyOf(row, groupBy);
+    if (bucketKey !== null && key !== bucketKey) {
+      result.push(finishBucket(bucket));
+      bucket = [];
+    }
+    bucketKey = key;
+    bucket.push(row);
+  }
+  if (bucket.length > 0) result.push(finishBucket(bucket));
+  return result;
+}
+
+/**
+ * The second aggregate strategy (plan.md §22.2): rather than a hash table,
+ * sort the input on `groupBy` first — the exact same `externalMergeSort`
+ * `Sort` uses below, so its spill genuinely competes for the same buffer
+ * frames a heap scan does — then one streaming pass collapses each run of
+ * equal keys into a group with `collapseSortedGroups`, computing every
+ * aggregate with the same `computeAggregate` `hashAggregate` uses. Same
+ * output, same row count as a `HashAggregate` over the same query; the only
+ * difference is *how* it gets there, which is the whole point of naming two
+ * strategies and putting them side by side in `/compare`.
+ */
+function sortAggregate(
+  plan: Extract<Plan, { op: 'SortAggregate' }>,
+  child: Operator,
+  ctx: ExecContext,
+): Operator {
+  let rows: Row[] | null = null;
+  let index = 0;
+  const produced = counter(ctx, 'SortAggregate');
+
+  return {
+    name: 'SortAggregate',
+    open() {
+      child.open();
+      rows = null;
+      index = 0;
+    },
+    next() {
+      if (rows === null) {
+        const materialised: Row[] = [];
+        for (;;) {
+          const row = child.next();
+          if (!row) break;
+          materialised.push(row);
+        }
+        child.close();
+
+        const sorted = externalMergeSort(
+          materialised,
+          (r) => plan.groupBy.map((col) => r[col] ?? null),
+          'asc',
+          {
+            pool: ctx.pool,
+            emit: ctx.emit,
+            base: pageCountFor(ctx.heap, ctx.tree),
+            memPages: ctx.options.bufferFrames,
+            rowsPerPage: ctx.options.rowsPerPage,
+          },
+          'SortAggregate',
+          'SortAggregate',
+        );
+        rows = collapseSortedGroups(sorted, plan.groupBy, plan.aggregates);
+      }
+
+      const row = rows[index];
+      if (!row) return null;
+      index += 1;
+      produced(
+        plan.groupBy.length > 0
+          ? `SortAggregate returns group ${index} of ${rows.length} (${plan.groupBy
+              .map((col) => `${col} = ${JSON.stringify(row[col] ?? null)}`)
+              .join(', ')}).`
+          : 'SortAggregate returns the one row the whole table collapses into.',
+      );
+      return row;
+    },
+    close() {
+      if (rows === null) child.close();
+    },
+  };
+}
+
 /**
  * `ORDER BY` — the one operator here that cannot stream. Volcano pulls a row
  * at a time, but a sort cannot hand back its first row until it has seen
@@ -390,7 +498,7 @@ function sort(plan: Extract<Plan, { op: 'Sort' }>, child: Operator, ctx: ExecCon
           materialised.push(row);
         }
         child.close();
-        rows = externalMergeSort(materialised, (r) => r[plan.column] ?? null, plan.direction, {
+        rows = externalMergeSort(materialised, (r) => [r[plan.column] ?? null], plan.direction, {
           pool: ctx.pool,
           emit: ctx.emit,
           base: pageCountFor(ctx.heap, ctx.tree),
@@ -462,6 +570,8 @@ export function buildOperator(plan: Plan, ctx: ExecContext): Operator {
       return filter(plan.predicate, buildOperator(plan.child, ctx), ctx);
     case 'HashAggregate':
       return hashAggregate(plan, buildOperator(plan.child, ctx), ctx);
+    case 'SortAggregate':
+      return sortAggregate(plan, buildOperator(plan.child, ctx), ctx);
     case 'Sort':
       return sort(plan, buildOperator(plan.child, ctx), ctx);
     case 'Project':

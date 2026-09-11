@@ -20,6 +20,7 @@ export {
   equalityOn,
   exprToSql,
   findSort,
+  needsSortSpill,
   toPlanDisplay,
 } from './plan.ts';
 export type { AggregateSpec, Plan, ProjectList } from './plan.ts';

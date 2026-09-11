@@ -295,6 +295,28 @@ test('compare scores the same query with and without the index', async ({ page }
   await expect(page.getByText(/first pick a different victim/)).toBeVisible();
 });
 
+test('compare forces a hash aggregate and a sort aggregate onto the same GROUP BY query', async ({ page }) => {
+  await page.goto('/compare');
+  await page.getByRole('radio', { name: 'Hash aggregate vs. sort aggregate' }).click();
+
+  // The default preset groups by a real column, so both strategies produce
+  // the same groups but only the sort aggregate touches the buffer pool.
+  await expect(page.getByText(/Same \d+ groups? either way/)).toBeVisible();
+  const column = (heading: string) =>
+    page.locator('div.flex.flex-col.gap-2', {
+      has: page.getByRole('heading', { name: heading, exact: true }),
+    });
+  const writes = (heading: string) =>
+    column(heading).locator('div.contents', { hasText: 'pages written' }).locator('dd');
+  await expect(writes('Hash aggregate')).toHaveText('0');
+  await expect(writes('Sort aggregate')).not.toHaveText('0');
+
+  // A plain SELECT has no aggregate at all — the strategy makes no difference.
+  await page.getByLabel('SQL').fill('SELECT * FROM orders');
+  await page.getByRole('button', { name: 'Run' }).click();
+  await expect(page.getByText(/makes no difference/)).toBeVisible();
+});
+
 test('a diagram panel exports itself as a PNG with real bytes', async ({ page }) => {
   await page.goto('/stages/index'); // the B+Tree panel — a real diagram
   const button = page.getByRole('button', { name: 'Download PNG' });

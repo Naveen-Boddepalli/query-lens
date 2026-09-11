@@ -45,11 +45,19 @@ export function isAggregateQuery(ast: SelectStatement): boolean {
 }
 
 /**
- * Builds the `HashAggregate` node for a `SELECT` that groups or aggregates.
- * Shared with `emit.ts`'s progressive plan-tree narration, so the two never
- * drift on how a `SelectItem` becomes an `AggregateSpec`.
+ * Builds the aggregate node — `HashAggregate` by default, or `SortAggregate`
+ * when `strategy` says so — for a `SELECT` that groups or aggregates. Shared
+ * with `emit.ts`'s progressive plan-tree narration, so the two never drift
+ * on how a `SelectItem` becomes an `AggregateSpec`. Nothing in the pipeline
+ * picks `strategy` on its own; it defaults to `'hash'` (the shipped
+ * behaviour) and only `/compare`'s third mode ever passes `'sort'`, via
+ * `EngineOptions.aggregateStrategy` (plan.md §22.2).
  */
-export function buildAggregatePlan(ast: SelectStatement, child: Plan): Plan {
+export function buildAggregatePlan(
+  ast: SelectStatement,
+  child: Plan,
+  strategy: 'hash' | 'sort' = 'hash',
+): Plan {
   const groupBy = ast.groupBy?.columns.map((c) => c.name) ?? [];
   const aggregates: AggregateSpec[] =
     ast.select.kind === 'columns'
@@ -57,17 +65,19 @@ export function buildAggregatePlan(ast: SelectStatement, child: Plan): Plan {
           .filter((item): item is Extract<SelectItem, { kind: 'aggregate' }> => item.kind === 'aggregate')
           .map((item) => ({ key: selectItemKey(item), fn: item.fn, column: selectItemArgColumn(item) }))
       : [];
-  return { op: 'HashAggregate', groupBy, aggregates, child };
+  return { op: strategy === 'sort' ? 'SortAggregate' : 'HashAggregate', groupBy, aggregates, child };
 }
 
-export function buildPlan(ast: SelectStatement): Plan {
+export function buildPlan(ast: SelectStatement, aggregateStrategy: 'hash' | 'sort' = 'hash'): Plan {
   const scan: Plan = { op: 'SeqScan', table: ast.from.name };
 
   const filtered: Plan = ast.where
     ? { op: 'Filter', predicate: ast.where, child: scan }
     : scan;
 
-  const aggregated: Plan = isAggregateQuery(ast) ? buildAggregatePlan(ast, filtered) : filtered;
+  const aggregated: Plan = isAggregateQuery(ast)
+    ? buildAggregatePlan(ast, filtered, aggregateStrategy)
+    : filtered;
 
   // ORDER BY and GROUP BY are mutually exclusive (the parser enforces this),
   // so Sort only ever sits above the filtered scan, never above an aggregate.

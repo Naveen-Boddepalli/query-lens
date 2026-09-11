@@ -210,6 +210,15 @@ export interface EngineOptions {
   /** Rows stored per simulated page. Small on purpose. */
   rowsPerPage: number;
   policy: ReplacementPolicyName;
+  /**
+   * Which physical strategy a `GROUP BY` / aggregate query uses — `hash`
+   * (the default, when absent) builds an in-memory hash table; `sort` sorts
+   * by the `GROUP BY` columns first (spilling through the real buffer pool
+   * exactly as `ORDER BY`'s `Sort` does) and then collapses runs of equal
+   * keys. Nothing in the pipeline chooses between them on its own — this is
+   * how `/compare`'s third mode forces each side explicitly (plan.md §22.2).
+   */
+  aggregateStrategy?: 'hash' | 'sort';
 }
 
 export const DEFAULT_ENGINE_OPTIONS: EngineOptions = {

@@ -70,33 +70,33 @@ describe('externalMergeSort', () => {
   it('sorts ascending by the given key', () => {
     const rows = [row(1, 5), row(2, 1), row(3, 3), row(4, 2), row(5, 4)];
     const { io } = makeIO(rows.length, 2, 4);
-    const sorted = externalMergeSort(rows, (r) => r.key ?? null, 'asc', io);
+    const sorted = externalMergeSort(rows, (r) => [r.key ?? null], 'asc', io);
     expect(sorted.map((r) => r.key ?? null)).toEqual([1, 2, 3, 4, 5]);
   });
 
   it('sorts descending', () => {
     const rows = [row(1, 5), row(2, 1), row(3, 3), row(4, 2), row(5, 4)];
     const { io } = makeIO(rows.length, 2, 4);
-    const sorted = externalMergeSort(rows, (r) => r.key ?? null, 'desc', io);
+    const sorted = externalMergeSort(rows, (r) => [r.key ?? null], 'desc', io);
     expect(sorted.map((r) => r.key ?? null)).toEqual([5, 4, 3, 2, 1]);
   });
 
   it('preserves every row exactly once — sorting reorders, it does not drop or duplicate', () => {
     const rows = Array.from({ length: 23 }, (_, i) => row(i, (i * 7) % 13));
     const { io } = makeIO(rows.length, 3, 4);
-    const sorted = externalMergeSort(rows, (r) => r.key ?? null, 'asc', io);
+    const sorted = externalMergeSort(rows, (r) => [r.key ?? null], 'asc', io);
     const ids = (list: readonly Row[]) => list.map((r) => Number(r.id ?? -1)).sort((a, b) => a - b);
     expect(ids(sorted)).toEqual(ids(rows));
   });
 
   it('handles an empty input', () => {
     const { io } = makeIO(0, 4, 8);
-    expect(externalMergeSort([], (r) => r.key ?? null, 'asc', io)).toEqual([]);
+    expect(externalMergeSort([], (r) => [r.key ?? null], 'asc', io)).toEqual([]);
   });
 
   it('handles a single row', () => {
     const { io } = makeIO(1, 4, 8);
-    expect(externalMergeSort([row(1, 9)], (r) => r.key ?? null, 'asc', io)).toEqual([row(1, 9)]);
+    expect(externalMergeSort([row(1, 9)], (r) => [r.key ?? null], 'asc', io)).toEqual([row(1, 9)]);
   });
 
   it('spills across multiple runs and multiple merge passes when memory is tight', () => {
@@ -104,7 +104,7 @@ describe('externalMergeSort', () => {
     // need 20 initial runs, so more than one merge pass is unavoidable.
     const rows = Array.from({ length: 20 }, (_, i) => row(i, 20 - i));
     const { io, drain } = makeIO(rows.length, 1, 2);
-    const sorted = externalMergeSort(rows, (r) => r.key ?? null, 'asc', io);
+    const sorted = externalMergeSort(rows, (r) => [r.key ?? null], 'asc', io);
     expect(sorted.map((r) => r.key ?? null)).toEqual(Array.from({ length: 20 }, (_, i) => i + 1));
 
     const passCount = sortPassCount(20, 2);
@@ -117,22 +117,22 @@ describe('externalMergeSort', () => {
   it('sorts NULLs last ascending, first descending — Postgres’s own default', () => {
     const rows = [row(1, 3), row(2, null), row(3, 1), row(4, null), row(5, 2)];
     const { io: ascIO } = makeIO(rows.length, 2, 4);
-    const asc = externalMergeSort(rows, (r) => r.key ?? null, 'asc', ascIO);
+    const asc = externalMergeSort(rows, (r) => [r.key ?? null], 'asc', ascIO);
     expect(asc.map((r) => r.key ?? null)).toEqual([1, 2, 3, null, null]);
 
     const { io: descIO } = makeIO(rows.length, 2, 4);
-    const desc = externalMergeSort(rows, (r) => r.key ?? null, 'desc', descIO);
+    const desc = externalMergeSort(rows, (r) => [r.key ?? null], 'desc', descIO);
     expect(desc.map((r) => r.key ?? null)).toEqual([null, null, 3, 2, 1]);
   });
 
   it('compares numbers numerically and strings lexicographically', () => {
     const numeric = [row(1, 10), row(2, 2), row(3, 1)];
     const { io: numIO } = makeIO(numeric.length, 2, 4);
-    expect(externalMergeSort(numeric, (r) => r.key ?? null, 'asc', numIO).map((r) => r.key ?? null)).toEqual([1, 2, 10]);
+    expect(externalMergeSort(numeric, (r) => [r.key ?? null], 'asc', numIO).map((r) => r.key ?? null)).toEqual([1, 2, 10]);
 
     const strings = [row(1, 'banana'), row(2, 'apple'), row(3, 'cherry')];
     const { io: strIO } = makeIO(strings.length, 2, 4);
-    expect(externalMergeSort(strings, (r) => r.key ?? null, 'asc', strIO).map((r) => r.key ?? null)).toEqual([
+    expect(externalMergeSort(strings, (r) => [r.key ?? null], 'asc', strIO).map((r) => r.key ?? null)).toEqual([
       'apple',
       'banana',
       'cherry',
@@ -142,7 +142,7 @@ describe('externalMergeSort', () => {
   it('never writes the same page id twice — every spill page is fresh', () => {
     const rows = Array.from({ length: 20 }, (_, i) => row(i, 20 - i));
     const { io, drain } = makeIO(rows.length, 1, 2);
-    externalMergeSort(rows, (r) => r.key ?? null, 'asc', io);
+    externalMergeSort(rows, (r) => [r.key ?? null], 'asc', io);
     const writePageIds = drain()
       .filter((e) => e.stage === 'buffer' && e.action === 'write')
       .map((e) => (e.stage === 'buffer' && e.action === 'write' ? e.pageId : -1));
@@ -154,7 +154,7 @@ describe('externalMergeSort', () => {
     // resolved by the merge itself, not by a single in-memory sort.
     const rows = [row(1, 1), row(2, 1), row(3, 1), row(4, 1)];
     const { io } = makeIO(rows.length, 1, 1);
-    const sorted = externalMergeSort(rows, (r) => r.key ?? null, 'asc', io);
+    const sorted = externalMergeSort(rows, (r) => [r.key ?? null], 'asc', io);
     expect(sorted.map((r) => r.id)).toEqual([1, 2, 3, 4]);
   });
 });

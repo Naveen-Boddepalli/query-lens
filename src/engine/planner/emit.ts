@@ -22,6 +22,7 @@ export function emitPlanEvents(
   ast: SelectStatement,
   table: Table,
   rowsPerPage: number,
+  aggregateStrategy: 'hash' | 'sort' = 'hash',
 ): Plan {
   const display = (plan: Plan, changed?: ReadonlySet<Plan>) =>
     toPlanDisplay(plan, changed, estimatePlan(plan, table, rowsPerPage));
@@ -43,16 +44,25 @@ export function emitPlanEvents(
   }
 
   if (isAggregateQuery(ast)) {
-    current = buildAggregatePlan(ast, current);
+    current = buildAggregatePlan(ast, current, aggregateStrategy);
     const groupBy = ast.groupBy?.columns.map((c) => c.name) ?? [];
     const aggregateLabels =
-      current.op === 'HashAggregate' ? current.aggregates.map((a) => a.key).join(', ') : '';
+      current.op === 'HashAggregate' || current.op === 'SortAggregate'
+        ? current.aggregates.map((a) => a.key).join(', ')
+        : '';
+    const nodeName = aggregateStrategy === 'sort' ? 'SortAggregate' : 'HashAggregate';
+    const mechanism =
+      aggregateStrategy === 'sort'
+        ? `by sorting on ${groupBy.join(', ') || 'nothing'} first — spilling through the buffer pool exactly as ORDER BY's Sort does — then collapsing runs of equal keys in one pass`
+        : 'with a hash table keyed on the group';
     emit(
       groupBy.length > 0
-        ? `GROUP BY becomes a HashAggregate above that: rows are grouped by ${groupBy.join(', ')}${
+        ? `GROUP BY becomes a ${nodeName} above that: rows are grouped by ${groupBy.join(', ')}${
             aggregateLabels ? `, computing ${aggregateLabels} per group` : ''
-          }. Like Sort, it cannot produce a row until it has seen every one — the last group is not known to be complete until the input runs out.`
-        : `${aggregateLabels} becomes a HashAggregate above that: with no GROUP BY, the whole table is one group, so it collapses every row into one. Like Sort, it cannot produce a row until it has seen all of them.`,
+          }, ${mechanism}. Like Sort, it cannot produce a row until it has seen every one — the last group is not known to be complete until the input runs out.`
+        : `${aggregateLabels} becomes a ${nodeName} above that: with no GROUP BY, the whole table is one group, so it collapses every row into one${
+            aggregateStrategy === 'sort' ? ', sorting first even though there is only ever one group to produce' : ''
+          }. Like Sort, it cannot produce a row until it has seen all of them.`,
       { stage: 'plan', planTree: display(current) },
     );
   }
@@ -98,7 +108,7 @@ export function emitPlanEvents(
 
   // The canonical plan is a direct translation of the query text. Everything
   // below is the optimizer earning its keep.
-  const canonical = buildPlan(ast);
+  const canonical = buildPlan(ast, aggregateStrategy);
   let optimised = canonical;
   let before = canonical;
 
