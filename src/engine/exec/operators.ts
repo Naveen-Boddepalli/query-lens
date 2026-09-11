@@ -163,6 +163,45 @@ function indexScan(plan: Extract<Plan, { op: 'IndexScan' }>, ctx: ExecContext): 
   };
 }
 
+/**
+ * Same equality lookup as `IndexScan`, but the query needs nothing the leaf
+ * doesn't already hold — `column`'s own value, which is the key it was
+ * found by. `emitIndexLookup`'s `touchHeap: false` skips the heap fetch and
+ * lock entirely, so the row this returns is built from the key alone, never
+ * from a page read (plan.md §22.2).
+ */
+function indexOnlyScan(plan: Extract<Plan, { op: 'IndexOnlyScan' }>, ctx: ExecContext): Operator {
+  let found = false;
+  let done = false;
+  const produced = counter(ctx, 'IndexOnlyScan');
+
+  return {
+    name: 'IndexOnlyScan',
+    open() {
+      if (!ctx.tree) return;
+      const { pointer } = emitIndexLookup(
+        ctx.emit,
+        ctx.tree,
+        plan.key,
+        ctx.pool,
+        plan.column,
+        ctx.locks,
+        false,
+      );
+      found = pointer !== null;
+    },
+    next() {
+      if (done || !found) return null;
+      done = true;
+      produced('IndexOnlyScan returns the key itself — the heap is never touched.');
+      return { [plan.column]: plan.key };
+    },
+    close() {
+      found = false;
+    },
+  };
+}
+
 function filter(predicate: Expr, child: Operator, ctx: ExecContext): Operator {
   const produced = counter(ctx, 'Filter');
   let rejected = 0;
@@ -417,6 +456,8 @@ export function buildOperator(plan: Plan, ctx: ExecContext): Operator {
       return seqScan(plan, ctx);
     case 'IndexScan':
       return indexScan(plan, ctx);
+    case 'IndexOnlyScan':
+      return indexOnlyScan(plan, ctx);
     case 'Filter':
       return filter(plan.predicate, buildOperator(plan.child, ctx), ctx);
     case 'HashAggregate':

@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Index-only scan, a fourth optimizer rule** (plan.md §22.2) — when a query's SELECT list needs
+  nothing but the indexed column itself (`SELECT id FROM users WHERE id = 5`), the B+Tree leaf's
+  key already *is* the answer: `index-only-scan` rewrites the `IndexScan` `index-selection` just
+  produced into a new `IndexOnlyScan` node, and `emitIndexLookup` gained a `touchHeap` parameter
+  (default `true` — every existing caller unchanged) that, passed `false`, skips the heap page's
+  fetch and lock entirely. This is a real, measured discount, not a claimed one: on the seed data
+  it is 3 disk reads (the B+Tree's own height) instead of the 4 an ordinary index lookup takes (the
+  same 3, plus the heap page). The cost model prices it accordingly. Deliberately narrow: no
+  residual conjunct allowed (a recheck needs the row the scan never fetches), and no `Sort`/
+  `HashAggregate` in between (an index-only result is always exactly one row, so there is nothing
+  yet worth the extra cases). True composite (multi-column) indexes, and a second candidate index
+  for the optimizer to choose between, stay open — v0 tables still have exactly one index. 13 unit
+  tests (`__tests__/indexOnlyScan.test.ts`), plus new planner and cost-model coverage, 1 e2e
 - **Aggregates and `GROUP BY`, with a hash aggregate** (plan.md §22.2) — `COUNT`/`SUM`/`AVG`/`MIN`/
   `MAX` in the SELECT list, and `GROUP BY` on one or more columns, are real. A `SelectItem` union
   (a plain column, or an aggregate call like `COUNT(*)`/`SUM(age)`) replaces the old flat

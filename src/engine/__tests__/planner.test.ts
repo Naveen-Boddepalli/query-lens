@@ -294,6 +294,53 @@ describe('optimize — index selection', () => {
   });
 });
 
+describe('optimize — index-only scan', () => {
+  it('rewrites an IndexScan to IndexOnlyScan when the SELECT list is only the indexed column', () => {
+    const p = final('SELECT id FROM users WHERE id = 5');
+    expect(shape(p)).toEqual(['Project', 'IndexOnlyScan']);
+    const scan = p.op === 'Project' ? p.child : null;
+    expect(scan).toMatchObject({ op: 'IndexOnlyScan', column: 'id', key: 5 });
+  });
+
+  it('fires for repeats of the same column too — SELECT id, id', () => {
+    expect(shape(final('SELECT id, id FROM users WHERE id = 5'))).toEqual(['Project', 'IndexOnlyScan']);
+  });
+
+  it('does not fire when the SELECT list needs any other column', () => {
+    expect(shape(final('SELECT id, name FROM users WHERE id = 5'))).toEqual(['Project', 'IndexScan']);
+  });
+
+  it('does not fire for SELECT *', () => {
+    expect(shape(final('SELECT * FROM users WHERE id = 5'))).toEqual(['Project', 'IndexScan']);
+  });
+
+  it('does not fire when a residual conjunct is left over — the recheck needs the row', () => {
+    expect(shape(final('SELECT id FROM users WHERE id = 5 AND age > 30'))).toEqual(['Project', 'IndexScan']);
+  });
+
+  it('does not fire on a plain SeqScan, or when the table has no index', () => {
+    expect(shape(final('SELECT age FROM users WHERE age > 30'))).toEqual(['Project', 'SeqScan']);
+    expect(shape(final('SELECT id FROM users WHERE id = 5', noIndex))).toEqual(['Project', 'SeqScan']);
+  });
+
+  it('carries LIMIT above it, same as an ordinary IndexScan', () => {
+    expect(shape(final('SELECT id FROM users WHERE id = 5 LIMIT 1'))).toEqual([
+      'Limit',
+      'Project',
+      'IndexOnlyScan',
+    ]);
+  });
+
+  it('can be turned off independently, leaving a plain IndexScan', () => {
+    const steps = optimize(
+      plan('SELECT id FROM users WHERE id = 5'),
+      users,
+      new Set(['predicate-pushdown', 'index-selection']),
+    );
+    expect(steps.map((s) => s.rule)).toEqual(['predicate-pushdown', 'index-selection']);
+  });
+});
+
 describe('optimize — LIMIT stays transparent to the rewrites', () => {
   it('predicate pushdown still fires underneath a LIMIT', () => {
     const p = final('SELECT * FROM users WHERE age > 30 LIMIT 3');
@@ -412,7 +459,12 @@ describe('optimize — rule filter (plan.md §22.3 /tools/planner)', () => {
   const sql = 'SELECT * FROM users WHERE id = 5';
 
   it('OPTIMIZER_RULES lists every rule, in run order', () => {
-    expect([...OPTIMIZER_RULES]).toEqual(['constant-folding', 'predicate-pushdown', 'index-selection']);
+    expect([...OPTIMIZER_RULES]).toEqual([
+      'constant-folding',
+      'predicate-pushdown',
+      'index-selection',
+      'index-only-scan',
+    ]);
   });
 
   it('an empty set runs no rules — the canonical plan is untouched', () => {

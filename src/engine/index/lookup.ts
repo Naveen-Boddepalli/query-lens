@@ -30,6 +30,14 @@ export function emitIndexLookup(
   pool: BufferPool,
   column: string,
   locks: LockManager,
+  /**
+   * Every existing caller wants the row, so this defaults to `true`. An
+   * index-only scan (plan.md §22.2) passes `false`: the leaf already holds
+   * everything the query needs, so fetching and locking the heap page the
+   * pointer names would be pure theatre — real disk I/O the query never
+   * actually required, which is exactly the discount §12 rules out claiming.
+   */
+  touchHeap = true,
 ): LookupOutcome {
   emit(
     `Open the B+Tree on \`${column}\`: ${height(tree)} levels, so any key is at most ${height(tree)} node reads away — however many rows the table holds.`,
@@ -120,24 +128,29 @@ export function emitIndexLookup(
 
   const pointer = leaf.pointers[at]!;
   emit(
-    `Found ${describe(key)}. The leaf stores a pointer to the row, not the row itself: heap page ${pointer.pageId}, slot ${pointer.slot}.`,
+    touchHeap
+      ? `Found ${describe(key)}. The leaf stores a pointer to the row, not the row itself: heap page ${pointer.pageId}, slot ${pointer.slot}.`
+      : `Found ${describe(key)}. This query only needs \`${column}\` itself, which the leaf already holds — the heap page the pointer names is never read.`,
     { stage: 'index', action: 'found', nodeId: leaf.id, key },
   );
 
-  locks.acquire(
-    pointer.pageId,
-    'shared',
-    `Lock heap page ${String(pointer.pageId)}, where the row itself lives.`,
-  );
+  if (touchHeap) {
+    locks.acquire(
+      pointer.pageId,
+      'shared',
+      `Lock heap page ${String(pointer.pageId)}, where the row itself lives.`,
+    );
 
-  const heapFetch = pool.fetch(pointer.pageId);
-  if (heapFetch) {
-    pagesRead.push(pointer.pageId);
-    pool.unpin(heapFetch.frameId);
+    const heapFetch = pool.fetch(pointer.pageId);
+    if (heapFetch) {
+      pagesRead.push(pointer.pageId);
+      pool.unpin(heapFetch.frameId);
+    }
+
+    locks.release(pointer.pageId, 'shared');
   }
 
   if (parentPage !== null) locks.release(parentPage, 'shared');
-  locks.release(pointer.pageId, 'shared');
 
   return { pointer, pagesRead };
 }

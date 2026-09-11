@@ -172,6 +172,21 @@ describe('estimatePlan', () => {
   });
 });
 
+describe('estimatePlan — IndexOnlyScan', () => {
+  it('estimates one row, and fewer pages than an ordinary index lookup', () => {
+    const lookup = rootEstimate(optimised('SELECT id, name FROM users WHERE id = 5'), users, RPP);
+    const indexOnly = rootEstimate(optimised('SELECT id FROM users WHERE id = 5'), users, RPP);
+    expect(indexOnly.estRows).toBe(1);
+    expect(indexOnly.estPages).toBeLessThan(lookup.estPages);
+  });
+
+  it('the page difference is exactly the one heap page an ordinary lookup fetches', () => {
+    const lookup = rootEstimate(optimised('SELECT id, name FROM users WHERE id = 5'), users, RPP);
+    const indexOnly = rootEstimate(optimised('SELECT id FROM users WHERE id = 5'), users, RPP);
+    expect(lookup.estPages - indexOnly.estPages).toBe(1);
+  });
+});
+
 describe('estimatePlan — HashAggregate', () => {
   it('with no GROUP BY, estimates exactly one row — the whole input is one group', () => {
     const est = rootEstimate(optimised('SELECT COUNT(*) FROM users'), users, RPP);

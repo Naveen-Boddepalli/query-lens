@@ -158,6 +158,18 @@ function estimateNode(plan: Plan, table: Table, rowsPerPage: number, into: PlanC
       };
       break;
     }
+    case 'IndexOnlyScan': {
+      // Same unique-column assumption as IndexScan (v0 indexes are unique),
+      // but the page cost is the honest difference: the tree levels alone,
+      // no +1 for a heap page this scan never fetches.
+      const distinct = ndistinct(table.rows, plan.column);
+      estimate = {
+        estRows: 1,
+        estPages: estimateIndexLevels(rowCount),
+        basis: `1/${String(distinct)} on ${plan.column} — index-only, no heap page`,
+      };
+      break;
+    }
     case 'Filter': {
       const child = estimateNode(plan.child, table, rowsPerPage, into);
       const { fraction, basis } = selectivityOf(plan.predicate, table);

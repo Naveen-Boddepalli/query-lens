@@ -29,6 +29,20 @@ export type Plan =
       /** Conjuncts the index could not satisfy, re-checked per row. */
       residual?: Expr;
     }
+  | {
+      /**
+       * An equality lookup whose result never touches the heap: every column
+       * the query needs is `column` itself, which the leaf already holds as
+       * the key. No `residual` — a leftover conjunct would need a column the
+       * leaf does not have, so `index-only-scan` never fires with one
+       * (plan.md §22.2 — the third point on the lookup-vs-scan line, after a
+       * full scan and an ordinary index lookup that still fetches the row).
+       */
+      op: 'IndexOnlyScan';
+      table: string;
+      column: string;
+      key: SqlValue;
+    }
   | { op: 'Filter'; predicate: Expr; child: Plan }
   /**
    * `GROUP BY` / aggregate functions, between Filter and Sort or Project:
@@ -169,6 +183,15 @@ function convert(
         detail: plan.residual
           ? `key: ${plan.column} = ${format(plan.key)} · recheck: ${exprToSql(plan.residual)}`
           : `key: ${plan.column} = ${format(plan.key)}`,
+        ...(highlight ? { highlight } : {}),
+        ...cost,
+      };
+    case 'IndexOnlyScan':
+      return {
+        id,
+        op: 'IndexOnlyScan',
+        label: `IndexOnlyScan ${plan.table}.${plan.column}`,
+        detail: `key: ${plan.column} = ${format(plan.key)} · never touches the heap`,
         ...(highlight ? { highlight } : {}),
         ...cost,
       };

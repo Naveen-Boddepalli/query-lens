@@ -244,10 +244,41 @@ const indexSelection: Rule = (input, table) => {
   };
 };
 
+/**
+ * When an `IndexScan`'s equality lookup already answers the query outright —
+ * every column the SELECT list needs is the indexed column itself, and
+ * there is no leftover conjunct to recheck against the row — the leaf's key
+ * *is* the answer. Runs after `index-selection`, since it rewrites the
+ * `IndexScan` that rule just produced; deliberately narrow (no `Sort` or
+ * `HashAggregate` in between) rather than reaching through them the way the
+ * earlier rules do, since an index-only result is always exactly one row and
+ * there is nothing there yet worth the extra cases.
+ */
+const indexOnlyScan: Rule = (input) => {
+  const { limit, rest: plan } = unwrapLimit(input);
+  if (plan.op !== 'Project' || plan.columns.kind !== 'columns') return null;
+  if (plan.child.op !== 'IndexScan' || plan.child.residual) return null;
+
+  const scan = plan.child;
+  const onlyIndexedColumn = plan.columns.names.every((name) => name === scan.column);
+  if (!onlyIndexedColumn) return null;
+
+  const indexOnly: Plan = { op: 'IndexOnlyScan', table: scan.table, column: scan.column, key: scan.key };
+  const root = rewrapLimit(limit, { op: 'Project', columns: plan.columns, child: indexOnly });
+
+  return {
+    rule: 'index-only-scan',
+    label: `Every column this query needs — \`${scan.column}\` — is already the index key, so the lookup answers it without ever fetching the heap page the pointer names.`,
+    plan: root,
+    changed: new Set<Plan>([indexOnly]),
+  };
+};
+
 const RULES: { name: string; apply: Rule }[] = [
   { name: 'constant-folding', apply: constantFolding },
   { name: 'predicate-pushdown', apply: predicatePushdown },
   { name: 'index-selection', apply: indexSelection },
+  { name: 'index-only-scan', apply: indexOnlyScan },
 ];
 
 /** Every rewrite rule's name, in the order the optimizer runs them. */

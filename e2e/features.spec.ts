@@ -376,6 +376,15 @@ test('GROUP BY aggregates and shows as a HashAggregate node in the plan', async 
   await expect(page.getByText('HashAggregate', { exact: true }).first()).toBeVisible();
 });
 
+test('an index-only scan answers the query without ever fetching the heap page', async ({ page }) => {
+  await page.goto('/playground?q=SELECT+id+FROM+users+WHERE+id+=+5&p=lru&x=0&s=9999');
+  // 3 disk reads is the B+Tree's own height, with no +1 for a heap page.
+  await expect(page.getByText(/1 row returned, from 3 disk read/)).toBeVisible();
+
+  await page.getByRole('button', { name: 'Optimizer' }).click();
+  await expect(page.getByText('IndexOnlyScan', { exact: true }).first()).toBeVisible();
+});
+
 test('DELETE removes a row for real — the Playground persists it across the next query', async ({
   page,
 }) => {
