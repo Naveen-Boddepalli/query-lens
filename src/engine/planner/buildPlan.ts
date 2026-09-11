@@ -12,7 +12,7 @@
  * legible when the two are shown side by side.
  */
 
-import type { DeleteStatement, SelectStatement } from '../parser/index.ts';
+import type { DeleteStatement, SelectStatement, UpdateStatement } from '../parser/index.ts';
 import type { Plan, ProjectList } from './plan.ts';
 
 /**
@@ -22,6 +22,16 @@ import type { Plan, ProjectList } from './plan.ts';
  */
 export function buildDeletePlan(ast: DeleteStatement): Plan {
   const scan: Plan = { op: 'SeqScan', table: ast.from.name };
+  return ast.where ? { op: 'Filter', predicate: ast.where, child: scan } : scan;
+}
+
+/**
+ * An `UPDATE`'s canonical plan is the same shape as a `DELETE`'s — the scan
+ * that finds the rows to modify. The SET clause plays no part in planning:
+ * it only takes effect once execution has already found a row.
+ */
+export function buildUpdatePlan(ast: UpdateStatement): Plan {
+  const scan: Plan = { op: 'SeqScan', table: ast.table.name };
   return ast.where ? { op: 'Filter', predicate: ast.where, child: scan } : scan;
 }
 

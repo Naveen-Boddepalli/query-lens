@@ -27,8 +27,12 @@ export interface DeleteOutcome {
   deleted: Row[];
 }
 
-/** One clause summarising what a B+Tree delete had to do beyond the plain removal. */
-function summarizeSteps(steps: DeleteStep[]): string {
+/**
+ * One clause summarising what a B+Tree delete had to do beyond the plain
+ * removal. Exported: `exec/update.ts` reuses it for the "drop the old key"
+ * half of a reindex.
+ */
+export function summarizeSteps(steps: DeleteStep[]): string {
   const rest = steps.slice(1); // steps[0] is always the leaf `remove` itself
   if (rest.length === 0) return 'the leaf stayed at least half full, so nothing else moved';
   return `the tree also had to ${rest.map((s) => s.kind.replace('-', ' ')).join(', then ')}`;

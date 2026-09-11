@@ -27,8 +27,12 @@ function targetPage(ctx: ExecContext): { pageId: number; slot: number; isNewPage
     : { pageId: pageCountFor(ctx.heap, ctx.tree), slot: 0, isNewPage: true };
 }
 
-/** One clause summarising what the B+Tree insert had to do beyond the plain add. */
-function summarizeInsert(nodesBefore: number, nodesAfter: number, heightBefore: number, heightAfter: number): string {
+/**
+ * One clause summarising what the B+Tree insert had to do beyond the plain
+ * add. Exported: `exec/update.ts` reuses it for the "add the new key" half
+ * of a reindex.
+ */
+export function summarizeInsert(nodesBefore: number, nodesAfter: number, heightBefore: number, heightAfter: number): string {
   if (nodesAfter === nodesBefore) return 'the leaf had room, so no split was needed';
   const added = nodesAfter - nodesBefore;
   return `a split added ${added} node${added === 1 ? '' : 's'}${

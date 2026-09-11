@@ -19,6 +19,8 @@ import type {
   SelectList,
   SelectStatement,
   TableRef,
+  UpdateAssignment,
+  UpdateStatement,
 } from './ast.ts';
 
 function selectListNode(select: SelectList): ASTNode {
@@ -152,14 +154,44 @@ function valuesNode(values: InsertValues): ASTNode {
   };
 }
 
+function updateTableNode(table: TableRef): ASTNode {
+  return { id: 'table', kind: 'Table', label: table.name, span: table.span };
+}
+
+function assignmentNode(a: UpdateAssignment, id: string): ASTNode {
+  return {
+    id,
+    kind: 'Assignment',
+    label: a.column,
+    detail: `= ${a.value.raw}`,
+    span: { from: a.columnSpan.from, to: a.value.span.to },
+  };
+}
+
+function setNode(set: UpdateStatement['set']): ASTNode {
+  return {
+    id: 'set',
+    kind: 'Set',
+    label: 'SET',
+    detail: `${set.assignments.length} assignment${set.assignments.length === 1 ? '' : 's'}`,
+    span: set.span,
+    children: set.assignments.map((a, i) => assignmentNode(a, `set.a${i}`)),
+  };
+}
+
+const ROOT_KIND = {
+  SELECT: 'SelectStatement',
+  DELETE: 'DeleteStatement',
+  INSERT: 'InsertStatement',
+  UPDATE: 'UpdateStatement',
+} as const;
+
 function root(
   children: ASTNode[],
   span: Span,
-  label: 'SELECT' | 'DELETE' | 'INSERT' = 'SELECT',
+  label: keyof typeof ROOT_KIND = 'SELECT',
 ): ASTNode {
-  const kind =
-    label === 'SELECT' ? 'SelectStatement' : label === 'DELETE' ? 'DeleteStatement' : 'InsertStatement';
-  return { id: 'select-stmt', kind, label, span, children };
+  return { id: 'select-stmt', kind: ROOT_KIND[label], label, span, children };
 }
 
 /** The complete display tree for a parsed statement. */
@@ -296,6 +328,43 @@ export function emitInsertParseEvents(emit: Emit, ast: InsertStatement): void {
   const tree = root([...children], ast.span, 'INSERT');
   emit(
     `Parsing is done: ${countNodes(tree)} AST nodes and no data touched. There is nothing to plan or optimize — an INSERT with only literal values goes straight to execution.`,
+    { stage: 'parse', ast: tree, span: ast.span },
+  );
+}
+
+/** The complete display tree for a parsed `UPDATE`. */
+export function updateDisplayTree(ast: UpdateStatement): ASTNode {
+  const children = [updateTableNode(ast.table), setNode(ast.set)];
+  if (ast.where) children.push(whereNode(ast.where));
+  return root(children, ast.span, 'UPDATE');
+}
+
+/** Emit the parse stage for an `UPDATE`, one clause at a time — mirrors `emitParseEvents`. */
+export function emitUpdateParseEvents(emit: Emit, ast: UpdateStatement): void {
+  const children: ASTNode[] = [updateTableNode(ast.table)];
+  emit(`Read the table name: UPDATE modifies rows in \`${ast.table.name}\`.`, {
+    stage: 'parse',
+    ast: root([...children], ast.span, 'UPDATE'),
+    span: ast.table.span,
+  });
+
+  children.push(setNode(ast.set));
+  emit(
+    `Read the SET clause: ${ast.set.assignments.map((a) => `\`${a.column}\` = ${a.value.raw}`).join(', ')}. Nothing has been written yet — this is still only structure.`,
+    { stage: 'parse', ast: root([...children], ast.span, 'UPDATE'), span: ast.set.span },
+  );
+
+  if (ast.where) {
+    children.push(whereNode(ast.where));
+    emit(
+      'Read the WHERE clause and build the predicate tree. Nothing has been modified yet — this is still only structure.',
+      { stage: 'parse', ast: root([...children], ast.span, 'UPDATE'), span: ast.where.span },
+    );
+  }
+
+  const tree = root([...children], ast.span, 'UPDATE');
+  emit(
+    `Parsing is done: ${countNodes(tree)} AST nodes and no data touched. The planner turns the WHERE clause into a plan next — the SET clause has nothing to plan, it only takes effect once a row is found.`,
     { stage: 'parse', ast: tree, span: ast.span },
   );
 }

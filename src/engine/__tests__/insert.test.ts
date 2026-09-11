@@ -119,10 +119,10 @@ describe('INSERT — errors, same discipline as SELECT and DELETE', () => {
     expect(out.error?.message).toMatch(/1 column but 2 values/);
   });
 
-  it('rejects a column name inside VALUES, explaining where column names belong', () => {
+  it('rejects a column name inside VALUES, explaining that only literals belong there', () => {
     const out = run('INSERT INTO users (id) VALUES (age)');
     expect(out.error?.message).toMatch(/Expected a value/);
-    expect(out.error?.hint).toMatch(/before VALUES/);
+    expect(out.error?.hint).toMatch(/literal values/);
   });
 });
 

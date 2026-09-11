@@ -12,15 +12,22 @@ import {
   emitDeleteParseEvents,
   emitInsertParseEvents,
   emitParseEvents,
+  emitUpdateParseEvents,
   parseStatement,
 } from './parser/index.ts';
 import type { InsertStatement, Statement } from './parser/index.ts';
-import { emitDeletePlanEvents, emitPlanEvents, findSort } from './planner/index.ts';
+import {
+  emitDeletePlanEvents,
+  emitPlanEvents,
+  emitUpdatePlanEvents,
+  findSort,
+} from './planner/index.ts';
 import { buildHeap, createBufferPool } from './storage/index.ts';
 import { buildIndex, pageCountFor } from './index/index.ts';
 import { execute } from './exec/index.ts';
 import { executeDelete } from './exec/delete.ts';
 import { executeInsert } from './exec/insert.ts';
+import { executeUpdate } from './exec/update.ts';
 import { sortTempPageCount } from './exec/sort.ts';
 import { createLockManager } from './locks/index.ts';
 import { createTracer } from './trace.ts';
@@ -39,7 +46,7 @@ export function runQuery(
     return { events: drain(), rows: [], error: parsed.error };
   }
   const ast = parsed.ast;
-  const tableRef = ast.kind === 'insert' ? ast.into : ast.from;
+  const tableRef = ast.kind === 'insert' ? ast.into : ast.kind === 'update' ? ast.table : ast.from;
 
   const table = db.tables[tableRef.name];
   if (!table) {
@@ -141,6 +148,37 @@ export function runQuery(
     };
   }
 
+  if (ast.kind === 'update') {
+    emitUpdateParseEvents(emit, ast);
+    const plan = emitUpdatePlanEvents(emit, ast, table, options.rowsPerPage);
+    const pool = createBufferPool(pageCountFor(heap, tree), options, emit);
+
+    const { before, after } = executeUpdate(plan, ast.set.assignments, {
+      emit,
+      pool,
+      locks,
+      heap,
+      tree,
+      table,
+      options,
+    });
+    const replacements = new Map(before.map((row, i) => [row, after[i]!]));
+    const rows = table.rows.map((r) => replacements.get(r) ?? r);
+
+    emit(
+      `${after.length} row${after.length === 1 ? '' : 's'} updated, from ${pool.stats.misses} disk read${
+        pool.stats.misses === 1 ? '' : 's'
+      } and ${pool.stats.evictions} eviction${pool.stats.evictions === 1 ? '' : 's'}.`,
+      { stage: 'result', rows: after },
+    );
+
+    return {
+      events: drain(),
+      rows: after,
+      write: { kind: 'update', table: table.name, updatedCount: after.length, rows },
+    };
+  }
+
   emitParseEvents(emit, ast);
   const plan = emitPlanEvents(emit, ast, table, options.rowsPerPage);
 
@@ -171,6 +209,9 @@ function referencedColumns(ast: Statement): { name: string; span: { from: number
   }
   if (ast.kind === 'select' && ast.orderBy) refs.push({ name: ast.orderBy.column, span: ast.orderBy.span });
   if (ast.kind === 'insert' && ast.columns) refs.push(...ast.columns.names);
+  if (ast.kind === 'update') {
+    refs.push(...ast.set.assignments.map((a) => ({ name: a.column, span: a.columnSpan })));
+  }
   return refs;
 }
 

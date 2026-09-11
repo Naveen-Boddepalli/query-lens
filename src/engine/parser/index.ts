@@ -7,8 +7,10 @@ export {
   emitDeleteParseEvents,
   emitInsertParseEvents,
   emitParseEvents,
+  emitUpdateParseEvents,
   insertDisplayTree,
   toDisplayTree,
+  updateDisplayTree,
 } from './display.ts';
 export { columnsIn, walkExpr } from './ast.ts';
 export type {
@@ -25,4 +27,6 @@ export type {
   Span,
   Statement,
   TableRef,
+  UpdateAssignment,
+  UpdateStatement,
 } from './ast.ts';

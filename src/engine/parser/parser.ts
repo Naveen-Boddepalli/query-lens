@@ -1,11 +1,13 @@
 /**
  * Recursive-descent parser for the v0 SQL subset (plan.md §4):
  *
- *   statement  := select | delete | insert
+ *   statement  := select | delete | insert | update
  *   select     := SELECT selectList FROM identifier [WHERE expr]
  *                 [ORDER BY identifier [ASC|DESC]] [LIMIT number] [';'] EOF
  *   delete     := DELETE FROM identifier [WHERE expr] [';'] EOF
  *   insert     := INSERT INTO identifier [columnList] VALUES valueList [';'] EOF
+ *   update     := UPDATE identifier SET assignment (',' assignment)* [WHERE expr] [';'] EOF
+ *   assignment := identifier '=' value
  *   columnList := '(' identifier (',' identifier)* ')'
  *   valueList  := '(' value (',' value)* ')'
  *   value      := number | string | NULL | TRUE | FALSE
@@ -19,9 +21,9 @@
  *
  * `parse` stays the SELECT-only entry point every existing caller (the
  * Playground, the standalone tools, the CLI) already expects. `parseStatement`
- * is the broader one `runQuery.ts` needs now that `DELETE` and `INSERT` are
- * real — the three share every helper below; nothing about SELECT parsing
- * changed.
+ * is the broader one `runQuery.ts` needs now that `DELETE`, `INSERT` and
+ * `UPDATE` are real — the four share every helper below; nothing about
+ * SELECT parsing changed.
  */
 
 import type { QueryError } from '../types.ts';
@@ -35,6 +37,8 @@ import type {
   Span,
   Statement,
   TableRef,
+  UpdateAssignment,
+  UpdateStatement,
 } from './ast.ts';
 import { TokenizeError, tokenize } from './tokenizer.ts';
 import type { Token } from './tokenizer.ts';
@@ -68,9 +72,8 @@ const OUT_OF_SCOPE: Record<string, string> = {
   UNION: 'UNION is not in the v0 subset.',
   OR: 'v0 supports AND only. Combine predicates with AND.',
   NOT: 'v0 supports =, < and > only, combined with AND.',
-  UPDATE: 'UPDATE is not in the v0 write path yet — DELETE and INSERT are.',
-  CREATE: 'QueryLens only runs SELECT, DELETE and INSERT. Edit the seed data to change the table.',
-  DROP: 'QueryLens only runs SELECT, DELETE and INSERT. Edit the seed data to change the table.',
+  CREATE: 'QueryLens only runs SELECT, DELETE, INSERT and UPDATE. Edit the seed data to change the table.',
+  DROP: 'QueryLens only runs SELECT, DELETE, INSERT and UPDATE. Edit the seed data to change the table.',
 };
 
 const describe = (t: Token): string =>
@@ -239,8 +242,12 @@ function parseOptionalWhere(c: Cursor): Expr | undefined {
   return undefined;
 }
 
-/** A `VALUES` entry — a literal only; v0 has no expressions or subqueries in an INSERT. */
-function parseInsertValue(c: Cursor): Extract<Expr, { kind: 'literal' }> {
+/**
+ * A literal value — the only kind an INSERT's VALUES list or an UPDATE's SET
+ * assignment can hold; v0 has no expressions, subqueries or column
+ * references on the right of either.
+ */
+function parseLiteralValue(c: Cursor): Extract<Expr, { kind: 'literal' }> {
   const token = c.peek();
 
   if (token.type === 'number') {
@@ -270,7 +277,7 @@ function parseInsertValue(c: Cursor): Extract<Expr, { kind: 'literal' }> {
     throw new ParseError(
       `Expected a value, found \`${token.value}\`.`,
       token,
-      'Column names go in the column list before VALUES, not inside it.',
+      'v0 takes only literal values here — no column references or expressions.',
     );
   }
 
@@ -420,7 +427,7 @@ function parseInsertBody(c: Cursor): InsertStatement {
   }
 
   c.expectKeyword('VALUES', columns ? 'after the column list' : 'after the table name');
-  const parsedValues = parseParenList(c, 'value list', parseInsertValue);
+  const parsedValues = parseParenList(c, 'value list', parseLiteralValue);
   const values = { items: parsedValues.items, span: { from: parsedValues.from, to: parsedValues.to } };
 
   if (columns && columns.names.length !== values.items.length) {
@@ -443,12 +450,59 @@ function parseInsertBody(c: Cursor): InsertStatement {
   };
 }
 
+/* -------------------------------------------------------------------------- */
+/* UPDATE                                                                      */
+/* -------------------------------------------------------------------------- */
+
+function parseAssignment(c: Cursor): UpdateAssignment {
+  const column = c.expectIdentifier('a column name');
+  const eq = c.peek();
+  if (eq.type !== 'operator' || eq.value !== '=') {
+    c.guardScope(eq);
+    throw new ParseError(`Expected \`=\` after the column name, found ${describe(eq)}.`, eq);
+  }
+  c.next();
+  const value = parseLiteralValue(c);
+  return { column: column.value, columnSpan: { from: column.from, to: column.to }, value };
+}
+
+/** `SET assignment (',' assignment)*` — no parentheses, unlike INSERT's lists. */
+function parseSetClause(c: Cursor): UpdateStatement['set'] {
+  const first = parseAssignment(c);
+  const assignments = [first];
+  let last = first;
+  while (c.peek().type === 'comma') {
+    c.next();
+    last = parseAssignment(c);
+    assignments.push(last);
+  }
+  return { assignments, span: { from: first.columnSpan.from, to: last.value.span.to } };
+}
+
+function parseUpdateBody(c: Cursor): UpdateStatement {
+  const updateToken = c.expectKeyword('UPDATE', 'to begin an update');
+  const table = parseTableRef(c);
+  c.expectKeyword('SET', 'after the table name');
+  const set = parseSetClause(c);
+  const where = parseOptionalWhere(c);
+  expectStatementEnd(c);
+
+  const end = where?.span.to ?? set.span.to;
+  return {
+    kind: 'update',
+    table,
+    set,
+    ...(where === undefined ? {} : { where }),
+    span: { from: updateToken.from, to: end },
+  };
+}
+
 export type StatementOutcome = { ok: true; ast: Statement } | { ok: false; error: QueryError };
 
 /**
- * The broader entry point: SELECT, DELETE or INSERT, dispatched on the first
- * keyword. `runQuery.ts` uses this one; every SELECT-only caller keeps using
- * `parse`.
+ * The broader entry point: SELECT, DELETE, INSERT or UPDATE, dispatched on
+ * the first keyword. `runQuery.ts` uses this one; every SELECT-only caller
+ * keeps using `parse`.
  */
 export function parseStatement(sql: string): StatementOutcome {
   return runParse(sql, (c) => {
@@ -456,6 +510,7 @@ export function parseStatement(sql: string): StatementOutcome {
     const first = c.peek();
     if (first.type === 'keyword' && first.upper === 'DELETE') return parseDeleteBody(c);
     if (first.type === 'keyword' && first.upper === 'INSERT') return parseInsertBody(c);
+    if (first.type === 'keyword' && first.upper === 'UPDATE') return parseUpdateBody(c);
     return parseSelectBody(c);
   });
 }

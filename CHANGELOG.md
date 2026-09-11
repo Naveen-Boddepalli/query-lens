@@ -8,6 +8,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`UPDATE`, the write path's third and last statement** (plan.md §22.2) — `UPDATE table SET col =
+  value [, col = value ...] [WHERE ...]` changes rows for real, completing the write path
+  (`INSERT`/`UPDATE`/`DELETE` are now all real in the pipeline, not just `/tools/btree`).
+  `parseStatement` grows a fourth grammar, reusing `INSERT`'s literal-value parser for the right
+  side of each assignment. Execution finds its matches exactly the way `DELETE` does — a dedicated
+  find-then-mutate pass, since an update mid-scan could shift what a later step reads — reusing
+  `predicate-pushdown`/`index-selection` through the same throwaway-`Project` trick, and applies the
+  SET assignments to produce each row's replacement. This is the hardest of the three statements for
+  one reason: when the assignments touch the *indexed* column, the B+Tree has no in-place rekey, so
+  `exec/update.ts` runs the real `deleteKey` and `insert` algorithms in sequence — drop the old key,
+  add the new one at the row's existing heap pointer — narrated as one clause per half
+  ("Because `id` changed, the B+Tree drops key 5 ..., then adds key 9000 ..."). An assignment that
+  leaves the indexed column unchanged, or reassigns it to the value it already had, touches the tree
+  not at all. 24 unit tests (`__tests__/update.test.ts`), plus new `parseStatement`/
+  `updateDisplayTree` coverage in `__tests__/parser.test.ts`, 1 e2e (the rekey case)
 - **`INSERT`, the write path's second statement** (plan.md §22.2) — `INSERT INTO table [(col, ...)]
   VALUES (value, ...)` adds a row for real, persisted in the Playground the same way `DELETE`
   already persists a removal. `parseStatement` grows a third grammar: an optional column list

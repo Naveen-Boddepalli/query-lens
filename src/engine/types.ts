@@ -229,21 +229,25 @@ export interface QueryError {
 
 export interface RunResult {
   events: StepEvent[];
-  /** `SELECT`'s result rows; the row a `DELETE` removed or an `INSERT` added, for `write`. */
+  /**
+   * `SELECT`'s result rows; the rows a `DELETE` removed, an `INSERT` added,
+   * or an `UPDATE` changed (after values), for `write`.
+   */
   rows: Row[];
   error?: QueryError;
   /**
-   * Present only for a successful write (`DELETE`/`INSERT` — plan.md §22.2).
-   * The caller persists `rows` as the table's new contents; nothing in the
-   * engine holds state between calls, so this is the only way a write has
-   * any effect beyond its own trace.
+   * Present only for a successful write (`DELETE`/`INSERT`/`UPDATE` —
+   * plan.md §22.2). The caller persists `rows` as the table's new contents;
+   * nothing in the engine holds state between calls, so this is the only way
+   * a write has any effect beyond its own trace.
    */
   write?: WriteOutcome;
 }
 
 export type WriteOutcome =
   | { kind: 'delete'; table: string; deletedCount: number; rows: Row[] }
-  | { kind: 'insert'; table: string; insertedCount: number; rows: Row[] };
+  | { kind: 'insert'; table: string; insertedCount: number; rows: Row[] }
+  | { kind: 'update'; table: string; updatedCount: number; rows: Row[] };
 
 /**
  * The stages this build of the engine actually executes. Everything else in

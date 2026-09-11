@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { parse, parseStatement } from '../parser/parser.ts';
-import { deleteDisplayTree, insertDisplayTree, toDisplayTree } from '../parser/display.ts';
-import type { DeleteStatement, InsertStatement, SelectStatement } from '../parser/ast.ts';
+import {
+  deleteDisplayTree,
+  insertDisplayTree,
+  toDisplayTree,
+  updateDisplayTree,
+} from '../parser/display.ts';
+import type { DeleteStatement, InsertStatement, SelectStatement, UpdateStatement } from '../parser/ast.ts';
 
 function ok(sql: string): SelectStatement {
   const out = parse(sql);
@@ -30,6 +35,12 @@ function okDelete(sql: string): DeleteStatement {
 function okInsert(sql: string): InsertStatement {
   const ast = okStatement(sql);
   if (ast.kind !== 'insert') throw new Error(`expected an insert, got ${ast.kind}`);
+  return ast;
+}
+
+function okUpdate(sql: string): UpdateStatement {
+  const ast = okStatement(sql);
+  if (ast.kind !== 'update') throw new Error(`expected an update, got ${ast.kind}`);
   return ast;
 }
 
@@ -252,10 +263,6 @@ describe('parseStatement — DELETE', () => {
     expect(e.message).toMatch(/unexpected/i);
   });
 
-  it('still rejects UPDATE, naming DELETE and INSERT as what does work', () => {
-    expect(errStatement('UPDATE users SET age = 1').hint).toMatch(/DELETE and INSERT are/);
-  });
-
   it('rejects an empty query the same way SELECT does', () => {
     expect(errStatement('').message).toMatch(/empty/i);
   });
@@ -308,7 +315,7 @@ describe('parseStatement — INSERT', () => {
   it('rejects a column name written where a value belongs, with a hint', () => {
     const e = errStatement('INSERT INTO users (id) VALUES (age)');
     expect(e.message).toMatch(/expected a value/i);
-    expect(e.hint).toMatch(/before VALUES/);
+    expect(e.hint).toMatch(/literal values/);
   });
 
   it('rejects a column count that does not match the value count', () => {
@@ -318,6 +325,67 @@ describe('parseStatement — INSERT', () => {
 
   it('rejects trailing junk, same as SELECT and DELETE', () => {
     expect(errStatement("INSERT INTO users VALUES (1) garbage").message).toMatch(/unexpected/i);
+  });
+});
+
+describe('parseStatement — UPDATE', () => {
+  it('parses a single assignment', () => {
+    const ast = okUpdate('UPDATE users SET age = 30');
+    expect(ast).toMatchObject({ kind: 'update', table: { name: 'users' } });
+    expect(ast.set.assignments).toHaveLength(1);
+    expect(ast.set.assignments[0]).toMatchObject({ column: 'age', value: { kind: 'literal', value: 30 } });
+    expect(ast.where).toBeUndefined();
+  });
+
+  it('parses multiple assignments, comma-separated', () => {
+    const ast = okUpdate("UPDATE users SET name = 'ada', age = 30");
+    expect(ast.set.assignments.map((a) => a.column)).toEqual(['name', 'age']);
+    expect(ast.set.assignments.map((a) => a.value.value)).toEqual(['ada', 30]);
+  });
+
+  it('parses a WHERE after SET, same grammar as SELECT and DELETE', () => {
+    const ast = okUpdate('UPDATE users SET age = 30 WHERE id = 5');
+    expect(ast.where).toMatchObject({ kind: 'compare', op: '=' });
+  });
+
+  it('parses every literal kind an assignment can hold', () => {
+    const ast = okUpdate('UPDATE t SET a = 1, b = NULL, c = TRUE, d = FALSE');
+    expect(ast.set.assignments.map((a) => a.value.value)).toEqual([1, null, true, false]);
+  });
+
+  it('is case-insensitive and tolerates a trailing semicolon', () => {
+    expect(okUpdate('update users set age = 30;').table.name).toBe('users');
+  });
+
+  it('spans the whole statement, from UPDATE to the end of the WHERE', () => {
+    const sql = 'UPDATE users SET age = 30 WHERE id = 5';
+    expect(okUpdate(sql).span).toEqual({ from: 0, to: sql.length });
+  });
+
+  it('rejects a missing table name', () => {
+    expect(errStatement('UPDATE SET age = 30').message).toMatch(/expected a table name/i);
+  });
+
+  it('rejects a missing SET', () => {
+    expect(errStatement('UPDATE users age = 30').message).toMatch(/expected `set`/i);
+  });
+
+  it('rejects a missing `=` in an assignment', () => {
+    expect(errStatement('UPDATE users SET age 30').message).toMatch(/expected `=`/i);
+  });
+
+  it('rejects a column name written where a value belongs, with a hint', () => {
+    const e = errStatement('UPDATE users SET age = name');
+    expect(e.message).toMatch(/expected a value/i);
+    expect(e.hint).toMatch(/literal values/);
+  });
+
+  it('rejects trailing junk, same as SELECT, DELETE and INSERT', () => {
+    expect(errStatement('UPDATE users SET age = 30 garbage').message).toMatch(/unexpected/i);
+  });
+
+  it('rejects an empty query the same way SELECT does', () => {
+    expect(errStatement('').message).toMatch(/empty/i);
   });
 });
 
@@ -360,16 +428,16 @@ describe('parse — errors point at the right text', () => {
     ['SELECT * FROM a JOIN b ON a.id = b.id', /JOIN/, /v1/],
     ['SELECT * FROM users GROUP BY id', /GROUP/, /v0 subset/],
     ['SELECT * FROM users LIMIT 5 OFFSET 10', /OFFSET/, /LIMIT on its own is/],
-    ['UPDATE users SET age = 1', /UPDATE/, /DELETE and INSERT are/],
   ])('explains out-of-scope SQL: %s', (sql, message, hint) => {
     const e = err(sql);
     expect(e.message).toMatch(message);
     expect(e.hint).toMatch(hint);
   });
 
-  it('rejects DELETE and INSERT too — parse() is the SELECT-only entry point; parseStatement() is where they live', () => {
+  it('rejects DELETE, INSERT and UPDATE too — parse() is the SELECT-only entry point; parseStatement() is where they live', () => {
     expect(err('DELETE FROM users').message).toMatch(/expected `select`/i);
     expect(err('INSERT INTO users VALUES (1)').message).toMatch(/expected `select`/i);
+    expect(err('UPDATE users SET age = 1').message).toMatch(/expected `select`/i);
   });
 
   it('rejects parentheses with a scope explanation', () => {
@@ -436,6 +504,15 @@ describe('toDisplayTree', () => {
 
     const withColumns = insertDisplayTree(okInsert("INSERT INTO users (id, name) VALUES (1, 'ada')"));
     expect(withColumns.children?.map((c) => c.kind)).toEqual(['Into', 'ColumnList', 'Values']);
+  });
+
+  it('updateDisplayTree mirrors UPDATE — Table, Set, then Where when present', () => {
+    const bare = updateDisplayTree(okUpdate('UPDATE users SET age = 30'));
+    expect(bare.label).toBe('UPDATE');
+    expect(bare.children?.map((c) => c.kind)).toEqual(['Table', 'Set']);
+
+    const withWhere = updateDisplayTree(okUpdate('UPDATE users SET age = 30 WHERE id = 5'));
+    expect(withWhere.children?.map((c) => c.kind)).toEqual(['Table', 'Set', 'Where']);
   });
 
   it('gives every node a unique id, so a progressive reveal can animate', () => {

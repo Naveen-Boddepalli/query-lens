@@ -85,8 +85,28 @@ export interface InsertStatement {
   span: Span;
 }
 
+/**
+ * `UPDATE table SET col = value [, col = value ...] [WHERE expr]` (plan.md
+ * §22.2, the write path's third and last statement). Assignment values are
+ * literals only, same as `INSERT`'s `VALUES` — no expressions, no reading
+ * one column to set another.
+ */
+export interface UpdateAssignment {
+  column: string;
+  columnSpan: Span;
+  value: Extract<Expr, { kind: 'literal' }>;
+}
+
+export interface UpdateStatement {
+  kind: 'update';
+  table: TableRef;
+  set: { assignments: UpdateAssignment[]; span: Span };
+  where?: Expr;
+  span: Span;
+}
+
 /** Every statement form `parseStatement` can produce. `parse` stays SELECT-only. */
-export type Statement = SelectStatement | DeleteStatement | InsertStatement;
+export type Statement = SelectStatement | DeleteStatement | InsertStatement | UpdateStatement;
 
 /** Depth-first walk, parents before children. */
 export function walkExpr(expr: Expr, visit: (e: Expr) => void): void {

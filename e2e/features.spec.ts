@@ -418,6 +418,39 @@ test('INSERT adds a row for real — the Playground persists it across the next 
   await expect(page.getByText('zeta@example.com')).toBeVisible();
 });
 
+test('UPDATE changes a row for real, rekeying the index when the indexed column changes', async ({
+  page,
+}) => {
+  await page.goto('/playground');
+  await expect(page.getByRole('button', { name: /^Edit data/ })).toHaveText('Edit data (48)');
+
+  const editor = page.locator('.cm-content');
+  await editor.click();
+  await page.keyboard.press('ControlOrMeta+A');
+  await page.keyboard.type('UPDATE users SET id = 9000 WHERE id = 5;');
+  await page.getByRole('button', { name: 'Run' }).click();
+  await page.getByLabel('Scrub to step').press('End');
+
+  await expect(page.getByText(/1 row updated/)).toBeVisible();
+  // The row count never changes on an UPDATE.
+  await expect(page.getByRole('button', { name: /^Edit data/ })).toHaveText('Edit data (48)');
+
+  // Persisted, not just narrated: the old key is gone, the new one is there.
+  await editor.click();
+  await page.keyboard.press('ControlOrMeta+A');
+  await page.keyboard.type('SELECT * FROM users WHERE id = 5;');
+  await page.getByRole('button', { name: 'Run' }).click();
+  await page.getByLabel('Scrub to step').press('End');
+  await expect(page.getByText('0 rows returned')).toBeVisible();
+
+  await editor.click();
+  await page.keyboard.press('ControlOrMeta+A');
+  await page.keyboard.type('SELECT * FROM users WHERE id = 9000;');
+  await page.getByRole('button', { name: 'Run' }).click();
+  await page.getByLabel('Scrub to step').press('End');
+  await expect(page.getByText('1 row returned')).toBeVisible();
+});
+
 test('the preset chips load and run a query in one click', async ({ page }) => {
   await page.goto('/playground');
 

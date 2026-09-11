@@ -54,7 +54,7 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
   // second importer of the planner + `buildPlan` + `toPlanDisplay`, so rolldown
   // hoisted that shared engine code out of the Playground chunk into its own —
   // a move between chunks, not growth, but it shows here.
-  { name: 'trace-ui', test: /^(PlaygroundPage|PlaygroundTour|TraceWorksheet|StageDetail|stageMeta|datasets|datasetCatalogue|types|seed|trace|runQuery|engine|SqlEditor|PlaybackControls|PresenterView|AstTree|BTreePanel|FlowTree|display)-/, kb: 43, note: 'Playground + the presenter view + the SQL editor + the shared panel/tree renderers (AstTree, BTreePanel, FlowTree, the two display transformers) plus the engine core (runQuery and the planner split into their own chunks once a third / second route imported them; SqlEditor split once /challenges became a second) plus the preset dataset library, the print worksheet, LIMIT, ORDER BY + the Sort operator, and DELETE + INSERT (plan.md §22.2)' },
+  { name: 'trace-ui', test: /^(PlaygroundPage|PlaygroundTour|TraceWorksheet|StageDetail|stageMeta|datasets|datasetCatalogue|types|seed|trace|runQuery|engine|SqlEditor|PlaybackControls|PresenterView|AstTree|BTreePanel|FlowTree|display)-/, kb: 44, note: 'Playground + the presenter view + the SQL editor + the shared panel/tree renderers (AstTree, BTreePanel, FlowTree, the two display transformers) plus the engine core (runQuery and the planner split into their own chunks once a third / second route imported them; SqlEditor split once /challenges became a second) plus the preset dataset library, the print worksheet, LIMIT, ORDER BY + the Sort operator, and the full DELETE + INSERT + UPDATE write path (plan.md §22.2)' },
   // The small per-route shells: landing hub, stage index, examples, docs shell,
   // 404, tools index — plus the redesign's shared UI kit (primitives.ts,
   // PageHeader, Hero) that two or more of them import.
@@ -165,8 +165,18 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
  * matching additions to `AstTree`/`display.ts`. INSERT has no predicate to
  * plan or optimize, so it is also the first statement to skip straight from
  * parse to execute — a real, honest gap in the pipeline tracker, not a bug.
+ * Raised 387 → 388 for the write path's third and last statement, `UPDATE`
+ * (§22.2), completing it: a fourth grammar (`SET col = value, ...`, reusing
+ * INSERT's literal-value parsing), `exec/update.ts` (finds matches exactly
+ * the way `DELETE` does, applies the assignments, and — if the indexed
+ * column changed — drops the old key and adds the new one through the real
+ * `deleteKey`/`insert` algorithms; the delete-then-reinsert pair those two
+ * statements already built, reused rather than reimplemented), and
+ * `planner/emitUpdate.ts` reusing the same optimizer-wrapping trick
+ * `DELETE`'s plan does. The full `INSERT`/`UPDATE`/`DELETE` write path is
+ * now real, in the pipeline, not just `/tools/btree`.
  */
-const TOTAL_KB = 387;
+const TOTAL_KB = 388;
 
 const gzipKb = (bytes: Buffer): number => gzipSync(bytes, { level: 9 }).length / 1024;
 
