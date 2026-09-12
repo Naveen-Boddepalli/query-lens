@@ -76,9 +76,15 @@ export function buildAggregatePlan(
  * guarantees both `on` operands are qualified columns; the `kind` check
  * below is just how the type system is told what that check already ensures.
  * Shared with `emit.ts`'s progressive plan-tree narration, like
- * `buildAggregatePlan` already is, so the two never drift.
+ * `buildAggregatePlan` already is, so the two never drift. `algorithm`
+ * defaults to `'nested-loop'` (the shipped behaviour); only `/compare`'s
+ * fourth mode ever passes `'hash'`, via `EngineOptions.joinStrategy`.
  */
-export function buildJoinPlan(join: JoinClause, fromTable: string): Plan {
+export function buildJoinPlan(
+  join: JoinClause,
+  fromTable: string,
+  algorithm: 'nested-loop' | 'hash' = 'nested-loop',
+): Plan {
   const { left, right } = join.on;
   if (left.kind !== 'column' || right.kind !== 'column') {
     throw new Error('unreachable: checkJoinOn guarantees a JOIN ON is column = column');
@@ -87,7 +93,7 @@ export function buildJoinPlan(join: JoinClause, fromTable: string): Plan {
   const rightColumn = left.table === join.table.name ? left.name : right.name;
   return {
     op: 'Join',
-    algorithm: 'nested-loop',
+    algorithm,
     left: { op: 'SeqScan', table: fromTable },
     right: { op: 'SeqScan', table: join.table.name },
     leftTable: fromTable,
@@ -97,9 +103,13 @@ export function buildJoinPlan(join: JoinClause, fromTable: string): Plan {
   };
 }
 
-export function buildPlan(ast: SelectStatement, aggregateStrategy: 'hash' | 'sort' = 'hash'): Plan {
+export function buildPlan(
+  ast: SelectStatement,
+  aggregateStrategy: 'hash' | 'sort' = 'hash',
+  joinStrategy: 'nested-loop' | 'hash' = 'nested-loop',
+): Plan {
   const scan: Plan = ast.join
-    ? buildJoinPlan(ast.join, ast.from.name)
+    ? buildJoinPlan(ast.join, ast.from.name, joinStrategy)
     : { op: 'SeqScan', table: ast.from.name };
 
   const filtered: Plan = ast.where

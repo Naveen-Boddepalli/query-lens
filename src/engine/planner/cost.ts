@@ -154,16 +154,30 @@ function estimateNode(
       // Foreign-key assumption: each left row matches about 1/ndistinct(right
       // key) of the right table — the same independence heuristic an
       // equality WHERE already makes, just applied to a join key instead of a
-      // literal. Nested-loop's own cost is the honest, unflattering number:
-      // the outer read once, plus a full rescan of the inner for every outer
-      // row — no index taken advantage of yet, since `left`/`right` are
-      // always a bare SeqScan in v1.
+      // literal. Row count never depends on the algorithm — only the page
+      // cost does.
       const rightDistinct = ndistinct(tableNamed(plan.rightTable).rows, plan.rightColumn);
-      estimate = {
-        estRows: clampRows((left.estRows * right.estRows) / rightDistinct),
-        estPages: left.estPages + left.estRows * right.estPages,
-        basis: `${String(left.estRows)} × ${String(right.estRows)} / ndistinct(${plan.rightTable}.${plan.rightColumn}); nested-loop rescans ${plan.rightTable} once per ${plan.leftTable} row`,
-      };
+      const estRows = clampRows((left.estRows * right.estRows) / rightDistinct);
+      const rowsBasis = `${String(left.estRows)} × ${String(right.estRows)} / ndistinct(${plan.rightTable}.${plan.rightColumn})`;
+      estimate =
+        plan.algorithm === 'hash'
+          ? {
+              // Build the right side into a hash table once, then probe with
+              // the left streamed — each side is read exactly once, the
+              // honest saving over nested-loop's repeated rescans.
+              estRows,
+              estPages: left.estPages + right.estPages,
+              basis: `${rowsBasis}; hash join reads each side once — build a table on ${plan.rightTable}, probe with ${plan.leftTable}`,
+            }
+          : {
+              // Nested-loop's own cost is the honest, unflattering number:
+              // the outer read once, plus a full rescan of the inner for
+              // every outer row — no index taken advantage of yet, since
+              // `left`/`right` are always a bare SeqScan in v1.
+              estRows,
+              estPages: left.estPages + left.estRows * right.estPages,
+              basis: `${rowsBasis}; nested-loop rescans ${plan.rightTable} once per ${plan.leftTable} row`,
+            };
       break;
     }
     case 'SeqScan': {

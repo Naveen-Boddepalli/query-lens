@@ -16,7 +16,7 @@ import type { BufferPool, Heap } from '../storage/index.ts';
 import type { LockManager } from '../locks/index.ts';
 import type { BPlusTree } from '../index/index.ts';
 import { emitIndexLookup, pageCountFor } from '../index/index.ts';
-import { compare, passes } from './evaluate.ts';
+import { compare, equalityKeyOf, passes } from './evaluate.ts';
 import { externalMergeSort } from './sort.ts';
 
 export interface Operator {
@@ -574,15 +574,16 @@ function mergeJoinedRow(leftTable: string, leftRow: Row, rightTable: string, rig
 }
 
 /**
- * Nested-loop join — the simplest algorithm, and the only one v1 has (plan.md
- * §22.2). For every row the left (outer) side produces, the right (inner)
- * side is rescanned from scratch looking for a match: `right`'s operator is
- * only ever built once and re-opened per outer row, exactly the reset
- * `open()` already means for every other operator here. `ctx.joinRight`
- * carries the right table's own heap (built by `runQuery.ts`, its pages
- * numbered right after the left's), so `right`'s `SeqScan` reads through a
- * genuinely different table than `left`'s — the one thing an `ExecContext`
- * never had to represent before a query could name two tables at once.
+ * Nested-loop join — the simplest algorithm, and the first one v1 had
+ * (plan.md §22.2; `hashJoin` below is the second). For every row the left
+ * (outer) side produces, the right (inner) side is rescanned from scratch
+ * looking for a match: `right`'s operator is only ever built once and
+ * re-opened per outer row, exactly the reset `open()` already means for
+ * every other operator here. `ctx.joinRight` carries the right table's own
+ * heap (built by `runQuery.ts`, its pages numbered right after the left's),
+ * so `right`'s `SeqScan` reads through a genuinely different table than
+ * `left`'s — the one thing an `ExecContext` never had to represent before a
+ * query could name two tables at once.
  */
 function join(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): Operator {
   const joinRight = ctx.joinRight;
@@ -646,6 +647,99 @@ function join(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): Operator {
   };
 }
 
+/**
+ * Hash join — the second algorithm (plan.md §22.2). The build phase drains
+ * the right side once into an in-memory hash table keyed by
+ * `equalityKeyOf(rightColumn)` — a NULL key is never inserted, mirroring the
+ * "NULL never matches NULL" rule nested-loop's `compare('=', ...)` already
+ * enforces — reading every one of its pages exactly once through the real
+ * buffer pool; the probe phase then streams the left side one row at a
+ * time, looking each one up instead of rescanning. `equalityKeyOf` is used
+ * on both sides specifically so a hash join agrees with nested-loop even
+ * when the two columns hold mixed types (a number and a numeric string, say)
+ * — the two algorithms must never disagree on which rows match. No
+ * partitioning or spill: the table itself lives in a plain JS `Map`, the
+ * same simplification `HashAggregate` already makes for `GROUP BY`; a build
+ * side too large for memory needs partition spill (Grace hash join),
+ * `/tools/hash-join`'s own deferred future work.
+ */
+function hashJoin(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): Operator {
+  const joinRight = ctx.joinRight;
+  if (!joinRight) throw new Error('unreachable: a Join plan implies ExecContext.joinRight is set');
+
+  const left = buildOperator(plan.left, ctx);
+  const right = buildOperator(plan.right, {
+    ...ctx,
+    table: joinRight.table,
+    heap: joinRight.heap,
+    tree: joinRight.tree,
+  });
+
+  const produced = counter(ctx, 'Join');
+  let built: Map<string, Row[]> | null = null;
+  let leftRow: Row | null = null;
+  let bucket: Row[] = [];
+  let bucketIndex = 0;
+  let matched = 0;
+
+  return {
+    name: 'Join',
+    open() {
+      left.open();
+      right.open();
+      built = null;
+      leftRow = null;
+      bucket = [];
+      bucketIndex = 0;
+      matched = 0;
+    },
+    next() {
+      if (!built) {
+        const table = new Map<string, Row[]>();
+        for (;;) {
+          const row = right.next();
+          if (!row) break;
+          const value = row[plan.rightColumn] ?? null;
+          if (value === null) continue;
+          const key = equalityKeyOf(value);
+          const existing = table.get(key);
+          if (existing) existing.push(row);
+          else table.set(key, [row]);
+        }
+        right.close();
+        built = table;
+        ctx.emit(
+          `Join builds an in-memory hash table over ${plan.rightTable}, keyed on ${plan.rightColumn} (${String(table.size)} distinct key${table.size === 1 ? '' : 's'}).`,
+          { stage: 'execute', op: 'Join', rowsProduced: 0 },
+        );
+      }
+
+      for (;;) {
+        if (bucketIndex >= bucket.length) {
+          leftRow = left.next();
+          if (!leftRow) return null;
+          const value = leftRow[plan.leftColumn] ?? null;
+          bucket = value === null ? [] : (built.get(equalityKeyOf(value)) ?? []);
+          bucketIndex = 0;
+          continue;
+        }
+
+        const rightRow = bucket[bucketIndex]!;
+        bucketIndex += 1;
+        matched += 1;
+        produced(
+          `Join probes the hash table with a row from ${plan.leftTable} and finds a match in ${plan.rightTable} (${matched} match${matched === 1 ? '' : 'es'} so far).`,
+        );
+        return mergeJoinedRow(plan.leftTable, leftRow!, plan.rightTable, rightRow);
+      }
+    },
+    close() {
+      left.close();
+      if (!built) right.close();
+    },
+  };
+}
+
 /** Turns a plan tree into an operator tree of the same shape. */
 export function buildOperator(plan: Plan, ctx: ExecContext): Operator {
   switch (plan.op) {
@@ -656,7 +750,7 @@ export function buildOperator(plan: Plan, ctx: ExecContext): Operator {
     case 'IndexOnlyScan':
       return indexOnlyScan(plan, ctx);
     case 'Join':
-      return join(plan, ctx);
+      return plan.algorithm === 'hash' ? hashJoin(plan, ctx) : join(plan, ctx);
     case 'Filter':
       return filter(plan.predicate, buildOperator(plan.child, ctx), ctx);
     case 'HashAggregate':

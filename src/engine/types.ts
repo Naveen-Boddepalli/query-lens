@@ -219,6 +219,16 @@ export interface EngineOptions {
    * how `/compare`'s third mode forces each side explicitly (plan.md §22.2).
    */
   aggregateStrategy?: 'hash' | 'sort';
+  /**
+   * Which algorithm a `JOIN` runs — `nested-loop` (the default, when absent)
+   * rescans the right table whole per left row; `hash` builds an in-memory
+   * hash table over the right table once, then probes it with the left
+   * table streamed a row at a time. Same rows out either way; nothing in the
+   * pipeline picks between them on its own — this is how `/compare`'s fourth
+   * mode forces each side explicitly, the same way `aggregateStrategy` above
+   * does for `GROUP BY` (plan.md §22.2).
+   */
+  joinStrategy?: 'nested-loop' | 'hash';
 }
 
 export const DEFAULT_ENGINE_OPTIONS: EngineOptions = {

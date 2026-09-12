@@ -59,7 +59,11 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
   // the cost model's/parser's growth to carry a second table through —
   // `engine-*.js` is the largest single mover, `/tools/planner` (this group)
   // and `/tools/grammar` (`standalone-tools`) both import it.
-  { name: 'trace-ui', test: /^(PlaygroundPage|PlaygroundTour|TraceWorksheet|StageDetail|stageMeta|datasets|datasetCatalogue|types|seed|trace|runQuery|engine|SqlEditor|PlaybackControls|PresenterView|AstTree|BTreePanel|FlowTree|display)-/, kb: 48, note: 'Playground + the presenter view + the SQL editor + the shared panel/tree renderers (AstTree, BTreePanel, FlowTree, the two display transformers) plus the engine core (runQuery and the planner split into their own chunks once a third / second route imported them; SqlEditor split once /challenges became a second) plus the preset dataset library, the print worksheet, LIMIT, ORDER BY + the Sort operator, the full DELETE + INSERT + UPDATE write path, GROUP BY + aggregates, and JOIN (plan.md §22.2)' },
+  // Raised 48 → 49 for hash join, JOIN's second algorithm (§22.2): a
+  // `hashJoin` operator in `exec/operators.ts`, the cost model's
+  // per-algorithm estimate, and `equalityKeyOf` in `exec/evaluate.ts` — all
+  // in `engine-*.js`, which this group still hoists.
+  { name: 'trace-ui', test: /^(PlaygroundPage|PlaygroundTour|TraceWorksheet|StageDetail|stageMeta|datasets|datasetCatalogue|types|seed|trace|runQuery|engine|SqlEditor|PlaybackControls|PresenterView|AstTree|BTreePanel|FlowTree|display)-/, kb: 49, note: 'Playground + the presenter view + the SQL editor + the shared panel/tree renderers (AstTree, BTreePanel, FlowTree, the two display transformers) plus the engine core (runQuery and the planner split into their own chunks once a third / second route imported them; SqlEditor split once /challenges became a second) plus the preset dataset library, the print worksheet, LIMIT, ORDER BY + the Sort operator, the full DELETE + INSERT + UPDATE write path, GROUP BY + aggregates, and JOIN — both algorithms (plan.md §22.2)' },
   // The small per-route shells: landing hub, stage index, examples, docs shell,
   // 404, tools index — plus the redesign's shared UI kit (primitives.ts,
   // PageHeader, Hero) that two or more of them import.
@@ -83,7 +87,10 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
   // Raised 37 → 38 for `/compare`'s third mode, hash aggregate vs. sort
   // aggregate (§22.2): `ComparePage.tsx` grows an `AggregateCompare` panel,
   // the same shape as `IndexCompare`'s scorecards.
-  { name: 'standalone-tools', test: /^(GalleryPage|ComparePage|SettingsPage|AssignmentsNewPage|TracePage|BufferPoolToolPage|ParserToolPage|BTreeToolPage|PageToolPage|SortToolPage|PlannerToolPage|LocksToolPage|lockSimulation|GrammarToolPage|grammar|BufferPoolPanel|bufferTrace|slottedPage|externalSort|assignmentSet|preferences|urlState)-/, kb: 38, note: 'Gallery, Tools, Compare, Settings, Assignments (+ assignment sets), the trace inspector, and the buffer-pool / parser / B+Tree / slotted-page / external-merge-sort / planner / locks / grammar sandboxes (plan.md §21.3, §20.4, §22.3, §22.4)' },
+  // Raised 38 → 39 for `/compare`'s fourth mode, nested-loop join vs. hash
+  // join (§22.2): a `JoinCompare` panel, the same shape as the other three,
+  // plus its own small `authors`/`posts` demo database.
+  { name: 'standalone-tools', test: /^(GalleryPage|ComparePage|SettingsPage|AssignmentsNewPage|TracePage|BufferPoolToolPage|ParserToolPage|BTreeToolPage|PageToolPage|SortToolPage|PlannerToolPage|LocksToolPage|lockSimulation|GrammarToolPage|grammar|BufferPoolPanel|bufferTrace|slottedPage|externalSort|assignmentSet|preferences|urlState)-/, kb: 39, note: 'Gallery, Tools, Compare, Settings, Assignments (+ assignment sets), the trace inspector, and the buffer-pool / parser / B+Tree / slotted-page / external-merge-sort / planner / locks / grammar sandboxes (plan.md §21.3, §20.4, §22.3, §22.4)' },
   // The `/learn` guided track (plan.md §21.3): the index, one lesson page, the
   // localStorage progress helper, and `lessons.tsx` — the lesson prose plus the
   // link-builder that computes each step from a real engine run. Lazy; loads
@@ -221,6 +228,9 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
  * table's own heap), and the cost model's join estimate. `/tools/planner`
  * gained a small fixed `authors`/`posts` pair (`createJoinDemoDatabase`) to
  * try it against, without touching `users`' own index toggle.
+ * `trace-ui` and `standalone-tools` both bumped for hash join, JOIN's second
+ * algorithm, and `/compare`'s fourth mode naming it against nested-loop — the
+ * total itself still fits under 399, so it stays put this time.
  */
 const TOTAL_KB = 399;
 

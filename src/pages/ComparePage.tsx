@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import {
+  createJoinDemoDatabase,
   createSeedDatabase,
   createTraceProjector,
   DATASETS,
@@ -46,9 +47,15 @@ import {
  *    same groups out either way, but only the sort aggregate spills through
  *    the buffer pool. "One strategy, nothing to compare" is exactly the gap
  *    this closes.
+ *  - **nested-loop join vs. hash join** (§22.2): the same JOIN query run once
+ *    with each algorithm forced via `EngineOptions.joinStrategy`, against the
+ *    small `authors`/`posts` demo pair (`createJoinDemoDatabase`, the same
+ *    fixture `/tools/planner` uses). Same rows out either way; nested-loop
+ *    rescans the right table whole per left row, hash join reads each side
+ *    exactly once.
  */
 
-type Mode = 'policies' | 'index' | 'aggregate';
+type Mode = 'policies' | 'index' | 'aggregate' | 'join';
 
 /* -------------------------------------------------------------------------- */
 /* Replacement-policy comparison                                              */
@@ -634,6 +641,191 @@ function AggregateCompare() {
 }
 
 /* -------------------------------------------------------------------------- */
+/* Nested-loop join vs. hash join comparison                                  */
+/* -------------------------------------------------------------------------- */
+
+const JOIN_DB = createJoinDemoDatabase();
+
+const JOIN_PRESETS = [
+  {
+    label: 'Every matching row',
+    sql: 'SELECT authors.name, posts.title FROM authors JOIN posts ON authors.id = posts.authorId',
+  },
+  {
+    label: 'Filtered after the join',
+    sql: "SELECT authors.name, posts.title FROM authors JOIN posts ON authors.id = posts.authorId WHERE authors.name = 'ada'",
+  },
+] as const;
+
+interface JoinScorecard {
+  steps: number;
+  diskReads: number;
+  evictions: number;
+  rows: number;
+}
+
+function joinScoreOf(result: RunResult): JoinScorecard {
+  const end = createTraceProjector(result.events, DEFAULT_ENGINE_OPTIONS).at(result.events.length);
+  return {
+    steps: result.events.length,
+    diskReads: end.bufferStats.misses,
+    evictions: end.bufferStats.evictions,
+    rows: result.rows.length,
+  };
+}
+
+const JOIN_STAT_ROWS: { key: keyof JoinScorecard; label: string }[] = [
+  { key: 'steps', label: 'trace steps' },
+  { key: 'diskReads', label: 'disk reads' },
+  { key: 'evictions', label: 'evictions' },
+  { key: 'rows', label: 'rows returned' },
+];
+
+function JoinScoreColumn({
+  label,
+  sub,
+  score,
+  compareTo,
+}: {
+  label: string;
+  sub: string;
+  score: JoinScorecard;
+  compareTo: JoinScorecard;
+}) {
+  return (
+    <div className="flex min-w-0 flex-1 flex-col gap-2">
+      <div>
+        <h3 className="text-body font-semibold text-ink">{label}</h3>
+        <p className="text-label text-ink-dim">{sub}</p>
+      </div>
+      <dl className={`${panelSurface} grid grid-cols-[1fr_auto] gap-x-4 gap-y-1.5 p-3 text-label`}>
+        {JOIN_STAT_ROWS.map(({ key, label: rowLabel }) => {
+          const mine = score[key];
+          const theirs = compareTo[key];
+          const worse = rowLabel !== 'rows returned' && mine > theirs;
+          return (
+            <div key={key} className="contents">
+              <dt className="text-ink-dim">{rowLabel}</dt>
+              <dd className={`text-right font-mono tabular-nums ${worse ? 'text-evict' : 'text-ink'}`}>
+                {mine}
+              </dd>
+            </div>
+          );
+        })}
+      </dl>
+    </div>
+  );
+}
+
+// `authors`/`posts` together are only 5 heap pages — under the default 8
+// buffer frames the whole demo fits in cache, so after the *first* rescan
+// every later one is a hit, not a miss, and the two algorithms' disk-read
+// counts tie even though their real work differs (the same reason
+// `AggregateCompare` reaches for the 120-row `orders` dataset instead of
+// `users`). Fewer frames than the 5 pages, rather than a bigger dataset,
+// makes nested-loop's *repeated* rescans genuinely re-fetch from disk here.
+const JOIN_FRAMES = 2;
+const NESTED_LOOP_OPTIONS = { ...DEFAULT_ENGINE_OPTIONS, bufferFrames: JOIN_FRAMES, joinStrategy: 'nested-loop' } as const;
+const HASH_JOIN_OPTIONS = { ...DEFAULT_ENGINE_OPTIONS, bufferFrames: JOIN_FRAMES, joinStrategy: 'hash' } as const;
+
+function JoinCompare() {
+  const [sqlInput, setSqlInput] = useState<string>(JOIN_PRESETS[0].sql);
+  const [sql, setSql] = useState<string>(JOIN_PRESETS[0].sql);
+
+  const nestedRun = useMemo(() => runQuery(sql, JOIN_DB, NESTED_LOOP_OPTIONS), [sql]);
+  const hashRun = useMemo(() => runQuery(sql, JOIN_DB, HASH_JOIN_OPTIONS), [sql]);
+
+  const nestedScore = useMemo(() => joinScoreOf(nestedRun), [nestedRun]);
+  const hashScore = useMemo(() => joinScoreOf(hashRun), [hashRun]);
+
+  const isJoinQuery = nestedRun.events.some((e) => e.stage === 'execute' && e.op === 'Join');
+
+  return (
+    <>
+      <p className="text-body text-ink-dim">
+        The same JOIN query, run once with each algorithm forced (plan.md §22.2), against the small{' '}
+        <code className="font-mono text-ink">authors</code>/<code className="font-mono text-ink">posts</code> pair.
+        A nested-loop join rescans <code className="font-mono text-ink">posts</code> whole for every{' '}
+        <code className="font-mono text-ink">authors</code> row; a hash join builds one in-memory hash
+        table over <code className="font-mono text-ink">posts</code> and probes it instead. Same rows out
+        either way; the difference is entirely in how many pages get read.
+      </p>
+
+      <div className="mt-2 flex flex-col gap-3 rounded-xl border border-edge bg-surface-2 p-3 shadow-e1">
+        <label htmlFor="join-preset" className="flex flex-col gap-1 text-label text-ink-dim">
+          Query
+          <select
+            id="join-preset"
+            value={JOIN_PRESETS.some((p) => p.sql === sqlInput) ? sqlInput : 'custom'}
+            onChange={(e) => { if (e.target.value !== 'custom') setSqlInput(e.target.value); }}
+            className={inputField}
+          >
+            {JOIN_PRESETS.map((p) => (
+              <option key={p.label} value={p.sql}>{p.label}</option>
+            ))}
+            <option value="custom">Custom (edit below)</option>
+          </select>
+        </label>
+        <div className="flex flex-wrap items-end gap-3">
+          <label htmlFor="join-sql" className="flex flex-1 min-w-64 flex-col gap-1 text-label text-ink-dim">
+            SQL
+            <input
+              id="join-sql"
+              type="text"
+              value={sqlInput}
+              onChange={(e) => { setSqlInput(e.target.value); }}
+              className={`${inputField} font-mono`}
+              spellCheck={false}
+            />
+          </label>
+          <button type="button" onClick={() => { setSql(sqlInput); }} className={btnPrimary}>
+            Run
+          </button>
+        </div>
+      </div>
+
+      {nestedRun.error ? (
+        <p className="rounded-lg border border-evict/40 bg-evict/10 p-3 text-label text-ink">
+          {nestedRun.error.message}
+        </p>
+      ) : !isJoinQuery ? (
+        <p className="rounded-xl border border-edge bg-surface-2 px-3 py-2 text-label text-ink-dim shadow-e1">
+          This query has no JOIN, so the algorithm makes no difference — both runs are the same plan
+          ({nestedScore.rows} row{nestedScore.rows === 1 ? '' : 's'}). Try one of the JOIN presets to see
+          the contrast.
+        </p>
+      ) : (
+        <>
+          <p className="rounded-xl border border-accent/40 bg-accent-soft px-3 py-2 text-label text-ink shadow-e1">
+            Same <span className="font-mono">{nestedScore.rows}</span> row
+            {nestedScore.rows === 1 ? '' : 's'} either way. The nested-loop join needed{' '}
+            <span className="font-mono">{nestedScore.diskReads}</span> disk read
+            {nestedScore.diskReads === 1 ? '' : 's'}, rescanning <code className="font-mono">posts</code>{' '}
+            once per author; the hash join needed only{' '}
+            <span className="font-mono">{hashScore.diskReads}</span>, reading each table once.
+          </p>
+
+          <div className="flex flex-col gap-4 lg:flex-row">
+            <JoinScoreColumn
+              label="Nested-loop join"
+              sub="rescans posts once per authors row"
+              score={nestedScore}
+              compareTo={hashScore}
+            />
+            <JoinScoreColumn
+              label="Hash join"
+              sub="builds one hash table over posts, then probes it"
+              score={hashScore}
+              compareTo={nestedScore}
+            />
+          </div>
+        </>
+      )}
+    </>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
 
 export function ComparePage() {
   const [mode, setMode] = useState<Mode>('policies');
@@ -650,6 +842,7 @@ export function ComparePage() {
             ['policies', 'Replacement policies'],
             ['index', 'Index vs. sequential scan'],
             ['aggregate', 'Hash aggregate vs. sort aggregate'],
+            ['join', 'Nested-loop join vs. hash join'],
           ] as const
         ).map(([value, label]) => (
           <button
@@ -665,7 +858,15 @@ export function ComparePage() {
         ))}
       </div>
 
-      {mode === 'policies' ? <PolicyCompare /> : mode === 'index' ? <IndexCompare /> : <AggregateCompare />}
+      {mode === 'policies' ? (
+        <PolicyCompare />
+      ) : mode === 'index' ? (
+        <IndexCompare />
+      ) : mode === 'aggregate' ? (
+        <AggregateCompare />
+      ) : (
+        <JoinCompare />
+      )}
     </div>
   );
 }

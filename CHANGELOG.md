@@ -8,6 +8,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Hash join, `JOIN`'s second algorithm, and a fourth `/compare` mode naming it against
+  nested-loop** (plan.md §22.2) — `Join.algorithm` widens from the single `'nested-loop'` value to
+  `'nested-loop' | 'hash'`. The new `hashJoin` operator (`exec/operators.ts`) drains the right side
+  once into a plain `Map`, keyed by a new `equalityKeyOf(rightColumn)` helper (`exec/evaluate.ts`) —
+  a NULL key is never inserted, the same "NULL never matches NULL" rule nested-loop's own
+  `compare('=', ...)` already enforces — then streams the left side, probing the table instead of
+  rescanning. `equalityKeyOf` mirrors `compare`'s exact coercion (a number and a numeric string
+  collide the same way `compare('=', 5, '5')` already says `true`), so the two algorithms can never
+  silently disagree on which rows match — checked directly with a mixed-type test. No partitioning
+  or spill: the hash table lives entirely in memory, the same simplification `HashAggregate` already
+  makes for `GROUP BY` (partition spill for a build side too large for memory is Grace hash join,
+  `/tools/hash-join`'s own deferred future work).
+
+  The cost model prices a hash join at `left.estPages + right.estPages` — each side read exactly
+  once — against nested-loop's `leftPages + leftRows × rightPages`; the row estimate is identical
+  either way, since the algorithm changes I/O, not cardinality. Nothing in the pipeline picks
+  between them on its own: `EngineOptions.joinStrategy` (`'nested-loop'` by default, so every
+  existing caller is unaffected) is the seam `/compare`'s new **Nested-loop join vs. hash join** mode
+  uses to force each side explicitly and score them — trace steps, disk reads, evictions, rows
+  returned — against the same small `authors`/`posts` pair `/tools/planner` already uses. That
+  fixture is only 5 heap pages, which fits entirely inside the default 8 buffer frames — so the
+  comparison forces `bufferFrames: 2` too, or nested-loop's repeated rescans would just hit cache
+  after the first pass and the two algorithms' disk-read counts would tie despite doing genuinely
+  different work. 11 new unit tests, 1 e2e.
 - **`JOIN`, v1's first join algorithm** (plan.md §22.2) — `FROM t1 JOIN t2 ON t1.a = t2.b`: an
   implicit inner join (bare `JOIN`, no `LEFT`/`RIGHT`/`FULL`/`CROSS`/`INNER`/`OUTER`/`USING` yet,
   each still rejected by name), exactly one per query, computed by nested-loop — the only algorithm

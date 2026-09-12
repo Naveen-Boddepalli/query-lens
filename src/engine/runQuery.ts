@@ -204,7 +204,15 @@ export function runQuery(
   }
 
   emitParseEvents(emit, ast);
-  const plan = emitPlanEvents(emit, ast, table, options.rowsPerPage, options.aggregateStrategy ?? 'hash', joinTable);
+  const plan = emitPlanEvents(
+    emit,
+    ast,
+    table,
+    options.rowsPerPage,
+    options.aggregateStrategy ?? 'hash',
+    joinTable,
+    options.joinStrategy ?? 'nested-loop',
+  );
 
   // A JOIN's second table gets its own heap, its pages numbered right after
   // the FROM table's — so both compete for the same buffer frames, the same

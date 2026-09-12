@@ -333,6 +333,30 @@ test('compare forces a hash aggregate and a sort aggregate onto the same GROUP B
   await expect(page.getByText(/makes no difference/)).toBeVisible();
 });
 
+test('compare forces nested-loop and hash join onto the same JOIN query', async ({ page }) => {
+  await page.goto('/compare');
+  await page.getByRole('radio', { name: 'Nested-loop join vs. hash join' }).click();
+
+  // Same rows out of both algorithms; the hash join reads far fewer pages —
+  // the demo purposely runs both under few enough buffer frames that a
+  // nested-loop rescan cannot stay cached.
+  await expect(page.getByText(/Same \d+ rows? either way/)).toBeVisible();
+  const column = (heading: string) =>
+    page.locator('div.flex.flex-col.gap-2', {
+      has: page.getByRole('heading', { name: heading, exact: true }),
+    });
+  const diskReads = (heading: string) =>
+    column(heading).locator('div.contents', { hasText: 'disk reads' }).locator('dd');
+  const nestedLoop = Number(await diskReads('Nested-loop join').innerText());
+  const hashJoin = Number(await diskReads('Hash join').innerText());
+  expect(hashJoin).toBeLessThan(nestedLoop);
+
+  // A query with no JOIN at all — the algorithm makes no difference.
+  await page.getByLabel('SQL').fill('SELECT * FROM authors');
+  await page.getByRole('button', { name: 'Run' }).click();
+  await expect(page.getByText(/makes no difference/)).toBeVisible();
+});
+
 test('a diagram panel exports itself as a PNG with real bytes', async ({ page }) => {
   await page.goto('/stages/index'); // the B+Tree panel — a real diagram
   const button = page.getByRole('button', { name: 'Download PNG' });

@@ -4,10 +4,13 @@ import { createJoinDemoDatabase } from '../seed.ts';
 import { parse, parseStatement } from '../parser/index.ts';
 import { buildPlan } from '../planner/buildPlan.ts';
 import { rootEstimate } from '../planner/cost.ts';
-import type { Database } from '../types.ts';
+import { DEFAULT_ENGINE_OPTIONS } from '../types.ts';
+import type { Database, EngineOptions } from '../types.ts';
 
 const db = () => createJoinDemoDatabase();
-const run = (sql: string, database: Database = db()) => runQuery(sql, database);
+const run = (sql: string, database: Database = db(), options: EngineOptions = DEFAULT_ENGINE_OPTIONS) =>
+  runQuery(sql, database, options);
+const HASH = { ...DEFAULT_ENGINE_OPTIONS, joinStrategy: 'hash' } as const;
 
 describe('JOIN — parsing', () => {
   it('parses a qualified ON clause into a JoinClause', () => {
@@ -150,6 +153,26 @@ describe('JOIN — plan and cost', () => {
     // per left row: 2 + 5*3.
     expect(est.estPages).toBe(2 + 5 * 3);
   });
+
+  it('buildPlan honours a joinStrategy of "hash"', () => {
+    const parsed = parse('SELECT * FROM authors JOIN posts ON authors.id = posts.authorId');
+    if (!parsed.ok) throw new Error(parsed.error.message);
+    const plan = buildPlan(parsed.ast, undefined, 'hash');
+    if (plan.op !== 'Project' || plan.child.op !== 'Join') throw new Error('expected Project -> Join');
+    expect(plan.child.algorithm).toBe('hash');
+  });
+
+  it('prices a hash join as reading each side once, not a rescan per left row', () => {
+    const parsed = parse('SELECT * FROM authors JOIN posts ON authors.id = posts.authorId');
+    if (!parsed.ok) throw new Error(parsed.error.message);
+    const plan = buildPlan(parsed.ast, undefined, 'hash');
+    const { authors, posts } = db().tables;
+    const est = rootEstimate(plan, authors!, 4, { posts: posts! });
+    // Same row estimate as nested-loop — the algorithm changes I/O, not cardinality.
+    expect(est.estRows).toBe(Math.round((5 * 10) / 4));
+    // authors is 2 pages, posts is 3 — a hash join reads each exactly once: 2 + 3.
+    expect(est.estPages).toBe(2 + 3);
+  });
 });
 
 describe('JOIN — pipeline correctness', () => {
@@ -288,5 +311,85 @@ describe('JOIN — the pipeline narrates it', () => {
     const { events } = run('SELECT * FROM authors JOIN posts ON authors.id = posts.authorId');
     const rules = events.flatMap((e) => (e.stage === 'optimize' ? [e.rule] : []));
     expect(rules).toEqual(['none']);
+  });
+});
+
+describe('JOIN — hash join (the second algorithm)', () => {
+  it('agrees with nested-loop on the exact same result set', () => {
+    const nested = run('SELECT * FROM authors JOIN posts ON authors.id = posts.authorId');
+    const hashed = run('SELECT * FROM authors JOIN posts ON authors.id = posts.authorId', db(), HASH);
+    const sortRows = (rs: readonly Record<string, unknown>[]) =>
+      [...rs].sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+    expect(sortRows(hashed.rows)).toEqual(sortRows(nested.rows));
+  });
+
+  it('agrees with nested-loop when WHERE filters the joined result', () => {
+    const sql = "SELECT * FROM authors JOIN posts ON authors.id = posts.authorId WHERE authors.name = 'ada'";
+    const nested = run(sql);
+    const hashed = run(sql, db(), HASH);
+    expect(hashed.rows.length).toBe(nested.rows.length);
+    expect(hashed.rows.length).toBeGreaterThan(0);
+  });
+
+  it('a NULL join key matches nothing under hash join either', () => {
+    const nullDb: Database = {
+      tables: {
+        a: { name: 'a', columns: ['id', 'k'], rows: [{ id: 1, k: null }, { id: 2, k: 1 }] },
+        b: { name: 'b', columns: ['id', 'k'], rows: [{ id: 1, k: null }, { id: 2, k: 1 }] },
+      },
+    };
+    const { rows } = runQuery('SELECT * FROM a JOIN b ON a.k = b.k', nullDb, HASH);
+    expect(rows).toEqual([{ 'a.id': 2, 'a.k': 1, 'b.id': 2, 'b.k': 1 }]);
+  });
+
+  it('produces zero rows, not an error, when nothing matches', () => {
+    const noMatch: Database = {
+      tables: {
+        a: { name: 'a', columns: ['id'], rows: [{ id: 1 }] },
+        b: { name: 'b', columns: ['id', 'aId'], rows: [{ id: 1, aId: 999 }] },
+      },
+    };
+    expect(runQuery('SELECT * FROM a JOIN b ON a.id = b.aId', noMatch, HASH).rows).toEqual([]);
+  });
+
+  it('a mismatched-type join key that nested-loop would still match, hash join also matches', () => {
+    // `compare('=', ...)` coerces a number and a numeric string to equal
+    // (plan.md §22.2's `evaluate.ts`) — the hash join's key must agree, or
+    // the two algorithms would silently disagree on which rows match.
+    const mixedDb: Database = {
+      tables: {
+        a: { name: 'a', columns: ['id'], rows: [{ id: 5 }] },
+        b: { name: 'b', columns: ['id', 'aId'], rows: [{ id: 1, aId: '5' }] },
+      },
+    };
+    const nested = runQuery('SELECT * FROM a JOIN b ON a.id = b.aId', mixedDb);
+    const hashed = runQuery('SELECT * FROM a JOIN b ON a.id = b.aId', mixedDb, HASH);
+    expect(nested.rows).toHaveLength(1);
+    expect(hashed.rows).toEqual(nested.rows);
+  });
+
+  it('LIMIT still caps the result, pulled through the probe phase one row at a time', () => {
+    const { rows } = run('SELECT * FROM authors JOIN posts ON authors.id = posts.authorId LIMIT 1', db(), HASH);
+    expect(rows).toHaveLength(1);
+  });
+
+  it('narrates a build step (the hash table) before any probe match', () => {
+    const { events } = run('SELECT * FROM authors JOIN posts ON authors.id = posts.authorId', db(), HASH);
+    const joinLabels = events.flatMap((e) => (e.stage === 'execute' && e.op === 'Join' ? [e.label] : []));
+    expect(joinLabels[0]).toMatch(/builds an in-memory hash table/);
+    expect(joinLabels.slice(1).every((label) => /probes the hash table/.test(label))).toBe(true);
+  });
+
+  it('reads each table once — no repeated page loads the way nested-loop rescans', () => {
+    const { events } = run('SELECT * FROM authors JOIN posts ON authors.id = posts.authorId', db(), HASH);
+    const loads = events.flatMap((e) => (e.stage === 'buffer' && e.action === 'load' ? [e.pageId] : []));
+    // authors: 2 pages, posts: 3 pages — each loaded at most once from disk.
+    expect(new Set(loads).size).toBe(loads.length);
+  });
+
+  it('is deterministic — the same query twice gives byte-identical traces', () => {
+    const a = run('SELECT * FROM authors JOIN posts ON authors.id = posts.authorId', db(), HASH);
+    const b = run('SELECT * FROM authors JOIN posts ON authors.id = posts.authorId', db(), HASH);
+    expect(JSON.stringify(a.events)).toEqual(JSON.stringify(b.events));
   });
 });

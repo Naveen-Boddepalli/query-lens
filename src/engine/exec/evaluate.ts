@@ -42,6 +42,18 @@ export function compare(op: '=' | '<' | '>', left: SqlValue, right: SqlValue): T
   return op === '=' ? a === b : op === '<' ? a < b : a > b;
 }
 
+/**
+ * A canonical string key for `=` comparison, exported for `operators.ts`'s
+ * hash join (plan.md §22.2): two non-null values collide under this key
+ * exactly when `compare('=', a, b)` above would say `true` — the same
+ * coercion, just computed once per value instead of pairwise. Never called
+ * on `null` — a NULL join key is filtered out before it would reach this,
+ * the same "NULL never matches NULL" rule `compare` itself enforces.
+ */
+export function equalityKeyOf(value: Exclude<SqlValue, null>): string {
+  return typeof value === 'boolean' ? String(Number(value)) : String(value);
+}
+
 export function evaluatePredicate(expr: Expr, row: Row): Truth {
   switch (expr.kind) {
     case 'compare':

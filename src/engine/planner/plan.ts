@@ -29,13 +29,15 @@ export type Plan =
    * the parser's `checkJoinOn` already guarantees the ON clause is exactly
    * one equality between a qualified column on each side, whichever order
    * it was written in, so no consumer here has to re-figure out which
-   * column belongs to which table. `nested-loop` is the only algorithm so
-   * far; hash join and sort-merge join are the natural next strategies, the
-   * same pair `HashAggregate`/`SortAggregate` already are for `GROUP BY`.
+   * column belongs to which table. Two algorithms so far, the same pair
+   * `HashAggregate`/`SortAggregate` already are for `GROUP BY`: `nested-loop`
+   * rescans `right` whole per row of `left`; `hash` builds an in-memory hash
+   * table over `right` once and probes it with `left` streamed. Sort-merge
+   * join is the natural third strategy, still open.
    */
   | {
       op: 'Join';
-      algorithm: 'nested-loop';
+      algorithm: 'nested-loop' | 'hash';
       left: Plan;
       right: Plan;
       leftTable: string;
@@ -229,7 +231,7 @@ function convert(
       return {
         id,
         op: 'Join',
-        label: `Join (nested-loop) ${plan.leftTable} × ${plan.rightTable}`,
+        label: `Join (${plan.algorithm}) ${plan.leftTable} × ${plan.rightTable}`,
         detail: `on: ${plan.leftTable}.${plan.leftColumn} = ${plan.rightTable}.${plan.rightColumn}`,
         ...(highlight ? { highlight } : {}),
         ...cost,
