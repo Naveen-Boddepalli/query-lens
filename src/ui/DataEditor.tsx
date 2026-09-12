@@ -12,7 +12,8 @@ import { btnGhost, btnPrimary, btnSecondary, inputField } from './primitives.ts'
 export interface DataEditorProps {
   table: Table;
   onApply: (rows: Row[]) => void;
-  onReset: () => void;
+  /** Omit for a table with no "original seed" to revert to (plan.md §22.7's schema editor) — hides the Reset button rather than showing one with nothing to do. */
+  onReset?: () => void;
   onClose: () => void;
 }
 
@@ -206,9 +207,11 @@ export function DataEditor({ table, onApply, onReset, onClose }: DataEditorProps
           >
             Import CSV
           </button>
-          <button type="button" onClick={() => { close(); onReset(); }} className={btnGhost}>
-            Reset to seed
-          </button>
+          {onReset && (
+            <button type="button" onClick={() => { close(); onReset(); }} className={btnGhost}>
+              Reset to seed
+            </button>
+          )}
           <p className="ml-auto max-w-xs text-label text-ink-dim">
             Fewer rows means fewer pages, and the buffer pool may stop evicting entirely.
           </p>

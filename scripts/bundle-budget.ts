@@ -63,7 +63,12 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
   // `hashJoin` operator in `exec/operators.ts`, the cost model's
   // per-algorithm estimate, and `equalityKeyOf` in `exec/evaluate.ts` — all
   // in `engine-*.js`, which this group still hoists.
-  { name: 'trace-ui', test: /^(PlaygroundPage|PlaygroundTour|TraceWorksheet|StageDetail|stageMeta|datasets|datasetCatalogue|types|seed|trace|runQuery|engine|SqlEditor|PlaybackControls|PresenterView|AstTree|BTreePanel|FlowTree|display)-/, kb: 49, note: 'Playground + the presenter view + the SQL editor + the shared panel/tree renderers (AstTree, BTreePanel, FlowTree, the two display transformers) plus the engine core (runQuery and the planner split into their own chunks once a third / second route imported them; SqlEditor split once /challenges became a second) plus the preset dataset library, the print worksheet, LIMIT, ORDER BY + the Sort operator, the full DELETE + INSERT + UPDATE write path, GROUP BY + aggregates, and JOIN — both algorithms (plan.md §22.2)' },
+  // Raised 49 → 51 for the multi-table schema editor (§22.7): `SchemaEditor.tsx`
+  // + `customDatabase.ts` (localStorage load/save, name validation reusing the
+  // real tokenizer, the starter database) — the piece JOIN shipped without,
+  // so it can finally run from the Playground itself instead of staying
+  // `/tools/planner` + `/compare`-only.
+  { name: 'trace-ui', test: /^(PlaygroundPage|PlaygroundTour|TraceWorksheet|StageDetail|stageMeta|datasets|datasetCatalogue|types|seed|trace|runQuery|engine|SqlEditor|PlaybackControls|PresenterView|AstTree|BTreePanel|FlowTree|display|SchemaEditor|customDatabase)-/, kb: 51, note: 'Playground + the presenter view + the SQL editor + the shared panel/tree renderers (AstTree, BTreePanel, FlowTree, the two display transformers) plus the engine core (runQuery and the planner split into their own chunks once a third / second route imported them; SqlEditor split once /challenges became a second) plus the preset dataset library, the print worksheet, LIMIT, ORDER BY + the Sort operator, the full DELETE + INSERT + UPDATE write path, GROUP BY + aggregates, JOIN — both algorithms, and the multi-table schema editor (plan.md §22.2, §22.7)' },
   // The small per-route shells: landing hub, stage index, examples, docs shell,
   // 404, tools index — plus the redesign's shared UI kit (primitives.ts,
   // PageHeader, Hero) that two or more of them import.
@@ -237,8 +242,11 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
  * total itself still fits under 399, so it stays put this time.
  * Raised 399 → 403 for `/tools/hash-join` (§22.3): a new lazy route plus its
  * own driver, `hashJoin.ts` — an eighth `/tools/*` sandbox.
+ * Raised 403 → 406 for the multi-table schema editor (§22.7): `SchemaEditor.tsx`
+ * + `customDatabase.ts` in the Playground chunk, and a small `DataEditor.tsx`
+ * change (an optional `onReset`) it reuses for per-table row editing.
  */
-const TOTAL_KB = 403;
+const TOTAL_KB = 406;
 
 const gzipKb = (bytes: Buffer): number => gzipSync(bytes, { level: 9 }).length / 1024;
 

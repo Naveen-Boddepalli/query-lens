@@ -834,6 +834,61 @@ test('the seed editor imports rows from pasted CSV', async ({ page }) => {
   await expect(page.getByText(/steps in this trace/)).toBeVisible();
 });
 
+test('a custom multi-table database can be built and joined from the Playground itself', async ({ page }) => {
+  await page.goto('/playground');
+  await page.getByRole('button', { name: 'Custom', exact: true }).click();
+
+  // Opens on a real two-table JOIN, run against the starter authors/posts pair.
+  await expect(page.getByRole('button', { name: 'Manage tables (2)' })).toBeVisible();
+  await expect(page.getByText(/steps in this trace/)).toBeVisible();
+  // A custom database isn't part of a trace file yet — the button says so.
+  await expect(page.getByRole('button', { name: 'Download trace' })).toBeDisabled();
+
+  await page.getByRole('button', { name: 'Manage tables (2)' }).click();
+  const manage = page.getByRole('dialog', { name: 'Manage tables' });
+  await manage.getByRole('button', { name: '+ Add table' }).click();
+  await manage.getByPlaceholder('reviews').fill('comments');
+  await manage.getByPlaceholder('id, rating, comment').fill('id, postId, body');
+  await manage.getByLabel('Index').selectOption('id');
+  await manage.getByRole('button', { name: 'Add table' }).click();
+  await expect(manage.getByText('3 tables')).toBeVisible();
+
+  // Edit its rows in the nested DataEditor — no "Reset to seed" for a table with no seed.
+  await manage.getByRole('button', { name: 'Edit rows' }).nth(1).click();
+  const rowEditor = page.getByRole('dialog', { name: 'Edit seed data' });
+  await expect(rowEditor.getByRole('button', { name: /Reset to seed/ })).toHaveCount(0);
+  await rowEditor.getByRole('button', { name: '+ Add row' }).click();
+  await rowEditor.getByLabel('id row 1', { exact: true }).fill('1');
+  await rowEditor.getByLabel('postId row 1', { exact: true }).fill('1');
+  await rowEditor.getByLabel('body row 1', { exact: true }).fill('nice post!');
+  await rowEditor.getByRole('button', { name: /Apply .* re-run/ }).click();
+  await expect(manage.getByText('1 row', { exact: true })).toBeVisible();
+
+  await manage.getByRole('button', { name: /Apply .* re-run/ }).click();
+  await expect(manage).toHaveCount(0);
+
+  // JOIN the freshly-created table against an existing one, in the real Playground.
+  await page.getByLabel('SQL query').click();
+  await page.keyboard.press('ControlOrMeta+a');
+  await page.keyboard.type(
+    'SELECT posts.title, comments.body FROM posts JOIN comments ON posts.id = comments.postId',
+  );
+  await page.getByRole('button', { name: /^Run/ }).click();
+  await page.getByLabel('Scrub to step').press('End');
+  await expect(page.getByText(/1 row returned/)).toBeVisible();
+  await expect(page.getByText("nice post!")).toBeVisible();
+
+  // Persists across a reload.
+  await page.reload();
+  await page.getByRole('button', { name: 'Custom', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Manage tables (3)' })).toBeVisible();
+
+  // Switching to a preset cleanly leaves custom mode.
+  await page.getByRole('button', { name: 'users', exact: true }).click();
+  await expect(page.getByRole('button', { name: /^Edit data/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Download trace' })).toBeEnabled();
+});
+
 test('the progress dashboard fills in from real Playground activity', async ({ page }) => {
   await page.goto('/progress');
   await expect(page.getByText(/Nothing tracked yet/)).toBeVisible();

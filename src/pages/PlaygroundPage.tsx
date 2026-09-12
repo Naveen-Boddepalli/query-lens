@@ -17,12 +17,18 @@ import type {
   Stage,
 } from '../engine/index.ts';
 import { DATASET_CATALOGUE } from '../ui/datasetCatalogue.ts';
+import {
+  CUSTOM_STARTER_SQL,
+  loadCustomDatabase,
+  saveCustomDatabase,
+} from '../ui/customDatabase.ts';
 import { ErrorBoundary } from '../ui/ErrorBoundary.tsx';
 import { publishRepro } from '../ui/errorReport.ts';
 import { PipelineTracker } from '../ui/PipelineTracker.tsx';
 import { PlaybackControls } from '../ui/PlaybackControls.tsx';
 import { SqlEditor } from '../ui/SqlEditor.tsx';
 import { DataEditor } from '../ui/DataEditor.tsx';
+import { SchemaEditor } from '../ui/SchemaEditor.tsx';
 import { PredictionCard } from '../ui/PredictionCard.tsx';
 import { PresenterView } from '../ui/PresenterView.tsx';
 import { PlaygroundTour } from '../ui/PlaygroundTour.tsx';
@@ -108,6 +114,12 @@ export function PlaygroundPage() {
   const [pinnedStage, setPinnedStage] = useState<Stage | null>(null);
   const [datasetId, setDatasetId] = useState<DatasetId>(DATASET_ID);
   const [db, setDb] = useState<Database>(START.db);
+  // plan.md §22.7: a user-authored, multi-table database — local only (not
+  // part of `datasetId`/the URL scheme, which assume one of the three fixed
+  // presets), so JOIN can finally run from the Playground itself instead of
+  // staying `/tools/planner` + `/compare`-only.
+  const [isCustom, setIsCustom] = useState(false);
+  const [schemaEditorOpen, setSchemaEditorOpen] = useState(false);
   const [editingData, setEditingData] = useState(false);
   const [rowsEdited, setRowsEdited] = useState(SHARED.rows !== undefined);
   const [result, setResult] = useState<RunResult>(INITIAL_RESULT);
@@ -238,7 +250,10 @@ export function PlaygroundPage() {
           policy,
           predictOn,
           step: playback.step,
-          dataset: datasetId,
+          // A custom database has no `DatasetId` of its own (plan.md §22.7) —
+          // omitted rather than the stale preset id underneath it, so a
+          // copied link never claims to be a preset it isn't.
+          ...(isCustom ? {} : { dataset: datasetId }),
           ...(rowsEdited && table ? { rows: table.rows } : {}),
         },
         table,
@@ -248,7 +263,7 @@ export function PlaygroundPage() {
       writeShareState(presenting ? `${query}&present=1` : query);
     }, 250);
     return () => { window.clearTimeout(timer); };
-  }, [sql, policy, predictOn, playback.step, datasetId, rowsEdited, table, presenting]);
+  }, [sql, policy, predictOn, playback.step, datasetId, isCustom, rowsEdited, table, presenting]);
 
   const [copied, setCopied] = useState(false);
   async function copyLink() {
@@ -320,10 +335,11 @@ export function PlaygroundPage() {
    * `run`, whose `useCallback` still closes over the old `sql`/`db`.
    */
   function switchDataset(id: DatasetId) {
-    if (id === datasetId) return;
+    if (!isCustom && id === datasetId) return;
     const nextDb = DATASETS[id].make();
     const nextSql = DATASET_CATALOGUE[id].starterSql;
     setDatasetId(id);
+    setIsCustom(false);
     setDb(nextDb);
     setRowsEdited(false);
     setEditingData(false);
@@ -334,6 +350,38 @@ export function PlaygroundPage() {
     setAnswers({});
     playback.land(landingStep(next, askToPredict));
   }
+
+  /** Switches to the user's own multi-table database — same shape as `switchDataset`, loading from `localStorage` instead of a fixed preset (plan.md §22.7). */
+  function switchToCustom() {
+    if (isCustom) return;
+    const nextDb = loadCustomDatabase();
+    setIsCustom(true);
+    setDb(nextDb);
+    setRowsEdited(false);
+    setEditingData(false);
+    setSql(CUSTOM_STARTER_SQL);
+    const next = runQuery(CUSTOM_STARTER_SQL, nextDb, options);
+    setResult(next);
+    setPinnedStage(null);
+    setAnswers({});
+    playback.land(landingStep(next, askToPredict));
+  }
+
+  function applySchema(next: Database) {
+    setDb(next);
+    setRowsEdited(true);
+    setSchemaEditorOpen(false);
+    run(next);
+  }
+
+  // Every discrete change to a custom database is saved as it happens — no
+  // debounce, unlike the URL-share effect below: `db` here only changes on
+  // whole actions (an applied schema edit, a write statement's persisted
+  // result), never per keystroke, so there is no thrash to guard against, and
+  // a debounce would risk losing an edit made just before switching away.
+  useEffect(() => {
+    if (isCustom) saveCustomDatabase(db);
+  }, [isCustom, db]);
 
   // plan.md §22.5: the shareable moment as a file, for a dataset too big for a
   // URL or a bug report that wants the seed data attached. `data:` + `<a
@@ -373,6 +421,7 @@ export function PlaygroundPage() {
     setPolicy(t.policy);
     setPredictOn(t.predictOn);
     setDatasetId(t.dataset);
+    setIsCustom(false); // a trace file always names one of the fixed presets
     setDb(nextDb);
     setRowsEdited(t.rows !== null);
     setEditingData(false);
@@ -419,7 +468,7 @@ export function PlaygroundPage() {
                     onClick={() => { switchDataset(id); }}
                     title={DATASET_CATALOGUE[id].blurb}
                     className={`rounded-full border px-2.5 py-0.5 text-label transition ${
-                      datasetId === id
+                      !isCustom && datasetId === id
                         ? 'border-accent bg-accent-soft text-ink'
                         : 'border-edge text-ink-dim hover:border-ink-dim/50 hover:text-ink'
                     }`}
@@ -427,27 +476,45 @@ export function PlaygroundPage() {
                     {DATASET_CATALOGUE[id].label}
                   </button>
                 ))}
-              </div>
-              <p className="text-label text-ink-dim/80">{DATASET_CATALOGUE[datasetId].blurb}</p>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-1.5">
-              <span className="mr-1 text-label text-ink-dim">Try:</span>
-              {presets.map((p) => (
                 <button
-                  key={p.label}
                   type="button"
-                  onClick={() => { loadPreset(p.sql); }}
+                  onClick={switchToCustom}
+                  title="Your own tables — added, edited and joined here, kept in this browser"
                   className={`rounded-full border px-2.5 py-0.5 text-label transition ${
-                    sql === p.sql
+                    isCustom
                       ? 'border-accent bg-accent-soft text-ink'
                       : 'border-edge text-ink-dim hover:border-ink-dim/50 hover:text-ink'
                   }`}
                 >
-                  {p.label}
+                  Custom
                 </button>
-              ))}
+              </div>
+              <p className="text-label text-ink-dim/80">
+                {isCustom
+                  ? 'Your own tables, kept in this browser — add a table, declare an index, and JOIN across them.'
+                  : DATASET_CATALOGUE[datasetId].blurb}
+              </p>
             </div>
+
+            {!isCustom && (
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="mr-1 text-label text-ink-dim">Try:</span>
+                {presets.map((p) => (
+                  <button
+                    key={p.label}
+                    type="button"
+                    onClick={() => { loadPreset(p.sql); }}
+                    className={`rounded-full border px-2.5 py-0.5 text-label transition ${
+                      sql === p.sql
+                        ? 'border-accent bg-accent-soft text-ink'
+                        : 'border-edge text-ink-dim hover:border-ink-dim/50 hover:text-ink'
+                    }`}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+            )}
 
             <SqlEditor
               value={sql}
@@ -463,13 +530,23 @@ export function PlaygroundPage() {
             <button type="button" onClick={() => { run(); }} className={btnPrimary}>
               Run{touch ? '' : ` ${RUN_HINT}`}
             </button>
-            <button
-              type="button"
-              onClick={() => { setEditingData(true); }}
-              className={btnSecondary}
-            >
-              Edit data ({table?.rows.length ?? 0})
-            </button>
+            {isCustom ? (
+              <button
+                type="button"
+                onClick={() => { setSchemaEditorOpen(true); }}
+                className={btnSecondary}
+              >
+                Manage tables ({Object.keys(db.tables).length})
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => { setEditingData(true); }}
+                className={btnSecondary}
+              >
+                Edit data ({table?.rows.length ?? 0})
+              </button>
+            )}
             <label className="ml-auto flex items-center gap-2 text-label text-ink-dim">
               Eviction
               <select
@@ -505,7 +582,9 @@ export function PlaygroundPage() {
               <button
                 type="button"
                 onClick={downloadTrace}
-                className="underline-offset-2 transition-colors hover:text-ink hover:underline"
+                disabled={isCustom}
+                title={isCustom ? 'A custom database is not yet part of a trace file — kept in this browser only.' : undefined}
+                className="underline-offset-2 transition-colors hover:text-ink hover:underline disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:no-underline disabled:hover:text-inherit"
               >
                 Download trace
               </button>
@@ -682,7 +761,7 @@ export function PlaygroundPage() {
           sql={sql}
           policy={policy}
           predictOn={predictOn}
-          dataset={datasetId}
+          dataset={isCustom ? 'a custom database' : datasetId}
           events={result.events}
           rowCount={result.rows.length}
         />
@@ -694,6 +773,14 @@ export function PlaygroundPage() {
           onApply={applyRows}
           onReset={resetData}
           onClose={() => { setEditingData(false); }}
+        />
+      )}
+
+      {schemaEditorOpen && (
+        <SchemaEditor
+          db={db}
+          onApply={applySchema}
+          onClose={() => { setSchemaEditorOpen(false); }}
         />
       )}
 

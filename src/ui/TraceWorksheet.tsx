@@ -1,6 +1,6 @@
 import { BUILD_SHA } from '../buildInfo.ts';
 import { REPLACEMENT_POLICY_LABELS } from '../engine/index.ts';
-import type { DatasetId, ReplacementPolicyName, StepEvent } from '../engine/index.ts';
+import type { ReplacementPolicyName, StepEvent } from '../engine/index.ts';
 
 /**
  * plan.md §22.6: the current query and its whole trace as a paper worksheet,
@@ -24,7 +24,8 @@ export function TraceWorksheet({
   sql: string;
   policy: ReplacementPolicyName;
   predictOn: boolean;
-  dataset: DatasetId;
+  /** Display text only — a preset's `DatasetId`, or a custom database's own label (plan.md §22.7). */
+  dataset: string;
   events: readonly StepEvent[];
   rowCount: number;
 }) {

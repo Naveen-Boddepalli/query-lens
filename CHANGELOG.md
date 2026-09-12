@@ -8,6 +8,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **A multi-table schema editor in the Playground itself** (plan.md §22.7) — the one piece JOIN
+  shipped without. A fourth "Custom" chip joins the existing `users`/`orders`/`logins` data presets;
+  clicking it opens on a real, editable `authors`/`posts` pair (the same starter `/tools/planner`
+  uses) and a new **Manage tables** button. `SchemaEditor.tsx` lets you add a table (name, a
+  comma-separated column list, an optional index), remove one, or open its rows in a nested
+  `DataEditor` — native `<dialog>`s stack fine, and this is the only caller that omits
+  `DataEditor`'s now-optional `onReset` prop, since a user-authored table has no "seed" to revert to.
+
+  Table and column names are validated by literally tokenizing the candidate string and checking it
+  produces exactly one `identifier` token (`isValidName`, `src/ui/customDatabase.ts`) — reusing the
+  real tokenizer rather than a hand-written regex means a SQL keyword is rejected for free (it
+  tokenizes as `'keyword'`, not `'identifier'`) with zero risk of drifting from what `runQuery` will
+  actually accept. `Database.tables` needed no engine change — it was already `Record<string,
+  Table>` — so this was purely a UI gap.
+
+  A custom database is deliberately **local only**: kept in `localStorage`
+  (`loadCustomDatabase`/`saveCustomDatabase`), never encoded into the URL or a trace file.
+  `isCustom` is its own boolean, not a fourth `DatasetId` — widening that closed 3-value union would
+  have dragged `urlState.ts`'s positional-by-known-columns row encoding, `traceFile.ts`'s
+  `TraceState.dataset`, and `datasets.test.ts`'s one-table-per-preset invariant into supporting an
+  open-ended schema none of them were designed for. `Download trace` is disabled with an explanatory
+  tooltip while Custom is active, and switching to a preset — or loading a trace file, which always
+  names one of the three fixed presets — cleanly exits custom mode. 29 unit tests for the driver, 7
+  for `SchemaEditor`, 1 e2e covering the full flow: add a table, edit its rows, `JOIN` it against an
+  existing one in the real Playground, reload and confirm it persisted, then switch back to a preset
+  and confirm a clean exit.
+
+  Deliberately out of scope for v1: renaming a column after a table is created — the query text
+  itself has no way to follow along, so the honest version is "define the columns once, at creation."
 - **`/tools/hash-join`, a Grace hash join sandbox** (plan.md §22.3) — the engine's real `hashJoin`
   operator (added just above) never partitions or spills, so this is its own driver, `src/ui/hashJoin.ts`,
   the same "own driver, no playback" shape `externalSort.ts` established for `/tools/sort`. Given a
