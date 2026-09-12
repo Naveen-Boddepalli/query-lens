@@ -90,7 +90,11 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
   // Raised 38 → 39 for `/compare`'s fourth mode, nested-loop join vs. hash
   // join (§22.2): a `JoinCompare` panel, the same shape as the other three,
   // plus its own small `authors`/`posts` demo database.
-  { name: 'standalone-tools', test: /^(GalleryPage|ComparePage|SettingsPage|AssignmentsNewPage|TracePage|BufferPoolToolPage|ParserToolPage|BTreeToolPage|PageToolPage|SortToolPage|PlannerToolPage|LocksToolPage|lockSimulation|GrammarToolPage|grammar|BufferPoolPanel|bufferTrace|slottedPage|externalSort|assignmentSet|preferences|urlState)-/, kb: 39, note: 'Gallery, Tools, Compare, Settings, Assignments (+ assignment sets), the trace inspector, and the buffer-pool / parser / B+Tree / slotted-page / external-merge-sort / planner / locks / grammar sandboxes (plan.md §21.3, §20.4, §22.3, §22.4)' },
+  // Raised 39 → 43 for `/tools/hash-join` (§22.3): `HashJoinToolPage.tsx` +
+  // its own driver, `hashJoin.ts` (partitioning, per-level spill, and the
+  // bucket-collision build/probe model) — an eighth `/tools/*` sandbox,
+  // lazy, and the first to need its own recursive tree renderer.
+  { name: 'standalone-tools', test: /^(GalleryPage|ComparePage|SettingsPage|AssignmentsNewPage|TracePage|BufferPoolToolPage|ParserToolPage|BTreeToolPage|PageToolPage|SortToolPage|PlannerToolPage|LocksToolPage|lockSimulation|GrammarToolPage|grammar|HashJoinToolPage|hashJoin|BufferPoolPanel|bufferTrace|slottedPage|externalSort|assignmentSet|preferences|urlState)-/, kb: 43, note: 'Gallery, Tools, Compare, Settings, Assignments (+ assignment sets), the trace inspector, and the buffer-pool / parser / B+Tree / slotted-page / external-merge-sort / planner / locks / grammar / hash-join sandboxes (plan.md §21.3, §20.4, §22.3, §22.4)' },
   // The `/learn` guided track (plan.md §21.3): the index, one lesson page, the
   // localStorage progress helper, and `lessons.tsx` — the lesson prose plus the
   // link-builder that computes each step from a real engine run. Lazy; loads
@@ -231,8 +235,10 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
  * `trace-ui` and `standalone-tools` both bumped for hash join, JOIN's second
  * algorithm, and `/compare`'s fourth mode naming it against nested-loop — the
  * total itself still fits under 399, so it stays put this time.
+ * Raised 399 → 403 for `/tools/hash-join` (§22.3): a new lazy route plus its
+ * own driver, `hashJoin.ts` — an eighth `/tools/*` sandbox.
  */
-const TOTAL_KB = 399;
+const TOTAL_KB = 403;
 
 const gzipKb = (bytes: Buffer): number => gzipSync(bytes, { level: 9 }).length / 1024;
 

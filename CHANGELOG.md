@@ -8,6 +8,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`/tools/hash-join`, a Grace hash join sandbox** (plan.md §22.3) — the engine's real `hashJoin`
+  operator (added just above) never partitions or spills, so this is its own driver, `src/ui/hashJoin.ts`,
+  the same "own driver, no playback" shape `externalSort.ts` established for `/tools/sort`. Given a
+  build-key list, a probe-key list, and a memory budget, `planHashJoin` lays out the whole plan up
+  front: `numPartitions = memPages - 1`; each partitioning level hashes with a Knuth multiplicative
+  `h1`, a *different* constant per level so a partition still too big after one pass genuinely
+  redistributes on the next rather than repeating the same split; a hard depth cap of 2 so a
+  heavily-skewed build side (many equal keys, which no hash of the value alone can ever separate)
+  still terminates instead of recursing forever. A leaf partition's build phase hashes again with
+  `h2 = key mod numBuckets`, sized so two keys share a bucket on average — collisions are the point,
+  not an edge case to avoid — and its probe phase reports each probe key as a genuine match, a bucket
+  collision that still failed the equality check, or a clean miss. `HashJoinToolPage.tsx` renders every
+  partitioning level as its own row (a dashed box split further, a solid one is a leaf ready to build
+  and probe) and a selected leaf's own bucket table and match/miss list below.
+
+  One real bug, caught by looking at the tool in the browser rather than by any of the 19 unit tests
+  written first: an initial level-1 multiplier (`40503`) was itself a multiple of 3, so at the tool's
+  own default parameters (`numPartitions = 3`) every key collapsed into a single partition on the very
+  first split — the "spill" was a silent no-op that just recreated the parent. Fixed by picking
+  multipliers confirmed coprime to 2 through 5 (every `numPartitions` this tool can reach), plus a 20th
+  regression test reproducing the exact scenario. 1 new e2e test.
 - **Hash join, `JOIN`'s second algorithm, and a fourth `/compare` mode naming it against
   nested-loop** (plan.md §22.2) — `Join.algorithm` widens from the single `'nested-loop'` value to
   `'nested-loop' | 'hash'`. The new `hashJoin` operator (`exec/operators.ts`) drains the right side

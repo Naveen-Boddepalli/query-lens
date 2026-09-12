@@ -226,6 +226,23 @@ test('the external merge sort sandbox trades memory for I/O', async ({ page }) =
   await expect(run).toHaveAttribute('aria-pressed', 'true');
 });
 
+test('the hash join sandbox partitions, spills, and shows a bucket collision', async ({ page }) => {
+  // 12 build keys, 4 buffer pages → build side doesn't fit, forcing a spill.
+  await page.goto('/tools/hash-join?build=12&probe=20&page=2&mem=4&seed=1');
+  await expect(page.getByRole('heading', { name: 'Hash join' })).toBeVisible();
+  await expect(page.getByText('too big — splits further')).toBeVisible();
+  await expect(page.getByText('⚠ collision').first()).toBeVisible();
+
+  // A leaf partition is selected by default and shows its own build/probe detail.
+  await expect(page.getByRole('heading', { name: /build & probe/ })).toBeVisible();
+  await expect(page.getByText(/\d+ matches?, \d+ misses?/)).toBeVisible();
+
+  // A generous buffer budget needs no partitioning pass at all.
+  await page.getByLabel('Buffer pages').selectOption('6');
+  await expect(page.getByText(/no split needed/)).toBeVisible();
+  await expect.poll(() => page.url()).toMatch(/[?&]mem=6/);
+});
+
 test('the planner sandbox runs the rewrite rules one at a time', async ({ page }) => {
   await page.goto('/tools/planner');
   await expect(page.getByRole('heading', { name: 'Planner sandbox' })).toBeVisible();

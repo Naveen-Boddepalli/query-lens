@@ -64,6 +64,13 @@ const TOOLS = [
       'Every rule the parser accepts, diagrammed straight from the same data its own test checks against the real tokenizer and parser — a keyword pill, a clickable box for a rule it calls, a dashed bracket for anything optional, a loop glyph for anything repeated.',
     available: true,
   },
+  {
+    title: 'Hash join',
+    href: '/tools/hash-join',
+    description:
+      'Grace hash join: partition a build side and a probe side by hashing the join key, split further whatever still doesn\'t fit in memory, then build an in-memory hash table over each partition and probe it — hash collisions and partition spill both on display.',
+    available: true,
+  },
 ] as const;
 
 export function ToolsIndexPage() {
