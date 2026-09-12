@@ -13,12 +13,22 @@ import {
 import { STAGE_META } from '../stageMeta.ts';
 import { CopyButton } from '../CopyButton.tsx';
 import { DownloadPngButton } from '../DownloadPngButton.tsx';
+import { DownloadSvgButton } from '../DownloadSvgButton.tsx';
+import type { FlowNode, SideEdge } from './FlowTree.tsx';
 import { AstTree } from './AstTree.tsx';
+import { TONES as AST_TONES } from './astTreeTones.ts';
 import { BTreePanel } from './BTreePanel.tsx';
+import {
+  collectSiblings,
+  ICONS as BTREE_ICONS,
+  toFlow as btreeToFlow,
+  TONES as BTREE_TONES,
+} from './btreeTones.ts';
 import { LockPanel } from './LockPanel.tsx';
 import { BufferPoolPanel } from './BufferPoolPanel.tsx';
 import { ResultPanel } from './ResultPanel.tsx';
 import { PlanTree } from './PlanTree.tsx';
+import { toFlow as planToFlow, TONES as PLAN_TONES } from './planTreeTones.ts';
 
 export interface StageDetailProps {
   stage: Stage;
@@ -100,6 +110,38 @@ export function StageDetail({
           ? indexTreeToText(state.indexTree)
           : null;
 
+  // A real vector export (§20.3) — unlike Mermaid, it *can* take the B+Tree
+  // (its own renderer draws a sibling chain fine; Mermaid's layout cannot).
+  // `svgTree` bundles exactly what `renderSvg` needs: the same `FlowNode`
+  // root, tone map and layout flags (`wide`/`compact`/`sideEdges`) each panel
+  // already builds for itself, reused here rather than duplicated.
+  const svgTree: {
+    root: FlowNode;
+    tones: Record<string, string>;
+    kindIcons?: Record<string, string>;
+    wide?: boolean;
+    compact?: boolean;
+    sideEdges?: SideEdge[];
+  } | null =
+    stage === 'parse' && state.ast
+      ? { root: state.ast, tones: AST_TONES }
+      : (stage === 'plan' || stage === 'optimize') && state.plan
+        ? { root: planToFlow(state.plan), tones: PLAN_TONES, wide: true }
+        : stage === 'index' && state.indexTree
+          ? (() => {
+              const pathSet = new Set(state.indexPath);
+              const sideEdges: SideEdge[] = [];
+              collectSiblings(state.indexTree, sideEdges);
+              return {
+                root: btreeToFlow(state.indexTree, pathSet),
+                tones: BTREE_TONES,
+                kindIcons: BTREE_ICONS,
+                compact: true,
+                sideEdges,
+              };
+            })()
+          : null;
+
   // In-app EXPLAIN (§22.2): estimate next to actual, offered once the query
   // has actually run — `state.operators` is only complete by the result
   // stage, the same way real `EXPLAIN ANALYZE` needs the query to finish.
@@ -135,6 +177,17 @@ export function StageDetail({
 
         <div className="ml-auto flex flex-wrap items-center gap-2">
           {implemented && <DownloadPngButton target={panelRef} name={stage} />}
+          {svgTree && (
+            <DownloadSvgButton
+              root={svgTree.root}
+              tones={svgTree.tones}
+              name={stage}
+              {...(svgTree.kindIcons ? { kindIcons: svgTree.kindIcons } : {})}
+              {...(svgTree.wide === undefined ? {} : { wide: svgTree.wide })}
+              {...(svgTree.compact === undefined ? {} : { compact: svgTree.compact })}
+              {...(svgTree.sideEdges ? { sideEdges: svgTree.sideEdges } : {})}
+            />
+          )}
           {mermaid && (
             <CopyButton
               text={mermaid}

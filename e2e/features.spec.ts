@@ -395,6 +395,41 @@ test('a diagram panel exports itself as a PNG with real bytes', async ({ page })
   await expect(page.getByRole('button', { name: 'Saved ✓' })).toBeVisible();
 });
 
+test('the AST, plan and B+Tree panels export themselves as a real vector SVG', async ({ page }) => {
+  async function downloadSvg(path: string, filename: string) {
+    await page.goto(path);
+    const button = page.getByRole('button', { name: 'Download SVG' });
+    const downloadPromise = page.waitForEvent('download');
+    await button.click();
+    const download = await downloadPromise;
+    expect(download.suggestedFilename()).toBe(filename);
+
+    const stream = await download.createReadStream();
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream) chunks.push(chunk as Buffer);
+    return Buffer.concat(chunks).toString('utf8');
+  }
+
+  const ast = await downloadSvg('/stages/parse', 'querylens-parse.svg');
+  expect(ast.startsWith('<svg xmlns="http://www.w3.org/2000/svg"')).toBe(true);
+  expect(ast.trimEnd().endsWith('</svg>')).toBe(true);
+  expect(ast).toContain('<rect ');
+  expect(ast).toContain('<text ');
+  // The whole point: real rgb()/rgba() colours, never this app's own oklch()
+  // design tokens, which Illustrator/Inkscape/PowerPoint don't reliably import.
+  expect(ast).not.toMatch(/oklch|oklab/);
+
+  const plan = await downloadSvg('/stages/optimize', 'querylens-optimize.svg');
+  expect(plan).toContain('<path ');
+  expect(plan).not.toMatch(/oklch|oklab/);
+
+  // The B+Tree — the one Mermaid can't take, since it lays out a sibling
+  // chain badly; this renderer draws it as a dashed side edge instead.
+  const btree = await downloadSvg('/stages/index', 'querylens-index.svg');
+  expect(btree).toContain('stroke-dasharray');
+  expect(btree).not.toMatch(/oklch|oklab/);
+});
+
 test('the AST and plan panels copy themselves as a Mermaid diagram', async ({ page, context }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
 

@@ -68,7 +68,14 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
   // real tokenizer, the starter database) — the piece JOIN shipped without,
   // so it can finally run from the Playground itself instead of staying
   // `/tools/planner` + `/compare`-only.
-  { name: 'trace-ui', test: /^(PlaygroundPage|PlaygroundTour|TraceWorksheet|StageDetail|stageMeta|datasets|datasetCatalogue|types|seed|trace|runQuery|engine|SqlEditor|PlaybackControls|PresenterView|AstTree|BTreePanel|FlowTree|display|SchemaEditor|customDatabase)-/, kb: 51, note: 'Playground + the presenter view + the SQL editor + the shared panel/tree renderers (AstTree, BTreePanel, FlowTree, the two display transformers) plus the engine core (runQuery and the planner split into their own chunks once a third / second route imported them; SqlEditor split once /challenges became a second) plus the preset dataset library, the print worksheet, LIMIT, ORDER BY + the Sort operator, the full DELETE + INSERT + UPDATE write path, GROUP BY + aggregates, JOIN — both algorithms, and the multi-table schema editor (plan.md §22.2, §22.7)' },
+  // Raised 51 → 53 for the true vector SVG export (§20.3): `renderSvg.ts` (the
+  // shared d3-hierarchy-to-`<svg>` renderer) + `DownloadSvgButton.tsx`, plus
+  // `astTreeTones.ts`/`planTreeTones.ts`/`btreeTones.ts` — each tree's own tone
+  // map and `toFlow`, split out of its component file so Fast Refresh still
+  // works (a component file can only export components) and so `StageDetail`
+  // can reuse the exact same map the on-screen tree already renders with,
+  // rather than a second one that could drift.
+  { name: 'trace-ui', test: /^(PlaygroundPage|PlaygroundTour|TraceWorksheet|StageDetail|stageMeta|datasets|datasetCatalogue|types|seed|trace|runQuery|engine|SqlEditor|PlaybackControls|PresenterView|AstTree|BTreePanel|FlowTree|display|SchemaEditor|customDatabase|renderSvg|DownloadSvgButton|astTreeTones|planTreeTones|btreeTones)-/, kb: 53, note: 'Playground + the presenter view + the SQL editor + the shared panel/tree renderers (AstTree, BTreePanel, FlowTree, the two display transformers) plus the engine core (runQuery and the planner split into their own chunks once a third / second route imported them; SqlEditor split once /challenges became a second) plus the preset dataset library, the print worksheet, LIMIT, ORDER BY + the Sort operator, the full DELETE + INSERT + UPDATE write path, GROUP BY + aggregates, JOIN — both algorithms, the multi-table schema editor, and true vector SVG export (plan.md §22.2, §22.7, §20.3)' },
   // The small per-route shells: landing hub, stage index, examples, docs shell,
   // 404, tools index — plus the redesign's shared UI kit (primitives.ts,
   // PageHeader, Hero) that two or more of them import.
@@ -245,8 +252,11 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
  * Raised 403 → 406 for the multi-table schema editor (§22.7): `SchemaEditor.tsx`
  * + `customDatabase.ts` in the Playground chunk, and a small `DataEditor.tsx`
  * change (an optional `onReset`) it reuses for per-table row editing.
+ * Raised 406 → 409 for true vector SVG export (§20.3): `renderSvg.ts` +
+ * `DownloadSvgButton.tsx`, plus each tree's tone map/`toFlow` moving into its
+ * own file so `StageDetail` can reuse them without a second colour table.
  */
-const TOTAL_KB = 406;
+const TOTAL_KB = 409;
 
 const gzipKb = (bytes: Buffer): number => gzipSync(bytes, { level: 9 }).length / 1024;
 

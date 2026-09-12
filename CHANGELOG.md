@@ -8,6 +8,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **True vector SVG export for the AST, plan and B+Tree trees** (plan.md §20.3) — a **Download SVG**
+  button beside **Download PNG**, emitting real `<rect>`/`<text>`/`<path>` elements instead of
+  `html-to-image`'s `toSvg`, which wraps HTML in a `<foreignObject>` that Illustrator, Inkscape and
+  PowerPoint all import inconsistently — a screenshot with extra steps, not a real vector export.
+  `src/ui/renderSvg.ts` reuses the *exact* d3-hierarchy layout `FlowTree.tsx`'s own `build()` already
+  computes, so an exported tree matches what was on screen, but never touches the DOM for geometry:
+  every label/detail line in the app is already `font-mono`, so a fixed monospace character-width
+  estimate (`wrapMonospace`) wraps text deterministically with no text measurement needed at all.
+
+  Colour is the one place this can't stay fully pure. `resolveTone` reuses each tree's *existing*
+  `tones` map verbatim — no second colour table to drift out of sync with what's actually on screen —
+  by recognising the app's own two Tailwind conventions (a `hue-<name>` design token, or
+  `[var(--color-<name>)]` naming one directly) and resolving them through an injected `resolveColor`
+  callback, which keeps the geometry and text-wrapping pure and unit-testable without a real DOM. The
+  real, browser-backed resolver (`resolveCssColor`) is a two-step pipeline, not one: a throwaway
+  element's computed `color` resolves any `var()`/`color-mix()` reference (the only step that can,
+  since those need a real CSS cascade), and then a 1×1 canvas *rasterises* that value to concrete
+  8-bit RGBA — because current Chrome's `getComputedStyle` now **preserves** `oklch()`/`oklab()`
+  rather than normalising to `rgb()` the way it used to. Skipping that second step would have silently
+  reproduced the exact "imports inconsistently" problem this feature exists to fix, just via an
+  unsupported colour function instead of `foreignObject` — caught by inspecting an actual downloaded
+  file in the browser, not by any unit test.
+
+  `AstTree.tsx`, `PlanTree.tsx` and `BTreePanel.tsx` each had their `TONES`/`toFlow`/`ICONS` moved into
+  a sibling data file (`astTreeTones.ts`/`planTreeTones.ts`/`btreeTones.ts`): Fast Refresh only works
+  on a file that exports nothing but components, and `StageDetail.tsx` needed the same data these
+  components already had to build the new **Download SVG** button. 18 new unit tests (including one
+  that imports the three real tone maps and asserts every entry classifies correctly — an anti-drift
+  check, not a hardcoded copy), 1 e2e covering all three trees and asserting zero `oklch`/`oklab` ever
+  reaches the exported file.
 - **A multi-table schema editor in the Playground itself** (plan.md §22.7) — the one piece JOIN
   shipped without. A fourth "Custom" chip joins the existing `users`/`orders`/`logins` data presets;
   clicking it opens on a real, editable `authors`/`posts` pair (the same starter `/tools/planner`
