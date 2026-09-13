@@ -2412,3 +2412,45 @@ In the discipline of §20 and [RESEARCH.md §21](RESEARCH.md#21-what-i-deliberat
   out, for §4's reason: more grammar is more surface with no intuition the v0 subset does not
   already deliver.
 - **No APM / production-plan tooling.** §2's non-goal and §20.6's separate-product line both stand.
+
+---
+
+## 23. Active Build Tranche (v15+) — Engine Depth, Join Algorithms & Interactive Polish
+
+> Added in v15 after shipping M11's manual pages and the §9 study instruments. With the §9 gate
+> lifted (§9, v14) and the write path, hash join, external sort, and SVG export all completed, this
+> tranche takes the remaining high-leverage engine items, educational tools and UX gaps, filtered
+> through §20.1/§22.1's 5 questions. Every item deepens the core teaching contrast (disk I/O, algorithm
+> choice, physical execution), respects zero-backend isolation, and builds on existing engine primitives.
+
+### 23.1 Tranche Items — Scoped and Vetted
+
+| Item | Scope & Implementation | Cost against `src/` | Educational Contrast / Justification |
+|---|---|---|---|
+| **Sort-Merge Join (3rd join algorithm) + 3-way Compare** | Complete the classic join triad. `SortMergeJoin` operator (`exec/sortMergeJoin.ts`) sorts left and right by join key (reusing `externalMergeSort`), then streams both with dual-pointer matching and duplicate run rewinding. Extends `Join.algorithm` to `'nested-loop' \| 'hash' \| 'sort-merge'` and `/compare` mode 4 to a 3-way view. | ~4–5 days; reuses `externalMergeSort` and `equalityKeyOf` | Teaches when each wins: Hash Join wins for unsorted inputs with a small build side; Nested-Loop wins for tiny outer with indexed inner; Sort-Merge wins when inputs are already sorted or downstream requires sorted output. |
+| **B+Tree Range Scans (Leaf-Chaining Traversal)** | B+Trees beat hash tables primarily because of ordered leaf chains. `engine/index/btree.ts` already has leaf `next` sibling pointers. Extend `index-selection` in `optimize.ts` to recognize range predicates (`>`, `<`, `>=`, `<=`, `BETWEEN`). Add `IndexRangeScan` plan node and operator: descend once to the start leaf, then step horizontally along sibling pointers without re-descending. Highlight horizontal path in `BTreePanel`. | ~3–4 days; `btree.ts` already links leaves | Demonstrates horizontal leaf pointer traversal vs vertical tree descent — one of the most fundamental concepts in database indexing. |
+| **Predicate Pushdown into Joins** | Currently, `WHERE` with `JOIN` acts as a top-level `Filter` after the entire join completes. Add `join-predicate-pushdown` rule in `optimize.ts`: evaluate conjuncts in `WHERE`, identify single-table predicates, and push `Filter` (or `IndexScan`) below the `Join` operator directly onto each child scan. | ~2–3 days; pure AST/Plan rewrite rule | Teaches the huge I/O and CPU reduction of filtering before joining: cutting 100 rows to 5 prior to nested-loop eliminates 95 full rescans of the inner table. |
+| **Live Interactive Component Embeds in Docs (closes §17.4 DoD)** | Replace static explanations on Concepts pages with live, interactive mini-widgets (`DocsComponents.tsx`). Embed interactive B+Tree sandbox in `concepts/btree.mdx` and interactive frame visualizer in `concepts/buffer-pool.mdx`. | ~2 days; uses existing UI panels in compact mode | Fulfills Carroll's minimalist documentation rule and closes the last open M11 definition-of-done checkbox without breaking Diátaxis separation. |
+| **Expanded Challenge Pack (Joins, Spills & Writebacks)** | 4 new goal-oriented puzzles in `/challenges`: (1) "The Sort Spill" (force external sort to spill temp pages to buffer pool), (2) "Hash Beats Loop" (craft a query where hash join beats nested-loop on disk reads), (3) "The Dirty Eviction" (perform an `UPDATE` that forces an evicted dirty page writeback), and (4) "The Range Leap" (use range scan to touch fewer pages than sequential scan). | ~1–2 days; pure `RunResult` predicates | Gives learners structured hands-on targets for the newly added v14 engine features (Sort, Join, Write path). |
+| **DataEditor & SchemaEditor Safety (Undo/Redo)** | Add an in-memory undo/redo history stack in `DataEditor.tsx` and `SchemaEditor.tsx` with `Ctrl+Z` / `Ctrl+Y` and an explicit Undo button. | ~1 day; pure React state | Closes open UX debt from §15 (plan.md:894) preventing accidental loss of custom tables or row edits. |
+| **Clean Licensing & Governance (closes §17.4 / §18)** | Ship `LICENSE-DOCS` (CC BY 4.0), verify `OFL.txt` font notice, and restructure `README.md` to be under 120 lines (moving architecture deep dives into docs). | ~1 day | Closes all open documentation and legal readiness checkboxes. |
+| **Vite Chunking Modernization** | Replace deprecated `advancedChunks` in `vite.config.ts` with Rollup `output.manualChunks` / Vite 8 `codeSplitting`. | ~0.5 day | Resolves the build deprecation warning and strictly ensures heavy libraries (`@xyflow/react`, CodeMirror) load only on routes that use them. |
+
+### 23.2 Prioritized Execution Order
+
+1. **Quick Polish & Governance (0.5–1 day):**
+   - Modernize Vite chunking configuration in `vite.config.ts`.
+   - Add `LICENSE-DOCS` (CC BY 4.0) and verify font licenses (closes §17.4 DoD).
+   - DataEditor / SchemaEditor undo history (closes §15).
+2. **Engine Depth: Sort-Merge Join (3–4 days):**
+   - Implement `SortMergeJoin` operator in `src/engine/exec/sortMergeJoin.ts`.
+   - Wire into `runQuery.ts`, cost model `cost.ts`, and `/compare` mode 4.
+3. **Engine Depth: B+Tree Leaf-Chaining Range Scans (3 days):**
+   - Support range predicates in optimizer (`optimize.ts`).
+   - Implement `IndexRangeScan` and animate sibling traversal in `BTreePanel`.
+4. **Optimizer: Predicate Pushdown into Joins (2 days):**
+   - Push single-table conjuncts below `Join` node.
+5. **Interactive Docs & Challenge Expansion (2 days):**
+   - Embed live mini-widgets into `src/pages/DocsContent/concepts/*.mdx`.
+   - Add the 4 new v14-focused challenges to `/challenges`.
+
