@@ -262,10 +262,12 @@ test('the planner sandbox runs the rewrite rules one at a time', async ({ page }
 
   // Turn predicate-pushdown off (index back on): nothing fires — the two plans match.
   await page.getByLabel('id index').check();
-  await page.getByLabel('predicate-pushdown').uncheck();
+  await page.getByLabel('predicate-pushdown', { exact: true }).uncheck();
   await expect(page.getByText('optimized · unchanged')).toBeVisible();
   await expect(page.getByText(/predicate-pushdown — turned off/)).toBeVisible();
-  await expect.poll(() => page.url()).toMatch(/rules=constant-folding%2Cindex-selection/);
+  await expect.poll(() => page.url()).toMatch(
+    /rules=constant-folding%2Cjoin-predicate-pushdown%2Cindex-selection%2Cindex-only-scan/,
+  );
 });
 
 test('the planner sandbox folds an always-true comparison out of the predicate', async ({ page }) => {

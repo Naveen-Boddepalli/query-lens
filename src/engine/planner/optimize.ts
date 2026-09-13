@@ -202,6 +202,121 @@ const predicatePushdown: Rule = (input) => {
   };
 };
 
+/** Every table a qualified column reference inside `expr` names. Empty for a literal. */
+function tablesReferencedBy(expr: Expr): Set<string> {
+  switch (expr.kind) {
+    case 'literal':
+      return new Set();
+    case 'column':
+      return expr.table ? new Set([expr.table]) : new Set();
+    case 'compare':
+    case 'and':
+      return new Set([...tablesReferencedBy(expr.left), ...tablesReferencedBy(expr.right)]);
+  }
+}
+
+/**
+ * Clears every column's table qualifier. A conjunct pushed into one side's own
+ * `SeqScan` runs against that table's *raw* rows — `{ id: 1, name: 'ada' }`,
+ * never `{ 'authors.id': 1, ... }` — qualification only exists to route a
+ * `WHERE` clause to the right side before the rewrite, the same way it exists
+ * in the SQL text only to route the reference to the right table at parse
+ * time. Left qualified, `authors.name = 'ada'` would read `row['authors.name']`
+ * off a row that has no such key and silently match nothing.
+ */
+function stripTableQualifiers(expr: Expr): Expr {
+  switch (expr.kind) {
+    case 'literal':
+      return expr;
+    case 'column': {
+      if (!expr.table) return expr;
+      const { table: _table, ...rest } = expr;
+      return rest;
+    }
+    case 'compare':
+      return { ...expr, left: stripTableQualifiers(expr.left), right: stripTableQualifiers(expr.right) };
+    case 'and':
+      return { ...expr, left: stripTableQualifiers(expr.left), right: stripTableQualifiers(expr.right) };
+  }
+}
+
+/**
+ * Pushes each `WHERE` conjunct that names only one side of a `JOIN` into that
+ * side's own `SeqScan` — `predicatePushdown`'s counterpart for a `Join`'s two
+ * children instead of a single scan. A conjunct naming both sides can only be
+ * evaluated once a row from each side is already paired, so it stays behind
+ * as a residual `Filter` above the `Join`; every reference is qualified once
+ * a query has a `JOIN` at all (the parser guarantees it), so there is no
+ * unqualified conjunct to worry about routing.
+ *
+ * Deliberately narrow: it does not also run `index-selection` on the side it
+ * just filtered — that rule only ever looks at the very top of the tree
+ * (`Project → … → SeqScan`), not inside a `Join`'s own children, so a pushed
+ * conjunct that happens to match an index still runs as a full scan. Reaching
+ * `index-selection` into a `Join`'s children is its own, larger step.
+ */
+const joinPredicatePushdown: Rule = (input) => {
+  const { limit, rest: plan } = unwrapLimit(input);
+  if (plan.op !== 'Project') return null;
+  const { sort, rest: belowSort } = unwrapSort(plan.child);
+  const { aggregate, rest: belowProject } = unwrapAggregate(belowSort);
+  if (belowProject.op !== 'Filter') return null;
+  const join = belowProject.child;
+  if (
+    join.op !== 'Join' ||
+    join.left.op !== 'SeqScan' ||
+    join.left.filter ||
+    join.right.op !== 'SeqScan' ||
+    join.right.filter
+  ) {
+    return null;
+  }
+
+  const parts = conjuncts(belowProject.predicate);
+  const leftParts: Expr[] = [];
+  const rightParts: Expr[] = [];
+  const residualParts: Expr[] = [];
+  for (const part of parts) {
+    const tables = tablesReferencedBy(part);
+    if (tables.size === 1 && tables.has(join.leftTable)) leftParts.push(part);
+    else if (tables.size === 1 && tables.has(join.rightTable)) rightParts.push(part);
+    else residualParts.push(part);
+  }
+  if (leftParts.length === 0 && rightParts.length === 0) return null;
+
+  const newLeft: Plan =
+    leftParts.length > 0
+      ? { op: 'SeqScan', table: join.leftTable, filter: stripTableQualifiers(conjoin(leftParts)!) }
+      : join.left;
+  const newRight: Plan =
+    rightParts.length > 0
+      ? { op: 'SeqScan', table: join.rightTable, filter: stripTableQualifiers(conjoin(rightParts)!) }
+      : join.right;
+  const newJoin: Plan = { ...join, left: newLeft, right: newRight };
+  const residual = conjoin(residualParts);
+  const filtered: Plan = residual ? { op: 'Filter', predicate: residual, child: newJoin } : newJoin;
+
+  const root = rewrapLimit(
+    limit,
+    { op: 'Project', columns: plan.columns, child: rewrapSort(sort, rewrapAggregate(aggregate, filtered)) },
+  );
+
+  const pushedSides = [
+    leftParts.length > 0 ? join.leftTable : null,
+    rightParts.length > 0 ? join.rightTable : null,
+  ].filter((t): t is string => t !== null);
+  const changed = new Set<Plan>([newJoin, ...(leftParts.length > 0 ? [newLeft] : []), ...(rightParts.length > 0 ? [newRight] : [])]);
+
+  return {
+    rule: 'join-predicate-pushdown',
+    label: residual
+      ? `Predicate pushdown: the part${pushedSides.length === 1 ? '' : 's'} of the WHERE clause naming only ${pushedSides.join(' or only ')} move${pushedSides.length === 1 ? 's' : ''} into that scan; the rest can only be checked once a row from each side is paired, so it stays a residual Filter above the Join.`
+      : `Predicate pushdown: every part of the WHERE clause names only one side, so the whole thing moves into ${pushedSides.length === 1 ? 'that scan' : 'the two scans'} — nothing is left to recheck after the Join.`,
+    plan: root,
+    changed,
+  };
+};
+
 /**
  * Swap a `SeqScan` for an `IndexScan` when one conjunct is an equality on the
  * indexed column. Conjuncts the index cannot answer stay behind as a recheck —
@@ -284,6 +399,7 @@ const indexOnlyScan: Rule = (input) => {
 const RULES: { name: string; apply: Rule }[] = [
   { name: 'constant-folding', apply: constantFolding },
   { name: 'predicate-pushdown', apply: predicatePushdown },
+  { name: 'join-predicate-pushdown', apply: joinPredicatePushdown },
   { name: 'index-selection', apply: indexSelection },
   { name: 'index-only-scan', apply: indexOnlyScan },
 ];

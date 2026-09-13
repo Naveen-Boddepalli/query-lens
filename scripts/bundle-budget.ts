@@ -75,7 +75,7 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
   // works (a component file can only export components) and so `StageDetail`
   // can reuse the exact same map the on-screen tree already renders with,
   // rather than a second one that could drift.
-  { name: 'trace-ui', test: /^(PlaygroundPage|PlaygroundTour|TraceWorksheet|StageDetail|stageMeta|datasets|datasetCatalogue|types|seed|trace|runQuery|engine|SqlEditor|PlaybackControls|PresenterView|AstTree|BTreePanel|FlowTree|display|SchemaEditor|customDatabase|renderSvg|DownloadSvgButton|astTreeTones|planTreeTones|btreeTones)-/, kb: 53, note: 'Playground + the presenter view + the SQL editor + the shared panel/tree renderers (AstTree, BTreePanel, FlowTree, the two display transformers) plus the engine core (runQuery and the planner split into their own chunks once a third / second route imported them; SqlEditor split once /challenges became a second) plus the preset dataset library, the print worksheet, LIMIT, ORDER BY + the Sort operator, the full DELETE + INSERT + UPDATE write path, GROUP BY + aggregates, JOIN — both algorithms, the multi-table schema editor, and true vector SVG export (plan.md §22.2, §22.7, §20.3)' },
+  { name: 'trace-ui', test: /^(PlaygroundPage|PlaygroundTour|TraceWorksheet|StageDetail|stageMeta|datasets|datasetCatalogue|types|seed|trace|runQuery|engine|SqlEditor|PlaybackControls|PresenterView|AstTree|BTreePanel|FlowTree|display|SchemaEditor|customDatabase|renderSvg|DownloadSvgButton|astTreeTones|planTreeTones|btreeTones)-/, kb: 54, note: 'Playground + the presenter view + the SQL editor + the shared panel/tree renderers (AstTree, BTreePanel, FlowTree, the two display transformers) plus the engine core (runQuery and the planner split into their own chunks once a third / second route imported them; SqlEditor split once /challenges became a second) plus the preset dataset library, the print worksheet, LIMIT, ORDER BY + the Sort operator, the full DELETE + INSERT + UPDATE write path, GROUP BY + aggregates, JOIN — all three algorithms plus predicate pushdown into its own children, the multi-table schema editor, and true vector SVG export (plan.md §22.2, §22.7, §20.3)' },
   // The small per-route shells: landing hub, stage index, examples, docs shell,
   // 404, tools index — plus the redesign's shared UI kit (primitives.ts,
   // PageHeader, Hero) that two or more of them import.
@@ -255,6 +255,10 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
  * Raised 406 → 409 for true vector SVG export (§20.3): `renderSvg.ts` +
  * `DownloadSvgButton.tsx`, plus each tree's tone map/`toFlow` moving into its
  * own file so `StageDetail` can reuse them without a second colour table.
+ * `trace-ui`'s own ceiling raised 53 → 54 kB for sort-merge join, JOIN's
+ * third algorithm, and `join-predicate-pushdown`, a new optimizer rule
+ * pushing a WHERE conjunct into whichever side of a Join it names (both in
+ * `engine-*.js`) — the total itself still fits under 409, so it stays put.
  */
 const TOTAL_KB = 409;
 

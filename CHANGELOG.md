@@ -8,6 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Predicate pushdown into a `JOIN`'s own children** (plan.md §22.2) — a new optimizer rule,
+  `join-predicate-pushdown`, splits a `WHERE` clause's conjuncts by which table they qualify (every
+  reference is qualified once a query has a `JOIN`, so there's no ambiguity) and pushes each
+  single-table conjunct into that side's own `SeqScan`, with its table qualifier stripped first — a
+  scan reads that table's raw, unqualified rows, and a qualified reference against them would
+  silently match nothing rather than error. A conjunct naming both sides (the join predicate itself,
+  restated in `WHERE`, say) stays a residual `Filter` above the `Join`, exactly as before. Needed no
+  multi-join grammar, unlike join order, and no cost-model change either — `estimateNode`'s `SeqScan`
+  case already prices a `.filter`, so a pushed conjunct's selectivity flows into the `Join`'s own row
+  estimate automatically. 12 new unit tests, including two test titles/comments fixed for now
+  describing stale behavior ("a residual, not pushed into either scan" was true until this rule
+  shipped).
 - **Sort-merge join, `JOIN`'s third algorithm** (plan.md §22.2) — `Join.algorithm` widened to
   `'nested-loop' | 'hash' | 'sort-merge'`. The new `sortMergeJoin` operator sorts both sides on the
   join key (each its own `externalMergeSort` call — real spill I/O through the buffer pool, the same

@@ -236,12 +236,25 @@ describe('JOIN — pipeline correctness', () => {
     for (const row of rows) expect(Object.keys(row).sort()).toEqual(['authors.name', 'posts.title']);
   });
 
-  it('WHERE filters the joined result, evaluated after the join (a residual, not pushed into either scan)', () => {
+  it('WHERE filters the joined result correctly, whether or not it gets pushed into a scan', () => {
     const all = run('SELECT * FROM authors JOIN posts ON authors.id = posts.authorId');
     const filtered = run("SELECT * FROM authors JOIN posts ON authors.id = posts.authorId WHERE authors.name = 'ada'");
     expect(filtered.rows.length).toBeGreaterThan(0);
     expect(filtered.rows.length).toBeLessThan(all.rows.length);
     expect(filtered.rows.every((r) => r['authors.name'] === 'ada')).toBe(true);
+  });
+
+  it('a conjunct naming both sides stays a residual Filter above the Join — it cannot be pushed into either scan', () => {
+    // `authors.id = posts.authorId` names both tables, so it can only be
+    // checked once a row from each side is already paired — restating the
+    // ON clause in WHERE changes nothing here.
+    const all = run('SELECT * FROM authors JOIN posts ON authors.id = posts.authorId');
+    const restated = run(
+      'SELECT * FROM authors JOIN posts ON authors.id = posts.authorId WHERE authors.id = posts.authorId',
+    );
+    expect(restated.rows.length).toBe(all.rows.length);
+    const rules = restated.events.flatMap((e) => (e.stage === 'optimize' ? [e.rule] : []));
+    expect(rules).toEqual(['none']);
   });
 
   it('LIMIT caps the joined result and short-circuits the nested loop', () => {
@@ -297,6 +310,84 @@ describe('JOIN — pipeline correctness', () => {
   });
 });
 
+describe('JOIN — predicate pushdown into a Join\'s own children', () => {
+  it('pushes a conjunct naming only the left table into the left SeqScan', () => {
+    const sql = "SELECT * FROM authors JOIN posts ON authors.id = posts.authorId WHERE authors.name = 'ada'";
+    const { rows, events } = run(sql);
+    const baseline = run('SELECT * FROM authors JOIN posts ON authors.id = posts.authorId');
+    const expected = baseline.rows.filter((r) => r['authors.name'] === 'ada');
+    expect(sortRows(rows)).toEqual(sortRows(expected));
+
+    const rules = events.flatMap((e) => (e.stage === 'optimize' ? [e.rule] : []));
+    expect(rules).toEqual(['join-predicate-pushdown']);
+    const tree = events.find((e) => e.stage === 'optimize')!.after;
+    const leftScan = tree.children![0]!.children![0]!;
+    expect(leftScan.label).toBe('SeqScan authors');
+    // Unqualified — a scan reads that table's own raw rows, never `authors.name`.
+    expect(leftScan.detail).toBe("filter: name = 'ada'");
+    const rightScan = tree.children![0]!.children![1]!;
+    expect(rightScan.detail).toBeUndefined();
+  });
+
+  it('pushes a conjunct naming only the right table into the right SeqScan', () => {
+    const sql = 'SELECT * FROM authors JOIN posts ON authors.id = posts.authorId WHERE posts.id = 3';
+    const { rows, events } = run(sql);
+    const baseline = run('SELECT * FROM authors JOIN posts ON authors.id = posts.authorId');
+    const expected = baseline.rows.filter((r) => r['posts.id'] === 3);
+    expect(sortRows(rows)).toEqual(sortRows(expected));
+    expect(rows.length).toBeGreaterThan(0);
+
+    const rules = events.flatMap((e) => (e.stage === 'optimize' ? [e.rule] : []));
+    expect(rules).toEqual(['join-predicate-pushdown']);
+    const tree = events.find((e) => e.stage === 'optimize')!.after;
+    const rightScan = tree.children![0]!.children![1]!;
+    expect(rightScan.label).toBe('SeqScan posts');
+    expect(rightScan.detail).toBe('filter: id = 3');
+  });
+
+  it('splits a two-sided WHERE, pushing each conjunct to its own side, with nothing left over', () => {
+    const sql = "SELECT * FROM authors JOIN posts ON authors.id = posts.authorId WHERE authors.name = 'ada' AND posts.id = 3";
+    const { rows, events } = run(sql);
+    const baseline = run('SELECT * FROM authors JOIN posts ON authors.id = posts.authorId');
+    const expected = baseline.rows.filter((r) => r['authors.name'] === 'ada' && r['posts.id'] === 3);
+    expect(sortRows(rows)).toEqual(sortRows(expected));
+
+    const optimizeEvents = events.filter((e) => e.stage === 'optimize');
+    expect(optimizeEvents.map((e) => e.rule)).toEqual(['join-predicate-pushdown']);
+    // No Filter node survives above the Join — both conjuncts had a home.
+    const tree = optimizeEvents[0]!.after;
+    expect(tree.op).toBe('Project');
+    expect(tree.children![0]!.op).toBe('Join');
+  });
+
+  it('leaves a conjunct naming both tables as a residual Filter above the Join', () => {
+    const sql = 'SELECT * FROM authors JOIN posts ON authors.id = posts.authorId WHERE authors.id = posts.authorId';
+    const { events } = run(sql);
+    const rules = events.flatMap((e) => (e.stage === 'optimize' ? [e.rule] : []));
+    expect(rules).toEqual(['none']);
+  });
+
+  it('cost estimates the Join against the filtered left side\'s row count, not the whole table', () => {
+    const sql = "SELECT * FROM authors JOIN posts ON authors.id = posts.authorId WHERE authors.name = 'ada'";
+    const { events } = run(sql);
+    const tree = events.find((e) => e.stage === 'optimize')!.after;
+    const leftScan = tree.children![0]!.children![0]!;
+    // authors has 5 rows, 1 of them named 'ada' — the same 1/5 selectivity
+    // `index-selection` prices an equality at, applied here to a scan instead.
+    expect(leftScan.estRows).toBe(1);
+    expect(tree.children![0]!.estBasis).toMatch(/^1 × 10 \/ ndistinct/);
+  });
+
+  it('agrees with a plain client-side filter of the unfiltered baseline, across all three join algorithms', () => {
+    const sql = "SELECT * FROM authors JOIN posts ON authors.id = posts.authorId WHERE authors.name = 'ada'";
+    const nested = run(sql);
+    const hashed = run(sql, db(), HASH);
+    const merged = run(sql, db(), SORT_MERGE);
+    expect(sortRows(hashed.rows)).toEqual(sortRows(nested.rows));
+    expect(sortRows(merged.rows)).toEqual(sortRows(nested.rows));
+  });
+});
+
 describe('JOIN — the pipeline narrates it', () => {
   it('narrates a Join execute stage, above both scans', () => {
     const { events } = run('SELECT * FROM authors JOIN posts ON authors.id = posts.authorId');
@@ -330,7 +421,7 @@ describe('JOIN — the pipeline narrates it', () => {
     expect(structuredClone(events)).toEqual(events);
   });
 
-  it('no optimizer rule fires on a JOIN plan yet — nested-loop over two full scans is the only plan v1 has', () => {
+  it('no optimizer rule fires on an unfiltered JOIN — nothing to push down with no WHERE clause', () => {
     const { events } = run('SELECT * FROM authors JOIN posts ON authors.id = posts.authorId');
     const rules = events.flatMap((e) => (e.stage === 'optimize' ? [e.rule] : []));
     expect(rules).toEqual(['none']);

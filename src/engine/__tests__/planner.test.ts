@@ -462,6 +462,7 @@ describe('optimize — rule filter (plan.md §22.3 /tools/planner)', () => {
     expect([...OPTIMIZER_RULES]).toEqual([
       'constant-folding',
       'predicate-pushdown',
+      'join-predicate-pushdown',
       'index-selection',
       'index-only-scan',
     ]);
