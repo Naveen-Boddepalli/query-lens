@@ -27,6 +27,7 @@ export {
   equalityOn,
   exprToSql,
   findSort,
+  findSortMergeJoin,
   needsSortSpill,
   toPlanDisplay,
 } from './plan.ts';

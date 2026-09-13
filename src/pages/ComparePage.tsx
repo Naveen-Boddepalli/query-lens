@@ -31,7 +31,7 @@ import {
 } from '../ui/primitives.ts';
 
 /**
- * plan.md §13's comparison view, in three modes:
+ * plan.md §13's comparison view, in four modes:
  *
  *  - **replacement policies** — the original: one page-reference string under
  *    two of the five policies (§20.4), stepped together by *access index*
@@ -47,12 +47,14 @@ import {
  *    same groups out either way, but only the sort aggregate spills through
  *    the buffer pool. "One strategy, nothing to compare" is exactly the gap
  *    this closes.
- *  - **nested-loop join vs. hash join** (§22.2): the same JOIN query run once
- *    with each algorithm forced via `EngineOptions.joinStrategy`, against the
- *    small `authors`/`posts` demo pair (`createJoinDemoDatabase`, the same
- *    fixture `/tools/planner` uses). Same rows out either way; nested-loop
- *    rescans the right table whole per left row, hash join reads each side
- *    exactly once.
+ *  - **nested-loop vs. hash vs. sort-merge join** (§22.2): the same JOIN query
+ *    run once with each of the three algorithms forced via
+ *    `EngineOptions.joinStrategy`, against the small `authors`/`posts` demo
+ *    pair (`createJoinDemoDatabase`, the same fixture `/tools/planner` uses).
+ *    Same rows out every time; nested-loop rescans the right table whole per
+ *    left row, hash join reads each side exactly once via an in-memory
+ *    table, and sort-merge reads each side once too but pays for it by
+ *    sorting both first.
  */
 
 type Mode = 'policies' | 'index' | 'aggregate' | 'join';
@@ -641,7 +643,7 @@ function AggregateCompare() {
 }
 
 /* -------------------------------------------------------------------------- */
-/* Nested-loop join vs. hash join comparison                                  */
+/* Nested-loop vs. hash vs. sort-merge join comparison                        */
 /* -------------------------------------------------------------------------- */
 
 const JOIN_DB = createJoinDemoDatabase();
@@ -681,6 +683,7 @@ const JOIN_STAT_ROWS: { key: keyof JoinScorecard; label: string }[] = [
   { key: 'rows', label: 'rows returned' },
 ];
 
+/** `compareTo` is the best (lowest) figure across every algorithm shown, from `bestOf` below — a column is flagged only where it is not the winner, not merely where it loses to one specific other. */
 function JoinScoreColumn({
   label,
   sub,
@@ -701,8 +704,8 @@ function JoinScoreColumn({
       <dl className={`${panelSurface} grid grid-cols-[1fr_auto] gap-x-4 gap-y-1.5 p-3 text-label`}>
         {JOIN_STAT_ROWS.map(({ key, label: rowLabel }) => {
           const mine = score[key];
-          const theirs = compareTo[key];
-          const worse = rowLabel !== 'rows returned' && mine > theirs;
+          const best = compareTo[key];
+          const worse = rowLabel !== 'rows returned' && mine > best;
           return (
             <div key={key} className="contents">
               <dt className="text-ink-dim">{rowLabel}</dt>
@@ -719,14 +722,26 @@ function JoinScoreColumn({
 
 // `authors`/`posts` together are only 5 heap pages — under the default 8
 // buffer frames the whole demo fits in cache, so after the *first* rescan
-// every later one is a hit, not a miss, and the two algorithms' disk-read
-// counts tie even though their real work differs (the same reason
-// `AggregateCompare` reaches for the 120-row `orders` dataset instead of
-// `users`). Fewer frames than the 5 pages, rather than a bigger dataset,
-// makes nested-loop's *repeated* rescans genuinely re-fetch from disk here.
+// every later one is a hit, not a miss, and the algorithms' disk-read counts
+// tie even though their real work differs (the same reason `AggregateCompare`
+// reaches for the 120-row `orders` dataset instead of `users`). Fewer frames
+// than the 5 pages, rather than a bigger dataset, makes nested-loop's
+// *repeated* rescans — and sort-merge's own sort spill — genuinely re-fetch
+// from disk here.
 const JOIN_FRAMES = 2;
 const NESTED_LOOP_OPTIONS = { ...DEFAULT_ENGINE_OPTIONS, bufferFrames: JOIN_FRAMES, joinStrategy: 'nested-loop' } as const;
 const HASH_JOIN_OPTIONS = { ...DEFAULT_ENGINE_OPTIONS, bufferFrames: JOIN_FRAMES, joinStrategy: 'hash' } as const;
+const SORT_MERGE_JOIN_OPTIONS = { ...DEFAULT_ENGINE_OPTIONS, bufferFrames: JOIN_FRAMES, joinStrategy: 'sort-merge' } as const;
+
+/** The best (lowest) figure across every scorecard shown — see `JoinScoreColumn`'s doc comment. */
+function bestOf(scores: readonly JoinScorecard[]): JoinScorecard {
+  return {
+    steps: Math.min(...scores.map((s) => s.steps)),
+    diskReads: Math.min(...scores.map((s) => s.diskReads)),
+    evictions: Math.min(...scores.map((s) => s.evictions)),
+    rows: scores[0]!.rows, // same rows out of every algorithm, by construction
+  };
+}
 
 function JoinCompare() {
   const [sqlInput, setSqlInput] = useState<string>(JOIN_PRESETS[0].sql);
@@ -734,21 +749,27 @@ function JoinCompare() {
 
   const nestedRun = useMemo(() => runQuery(sql, JOIN_DB, NESTED_LOOP_OPTIONS), [sql]);
   const hashRun = useMemo(() => runQuery(sql, JOIN_DB, HASH_JOIN_OPTIONS), [sql]);
+  const sortMergeRun = useMemo(() => runQuery(sql, JOIN_DB, SORT_MERGE_JOIN_OPTIONS), [sql]);
 
   const nestedScore = useMemo(() => joinScoreOf(nestedRun), [nestedRun]);
   const hashScore = useMemo(() => joinScoreOf(hashRun), [hashRun]);
+  const sortMergeScore = useMemo(() => joinScoreOf(sortMergeRun), [sortMergeRun]);
+  const best = useMemo(() => bestOf([nestedScore, hashScore, sortMergeScore]), [nestedScore, hashScore, sortMergeScore]);
 
   const isJoinQuery = nestedRun.events.some((e) => e.stage === 'execute' && e.op === 'Join');
 
   return (
     <>
       <p className="text-body text-ink-dim">
-        The same JOIN query, run once with each algorithm forced (plan.md §22.2), against the small{' '}
-        <code className="font-mono text-ink">authors</code>/<code className="font-mono text-ink">posts</code> pair.
-        A nested-loop join rescans <code className="font-mono text-ink">posts</code> whole for every{' '}
-        <code className="font-mono text-ink">authors</code> row; a hash join builds one in-memory hash
-        table over <code className="font-mono text-ink">posts</code> and probes it instead. Same rows out
-        either way; the difference is entirely in how many pages get read.
+        The same JOIN query, run once with each of the three algorithms forced (plan.md §22.2),
+        against the small <code className="font-mono text-ink">authors</code>/
+        <code className="font-mono text-ink">posts</code> pair. A nested-loop join rescans{' '}
+        <code className="font-mono text-ink">posts</code> whole for every{' '}
+        <code className="font-mono text-ink">authors</code> row; a hash join builds one in-memory
+        hash table over <code className="font-mono text-ink">posts</code> and probes it instead;
+        a sort-merge join sorts both tables on the join key first, then merges the two sorted
+        lists in a single pass. Same rows out every time; the difference is entirely in how many
+        pages get read, and when.
       </p>
 
       <div className="mt-2 flex flex-col gap-3 rounded-xl border border-edge bg-surface-2 p-3 shadow-e1">
@@ -798,11 +819,13 @@ function JoinCompare() {
         <>
           <p className="rounded-xl border border-accent/40 bg-accent-soft px-3 py-2 text-label text-ink shadow-e1">
             Same <span className="font-mono">{nestedScore.rows}</span> row
-            {nestedScore.rows === 1 ? '' : 's'} either way. The nested-loop join needed{' '}
+            {nestedScore.rows === 1 ? '' : 's'} every time. The nested-loop join needed{' '}
             <span className="font-mono">{nestedScore.diskReads}</span> disk read
             {nestedScore.diskReads === 1 ? '' : 's'}, rescanning <code className="font-mono">posts</code>{' '}
             once per author; the hash join needed only{' '}
-            <span className="font-mono">{hashScore.diskReads}</span>, reading each table once.
+            <span className="font-mono">{hashScore.diskReads}</span>, reading each table once; the
+            sort-merge join needed <span className="font-mono">{sortMergeScore.diskReads}</span>,
+            reading each table once too but paying for the sort spill it does first.
           </p>
 
           <div className="flex flex-col gap-4 lg:flex-row">
@@ -810,13 +833,19 @@ function JoinCompare() {
               label="Nested-loop join"
               sub="rescans posts once per authors row"
               score={nestedScore}
-              compareTo={hashScore}
+              compareTo={best}
             />
             <JoinScoreColumn
               label="Hash join"
               sub="builds one hash table over posts, then probes it"
               score={hashScore}
-              compareTo={nestedScore}
+              compareTo={best}
+            />
+            <JoinScoreColumn
+              label="Sort-merge join"
+              sub="sorts both tables on the join key, then merges them"
+              score={sortMergeScore}
+              compareTo={best}
             />
           </div>
         </>
@@ -842,7 +871,7 @@ export function ComparePage() {
             ['policies', 'Replacement policies'],
             ['index', 'Index vs. sequential scan'],
             ['aggregate', 'Hash aggregate vs. sort aggregate'],
-            ['join', 'Nested-loop join vs. hash join'],
+            ['join', 'JOIN algorithms'],
           ] as const
         ).map(([value, label]) => (
           <button

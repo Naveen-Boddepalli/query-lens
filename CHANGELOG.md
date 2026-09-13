@@ -8,6 +8,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Sort-merge join, `JOIN`'s third algorithm** (plan.md §22.2) — `Join.algorithm` widened to
+  `'nested-loop' | 'hash' | 'sort-merge'`. The new `sortMergeJoin` operator sorts both sides on the
+  join key (each its own `externalMergeSort` call — real spill I/O through the buffer pool, the same
+  driver `Sort`/`SortAggregate` already use) and merges the two sorted lists in a single pass, driven
+  by a generator (`sortMergeMatches`) that replays the *entire* matching run on both sides once a key
+  repeats, rather than a plain two-pointer merge, which would silently drop every pairing after the
+  first once the join column isn't unique. The sort key is `equalityKeyOf`'s own coercion, not a raw
+  comparison, so a value `compare('=', ...)` calls equal always sorts adjacent — the same property
+  hash join's mixed-type test already defended, now proven for sort-merge too. Each side's sort
+  scratch gets its own non-colliding page-id block (`runQuery.ts` now reserves one per side — the
+  first case two independent sort reservations were ever needed in one query). Priced honestly:
+  `left.estPages + right.estPages` (each side read once, like hash) plus both sides' own spill,
+  mirroring `Sort`'s own estimate — pricier than hash, cheaper than nested-loop's rescans past a tiny
+  table. `/compare`'s join mode is now a genuine three-way ("JOIN algorithms," renamed from
+  "Nested-loop join vs. hash join"), each column flagged only where it isn't the best of the three.
+  12 new unit tests, 1 e2e updated.
 - **The two §9-blocking manual pages** (plan.md §17.2): `/docs/manual/eviction` ("Watch a page get
   evicted") and `/docs/manual/btree-split` ("Watch a B+Tree split"), a new **Manual** group in the
   docs nav. Both are task-shaped how-tos that open the app at the exact state they describe rather

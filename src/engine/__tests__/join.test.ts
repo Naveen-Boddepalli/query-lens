@@ -11,6 +11,9 @@ const db = () => createJoinDemoDatabase();
 const run = (sql: string, database: Database = db(), options: EngineOptions = DEFAULT_ENGINE_OPTIONS) =>
   runQuery(sql, database, options);
 const HASH = { ...DEFAULT_ENGINE_OPTIONS, joinStrategy: 'hash' } as const;
+const SORT_MERGE = { ...DEFAULT_ENGINE_OPTIONS, joinStrategy: 'sort-merge' } as const;
+const sortRows = (rs: readonly Record<string, unknown>[]) =>
+  [...rs].sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
 
 describe('JOIN — parsing', () => {
   it('parses a qualified ON clause into a JoinClause', () => {
@@ -173,6 +176,26 @@ describe('JOIN — plan and cost', () => {
     // authors is 2 pages, posts is 3 — a hash join reads each exactly once: 2 + 3.
     expect(est.estPages).toBe(2 + 3);
   });
+
+  it('buildPlan honours a joinStrategy of "sort-merge"', () => {
+    const parsed = parse('SELECT * FROM authors JOIN posts ON authors.id = posts.authorId');
+    if (!parsed.ok) throw new Error(parsed.error.message);
+    const plan = buildPlan(parsed.ast, undefined, 'sort-merge');
+    if (plan.op !== 'Project' || plan.child.op !== 'Join') throw new Error('expected Project -> Join');
+    expect(plan.child.algorithm).toBe('sort-merge');
+  });
+
+  it('prices a sort-merge join as reading each side once plus both sides\' own spill', () => {
+    const parsed = parse('SELECT * FROM authors JOIN posts ON authors.id = posts.authorId');
+    if (!parsed.ok) throw new Error(parsed.error.message);
+    const plan = buildPlan(parsed.ast, undefined, 'sort-merge');
+    const { authors, posts } = db().tables;
+    const est = rootEstimate(plan, authors!, 4, { posts: posts! });
+    // Same row estimate as the other two — the algorithm changes I/O, not cardinality.
+    expect(est.estRows).toBe(Math.round((5 * 10) / 4));
+    // authors: 2 heap pages + 2*ceil(5/4)=2*2 spill; posts: 3 heap pages + 2*ceil(10/4)=2*3 spill.
+    expect(est.estPages).toBe(2 + 3 + 2 * 2 + 2 * 3);
+  });
 });
 
 describe('JOIN — pipeline correctness', () => {
@@ -318,8 +341,6 @@ describe('JOIN — hash join (the second algorithm)', () => {
   it('agrees with nested-loop on the exact same result set', () => {
     const nested = run('SELECT * FROM authors JOIN posts ON authors.id = posts.authorId');
     const hashed = run('SELECT * FROM authors JOIN posts ON authors.id = posts.authorId', db(), HASH);
-    const sortRows = (rs: readonly Record<string, unknown>[]) =>
-      [...rs].sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
     expect(sortRows(hashed.rows)).toEqual(sortRows(nested.rows));
   });
 
@@ -390,6 +411,112 @@ describe('JOIN — hash join (the second algorithm)', () => {
   it('is deterministic — the same query twice gives byte-identical traces', () => {
     const a = run('SELECT * FROM authors JOIN posts ON authors.id = posts.authorId', db(), HASH);
     const b = run('SELECT * FROM authors JOIN posts ON authors.id = posts.authorId', db(), HASH);
+    expect(JSON.stringify(a.events)).toEqual(JSON.stringify(b.events));
+  });
+});
+
+describe('JOIN — sort-merge join (the third algorithm)', () => {
+  it('agrees with nested-loop on the exact same result set', () => {
+    const nested = run('SELECT * FROM authors JOIN posts ON authors.id = posts.authorId');
+    const merged = run('SELECT * FROM authors JOIN posts ON authors.id = posts.authorId', db(), SORT_MERGE);
+    expect(sortRows(merged.rows)).toEqual(sortRows(nested.rows));
+  });
+
+  it('agrees with nested-loop when WHERE filters the joined result', () => {
+    const sql = "SELECT * FROM authors JOIN posts ON authors.id = posts.authorId WHERE authors.name = 'ada'";
+    const nested = run(sql);
+    const merged = run(sql, db(), SORT_MERGE);
+    expect(merged.rows.length).toBe(nested.rows.length);
+    expect(merged.rows.length).toBeGreaterThan(0);
+  });
+
+  it('a NULL join key matches nothing under sort-merge join either', () => {
+    const nullDb: Database = {
+      tables: {
+        a: { name: 'a', columns: ['id', 'k'], rows: [{ id: 1, k: null }, { id: 2, k: 1 }] },
+        b: { name: 'b', columns: ['id', 'k'], rows: [{ id: 1, k: null }, { id: 2, k: 1 }] },
+      },
+    };
+    const { rows } = runQuery('SELECT * FROM a JOIN b ON a.k = b.k', nullDb, SORT_MERGE);
+    expect(rows).toEqual([{ 'a.id': 2, 'a.k': 1, 'b.id': 2, 'b.k': 1 }]);
+  });
+
+  it('produces zero rows, not an error, when nothing matches', () => {
+    const noMatch: Database = {
+      tables: {
+        a: { name: 'a', columns: ['id'], rows: [{ id: 1 }] },
+        b: { name: 'b', columns: ['id', 'aId'], rows: [{ id: 1, aId: 999 }] },
+      },
+    };
+    expect(runQuery('SELECT * FROM a JOIN b ON a.id = b.aId', noMatch, SORT_MERGE).rows).toEqual([]);
+  });
+
+  it('a mismatched-type join key that nested-loop would still match, sort-merge also matches', () => {
+    // The sort key must coerce the exact way `equalityKeyOf` does, or a
+    // number and a numeric string could sort apart instead of adjacent —
+    // silently missing a match `compare('=', ...)` says is real.
+    const mixedDb: Database = {
+      tables: {
+        a: { name: 'a', columns: ['id'], rows: [{ id: 5 }] },
+        b: { name: 'b', columns: ['id', 'aId'], rows: [{ id: 1, aId: '5' }] },
+      },
+    };
+    const nested = runQuery('SELECT * FROM a JOIN b ON a.id = b.aId', mixedDb);
+    const merged = runQuery('SELECT * FROM a JOIN b ON a.id = b.aId', mixedDb, SORT_MERGE);
+    expect(nested.rows).toHaveLength(1);
+    expect(merged.rows).toEqual(nested.rows);
+  });
+
+  it('a repeated key on both sides produces the full cross product, matching nested-loop', () => {
+    // Neither side's join column is unique here — the textbook refinement a
+    // plain two-pointer merge misses: every left row sharing a key must pair
+    // with every right row sharing it, not just the first one found.
+    const dupDb: Database = {
+      tables: {
+        a: { name: 'a', columns: ['id', 'k'], rows: [{ id: 1, k: 5 }, { id: 2, k: 5 }, { id: 3, k: 9 }] },
+        b: { name: 'b', columns: ['id', 'k'], rows: [{ id: 1, k: 5 }, { id: 2, k: 5 }, { id: 3, k: 5 }] },
+      },
+    };
+    const sql = 'SELECT * FROM a JOIN b ON a.k = b.k';
+    const nested = runQuery(sql, dupDb);
+    const merged = runQuery(sql, dupDb, SORT_MERGE);
+    // Two left rows (k=5) × three right rows (k=5) = 6 matches; a.id=3 (k=9) matches nothing.
+    expect(nested.rows).toHaveLength(6);
+    expect(sortRows(merged.rows)).toEqual(sortRows(nested.rows));
+  });
+
+  it('LIMIT still caps the result, even though both sides are fully sorted first', () => {
+    const { rows } = run('SELECT * FROM authors JOIN posts ON authors.id = posts.authorId LIMIT 1', db(), SORT_MERGE);
+    expect(rows).toHaveLength(1);
+  });
+
+  it('narrates a sort phase on both sides before any merge match', () => {
+    const { events } = run('SELECT * FROM authors JOIN posts ON authors.id = posts.authorId', db(), SORT_MERGE);
+    const joinLabels = events.flatMap((e) => (e.stage === 'execute' && e.op === 'Join' ? [e.label] : []));
+    const mergeStart = joinLabels.findIndex((label) => /merges a row from authors with one from posts/.test(label));
+    expect(mergeStart).toBeGreaterThan(0);
+    // Everything before the first match is sort-phase narration — each
+    // side's own `externalMergeSort` call, then this operator's own summary.
+    expect(joinLabels.slice(0, mergeStart).some((label) => /authors has to see every row/.test(label))).toBe(true);
+    expect(joinLabels.slice(0, mergeStart).some((label) => /posts has to see every row/.test(label))).toBe(true);
+    expect(joinLabels.slice(0, mergeStart).some((label) => /sorts authors and posts .* then merges/.test(label))).toBe(
+      true,
+    );
+    // And every label from the first match onward is a merge match.
+    expect(joinLabels.slice(mergeStart).every((label) => /merges a row from authors with one from posts/.test(label))).toBe(
+      true,
+    );
+  });
+
+  it('the right side\'s sort scratch never reuses a page id the left side\'s sort already claimed', () => {
+    const { events } = run('SELECT * FROM authors JOIN posts ON authors.id = posts.authorId', db(), SORT_MERGE);
+    const written = events.flatMap((e) => (e.stage === 'buffer' && e.action === 'write' ? [e.pageId] : []));
+    expect(new Set(written).size).toBe(written.length);
+  });
+
+  it('is deterministic — the same query twice gives byte-identical traces', () => {
+    const a = run('SELECT * FROM authors JOIN posts ON authors.id = posts.authorId', db(), SORT_MERGE);
+    const b = run('SELECT * FROM authors JOIN posts ON authors.id = posts.authorId', db(), SORT_MERGE);
     expect(JSON.stringify(a.events)).toEqual(JSON.stringify(b.events));
   });
 });

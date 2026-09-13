@@ -17,7 +17,7 @@ import type { LockManager } from '../locks/index.ts';
 import type { BPlusTree } from '../index/index.ts';
 import { emitIndexLookup, pageCountFor } from '../index/index.ts';
 import { compare, equalityKeyOf, passes } from './evaluate.ts';
-import { externalMergeSort } from './sort.ts';
+import { externalMergeSort, sortTempPageCount } from './sort.ts';
 
 export interface Operator {
   readonly name: string;
@@ -740,6 +740,187 @@ function hashJoin(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): Operat
   };
 }
 
+/**
+ * A join key, coerced the exact way `equalityKeyOf` already does for hash
+ * join — so a value that hash join and nested-loop's `compare('=', ...)`
+ * would call equal (a number and a numeric string, say) sorts to the *same*
+ * key here too. Without that, the sort could scatter two "equal" rows apart
+ * instead of adjacent, and the merge below would silently miss the match —
+ * sort-merge join must never disagree with the other two on which rows
+ * match, the same property hash join's own mixed-type test defends.
+ */
+function joinKeyOf(row: Row, column: string): string | null {
+  const value = row[column] ?? null;
+  return value === null ? null : equalityKeyOf(value);
+}
+
+/**
+ * The merge phase, as a generator: `left`/`right` are already fully sorted
+ * on their own join key (ascending, NULLs last — `externalMergeSort`'s own
+ * rule). NULL never matches, so once either pointer reaches the NULL tail it
+ * only ever advances, never matches. A key can repeat on either side (the
+ * join column need not be unique), so a matching key advances through the
+ * *entire* run on both sides — every left row in the run paired with every
+ * right row in it — before either pointer moves past the run, the textbook
+ * refinement a plain two-pointer merge misses.
+ */
+function* sortMergeMatches(
+  left: readonly Row[],
+  right: readonly Row[],
+  leftColumn: string,
+  rightColumn: string,
+): Generator<readonly [Row, Row]> {
+  let i = 0;
+  let j = 0;
+  while (i < left.length && j < right.length) {
+    const leftKey = joinKeyOf(left[i]!, leftColumn);
+    const rightKey = joinKeyOf(right[j]!, rightColumn);
+    if (leftKey === null) { i += 1; continue; }
+    if (rightKey === null) { j += 1; continue; }
+    if (leftKey < rightKey) { i += 1; continue; }
+    if (leftKey > rightKey) { j += 1; continue; }
+
+    const runStart = j;
+    while (i < left.length && joinKeyOf(left[i]!, leftColumn) === leftKey) {
+      for (let k = runStart; k < right.length && joinKeyOf(right[k]!, rightColumn) === leftKey; k++) {
+        yield [left[i]!, right[k]!];
+      }
+      i += 1;
+    }
+    j = runStart;
+    while (j < right.length && joinKeyOf(right[j]!, rightColumn) === leftKey) j += 1;
+  }
+}
+
+/**
+ * Sort-merge join — the third algorithm (plan.md §22.2). Sorts both sides on
+ * the join key, each its own `externalMergeSort` call (the same driver
+ * `Sort` uses, real spill I/O through `ctx.pool`), then merges the two
+ * sorted lists in a single pass — the classic trade against the other two:
+ * no per-row rescan (nested-loop's cost) and no in-memory table sized to one
+ * side (hash join's), at the price of sorting both sides first even when
+ * neither would otherwise need to be. Like `Sort`, this cannot produce a row
+ * until *both* sides are fully sorted, so a `LIMIT` above it caps only the
+ * merge's output — the sorting has already happened by the time any row
+ * comes out, the same honest gap `Sort`'s own doc comment names.
+ *
+ * `left`'s sort scratch starts right after every page id already spoken for
+ * (both heaps); `right`'s starts right after `left`'s own reservation —
+ * `runQuery.ts` sizes and orders the two identically, so neither ever
+ * collides with a page id the other is using.
+ */
+function sortMergeJoin(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): Operator {
+  const joinRight = ctx.joinRight;
+  if (!joinRight) throw new Error('unreachable: a Join plan implies ExecContext.joinRight is set');
+
+  const left = buildOperator(plan.left, ctx);
+  const right = buildOperator(plan.right, {
+    ...ctx,
+    table: joinRight.table,
+    heap: joinRight.heap,
+    tree: joinRight.tree,
+  });
+
+  const produced = counter(ctx, 'Join');
+  let matches: Generator<readonly [Row, Row]> | null = null;
+  let matched = 0;
+
+  return {
+    name: 'Join',
+    open() {
+      left.open();
+      right.open();
+      matches = null;
+      matched = 0;
+    },
+    next() {
+      if (!matches) {
+        const leftRows: Row[] = [];
+        for (;;) {
+          const row = left.next();
+          if (!row) break;
+          leftRows.push(row);
+        }
+        left.close();
+
+        const rightRows: Row[] = [];
+        for (;;) {
+          const row = right.next();
+          if (!row) break;
+          rightRows.push(row);
+        }
+        right.close();
+
+        const leftBase = pageCountFor(ctx.heap, ctx.tree) + pageCountFor(joinRight.heap, joinRight.tree);
+        const leftSortSize = sortTempPageCount(ctx.table.rows.length, ctx.options.rowsPerPage, ctx.options.bufferFrames);
+
+        const leftSorted = externalMergeSort(
+          leftRows,
+          (r) => [joinKeyOf(r, plan.leftColumn)],
+          'asc',
+          {
+            pool: ctx.pool,
+            emit: ctx.emit,
+            base: leftBase,
+            memPages: ctx.options.bufferFrames,
+            rowsPerPage: ctx.options.rowsPerPage,
+          },
+          plan.leftTable,
+          'Join',
+        );
+        const rightSorted = externalMergeSort(
+          rightRows,
+          (r) => [joinKeyOf(r, plan.rightColumn)],
+          'asc',
+          {
+            pool: ctx.pool,
+            emit: ctx.emit,
+            base: leftBase + leftSortSize,
+            memPages: ctx.options.bufferFrames,
+            rowsPerPage: ctx.options.rowsPerPage,
+          },
+          plan.rightTable,
+          'Join',
+        );
+
+        ctx.emit(
+          `Join sorts ${plan.leftTable} and ${plan.rightTable} on the join key, then merges the two sorted lists in one pass.`,
+          { stage: 'execute', op: 'Join', rowsProduced: 0 },
+        );
+
+        matches = sortMergeMatches(leftSorted, rightSorted, plan.leftColumn, plan.rightColumn);
+      }
+
+      const step = matches.next();
+      if (step.done) return null;
+      const [leftRow, rightRow] = step.value;
+      matched += 1;
+      produced(
+        `Join merges a row from ${plan.leftTable} with one from ${plan.rightTable} — both sides already sorted on the join key (${matched} match${matched === 1 ? '' : 'es'} so far).`,
+      );
+      return mergeJoinedRow(plan.leftTable, leftRow, plan.rightTable, rightRow);
+    },
+    close() {
+      if (!matches) {
+        left.close();
+        right.close();
+      }
+    },
+  };
+}
+
+/** Dispatches a `Join` node to its own algorithm's operator. */
+function buildJoinOperator(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): Operator {
+  switch (plan.algorithm) {
+    case 'hash':
+      return hashJoin(plan, ctx);
+    case 'sort-merge':
+      return sortMergeJoin(plan, ctx);
+    case 'nested-loop':
+      return join(plan, ctx);
+  }
+}
+
 /** Turns a plan tree into an operator tree of the same shape. */
 export function buildOperator(plan: Plan, ctx: ExecContext): Operator {
   switch (plan.op) {
@@ -750,7 +931,7 @@ export function buildOperator(plan: Plan, ctx: ExecContext): Operator {
     case 'IndexOnlyScan':
       return indexOnlyScan(plan, ctx);
     case 'Join':
-      return plan.algorithm === 'hash' ? hashJoin(plan, ctx) : join(plan, ctx);
+      return buildJoinOperator(plan, ctx);
     case 'Filter':
       return filter(plan.predicate, buildOperator(plan.child, ctx), ctx);
     case 'HashAggregate':

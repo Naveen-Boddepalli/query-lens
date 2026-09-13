@@ -29,15 +29,18 @@ export type Plan =
    * the parser's `checkJoinOn` already guarantees the ON clause is exactly
    * one equality between a qualified column on each side, whichever order
    * it was written in, so no consumer here has to re-figure out which
-   * column belongs to which table. Two algorithms so far, the same pair
-   * `HashAggregate`/`SortAggregate` already are for `GROUP BY`: `nested-loop`
-   * rescans `right` whole per row of `left`; `hash` builds an in-memory hash
-   * table over `right` once and probes it with `left` streamed. Sort-merge
-   * join is the natural third strategy, still open.
+   * column belongs to which table. Three algorithms now, the same pair
+   * `HashAggregate`/`SortAggregate` already are for `GROUP BY`, plus a third:
+   * `nested-loop` rescans `right` whole per row of `left`; `hash` builds an
+   * in-memory hash table over `right` once and probes it with `left`
+   * streamed; `sort-merge` sorts both sides on the join key (each side its
+   * own call into `externalMergeSort`, spilling through the real buffer pool
+   * exactly as `ORDER BY`'s `Sort` does) and then merges the two sorted
+   * lists in one pass.
    */
   | {
       op: 'Join';
-      algorithm: 'nested-loop' | 'hash';
+      algorithm: 'nested-loop' | 'hash' | 'sort-merge';
       left: Plan;
       right: Plan;
       leftTable: string;
@@ -134,6 +137,24 @@ export function needsSortSpill(plan: Plan): boolean {
     node = childOf(node);
   }
   return false;
+}
+
+/**
+ * The `Join` node, when it runs the `sort-merge` algorithm — `runQuery.ts`
+ * needs this before the buffer pool exists too, to reserve scratch page ids
+ * for *both* sides' own internal sort (each is its own `externalMergeSort`
+ * call, plan.md §22.2). `childOf` stops at a `Join` (its own two children are
+ * always a bare `SeqScan`, never a `Sort`), so this and `needsSortSpill`
+ * never both fire on the same plan — `ORDER BY`/`GROUP BY` still can't
+ * combine with `JOIN` at all.
+ */
+export function findSortMergeJoin(plan: Plan): Extract<Plan, { op: 'Join' }> | null {
+  let node: Plan | undefined = plan;
+  while (node) {
+    if (node.op === 'Join' && node.algorithm === 'sort-merge') return node;
+    node = childOf(node);
+  }
+  return null;
 }
 
 /* -------------------------------------------------------------------------- */

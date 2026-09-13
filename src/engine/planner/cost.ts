@@ -159,25 +159,44 @@ function estimateNode(
       const rightDistinct = ndistinct(tableNamed(plan.rightTable).rows, plan.rightColumn);
       const estRows = clampRows((left.estRows * right.estRows) / rightDistinct);
       const rowsBasis = `${String(left.estRows)} × ${String(right.estRows)} / ndistinct(${plan.rightTable}.${plan.rightColumn})`;
-      estimate =
-        plan.algorithm === 'hash'
-          ? {
-              // Build the right side into a hash table once, then probe with
-              // the left streamed — each side is read exactly once, the
-              // honest saving over nested-loop's repeated rescans.
-              estRows,
-              estPages: left.estPages + right.estPages,
-              basis: `${rowsBasis}; hash join reads each side once — build a table on ${plan.rightTable}, probe with ${plan.leftTable}`,
-            }
-          : {
-              // Nested-loop's own cost is the honest, unflattering number:
-              // the outer read once, plus a full rescan of the inner for
-              // every outer row — no index taken advantage of yet, since
-              // `left`/`right` are always a bare SeqScan in v1.
-              estRows,
-              estPages: left.estPages + left.estRows * right.estPages,
-              basis: `${rowsBasis}; nested-loop rescans ${plan.rightTable} once per ${plan.leftTable} row`,
-            };
+      switch (plan.algorithm) {
+        case 'hash':
+          estimate = {
+            // Build the right side into a hash table once, then probe with
+            // the left streamed — each side is read exactly once, the
+            // honest saving over nested-loop's repeated rescans.
+            estRows,
+            estPages: left.estPages + right.estPages,
+            basis: `${rowsBasis}; hash join reads each side once — build a table on ${plan.rightTable}, probe with ${plan.leftTable}`,
+          };
+          break;
+        case 'sort-merge': {
+          // Each side is read once, same as hash — but sorting it first is
+          // real spill I/O (mirroring `Sort`'s own `2 * spillPages` "at
+          // least run generation" estimate), which hash join's in-memory
+          // table never pays. Honest, not flattering: sort-merge is not
+          // free just because it avoids nested-loop's rescans.
+          const leftSpill = Math.max(1, Math.ceil(left.estRows / rowsPerPage));
+          const rightSpill = Math.max(1, Math.ceil(right.estRows / rowsPerPage));
+          estimate = {
+            estRows,
+            estPages: left.estPages + right.estPages + 2 * leftSpill + 2 * rightSpill,
+            basis: `${rowsBasis}; sort-merge reads each side once, then sorts both — at least ${String(2 * leftSpill)} spill pages on ${plan.leftTable}, ${String(2 * rightSpill)} on ${plan.rightTable}`,
+          };
+          break;
+        }
+        case 'nested-loop':
+          estimate = {
+            // Nested-loop's own cost is the honest, unflattering number:
+            // the outer read once, plus a full rescan of the inner for
+            // every outer row — no index taken advantage of yet, since
+            // `left`/`right` are always a bare SeqScan in v1.
+            estRows,
+            estPages: left.estPages + left.estRows * right.estPages,
+            basis: `${rowsBasis}; nested-loop rescans ${plan.rightTable} once per ${plan.leftTable} row`,
+          };
+          break;
+      }
       break;
     }
     case 'SeqScan': {

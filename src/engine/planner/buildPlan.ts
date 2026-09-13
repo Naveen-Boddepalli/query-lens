@@ -78,12 +78,13 @@ export function buildAggregatePlan(
  * Shared with `emit.ts`'s progressive plan-tree narration, like
  * `buildAggregatePlan` already is, so the two never drift. `algorithm`
  * defaults to `'nested-loop'` (the shipped behaviour); only `/compare`'s
- * fourth mode ever passes `'hash'`, via `EngineOptions.joinStrategy`.
+ * join mode ever passes `'hash'` or `'sort-merge'`, via
+ * `EngineOptions.joinStrategy`.
  */
 export function buildJoinPlan(
   join: JoinClause,
   fromTable: string,
-  algorithm: 'nested-loop' | 'hash' = 'nested-loop',
+  algorithm: 'nested-loop' | 'hash' | 'sort-merge' = 'nested-loop',
 ): Plan {
   const { left, right } = join.on;
   if (left.kind !== 'column' || right.kind !== 'column') {
@@ -106,7 +107,7 @@ export function buildJoinPlan(
 export function buildPlan(
   ast: SelectStatement,
   aggregateStrategy: 'hash' | 'sort' = 'hash',
-  joinStrategy: 'nested-loop' | 'hash' = 'nested-loop',
+  joinStrategy: 'nested-loop' | 'hash' | 'sort-merge' = 'nested-loop',
 ): Plan {
   const scan: Plan = ast.join
     ? buildJoinPlan(ast.join, ast.from.name, joinStrategy)

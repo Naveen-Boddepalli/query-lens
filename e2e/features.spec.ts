@@ -350,14 +350,15 @@ test('compare forces a hash aggregate and a sort aggregate onto the same GROUP B
   await expect(page.getByText(/makes no difference/)).toBeVisible();
 });
 
-test('compare forces nested-loop and hash join onto the same JOIN query', async ({ page }) => {
+test('compare forces nested-loop, hash and sort-merge join onto the same JOIN query', async ({ page }) => {
   await page.goto('/compare');
-  await page.getByRole('radio', { name: 'Nested-loop join vs. hash join' }).click();
+  await page.getByRole('radio', { name: 'JOIN algorithms' }).click();
 
-  // Same rows out of both algorithms; the hash join reads far fewer pages —
-  // the demo purposely runs both under few enough buffer frames that a
-  // nested-loop rescan cannot stay cached.
-  await expect(page.getByText(/Same \d+ rows? either way/)).toBeVisible();
+  // Same rows out of all three algorithms; the hash join reads far fewer
+  // pages than either — the demo purposely runs all three under few enough
+  // buffer frames that a nested-loop rescan (or a sort-merge spill) cannot
+  // stay cached.
+  await expect(page.getByText(/Same \d+ rows? every time/)).toBeVisible();
   const column = (heading: string) =>
     page.locator('div.flex.flex-col.gap-2', {
       has: page.getByRole('heading', { name: heading, exact: true }),
@@ -366,7 +367,10 @@ test('compare forces nested-loop and hash join onto the same JOIN query', async 
     column(heading).locator('div.contents', { hasText: 'disk reads' }).locator('dd');
   const nestedLoop = Number(await diskReads('Nested-loop join').innerText());
   const hashJoin = Number(await diskReads('Hash join').innerText());
+  const sortMergeJoin = Number(await diskReads('Sort-merge join').innerText());
   expect(hashJoin).toBeLessThan(nestedLoop);
+  expect(hashJoin).toBeLessThan(sortMergeJoin);
+  expect(sortMergeJoin).toBeLessThan(nestedLoop);
 
   // A query with no JOIN at all — the algorithm makes no difference.
   await page.getByLabel('SQL').fill('SELECT * FROM authors');

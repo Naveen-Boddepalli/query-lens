@@ -26,7 +26,7 @@ export function emitPlanEvents(
   rowsPerPage: number,
   aggregateStrategy: 'hash' | 'sort' = 'hash',
   joinTable?: Table,
-  joinStrategy: 'nested-loop' | 'hash' = 'nested-loop',
+  joinStrategy: 'nested-loop' | 'hash' | 'sort-merge' = 'nested-loop',
 ): Plan {
   const otherTables = joinTable ? { [joinTable.name]: joinTable } : undefined;
   const display = (plan: Plan, changed?: ReadonlySet<Plan>) =>
@@ -46,7 +46,9 @@ export function emitPlanEvents(
     const mechanism =
       joinStrategy === 'hash'
         ? `it builds an in-memory hash table over all of \`${ast.join.table.name}\`, keyed on \`${join?.rightColumn}\`, once — then probes it with each \`${ast.from.name}\` row's \`${join?.leftColumn}\`, reading \`${ast.join.table.name}\` exactly once regardless of how many rows \`${ast.from.name}\` has`
-        : `for every row \`${ast.from.name}\` produces, it rescans all of \`${ast.join.table.name}\` looking for a match on \`${join?.leftColumn}\` = \`${join?.rightColumn}\` — nested-loop, the simplest join algorithm, and the most expensive once neither side has an index to speed the inner scan up`;
+        : joinStrategy === 'sort-merge'
+          ? `it sorts both \`${ast.from.name}\` and \`${ast.join.table.name}\` on the join key, then merges the two sorted lists in a single pass — no per-row rescan and no table held in memory, at the cost of sorting both sides first`
+          : `for every row \`${ast.from.name}\` produces, it rescans all of \`${ast.join.table.name}\` looking for a match on \`${join?.leftColumn}\` = \`${join?.rightColumn}\` — nested-loop, the simplest join algorithm, and the most expensive once neither side has an index to speed the inner scan up`;
     emit(
       `JOIN adds a second scan of \`${ast.join.table.name}\` and a Join above both: ${mechanism}.`,
       { stage: 'plan', planTree: display(current) },

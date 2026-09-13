@@ -20,6 +20,7 @@ import {
   emitDeletePlanEvents,
   emitPlanEvents,
   emitUpdatePlanEvents,
+  findSortMergeJoin,
   needsSortSpill,
 } from './planner/index.ts';
 import { buildHeap, createBufferPool } from './storage/index.ts';
@@ -226,10 +227,16 @@ export function runQuery(
   // A Sort's (or a SortAggregate's own internal sort's) spill needs its own
   // page ids, reserved up front — sized against the whole table (the worst
   // case; a WHERE clause can only shrink what actually reaches it) so the
-  // reservation is never too small to discover only at runtime.
+  // reservation is never too small to discover only at runtime. A sort-merge
+  // Join needs the same reservation *twice* — one block per side, since each
+  // sorts independently — never both at once: ORDER BY/GROUP BY still can't
+  // combine with JOIN at all.
   const sortTemp = needsSortSpill(plan)
     ? sortTempPageCount(table.rows.length, options.rowsPerPage, options.bufferFrames)
-    : 0;
+    : findSortMergeJoin(plan)
+      ? sortTempPageCount(table.rows.length, options.rowsPerPage, options.bufferFrames) +
+        sortTempPageCount(joinTable!.rows.length, options.rowsPerPage, options.bufferFrames)
+      : 0;
   const pool = createBufferPool(
     pageCountFor(heap, tree) + (rightHeap ? rightHeap.pages.length : 0) + sortTemp,
     options,
