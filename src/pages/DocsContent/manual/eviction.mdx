@@ -1,0 +1,52 @@
+---
+title: Watch a page get evicted
+description: Run the buffer pool out of room under LRU, then feed the same access pattern to clock sweep and watch it choose a different page to keep.
+---
+
+import { DocMeta, Steps, Callout } from '../../../ui/DocsComponents.tsx';
+
+# Watch a page get evicted
+
+<DocMeta items={[
+  { label: 'Audience', value: 'Anyone comparing the two eviction policies' },
+  { label: 'Time', value: '~4 minutes' },
+]} />
+
+<Steps>
+
+1. **Open [the sequential scan under LRU](/?q=SELECT%20%2A%20FROM%20users%20WHERE%20age%20%3E%2030%3B&p=lru&x=0&s=91).**
+   That link lands on step 91 of 131 — the moment the pool fills up: frame 0 is outlined
+   **EVICTED**, holding page 0. Read the narration line under the trace; it names the victim and
+   the reason LRU picked it.
+
+2. **Step back a few times** with <kbd>←</kbd> and watch the frames fill from empty, one disk read
+   per miss, until the ninth read has nowhere to go and something has to leave.
+
+3. **Now open [the same query under clock sweep](/?q=SELECT%20%2A%20FROM%20users%20WHERE%20age%20%3E%2030%3B&p=clock&x=0&s=99).**
+   Same table, same query — only `p=lru` became `p=clock`. Its first eviction lands eight steps
+   later (clock sweep walks past a couple of frames decrementing counters before it takes one), but
+   it picks **the same page**.
+
+</Steps>
+
+That agreement is worth sitting with. On a scan that touches every page exactly once, nothing is
+meaningfully "hotter" than anything else, so the two policies have nothing to disagree about — see
+[the buffer pool concept page](/docs/concepts/buffer-pool) for why.
+
+## Where they actually disagree
+
+<Callout>
+Open the **[buffer pool sandbox](/tools/buffer-pool?ref=0%201%202%200%200%200%203%204%205&frames=3&policy=lru)** —
+preloaded with 3 frames and the reference string `0 1 2 0 0 0 3 4 5`: page 0 is read five times,
+the other four pages once each.
+</Callout>
+
+Press **Play**. Under **LRU**, page 0 still ends up evicted — by the time pages 3, 4 and 5 arrive,
+page 0's *most recent* touch is no longer recent enough, and LRU only ever looks at last touch.
+Final residents: pages 3, 4, 5.
+
+**Try this:** change nothing but the **Policy** dropdown — LRU to **Clock sweep** — and click **Run**
+again. Same nine accesses, same three frames, but page 0 survives to the end this time: each of its
+four extra touches gave it a fresh usage-count "second chance" the other pages never got. Final
+residents: pages 0, 4, 5. One dropdown, one different page kept alive — that is the entire reason
+clock sweep exists.

@@ -1331,14 +1331,42 @@ file, because the person who needs it will not read either.
 - [ ] FAQ answers "Is this a real database?", "Where is my data stored?", and "Can I use this in my
       course?"
 - [ ] Getting Started exists and a first-time user completes it without opening the README.
-- [ ] The two manual pages the §9 study depends on — eviction and B+Tree split — exist, each with
-      annotated screenshots, a "try this", and a link that opens the app at that state.
+- [x] The two manual pages the §9 study depends on — eviction and B+Tree split — exist, each with
+      ~~annotated screenshots~~, a "try this", and a link that opens the app at that state. **Done —
+      see the status note below the checklist for why screenshots were dropped.**
 - [ ] At least one Concepts page embeds a real component from `src/` rather than a screenshot (or
       the embed requirement is explicitly dropped and the tool choice revisited with it).
 - [ ] `LICENSE-DOCS` exists (CC BY 4.0) and the docs footer states it.
 - [ ] `OFL.txt` ships with the font files, subset files are renamed off the reserved font name, and
       `NOTICE` covers both fonts.
 - [ ] No docs page mixes two Diátaxis modes.
+
+> **Status, v15.** The two manual pages shipped: `/docs/manual/eviction` ("Watch a page get evicted")
+> and `/docs/manual/btree-split` ("Watch a B+Tree split"), a new **Manual** nav group between
+> Introduction and Concepts in `docsNav.ts`. Both follow §17.2's rules — task-titled, start at an
+> action, end with a "try this" that changes exactly one variable — with one deliberate deviation:
+> **no screenshots.** Getting Started already established the pattern this project actually uses for
+> an interactive tool — a live shareable-URL link the reader opens and drives themselves — and a
+> static image of a thing whose entire point is stepping through it would be the weaker teaching aid,
+> not a stronger one. Every link and every stated outcome (which frame gets evicted, which keys land
+> in which node after a split) was verified against the running app, not written from memory.
+>
+> The eviction page's "compare LRU against clock sweep" companion needed a real divergence, and the
+> pipeline's own sequential-scan link (already cited in `concepts/buffer-pool.mdx`) doesn't provide
+> one — on a uniform scan the two policies agree, which is the honest fact that page already states.
+> The [buffer-pool sandbox](https://query-lens.pages.dev/tools/buffer-pool)'s `ref`/`frames`/`policy`
+> URL state — built exactly for this, per its own doc comment — does: the skewed reference string
+> `0 1 2 0 0 0 3 4 5` at 3 frames already existed as a property test
+> (`storage.test.ts`, "disagree once one page is hot"); running it live confirmed LRU evicts the hot
+> page (0) while clock sweep keeps it resident, a "try this" that is a single dropdown change, not a
+> new query to construct.
+>
+> The B+Tree page's two split demos are similarly exact rather than illustrative: `keys=1,2,3&fanout=3`
+> then inserting `4` triggers the leaf split (copy-up, verified against `btree.ts`'s own
+> `splitLeaf`); `keys=1,2,3,4,5,6,7,8,9&fanout=3` then inserting `10` triggers the cascading root
+> split (push-up, verified against `insertIntoParent`) — both confirmed live rather than hand-traced,
+> since an off-by-one in a manually simulated split is exactly the kind of error this section warns
+> against shipping.
 
 ---
 

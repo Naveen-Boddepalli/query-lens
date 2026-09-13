@@ -145,6 +145,8 @@ const DocsGettingStarted = lazy(() => import('./pages/DocsContent/getting-starte
 const DocsFaq = lazy(() => import('./pages/DocsContent/faq.mdx'));
 const DocsBufferPool = lazy(() => import('./pages/DocsContent/concepts/buffer-pool.mdx'));
 const DocsBTree = lazy(() => import('./pages/DocsContent/concepts/btree.mdx'));
+const DocsManualEviction = lazy(() => import('./pages/DocsContent/manual/eviction.mdx'));
+const DocsManualBTreeSplit = lazy(() => import('./pages/DocsContent/manual/btree-split.mdx'));
 const DocsSql = lazy(() => import('./pages/DocsContent/reference/sql.mdx'));
 const DocsUrlParameters = lazy(() => import('./pages/DocsContent/reference/url-parameters.mdx'));
 const DocsShortcuts = lazy(() => import('./pages/DocsContent/reference/shortcuts.mdx'));
@@ -200,6 +202,8 @@ export default function App() {
               <Route path="faq" element={<DocsFaq />} />
               <Route path="concepts/buffer-pool" element={<DocsBufferPool />} />
               <Route path="concepts/btree" element={<DocsBTree />} />
+              <Route path="manual/eviction" element={<DocsManualEviction />} />
+              <Route path="manual/btree-split" element={<DocsManualBTreeSplit />} />
               <Route path="reference/sql" element={<DocsSql />} />
               <Route path="reference/url-parameters" element={<DocsUrlParameters />} />
               <Route path="reference/shortcuts" element={<DocsShortcuts />} />

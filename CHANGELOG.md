@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **The two §9-blocking manual pages** (plan.md §17.2): `/docs/manual/eviction` ("Watch a page get
+  evicted") and `/docs/manual/btree-split` ("Watch a B+Tree split"), a new **Manual** group in the
+  docs nav. Both are task-shaped how-tos that open the app at the exact state they describe rather
+  than showing a screenshot of it — the eviction page's LRU-vs-clock-sweep contrast uses the
+  [buffer-pool sandbox](https://query-lens.pages.dev/tools/buffer-pool)'s `ref`/`frames`/`policy`
+  URL state to reproduce a real divergence (`0 1 2 0 0 0 3 4 5` at 3 frames — LRU evicts the hot
+  page, clock sweep keeps it), and the B+Tree page's two split demos (`/tools/btree?keys=...`) walk a
+  verified leaf split (copy-up) and a verified cascading root split (push-up). See plan.md §17.4's
+  status note for what was checked and why screenshots were dropped.
 - **True vector SVG export for the AST, plan and B+Tree trees** (plan.md §20.3) — a **Download SVG**
   button beside **Download PNG**, emitting real `<rect>`/`<text>`/`<path>` elements instead of
   `html-to-image`'s `toSvg`, which wraps HTML in a `<foreignObject>` that Illustrator, Inkscape and

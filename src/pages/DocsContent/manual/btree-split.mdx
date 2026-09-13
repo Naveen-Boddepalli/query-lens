@@ -1,0 +1,54 @@
+---
+title: Watch a B+Tree split
+description: Insert one key past a full node and watch a leaf split copy its separator up, then keep going until an internal node splits and pushes one away.
+---
+
+import { DocMeta, Steps, Callout } from '../../../ui/DocsComponents.tsx';
+
+# Watch a B+Tree split
+
+<DocMeta items={[
+  { label: 'Audience', value: 'Anyone building intuition for index maintenance' },
+  { label: 'Time', value: '~4 minutes' },
+]} />
+
+<Steps>
+
+1. **Open [the B+Tree sandbox loaded with keys 1, 2, 3 at fan-out 3](/tools/btree?keys=1,2,3&fanout=3).**
+   One leaf, three keys, right at capacity — the status line reads "height 1, 3 keys, 1 node."
+
+2. **Type `4` into Key and click Insert.** The leaf is now one key over fan-out, so it splits: two
+   leaves, `1, 2` and `3, 4`, under a brand-new internal root holding a single separator, **3**. Look
+   closely — key 3 is the separator *and* still sits inside the right leaf. That is **copy-up**: a
+   leaf holds actual rows, so the key that becomes a separator has to stay exactly where it was.
+
+3. **Open [the same sandbox with keys 1 through 9 already loaded](/tools/btree?keys=1,2,3,4,5,6,7,8,9&fanout=3).**
+   The root is already a full internal node — three separators, `3 5 7`, routing to four leaves.
+
+4. **Type `10` and click Insert.** The rightmost leaf (`7, 8, 9`) splits as usual, copying separator
+   `9` up — but that gives the root four separators, one past its own fan-out. The root **pushes**
+   its middle key, `7`, up into a brand-new root and *removes it from both halves*: the left internal
+   node keeps `3, 5`, the right keeps `9`. Key 7 now exists in exactly one place in the whole tree —
+   the new root — because an internal node's keys are routes, not rows.
+
+</Steps>
+
+## Why the two rules can't swap
+
+<Callout>
+**Copy-up at a leaf, push-up internally — mixing them up is the exact bug plan.md §7.6 calls out.**
+It doesn't crash. It builds a tree that looks completely normal and quietly answers some queries wrong.
+</Callout>
+
+Push a leaf split's separator up the way an internal split does — remove it from the leaf instead of
+just copying it — and the row for that key is now gone from every leaf. A lookup for it still
+descends correctly (it follows the separator into the right leaf) and finds nothing there, so it
+reports "not found" for a key you can plainly see one level up. Copy an internal split's middle key
+the way a leaf split does — leave it behind instead of removing it — and that node now holds one more
+key than it has child pointers to match, so every key at or past the duplicate gets routed one child
+off from where it belongs. Neither failure looks like a crash. Both look like a tree that's fine,
+right up until it silently drops or misroutes rows.
+
+The [B+Tree sandbox](/tools/btree) re-checks these invariants after every edit — "invariants hold" in
+the status line is that check passing. Turn the fan-out down to 3 and keep inserting past 10 to watch
+more of both kinds of split happen back to back.

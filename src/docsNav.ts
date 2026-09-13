@@ -19,6 +19,13 @@ export const DOCS_NAV: readonly DocsNavGroup[] = [
     ],
   },
   {
+    title: 'Manual',
+    items: [
+      { to: '/docs/manual/eviction', label: 'Watch a page get evicted' },
+      { to: '/docs/manual/btree-split', label: 'Watch a B+Tree split' },
+    ],
+  },
+  {
     title: 'Concepts',
     items: [
       { to: '/docs/concepts/buffer-pool', label: 'Buffer pool' },
