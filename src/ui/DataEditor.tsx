@@ -3,6 +3,9 @@ import type { Row, SqlValue, Table } from '../engine/index.ts';
 import { parseSeedCsv } from './parseCsv.ts';
 import { btnGhost, btnPrimary, btnSecondary, inputField } from './primitives.ts';
 
+/** Caps the undo stack so a long editing session can't grow it unboundedly. */
+const MAX_HISTORY = 50;
+
 /**
  * "Construct their own input data sets" is named explicitly in the condition
  * that beat both text and a conventional animation in the HalVis studies
@@ -35,12 +38,44 @@ export function DataEditor({ table, onApply, onReset, onClose }: DataEditorProps
   const [importError, setImportError] = useState<string | null>(null);
   const dialog = useRef<HTMLDialogElement>(null);
 
+  // Undo/redo over row snapshots. Cell keystrokes coalesce into one history
+  // entry per cell (tracked via lastEditTarget) rather than one per character
+  // — moving to a different cell, or any structural change, starts a new
+  // entry. `past`/`future` hold snapshots *other than* the current `rows`.
+  const [past, setPast] = useState<Row[][]>([]);
+  const [future, setFuture] = useState<Row[][]>([]);
+  const lastEditTarget = useRef<string | null>(null);
+
+  const pushHistory = () => {
+    setPast((p) => [...p, rows].slice(-MAX_HISTORY));
+    setFuture([]);
+  };
+
+  const undo = () => {
+    if (past.length === 0) return;
+    const previous = past[past.length - 1]!;
+    setPast(past.slice(0, -1));
+    setFuture([rows, ...future]);
+    setRows(previous);
+    lastEditTarget.current = null;
+  };
+
+  const redo = () => {
+    if (future.length === 0) return;
+    const next = future[0]!;
+    setFuture(future.slice(1));
+    setPast([...past, rows].slice(-MAX_HISTORY));
+    setRows(next);
+    lastEditTarget.current = null;
+  };
+
   function importCsv() {
     const result = parseSeedCsv(csv, table);
     if (!result.ok) {
       setImportError(result.error);
       return;
     }
+    pushHistory();
     setRows(result.rows);
     setImporting(false);
     setImportError(null);
@@ -66,6 +101,11 @@ export function DataEditor({ table, onApply, onReset, onClose }: DataEditorProps
   const close = () => { dialog.current?.close(); };
 
   const edit = (index: number, column: string, raw: string) => {
+    const target = `${String(index)}:${column}`;
+    if (lastEditTarget.current !== target) {
+      pushHistory();
+      lastEditTarget.current = target;
+    }
     setRows((current) =>
       current.map((row, i) =>
         i === index ? { ...row, [column]: coerce(raw, row[column] ?? null) } : row,
@@ -74,6 +114,8 @@ export function DataEditor({ table, onApply, onReset, onClose }: DataEditorProps
   };
 
   const addRow = () => {
+    pushHistory();
+    lastEditTarget.current = null;
     setRows((current) => {
       const template = current[current.length - 1] ?? {};
       const blank: Row = {};
@@ -86,6 +128,8 @@ export function DataEditor({ table, onApply, onReset, onClose }: DataEditorProps
   };
 
   const removeRow = (index: number) => {
+    pushHistory();
+    lastEditTarget.current = null;
     setRows((current) => current.filter((_, i) => i !== index));
   };
 
@@ -196,6 +240,26 @@ export function DataEditor({ table, onApply, onReset, onClose }: DataEditorProps
         </div>
 
         <footer className="flex flex-wrap items-center gap-2 border-t border-edge bg-surface-2/40 px-4 py-3">
+          <button
+            type="button"
+            onClick={undo}
+            disabled={past.length === 0}
+            aria-label="Undo"
+            title="Undo"
+            className={`${btnGhost} disabled:cursor-not-allowed disabled:opacity-40`}
+          >
+            ↶ Undo
+          </button>
+          <button
+            type="button"
+            onClick={redo}
+            disabled={future.length === 0}
+            aria-label="Redo"
+            title="Redo"
+            className={`${btnGhost} disabled:cursor-not-allowed disabled:opacity-40`}
+          >
+            ↷ Redo
+          </button>
           <button type="button" onClick={addRow} className={btnSecondary}>
             + Add row
           </button>

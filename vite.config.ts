@@ -106,7 +106,7 @@ export default defineConfig({
      */
     rolldownOptions: {
       output: {
-        advancedChunks: {
+        codeSplitting: {
           groups: [
             { name: 'codemirror', test: /node_modules\/(@codemirror|@lezer|style-mod|w3c-keyname)\// },
             { name: 'flow', test: /node_modules\/(@xyflow|d3-|classcat|zustand)/ },

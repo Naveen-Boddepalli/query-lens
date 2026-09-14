@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Undo/redo in the seed data editor** (plan.md §23.1) — `DataEditor.tsx` keeps a `past`/`future`
+  snapshot stack of the table's rows, with an Undo and a Redo button in the footer. Repeated
+  keystrokes into the same cell coalesce into one undo step (tracked by a `lastEditTarget` ref) so
+  undoing a typed value doesn't mean clicking through every character — moving to a different cell,
+  or any structural change (add row, delete row, CSV import), starts a fresh step and clears the redo
+  stack. `SchemaEditor.tsx`'s own undo/redo (table/column structure rather than row values) is a
+  separate, still-open item.
+- **`LICENSE-DOCS`** (plan.md §17.3, §23.1) — the documentation prose under
+  `src/pages/DocsContent/` is CC BY 4.0, distinct from the MIT-licensed application source. The
+  site-wide footer already carried a "CC BY 4.0 docs" badge; it had nothing to link to until now —
+  `Footer.tsx`'s Project column gained a "Docs licence" link beside the existing MIT "Licence" one.
 - **A second candidate index, chosen by selectivity** (plan.md §22.2) — `Table.indexedColumn?:
   string` widened to `indexedColumns?: string[]`: each entry is its own independent single-column
   B+Tree, not a composite (multi-column) key over several columns at once, which stays a separate,
@@ -610,6 +621,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   built today, but `STAGES`/`IMPLEMENTED_STAGES` remain separate lists on purpose
 
 ### Fixed
+- `vite.config.ts`'s `output.advancedChunks` was deprecated by rolldown, printing a build-time
+  warning on every `pnpm build`. Renamed to `output.codeSplitting`, same `groups` shape — no change
+  in which modules land in which chunk
 - The diagram tree arrived unframed in the panel's corner on some cold loads, and always when the
   page loaded into a background tab — the common case for a shared link. React Flow animates viewport
   moves with a d3-zoom transition, which is driven by `requestAnimationFrame` and so never advances

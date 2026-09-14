@@ -75,4 +75,83 @@ describe('DataEditor', () => {
       { id: 2, name: 'grace', age: 41 },
     ]);
   });
+
+  describe('undo/redo', () => {
+    it('starts with both disabled — nothing to undo or redo yet', () => {
+      setup();
+      expect(screen.getByRole('button', { name: 'Undo' })).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Redo' })).toBeDisabled();
+    });
+
+    it('undoes a row edit back to the previous value, and redo restores it', () => {
+      const { onApply } = setup();
+      fireEvent.change(screen.getByLabelText('age row 1'), { target: { value: '99' } });
+      expect(screen.getByRole('button', { name: 'Undo' })).not.toBeDisabled();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+      expect(screen.getByRole('button', { name: 'Undo' })).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Redo' })).not.toBeDisabled();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Apply & re-run' }));
+      expect(onApply).toHaveBeenCalledWith([
+        { id: 1, name: 'ada', age: 36 },
+        { id: 2, name: 'alan', age: 41 },
+      ]);
+    });
+
+    it('redo replays the undone edit', () => {
+      const { onApply } = setup();
+      fireEvent.change(screen.getByLabelText('age row 1'), { target: { value: '99' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Redo' }));
+      expect(screen.getByRole('button', { name: 'Redo' })).toBeDisabled();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Apply & re-run' }));
+      expect(onApply).toHaveBeenCalledWith([
+        { id: 1, name: 'ada', age: 99 },
+        { id: 2, name: 'alan', age: 41 },
+      ]);
+    });
+
+    it('coalesces repeated keystrokes into the same cell into one undo step', () => {
+      setup();
+      const input = screen.getByLabelText('name row 1');
+      fireEvent.change(input, { target: { value: 'a' } });
+      fireEvent.change(input, { target: { value: 'ad' } });
+      fireEvent.change(input, { target: { value: 'ada!' } });
+
+      fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+      expect(screen.getByLabelText('name row 1')).toHaveValue('ada');
+      expect(screen.getByRole('button', { name: 'Undo' })).toBeDisabled();
+    });
+
+    it('a new edit clears the redo stack', () => {
+      setup();
+      fireEvent.change(screen.getByLabelText('age row 1'), { target: { value: '99' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+      expect(screen.getByRole('button', { name: 'Redo' })).not.toBeDisabled();
+
+      fireEvent.change(screen.getByLabelText('name row 2'), { target: { value: 'grace' } });
+      expect(screen.getByRole('button', { name: 'Redo' })).toBeDisabled();
+    });
+
+    it('undoes adding a row', () => {
+      setup();
+      fireEvent.click(screen.getByRole('button', { name: '+ Add row' }));
+      expect(screen.getAllByLabelText(/^id row/)).toHaveLength(3);
+
+      fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+      expect(screen.getAllByLabelText(/^id row/)).toHaveLength(2);
+    });
+
+    it('undoes removing a row', () => {
+      setup();
+      fireEvent.click(screen.getByRole('button', { name: 'Delete row 1' }));
+      expect(screen.getAllByLabelText(/^id row/)).toHaveLength(1);
+
+      fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+      expect(screen.getAllByLabelText(/^id row/)).toHaveLength(2);
+      expect(screen.getByLabelText('id row 1')).toHaveValue('1');
+    });
+  });
 });

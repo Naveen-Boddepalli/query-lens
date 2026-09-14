@@ -49,7 +49,13 @@ const PROJECT_LINKS: FooterLink[] = [
   {
     label: 'Licence',
     href: `${REPO_URL}/blob/main/LICENSE`,
-    title: 'MIT for the code; the bundled fonts are OFL 1.1 (see NOTICE); this documentation is CC BY 4.0',
+    title: 'MIT for the code; the bundled fonts are OFL 1.1 (see NOTICE); this documentation is CC BY 4.0 (see LICENSE-DOCS)',
+    external: true,
+  },
+  {
+    label: 'Docs licence',
+    href: `${REPO_URL}/blob/main/LICENSE-DOCS`,
+    title: 'CC BY 4.0 — the terms for reusing this documentation\'s prose',
     external: true,
   },
   { label: 'Changelog', href: `${REPO_URL}/blob/main/CHANGELOG.md`, title: 'What changed, and when', external: true },
