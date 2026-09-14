@@ -1,10 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { DATASETS, DEFAULT_ENGINE_OPTIONS, runQuery } from '../../../engine/index.ts';
-import { CHALLENGES, challengeById, challengeDataset, challengeStats } from '../challenges.tsx';
+import {
+  CHALLENGES,
+  challengeById,
+  challengeDatabase,
+  challengeDataset,
+  challengeOptions,
+  challengeStats,
+} from '../challenges.tsx';
 import type { Challenge } from '../challenges.tsx';
 
-const runOn = (c: Challenge, sql: string) =>
-  runQuery(sql, DATASETS[challengeDataset(c)].make(), DEFAULT_ENGINE_OPTIONS);
+const runOn = (c: Challenge, sql: string) => runQuery(sql, challengeDatabase(c), challengeOptions(c));
 
 describe('challenges', () => {
   it('has unique ids', () => {
@@ -16,7 +22,7 @@ describe('challenges', () => {
     for (const c of CHALLENGES) {
       const r = runOn(c, c.starter);
       expect(r.error, `${c.id} starter errored: ${r.error?.message ?? ''}`).toBeUndefined();
-      expect(c.check(r), `${c.id} starter should not pass`).toBe(false);
+      expect(c.check(r, c.starter), `${c.id} starter should not pass`).toBe(false);
     }
   });
 
@@ -30,6 +36,10 @@ describe('challenges', () => {
     'push-it-down': 'SELECT * FROM users WHERE age > 30;',
     'deep-descent': 'SELECT * FROM orders WHERE id = 42;',
     'needle-in-the-skew': "SELECT * FROM logins WHERE status = 'blocked';",
+    'sort-spill': 'SELECT * FROM users ORDER BY age;',
+    'hash-beats-loop': 'SELECT * FROM authors JOIN posts ON authors.id = posts.authorId;',
+    'dirty-eviction': "UPDATE users SET name = 'edited' WHERE age > 30;",
+    'range-leap': 'SELECT * FROM users WHERE id > 40;',
   };
 
   it('has a solution wired for every challenge', () => {
@@ -42,7 +52,7 @@ describe('challenges', () => {
       expect(sql, `no solution wired for ${c.id}`).toBeTruthy();
       const r = runOn(c, sql!);
       expect(r.error).toBeUndefined();
-      expect(c.check(r), `${c.id} rejected its solution`).toBe(true);
+      expect(c.check(r, sql!), `${c.id} rejected its solution`).toBe(true);
     }
   });
 
@@ -59,11 +69,50 @@ describe('challenges', () => {
     expect(s.usesIndex).toBe(true);
     expect(s.diskReads).toBeGreaterThanOrEqual(0);
     expect(s.evictions).toBe(0);
+    expect(s.writes).toBe(0);
+    expect(s.dirtyEvictions).toBe(0);
+    expect(s.usesRangeScan).toBe(false);
   });
 
-  it('challenges name only real datasets', () => {
+  it('challenges name only real datasets, when they use a dataset at all', () => {
     for (const c of CHALLENGES) {
+      if (c.database) continue; // its own one-off database, not a DatasetId
       expect(DATASETS[challengeDataset(c)], `${c.id} names an unknown dataset`).toBeTruthy();
     }
+  });
+
+  describe('a challenge with its own database (hash-beats-loop)', () => {
+    const c = CHALLENGES.find((ch) => ch.id === 'hash-beats-loop')!;
+
+    it('runs against the authors/posts JOIN demo, not the default users dataset', () => {
+      const r = runOn(c, 'SELECT * FROM authors;');
+      expect(r.error).toBeUndefined();
+      expect(r.rows.length).toBeGreaterThan(0);
+    });
+
+    it('runs under its own forced bufferFrames: 2, not the default 8', () => {
+      expect(challengeOptions(c).bufferFrames).toBe(2);
+    });
+
+    it('rejects a query with no real JOIN — nested-loop and hash cost the same for one table', () => {
+      const r = runOn(c, 'SELECT * FROM authors;');
+      expect(c.check(r, 'SELECT * FROM authors;')).toBe(false);
+    });
+  });
+
+  describe('the sort-spill and dirty-eviction thresholds', () => {
+    const sortSpill = CHALLENGES.find((c) => c.id === 'sort-spill')!;
+    const dirtyEviction = CHALLENGES.find((c) => c.id === 'dirty-eviction')!;
+
+    it('a tiny ORDER BY writes only one run — not enough to pass', () => {
+      const r = runOn(sortSpill, 'SELECT * FROM users WHERE id = 5 ORDER BY age;');
+      expect(sortSpill.check(r, 'SELECT * FROM users WHERE id = 5 ORDER BY age;')).toBe(false);
+    });
+
+    it('a single-row UPDATE never forces an eviction — not enough to pass', () => {
+      const sql = "UPDATE users SET name = 'x' WHERE id = 5;";
+      const r = runOn(dirtyEviction, sql);
+      expect(dirtyEviction.check(r, sql)).toBe(false);
+    });
   });
 });

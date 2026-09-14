@@ -3,14 +3,21 @@
  * which is why the file is `.tsx`; nothing here is a hot-reloadable component.
  */
 import type { ReactNode } from 'react';
-import { DEFAULT_DATASET } from '../../engine/index.ts';
-import type { ASTNode, DatasetId, RunResult, StepEvent } from '../../engine/index.ts';
+import {
+  createJoinDemoDatabase,
+  DATASETS,
+  DEFAULT_DATASET,
+  DEFAULT_ENGINE_OPTIONS,
+  runQuery,
+} from '../../engine/index.ts';
+import type { ASTNode, Database, DatasetId, EngineOptions, RunResult, StepEvent } from '../../engine/index.ts';
 
 /**
- * plan.md §22.4: goal-shaped puzzles with a client-side check. Each `check` is
- * a pure predicate over a `RunResult` — no backend, no new engine surface —
- * evaluated on every Run. The set is small on purpose (§22.4 scopes the full
- * thing at a week); this is the first cut.
+ * plan.md §22.4/§23.1: goal-shaped puzzles with a client-side check. Each
+ * `check` is a pure predicate over a `RunResult` — no backend, no new engine
+ * surface — evaluated on every Run. The set is small on purpose (§22.4 scopes
+ * the full thing at a week); this is the first cut plus a second, engine-depth
+ * one (§23.1: sort spills, join algorithms, dirty writeback, range scans).
  */
 
 export interface Challenge {
@@ -22,11 +29,36 @@ export interface Challenge {
   starter: string;
   /** Which preset table the check runs against (plan.md §22.7). Default `users`. */
   dataset?: DatasetId;
-  check: (result: RunResult) => boolean;
+  /**
+   * Overrides `dataset` entirely when set — for a challenge whose database no
+   * `DatasetId` names, e.g. the `authors`/`posts` JOIN demo. Called fresh per
+   * run, the same way `DatasetSpec.make()` already is, so nothing carries
+   * state between attempts.
+   */
+  database?: () => Database;
+  /** Merged over `DEFAULT_ENGINE_OPTIONS` for the player's own run. */
+  engineOptions?: Partial<EngineOptions>;
+  /**
+   * `sql` is the query that produced `result` — most checks only need
+   * `result`, but one (`hash-beats-loop`) reruns the same text itself under a
+   * different `joinStrategy` to compare two real algorithms head to head,
+   * rather than trusting an estimate.
+   */
+  check: (result: RunResult, sql: string) => boolean;
 }
 
-/** A challenge's dataset, defaulted. */
+/** A challenge's dataset, defaulted. Meaningless once `database` is set — `challengeDatabase` below is what actually runs. */
 export const challengeDataset = (c: Challenge): DatasetId => c.dataset ?? DEFAULT_DATASET;
+
+/** The database a challenge actually runs against. */
+export const challengeDatabase = (c: Challenge): Database =>
+  c.database ? c.database() : DATASETS[challengeDataset(c)].make();
+
+/** The engine options a challenge runs under — `DEFAULT_ENGINE_OPTIONS`, with a challenge's own overrides layered on. */
+export const challengeOptions = (c: Challenge): EngineOptions => ({
+  ...DEFAULT_ENGINE_OPTIONS,
+  ...(c.engineOptions ?? {}),
+});
 
 const diskReads = (events: readonly StepEvent[]): number =>
   events.filter((e) => e.stage === 'buffer' && e.action === 'miss').length;
@@ -34,11 +66,27 @@ const diskReads = (events: readonly StepEvent[]): number =>
 const evictions = (events: readonly StepEvent[]): number =>
   events.filter((e) => e.stage === 'buffer' && e.action === 'evict').length;
 
+/** Evictions that cost a writeback — the victim held a change nothing had flushed yet. */
+const dirtyEvictions = (events: readonly StepEvent[]): number =>
+  events.filter((e) => e.stage === 'buffer' && e.action === 'evict' && e.writtenBack).length;
+
+/** `Sort`/`SortAggregate` spill pages — the only two callers of `BufferPool.write()` besides `INSERT`. */
+const writes = (events: readonly StepEvent[]): number =>
+  events.filter((e) => e.stage === 'buffer' && e.action === 'write').length;
+
 const usesIndex = (events: readonly StepEvent[]): boolean =>
   events.some(
     (e) =>
       (e.stage === 'optimize' && e.rule === 'index-selection') ||
       (e.stage === 'execute' && e.op === 'IndexScan'),
+  );
+
+/** plan.md §23.1's leaf-chaining range scan, fired instead of a full SeqScan. */
+const usesRangeScan = (events: readonly StepEvent[]): boolean =>
+  events.some(
+    (e) =>
+      (e.stage === 'optimize' && e.rule === 'range-index-selection') ||
+      (e.stage === 'execute' && e.op === 'IndexRangeScan'),
   );
 
 function astHasKind(node: ASTNode | undefined, kind: string): boolean {
@@ -209,6 +257,101 @@ export const CHALLENGES: Challenge[] = [
     starter: "SELECT * FROM logins WHERE status = 'ok';",
     check: (r) => !r.error && r.rows.length > 0 && r.rows.length < 20 && !usesIndex(r.events),
   },
+  {
+    id: 'sort-spill',
+    title: 'The sort spill',
+    brief: (
+      <>
+        <code className="font-mono">ORDER BY</code> looks instant, but QueryLens&rsquo;s{' '}
+        <code className="font-mono">Sort</code> is a real external merge sort: it writes its sorted
+        runs out to pages and reads them back to merge, through the same buffer pool as everything
+        else. Sort enough rows that it needs more than one run.
+      </>
+    ),
+    hint: (
+      <>
+        A one-row result sorts trivially — one run, nothing to merge. Widen the{' '}
+        <code className="font-mono">WHERE</code>, or drop it, so there is enough to sort that the
+        spill is real.
+      </>
+    ),
+    starter: 'SELECT * FROM users WHERE id = 5 ORDER BY age;',
+    check: (r) => !r.error && writes(r.events) >= 5,
+  },
+  {
+    id: 'hash-beats-loop',
+    title: 'Hash beats loop',
+    database: createJoinDemoDatabase,
+    // Forced small on purpose, same reason `/compare`'s own JOIN mode does:
+    // the demo's 5 heap pages fit entirely inside the default 8 frames, which
+    // would let nested-loop's rescans hit cache and hide the very difference
+    // this challenge exists to show.
+    engineOptions: { bufferFrames: 2 },
+    brief: (
+      <>
+        This engine has three join algorithms. Nested-loop rescans all of the right-hand table once
+        per row of the left; hash join reads it once into memory instead. Join{' '}
+        <code className="font-mono">authors</code> to <code className="font-mono">posts</code> and
+        confirm hash join reads fewer pages than nested-loop does for the exact same query — the
+        check reruns your SQL under both algorithms itself and compares.
+      </>
+    ),
+    hint: (
+      <>
+        Any real join on <code className="font-mono">authors.id = posts.authorId</code> works.
+        Nested-loop pays for every row of <code className="font-mono">posts</code> a second time for
+        each author; hash join pays for it once, however many authors there are.
+      </>
+    ),
+    starter: 'SELECT * FROM authors;',
+    check: (r, sql) => {
+      if (r.error) return false;
+      const nestedLoopReads = diskReads(r.events);
+      const hash = runQuery(sql, createJoinDemoDatabase(), { ...DEFAULT_ENGINE_OPTIONS, bufferFrames: 2, joinStrategy: 'hash' });
+      return !hash.error && diskReads(hash.events) < nestedLoopReads;
+    },
+  },
+  {
+    id: 'dirty-eviction',
+    title: 'The dirty eviction',
+    brief: (
+      <>
+        Evicting a page an <code className="font-mono">UPDATE</code> already changed costs more than
+        evicting a page nobody touched — the dirty one has to be written back first.{' '}
+        <code className="font-mono">UPDATE</code> enough rows, spread across enough pages, that at
+        least one dirty page gets evicted before the statement finishes.
+      </>
+    ),
+    hint: (
+      <>
+        One row is one page, and the pool has eight frames — nothing gets evicted.{' '}
+        <code className="font-mono">WHERE</code> a broad enough condition that the write touches more
+        pages than the pool can hold at once.
+      </>
+    ),
+    starter: "UPDATE users SET name = 'edited' WHERE id = 5;",
+    check: (r) => !r.error && dirtyEvictions(r.events) >= 1,
+  },
+  {
+    id: 'range-leap',
+    title: 'The range leap',
+    brief: (
+      <>
+        A range predicate on an <em>indexed</em> column descends the B+Tree once and
+        walks the leaf chain sideways, instead of reading the whole table. Write a range query — not
+        an equality — that touches fewer pages than a full sequential scan does.
+      </>
+    ),
+    hint: (
+      <>
+        <code className="font-mono">age</code> is not indexed, so any range on it is a full 12-page
+        scan. <code className="font-mono">id</code> is — try <code className="font-mono">id &gt;</code>,{' '}
+        <code className="font-mono">id &lt;</code>, or a <code className="font-mono">BETWEEN</code>.
+      </>
+    ),
+    starter: 'SELECT * FROM users WHERE age > 30;',
+    check: (r) => !r.error && usesRangeScan(r.events) && diskReads(r.events) < 12,
+  },
 ];
 
 export function challengeById(id: string | undefined): Challenge | undefined {
@@ -221,11 +364,17 @@ export function challengeStats(result: RunResult): {
   diskReads: number;
   evictions: number;
   usesIndex: boolean;
+  writes: number;
+  dirtyEvictions: number;
+  usesRangeScan: boolean;
 } {
   return {
     rows: result.rows.length,
     diskReads: diskReads(result.events),
     evictions: evictions(result.events),
     usesIndex: usesIndex(result.events),
+    writes: writes(result.events),
+    dirtyEvictions: dirtyEvictions(result.events),
+    usesRangeScan: usesRangeScan(result.events),
   };
 }

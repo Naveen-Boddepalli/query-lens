@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Four new challenges** (plan.md §23.1/§23.2, closing the tranche) — "The sort spill" ( `ORDER
+  BY` enough rows that the external merge sort needs more than one run), "Hash beats loop" (a
+  JOIN over `authors`/`posts` that reads fewer pages under hash than nested-loop for the *same*
+  query — the check reruns your SQL itself under both algorithms and compares real numbers, not
+  an estimate), "The dirty eviction" (an `UPDATE` wide enough that an already-dirtied page gets
+  evicted, forcing a real writeback), and "The range leap" (a range predicate on the indexed
+  column, touching fewer pages than the equivalent full scan). `Challenge` gained two optional
+  fields to support the JOIN puzzle: `database` (a one-off `Database` no preset `DatasetId`
+  names) and `engineOptions` (forces `bufferFrames: 2`, the same reason `/compare`'s own JOIN
+  mode does, so the two algorithms' page counts actually diverge instead of both fitting in
+  cache). `check` now also receives the query text, and the page's stats grid gained three more
+  fields (sort writes, dirty evictions, range scan used) so every new goal has visible feedback,
+  not just pass/fail.
 - **Live interactive widgets embedded in the Concepts docs** (plan.md §23.1, closing §17.4's
   last open definition-of-done checkbox) — `concepts/btree.mdx` gets a "find a key" search
   box over a small live tree (`BTreeMiniDemo`), and `concepts/buffer-pool.mdx` gets a

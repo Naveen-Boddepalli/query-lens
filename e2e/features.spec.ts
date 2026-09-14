@@ -868,7 +868,7 @@ test('a link that names a dataset reopens on it, in the Playground and the inspe
 
 test('a challenge checks the query on Run and remembers the solve', async ({ page }) => {
   await page.goto('/challenges');
-  await expect(page.getByText('0 of 8 solved')).toBeVisible();
+  await expect(page.getByText('0 of 12 solved')).toBeVisible();
   await page.getByRole('link', { name: /Make the planner use the index/ }).click();
   await expect(page).toHaveURL(/\/challenges\/use-the-index$/);
 
@@ -892,9 +892,9 @@ test('a challenge checks the query on Run and remembers the solve', async ({ pag
 
   // The solve persists to the index.
   await page.goto('/challenges');
-  await expect(page.getByText('1 of 8 solved')).toBeVisible();
+  await expect(page.getByText('1 of 12 solved')).toBeVisible();
   await page.getByRole('button', { name: 'Reset progress' }).click();
-  await expect(page.getByText('0 of 8 solved')).toBeVisible();
+  await expect(page.getByText('0 of 12 solved')).toBeVisible();
 });
 
 test('a challenge can run against a non-default preset table', async ({ page }) => {
@@ -916,6 +916,44 @@ test('a challenge can run against a non-default preset table', async ({ page }) 
   await expect(
     page.getByRole('link', { name: /Step through this run in the Playground/ }),
   ).toHaveAttribute('href', /[?&]t=logins/);
+});
+
+test('a challenge with its own database reruns the query under a second algorithm to check it (plan.md §23.2)', async ({
+  page,
+}) => {
+  await page.goto('/challenges/hash-beats-loop');
+  await expect(page.getByText(/runs against its own.*authors.*posts.*pair/)).toBeVisible();
+
+  // The starter has no JOIN at all — nested-loop and hash cost the same.
+  await page.getByRole('button', { name: 'Run & check' }).click();
+  await expect(page.getByText(/Not there yet/)).toBeVisible();
+
+  const editor = page.locator('.cm-content');
+  await editor.click();
+  await page.keyboard.press('ControlOrMeta+A');
+  await page.keyboard.type('SELECT * FROM authors JOIN posts ON authors.id = posts.authorId;');
+  await page.getByRole('button', { name: 'Run & check' }).click();
+  await expect(page.getByText('✓ Solved.')).toBeVisible();
+
+  // No "step through" link — the Playground's own dataset URL scheme has no
+  // way to name this one-off JOIN demo.
+  await expect(page.getByRole('link', { name: /Step through this run in the Playground/ })).toHaveCount(0);
+});
+
+test('the range-leap challenge is solved by an IndexRangeScan (plan.md §23.1/§23.2)', async ({ page }) => {
+  await page.goto('/challenges/range-leap');
+
+  // The starter filters on the unindexed `age` column — a full scan.
+  await page.getByRole('button', { name: 'Run & check' }).click();
+  await expect(page.getByText(/Not there yet/)).toBeVisible();
+  await expect(page.getByText('range scan')).toBeVisible();
+
+  const editor = page.locator('.cm-content');
+  await editor.click();
+  await page.keyboard.press('ControlOrMeta+A');
+  await page.keyboard.type('SELECT * FROM users WHERE id > 40;');
+  await page.getByRole('button', { name: 'Run & check' }).click();
+  await expect(page.getByText('✓ Solved.')).toBeVisible();
 });
 
 test('the seed editor imports rows from pasted CSV', async ({ page }) => {

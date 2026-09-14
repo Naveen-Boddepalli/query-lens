@@ -1,8 +1,15 @@
 import { useState } from 'react';
 import { Link, Navigate, useParams } from 'react-router-dom';
-import { DATASETS, DEFAULT_ENGINE_OPTIONS, runQuery } from '../engine/index.ts';
+import { DEFAULT_ENGINE_OPTIONS, runQuery } from '../engine/index.ts';
 import type { RunResult } from '../engine/index.ts';
-import { CHALLENGES, challengeById, challengeDataset, challengeStats } from './challenges/challenges.tsx';
+import {
+  CHALLENGES,
+  challengeById,
+  challengeDatabase,
+  challengeDataset,
+  challengeOptions,
+  challengeStats,
+} from './challenges/challenges.tsx';
 import { markSolved, readSolved } from '../ui/challengeProgress.ts';
 import { PageHeader } from '../ui/PageHeader.tsx';
 import { SqlEditor } from '../ui/SqlEditor.tsx';
@@ -24,9 +31,9 @@ export function ChallengePage() {
 
   function check() {
     if (!challenge) return;
-    const result = runQuery(sql, DATASETS[dataset].make(), DEFAULT_ENGINE_OPTIONS);
+    const result = runQuery(sql, challengeDatabase(challenge), challengeOptions(challenge));
     setRun({ sql, result });
-    if (!result.error && challenge.check(result) && !solved) {
+    if (!result.error && challenge.check(result, sql) && !solved) {
       markSolved(challenge.id);
       setSolved(true);
     }
@@ -37,11 +44,14 @@ export function ChallengePage() {
   const index = CHALLENGES.findIndex((c) => c.id === challenge.id);
   const next = CHALLENGES[index + 1];
   const result = run?.result ?? null;
-  const passed = result !== null && !result.error && challenge.check(result);
+  const passed = run !== null && !run.result.error && challenge.check(run.result, run.sql);
   const stats = result && !result.error ? challengeStats(result) : null;
 
   const playgroundLink =
-    run !== null && !run.result.error
+    // A challenge with its own `database` (the authors/posts JOIN demo) has
+    // no `DatasetId` the Playground's own URL scheme could name — skip the
+    // link rather than reproduce the wrong table.
+    run !== null && !run.result.error && !challenge.database
       ? `/playground?${encodeShareState(
           {
             sql: run.sql,
@@ -84,10 +94,17 @@ export function ChallengePage() {
       </div>
 
       <div className="mt-4 space-y-3">
-        {dataset !== 'users' && (
+        {challenge.database ? (
           <p className="text-label text-ink-dim">
-            This one runs against the <code className="font-mono text-ink">{dataset}</code> table.
+            This one runs against its own <code className="font-mono text-ink">authors</code> /{' '}
+            <code className="font-mono text-ink">posts</code> pair, not the usual seed table.
           </p>
+        ) : (
+          dataset !== 'users' && (
+            <p className="text-label text-ink-dim">
+              This one runs against the <code className="font-mono text-ink">{dataset}</code> table.
+            </p>
+          )
         )}
         <SqlEditor value={sql} onChange={setSql} onRun={check} theme={theme} />
         <button type="button" onClick={check} className={btnPrimary}>
@@ -129,6 +146,18 @@ export function ChallengePage() {
                 <div>
                   <dt className="text-ink-dim">index used</dt>
                   <dd className="font-mono text-ink">{stats?.usesIndex ? 'yes' : 'no'}</dd>
+                </div>
+                <div>
+                  <dt className="text-ink-dim">range scan</dt>
+                  <dd className="font-mono text-ink">{stats?.usesRangeScan ? 'yes' : 'no'}</dd>
+                </div>
+                <div>
+                  <dt className="text-ink-dim">sort writes</dt>
+                  <dd className="font-mono tabular-nums text-hue-violet-ink">{stats?.writes}</dd>
+                </div>
+                <div>
+                  <dt className="text-ink-dim">dirty evictions</dt>
+                  <dd className="font-mono tabular-nums text-evict">{stats?.dirtyEvictions}</dd>
                 </div>
               </dl>
 

@@ -297,8 +297,13 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
  * its ceiling raised 16 → 20 kB for their real combined weight (measured
  * 18.7 kB) — the true cost of the feature was ~7 kB of genuinely new glue
  * code, not the 34 kB the naive grouping made it look like.
+ * Raised 416 → 418 for the four new §23.1 challenges (Sort Spill, Hash Beats
+ * Loop, Dirty Eviction, Range Leap) — `challenges` 4.6 → 5.8 kB for the new
+ * `database`/`engineOptions` override plumbing and three more stat fields.
+ * Landed at 416.0/416, the exact edge with nothing left for the next commit
+ * that touches this chunk.
  */
-const TOTAL_KB = 416;
+const TOTAL_KB = 418;
 
 const gzipKb = (bytes: Buffer): number => gzipSync(bytes, { level: 9 }).length / 1024;
 
