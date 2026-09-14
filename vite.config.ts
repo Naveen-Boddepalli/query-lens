@@ -114,11 +114,23 @@ export default defineConfig({
             // Panel PNG export (§20.3). `import()`ed on first use only, so this
             // gives it a stable chunk name rather than rolldown's generic `es-`.
             { name: 'html-to-image', test: /node_modules\/html-to-image\// },
-            // The nine docs pages (plan.md §21.5 item 5) are `React.lazy` in
+            // The docs pages (plan.md §21.5 item 5) are `React.lazy` in
             // App.tsx, so they are already out of the entry chunk; this folds
             // their individual async chunks into one `docs-*.js` that loads on
-            // the first `/docs` hit rather than nine round trips.
-            { name: 'docs', test: /src[\\/]pages[\\/]DocsContent[\\/]/ },
+            // the first `/docs` hit rather than nine round trips. Excludes the
+            // two Concepts pages with a live embedded widget (§23.1's
+            // interactive-docs item, `DocsBTreeDemo`/`DocsBufferPoolDemo`):
+            // those pull in `BTreePanel`/`FlowTree`/`BufferPoolPanel` and the
+            // engine's trace machinery, which forcing into this group merged
+            // into every other docs page's download too (measured: `docs`
+            // 15.5 → 49.8 kB) rather than the small shared chunk those two
+            // panels already are for Playground/`/tools`. Left ungrouped, they
+            // fall to rolldown's own default chunking and share that existing
+            // chunk instead of duplicating its contents in here.
+            {
+              name: 'docs',
+              test: /src[\\/]pages[\\/]DocsContent[\\/](?!concepts[\\/](btree|buffer-pool)\.mdx$)/,
+            },
           ],
         },
       },

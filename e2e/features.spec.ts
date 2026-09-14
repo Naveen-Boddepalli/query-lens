@@ -733,6 +733,43 @@ test('the panel `?` explains the stage and links to its concept page', async ({ 
   );
 });
 
+test('the B+Tree concept page embeds a real, searchable tree (plan.md §23.1)', async ({ page }) => {
+  await page.goto('/docs/concepts/btree');
+
+  // Scoped to the widget's own wrapper — the page's own "Try this" prose
+  // also contains the words "✓ found", further down the page.
+  const demo = page.locator('div.not-prose').filter({ has: page.getByLabel('Key to search for') });
+
+  // Loads with a default search already run.
+  await expect(demo.getByText(/✓ found/)).toBeVisible();
+
+  await page.getByLabel('Key to search for').fill('9999');
+  await page.getByRole('button', { name: 'Find' }).click();
+  await expect(demo.getByText(/✗ not found/)).toBeVisible();
+
+  await page.getByLabel('Key to search for').fill('5');
+  await page.getByRole('button', { name: 'Find' }).click();
+  await expect(demo.getByText(/✓ found/)).toBeVisible();
+});
+
+test('the buffer pool concept page embeds a live, steppable pool with an LRU/clock toggle (plan.md §23.1)', async ({
+  page,
+}) => {
+  await page.goto('/docs/concepts/buffer-pool');
+
+  await expect(page.getByText('0 / 16')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'LRU' })).toHaveAttribute('aria-pressed', 'true');
+
+  await page.getByLabel('Scrub to step').fill('16');
+  await expect(page.getByText('page 0').first()).toBeVisible();
+
+  await page.getByRole('button', { name: 'Clock sweep' }).click();
+  await expect(page.getByRole('button', { name: 'Clock sweep' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByText('0 / 21')).toBeVisible();
+  await page.getByLabel('Scrub to step').fill('21');
+  await expect(page.getByText('page 0').first()).toBeVisible();
+});
+
 test('the 60-second tour steps through the Playground and is skippable', async ({ page }) => {
   await page.goto('/playground');
 

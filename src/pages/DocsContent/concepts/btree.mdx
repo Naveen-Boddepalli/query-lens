@@ -3,6 +3,8 @@ title: The B+Tree index
 description: How an index turns a table scan into a handful of pointer follows, and what QueryLens's traversal panel actually shows.
 ---
 
+import { BTreeMiniDemo } from '../../../ui/DocsBTreeDemo.tsx';
+
 Without an index, finding one row means reading every page of the table — a **sequential scan**.
 A **B+Tree index** turns that into a short walk down a tree: at each level, compare the key you want
 against a handful of separator values and follow exactly one child pointer, until you land on a
@@ -12,6 +14,10 @@ that is the difference between reading thousands of pages and reading three or f
 QueryLens builds a real B+Tree over the seed table — internal nodes routing the search, leaf nodes
 holding the actual keys, leaves linked in a sibling chain for range scans — and traces every step of
 a lookup through it.
+
+Try it here, on a small 14-key tree — no need to leave the page:
+
+<BTreeMiniDemo />
 
 ## Try this
 

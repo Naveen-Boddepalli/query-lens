@@ -121,7 +121,12 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
   { name: 'html-to-image', test: /^html-to-image-/, kb: 8, note: 'panel PNG export, lazy-loaded on first use (plan.md §20.3)' },
   // The nine docs pages, folded into one async chunk by vite.config.ts. Loads
   // on the first `/docs` hit, never at first paint.
-  { name: 'docs', test: /^docs-.*\.js$/, kb: 16, note: 'integrated MDX docs (plan.md §17.1), lazy' },
+  {
+    name: 'docs',
+    test: /^(docs|btree|buffer-pool)-.*\.js$/,
+    kb: 20,
+    note: 'integrated MDX docs (plan.md §17.1), lazy — the concepts/btree and concepts/buffer-pool pages are their own chunks, not folded into the shared docs-*.js, since they embed BTreePanel/BufferPoolPanel/FlowTree (§23.1\'s interactive-docs item) and forcing that into the group every other docs page shares would have made a simple FAQ visit pay for it too',
+  },
   // Raised 14 → 17: @tailwindcss/typography (the docs' `.prose` styling,
   // themed onto the app's own tokens rather than its default palette — see
   // index.css) is a real, one-time addition to the generated stylesheet.
@@ -276,8 +281,24 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
  * vertical descent. Landed at 411.3/55.6; two kB of headroom this time
  * rather than the exact edge, since the last "no slack" bump turned into
  * friction almost immediately.
+ * Raised 412 → 416 for the interactive-docs item (§23.1): live
+ * `BTreeMiniDemo`/`BufferPoolMiniDemo` widgets embedded in the
+ * concepts/btree and concepts/buffer-pool pages. Naively adding them to the
+ * shared `docs` group (every other docs page's own chunk) took `docs` from
+ * 15.5 to 49.8 kB — those two pages' embedded panels pulled in
+ * `BTreePanel`/`BufferPoolPanel`/`FlowTree` and the engine's trace code,
+ * and being folded into the *one* combined docs chunk meant a bare FAQ visit
+ * paid for a B+Tree panel it never uses. Fixed by excluding those two pages
+ * from `vite.config.ts`'s `docs` codeSplitting group, so they fall to
+ * rolldown's own default chunking instead and share the *existing*
+ * `trace-ui`-tracked chunk Playground already needs, rather than a forced
+ * copy inside `docs`. `docs`'s own regex here widened to also catch the two
+ * resulting small standalone chunks (`btree-*.js`, `buffer-pool-*.js`) and
+ * its ceiling raised 16 → 20 kB for their real combined weight (measured
+ * 18.7 kB) — the true cost of the feature was ~7 kB of genuinely new glue
+ * code, not the 34 kB the naive grouping made it look like.
  */
-const TOTAL_KB = 412;
+const TOTAL_KB = 416;
 
 const gzipKb = (bytes: Buffer): number => gzipSync(bytes, { level: 9 }).length / 1024;
 

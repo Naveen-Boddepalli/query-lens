@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Live interactive widgets embedded in the Concepts docs** (plan.md §23.1, closing §17.4's
+  last open definition-of-done checkbox) — `concepts/btree.mdx` gets a "find a key" search
+  box over a small live tree (`BTreeMiniDemo`), and `concepts/buffer-pool.mdx` gets a
+  steppable buffer pool with its own LRU/clock-sweep toggle (`BufferPoolMiniDemo`), both
+  reusing the exact `BTreePanel`/`BufferPoolPanel` the standalone `/tools` sandboxes already
+  use rather than any new visualization code. Required excluding those two pages from
+  `vite.config.ts`'s shared `docs` chunk group — forcing them in had merged
+  `BTreePanel`/`FlowTree`/the engine's trace code into the one chunk every other docs page
+  shares too, so a bare FAQ visit would have paid for a B+Tree panel it never uses (measured:
+  `docs` chunk 15.5 → 49.8 kB gzip). They now fall to rolldown's own default chunking and
+  share the existing chunk Playground already needs that code from.
 - **B+Tree leaf-chaining range scans** (plan.md §23.1) — `>`, `<`, `>=`, `<=` and
   `BETWEEN` on an indexed column now descend the B+Tree once and walk the leaf sibling
   chain horizontally, instead of falling back to a full table scan the way every range

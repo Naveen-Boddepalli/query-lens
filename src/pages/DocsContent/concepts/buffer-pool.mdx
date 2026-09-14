@@ -3,6 +3,8 @@ title: The buffer pool
 description: Why databases keep a fixed set of pages in memory, and how QueryLens's two eviction policies decide what to keep.
 ---
 
+import { BufferPoolMiniDemo } from '../../../ui/DocsBufferPoolDemo.tsx';
+
 A disk read is slow compared to reading memory that is already there — often by several orders of
 magnitude. Every real database keeps a **buffer pool**: a fixed number of memory slots ("frames"),
 each holding one on-disk page. When a query needs a page, the engine checks the pool first. Found it
@@ -28,7 +30,14 @@ see below for why, and for where they actually diverge.
 
 ## Two eviction policies, and why both exist
 
-QueryLens implements two replacement policies, switchable from the dropdown next to Run:
+QueryLens implements two replacement policies, switchable from the dropdown next to Run. Step
+through the same eight-page access pattern under each one below — page 0 gets read three times
+before pages 4 and 5 arrive needing room. Both keep page 0 around (the point of having a
+replacement policy at all), but watch the step count each one needs to get there: clock sweep does
+more work — walking past hot frames, decrementing as it goes — to reach the same answer LRU's
+ordered list gives it directly, the actual cost/benefit trade the two policies make.
+
+<BufferPoolMiniDemo />
 
 **LRU (least recently used)** evicts whichever page was accessed longest ago. It is the policy every
 course teaches, and it is intuitive: the page nobody has touched in a while is the safest to throw
