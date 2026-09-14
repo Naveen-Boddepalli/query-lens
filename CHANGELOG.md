@@ -8,6 +8,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **B+Tree leaf-chaining range scans** (plan.md §23.1) — `>`, `<`, `>=`, `<=` and
+  `BETWEEN` on an indexed column now descend the B+Tree once and walk the leaf sibling
+  chain horizontally, instead of falling back to a full table scan the way every range
+  predicate did before this. The grammar gained `<=`/`>=` (the tokenizer already lexed
+  them, just to reject them) and `BETWEEN lo AND hi`, desugared to `col >= lo AND col <= hi`
+  at parse time rather than a new `Expr` kind, so every existing conjunct-walking piece of
+  the engine handles a `BETWEEN` for free. A new optimizer rule, `range-index-selection`,
+  runs right after `index-selection` and only fires when no equality conjunct matched any
+  indexed column — an equality always wins, by rule order, never a cost comparison. The new
+  `IndexRangeScan` plan node and executor operator pull one matching row at a time, as
+  lazily as every other operator, narrating a `chain-next` step each time a leaf runs out
+  and the walk crosses to the next one via its sibling pointer. Priced with a dedicated
+  `boundedRangeSelectivity` — the true linear-density interval overlap, not the product of
+  two independent `rangeSelectivity` fractions, which would double-discount a `BETWEEN`
+  (its lower and upper bound are the same column, not two independent ones). `FlowTree.tsx`'s
+  B+Tree sibling edges now light up the same way a lit hierarchical edge already does when
+  both leaves they connect were actually visited, so `BTreePanel` shows the real horizontal
+  path a scan took. Deliberately excluded from `DELETE`/`UPDATE`'s own optimizer pass — their
+  executors only know how to run a `SeqScan` or a single-row `IndexScan`, not an
+  `IndexRangeScan`'s multi-row walk — with a dedicated regression test guarding against that
+  silently reaching them. No index-only variant yet. 55 new unit tests, 1 new e2e.
 - **Undo/redo in the seed data editor and the multi-table schema editor** (plan.md §23.1) —
   `DataEditor.tsx` keeps a `past`/`future` snapshot stack of the table's rows, with an Undo and a
   Redo button in the footer. Repeated keystrokes into the same cell coalesce into one undo step
@@ -625,6 +646,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   built today, but `STAGES`/`IMPLEMENTED_STAGES` remain separate lists on purpose
 
 ### Fixed
+- `optimize.ts`'s constant-folding rule mishandled two reflexive comparisons: `age <= age`
+  and `age >= age` folded to `false` (they are always `true` — a column always satisfies
+  `<=`/`>=` against itself), and `foldLiteralCompare`'s own `<=`/`>=` cases silently fell
+  through to a `>` comparison instead of evaluating themselves. Both existed before `<=`/`>=`
+  were reachable from SQL at all (plan.md §23.1 finally exercises them) and were caught by
+  review, not a failing test
 - `vite.config.ts`'s `output.advancedChunks` was deprecated by rolldown, printing a build-time
   warning on every `pnpm build`. Renamed to `output.codeSplitting`, same `groups` shape — no change
   in which modules land in which chunk

@@ -3,7 +3,7 @@ import type { Table } from '../types.ts';
 import type { UpdateStatement } from '../parser/index.ts';
 import { buildUpdatePlan } from './buildPlan.ts';
 import { estimatePlan } from './cost.ts';
-import { optimize } from './optimize.ts';
+import { optimize, WRITE_PATH_RULES } from './optimize.ts';
 import { exprToSql, toPlanDisplay } from './plan.ts';
 import type { Plan } from './plan.ts';
 
@@ -17,7 +17,8 @@ function unwrap(plan: Plan): Plan {
  * access plan (`SeqScan` or `IndexScan`) the executor uses to find the rows
  * to modify — the mirror of `emitDeletePlanEvents`, since only the WHERE
  * clause is planned; the SET clause has nothing for a plan or an optimizer
- * rule to act on.
+ * rule to act on. Uses `WRITE_PATH_RULES` for the same reason
+ * `emitDeletePlanEvents` does — see its own doc comment.
  */
 export function emitUpdatePlanEvents(
   emit: Emit,
@@ -48,7 +49,7 @@ export function emitUpdatePlanEvents(
   let optimisedWrapped: Plan = wrapped;
   let before: Plan = wrapped;
 
-  for (const step of optimize(wrapped, table)) {
+  for (const step of optimize(wrapped, table, WRITE_PATH_RULES)) {
     emit(
       step.label,
       {

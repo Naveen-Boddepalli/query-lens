@@ -3,6 +3,7 @@ import { parse } from '../parser/parser.ts';
 import { buildPlan } from '../planner/buildPlan.ts';
 import { optimize } from '../planner/optimize.ts';
 import {
+  boundedRangeSelectivity,
   estimateIndexLevels,
   estimatePlan,
   rootEstimate,
@@ -68,6 +69,48 @@ describe('selectivityOf', () => {
     const idOnly = selectivityOf(ast('SELECT * FROM users WHERE id = 5').where!, users).fraction;
     const ageOnly = selectivityOf(ast('SELECT * FROM users WHERE age > 30').where!, users).fraction;
     expect(both).toBeCloseTo(idOnly * ageOnly, 10);
+  });
+});
+
+describe('boundedRangeSelectivity (plan.md §23.1 — IndexRangeScan)', () => {
+  // age runs 20..64 across the 48 seed rows (the same fact selectivityOf's
+  // own tests above use).
+  it('a low bound only agrees with rangeSelectivity for the same predicate', () => {
+    const bounded = boundedRangeSelectivity('age', 30, null, users).fraction;
+    const viaSelectivityOf = selectivityOf(ast('SELECT * FROM users WHERE age > 30').where!, users).fraction;
+    expect(bounded).toBeCloseTo(viaSelectivityOf, 10);
+  });
+
+  it('a high bound only agrees with rangeSelectivity for the same predicate', () => {
+    const bounded = boundedRangeSelectivity('age', null, 30, users).fraction;
+    const viaSelectivityOf = selectivityOf(ast('SELECT * FROM users WHERE age < 30').where!, users).fraction;
+    expect(bounded).toBeCloseTo(viaSelectivityOf, 10);
+  });
+
+  it('both bounds compute the true interval overlap directly, not the product of two independent fractions', () => {
+    // The honest number: (40-30)/(64-20).
+    const direct = boundedRangeSelectivity('age', 30, 40, users).fraction;
+    expect(direct).toBeCloseTo(10 / 44, 5);
+
+    // What multiplying two independent rangeSelectivity fractions would give
+    // instead — a real, different (and double-discounted) number, proving
+    // this function does not take that shortcut.
+    const above30 = boundedRangeSelectivity('age', 30, null, users).fraction;
+    const below40 = boundedRangeSelectivity('age', null, 40, users).fraction;
+    expect(direct).not.toBeCloseTo(above30 * below40, 5);
+  });
+
+  it('with neither bound and known stats, the whole column span is in range', () => {
+    expect(boundedRangeSelectivity('age', null, null, users).fraction).toBeCloseTo(1, 10);
+  });
+
+  it('clamps an impossible bound order to zero rather than a negative fraction', () => {
+    expect(boundedRangeSelectivity('age', 999, 0, users).fraction).toBe(0);
+  });
+
+  it('falls back to a labelled default with no numeric stats — ⅓ for one bound, ⅓×⅓ for both', () => {
+    expect(boundedRangeSelectivity('missing', 5, null, users).fraction).toBeCloseTo(1 / 3, 10);
+    expect(boundedRangeSelectivity('missing', 5, 10, users).fraction).toBeCloseTo(1 / 9, 10);
   });
 });
 
@@ -184,6 +227,51 @@ describe('estimatePlan — IndexOnlyScan', () => {
     const lookup = rootEstimate(optimised('SELECT id, name FROM users WHERE id = 5'), users, RPP);
     const indexOnly = rootEstimate(optimised('SELECT id FROM users WHERE id = 5'), users, RPP);
     expect(lookup.estPages - indexOnly.estPages).toBe(1);
+  });
+});
+
+describe('estimatePlan — IndexRangeScan', () => {
+  it('a narrow range prices more pages than an equality IndexScan but still fewer than a full SeqScan', () => {
+    const equality = rootEstimate(optimised('SELECT * FROM users WHERE id = 5'), users, RPP);
+    // Narrow on purpose (48 rows, id 1..48): a wide range's per-row heap
+    // touch can legitimately cost more than a full scan's page-sharing read
+    // does (the honest reason a real optimizer sometimes prefers a table
+    // scan) — that comparison belongs to the test right below this one, not
+    // this one, which is about a range small enough to stay a clear win.
+    const range = rootEstimate(optimised('SELECT * FROM users WHERE id > 44'), users, RPP);
+    const fullScan = rootEstimate(canonical('SELECT * FROM users WHERE age > 30'), users, RPP);
+    expect(range.estPages).toBeGreaterThan(equality.estPages);
+    expect(range.estPages).toBeLessThan(fullScan.estPages);
+  });
+
+  it('a wide range can honestly cost more than a full scan — one heap touch per row, no page-sharing credit', () => {
+    // The same simplification IndexScan's own single-row cost already makes,
+    // just repeated per row: real page-sharing among rows on the same heap
+    // page is not modelled, so a range wide enough to return many rows can
+    // legitimately look pricier than reading every heap page once. A
+    // genuine finding about the model, not a bug — matching how a real
+    // optimizer sometimes prefers a table scan over a non-clustered index
+    // range.
+    const wideRange = rootEstimate(optimised('SELECT * FROM users WHERE id > 5'), users, RPP);
+    const fullScan = rootEstimate(canonical('SELECT * FROM users WHERE age > 30'), users, RPP);
+    expect(wideRange.estPages).toBeGreaterThan(fullScan.estPages);
+  });
+
+  it('a tighter BETWEEN estimates fewer rows than a single open bound', () => {
+    const open = rootEstimate(optimised('SELECT * FROM users WHERE id > 10'), users, RPP);
+    const between = rootEstimate(optimised('SELECT * FROM users WHERE id BETWEEN 10 AND 20'), users, RPP);
+    expect(between.estRows).toBeLessThan(open.estRows);
+  });
+
+  it('a residual conjunct is folded into the estimate, same as IndexScan', () => {
+    const withResidual = rootEstimate(
+      optimised("SELECT * FROM users WHERE id > 10 AND name = 'ada'"),
+      users,
+      RPP,
+    );
+    const withoutResidual = rootEstimate(optimised('SELECT * FROM users WHERE id > 10'), users, RPP);
+    expect(withResidual.estRows).toBeLessThanOrEqual(withoutResidual.estRows);
+    expect(withResidual.basis).toMatch(/recheck/);
   });
 });
 

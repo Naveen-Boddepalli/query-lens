@@ -212,6 +212,14 @@ export function applyEvent(state: ViewState, event: StepEvent): ViewState {
         case 'not-found':
           next.indexOutcome = 'not-found';
           return next;
+        // A range scan's horizontal hop. Appends the leaf it lands on, the
+        // same way `traverse` appends a vertically-descended node — outcome
+        // stays 'searching' throughout, since a range has no single
+        // found/not-found answer the way a point lookup does.
+        case 'chain-next':
+          next.indexPath = [...state.indexPath, event.toNodeId];
+          next.indexOutcome = 'searching';
+          return next;
       }
       return next;
 

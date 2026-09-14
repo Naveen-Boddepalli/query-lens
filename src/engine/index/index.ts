@@ -9,6 +9,8 @@ export {
   height,
   insert,
   leafChain,
+  leftmostPath,
+  lowerBound,
   node,
   search,
 } from './btree.ts';
@@ -27,4 +29,6 @@ export { buildIndex, buildIndexes, pageCountFor } from './build.ts';
 export { keyList, toIndexDisplay } from './display.ts';
 export { emitIndexLookup } from './lookup.ts';
 export type { LookupOutcome } from './lookup.ts';
+export { emitRangeStart, nextInRange } from './rangeLookup.ts';
+export type { RangeBoundValue, RangeMatch, RangeStart } from './rangeLookup.ts';
 export { validate } from './validate.ts';

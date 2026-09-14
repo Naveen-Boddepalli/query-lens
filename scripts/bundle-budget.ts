@@ -75,7 +75,7 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
   // works (a component file can only export components) and so `StageDetail`
   // can reuse the exact same map the on-screen tree already renders with,
   // rather than a second one that could drift.
-  { name: 'trace-ui', test: /^(PlaygroundPage|PlaygroundTour|TraceWorksheet|StageDetail|stageMeta|datasets|datasetCatalogue|types|seed|trace|runQuery|engine|SqlEditor|PlaybackControls|PresenterView|AstTree|BTreePanel|FlowTree|display|SchemaEditor|customDatabase|renderSvg|DownloadSvgButton|astTreeTones|planTreeTones|btreeTones)-/, kb: 54, note: 'Playground + the presenter view + the SQL editor + the shared panel/tree renderers (AstTree, BTreePanel, FlowTree, the two display transformers) plus the engine core (runQuery and the planner split into their own chunks once a third / second route imported them; SqlEditor split once /challenges became a second) plus the preset dataset library, the print worksheet, LIMIT, ORDER BY + the Sort operator, the full DELETE + INSERT + UPDATE write path, GROUP BY + aggregates, JOIN — all three algorithms plus predicate pushdown into its own children, the multi-table schema editor, and true vector SVG export (plan.md §22.2, §22.7, §20.3)' },
+  { name: 'trace-ui', test: /^(PlaygroundPage|PlaygroundTour|TraceWorksheet|StageDetail|stageMeta|datasets|datasetCatalogue|types|seed|trace|runQuery|engine|SqlEditor|PlaybackControls|PresenterView|AstTree|BTreePanel|FlowTree|display|SchemaEditor|customDatabase|renderSvg|DownloadSvgButton|astTreeTones|planTreeTones|btreeTones)-/, kb: 56, note: 'Playground + the presenter view + the SQL editor + the shared panel/tree renderers (AstTree, BTreePanel, FlowTree, the two display transformers) plus the engine core (runQuery and the planner split into their own chunks once a third / second route imported them; SqlEditor split once /challenges became a second) plus the preset dataset library, the print worksheet, LIMIT, ORDER BY + the Sort operator, the full DELETE + INSERT + UPDATE write path, GROUP BY + aggregates, JOIN — all three algorithms plus predicate pushdown into its own children, the multi-table schema editor, true vector SVG export (plan.md §22.2, §22.7, §20.3), a second candidate index, and B+Tree leaf-chaining range scans (§23.1)' },
   // The small per-route shells: landing hub, stage index, examples, docs shell,
   // 404, tools index — plus the redesign's shared UI kit (primitives.ts,
   // PageHeader, Hero) that two or more of them import.
@@ -267,8 +267,17 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
  * becoming a real multi-select. The total landed at 409.0, exactly the old
  * ceiling with no slack for the next commit that touches this chunk; one kB
  * of headroom is cheaper than re-deriving this measurement next time.
+ * `trace-ui`'s own ceiling raised 54 → 56 kB, total 410 → 412, for B+Tree
+ * leaf-chaining range scans (§23.1): `<=`/`>=`/`BETWEEN` in the grammar, a
+ * new `IndexRangeScan` plan node and executor operator, `range-index-selection`
+ * (a new optimizer rule) and `boundedRangeSelectivity` (a new cost-model
+ * function) — all in `engine-*.js` — plus `FlowTree.tsx`'s sibling-edge
+ * highlighting so `BTreePanel` shows the horizontal leaf walk, not just the
+ * vertical descent. Landed at 411.3/55.6; two kB of headroom this time
+ * rather than the exact edge, since the last "no slack" bump turned into
+ * friction almost immediately.
  */
-const TOTAL_KB = 410;
+const TOTAL_KB = 412;
 
 const gzipKb = (bytes: Buffer): number => gzipSync(bytes, { level: 9 }).length / 1024;
 

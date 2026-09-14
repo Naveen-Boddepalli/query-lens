@@ -17,7 +17,8 @@
  *   selectItem    := qualifiedColumn | aggregateCall
  *   aggregateCall := ('COUNT'|'SUM'|'AVG'|'MIN'|'MAX') '(' ('*' | qualifiedColumn) ')'
  *   expr          := comparison (AND comparison)*
- *   comparison    := operand ('=' | '<' | '>') operand
+ *   comparison    := operand ('=' | '<' | '>' | '<=' | '>=') operand
+ *                     | operand BETWEEN operand AND operand
  *   operand       := qualifiedColumn | number | string | NULL | TRUE | FALSE
  *   qualifiedColumn := identifier ['.' identifier]
  *
@@ -93,7 +94,7 @@ const OUT_OF_SCOPE: Record<string, string> = {
   DISTINCT: 'DISTINCT is not in the v0 subset.',
   UNION: 'UNION is not in the v0 subset.',
   OR: 'v0 supports AND only. Combine predicates with AND.',
-  NOT: 'v0 supports =, < and > only, combined with AND.',
+  NOT: 'v0 supports =, <, >, <=, >= and BETWEEN, combined with AND.',
   CREATE: 'QueryLens only runs SELECT, DELETE, INSERT and UPDATE. Edit the seed data to change the table.',
   DROP: 'QueryLens only runs SELECT, DELETE, INSERT and UPDATE. Edit the seed data to change the table.',
 };
@@ -455,16 +456,25 @@ function parseOperand(c: Cursor): Expr {
   throw new ParseError(`Expected a column name or a value, found ${describe(token)}.`, token);
 }
 
-function parseComparison(c: Cursor): Extract<Expr, { kind: 'compare' }> {
-  const left = parseOperand(c);
+const COMPARE_OPS = ['=', '<', '>', '<=', '>='];
+
+/** `left op operand`, given `left` already parsed — shared by `parseComparison` and the plain (non-BETWEEN) half of `parseComparisonOrBetween`. */
+function finishComparison(c: Cursor, left: Expr): Extract<Expr, { kind: 'compare' }> {
   const opToken = c.peek();
 
   if (opToken.type !== 'operator') {
     c.guardScope(opToken);
-    throw new ParseError(`Expected \`=\`, \`<\` or \`>\`, found ${describe(opToken)}.`, opToken);
+    throw new ParseError(
+      `Expected \`=\`, \`<\`, \`>\`, \`<=\`, \`>=\` or \`BETWEEN\`, found ${describe(opToken)}.`,
+      opToken,
+    );
   }
-  if (!['=', '<', '>'].includes(opToken.value)) {
-    throw new ParseError(`\`${opToken.value}\` is not supported yet.`, opToken, 'v0 supports `=`, `<` and `>`.');
+  if (!COMPARE_OPS.includes(opToken.value)) {
+    throw new ParseError(
+      `\`${opToken.value}\` is not supported yet.`,
+      opToken,
+      'v0 supports `=`, `<`, `>`, `<=`, `>=` and BETWEEN.',
+    );
   }
   c.next();
 
@@ -478,11 +488,43 @@ function parseComparison(c: Cursor): Extract<Expr, { kind: 'compare' }> {
   };
 }
 
+/** Used only by `JOIN ... ON`, which needs exactly one equality — no BETWEEN there. */
+function parseComparison(c: Cursor): Extract<Expr, { kind: 'compare' }> {
+  return finishComparison(c, parseOperand(c));
+}
+
+/**
+ * `operand BETWEEN operand AND operand` desugars to `operand >= lo AND
+ * operand <= hi` right here, rather than adding a `between` `Expr` kind — the
+ * two comparisons that come out are indistinguishable from ones written by
+ * hand, so `index-selection`'s range rule, the cost model's selectivity
+ * estimate, `evaluate.ts`, and every other conjunct-walking piece of the
+ * engine all handle a `BETWEEN` for free, with zero new code.
+ */
+function parseComparisonOrBetween(c: Cursor): Expr {
+  const left = parseOperand(c);
+
+  if (c.peek().type === 'keyword' && c.peek().upper === 'BETWEEN') {
+    c.next();
+    const low = parseOperand(c);
+    c.expectKeyword('AND', 'between the two bounds of a BETWEEN range');
+    const high = parseOperand(c);
+    return {
+      kind: 'and',
+      left: { kind: 'compare', op: '>=', left, right: low, span: { from: left.span.from, to: low.span.to } },
+      right: { kind: 'compare', op: '<=', left, right: high, span: { from: left.span.from, to: high.span.to } },
+      span: { from: left.span.from, to: high.span.to },
+    };
+  }
+
+  return finishComparison(c, left);
+}
+
 function parseExpr(c: Cursor): Expr {
-  let left: Expr = parseComparison(c);
+  let left: Expr = parseComparisonOrBetween(c);
   while (c.peek().type === 'keyword' && c.peek().upper === 'AND') {
     c.next();
-    const right = parseComparison(c);
+    const right = parseComparisonOrBetween(c);
     left = { kind: 'and', left, right, span: { from: left.span.from, to: right.span.to } };
   }
   return left;

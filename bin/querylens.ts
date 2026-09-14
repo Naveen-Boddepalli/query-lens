@@ -132,7 +132,12 @@ function detail(event: StepEvent): string {
       if (event.action === 'evict') return `evict page ${String(event.victimPageId)} from frame ${String(event.frameId)}`;
       if (event.action === 'miss') return `miss page ${String(event.pageId)}`;
       return `${event.action} page ${String(event.pageId)} @ frame ${String(event.frameId)}`;
-    case 'index': return event.action === 'open' ? `open (height ${String(event.height)})` : `${event.action} ${event.nodeId}`;
+    case 'index':
+      return event.action === 'open'
+        ? `open (height ${String(event.height)})`
+        : event.action === 'chain-next'
+          ? `chain-next ${event.fromNodeId} -> ${event.toNodeId}`
+          : `${event.action} ${event.nodeId}`;
     case 'lock': return `${event.action} page ${String(event.pageId)} (${event.mode})`;
     case 'result': return `${String(event.rows.length)} rows`;
   }

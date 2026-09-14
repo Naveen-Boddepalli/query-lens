@@ -9,7 +9,7 @@
  */
 
 import { columnKey } from '../parser/index.ts';
-import type { Expr } from '../parser/index.ts';
+import type { CompareOp, Expr } from '../parser/index.ts';
 import type { Row, SqlValue } from '../types.ts';
 
 /** null means UNKNOWN. */
@@ -30,16 +30,31 @@ export function evaluateValue(expr: Expr, row: Row): SqlValue {
 }
 
 /** Exported for `operators.ts`'s `HashAggregate` — MIN/MAX order values the same way a `<`/`>` predicate does. */
-export function compare(op: '=' | '<' | '>', left: SqlValue, right: SqlValue): Truth {
+export function compare(op: CompareOp, left: SqlValue, right: SqlValue): Truth {
   if (left === null || right === null) return null; // UNKNOWN
 
   if (typeof left === 'number' && typeof right === 'number') {
-    return op === '=' ? left === right : op === '<' ? left < right : left > right;
+    return compareOrdered(op, left, right);
   }
 
   const a = typeof left === 'boolean' ? String(Number(left)) : String(left);
   const b = typeof right === 'boolean' ? String(Number(right)) : String(right);
-  return op === '=' ? a === b : op === '<' ? a < b : a > b;
+  return compareOrdered(op, a, b);
+}
+
+function compareOrdered<T extends number | string>(op: CompareOp, a: T, b: T): boolean {
+  switch (op) {
+    case '=':
+      return a === b;
+    case '<':
+      return a < b;
+    case '>':
+      return a > b;
+    case '<=':
+      return a <= b;
+    case '>=':
+      return a >= b;
+  }
 }
 
 /**

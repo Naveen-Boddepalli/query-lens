@@ -98,8 +98,8 @@ function allocate<T extends BTreeNode>(tree: BPlusTree, make: (id: string, pageI
   return created;
 }
 
-/** Index of the first key >= `key`. */
-function lowerBound(keys: SqlValue[], key: SqlValue): number {
+/** Index of the first key >= `key`. Exported for `index/rangeLookup.ts` — a range scan's own starting position within its first leaf. */
+export function lowerBound(keys: SqlValue[], key: SqlValue): number {
   let lo = 0;
   let hi = keys.length;
   while (lo < hi) {
@@ -124,6 +124,25 @@ export function descend(tree: BPlusTree, key: SqlValue): string[] {
 
   while (current.kind === 'internal') {
     const childId = current.children[childIndexFor(current, key)]!;
+    path.push(childId);
+    current = node(tree, childId);
+  }
+
+  return path;
+}
+
+/**
+ * Root-to-leaf node ids along the tree's leftmost edge — always child 0 at
+ * every internal node. The starting point for a range scan with no lower
+ * bound (`age < 30`, with nothing to descend *toward*), mirroring `descend`'s
+ * shape exactly so `index/rangeLookup.ts` can narrate either the same way.
+ */
+export function leftmostPath(tree: BPlusTree): string[] {
+  const path: string[] = [tree.rootId];
+  let current = node(tree, tree.rootId);
+
+  while (current.kind === 'internal') {
+    const childId = current.children[0]!;
     path.push(childId);
     current = node(tree, childId);
   }

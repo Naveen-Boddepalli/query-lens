@@ -5,8 +5,13 @@ export interface Span {
   to: number;
 }
 
-/** The comparison operators v0 supports. plan.md §4. */
-export type CompareOp = '=' | '<' | '>';
+/**
+ * The comparison operators v0 supports. plan.md §4, widened by §23.1's
+ * leaf-chaining range scans: `BETWEEN lo AND hi` is not its own operator —
+ * the parser desugars it to `col >= lo AND col <= hi` at parse time, so
+ * `<=`/`>=` are the only new surface here.
+ */
+export type CompareOp = '=' | '<' | '>' | '<=' | '>=';
 
 /**
  * `table` is set only by a qualified reference (`authors.id`) — v0 requires

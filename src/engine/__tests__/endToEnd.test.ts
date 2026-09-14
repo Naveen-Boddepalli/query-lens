@@ -185,18 +185,23 @@ describe('the pipeline is stable across configuration', () => {
 });
 
 describe('the index and the scan agree', () => {
-  it('an indexed lookup returns what a scan for the same row returns', () => {
+  it('an equality lookup and a range that pins the same row return the same thing', () => {
     const indexed = run('SELECT * FROM users WHERE id = 5').rows;
-    // `id > 4 AND id < 6` selects the same row but cannot use the index.
-    const scanned = run('SELECT * FROM users WHERE id > 4 AND id < 6').rows;
-    expect(indexed).toEqual(scanned);
+    // `id > 4 AND id < 6` selects the same one row — and, since plan.md
+    // §23.1's leaf-chaining range scan, via the index too (range-index-selection).
+    const ranged = run('SELECT * FROM users WHERE id > 4 AND id < 6').rows;
+    expect(indexed).toEqual(ranged);
   });
 
-  it('and does it with far less work', () => {
+  it('both do far less work than a predicate on a column with no index at all', () => {
     const reads = (events: StepEvent[]) =>
       events.filter((e) => e.stage === 'buffer' && e.action === 'load').length;
-    expect(reads(run('SELECT * FROM users WHERE id = 5').events)).toBeLessThan(
-      reads(run('SELECT * FROM users WHERE id > 4 AND id < 6').events) / 2,
-    );
+    // `age` is not an indexed column, so this one is a genuine full scan —
+    // the honest comparison point now that the range predicate below is
+    // index-backed too, not the plain SeqScan it used to fall back to.
+    const fullScan = reads(run('SELECT * FROM users WHERE age > 1000').events);
+
+    expect(reads(run('SELECT * FROM users WHERE id = 5').events)).toBeLessThan(fullScan / 2);
+    expect(reads(run('SELECT * FROM users WHERE id > 4 AND id < 6').events)).toBeLessThan(fullScan / 2);
   });
 });

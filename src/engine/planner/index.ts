@@ -7,6 +7,7 @@ export {
   isAggregateQuery,
 } from './buildPlan.ts';
 export {
+  boundedRangeSelectivity,
   estimateIndexLevels,
   estimatePlan,
   ndistinct,
@@ -19,7 +20,7 @@ export type { CostEstimate, PlanCost } from './cost.ts';
 export { emitPlanEvents } from './emit.ts';
 export { emitDeletePlanEvents } from './emitDelete.ts';
 export { emitUpdatePlanEvents } from './emitUpdate.ts';
-export { optimize, OPTIMIZER_RULES, scanPredicate } from './optimize.ts';
+export { optimize, OPTIMIZER_RULES, scanPredicate, WRITE_PATH_RULES } from './optimize.ts';
 export type { Rewrite } from './optimize.ts';
 export {
   childOf,
@@ -29,7 +30,9 @@ export {
   exprToSql,
   findSort,
   findSortMergeJoin,
+  formatRangeBounds,
   needsSortSpill,
+  rangeOn,
   toPlanDisplay,
 } from './plan.ts';
-export type { AggregateSpec, Plan, ProjectList } from './plan.ts';
+export type { AggregateSpec, Plan, ProjectList, RangeBound } from './plan.ts';

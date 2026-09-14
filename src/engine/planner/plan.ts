@@ -5,10 +5,16 @@
  */
 
 import type { PlanNode, SqlValue } from '../types.ts';
-import type { AggregateFn, Expr } from '../parser/index.ts';
+import type { AggregateFn, CompareOp, Expr } from '../parser/index.ts';
 import type { PlanCost } from './cost.ts';
 
 export type ProjectList = { kind: 'star' } | { kind: 'columns'; names: string[] };
+
+/** One side of an `IndexRangeScan`'s bound — `inclusive` is `<=`/`>=` vs `<`/`>`. */
+export interface RangeBound {
+  value: SqlValue;
+  inclusive: boolean;
+}
 
 /** One aggregate a `HashAggregate` computes, keyed by its canonical SQL text (e.g. `COUNT(*)`). */
 export interface AggregateSpec {
@@ -55,6 +61,26 @@ export type Plan =
       column: string;
       key: SqlValue;
       /** Conjuncts the index could not satisfy, re-checked per row. */
+      residual?: Expr;
+    }
+  | {
+      /**
+       * `>`, `<`, `>=`, `<=` (or a `BETWEEN`, desugared to both a `low` and a
+       * `high`) on an indexed column (plan.md §23.1) — descend the B+Tree
+       * once to the leaf the lower bound would start at (or the leftmost
+       * leaf, with no lower bound), then walk the leaf sibling chain
+       * horizontally rather than rescanning the whole table. Always touches
+       * the heap — no index-only variant yet, unlike `IndexOnlyScan`; that
+       * combination is its own follow-on.
+       */
+      op: 'IndexRangeScan';
+      table: string;
+      column: string;
+      /** Absent means "no lower bound" — start at the tree's leftmost leaf. */
+      low?: RangeBound;
+      /** Absent means "no upper bound" — walk until the leaf chain ends. */
+      high?: RangeBound;
+      /** Conjuncts the range could not satisfy, re-checked per row. */
       residual?: Expr;
     }
   | {
@@ -191,6 +217,41 @@ export function equalityOn(expr: Expr, column: string): SqlValue | undefined {
   return undefined;
 }
 
+const FLIPPED_COMPARE_OP: Record<Exclude<CompareOp, '='>, Exclude<CompareOp, '='>> = {
+  '<': '>',
+  '>': '<',
+  '<=': '>=',
+  '>=': '<=',
+};
+
+/**
+ * `col OP literal` against the given column, for `OP` in `<`, `>`, `<=`,
+ * `>=` — in either operand order, with the operator flipped when the column
+ * is on the right (`30 < age` reads as `age > 30`). `rangeIndexSelection`'s
+ * sibling to `equalityOn`, above.
+ */
+export function rangeOn(
+  expr: Expr,
+  column: string,
+): { op: Exclude<CompareOp, '='>; value: SqlValue } | undefined {
+  if (expr.kind !== 'compare' || expr.op === '=') return undefined;
+  if (expr.left.kind === 'column' && expr.left.name === column && expr.right.kind === 'literal') {
+    return { op: expr.op, value: expr.right.value };
+  }
+  if (expr.right.kind === 'column' && expr.right.name === column && expr.left.kind === 'literal') {
+    return { op: FLIPPED_COMPARE_OP[expr.op], value: expr.left.value };
+  }
+  return undefined;
+}
+
+/** `age ≥ 30`, `age < 50`, or `age between 20 and 40` — an `IndexRangeScan`'s bounds, in words. */
+export function formatRangeBounds(column: string, low?: RangeBound, high?: RangeBound): string {
+  if (low && high) return `\`${column}\` between ${format(low.value)} and ${format(high.value)}`;
+  if (low) return `\`${column}\` ${low.inclusive ? '≥' : '>'} ${format(low.value)}`;
+  if (high) return `\`${column}\` ${high.inclusive ? '≤' : '<'} ${format(high.value)}`;
+  return `\`${column}\``;
+}
+
 export function exprToSql(expr: Expr): string {
   switch (expr.kind) {
     case 'column':
@@ -278,6 +339,17 @@ function convert(
         op: 'IndexOnlyScan',
         label: `IndexOnlyScan ${plan.table}.${plan.column}`,
         detail: `key: ${plan.column} = ${format(plan.key)} · never touches the heap`,
+        ...(highlight ? { highlight } : {}),
+        ...cost,
+      };
+    case 'IndexRangeScan':
+      return {
+        id,
+        op: 'IndexRangeScan',
+        label: `IndexRangeScan ${plan.table}.${plan.column}`,
+        detail: plan.residual
+          ? `range: ${formatRangeBounds(plan.column, plan.low, plan.high)} · recheck: ${exprToSql(plan.residual)}`
+          : `range: ${formatRangeBounds(plan.column, plan.low, plan.high)}`,
         ...(highlight ? { highlight } : {}),
         ...cost,
       };

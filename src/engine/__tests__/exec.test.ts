@@ -31,6 +31,21 @@ describe('three-valued logic', () => {
     expect(evaluatePredicate(where('SELECT * FROM t WHERE a < 9'), row)).toBe(true);
   });
 
+  it('<= and >= are inclusive at the boundary (plan.md §23.1)', () => {
+    expect(evaluatePredicate(where('SELECT * FROM t WHERE a <= 5'), row)).toBe(true);
+    expect(evaluatePredicate(where('SELECT * FROM t WHERE a >= 5'), row)).toBe(true);
+    expect(evaluatePredicate(where('SELECT * FROM t WHERE a <= 4'), row)).toBe(false);
+    expect(evaluatePredicate(where('SELECT * FROM t WHERE a >= 6'), row)).toBe(false);
+  });
+
+  it('BETWEEN desugars to >= lo AND <= hi at parse time — inclusive on both ends', () => {
+    expect(evaluatePredicate(where('SELECT * FROM t WHERE a BETWEEN 5 AND 10'), row)).toBe(true);
+    expect(evaluatePredicate(where('SELECT * FROM t WHERE a BETWEEN 1 AND 5'), row)).toBe(true);
+    expect(evaluatePredicate(where('SELECT * FROM t WHERE a BETWEEN 6 AND 10'), row)).toBe(false);
+    // NULL propagates through the desugared AND exactly like a hand-written one.
+    expect(evaluatePredicate(where('SELECT * FROM t WHERE b BETWEEN 1 AND 10'), row)).toBeNull();
+  });
+
   it('compares strings lexicographically', () => {
     expect(evaluatePredicate(where("SELECT * FROM t WHERE name = 'ada'"), row)).toBe(true);
     expect(evaluatePredicate(where("SELECT * FROM t WHERE name < 'brendan'"), row)).toBe(true);
@@ -111,9 +126,30 @@ describe('execution results are correct', () => {
   });
 
   it('gives the same answer whichever access method the optimizer picks', () => {
-    // `id = 5` uses the index; `id < 6 AND id > 4` cannot, so it scans.
+    // Both are index-backed now (index-selection's equality lookup vs.
+    // range-index-selection's leaf-chaining scan, plan.md §23.1) — the point
+    // is that either way, the same one row comes back.
     expect(run('SELECT * FROM users WHERE id = 5').rows).toEqual(
       run('SELECT * FROM users WHERE id > 4 AND id < 6').rows,
+    );
+  });
+
+  it('a range predicate on the indexed column agrees with a plain filter (IndexRangeScan)', () => {
+    expect(run('SELECT * FROM users WHERE id > 30').rows).toEqual(
+      expected((r) => (r.id as number) > 30),
+    );
+    expect(run('SELECT * FROM users WHERE id <= 10').rows).toEqual(
+      expected((r) => (r.id as number) <= 10),
+    );
+    expect(run('SELECT * FROM users WHERE id BETWEEN 10 AND 20').rows).toEqual(
+      expected((r) => (r.id as number) >= 10 && (r.id as number) <= 20),
+    );
+  });
+
+  it('rechecks the residual after an IndexRangeScan too, exactly like IndexScan', () => {
+    expect(run("SELECT * FROM users WHERE id > 10 AND name = 'nobody'").rows).toEqual([]);
+    expect(run('SELECT * FROM users WHERE id > 40 AND age > 0').rows).toEqual(
+      expected((r) => (r.id as number) > 40 && (r.age as number) > 0),
     );
   });
 

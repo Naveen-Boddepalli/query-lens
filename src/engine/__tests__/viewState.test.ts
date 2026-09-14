@@ -170,6 +170,69 @@ describe('applyEvent', () => {
     expect(s.plan).toEqual(after);
     expect(s.appliedRules).toEqual(['predicate-pushdown']);
   });
+
+  describe('the index stage', () => {
+    const tree = { id: 'n0', kind: 'leaf' as const, label: 'n0', pageId: 0 };
+
+    it('open resets indexPath and indexOutcome, and stores the tree', () => {
+      const s = applyEvent(
+        initialViewState(opts),
+        ev(0, { stage: 'index', action: 'open', tree, nodeId: 'n0', height: 1 }),
+      );
+      expect(s.indexTree).toEqual(tree);
+      expect(s.indexPath).toEqual([]);
+      expect(s.indexOutcome).toBeNull();
+    });
+
+    it('traverse appends to indexPath and sets outcome to searching', () => {
+      let s = applyEvent(
+        initialViewState(opts),
+        ev(0, { stage: 'index', action: 'open', tree, nodeId: 'n0', height: 2 }),
+      );
+      s = applyEvent(s, ev(1, { stage: 'index', action: 'traverse', nodeId: 'n0', key: 5, childIndex: 0 }));
+      s = applyEvent(s, ev(2, { stage: 'index', action: 'traverse', nodeId: 'n1', key: 5 }));
+      expect(s.indexPath).toEqual(['n0', 'n1']);
+      expect(s.indexOutcome).toBe('searching');
+    });
+
+    // plan.md §23.1's leaf-chaining range scan: a horizontal hop is not a
+    // vertical `traverse`, but it lands in the same `indexPath` the same
+    // way — that is what lets BTreePanel highlight every leaf a range scan
+    // actually crossed.
+    it('chain-next appends the destination leaf to indexPath, same as traverse would', () => {
+      let s = applyEvent(
+        initialViewState(opts),
+        ev(0, { stage: 'index', action: 'open', tree, nodeId: 'n0', height: 1 }),
+      );
+      s = applyEvent(s, ev(1, { stage: 'index', action: 'traverse', nodeId: 'n0' }));
+      s = applyEvent(s, ev(2, { stage: 'index', action: 'chain-next', fromNodeId: 'n0', toNodeId: 'n1' }));
+      expect(s.indexPath).toEqual(['n0', 'n1']);
+      expect(s.indexOutcome).toBe('searching');
+
+      s = applyEvent(s, ev(3, { stage: 'index', action: 'chain-next', fromNodeId: 'n1', toNodeId: 'n2' }));
+      expect(s.indexPath).toEqual(['n0', 'n1', 'n2']);
+    });
+
+    it('found and not-found set the outcome without touching indexPath', () => {
+      let s = applyEvent(
+        initialViewState(opts),
+        ev(0, { stage: 'index', action: 'open', tree, nodeId: 'n0', height: 1 }),
+      );
+      s = applyEvent(s, ev(1, { stage: 'index', action: 'traverse', nodeId: 'n0' }));
+      const path = s.indexPath;
+
+      const foundState = applyEvent(s, ev(2, { stage: 'index', action: 'found', nodeId: 'n0', key: 5 }));
+      expect(foundState.indexOutcome).toBe('found');
+      expect(foundState.indexPath).toEqual(path);
+
+      const notFoundState = applyEvent(
+        s,
+        ev(2, { stage: 'index', action: 'not-found', nodeId: 'n0', key: 5 }),
+      );
+      expect(notFoundState.indexOutcome).toBe('not-found');
+      expect(notFoundState.indexPath).toEqual(path);
+    });
+  });
 });
 
 describe('createTraceProjector', () => {

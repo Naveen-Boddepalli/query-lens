@@ -134,7 +134,9 @@ export function emitPlanEvents(
 
   for (const step of optimize(canonical, table)) {
     emit(
-      step.rule === 'index-selection' || step.rule === 'index-only-scan'
+      step.rule === 'index-selection' ||
+        step.rule === 'range-index-selection' ||
+        step.rule === 'index-only-scan'
         ? withCostJustification(step.label, step.plan)
         : step.label,
       {

@@ -5,9 +5,12 @@ import {
   compareKeys,
   createTree,
   DEFAULT_MAX_KEYS,
+  descend,
   height,
   insert,
   leafChain,
+  leftmostPath,
+  lowerBound,
   node,
   search,
 } from '../index/btree.ts';
@@ -68,6 +71,38 @@ describe('B+Tree basics', () => {
     const tree = treeOf(Array.from({ length: 40 }, (_, i) => i + 1));
     const pages = Object.values(tree.nodes).map((n) => n.pageId);
     expect(new Set(pages).size).toBe(pages.length);
+  });
+});
+
+describe('lowerBound (plan.md §23.1 — a range scan\'s own starting position)', () => {
+  it('finds the first index at or after the key', () => {
+    expect(lowerBound([10, 20, 30, 40], 25)).toBe(2);
+    expect(lowerBound([10, 20, 30, 40], 20)).toBe(1);
+    expect(lowerBound([10, 20, 30, 40], 5)).toBe(0);
+    expect(lowerBound([10, 20, 30, 40], 41)).toBe(4);
+  });
+
+  it('is the length of an empty array', () => {
+    expect(lowerBound([], 5)).toBe(0);
+  });
+});
+
+describe('leftmostPath (plan.md §23.1 — a range scan with no lower bound)', () => {
+  it('is just the root for a single-leaf tree', () => {
+    const tree = treeOf([1, 2, 3]);
+    expect(leftmostPath(tree)).toEqual([tree.rootId]);
+  });
+
+  it('always takes child 0 at every internal node — the same leaf descend(minKey) would reach', () => {
+    // Built from keys 1..40, so 1 is the minimum key by construction.
+    const tree = treeOf(Array.from({ length: 40 }, (_, i) => i + 1));
+    expect(leftmostPath(tree)).toEqual(descend(tree, 1));
+  });
+
+  it('ends at the same leaf leafChain() starts its walk from', () => {
+    const tree = treeOf(Array.from({ length: 40 }, (_, i) => i + 1));
+    const path = leftmostPath(tree);
+    expect(path[path.length - 1]).toBe(leafChain(tree)[0]);
   });
 });
 

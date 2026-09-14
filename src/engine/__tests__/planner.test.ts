@@ -274,9 +274,12 @@ describe('optimize — index selection', () => {
     expect(scan && scan.op === 'IndexScan' && exprToSql(scan.residual!)).toBe('age > 30');
   });
 
-  it('stays a SeqScan for a range predicate — v0 indexes answer equalities only', () => {
+  it('stays a SeqScan for a range predicate on an unindexed column', () => {
     expect(shape(final('SELECT * FROM users WHERE age > 30'))).toEqual(['Project', 'SeqScan']);
-    expect(shape(final('SELECT * FROM users WHERE id > 5'))).toEqual(['Project', 'SeqScan']);
+  });
+
+  it('a range predicate on the indexed column becomes an IndexRangeScan instead (range-index-selection, plan.md §23.1)', () => {
+    expect(shape(final('SELECT * FROM users WHERE id > 5'))).toEqual(['Project', 'IndexRangeScan']);
   });
 
   it('stays a SeqScan when the equality is on an unindexed column', () => {
@@ -363,6 +366,108 @@ describe('optimize — index selection with two candidate indexes (plan.md §22.
   it('still picks a real IndexScan on a tie — declaration order, not an error', () => {
     const p = final("SELECT * FROM tied WHERE id = 2 AND slug = 'b'", tied);
     expect(p).toMatchObject({ op: 'Project', child: { op: 'IndexScan', column: 'id', key: 2 } });
+  });
+});
+
+describe('optimize — range-index-selection (leaf-chaining range scans, plan.md §23.1)', () => {
+  it('a single lower bound becomes an IndexRangeScan with only a low bound', () => {
+    const p = final('SELECT * FROM users WHERE id > 30', users);
+    const scan = p.op === 'Project' ? p.child : null;
+    expect(scan).toMatchObject({ op: 'IndexRangeScan', column: 'id', low: { value: 30, inclusive: false } });
+    expect(scan).not.toHaveProperty('high');
+  });
+
+  it('>= sets inclusive: true on the low bound', () => {
+    const p = final('SELECT * FROM users WHERE id >= 30', users);
+    const scan = p.op === 'Project' ? p.child : null;
+    expect(scan).toMatchObject({ op: 'IndexRangeScan', low: { value: 30, inclusive: true } });
+  });
+
+  it('a single upper bound becomes an IndexRangeScan with only a high bound', () => {
+    const p = final('SELECT * FROM users WHERE id < 10', users);
+    const scan = p.op === 'Project' ? p.child : null;
+    expect(scan).toMatchObject({ op: 'IndexRangeScan', column: 'id', high: { value: 10, inclusive: false } });
+    expect(scan).not.toHaveProperty('low');
+  });
+
+  it('a BETWEEN (desugared to two conjuncts) sets both bounds, inclusive on each end', () => {
+    const p = final('SELECT * FROM users WHERE id BETWEEN 10 AND 20', users);
+    const scan = p.op === 'Project' ? p.child : null;
+    expect(scan).toMatchObject({
+      op: 'IndexRangeScan',
+      column: 'id',
+      low: { value: 10, inclusive: true },
+      high: { value: 20, inclusive: true },
+    });
+  });
+
+  it('a conjunct the range cannot answer stays a residual recheck', () => {
+    const p = final("SELECT * FROM users WHERE id > 10 AND name = 'ada'", users);
+    const scan = p.op === 'Project' ? p.child : null;
+    expect(scan).toMatchObject({ op: 'IndexRangeScan', column: 'id' });
+    expect(scan && scan.op === 'IndexRangeScan' && exprToSql(scan.residual!)).toBe("name = 'ada'");
+  });
+
+  it('stays a SeqScan when the range is on an unindexed column', () => {
+    expect(shape(final('SELECT * FROM users WHERE age > 30'))).toEqual(['Project', 'SeqScan']);
+  });
+
+  it('an equality on the same table always wins over a range — index-selection fires first, this rule never touches an IndexScan', () => {
+    // `id` is the only index; an equality on it always beats any range on
+    // any column, by rule order alone, never a cost-model comparison.
+    const p = final('SELECT * FROM users WHERE id = 5 AND age > 10', users);
+    expect(shape(p)).toEqual(['Project', 'IndexScan']);
+  });
+
+  const spans: Table = {
+    name: 'spans',
+    columns: ['id', 'ord'],
+    rows: [
+      { id: 1, ord: 10 },
+      { id: 2, ord: 20 },
+      { id: 3, ord: 30 },
+      { id: 4, ord: 40 },
+    ],
+    indexedColumns: ['id', 'ord'],
+  };
+
+  it('with two range-indexable columns, picks the narrower estimated range and rechecks the other', () => {
+    // `id`'s own min/max is 1..4, so `id > 3` is 1/3 of its span; `ord`'s
+    // min/max is 10..40, and its own bound (10) sits exactly at that min, so
+    // `ord > 10` spans the column's *entire* range — id is the narrower
+    // fraction, and should win on that basis.
+    const p = final('SELECT * FROM spans WHERE id > 3 AND ord > 10', spans);
+    const scan = p.op === 'Project' ? p.child : null;
+    expect(scan).toMatchObject({ op: 'IndexRangeScan', column: 'id' });
+    expect(scan && scan.op === 'IndexRangeScan' && exprToSql(scan.residual!)).toBe('ord > 10');
+  });
+
+  it('names the runner-up in the narration when there is a choice to make', () => {
+    const steps = optimize(plan('SELECT * FROM spans WHERE id > 3 AND ord > 10'), spans);
+    const step = steps.find((s) => s.rule === 'range-index-selection')!;
+    expect(step.label).toMatch(/`id` is indexed and.*chosen over `ord`/);
+  });
+
+  const tiedSpans: Table = {
+    name: 'tiedSpans',
+    columns: ['id', 'ord'],
+    rows: [
+      { id: 1, ord: 1 },
+      { id: 2, ord: 2 },
+      { id: 3, ord: 3 },
+      { id: 4, ord: 4 },
+    ],
+    indexedColumns: ['id', 'ord'],
+  };
+
+  it('never claims one range "beats" another when both are equally selective', () => {
+    // id and ord run over the exact same 1..4 values, so `> 2` on either is
+    // an identical fraction — an honest tie, not a false "narrower" claim.
+    const steps = optimize(plan('SELECT * FROM tiedSpans WHERE id > 2 AND ord > 2'), tiedSpans);
+    const step = steps.find((s) => s.rule === 'range-index-selection')!;
+    expect(step.label).not.toMatch(/chosen over/);
+    expect(step.label).toMatch(/tied with `ord`/);
+    expect(step.label).toMatch(/declared first/);
   });
 });
 
@@ -536,6 +641,7 @@ describe('optimize — rule filter (plan.md §22.3 /tools/planner)', () => {
       'predicate-pushdown',
       'join-predicate-pushdown',
       'index-selection',
+      'range-index-selection',
       'index-only-scan',
     ]);
   });

@@ -13,9 +13,9 @@
 import type { PredictionPrompt, SqlValue, Table } from '../types.ts';
 import { indexSelectionPrompt } from '../predict.ts';
 import type { CompareOp, Expr } from '../parser/index.ts';
-import { conjoin, conjuncts, equalityOn, exprToSql } from './plan.ts';
-import type { Plan } from './plan.ts';
-import { ndistinct } from './cost.ts';
+import { conjoin, conjuncts, equalityOn, exprToSql, formatRangeBounds, rangeOn } from './plan.ts';
+import type { Plan, RangeBound } from './plan.ts';
+import { boundedRangeSelectivity, ndistinct } from './cost.ts';
 
 export interface Rewrite {
   rule: string;
@@ -89,18 +89,32 @@ function rewrapAggregate(aggregate: AggregateNode | null, plan: Plan): Plan {
  */
 function foldLiteralCompare(op: CompareOp, left: SqlValue, right: SqlValue): boolean | null {
   if (left === null || right === null) return null;
-  if (typeof left === 'number' && typeof right === 'number') {
-    return op === '=' ? left === right : op === '<' ? left < right : left > right;
-  }
+  if (typeof left === 'number' && typeof right === 'number') return orderedCompare(op, left, right);
   const a = typeof left === 'boolean' ? String(Number(left)) : String(left);
   const b = typeof right === 'boolean' ? String(Number(right)) : String(right);
-  return op === '=' ? a === b : op === '<' ? a < b : a > b;
+  return orderedCompare(op, a, b);
+}
+
+function orderedCompare<T extends number | string>(op: CompareOp, a: T, b: T): boolean {
+  switch (op) {
+    case '=':
+      return a === b;
+    case '<':
+      return a < b;
+    case '>':
+      return a > b;
+    case '<=':
+      return a <= b;
+    case '>=':
+      return a >= b;
+  }
 }
 
 /**
  * A comparison whose truth value does not depend on the row at all: two
- * literals (`5 > 3`), or the same column compared with itself (`age = age`
- * is always true; `age < age` is always false). Anything else — a column
+ * literals (`5 > 3`), or the same column compared with itself — `age = age`,
+ * `age <= age` and `age >= age` are always true (reflexive); `age < age` and
+ * `age > age` are always false (irreflexive). Anything else — a column
  * against a literal, or two different columns — depends on the data and
  * cannot be folded. "Same column" checks the table qualifier too: once a
  * JOIN is in play, `authors.id = posts.id` names the *same* column on two
@@ -115,7 +129,8 @@ function foldComparison(expr: Extract<Expr, { kind: 'compare' }>): 'true' | 'fal
   }
 
   if (left.kind === 'column' && right.kind === 'column' && left.name === right.name && left.table === right.table) {
-    return op === '=' ? 'true' : 'false';
+    // Reflexive ops (=, <=, >=) always hold against oneself; the strict ones (<, >) never do.
+    return op === '=' || op === '<=' || op === '>=' ? 'true' : 'false';
   }
 
   return null;
@@ -394,6 +409,95 @@ const indexSelection: Rule = (input, table) => {
 };
 
 /**
+ * Swap a `SeqScan` for an `IndexRangeScan` when a range comparison (`<`,
+ * `>`, `<=`, `>=` — including a `BETWEEN`, already desugared to both a lower
+ * and an upper bound by the parser) sits on an indexed column. Descends the
+ * B+Tree once to the leaf the lower bound would start at (the leftmost leaf,
+ * with none), then the executor walks the leaf sibling chain horizontally
+ * rather than rescanning the table (plan.md §23.1).
+ *
+ * Deliberately narrower than `index-selection`: it only ever sees a plan
+ * `index-selection` left untouched as a `SeqScan` — i.e. no equality conjunct
+ * matched any indexed column at all — because an equality is always at least
+ * as selective a starting point as a range, and choosing between an
+ * equality's `1/ndistinct` and a range's interval fraction by comparing the
+ * two numbers would be exactly the kind of cost-model call inside a rule
+ * §12 rules out. At most one lower bound and one upper bound per column are
+ * consumed; a second bound in the same direction (`age > 10 AND age > 20`)
+ * is left as a residual recheck rather than merged — correctness never
+ * depends on catching it, only how tightly the index narrows the search
+ * does.
+ */
+const rangeIndexSelection: Rule = (input, table) => {
+  const { limit, rest: plan } = unwrapLimit(input);
+  if (plan.op !== 'Project') return null;
+  const { sort, rest: belowSort } = unwrapSort(plan.child);
+  const { aggregate, rest: scan } = unwrapAggregate(belowSort);
+  if (scan.op !== 'SeqScan' || !scan.filter) return null;
+
+  const parts = conjuncts(scan.filter);
+  const candidates = (table.indexedColumns ?? []).flatMap((column) => {
+    const matches = parts
+      .map((p, i) => ({ i, match: rangeOn(p, column) }))
+      .filter((m): m is { i: number; match: NonNullable<ReturnType<typeof rangeOn>> } => m.match !== undefined);
+    if (matches.length === 0) return [];
+
+    const lower = matches.find((m) => m.match.op === '>' || m.match.op === '>=');
+    const upper = matches.find((m) => m.match.op === '<' || m.match.op === '<=');
+    const consumed = new Set([lower?.i, upper?.i].filter((i): i is number => i !== undefined));
+    const low: RangeBound | undefined = lower
+      ? { value: lower.match.value, inclusive: lower.match.op === '>=' }
+      : undefined;
+    const high: RangeBound | undefined = upper
+      ? { value: upper.match.value, inclusive: upper.match.op === '<=' }
+      : undefined;
+    const numericLow = low && typeof low.value === 'number' ? low.value : null;
+    const numericHigh = high && typeof high.value === 'number' ? high.value : null;
+    const selectivity = boundedRangeSelectivity(column, numericLow, numericHigh, table);
+    return [{ column, consumed, low, high, selectivity }];
+  });
+  if (candidates.length === 0) return null;
+
+  const chosen = candidates.reduce((best, c) =>
+    c.selectivity.fraction < best.selectivity.fraction ? c : best,
+  );
+  const runnersUp = candidates.filter((c) => c !== chosen);
+
+  const residual = conjoin(parts.filter((_, i) => !chosen.consumed.has(i)));
+
+  const rangeScan: Plan = {
+    op: 'IndexRangeScan',
+    table: scan.table,
+    column: chosen.column,
+    ...(chosen.low ? { low: chosen.low } : {}),
+    ...(chosen.high ? { high: chosen.high } : {}),
+    ...(residual ? { residual } : {}),
+  };
+  const root = rewrapLimit(
+    limit,
+    { op: 'Project', columns: plan.columns, child: rewrapSort(sort, rewrapAggregate(aggregate, rangeScan)) },
+  );
+
+  const runnerUpNames = runnersUp.map((c) => `\`${c.column}\``).join(', ');
+  const choiceClause =
+    runnersUp.length === 0
+      ? ''
+      : runnersUp.every((c) => c.selectivity.fraction === chosen.selectivity.fraction)
+        ? ` (tied with ${runnerUpNames} — \`${chosen.column}\` wins only because it was declared first, not because it narrows the search any further)`
+        : ` (chosen over ${runnerUpNames} — a narrower estimated range)`;
+  const boundsText = formatRangeBounds(chosen.column, chosen.low, chosen.high);
+
+  return {
+    rule: 'range-index-selection',
+    label: residual
+      ? `\`${chosen.column}\` is indexed and ${boundsText}${choiceClause}, so the scan becomes a single descent to the first matching leaf, then a walk along the leaf chain — no full table scan. The rest of the predicate is rechecked on each row the index returns.`
+      : `\`${chosen.column}\` is indexed and the whole predicate is ${boundsText}${choiceClause}, so the scan becomes a single descent to the first matching leaf, then a walk along the leaf chain — no full table scan.`,
+    plan: root,
+    changed: new Set<Plan>([rangeScan]),
+  };
+};
+
+/**
  * When an `IndexScan`'s equality lookup already answers the query outright —
  * every column the SELECT list needs is the indexed column itself, and
  * there is no leftover conjunct to recheck against the row — the leaf's key
@@ -428,11 +532,28 @@ const RULES: { name: string; apply: Rule }[] = [
   { name: 'predicate-pushdown', apply: predicatePushdown },
   { name: 'join-predicate-pushdown', apply: joinPredicatePushdown },
   { name: 'index-selection', apply: indexSelection },
+  { name: 'range-index-selection', apply: rangeIndexSelection },
   { name: 'index-only-scan', apply: indexOnlyScan },
 ];
 
 /** Every rewrite rule's name, in the order the optimizer runs them. */
 export const OPTIMIZER_RULES: readonly string[] = RULES.map((r) => r.name);
+
+/**
+ * `DELETE`/`UPDATE` reuse this same optimizer (`emitDeletePlanEvents`,
+ * `emitUpdatePlanEvents`) to find the rows to touch, wrapped in a throwaway
+ * `Project *` — but their executors (`exec/delete.ts`, `exec/update.ts`)
+ * only know how to run a `SeqScan` or a single-row `IndexScan`
+ * (`indexScanForMatch`), not an `IndexRangeScan`'s multi-row leaf walk. Every
+ * other rule name is safe to reuse as-is; only `range-index-selection` is
+ * excluded, so a write statement's plan can only ever come out as one of
+ * the two shapes those executors already handle. Reaching an `IndexRangeScan`
+ * into DELETE/UPDATE is its own follow-on, not something silently unsafe
+ * today only because this excludes it.
+ */
+export const WRITE_PATH_RULES: ReadonlySet<string> = new Set(
+  OPTIMIZER_RULES.filter((name) => name !== 'range-index-selection'),
+);
 
 /**
  * Applies every enabled rule that fires, in order. Returns each step for
@@ -464,7 +585,7 @@ export function optimize(
 /** The predicate a scan will evaluate, whatever form it ended up in. */
 export function scanPredicate(plan: Plan): Expr | undefined {
   if (plan.op === 'SeqScan') return plan.filter;
-  if (plan.op === 'IndexScan') return plan.residual;
+  if (plan.op === 'IndexScan' || plan.op === 'IndexRangeScan') return plan.residual;
   return plan.op === 'Filter' ||
     plan.op === 'HashAggregate' ||
     plan.op === 'SortAggregate' ||

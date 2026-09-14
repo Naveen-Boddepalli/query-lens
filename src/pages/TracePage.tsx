@@ -121,6 +121,8 @@ function detailOf(e: StepEvent): string {
           return `open · ${e.nodeId} · height ${e.height}`;
         case 'traverse':
           return `traverse · ${e.nodeId}${e.childIndex === undefined ? '' : ` → child ${e.childIndex}`}`;
+        case 'chain-next':
+          return `chain-next · ${e.fromNodeId} → ${e.toNodeId}`;
         default:
           return `${e.action} · ${e.nodeId}`;
       }

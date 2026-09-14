@@ -209,6 +209,11 @@ function build(
         target: e.target,
         sourceHandle: 'next',
         targetHandle: 'prev',
+        // Both leaves lit means this specific sibling hop is one a scan
+        // actually crossed (a B+Tree range scan's `chain-next` step —
+        // plan.md §23.1), not just the tree's static leaf chain — the same
+        // `.is-active` treatment a lit hierarchical edge already gets above.
+        ...(lit.has(e.source) && lit.has(e.target) ? { className: 'is-active' } : {}),
         style: {
           stroke: 'var(--color-node-leaf)',
           strokeWidth: 1,

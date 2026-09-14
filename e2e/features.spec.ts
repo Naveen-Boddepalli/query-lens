@@ -250,14 +250,15 @@ test('the planner sandbox runs the rewrite rules one at a time', async ({ page }
   const optimized = page.getByRole('figure').filter({ hasText: 'optimized' });
 
   // Default: every rule on, index on → the scan becomes a B+Tree lookup.
+  // Anchored at `^` so it does not also match `range-index-selection`.
   await expect(optimized.getByText(/IndexScan/).first()).toBeVisible();
-  await expect(page.getByText(/index-selection — /)).toContainText(/indexed/);
+  await expect(page.getByText(/^index-selection — /)).toContainText(/indexed/);
 
   // Drop the index → index-selection has nothing to match; the scan stays sequential.
   await page.getByLabel('id index').uncheck();
   await expect(optimized.getByText(/IndexScan/)).toHaveCount(0);
   await expect(optimized.getByText(/SeqScan/).first()).toBeVisible();
-  await expect(page.getByText(/index-selection — no match/)).toBeVisible();
+  await expect(page.getByText(/^index-selection — no match/)).toBeVisible();
   await expect.poll(() => page.url()).toMatch(/[?&]idx=0/);
 
   // Turn predicate-pushdown off (index back on): nothing fires — the two plans match.
@@ -266,14 +267,14 @@ test('the planner sandbox runs the rewrite rules one at a time', async ({ page }
   await expect(page.getByText('optimized · unchanged')).toBeVisible();
   await expect(page.getByText(/predicate-pushdown — turned off/)).toBeVisible();
   await expect.poll(() => page.url()).toMatch(
-    /rules=constant-folding%2Cjoin-predicate-pushdown%2Cindex-selection%2Cindex-only-scan/,
+    /rules=constant-folding%2Cjoin-predicate-pushdown%2Cindex-selection%2Crange-index-selection%2Cindex-only-scan/,
   );
 });
 
 test('the planner sandbox folds an always-true comparison out of the predicate', async ({ page }) => {
   await page.goto('/tools/planner?q=SELECT%20*%20FROM%20users%20WHERE%201%20%3D%201%20AND%20id%20%3D%205');
   await expect(page.getByText(/constant-folding — Constant folding:/)).toBeVisible();
-  await expect(page.getByText(/index-selection — /)).toContainText(/indexed/);
+  await expect(page.getByText(/^index-selection — /)).toContainText(/indexed/);
 });
 
 test('the planner sandbox plans a real JOIN against its authors/posts demo tables', async ({ page }) => {
@@ -546,6 +547,35 @@ test('an index-only scan answers the query without ever fetching the heap page',
 
   await page.getByRole('button', { name: 'Optimizer' }).click();
   await expect(page.getByText('IndexOnlyScan', { exact: true }).first()).toBeVisible();
+});
+
+test('a range predicate on the indexed column becomes an IndexRangeScan and walks the leaf chain (plan.md §23.1)', async ({
+  page,
+}) => {
+  await page.goto('/playground?q=SELECT+*+FROM+users+WHERE+id+%3E+40&p=lru&x=0&s=9999');
+  // 8 of the 48 seed rows have id > 40.
+  await expect(page.getByText('8 rows returned', { exact: false })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Optimizer' }).click();
+  await expect(page.getByText('IndexRangeScan', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText(/range-index-selection/)).toBeVisible();
+
+  await page.getByRole('button', { name: 'Index', exact: true }).click();
+  // The leaf-chaining narration, and the breadcrumb it leaves behind — the
+  // point of the feature: more than one leaf visited, joined by a sibling
+  // hop, not a fresh descent from the root each time.
+  await expect(page.getByLabel('Scrub to step')).toBeVisible();
+  await page.getByLabel('Scrub to step').fill('1');
+  await expect(page.getByText(/sibling pointer/)).not.toBeVisible();
+  let hopSeen = false;
+  for (let step = 1; step <= 60; step++) {
+    await page.getByLabel('Scrub to step').fill(String(step));
+    if (await page.getByText(/sibling pointer/).isVisible()) {
+      hopSeen = true;
+      break;
+    }
+  }
+  expect(hopSeen).toBe(true);
 });
 
 test('DELETE removes a row for real — the Playground persists it across the next query', async ({

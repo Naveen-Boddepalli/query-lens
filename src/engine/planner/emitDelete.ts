@@ -3,7 +3,7 @@ import type { Table } from '../types.ts';
 import type { DeleteStatement } from '../parser/index.ts';
 import { buildDeletePlan } from './buildPlan.ts';
 import { estimatePlan } from './cost.ts';
-import { optimize } from './optimize.ts';
+import { optimize, WRITE_PATH_RULES } from './optimize.ts';
 import { exprToSql, toPlanDisplay } from './plan.ts';
 import type { Plan } from './plan.ts';
 
@@ -17,11 +17,14 @@ function unwrap(plan: Plan): Plan {
  * plan (`SeqScan` or `IndexScan`, whichever the optimizer chose) the executor
  * uses to find the rows to remove.
  *
- * Reuses the exact same `predicate-pushdown` / `index-selection` rules a
- * `SELECT` uses — they are written against `Project → …`, so the scan is
- * wrapped in a throwaway `Project *` for the optimizer's sake, and every tree
- * shown to the reader has that wrapper stripped again: nothing about a
- * `DELETE` cares what columns a `Project` would keep.
+ * Reuses the same rules a `SELECT` uses — they are written against
+ * `Project → …`, so the scan is wrapped in a throwaway `Project *` for the
+ * optimizer's sake, and every tree shown to the reader has that wrapper
+ * stripped again: nothing about a `DELETE` cares what columns a `Project`
+ * would keep. `WRITE_PATH_RULES` excludes `range-index-selection` specifically
+ * — see its own doc comment in `optimize.ts` — so the plan this returns is
+ * always a `SeqScan` or a single-row `IndexScan`, the two shapes
+ * `executeDelete` (`exec/delete.ts`) knows how to run.
  */
 export function emitDeletePlanEvents(
   emit: Emit,
@@ -52,7 +55,7 @@ export function emitDeletePlanEvents(
   let optimisedWrapped: Plan = wrapped;
   let before: Plan = wrapped;
 
-  for (const step of optimize(wrapped, table)) {
+  for (const step of optimize(wrapped, table, WRITE_PATH_RULES)) {
     emit(
       step.label,
       {

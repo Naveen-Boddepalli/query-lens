@@ -77,9 +77,29 @@ describe('parse — the v0 subset', () => {
   });
 
   it('accepts each supported operator', () => {
-    for (const op of ['=', '<', '>']) {
+    for (const op of ['=', '<', '>', '<=', '>=']) {
       expect(ok(`SELECT * FROM users WHERE age ${op} 30`).where).toMatchObject({ op });
     }
+  });
+
+  it('desugars BETWEEN to >= lo AND <= hi (plan.md §23.1) — no `between` Expr kind', () => {
+    const ast = ok('SELECT * FROM users WHERE age BETWEEN 20 AND 40');
+    expect(ast.where).toMatchObject({
+      kind: 'and',
+      left: { kind: 'compare', op: '>=', left: { kind: 'column', name: 'age' }, right: { value: 20 } },
+      right: { kind: 'compare', op: '<=', left: { kind: 'column', name: 'age' }, right: { value: 40 } },
+    });
+  });
+
+  it('BETWEEN combines with AND the same way a hand-written range does', () => {
+    // The BETWEEN's own AND is consumed inside the comparison; this outer AND
+    // is `parseExpr`'s loop — the two must not be confused for one another.
+    const ast = ok("SELECT * FROM users WHERE age BETWEEN 20 AND 40 AND name = 'ada'");
+    expect(ast.where).toMatchObject({
+      kind: 'and',
+      left: { kind: 'and', left: { op: '>=' }, right: { op: '<=' } },
+      right: { kind: 'compare', op: '=', left: { name: 'name' } },
+    });
   });
 
   it('chains AND left-associatively', () => {
@@ -501,9 +521,11 @@ describe('parse — errors point at the right text', () => {
   });
 
   it('names the v0 scope for unsupported operators', () => {
-    const e = err('SELECT * FROM users WHERE id >= 5');
-    expect(e.message).toMatch(/`>=` is not supported yet/);
-    expect(e.hint).toMatch(/`=`, `<` and `>`/);
+    // `<=`/`>=`/BETWEEN are real, supported operators now (plan.md §23.1) —
+    // `<>` (not-equal) is the operator that is still genuinely out of scope.
+    const e = err('SELECT * FROM users WHERE id <> 5');
+    expect(e.message).toMatch(/`<>` is not supported yet/);
+    expect(e.hint).toMatch(/`=`, `<`, `>`, `<=`, `>=` and BETWEEN/);
     expect(e.from).toBe(29);
     expect(e.to).toBe(31);
   });

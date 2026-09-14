@@ -94,6 +94,50 @@ function rangeSelectivity(
   return { fraction, basis: `~${String(Math.round(fraction * 100))}% by range` };
 }
 
+/**
+ * Fraction of `table`'s rows whose `column` falls within `[low, high]` —
+ * either bound may be `null` for a half-open range. A dedicated formula
+ * rather than reusing `selectivityOf`'s `AND` path (which multiplies two
+ * independent fractions): a range's own lower and upper bound are *not*
+ * independent of each other — the same column, not two different ones — so
+ * multiplying their separate `rangeSelectivity` fractions would
+ * double-discount a `BETWEEN` (plan.md §12: no plausible-but-false numbers).
+ * When both bounds and the column's numeric min/max are known, this instead
+ * computes the true linear-density overlap directly, which is provably the
+ * same fraction `rangeSelectivity` already gives for a single bound (set the
+ * absent bound to the column's own min or max and the two formulas agree).
+ */
+export function boundedRangeSelectivity(
+  column: string | null,
+  low: number | null,
+  high: number | null,
+  table: Table,
+): Selectivity {
+  const bounded = low !== null && high !== null;
+  const fallback: Selectivity = {
+    fraction: bounded ? OPEN_RANGE_SELECTIVITY * OPEN_RANGE_SELECTIVITY : OPEN_RANGE_SELECTIVITY,
+    basis: bounded ? '⅓ × ⅓ default (no numeric stats)' : '⅓ default (no numeric stats)',
+  };
+  if (!column) return fallback;
+
+  const values = table.rows
+    .map((row) => row[column])
+    .filter((value): value is number => typeof value === 'number');
+  if (values.length === 0) return fallback;
+
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  if (max === min) return fallback;
+
+  const effectiveLow = low === null ? min : Math.max(min, low);
+  const effectiveHigh = high === null ? max : Math.min(max, high);
+  const fraction = Math.min(1, Math.max(0, (effectiveHigh - effectiveLow) / (max - min)));
+  const boundsLabel = `${low === null ? 'no lower bound' : `≥${String(low)}`}, ${
+    high === null ? 'no upper bound' : `≤${String(high)}`
+  }`;
+  return { fraction, basis: `~${String(Math.round(fraction * 100))}% by range (${boundsLabel})` };
+}
+
 /** Selectivity of a predicate, with the heuristic that produced it. */
 export function selectivityOf(expr: Expr, table: Table): Selectivity {
   switch (expr.kind) {
@@ -223,6 +267,38 @@ function estimateNode(
         estRows: Math.max(clampRows(rowCount * fraction), plan.residual ? 0 : 1),
         estPages: levels + 1,
         basis,
+      };
+      break;
+    }
+    case 'IndexRangeScan': {
+      const low = plan.low && typeof plan.low.value === 'number' ? plan.low.value : null;
+      const high = plan.high && typeof plan.high.value === 'number' ? plan.high.value : null;
+      const { fraction: rangeFraction, basis: rangeBasis } = boundedRangeSelectivity(
+        plan.column,
+        low,
+        high,
+        table,
+      );
+      let fraction = rangeFraction;
+      let basis = rangeBasis;
+      if (plan.residual) {
+        const residual = selectivityOf(plan.residual, table);
+        fraction *= residual.fraction;
+        basis += ` + recheck ${residual.basis}`;
+      }
+      const estRows = clampRows(rowCount * fraction);
+      const levels = estimateIndexLevels(rowCount);
+      // Descend to the first leaf (`levels` node reads), walk however many
+      // more leaves the estimated rows span via sibling pointers, then one
+      // heap page per matching row — the same one-touch-per-row granularity
+      // IndexScan already prices, just repeated `estRows` times instead of
+      // once.
+      const leafSpan = Math.max(1, Math.ceil(estRows / FANOUT));
+      const extraLeaves = Math.max(0, leafSpan - 1);
+      estimate = {
+        estRows,
+        estPages: levels + extraLeaves + estRows,
+        basis: `${basis}; ${String(levels)} to descend, ${String(extraLeaves)} more leaf${extraLeaves === 1 ? '' : 's'} via sibling pointers, ${String(estRows)} heap page${estRows === 1 ? '' : 's'}`,
       };
       break;
     }

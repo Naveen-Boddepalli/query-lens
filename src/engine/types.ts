@@ -159,6 +159,16 @@ export type StepEventBody =
       childIndex?: number;
     }
   | { stage: 'index'; action: 'found' | 'not-found'; nodeId: string; key?: SqlValue }
+  /**
+   * A range scan's horizontal hop, following one leaf's `next` sibling
+   * pointer to the next — the leaf-chaining half of plan.md §23.1 that a
+   * point lookup's `traverse`/`found` never needs. `fromNodeId` and
+   * `toNodeId` both land in `indexPath` (`viewState.ts`), the same way a
+   * vertical `traverse` step does, so `BTreePanel` highlights every leaf a
+   * range scan actually crossed and — via `FlowTree`'s `sideEdges` — draws
+   * the sibling edge between them as active rather than a static dashed line.
+   */
+  | { stage: 'index'; action: 'chain-next'; fromNodeId: string; toNodeId: string }
   | {
       stage: 'lock';
       action: 'acquire' | 'release';

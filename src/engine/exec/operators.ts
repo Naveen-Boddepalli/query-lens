@@ -15,7 +15,7 @@ import type { AggregateSpec, Plan, ProjectList } from '../planner/index.ts';
 import type { BufferPool, Heap } from '../storage/index.ts';
 import type { LockManager } from '../locks/index.ts';
 import type { BPlusTree } from '../index/index.ts';
-import { emitIndexLookup, pageCountFor } from '../index/index.ts';
+import { emitIndexLookup, emitRangeStart, nextInRange, pageCountFor } from '../index/index.ts';
 import { compare, equalityKeyOf, passes } from './evaluate.ts';
 import { externalMergeSort, sortTempPageCount } from './sort.ts';
 
@@ -212,6 +212,73 @@ function indexOnlyScan(plan: Extract<Plan, { op: 'IndexOnlyScan' }>, ctx: ExecCo
     },
     close() {
       found = false;
+    },
+  };
+}
+
+/**
+ * `<`, `>`, `<=`, `>=` (or a `BETWEEN`) on an indexed column (plan.md
+ * §23.1): descend once to the leaf the lower bound starts at, then pull
+ * matching rows one at a time by walking the leaf chain — `nextInRange`
+ * crosses a `next` sibling pointer exactly when the current leaf runs out,
+ * so this stays as lazy as `SeqScan` rather than materialising the whole
+ * range in `open()`. Always touches the heap, one page per matching row,
+ * the same granularity `IndexScan`'s single row already costs — no
+ * index-only variant yet.
+ */
+function indexRangeScan(plan: Extract<Plan, { op: 'IndexRangeScan' }>, ctx: ExecContext): Operator {
+  let leafId: string | null = null;
+  let cursorIndex = 0;
+  let started = false;
+  const produced = counter(ctx, 'IndexRangeScan');
+
+  return {
+    name: 'IndexRangeScan',
+    open() {
+      const tree = ctx.trees[plan.column];
+      if (!tree) return;
+      const start = emitRangeStart(ctx.emit, tree, plan.column, plan.low, ctx.pool, ctx.locks);
+      leafId = start.leafId;
+      cursorIndex = start.startIndex;
+      started = true;
+    },
+    next() {
+      if (!started) return null;
+      const tree = ctx.trees[plan.column];
+      if (!tree) return null;
+
+      for (;;) {
+        if (leafId === null) return null;
+        const found = nextInRange(ctx.emit, tree, leafId, cursorIndex, plan.high);
+        if (!found) {
+          leafId = null;
+          return null;
+        }
+        leafId = found.leafId;
+        cursorIndex = found.nextIndex;
+
+        ctx.locks.acquire(
+          found.pointer.pageId,
+          'shared',
+          `Lock heap page ${String(found.pointer.pageId)}, where the matching row lives.`,
+        );
+        const fetched = ctx.pool.fetch(found.pointer.pageId);
+        if (fetched) ctx.pool.unpin(fetched.frameId);
+        ctx.locks.release(found.pointer.pageId, 'shared');
+
+        const page = ctx.heap.pages.find((p) => p.pageId === found.pointer.pageId);
+        const row = page?.rows[found.pointer.slot];
+        if (!row) continue;
+
+        if (!passes(plan.residual, row)) continue;
+
+        produced(`IndexRangeScan returns a row via leaf ${found.leafId}.`);
+        return row;
+      }
+    },
+    close() {
+      leafId = null;
+      started = false;
     },
   };
 }
@@ -936,6 +1003,8 @@ export function buildOperator(plan: Plan, ctx: ExecContext): Operator {
       return indexScan(plan, ctx);
     case 'IndexOnlyScan':
       return indexOnlyScan(plan, ctx);
+    case 'IndexRangeScan':
+      return indexRangeScan(plan, ctx);
     case 'Join':
       return buildJoinOperator(plan, ctx);
     case 'Filter':
