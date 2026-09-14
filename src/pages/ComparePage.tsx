@@ -281,9 +281,9 @@ function PolicyCompare() {
 
 const SEED = createSeedDatabase();
 // The same table with the index declaration dropped — the optimizer's
-// index-selection rule and `runQuery`'s `buildIndex` call both key off
-// `indexedColumn`, so this is all it takes to force a sequential scan.
-const { indexedColumn: _indexed, ...USERS_NO_INDEX } = SEED.tables.users!;
+// index-selection rule and `runQuery`'s `buildIndexes` call both key off
+// `indexedColumns`, so this is all it takes to force a sequential scan.
+const { indexedColumns: _indexed, ...USERS_NO_INDEX } = SEED.tables.users!;
 const NO_INDEX_DB: Database = { tables: { users: USERS_NO_INDEX } };
 
 const INDEX_PRESETS = [

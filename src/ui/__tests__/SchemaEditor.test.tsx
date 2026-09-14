@@ -5,10 +5,17 @@ import type { Database } from '../../engine/index.ts';
 
 const DB: Database = {
   tables: {
-    authors: { name: 'authors', columns: ['id', 'name'], rows: [{ id: 1, name: 'ada' }], indexedColumn: 'id' },
+    authors: { name: 'authors', columns: ['id', 'name'], rows: [{ id: 1, name: 'ada' }], indexedColumns: ['id'] },
     posts: { name: 'posts', columns: ['id', 'authorId'], rows: [{ id: 1, authorId: 1 }] },
   },
 };
+
+/** Selects one `<option>` of a multi-select by its value — jsdom needs the option's own `selected` flag set directly, `fireEvent.change` alone does not do it for `<select multiple>`. */
+function selectOption(select: Element, value: string) {
+  const option = select.querySelector<HTMLOptionElement>(`option[value="${value}"]`);
+  if (!option) throw new Error(`no <option value="${value}"> in this select`);
+  option.selected = true;
+}
 
 function setup(overrides: Partial<Parameters<typeof SchemaEditor>[0]> = {}) {
   const props = { db: DB, onApply: vi.fn(), onClose: vi.fn(), ...overrides };
@@ -64,14 +71,38 @@ describe('SchemaEditor', () => {
     fireEvent.change(screen.getByPlaceholderText('id, rating, comment'), {
       target: { value: 'id, rating' },
     });
-    fireEvent.change(screen.getByLabelText('Index'), { target: { value: 'id' } });
+    const select = screen.getByLabelText(/Indexes/);
+    selectOption(select, 'id');
+    fireEvent.change(select);
     fireEvent.click(screen.getByRole('button', { name: 'Add table' }));
     fireEvent.click(screen.getByRole('button', { name: /Apply/ }));
 
     expect(onApply).toHaveBeenCalledWith({
       tables: {
         ...DB.tables,
-        reviews: { name: 'reviews', columns: ['id', 'rating'], rows: [], indexedColumn: 'id' },
+        reviews: { name: 'reviews', columns: ['id', 'rating'], rows: [], indexedColumns: ['id'] },
+      },
+    });
+  });
+
+  it('declares two indexes on the new table when both are picked', () => {
+    const { onApply } = setup();
+    fireEvent.click(screen.getByRole('button', { name: '+ Add table' }));
+    fireEvent.change(screen.getByPlaceholderText('reviews'), { target: { value: 'reviews' } });
+    fireEvent.change(screen.getByPlaceholderText('id, rating, comment'), {
+      target: { value: 'id, rating' },
+    });
+    const select = screen.getByLabelText(/Indexes/);
+    selectOption(select, 'id');
+    selectOption(select, 'rating');
+    fireEvent.change(select);
+    fireEvent.click(screen.getByRole('button', { name: 'Add table' }));
+    fireEvent.click(screen.getByRole('button', { name: /Apply/ }));
+
+    expect(onApply).toHaveBeenCalledWith({
+      tables: {
+        ...DB.tables,
+        reviews: { name: 'reviews', columns: ['id', 'rating'], rows: [], indexedColumns: ['id', 'rating'] },
       },
     });
   });

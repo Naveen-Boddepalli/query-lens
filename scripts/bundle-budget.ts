@@ -258,9 +258,17 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
  * `trace-ui`'s own ceiling raised 53 → 54 kB for sort-merge join, JOIN's
  * third algorithm, and `join-predicate-pushdown`, a new optimizer rule
  * pushing a WHERE conjunct into whichever side of a Join it names (both in
- * `engine-*.js`) — the total itself still fits under 409, so it stays put.
+ * `engine-*.js`) — the total itself still fit under 409, so it stayed put.
+ * Raised 409 → 410 for the second-candidate-index item (§22.2): `Table`'s
+ * `indexedColumn` widened to `indexedColumns`, `buildIndexes` chaining
+ * several single-column trees over one heap, and `index-selection` choosing
+ * the more selective candidate by `ndistinct` when more than one matches —
+ * all in `engine-*.js` — plus `SchemaEditor.tsx`'s single-index `<select>`
+ * becoming a real multi-select. The total landed at 409.0, exactly the old
+ * ceiling with no slack for the next commit that touches this chunk; one kB
+ * of headroom is cheaper than re-deriving this measurement next time.
  */
-const TOTAL_KB = 409;
+const TOTAL_KB = 410;
 
 const gzipKb = (bytes: Buffer): number => gzipSync(bytes, { level: 9 }).length / 1024;
 

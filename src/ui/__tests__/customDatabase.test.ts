@@ -87,7 +87,7 @@ describe('loadCustomDatabase / saveCustomDatabase', () => {
   it('round-trips a saved database', () => {
     const db: Database = {
       tables: {
-        widgets: { name: 'widgets', columns: ['id', 'label'], rows: [{ id: 1, label: 'x' }], indexedColumn: 'id' },
+        widgets: { name: 'widgets', columns: ['id', 'label'], rows: [{ id: 1, label: 'x' }], indexedColumns: ['id', 'label'] },
       },
     };
     saveCustomDatabase(db);
@@ -115,10 +115,18 @@ describe('loadCustomDatabase / saveCustomDatabase', () => {
     expect(loadCustomDatabase()).toEqual(starterCustomDatabase());
   });
 
-  it('rejects an indexedColumn that names a column the table does not have', () => {
+  it('rejects an indexedColumns entry that names a column the table does not have', () => {
     localStorage.setItem(
       'querylens.customDatabase.v1',
-      JSON.stringify({ tables: { widgets: { name: 'widgets', columns: ['id'], rows: [], indexedColumn: 'bogus' } } }),
+      JSON.stringify({ tables: { widgets: { name: 'widgets', columns: ['id'], rows: [], indexedColumns: ['bogus'] } } }),
+    );
+    expect(loadCustomDatabase()).toEqual(starterCustomDatabase());
+  });
+
+  it('rejects a repeated column in indexedColumns', () => {
+    localStorage.setItem(
+      'querylens.customDatabase.v1',
+      JSON.stringify({ tables: { widgets: { name: 'widgets', columns: ['id'], rows: [], indexedColumns: ['id', 'id'] } } }),
     );
     expect(loadCustomDatabase()).toEqual(starterCustomDatabase());
   });

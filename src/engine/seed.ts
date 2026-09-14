@@ -35,7 +35,7 @@ export function createSeedDatabase(): Database {
         name: 'users',
         columns: ['id', 'name', 'email', 'age'],
         rows: seedRows(),
-        indexedColumn: 'id',
+        indexedColumns: ['id'],
       },
     },
   };
@@ -65,7 +65,7 @@ export function createJoinDemoDatabase(): Database {
         name: 'authors',
         columns: ['id', 'name'],
         rows: AUTHOR_NAMES.map((name, i) => ({ id: i + 1, name })),
-        indexedColumn: 'id',
+        indexedColumns: ['id'],
       },
       posts: {
         name: 'posts',
@@ -75,7 +75,17 @@ export function createJoinDemoDatabase(): Database {
           authorId,
           title: `${AUTHOR_NAMES[authorId - 1]}'s post ${String(i + 1)}`,
         })),
-        indexedColumn: 'id',
+        // Two indexes on purpose (plan.md §22.2's "second candidate index"):
+        // a query naming both `id` and `title` gives `/tools/planner`'s
+        // index-selection rule an actual second candidate to weigh, not just
+        // one column that's always the answer. Deliberately *not* `authorId`
+        // — it repeats (4 distinct values among 10 rows), and this B+Tree
+        // indexes a unique column only (`btree.ts`'s own `insert`: a
+        // duplicate key overwrites the previous row's pointer, "last writer
+        // wins"). Indexing it would make `WHERE authorId = 1` silently
+        // return one row instead of the three that actually match — found by
+        // running the query, not by inspection.
+        indexedColumns: ['id', 'title'],
       },
     },
   };

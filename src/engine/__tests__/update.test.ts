@@ -97,6 +97,33 @@ describe('UPDATE — correctness', () => {
     const { rows } = runQuery("UPDATE things SET label = 'z' WHERE id = 1", noIndexDb);
     expect(rows).toEqual([{ id: 1, label: 'z' }]);
   });
+
+  it('a table with two indexes only reindexes the one whose column actually changed', () => {
+    const twoIndexDb = {
+      tables: {
+        things: {
+          name: 'things',
+          columns: ['id', 'category'],
+          rows: [{ id: 1, category: 'a' }],
+          indexedColumns: ['id', 'category'],
+        },
+      },
+    };
+    const r = runQuery("UPDATE things SET category = 'b' WHERE id = 1", twoIndexDb);
+    expect(r.rows).toEqual([{ id: 1, category: 'b' }]);
+
+    const labels = r.events.flatMap((e) => (e.stage === 'execute' && e.op === 'Update' ? [e.label] : []));
+    expect(labels.some((l) => /Because `category` changed/.test(l))).toBe(true);
+    expect(labels.some((l) => /Because `id` changed/.test(l))).toBe(false);
+
+    // The category index moved; the id index still finds the same row by its unchanged id.
+    const nextDb = { tables: { things: { ...twoIndexDb.tables.things, rows: r.write!.rows } } };
+    expect(runQuery("SELECT * FROM things WHERE category = 'a'", nextDb).rows).toEqual([]);
+    expect(runQuery("SELECT * FROM things WHERE category = 'b'", nextDb).rows).toEqual([
+      { id: 1, category: 'b' },
+    ]);
+    expect(runQuery('SELECT * FROM things WHERE id = 1', nextDb).rows).toEqual([{ id: 1, category: 'b' }]);
+  });
 });
 
 describe('UPDATE — errors, same discipline as SELECT, DELETE and INSERT', () => {

@@ -180,8 +180,14 @@ export interface Table {
   name: string;
   columns: string[];
   rows: Row[];
-  /** Column the B+Tree index is built on, if any. */
-  indexedColumn?: string;
+  /**
+   * Columns a B+Tree index is built on, if any — each its own independent
+   * single-column tree, not one composite (multi-column) key over several
+   * columns at once (plan.md §22.2; that stays a separate, larger step).
+   * `index-selection` chooses among them when more than one could answer a
+   * query, by which is more selective.
+   */
+  indexedColumns?: string[];
 }
 
 /**

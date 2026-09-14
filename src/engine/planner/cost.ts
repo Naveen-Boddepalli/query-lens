@@ -36,7 +36,8 @@ export interface CostEstimate {
 /** Per-node estimates for one plan tree, keyed by node identity. */
 export type PlanCost = Map<Plan, CostEstimate>;
 
-function ndistinct(rows: readonly Row[], column: string): number {
+/** Exported for `optimize.ts`'s `index-selection` rule — the same selectivity fact, reused to pick the more selective of two candidate indexes rather than re-deriving it. */
+export function ndistinct(rows: readonly Row[], column: string): number {
   const seen = new Set<SqlValue>();
   for (const row of rows) seen.add(row[column] ?? null);
   return Math.max(seen.size, 1);

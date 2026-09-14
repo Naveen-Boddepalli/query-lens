@@ -111,7 +111,7 @@ export function DataEditor({ table, onApply, onReset, onClose }: DataEditorProps
           <h2 className="text-heading font-semibold">Seed data · {table.name}</h2>
           <p className="text-label text-ink-dim">
             {rows.length} row{rows.length === 1 ? '' : 's'}
-            {table.indexedColumn && ` · indexed on ${table.indexedColumn}`}
+            {table.indexedColumns && table.indexedColumns.length > 0 && ` · indexed on ${table.indexedColumns.join(', ')}`}
           </p>
           <button type="button" onClick={close} className={`ml-auto ${btnGhost}`}>
             Close
@@ -159,7 +159,7 @@ export function DataEditor({ table, onApply, onReset, onClose }: DataEditorProps
                 {table.columns.map((column) => (
                   <th key={column} className="px-2 py-1.5 font-medium">
                     {column}
-                    {column === table.indexedColumn && (
+                    {table.indexedColumns?.includes(column) && (
                       <span className="ml-1 text-label text-accent">idx</span>
                     )}
                   </th>

@@ -62,8 +62,10 @@ function isValidTable(key: string, value: unknown): value is Table {
   if (new Set(columns).size !== columns.length) return false;
   const sortedColumns = [...columns].sort();
   if (!Array.isArray(t.rows) || !t.rows.every((r) => isPlainRow(r, sortedColumns))) return false;
-  if (t.indexedColumn !== undefined && (typeof t.indexedColumn !== 'string' || !columns.includes(t.indexedColumn))) {
-    return false;
+  if (t.indexedColumns !== undefined) {
+    if (!Array.isArray(t.indexedColumns)) return false;
+    if (!t.indexedColumns.every((c) => typeof c === 'string' && columns.includes(c))) return false;
+    if (new Set(t.indexedColumns).size !== t.indexedColumns.length) return false;
   }
   return true;
 }

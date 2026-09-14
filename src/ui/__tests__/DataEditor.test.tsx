@@ -6,7 +6,7 @@ import type { Table } from '../../engine/index.ts';
 const TABLE: Table = {
   name: 'users',
   columns: ['id', 'name', 'age'],
-  indexedColumn: 'id',
+  indexedColumns: ['id'],
   rows: [
     { id: 1, name: 'ada', age: 36 },
     { id: 2, name: 'alan', age: 41 },

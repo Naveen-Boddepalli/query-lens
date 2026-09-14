@@ -32,16 +32,20 @@ export interface ExecContext {
   locks: LockManager;
   /** The `FROM` table — or a `Join`'s left side, when the plan has one. */
   heap: Heap;
-  tree: BPlusTree | null;
+  /** Every index this table declares, keyed by column — empty if it has none. */
+  trees: Record<string, BPlusTree>;
   table: Table;
   options: EngineOptions;
   /**
    * A `Join`'s right-hand table (plan.md §22.2) — its own heap, page ids
    * numbered right after `heap`'s so both share the one real buffer pool.
+   * `trees` is always empty here: none of the three join algorithms consults
+   * either side's own index yet (an index-aware join is a later strategy),
+   * so the right side's indexes, if it has any, are never built at all.
    * `undefined` for every query without a `Join`, which is every operator
    * here except `join()` itself.
    */
-  joinRight?: { table: Table; heap: Heap; tree: BPlusTree | null };
+  joinRight?: { table: Table; heap: Heap; trees: Record<string, BPlusTree> };
 }
 
 /** Counts rows an operator has produced, so `execute` events stay cumulative. */
@@ -136,10 +140,11 @@ function indexScan(plan: Extract<Plan, { op: 'IndexScan' }>, ctx: ExecContext): 
   return {
     name: 'IndexScan',
     open() {
-      if (!ctx.tree) return;
+      const tree = ctx.trees[plan.column];
+      if (!tree) return;
       const { pointer } = emitIndexLookup(
         ctx.emit,
-        ctx.tree,
+        tree,
         plan.key,
         ctx.pool,
         plan.column,
@@ -186,10 +191,11 @@ function indexOnlyScan(plan: Extract<Plan, { op: 'IndexOnlyScan' }>, ctx: ExecCo
   return {
     name: 'IndexOnlyScan',
     open() {
-      if (!ctx.tree) return;
+      const tree = ctx.trees[plan.column];
+      if (!tree) return;
       const { pointer } = emitIndexLookup(
         ctx.emit,
-        ctx.tree,
+        tree,
         plan.key,
         ctx.pool,
         plan.column,
@@ -447,7 +453,7 @@ function sortAggregate(
           {
             pool: ctx.pool,
             emit: ctx.emit,
-            base: pageCountFor(ctx.heap, ctx.tree),
+            base: pageCountFor(ctx.heap, ctx.trees),
             memPages: ctx.options.bufferFrames,
             rowsPerPage: ctx.options.rowsPerPage,
           },
@@ -509,7 +515,7 @@ function sort(plan: Extract<Plan, { op: 'Sort' }>, child: Operator, ctx: ExecCon
         rows = externalMergeSort(materialised, (r) => [r[plan.column] ?? null], plan.direction, {
           pool: ctx.pool,
           emit: ctx.emit,
-          base: pageCountFor(ctx.heap, ctx.tree),
+          base: pageCountFor(ctx.heap, ctx.trees),
           memPages: ctx.options.bufferFrames,
           rowsPerPage: ctx.options.rowsPerPage,
         });
@@ -594,7 +600,7 @@ function join(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): Operator {
     ...ctx,
     table: joinRight.table,
     heap: joinRight.heap,
-    tree: joinRight.tree,
+    trees: joinRight.trees,
   });
 
   const produced = counter(ctx, 'Join');
@@ -672,7 +678,7 @@ function hashJoin(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): Operat
     ...ctx,
     table: joinRight.table,
     heap: joinRight.heap,
-    tree: joinRight.tree,
+    trees: joinRight.trees,
   });
 
   const produced = counter(ctx, 'Join');
@@ -818,7 +824,7 @@ function sortMergeJoin(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): O
     ...ctx,
     table: joinRight.table,
     heap: joinRight.heap,
-    tree: joinRight.tree,
+    trees: joinRight.trees,
   });
 
   const produced = counter(ctx, 'Join');
@@ -851,7 +857,7 @@ function sortMergeJoin(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): O
         }
         right.close();
 
-        const leftBase = pageCountFor(ctx.heap, ctx.tree) + pageCountFor(joinRight.heap, joinRight.tree);
+        const leftBase = pageCountFor(ctx.heap, ctx.trees) + pageCountFor(joinRight.heap, joinRight.trees);
         const leftSortSize = sortTempPageCount(ctx.table.rows.length, ctx.options.rowsPerPage, ctx.options.bufferFrames);
 
         const leftSorted = externalMergeSort(

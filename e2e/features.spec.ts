@@ -890,9 +890,12 @@ test('a custom multi-table database can be built and joined from the Playground 
   await manage.getByRole('button', { name: '+ Add table' }).click();
   await manage.getByPlaceholder('reviews').fill('comments');
   await manage.getByPlaceholder('id, rating, comment').fill('id, postId, body');
-  await manage.getByLabel('Index').selectOption('id');
+  // Two indexes at once (plan.md §22.2's "second candidate index") — a real
+  // multi-select, not just a single choice.
+  await manage.getByLabel(/Indexes/).selectOption(['id', 'postId']);
   await manage.getByRole('button', { name: 'Add table' }).click();
   await expect(manage.getByText('3 tables')).toBeVisible();
+  await expect(manage.getByText('indexed on id, postId')).toBeVisible();
 
   // Edit its rows in the nested DataEditor — no "Reset to seed" for a table with no seed.
   await manage.getByRole('button', { name: 'Edit rows' }).nth(1).click();

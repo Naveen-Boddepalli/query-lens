@@ -24,9 +24,8 @@ import {
   needsSortSpill,
 } from './planner/index.ts';
 import { buildHeap, createBufferPool } from './storage/index.ts';
-import { buildIndex, pageCountFor } from './index/index.ts';
+import { buildIndexes, pageCountFor } from './index/index.ts';
 import type { Heap } from './storage/index.ts';
-import type { BPlusTree } from './index/index.ts';
 import { execute } from './exec/index.ts';
 import { executeDelete } from './exec/delete.ts';
 import { executeInsert } from './exec/insert.ts';
@@ -118,7 +117,7 @@ export function runQuery(
   }
 
   const heap = buildHeap(table, options.rowsPerPage);
-  const tree = table.indexedColumn ? buildIndex(heap, table.indexedColumn) : null;
+  const trees = buildIndexes(heap, table.indexedColumns ?? []);
   const locks = createLockManager(emit);
 
   if (ast.kind === 'insert') {
@@ -127,9 +126,9 @@ export function runQuery(
 
     const lastPage = heap.pages[heap.pages.length - 1]!;
     const insertNeedsNewPage = lastPage.rows.length >= options.rowsPerPage;
-    const pool = createBufferPool(pageCountFor(heap, tree) + (insertNeedsNewPage ? 1 : 0), options, emit);
+    const pool = createBufferPool(pageCountFor(heap, trees) + (insertNeedsNewPage ? 1 : 0), options, emit);
 
-    const { row: inserted } = executeInsert(row, { emit, pool, locks, heap, tree, table, options });
+    const { row: inserted } = executeInsert(row, { emit, pool, locks, heap, trees, table, options });
     const rows = [...table.rows, inserted];
 
     emit(
@@ -151,9 +150,9 @@ export function runQuery(
   if (ast.kind === 'delete') {
     emitDeleteParseEvents(emit, ast);
     const plan = emitDeletePlanEvents(emit, ast, table, options.rowsPerPage);
-    const pool = createBufferPool(pageCountFor(heap, tree), options, emit);
+    const pool = createBufferPool(pageCountFor(heap, trees), options, emit);
 
-    const { deleted } = executeDelete(plan, { emit, pool, locks, heap, tree, table, options });
+    const { deleted } = executeDelete(plan, { emit, pool, locks, heap, trees, table, options });
     const removed = new Set(deleted);
     const rows = table.rows.filter((r) => !removed.has(r));
 
@@ -176,14 +175,14 @@ export function runQuery(
   if (ast.kind === 'update') {
     emitUpdateParseEvents(emit, ast);
     const plan = emitUpdatePlanEvents(emit, ast, table, options.rowsPerPage);
-    const pool = createBufferPool(pageCountFor(heap, tree), options, emit);
+    const pool = createBufferPool(pageCountFor(heap, trees), options, emit);
 
     const { before, after } = executeUpdate(plan, ast.set.assignments, {
       emit,
       pool,
       locks,
       heap,
-      tree,
+      trees,
       table,
       options,
     });
@@ -217,9 +216,9 @@ export function runQuery(
 
   // A JOIN's second table gets its own heap, its pages numbered right after
   // the FROM table's — so both compete for the same buffer frames, the same
-  // way a Sort's spill pages do. v1's nested-loop `Join` never consults
-  // either side's index (that is "index nested-loop join," a later
-  // strategy), so there is no second B+Tree to build here.
+  // way a Sort's spill pages do. None of the three join algorithms consults
+  // either side's own index (an index-aware join is a later strategy for all
+  // three), so there is no B+Tree to build for the right side at all.
   const rightHeap: Heap | undefined = joinTable
     ? buildHeap(joinTable, options.rowsPerPage, heap.pages.length)
     : undefined;
@@ -238,7 +237,7 @@ export function runQuery(
         sortTempPageCount(joinTable!.rows.length, options.rowsPerPage, options.bufferFrames)
       : 0;
   const pool = createBufferPool(
-    pageCountFor(heap, tree) + (rightHeap ? rightHeap.pages.length : 0) + sortTemp,
+    pageCountFor(heap, trees) + (rightHeap ? rightHeap.pages.length : 0) + sortTemp,
     options,
     emit,
   );
@@ -248,10 +247,10 @@ export function runQuery(
     pool,
     locks,
     heap,
-    tree,
+    trees,
     table,
     options,
-    ...(joinTable && rightHeap ? { joinRight: { table: joinTable, heap: rightHeap, tree: null as BPlusTree | null } } : {}),
+    ...(joinTable && rightHeap ? { joinRight: { table: joinTable, heap: rightHeap, trees: {} } } : {}),
   });
 
   return { events: drain(), rows };

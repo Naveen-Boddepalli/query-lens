@@ -9,6 +9,7 @@ export {
 export {
   estimateIndexLevels,
   estimatePlan,
+  ndistinct,
   NO_STATS_EQ_SELECTIVITY,
   OPEN_RANGE_SELECTIVITY,
   rootEstimate,

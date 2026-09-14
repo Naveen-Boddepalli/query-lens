@@ -8,6 +8,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **A second candidate index, chosen by selectivity** (plan.md §22.2) — `Table.indexedColumn?:
+  string` widened to `indexedColumns?: string[]`: each entry is its own independent single-column
+  B+Tree, not a composite (multi-column) key over several columns at once, which stays a separate,
+  larger step. `buildIndexes` (`index/build.ts`) builds them in turn, each tree's own page ids
+  starting exactly where the last one's left off, so no two ever collide with the heap's or each
+  other's; `pageCountFor` widened the same way. `ExecContext.tree: BPlusTree | null` became
+  `trees: Record<string, BPlusTree>`; the write path (`insert`/`delete`/`update.ts`) now loops over
+  every declared column, maintaining each tree in turn, and `UPDATE` only reindexes the ones whose
+  own column actually changed. `index-selection` picks the more selective of two or more matching
+  candidates by `ndistinct` — the same fact the cost model's own equality-selectivity estimate
+  already rests on — and narrates a genuine tie honestly as a tie broken by declaration order, not
+  as one index falsely "beating" another with equal numbers (caught live against the shipped `posts`
+  fixture before it shipped wrong). `posts` now indexes `id` and `title`, deliberately not
+  `authorId` — it repeats (4 distinct among 10 rows), and this B+Tree's `insert` is "last writer
+  wins" on a duplicate key, so indexing a repeating column would make `WHERE authorId = 1` silently
+  return one row instead of three (found by running the query, not by inspection).
+  `SchemaEditor.tsx`'s single-index `<select>` is now a real multi-select. 20 new unit tests, 2 e2e
+  (one new, one extended to a real two-index selection).
 - **Predicate pushdown into a `JOIN`'s own children** (plan.md §22.2) — a new optimizer rule,
   `join-predicate-pushdown`, splits a `WHERE` clause's conjuncts by which table they qualify (every
   reference is qualified once a query has a `JOIN`, so there's no ambiguity) and pushes each

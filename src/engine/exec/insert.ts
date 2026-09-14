@@ -24,7 +24,7 @@ function targetPage(ctx: ExecContext): { pageId: number; slot: number; isNewPage
   const hasRoom = lastPage.rows.length < ctx.options.rowsPerPage;
   return hasRoom
     ? { pageId: lastPage.pageId, slot: lastPage.rows.length, isNewPage: false }
-    : { pageId: pageCountFor(ctx.heap, ctx.tree), slot: 0, isNewPage: true };
+    : { pageId: pageCountFor(ctx.heap, ctx.trees), slot: 0, isNewPage: true };
 }
 
 /**
@@ -40,23 +40,25 @@ export function summarizeInsert(nodesBefore: number, nodesAfter: number, heightB
   }`;
 }
 
-/** Adds `row`'s key to the tree, if the table is indexed and the key is not NULL. */
+/** Adds `row`'s key to every index the table declares, skipping a column whose key is NULL. */
 function insertIntoIndex(ctx: ExecContext, row: Row, pointer: RowPointer): void {
-  const column = ctx.table.indexedColumn;
-  if (!ctx.tree || !column) return;
-  const key: SqlValue = row[column] ?? null;
-  if (key === null) return; // NULLs are never indexed — nothing to add
+  for (const column of ctx.table.indexedColumns ?? []) {
+    const tree = ctx.trees[column];
+    if (!tree) continue;
+    const key: SqlValue = row[column] ?? null;
+    if (key === null) continue; // NULLs are never indexed — nothing to add
 
-  const nodesBefore = Object.keys(ctx.tree.nodes).length;
-  const heightBefore = height(ctx.tree);
-  insert(ctx.tree, key, pointer);
-  const nodesAfter = Object.keys(ctx.tree.nodes).length;
-  const heightAfter = height(ctx.tree);
+    const nodesBefore = Object.keys(tree.nodes).length;
+    const heightBefore = height(tree);
+    insert(tree, key, pointer);
+    const nodesAfter = Object.keys(tree.nodes).length;
+    const heightAfter = height(tree);
 
-  ctx.emit(
-    `The B+Tree gets key ${JSON.stringify(key)} — ${summarizeInsert(nodesBefore, nodesAfter, heightBefore, heightAfter)}.`,
-    { stage: 'execute', op: 'Insert', rowsProduced: 1 },
-  );
+    ctx.emit(
+      `The \`${column}\` B+Tree gets key ${JSON.stringify(key)} — ${summarizeInsert(nodesBefore, nodesAfter, heightBefore, heightAfter)}.`,
+      { stage: 'execute', op: 'Insert', rowsProduced: 1 },
+    );
+  }
 }
 
 export function executeInsert(row: Row, ctx: ExecContext): InsertOutcome {

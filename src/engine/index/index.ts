@@ -23,7 +23,7 @@ export type {
   RowPointer,
   SearchResult,
 } from './btree.ts';
-export { buildIndex, pageCountFor } from './build.ts';
+export { buildIndex, buildIndexes, pageCountFor } from './build.ts';
 export { keyList, toIndexDisplay } from './display.ts';
 export { emitIndexLookup } from './lookup.ts';
 export type { LookupOutcome } from './lookup.ts';

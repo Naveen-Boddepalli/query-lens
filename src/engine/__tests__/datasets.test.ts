@@ -18,7 +18,7 @@ describe('preset datasets', () => {
     for (const row of table.rows) {
       expect(Object.keys(row).sort()).toEqual([...table.columns].sort());
     }
-    if (table.indexedColumn) expect(table.columns).toContain(table.indexedColumn);
+    for (const column of table.indexedColumns ?? []) expect(table.columns).toContain(column);
   });
 
   it.each([...DATASET_IDS])('a point lookup on %s runs without an engine error', (id) => {

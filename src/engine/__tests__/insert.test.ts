@@ -94,6 +94,35 @@ describe('INSERT — correctness', () => {
     }
     expect(sawSplit).toBe(true);
   });
+
+  it('a table with two indexes updates both B+Trees on insert', () => {
+    const twoIndexDb = {
+      tables: {
+        things: {
+          name: 'things',
+          columns: ['id', 'category'],
+          rows: [{ id: 1, category: 'a' }],
+          indexedColumns: ['id', 'category'],
+        },
+      },
+    };
+    const r = runQuery("INSERT INTO things (id, category) VALUES (2, 'b')", twoIndexDb);
+    expect(r.error).toBeUndefined();
+
+    const labels = r.events.flatMap((e) => (e.stage === 'execute' && e.op === 'Insert' ? [e.label] : []));
+    expect(labels.some((l) => l.includes('`id` B+Tree'))).toBe(true);
+    expect(labels.some((l) => l.includes('`category` B+Tree'))).toBe(true);
+
+    // Both indexes actually work after the insert — a real lookup on each finds the new row.
+    const nextDb = { tables: { things: { ...twoIndexDb.tables.things, rows: r.write!.rows } } };
+    const byId = runQuery('SELECT * FROM things WHERE id = 2', nextDb);
+    expect(byId.rows).toEqual([{ id: 2, category: 'b' }]);
+    expect(byId.events.some((e) => e.stage === 'execute' && e.op === 'IndexScan')).toBe(true);
+
+    const byCategory = runQuery("SELECT * FROM things WHERE category = 'b'", nextDb);
+    expect(byCategory.rows).toEqual([{ id: 2, category: 'b' }]);
+    expect(byCategory.events.some((e) => e.stage === 'execute' && e.op === 'IndexScan')).toBe(true);
+  });
 });
 
 describe('INSERT — errors, same discipline as SELECT and DELETE', () => {

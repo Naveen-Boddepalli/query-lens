@@ -9,7 +9,7 @@ import type { Table } from '../types.ts';
 
 const db = createSeedDatabase();
 const users = db.tables.users!;
-const noIndex: Table = { ...users, indexedColumn: undefined as unknown as string };
+const noIndex: Table = { ...users, indexedColumns: [] };
 
 function ast(sql: string) {
   const out = parse(sql);
@@ -291,6 +291,78 @@ describe('optimize — index selection', () => {
       'Project',
       'SeqScan',
     ]);
+  });
+});
+
+describe('optimize — index selection with two candidate indexes (plan.md §22.2)', () => {
+  // `id` is unique (4 distinct of 4 rows); `category` is not (2 distinct).
+  // `id` is declared *second* — the choice has to be about selectivity, not
+  // declaration order, or this table would prove nothing.
+  const things: Table = {
+    name: 'things',
+    columns: ['id', 'category'],
+    rows: [
+      { id: 1, category: 'a' },
+      { id: 2, category: 'a' },
+      { id: 3, category: 'b' },
+      { id: 4, category: 'b' },
+    ],
+    indexedColumns: ['category', 'id'],
+  };
+
+  it('with only one matching conjunct, behaves exactly as a single-index table would', () => {
+    const p = final('SELECT * FROM things WHERE category = \'a\'', things);
+    expect(p).toMatchObject({ op: 'Project', child: { op: 'IndexScan', column: 'category', key: 'a' } });
+  });
+
+  it('with two matching conjuncts, picks the more selective index and rechecks the other', () => {
+    const p = final("SELECT * FROM things WHERE category = 'a' AND id = 2", things);
+    const scan = p.op === 'Project' ? p.child : null;
+    // id (4 distinct) beats category (2 distinct) — chosen even though it
+    // was declared second in indexedColumns.
+    expect(scan).toMatchObject({ op: 'IndexScan', column: 'id', key: 2 });
+    expect(scan && scan.op === 'IndexScan' && exprToSql(scan.residual!)).toBe("category = 'a'");
+  });
+
+  it('names the runner-up and the selectivity numbers in the narration', () => {
+    const steps = optimize(plan("SELECT * FROM things WHERE category = 'a' AND id = 2"), things);
+    const step = steps.find((s) => s.rule === 'index-selection')!;
+    expect(step.label).toMatch(/`id` is indexed \(chosen over `category` — 4 distinct values beats 2/);
+  });
+
+  it('a table with two indexes but only one matching conjunct needs no choice, and says nothing about one', () => {
+    const steps = optimize(plan("SELECT * FROM things WHERE category = 'a'"), things);
+    const step = steps.find((s) => s.rule === 'index-selection')!;
+    expect(step.label).not.toMatch(/chosen over/);
+  });
+
+  // Both indexed columns are fully unique — real data does this too (a
+  // table's `id` and its `title`, say), and the narration must not claim one
+  // "beats" the other when the true fact is a tie broken by declaration
+  // order. Caught live in `/tools/planner` against the shipped `posts`
+  // fixture (`id`/`title`, plan.md §22.2) before this test existed.
+  const tied: Table = {
+    name: 'tied',
+    columns: ['id', 'slug'],
+    rows: [
+      { id: 1, slug: 'a' },
+      { id: 2, slug: 'b' },
+      { id: 3, slug: 'c' },
+    ],
+    indexedColumns: ['id', 'slug'],
+  };
+
+  it('never claims one index "beats" another when both are equally selective', () => {
+    const steps = optimize(plan("SELECT * FROM tied WHERE id = 2 AND slug = 'b'"), tied);
+    const step = steps.find((s) => s.rule === 'index-selection')!;
+    expect(step.label).not.toMatch(/beats/);
+    expect(step.label).toMatch(/`id` is indexed \(tied with `slug` at 3 distinct values each/);
+    expect(step.label).toMatch(/declared first/);
+  });
+
+  it('still picks a real IndexScan on a tie — declaration order, not an error', () => {
+    const p = final("SELECT * FROM tied WHERE id = 2 AND slug = 'b'", tied);
+    expect(p).toMatchObject({ op: 'Project', child: { op: 'IndexScan', column: 'id', key: 2 } });
   });
 });
 

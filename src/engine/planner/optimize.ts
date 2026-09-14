@@ -15,6 +15,7 @@ import { indexSelectionPrompt } from '../predict.ts';
 import type { CompareOp, Expr } from '../parser/index.ts';
 import { conjoin, conjuncts, equalityOn, exprToSql } from './plan.ts';
 import type { Plan } from './plan.ts';
+import { ndistinct } from './cost.ts';
 
 export interface Rewrite {
   rule: string;
@@ -318,9 +319,20 @@ const joinPredicatePushdown: Rule = (input) => {
 };
 
 /**
- * Swap a `SeqScan` for an `IndexScan` when one conjunct is an equality on the
- * indexed column. Conjuncts the index cannot answer stay behind as a recheck —
- * the index narrows the search, it does not verify the whole predicate.
+ * Swap a `SeqScan` for an `IndexScan` when a conjunct is an equality on an
+ * indexed column. Conjuncts the index cannot answer stay behind as a
+ * recheck — the index narrows the search, it does not verify the whole
+ * predicate.
+ *
+ * A table can declare more than one index (plan.md §22.2's "second candidate
+ * index"). When two or more each have a matching equality conjunct, this
+ * picks the more selective one — higher `ndistinct`, so an equality on it
+ * matches fewer rows on average — the same fact the cost model's own
+ * equality-selectivity estimate already rests on, not a new page-cost
+ * comparison inside the rule (§12's "plausible but false" line: a rule still
+ * consults no cost estimate here, only the data itself). The conjunct that
+ * lost stays in the recheck, exactly like every other conjunct the chosen
+ * index can't answer — v0 has no way to intersect two index lookups.
  */
 const indexSelection: Rule = (input, table) => {
   const { limit, rest: plan } = unwrapLimit(input);
@@ -329,21 +341,26 @@ const indexSelection: Rule = (input, table) => {
   const { aggregate, rest: scan } = unwrapAggregate(belowSort);
   if (scan.op !== 'SeqScan' || !scan.filter) return null;
 
-  const indexed = table.indexedColumn;
-  if (!indexed) return null;
-
   const parts = conjuncts(scan.filter);
-  const matchIndex = parts.findIndex((p) => equalityOn(p, indexed) !== undefined);
-  if (matchIndex === -1) return null;
+  const candidates = (table.indexedColumns ?? []).flatMap((column) => {
+    const matchIndex = parts.findIndex((p) => equalityOn(p, column) !== undefined);
+    if (matchIndex === -1) return [];
+    return [{ column, matchIndex, key: equalityOn(parts[matchIndex]!, column)! }];
+  });
+  if (candidates.length === 0) return null;
 
-  const key = equalityOn(parts[matchIndex]!, indexed)!;
-  const residual = conjoin(parts.filter((_, i) => i !== matchIndex));
+  const chosen = candidates.reduce((best, c) =>
+    ndistinct(table.rows, c.column) > ndistinct(table.rows, best.column) ? c : best,
+  );
+  const runnersUp = candidates.filter((c) => c !== chosen);
+
+  const residual = conjoin(parts.filter((_, i) => i !== chosen.matchIndex));
 
   const indexScan: Plan = {
     op: 'IndexScan',
     table: scan.table,
-    column: indexed,
-    key,
+    column: chosen.column,
+    key: chosen.key,
     ...(residual ? { residual } : {}),
   };
   const root = rewrapLimit(
@@ -355,14 +372,24 @@ const indexSelection: Rule = (input, table) => {
     },
   );
 
+  const chosenDistinct = ndistinct(table.rows, chosen.column);
+  const runnerUpNames = runnersUp.map((c) => `\`${c.column}\``).join(', ');
+  const runnerUpDistinct = runnersUp.map((c) => ndistinct(table.rows, c.column));
+  const choiceClause =
+    runnersUp.length === 0
+      ? ''
+      : runnerUpDistinct.every((d) => d === chosenDistinct)
+        ? ` (tied with ${runnerUpNames} at ${String(chosenDistinct)} distinct values each — \`${chosen.column}\` wins only because it was declared first, not because it narrows the search any further)`
+        : ` (chosen over ${runnerUpNames} — ${String(chosenDistinct)} distinct values beats ${runnerUpDistinct.map(String).join('/')}, so it narrows the search more)`;
+
   return {
     rule: 'index-selection',
     label: residual
-      ? `\`${indexed}\` is indexed, so the equality becomes an index lookup. The rest of the predicate cannot be answered by the index and is rechecked on each row the index returns.`
-      : `\`${indexed}\` is indexed and the predicate is an equality on it, so the scan becomes a B+Tree lookup — a handful of pages instead of the whole table.`,
+      ? `\`${chosen.column}\` is indexed${choiceClause}, so the equality becomes an index lookup. The rest of the predicate cannot be answered by the index and is rechecked on each row the index returns.`
+      : `\`${chosen.column}\` is indexed${choiceClause} and the predicate is an equality on it, so the scan becomes a B+Tree lookup — a handful of pages instead of the whole table.`,
     plan: root,
     changed: new Set<Plan>([indexScan]),
-    prompt: indexSelectionPrompt(indexed, key),
+    prompt: indexSelectionPrompt(chosen.column, chosen.key),
   };
 };
 

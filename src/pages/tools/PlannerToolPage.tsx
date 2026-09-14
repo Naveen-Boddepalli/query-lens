@@ -42,7 +42,7 @@ const MAX_SQL = 2000;
 
 const SEED = createSeedDatabase();
 const USERS = SEED.tables.users!;
-const { indexedColumn: _dropped, ...USERS_NO_INDEX } = USERS;
+const { indexedColumns: _dropped, ...USERS_NO_INDEX } = USERS;
 
 // `authors`/`posts` sit alongside `users` (plan.md §22.2) purely so a typed
 // query can JOIN them — small on purpose, so a full unfiltered join stays

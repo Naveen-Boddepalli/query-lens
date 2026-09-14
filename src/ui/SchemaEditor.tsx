@@ -26,7 +26,7 @@ export function SchemaEditor({ db, onApply, onClose }: SchemaEditorProps) {
   const [adding, setAdding] = useState(false);
   const [nameInput, setNameInput] = useState('');
   const [columnsInput, setColumnsInput] = useState('');
-  const [indexInput, setIndexInput] = useState('');
+  const [indexInput, setIndexInput] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const dialog = useRef<HTMLDialogElement>(null);
 
@@ -52,14 +52,14 @@ export function SchemaEditor({ db, onApply, onClose }: SchemaEditorProps) {
           name: nameInput,
           columns,
           rows: [],
-          ...(indexInput ? { indexedColumn: indexInput } : {}),
+          ...(indexInput.length > 0 ? { indexedColumns: indexInput } : {}),
         },
       },
     }));
     setAdding(false);
     setNameInput('');
     setColumnsInput('');
-    setIndexInput('');
+    setIndexInput([]);
     setError(null);
   }
 
@@ -106,7 +106,7 @@ export function SchemaEditor({ db, onApply, onClose }: SchemaEditorProps) {
                 <span className="font-mono text-body font-medium text-ink">{name}</span>
                 <span className="text-label text-ink-dim">
                   {table.columns.join(', ')}
-                  {table.indexedColumn && ` · indexed on ${table.indexedColumn}`}
+                  {table.indexedColumns && table.indexedColumns.length > 0 && ` · indexed on ${table.indexedColumns.join(', ')}`}
                 </span>
                 <span className="text-label text-ink-dim/80">
                   {table.rows.length} row{table.rows.length === 1 ? '' : 's'}
@@ -157,13 +157,16 @@ export function SchemaEditor({ db, onApply, onClose }: SchemaEditorProps) {
                   />
                 </label>
                 <label className="flex flex-col gap-1 text-label text-ink-dim">
-                  Index
+                  Indexes (⌘/Ctrl-click for more than one)
                   <select
+                    multiple
                     value={indexInput}
-                    onChange={(e) => { setIndexInput(e.target.value); }}
-                    className={inputField}
+                    onChange={(e) => {
+                      setIndexInput([...e.target.selectedOptions].map((o) => o.value));
+                    }}
+                    className={`${inputField} h-auto`}
+                    size={Math.min(4, Math.max(2, columns.length || 1))}
                   >
-                    <option value="">(none)</option>
                     {columns.map((c) => <option key={c} value={c}>{c}</option>)}
                   </select>
                 </label>

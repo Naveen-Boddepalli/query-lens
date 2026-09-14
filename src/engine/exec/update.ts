@@ -46,39 +46,48 @@ function applyAssignments(row: Row, assignments: UpdateAssignment[]): Row {
 }
 
 /**
- * Moves `pointer`'s key from `beforeKey` to `afterKey` in the tree, if the
- * table is indexed and the indexed column actually changed. NULLs are never
- * indexed, so a key on either side that is NULL just drops the delete or the
- * insert half.
+ * Moves `pointer`'s key from `beforeKey` to `afterKey` in each index whose
+ * own column actually changed. NULLs are never indexed, so a key on either
+ * side that is NULL just drops the delete or the insert half. A table can
+ * have several indexes; an assignment only reindexes the ones whose column
+ * it touched, one sentence each.
  */
 function reindexRow(ctx: ExecContext, before: Row, after: Row, pointer: RowPointer): string | null {
-  const column = ctx.table.indexedColumn;
-  if (!ctx.tree || !column) return null;
-  const beforeKey: SqlValue = before[column] ?? null;
-  const afterKey: SqlValue = after[column] ?? null;
-  if (beforeKey === afterKey) return null; // the indexed column did not change
+  const sentences: string[] = [];
 
-  const parts: string[] = [];
+  for (const column of ctx.table.indexedColumns ?? []) {
+    const tree = ctx.trees[column];
+    if (!tree) continue;
+    const beforeKey: SqlValue = before[column] ?? null;
+    const afterKey: SqlValue = after[column] ?? null;
+    if (beforeKey === afterKey) continue; // this index's own column did not change
 
-  if (beforeKey !== null) {
-    const removed = deleteKey(ctx.tree, beforeKey);
-    if (removed.found) {
-      parts.push(`drops key ${JSON.stringify(beforeKey)} — ${summarizeSteps(removed.steps)}`);
+    const parts: string[] = [];
+
+    if (beforeKey !== null) {
+      const removed = deleteKey(tree, beforeKey);
+      if (removed.found) {
+        parts.push(`drops key ${JSON.stringify(beforeKey)} — ${summarizeSteps(removed.steps)}`);
+      }
+    }
+
+    if (afterKey !== null) {
+      const nodesBefore = Object.keys(tree.nodes).length;
+      const heightBefore = height(tree);
+      insert(tree, afterKey, pointer);
+      const nodesAfter = Object.keys(tree.nodes).length;
+      const heightAfter = height(tree);
+      parts.push(
+        `adds key ${JSON.stringify(afterKey)} — ${summarizeInsert(nodesBefore, nodesAfter, heightBefore, heightAfter)}`,
+      );
+    }
+
+    if (parts.length > 0) {
+      sentences.push(`Because \`${column}\` changed, its B+Tree ${parts.join(', then ')}.`);
     }
   }
 
-  if (afterKey !== null) {
-    const nodesBefore = Object.keys(ctx.tree.nodes).length;
-    const heightBefore = height(ctx.tree);
-    insert(ctx.tree, afterKey, pointer);
-    const nodesAfter = Object.keys(ctx.tree.nodes).length;
-    const heightAfter = height(ctx.tree);
-    parts.push(
-      `adds key ${JSON.stringify(afterKey)} — ${summarizeInsert(nodesBefore, nodesAfter, heightBefore, heightAfter)}`,
-    );
-  }
-
-  return parts.length > 0 ? `Because \`${column}\` changed, the B+Tree ${parts.join(', then ')}.` : null;
+  return sentences.length > 0 ? sentences.join(' ') : null;
 }
 
 /** Every heap page, filtered by `filter` if present — the SeqScan half of an update. */
@@ -118,9 +127,10 @@ function scanForMatches(ctx: ExecContext, filter: Expr | undefined): Match[] {
 /** Finds the one row an equality lookup points at, if it passes any residual predicate. */
 function indexScanForMatch(ctx: ExecContext, plan: Extract<Plan, { op: 'IndexScan' }>): Match[] {
   const emit = ctx.emit;
-  if (!ctx.tree) return [];
+  const tree = ctx.trees[plan.column];
+  if (!tree) return [];
 
-  const { pointer } = emitIndexLookup(emit, ctx.tree, plan.key, ctx.pool, plan.column, ctx.locks);
+  const { pointer } = emitIndexLookup(emit, tree, plan.key, ctx.pool, plan.column, ctx.locks);
   if (!pointer) return [];
 
   const page = ctx.heap.pages.find((p) => p.pageId === pointer.pageId);

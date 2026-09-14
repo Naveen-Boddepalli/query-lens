@@ -82,6 +82,33 @@ describe('DELETE — correctness', () => {
     expect(rows).toHaveLength(expected.length);
     expect(write?.rows).toHaveLength(120 - expected.length);
   });
+
+  it('a table with two indexes drops the key from both B+Trees on delete', () => {
+    const twoIndexDb = {
+      tables: {
+        things: {
+          name: 'things',
+          columns: ['id', 'category'],
+          rows: [
+            { id: 1, category: 'a' },
+            { id: 2, category: 'b' },
+          ],
+          indexedColumns: ['id', 'category'],
+        },
+      },
+    };
+    const r = runQuery('DELETE FROM things WHERE id = 1', twoIndexDb);
+    expect(r.rows).toEqual([{ id: 1, category: 'a' }]);
+
+    const labels = r.events.flatMap((e) => (e.stage === 'execute' && e.op === 'Delete' ? [e.label] : []));
+    expect(labels.some((l) => l.includes('`id` B+Tree drops key'))).toBe(true);
+    expect(labels.some((l) => l.includes('`category` B+Tree drops key'))).toBe(true);
+
+    // Neither index can find the deleted row any more.
+    const nextDb = { tables: { things: { ...twoIndexDb.tables.things, rows: r.write!.rows } } };
+    expect(runQuery('SELECT * FROM things WHERE id = 1', nextDb).rows).toEqual([]);
+    expect(runQuery("SELECT * FROM things WHERE category = 'a'", nextDb).rows).toEqual([]);
+  });
 });
 
 describe('DELETE — errors, same discipline as SELECT', () => {
