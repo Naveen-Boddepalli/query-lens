@@ -146,4 +146,60 @@ describe('SchemaEditor', () => {
       tables: { ...DB.tables, authors: { ...DB.tables.authors, rows: [{ id: 1, name: 'grace' }] } },
     });
   });
+
+  describe('undo/redo', () => {
+    it('starts with both disabled', () => {
+      setup();
+      expect(screen.getByRole('button', { name: 'Undo' })).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Redo' })).toBeDisabled();
+    });
+
+    it('undoes adding a table, and redo replays it', () => {
+      const { onApply } = setup();
+      fireEvent.click(screen.getByRole('button', { name: '+ Add table' }));
+      fireEvent.change(screen.getByPlaceholderText('reviews'), { target: { value: 'reviews' } });
+      fireEvent.change(screen.getByPlaceholderText('id, rating, comment'), {
+        target: { value: 'id, rating' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Add table' }));
+      expect(screen.getByText('3 tables')).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+      expect(screen.getByText('2 tables')).toBeInTheDocument();
+      expect(screen.queryByText('reviews')).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Redo' }));
+      expect(screen.getByText('3 tables')).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('button', { name: /Apply/ }));
+      expect(onApply).toHaveBeenCalledWith({
+        tables: { ...DB.tables, reviews: { name: 'reviews', columns: ['id', 'rating'], rows: [] } },
+      });
+    });
+
+    it('undoes removing a table', () => {
+      setup();
+      fireEvent.click(screen.getAllByRole('button', { name: 'Remove' })[0]!);
+      expect(screen.getByText('1 table')).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+      expect(screen.getByText('2 tables')).toBeInTheDocument();
+      expect(screen.getByText('authors')).toBeInTheDocument();
+    });
+
+    it('undoes committing a nested DataEditor row edit', () => {
+      const { onApply } = setup();
+      fireEvent.click(screen.getAllByRole('button', { name: 'Edit rows' })[0]!);
+      const nested = screen.getByRole('dialog', { name: 'Edit seed data' });
+      fireEvent.change(within(nested).getByLabelText('name row 1'), { target: { value: 'grace' } });
+      fireEvent.click(within(nested).getByRole('button', { name: /Apply & re-run/ }));
+
+      const outer = screen.getByRole('dialog', { name: 'Manage tables' });
+      expect(within(outer).getByRole('button', { name: 'Undo' })).not.toBeDisabled();
+      fireEvent.click(within(outer).getByRole('button', { name: 'Undo' }));
+
+      fireEvent.click(within(outer).getByRole('button', { name: /Apply & re-run/ }));
+      expect(onApply).toHaveBeenCalledWith(DB);
+    });
+  });
 });

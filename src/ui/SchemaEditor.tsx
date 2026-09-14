@@ -14,6 +14,9 @@ import { btnGhost, btnPrimary, btnSecondary, inputField } from './primitives.ts'
  * same commit-on-apply shape `DataEditor` already uses, so closing without
  * applying is a clean cancel.
  */
+/** Caps the undo stack so a long editing session can't grow it unboundedly. */
+const MAX_HISTORY = 50;
+
 export interface SchemaEditorProps {
   db: Database;
   onApply: (next: Database) => void;
@@ -30,6 +33,34 @@ export function SchemaEditor({ db, onApply, onClose }: SchemaEditorProps) {
   const [error, setError] = useState<string | null>(null);
   const dialog = useRef<HTMLDialogElement>(null);
 
+  // Undo/redo over the whole `working` database. Every mutation here is
+  // already a discrete, deliberate action (add a table, remove one, commit a
+  // table's edited rows) rather than a per-keystroke one, so — unlike
+  // DataEditor's own coalesced cell edits — each gets its own history entry.
+  const [past, setPast] = useState<Database[]>([]);
+  const [future, setFuture] = useState<Database[]>([]);
+
+  const pushHistory = () => {
+    setPast((p) => [...p, working].slice(-MAX_HISTORY));
+    setFuture([]);
+  };
+
+  const undo = () => {
+    if (past.length === 0) return;
+    const previous = past[past.length - 1]!;
+    setPast(past.slice(0, -1));
+    setFuture([working, ...future]);
+    setWorking(previous);
+  };
+
+  const redo = () => {
+    if (future.length === 0) return;
+    const next = future[0]!;
+    setFuture(future.slice(1));
+    setPast([...past, working].slice(-MAX_HISTORY));
+    setWorking(next);
+  };
+
   useEffect(() => {
     const el = dialog.current;
     if (el && !el.open) el.showModal();
@@ -45,6 +76,7 @@ export function SchemaEditor({ db, onApply, onClose }: SchemaEditorProps) {
       setError(problem);
       return;
     }
+    pushHistory();
     setWorking((current) => ({
       tables: {
         ...current.tables,
@@ -64,6 +96,7 @@ export function SchemaEditor({ db, onApply, onClose }: SchemaEditorProps) {
   }
 
   function removeTable(name: string) {
+    pushHistory();
     setWorking((current) => {
       const { [name]: _removed, ...rest } = current.tables;
       return { tables: rest };
@@ -187,6 +220,26 @@ export function SchemaEditor({ db, onApply, onClose }: SchemaEditorProps) {
             </div>
           ) : (
             <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={undo}
+                disabled={past.length === 0}
+                aria-label="Undo"
+                title="Undo"
+                className={`${btnGhost} disabled:cursor-not-allowed disabled:opacity-40`}
+              >
+                ↶ Undo
+              </button>
+              <button
+                type="button"
+                onClick={redo}
+                disabled={future.length === 0}
+                aria-label="Redo"
+                title="Redo"
+                className={`${btnGhost} disabled:cursor-not-allowed disabled:opacity-40`}
+              >
+                ↷ Redo
+              </button>
               <button type="button" onClick={() => { setAdding(true); }} className={btnSecondary}>
                 + Add table
               </button>
@@ -206,6 +259,7 @@ export function SchemaEditor({ db, onApply, onClose }: SchemaEditorProps) {
         <DataEditor
           table={working.tables[editingTable]}
           onApply={(rows) => {
+            pushHistory();
             setWorking((current) => ({
               tables: { ...current.tables, [editingTable]: { ...current.tables[editingTable]!, rows } },
             }));

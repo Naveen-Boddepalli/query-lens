@@ -8,13 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **Undo/redo in the seed data editor** (plan.md §23.1) — `DataEditor.tsx` keeps a `past`/`future`
-  snapshot stack of the table's rows, with an Undo and a Redo button in the footer. Repeated
-  keystrokes into the same cell coalesce into one undo step (tracked by a `lastEditTarget` ref) so
-  undoing a typed value doesn't mean clicking through every character — moving to a different cell,
-  or any structural change (add row, delete row, CSV import), starts a fresh step and clears the redo
-  stack. `SchemaEditor.tsx`'s own undo/redo (table/column structure rather than row values) is a
-  separate, still-open item.
+- **Undo/redo in the seed data editor and the multi-table schema editor** (plan.md §23.1) —
+  `DataEditor.tsx` keeps a `past`/`future` snapshot stack of the table's rows, with an Undo and a
+  Redo button in the footer. Repeated keystrokes into the same cell coalesce into one undo step
+  (tracked by a `lastEditTarget` ref) so undoing a typed value doesn't mean clicking through every
+  character — moving to a different cell, or any structural change (add row, delete row, CSV
+  import), starts a fresh step and clears the redo stack. `SchemaEditor.tsx` got the same
+  `past`/`future` shape over its own staged `Database`, one entry per add-table, remove-table, or a
+  row edit committed from its nested `DataEditor` — no coalescing needed there, since every mutation
+  at that level is already a discrete action. Both are button-driven only; `Ctrl+Z`/`Ctrl+Y` were
+  deliberately left out to avoid fighting the browser's own native per-field undo inside a dialog
+  full of plain `<input>`s.
 - **`LICENSE-DOCS`** (plan.md §17.3, §23.1) — the documentation prose under
   `src/pages/DocsContent/` is CC BY 4.0, distinct from the MIT-licensed application source. The
   site-wide footer already carried a "CC BY 4.0 docs" badge; it had nothing to link to until now —
