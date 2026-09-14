@@ -1326,11 +1326,19 @@ file, because the person who needs it will not read either.
 
 ### 17.4 Definition of done
 
-- [ ] The docs framework decision is recorded with its embedding requirement, and the site builds
-      and deploys at `/docs` on the same Cloudflare Pages project.
-- [ ] FAQ answers "Is this a real database?", "Where is my data stored?", and "Can I use this in my
-      course?"
-- [ ] Getting Started exists and a first-time user completes it without opening the README.
+- [x] The docs framework decision is recorded with its embedding requirement, and the site builds
+      and deploys at `/docs` on the same Cloudflare Pages project. *Already done (v6, tool decision
+      reversed at v9, commit `6eca5ac` — see §17.1's status notes) — the docs are now MDX routes
+      inside the app's own Vite build (`src/App.tsx`'s `docs` route, `src/ui/DocsLayout.tsx`), so
+      one `pnpm build` and one Cloudflare Pages project cover both; verified `/docs`,
+      `/docs/getting-started`, and `/docs/faq` all render correctly from a real build.*
+- [x] FAQ answers "Is this a real database?", "Where is my data stored?", and "Can I use this in my
+      course?" *Already done (v6) — all three are `##` sections in `faq.mdx` with direct answers;
+      confirmed live at `/docs/faq`.*
+- [x] Getting Started exists and a first-time user completes it without opening the README.
+      *Already done (v6) — `getting-started.mdx` is a self-contained walkthrough (open the app →
+      read the pipeline tracker → step → play → try the scan-vs-index contrast → predict-then-reveal)
+      with no README reference; confirmed live at `/docs/getting-started`.*
 - [x] The two manual pages the §9 study depends on — eviction and B+Tree split — exist, each with
       ~~annotated screenshots~~, a "try this", and a link that opens the app at that state. **Done —
       see the status note below the checklist for why screenshots were dropped.**
