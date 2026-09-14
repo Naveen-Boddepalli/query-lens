@@ -143,6 +143,7 @@ const DocsLayout = lazy(() =>
 const DocsIndex = lazy(() => import('./pages/DocsContent/index.mdx'));
 const DocsGettingStarted = lazy(() => import('./pages/DocsContent/getting-started.mdx'));
 const DocsFaq = lazy(() => import('./pages/DocsContent/faq.mdx'));
+const DocsArchitecture = lazy(() => import('./pages/DocsContent/architecture.mdx'));
 const DocsBufferPool = lazy(() => import('./pages/DocsContent/concepts/buffer-pool.mdx'));
 const DocsBTree = lazy(() => import('./pages/DocsContent/concepts/btree.mdx'));
 const DocsManualEviction = lazy(() => import('./pages/DocsContent/manual/eviction.mdx'));
@@ -208,6 +209,7 @@ export default function App() {
               <Route path="reference/url-parameters" element={<DocsUrlParameters />} />
               <Route path="reference/shortcuts" element={<DocsShortcuts />} />
               <Route path="reference/limits" element={<DocsLimits />} />
+              <Route path="architecture" element={<DocsArchitecture />} />
             </Route>
 
             <Route path="*" element={suspended(NotFoundPage)} />

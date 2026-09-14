@@ -8,30 +8,67 @@ concept explanation.
 
 ## Buffer pool
 
-- **8 frames**, fixed.
+- **8 frames** by default in the Playground; adjustable 2–8 in the
+  [standalone sandbox](/tools/buffer-pool) and forced to specific values by some
+  [challenges](/challenges) and [Compare](/compare) modes, to make an algorithm's actual behaviour
+  visible rather than hidden by a pool big enough to cache everything.
 - **4 rows per page.**
-- Two replacement policies: **LRU** and **clock sweep**, switchable per query. See
-  [The buffer pool](/docs/concepts/buffer-pool).
+- **Two replacement policies in the main pipeline** — LRU and clock sweep, switchable per query.
+  The standalone sandbox adds four more for comparison: FIFO, second-chance, optimal (unbuildable
+  for real; the fewest-misses bound the others are measured against), and midpoint LRU (what
+  InnoDB does). See [The buffer pool](/docs/concepts/buffer-pool).
 - Clock sweep's per-frame usage counter caps at **5**.
 
 ## B+Tree index
 
-- **One index**, built over the seed table's `id` column.
-- **Fan-out**: each node holds at most **4 keys** (5 children) before splitting.
-- Supported operations: **insert** and **point lookup**, both traced. See
-  [The B+Tree index](/docs/concepts/btree).
-- The planner uses the index only for an **equality** predicate on the indexed column
-  (`WHERE id = 5`) — a range predicate (`WHERE age > 30`) always runs as a sequential scan, which is
-  also the point of the comparison the [Getting started](/docs/getting-started) page walks through.
-- Not supported: deletion, key updates.
+- **Up to two indexed columns per table**, each its own independent single-column B+Tree — not a
+  composite (multi-column) key over several columns at once. When two candidates each match an
+  equality conjunct, the planner picks the more selective one by distinct-value count.
+- **Fan-out**: each node holds at most **4 keys** (5 children) before splitting; adjustable 3–6 in
+  the [standalone sandbox](/tools/btree).
+- Supported operations: **insert**, **delete** (borrow/merge/root-collapse), **point lookup**, and
+  a **range scan** that descends once and walks the leaf sibling chain horizontally. All traced.
+  See [The B+Tree index](/docs/concepts/btree).
+- The planner uses the index for an equality (`WHERE id = 5`, an `IndexScan`), a range (`WHERE id >
+  30`, `<`, `<=`, `>=` or `BETWEEN`, an `IndexRangeScan`), or — when the SELECT list needs nothing
+  but the indexed column itself — an index-only lookup that never touches the heap at all. An
+  equality always wins over a range when both are available, by rule order, not a cost comparison.
+  A predicate on an unindexed column always runs as a sequential scan.
+- Each B+Tree assumes a **unique key** — inserting a duplicate overwrites the previous row's
+  pointer rather than storing both. `DELETE`/`UPDATE` re-run the real `deleteKey`/`insert`
+  algorithms against it; `UPDATE` re-indexes a row only when its own indexed column actually
+  changed.
+
+## JOIN
+
+- **One `JOIN` per query**, an implicit inner join: `JOIN table ON a.col = b.col`, always an
+  equality between one qualified column from each side.
+- **Three algorithms** — nested-loop, hash, and sort-merge — chosen by whichever
+  [Compare](/compare) or the engine's own default forces; none of the three consults either side's
+  own index yet, so a joined table's index (if it has one) is never used inside the `JOIN`.
+- Cannot combine with `GROUP BY`, `ORDER BY`, or an aggregate in the SELECT list.
+
+## GROUP BY and aggregates
+
+- `COUNT(*)`, and `COUNT`/`SUM`/`AVG`/`MIN`/`MAX` over a column.
+- **Two strategies** — a hash aggregate (default) and a sort aggregate, which sorts the input on
+  the `GROUP BY` columns first, spilling through the buffer pool exactly as `ORDER BY` does. Same
+  groups out either way; [Compare](/compare)'s third mode scores the difference in I/O.
+
+## Writes
+
+`DELETE`, `INSERT` and `UPDATE` all run for real and persist their effect — a write's changed rows
+become the table's new contents for every query that follows. Each finds its target rows the same
+way a `SELECT`'s `WHERE` would (an index lookup when it can, a scan otherwise).
 
 ## Locks
 
 - **Page-level**, coarse-grained: one shared read lock per page, taken and released as a scan or
-  descent visits it.
+  descent visits it, upgraded to exclusive for the page a write actually changes.
 - **Visual only** — QueryLens runs exactly one query at a time, so no lock ever actually waits on
   another. The panel draws what a real engine's lock manager would be doing, not an enforced
-  constraint.
+  constraint. The [locks sandbox](/tools/locks) simulates two transactions separately, with real
+  blocking, deadlock detection and victim selection, outside the main pipeline.
 
 ## SQL
 
@@ -39,7 +76,11 @@ See [Supported SQL](/docs/reference/sql) for the complete accepted grammar.
 
 ## What's out of scope entirely
 
-No aggregates (`COUNT`, `SUM`, …), no `GROUP BY`, no subqueries, no joins, no writes (`INSERT` /
-`UPDATE` / `DELETE`), no transactions, no concurrency, no query cost estimation. These are
-deliberate exclusions for this release, not bugs — see the parser's own error messages in
-[Supported SQL](/docs/reference/sql) for exactly which keywords are recognised and rejected.
+No `OR`/`NOT` in `WHERE`, no subqueries, no more than one `JOIN` per query (so no join-order
+choice), no outer joins, no true composite (multi-column) indexes, no transactions, no real
+concurrency (the Locks panel is visual only), and no cost-based query optimization — every
+rewrite rule fires on a structural match, never a cost comparison, and the cost *estimates* shown
+alongside a plan exist to justify a rewrite's narration, not to decide whether it happens. `DISTINCT`,
+`UNION`, `HAVING` and `OFFSET` are also not accepted. These are deliberate exclusions for this
+release, not bugs — see the parser's own error messages in [Supported SQL](/docs/reference/sql)
+for exactly which keywords are recognised and rejected.

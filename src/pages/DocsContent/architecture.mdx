@@ -1,0 +1,150 @@
+---
+title: Architecture
+description: How QueryLens is built — the engine/UI split, the event model, the Volcano executor, and how to extend it.
+---
+
+import { Contents, DocMeta } from '../../ui/DocsComponents.tsx';
+
+<DocMeta items={[{ label: 'Audience', value: 'Contributors and forkers' }]} />
+
+<Contents items={[
+  { href: '#the-two-halves', label: 'The two halves' },
+  { href: '#the-event-model', label: 'The event model' },
+  { href: '#the-volcano-executor', label: 'The Volcano executor' },
+  { href: '#the-optimizer', label: 'The optimizer' },
+  { href: '#storage-the-buffer-pool-and-the-btree', label: 'Storage: the buffer pool and the B+Tree' },
+  { href: '#locks', label: 'Locks' },
+  { href: '#extending-it', label: 'Extending it' },
+]} />
+
+This is the "how it's built" page — for what the app *does*, see [Concepts](/docs/concepts/btree)
+and [Reference](/docs/reference/sql); for why a given decision was made, see
+[plan.md](https://github.com/Naveen-Boddepalli/query-lens/blob/main/plan.md), which narrates every
+feature as it shipped and is the source of record this page is kept consistent with.
+
+## The two halves
+
+```
+src/engine/   pure, synchronous, no DOM, no React, no async
+src/ui/       a renderer of engine state, nothing more
+```
+
+`runQuery(sql, db, options)` returns the **complete** event array in one synchronous call — there
+is no streaming, no worker, no async boundary anywhere in `src/engine`. Playback is then just an
+index into an array the UI already owns, which is what makes step-back, scrubbing and reset
+trivially correct: there is no "undo" to implement, only a different index to read.
+
+Every emitted value must be structurally cloneable. That is not a style preference — the trace
+survives `structuredClone` (checked directly by a test on every query in the suite), which keeps
+the engine worker-ready if a future version ever needs one, and is what lets a trace round-trip
+through a downloaded file.
+
+## The event model
+
+Events are **deltas, not snapshots**. `applyEvent` (`src/engine/viewState.ts`) folds one event into
+a `ViewState`; `createTraceProjector` memoises per index so stepping backward costs nothing.
+Snapshotting per step would forfeit the ability to animate the *transition* — an eviction has to be
+a frame visibly leaving, not frame-N swapped for frame-N+1 — which is the whole point of the
+product.
+
+Every event carries a human-readable `label` — the narration that turns an animation into a
+lesson — and belongs to one `stage` (`parse`, `plan`, `optimize`, `execute`, `buffer`, `index`,
+`lock`, `result`). A stage's own reducer branch in `applyEvent` is the only place that stage's
+slice of `ViewState` changes.
+
+## The Volcano executor
+
+Every operator (`src/engine/exec/operators.ts`) exposes `open` / `next` / `close`, and rows are
+**pulled** from the root of the plan tree downward — one `next()` call is one visualization tick.
+Nothing materialises the whole table at once; a row travels all the way to the top of the tree
+before the next one is pulled, which is exactly what the interleaving of `buffer` and `execute`
+events in a trace shows.
+
+Current operators: `SeqScan`, `IndexScan` (equality), `IndexOnlyScan` (equality, never touches the
+heap), `IndexRangeScan` (a range predicate, walking the leaf sibling chain), `Join` (dispatching to
+`nested-loop`, `hash`, or `sort-merge`), `Filter`, `HashAggregate`, `SortAggregate`, `Sort`,
+`Project`, `Limit`. `DELETE`/`INSERT`/`UPDATE` have their own executors (`exec/delete.ts`,
+`exec/insert.ts`, `exec/update.ts`) that reuse the same scan/index-lookup machinery to find their
+target rows.
+
+Predicates evaluate to `TRUE`, `FALSE` or **`UNKNOWN`** (`exec/evaluate.ts`), and only `TRUE` passes
+a `WHERE` clause — a comparison against `NULL` is `UNKNOWN`, not `FALSE`, and `FALSE` dominates
+`UNKNOWN` in an `AND`. Execution's own tests compute the expected rows with a plain JavaScript
+filter and compare against the engine's answer, so a storage bug (the wrong access method, the
+wrong replacement policy, a different page size) cannot hide behind a result that merely looks
+right.
+
+## The optimizer
+
+Rule-based, deterministic, and — this is a design principle, not an oversight — **the rules
+themselves consult no cost model**. `index-selection` fires whenever an equality on an indexed
+column is present, not when a cheaper plan happens to be costed lower. The cost model in
+`planner/cost.ts` produces *estimates* purely to justify a rewrite's narration ("the index reads
+about 3 pages; the scan reads 12") without the decision to rewrite ever depending on a number
+[plan.md §12](https://github.com/Naveen-Boddepalli/query-lens/blob/main/plan.md) would call
+plausible-but-false.
+
+Six rules, applied in this order, each producing one `optimize` event with before/after trees and
+the changed nodes highlighted:
+
+1. **`constant-folding`** — drops a conjunct that is always true regardless of the row (two
+   literals, or a column compared with itself).
+2. **`predicate-pushdown`** — folds a `Filter` into the scan beneath it, so rows are discarded as
+   they're read rather than materialised and thrown away.
+3. **`join-predicate-pushdown`** — the `Join` counterpart: pushes each `WHERE` conjunct naming only
+   one side of a `JOIN` into that side's own scan.
+4. **`index-selection`** — swaps `SeqScan` for `IndexScan` when a conjunct is an equality on an
+   indexed column; picks the more selective of two candidates by distinct-value count when more
+   than one matches.
+5. **`range-index-selection`** — the same idea for a range (`<`, `>`, `<=`, `>=`, `BETWEEN`), only
+   ever firing on a scan `index-selection` left untouched, since an equality always wins first.
+6. **`index-only-scan`** — narrows an `IndexScan` further when the SELECT list needs nothing but
+   the indexed column itself, so the lookup never fetches the heap page at all.
+
+When nothing fires, the optimizer says so out loud rather than silently emitting nothing.
+Deliberately absent: **join order** (needs multi-join grammar this parser doesn't have — a query
+has at most one `JOIN`) and **true composite (multi-column) indexes** — each an independent
+single-column B+Tree today.
+
+## Storage: the buffer pool and the B+Tree
+
+Both are covered in depth, with a live embedded widget each, in [Concepts](/docs/concepts/btree)
+— this section is the short version for someone comparing the code against the idea.
+
+The buffer pool is a fixed set of frames (8 in the Playground) behind one interface with six
+implementations (LRU and clock sweep in the pipeline; FIFO, second-chance, optimal and midpoint
+LRU in the [standalone sandbox](/tools/buffer-pool)). The B+Tree is real: internal nodes hold only
+separator keys, leaves hold the actual keys and are chained left-to-right, and a leaf split copies
+its separator up while staying in the leaf, while an internal split pushes its middle key up and
+removes it — the one rule [`validate()`](https://github.com/Naveen-Boddepalli/query-lens/blob/main/src/engine/index/validate.ts)
+and ~1,300 property-tested random insertion orders exist to catch getting backwards. Both structures
+share one real buffer pool with the heap, so an index descent's page reads are genuinely counted,
+not claimed.
+
+## Locks
+
+Page-level shared locks, taken before a page is read and released after. An index descent
+**crabs**: it takes the child's lock *before* releasing the parent's, so the branch cannot be
+restructured out from under the descent — briefly holding two locks at once, which is the whole
+technique. It is **visual only**: QueryLens's own SQL pipeline runs exactly one query at a time, so
+nothing here ever actually waits on anything else. The [locks sandbox](/tools/locks) is the
+exception — it simulates two transactions for real, with genuine blocking, a wait-for graph rebuilt
+per request, deadlock detection and victim selection, entirely separate from the pipeline's own
+(uncontested) lock manager.
+
+## Extending it
+
+Adding a new plan node and operator (the shape every engine feature so far has taken) touches, in
+order: the AST (`parser/ast.ts`, `parser/parser.ts`) if new syntax is involved; the `Plan` union
+(`planner/plan.ts`); an optimizer rule if the node results from a rewrite rather than a direct
+translation (`planner/optimize.ts`); a cost estimate (`planner/cost.ts`); an executor function and
+a `buildOperator` case (`exec/operators.ts`); and narration wherever the plan is first built
+(`planner/emit.ts` or the statement-specific `emitDeletePlanEvents`/`emitUpdatePlanEvents`).
+Every new `StepEventBody` variant (`types.ts`) needs a fold branch in `viewState.ts`'s
+`applyEvent`, or the UI has nothing to render it with.
+
+Tests come before visualization — a new B+Tree operation, in particular, gets a property test
+first, since a subtly wrong split or merge rule produces a tree that *looks* plausible and silently
+returns wrong rows. See [CONTRIBUTING.md](https://github.com/Naveen-Boddepalli/query-lens/blob/main/CONTRIBUTING.md)
+for the day-to-day mechanics (branch conventions, the PR checklist, the full gate a change has to
+pass).

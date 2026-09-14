@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **An Architecture docs page** (`/docs/architecture`, plan.md §18.4/§23) — the engine/UI split, the
+  event model, the Volcano executor's current operator list, all six optimizer rules in the order
+  they run, storage, locks, and a short "how to extend it" for contributors. Written fresh rather
+  than moved from the README verbatim as originally planned, since the README's own architecture
+  section had drifted to describing v0-era scope (two optimizer rules, no `JOIN`/writes, a separate
+  `docs/` Astro package removed years ago) by the time this shipped.
 - **Four new challenges** (plan.md §23.1/§23.2, closing the tranche) — "The sort spill" ( `ORDER
   BY` enough rows that the external merge sort needs more than one run), "Hash beats loop" (a
   JOIN over `authors`/`posts` that reads fewer pages under hash than nested-loop for the *same*
@@ -644,6 +650,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   §19 (The Landing Page) added to `plan.md`
 
 ### Changed
+- **`README.md` restructured** (plan.md §18.4) from 682 lines of decision log down to 82 lines of
+  badges, a three-sentence pitch, status, commands, deploying and testing — a front door, not an
+  architecture reference. The removed content isn't lost: `plan.md` already narrates every one of
+  those decisions in more detail and kept current, and the new [Architecture](src/pages/DocsContent/architecture.mdx)
+  docs page covers the engine internals a contributor would actually look for.
+- **Two Reference docs pages rewritten for accuracy** — [Supported SQL](src/pages/DocsContent/reference/sql.mdx)
+  and [Engine limits](src/pages/DocsContent/reference/limits.mdx) still described the engine's
+  original v0 scope (no `JOIN`, no `GROUP BY`, no writes, `<=`/`>=` rejected, one index, "no cost
+  estimation") years after all of that shipped. Found while restructuring the README, since the
+  same "describes v0, not what actually runs" problem turned out not to be limited to the README
+  itself
 - Raised the app's type floor: body 14→15px, label 12→13px, code 13→14px, heading 17→20px, display
   24→28px. The 11px `micro` step is retired; 13px is now the smallest text anywhere in the app.
   §16.1's instrument density is otherwise unchanged — verified against the densest panels (the

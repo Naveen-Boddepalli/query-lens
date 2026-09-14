@@ -124,8 +124,8 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
   {
     name: 'docs',
     test: /^(docs|btree|buffer-pool)-.*\.js$/,
-    kb: 20,
-    note: 'integrated MDX docs (plan.md §17.1), lazy — the concepts/btree and concepts/buffer-pool pages are their own chunks, not folded into the shared docs-*.js, since they embed BTreePanel/BufferPoolPanel/FlowTree (§23.1\'s interactive-docs item) and forcing that into the group every other docs page shares would have made a simple FAQ visit pay for it too',
+    kb: 27,
+    note: 'integrated MDX docs (plan.md §17.1), lazy — the concepts/btree and concepts/buffer-pool pages are their own chunks, not folded into the shared docs-*.js, since they embed BTreePanel/BufferPoolPanel/FlowTree (§23.1\'s interactive-docs item) and forcing that into the group every other docs page shares would have made a simple FAQ visit pay for it too. Raised 20 → 27 for the new Architecture page and rewriting the Supported SQL / Engine limits reference pages, which had drifted to describing v0-era scope (no JOIN, no writes, one index) years after all three shipped',
   },
   // Raised 14 → 17: @tailwindcss/typography (the docs' `.prose` styling,
   // themed onto the app's own tokens rather than its default palette — see
@@ -302,8 +302,12 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
  * `database`/`engineOptions` override plumbing and three more stat fields.
  * Landed at 416.0/416, the exact edge with nothing left for the next commit
  * that touches this chunk.
+ * Raised 418 → 424 for the README restructure (§17.4/§18.4): a new
+ * Architecture docs page, and the Supported SQL / Engine limits reference
+ * pages rewritten to describe the current engine instead of v0. `docs`
+ * 18.7 → 24.8 kB. Real documentation weight, not code.
  */
-const TOTAL_KB = 418;
+const TOTAL_KB = 424;
 
 const gzipKb = (bytes: Buffer): number => gzipSync(bytes, { level: 9 }).length / 1024;
 

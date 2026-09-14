@@ -41,4 +41,8 @@ export const DOCS_NAV: readonly DocsNavGroup[] = [
       { to: '/docs/reference/limits', label: 'Engine limits' },
     ],
   },
+  {
+    title: 'Architecture',
+    items: [{ to: '/docs/architecture', label: 'Architecture' }],
+  },
 ];
