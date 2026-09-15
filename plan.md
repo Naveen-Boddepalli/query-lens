@@ -1353,7 +1353,16 @@ file, because the person who needs it will not read either.
 - [x] `OFL.txt` ships with the font files, subset files are renamed off the reserved font name, and
       `NOTICE` covers both fonts. *Already done (v13/v14) — `public/fonts/querylens-{mono,sans}-OFL.txt`,
       both renamed off their reserved names, `NOTICE` covers both.*
-- [ ] No docs page mixes two Diátaxis modes.
+- [ ] No docs page mixes two Diátaxis modes. *Audited all eleven pages against a live build. Nine
+      are clean. Two pairs still mix: both Manual pages carry a paragraph-length mechanism
+      explanation after their steps — `manual/eviction.mdx`'s "Where they actually disagree" and
+      `manual/btree-split.mdx`'s "Why the two rules can't swap" — which is exactly the theory
+      §17.2's own rule says "lives in Concepts and is linked, not inlined"; and both Concepts pages
+      (`concepts/btree.mdx`, `concepts/buffer-pool.mdx`) carry a "Try this" section giving explicit
+      run-this-query, step-through instructions, which is How-to content inside an Explanation page.
+      (Architecture's Reference-plus-Explanation blend is §17.1's own deliberate classification, not
+      counted here.) Leaving unchecked rather than deciding unilaterally whether that's worth
+      rewriting or accepting as the project's house style.
 
 > **Status, v15.** The two manual pages shipped: `/docs/manual/eviction` ("Watch a page get evicted")
 > and `/docs/manual/btree-split` ("Watch a B+Tree split"), a new **Manual** nav group between
@@ -1481,7 +1490,11 @@ Original target shape, for the record — largely followed, with the deviations 
 - [x] `.github/PULL_REQUEST_TEMPLATE.md` exists.
 - [x] README has badges at the top.
 - [x] README links to CONTRIBUTING.md, CODE_OF_CONDUCT.md, and SECURITY.md.
-- [ ] GitHub Discussions is enabled and `ISSUE_TEMPLATE/config.yml` routes questions there.
+- [ ] GitHub Discussions is enabled and `ISSUE_TEMPLATE/config.yml` routes questions there. *Half
+      done — `.github/ISSUE_TEMPLATE/config.yml` now exists (`blank_issues_enabled: false`, a
+      contact link routing to Discussions). Enabling Discussions itself is a repository setting
+      (Settings → General → Features), not a file, and there's no `gh`/API credential available
+      here to check or flip it — left open until the repo owner confirms it's on.
 - [x] README restructured to user-facing format, under 120 lines (blocked on §17.1). **Done, v20**
       — see §18.4's own status note for what shipped and what was deliberately deferred (a GIF, a
       live "Try it" link, Acknowledgments).
