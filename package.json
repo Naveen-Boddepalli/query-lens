@@ -24,6 +24,7 @@
     "budget": "node --experimental-strip-types scripts/bundle-budget.ts",
     "og": "node --experimental-strip-types scripts/build-og.ts",
     "record": "node --experimental-strip-types scripts/record.ts",
+    "test:cli": "node --experimental-strip-types bin/querylens.ts --help",
     "test:e2e": "playwright test"
   },
   "dependencies": {
