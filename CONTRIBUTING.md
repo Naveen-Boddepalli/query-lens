@@ -13,7 +13,7 @@ pnpm dev          # http://localhost:5173
 
 ### Prerequisites
 
-- **Node.js** — `^20.19.0` or `>=22.12.0` (pinned in `.node-version`)
+- **Node.js** — `>=22.13.0` (pinned in `.node-version`)
 - **pnpm** — `11.1.2` (pinned in `package.json`)
 
 ### Verify your setup
