@@ -1490,11 +1490,11 @@ Original target shape, for the record — largely followed, with the deviations 
 - [x] `.github/PULL_REQUEST_TEMPLATE.md` exists.
 - [x] README has badges at the top.
 - [x] README links to CONTRIBUTING.md, CODE_OF_CONDUCT.md, and SECURITY.md.
-- [ ] GitHub Discussions is enabled and `ISSUE_TEMPLATE/config.yml` routes questions there. *Half
-      done — `.github/ISSUE_TEMPLATE/config.yml` now exists (`blank_issues_enabled: false`, a
-      contact link routing to Discussions). Enabling Discussions itself is a repository setting
-      (Settings → General → Features), not a file, and there's no `gh`/API credential available
-      here to check or flip it — left open until the repo owner confirms it's on.
+- [x] GitHub Discussions is enabled and `ISSUE_TEMPLATE/config.yml` routes questions there. **Done**
+      — `.github/ISSUE_TEMPLATE/config.yml` routes to Discussions with `blank_issues_enabled: false`;
+      Discussions itself enabled by the repo owner in Settings → General → Features (unverified here
+      — the repo returns 404 to an unauthenticated API check, and no `gh`/API credential is available
+      in this sandbox to confirm directly).
 - [x] README restructured to user-facing format, under 120 lines (blocked on §17.1). **Done, v20**
       — see §18.4's own status note for what shipped and what was deliberately deferred (a GIF, a
       live "Try it" link, Acknowledgments).
