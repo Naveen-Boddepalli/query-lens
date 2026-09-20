@@ -1,223 +1,12 @@
 # Project Plan: QueryLens — Interactive Database Internals Visualizer
 
-> **v13 — 2026-09-08.** A **new §22** — the feature-and-tool backlog, counted against `src/` the way
-> §20 counted the spin-offs. §13 named *"expand SQL coverage: joins, cost estimates"* in one line and
-> §4 has a "deferred to v1+" list; §22 gives each item an address, a cost against the actual code and
-> a trigger, and scores it on §20.1's filter plus a fifth question — *does it deepen the §9 contrast
-> or widen away from it?* The engine-depth pass (§22.2): JOIN with a join-algorithm comparison as a
-> third `/compare` mode, `ORDER BY`/`LIMIT` with an external sort that spills through the buffer pool,
-> aggregates, a **cost-based optimizer** that justifies the index choice §9 rests on (the strongest
-> v1 engine item, gated on the study), the `INSERT`/`UPDATE`/`DELETE` write path, with MVCC and WAL
-> marked explicitly as *second products* sharing a codebase. New tools (§22.3): a planner sandbox, a
-> lock/transaction sandbox, an external-sort visualiser, a slotted-**page inspector**, a
-> parser-derived grammar diagram. Learning surfaces (§22.4): the six missing `/learn` lessons, a
-> client-side challenge mode, a progress dashboard — and an in-app quiz held until *after* the §9
-> study, because the study's own question bank shipped in the app would contaminate it. Reach
-> (§22.6): an `aria-live` narration track over the `label` every event already carries — the tool is
-> not usable by a screen-reader user today and the data to fix that exists. **§22 adds no milestone**
-> — §20 added M12 and §21 added M13 because each had a do-it-now core; §22's do-it-now items (an
-> ASCII-art trace export beside the Mermaid one, trace JSON import/export, the narration track) fold
-> into M12 or land incrementally in v1, and everything else is a backlog behind the one experiment
-> that decides whether it is worth building. No MVP change, no §9 change, no §2 non-goal crossed.
->
-> **v12 — 2026-09-08.** Cleared most of the §21.6 v2 backlog. **`/tools/parser`** is built: a
-> live token ribbon over the existing tokenizer (`tokenize` now re-exported from
-> `src/engine/index.ts`), the Playground's AST view (`AstTree`, driven directly from
-> `toDisplayTree`), a recursion-depth readout, and the parser's own error messages for both
-> tokenize and parse failures — no engine change, since the parse half already existed (§20.4).
-> **Four replacement policies** joined the buffer-pool sandbox and Compare: `fifo`,
-> `second-chance` (emitting the same `sweep` events clock does), `optimal` (Bélády's MIN —
-> `runBufferTrace` now hands `createBufferPool` the whole reference string as lookahead;
-> `optimal` degrades to FIFO without one, which is all the SQL path ever sees), and `midpoint`
-> (InnoDB midpoint-insertion LRU, §7.5 — an optional `onLoad` hook on `ReplacementPolicy` lets a
-> load land in the "old" sublist so a one-pass scan cannot flush the hot set). `ReplacementPolicyName`
-> widened to six; the Playground `<select>`, `urlState` and `/settings` still allow-list
-> `lru`/`clock` only, so the pipeline's contrast (§9) and every shared link are unchanged.
-> `ComparePage` now picks either side from the six rather than being fixed on LRU-vs-clock.
-> **`/tools/btree`** shipped in the same push — the last of the three §21.3 tool routes, and the
-> only one gated on an engine build. **B+Tree deletion** now exists (`deleteKey` in
-> `src/engine/index/btree.ts`): leaf underflow → borrow from a sibling or merge; internal underflow
-> → the same, pulling the parent separator down; root-collapse when the root thins to one child;
-> and a separator rewrite up the descent path so `validate`'s "every internal key is a real leaf
-> key" invariant survives any delete sequence. Strict, not lazy — the property tests
-> (`btreeDelete.test.ts`, five of them, `validate` asserted clean after *every* op against a `Set`
-> oracle, per §7.6) would catch a stale separator. The sandbox itself is small (§20.4 said it would
-> be): a number pad over `insert` / `deleteKey` / `search`, the tree re-rendered whole after each
-> edit through the Playground's own `BTreePanel`, a fan-out slider, `deleteKey`'s step log narrated,
-> and the invariant check shown as a badge. Stepping the restructure event-by-event (new `index`
-> event kinds) is left for later, the same line drawn for the parser cursor.
->
-> **`/trace`** shipped alongside them — the raw `StepEvent[]` for a query as a filterable table
-> (per-stage toggles, a narration text filter) with per-row JSON and a Copy-JSON of the filtered
-> set. It runs the same `runQuery` the Playground does, so what you inspect is exactly what the
-> panels fold; each row's `#` opens the Playground at that step. Reads the Playground's `q`/`p`/`d`
-> keys (its `p` also takes the four buffer-pool-only policies); footer-only nav, next to Settings
-> and Assignments per §21.2. No engine change.
->
-> **The assignment reveal-lock** shipped too — the last gap in a v10 feature. `/assignments/new`
-> gained a "lock the reveal" toggle that adds `&l=1`; the Playground then forces prediction on,
-> removes the prompt's "skip", and — via a new `ceiling` on `usePlayback` — stops the scrubber
-> (which `gates` deliberately never blocked) from crossing an unanswered prompt. The lock lifts one
-> prompt at a time, and the author is warned when the chosen step has no prompt to lock on.
->
-> **`/compare` gained its full-pipeline half** (§13, §21.3's "not built" note). A mode toggle sits
-> above the existing policy comparison; the new "index vs. sequential scan" mode runs the same SQL
-> twice — once against the seed table, once against a copy with `indexedColumn` dropped, which is
-> all it takes to force a `SeqScan` — and scores them side by side (trace steps, disk reads,
-> evictions, B+Tree node reads, locks, rows). Scorecards, not two stepped panels: the contrast §13
-> is about is the *aggregate* work, and the Playground is where you step. A range query that cannot
-> use the index says so instead of scoring twins.
->
-> **`/learn` shipped** — the last named v2 route. Four of §17.2's tasks as an ordered track: an
-> index with a `localStorage` completion mark, and `/learn/:lessonId` rendering the task as
-> numbered steps. Each step's "open in the Playground" button is a deep link whose step number is
-> *computed* from a real engine run — `GalleryPage`'s discipline — so a lesson going out of sync
-> with the pipeline fails a test rather than shipping a dead link. Primary nav (eight items now).
-> The docs stay the reference; this is the walked-through version.
->
-> **M12 is complete (§20.8).** `src/export/toMermaid.ts` — a pure, unit-tested
-> `astToMermaid` / `planToMermaid` over the display trees (sequential `nN` ids, so no Mermaid
-> id-escaping) — behind a **Copy as Mermaid** button in `StageDetail`'s header, on the AST and plan
-> panels (not the B+Tree; §20.3). **Download PNG** on every implemented stage's panel:
-> `html-to-image@1.11.13` — the app's one runtime dependency past React / Router / CodeMirror —
-> `import()`ed on first use, into its own lazy chunk. Font inlining and `oklch()` verified in
-> Chromium (an e2e checks the PNG magic bytes); Safari's `foreignObject`→canvas colour bugs are
-> noted in the FAQ, not fought. And **`pnpm record`** (`scripts/record.ts`) — Playwright frame-steps
-> the built app over a `--from`/`--to` range and muxes a GIF + WebM, screenshotting the same live
-> panel DOM the PNG button uses; ffmpeg is `$FFMPEG_PATH` → `PATH` → Playwright's bundled copy, the
-> GIF degrading to "WebM + frames + the two commands" when only the bundled build is present.
->
-> Gate: typecheck, lint, 381 unit tests (+43: 13 policy, 12 B+Tree delete incl. 5 property tests,
-> 5 reveal-lock, 8 learn, 5 toMermaid), build, bundle budget (`standalone-tools` 18→24 kB, new
-> `learn` and `html-to-image` groups, total 335→354 — the parser/B+Tree/trace/learn routes plus the
-> shared `FlowTree`/`BTreePanel`/`display` chunks that split out
-> once a second route imported them; `ComparePage` grew ~1.4 kB gzip for `runQuery`; `html-to-image`
-> is a 5 kB gzip lazy chunk), 37 e2e (+11),
-> zero axe violations on `/tools/parser`, `/tools/btree`, `/trace`, `/compare` (both modes),
-> `/tools`, `/tools/buffer-pool` (incl. midpoint), `/learn` and a lesson page, `/stages/*` with the
-> copy-as-Mermaid and download-PNG buttons, and the Playground in assignment mode, in both themes
-> (fixed a
-> pre-existing `opacity-70` contrast failure on the Tools index card, and swapped the trace
-> inspector's stage colours off the
-> text — some `--color-stage-*` fall under 4.5:1 as 13px body text — onto a swatch).
->
-> **v11 — 2026-09-05.** A footer and docs-structure pass, prompted by a reference layout the user
-> shared. `Footer.tsx` is now four blocks — a brand block (mark, one-line description, a
-> licence/privacy badge) plus Explore / Documentation / Project columns — reading from
-> `src/routes.ts` and a new `src/docsNav.ts` rather than a hand-typed row of links, so nothing in it
-> can name a destination that has moved. It sits *outside* `Layout.tsx`'s fixed-height desktop shell
-> now, not inside it: a footer with real content is tall enough that folding it into the one-viewport
-> block would have shrunk the Playground's usable height on every load, which is exactly the
-> "stealing space from the app" failure §19 warns against — "below the fold" is no longer a
-> metaphor. `e2e/regressions.spec.ts`'s overflow test was rewritten to check that the page is at most
-> one viewport plus the footer's own height, not that it never exceeds one viewport.
->
-> Restructuring the docs pages to have real hierarchy — a title, an audience/version-style meta
-> line, an on-this-page contents block, a callout for the one thing not to skim past — surfaced a
-> bug that had been live since the docs migration (`6eca5ac`) and touched every one of the eight
-> `.md` pages: **left at its default, `@mdx-js/rollup` compiles a `.md` file as plain CommonMark**,
-> with no JSX or `{expression}` support, and only a literal `.mdx` extension gets the real MDX
-> processor. Every doc page `import`s and uses a component — `<Steps>`, `<Card>`, and the three new
-> ones — so every one of them was silently rendering as escaped text
-> (`&lt;DocMeta items={...} /&gt;`) instead of a component, invisible until something asked more of
-> the page than a paragraph of prose. Forcing `format: 'mdx'` globally turns JSX on but breaks
-> `remark-frontmatter`'s recognition of a `.md`-extensioned file's leading `---` block — so the fix
-> that shipped is renaming all eight to `.mdx`, which sidesteps the interaction entirely. Discovering
-> that also surfaced a second, adjacent bug: three reference pages use markdown tables, which plain
-> `remark-parse` renders as a literal paragraph of pipe characters — `remark-gfm` is now in the
-> pipeline. And `@tailwindcss/typography` had been a dependency since the same migration commit
-> without ever being registered (no `@plugin` line in `index.css`), so `.prose` did nothing and
-> every doc page had no heading hierarchy at all; it is now registered and themed onto the app's own
-> semantic tokens rather than the plugin's default palette, and `prose-invert` — which hardcoded a
-> dark palette regardless of the viewer's chosen theme — is gone with it. Three flagship pages
-> (index, FAQ, getting started) carry the new `DocMeta`/`Contents`/`Callout` structure; the other six
-> got the extension fix, the link fix (see below), and the typography/table fixes for free but not
-> the new components — a deliberate scope line, not an oversight.
->
-> Also fixed while in this code, because the docs restructure made them impossible not to notice:
-> 18 internal doc links across six pages still used Astro Starlight's trailing-slash form
-> (`/faq/`) from before `6eca5ac`, none of which resolve under this app's routes (`/docs/faq`) —
-> all corrected. Gate: typecheck, lint, 338 unit tests, build, bundle budget (raised for the
-> typography plugin's CSS), 26 e2e, zero axe violations across the footer and five checked docs
-> pages.
->
-> **v10 — 2026-09-05.** §21.3's v1 tranche shipped: `/gallery`, `/tools`, `/tools/buffer-pool`,
-> `/compare`, `/settings` and `/assignments/new` are built, routed, in the nav manifest (seven
-> primary items now, plus two footer-only), and covered by a new `e2e/features.spec.ts`. The build
-> produced `src/engine/bufferTrace.ts` — a page-reference-string driver over the same
-> `createBufferPool` the SQL path uses — a milestone earlier than §20.2 #2 called for, because
-> Compare needed the same seam the buffer-pool tool did. §21.3's table now records three shipped
-> gaps rather than smoothing them over: Gallery has no B+Tree-split or index-dropped moment (the
-> engine cannot produce either yet), Compare covers only the buffer-pool half of §13's idea, and
-> assignment links default prediction on without yet withholding the reveal until commit. Full
-> status note under §21.3; §21.6 struck through as each item landed. Gate: typecheck, lint, 338
-> unit tests, build, budget (two new groups), 26 e2e, zero axe violations across all six new routes.
->
-> **v9 — 2026-09-04.** **M13 executed** (§21.5, §21.8): the SPA rewrite (`public/_redirects`), the
-> dead `src/router.tsx` removed, the "single page" 404 and the stale `index.html` title corrected,
-> every route `React.lazy` behind `<Suspense>`, a `src/routes.ts` nav manifest feeding top nav and
-> footer, and `react-router-dom` pinned. The work surfaced three regressions the P0 list had not
-> named — the desktop fixed-height shell and the mobile scroll-snap both lost when `5c7ef5d` moved
-> the layout into `Layout.tsx` (two e2e tests red since), and a bundle budget whose 34 kB entry
-> line had been failing just as long — all now fixed, entry down to ~18 kB with the docs and the
-> trace UI split out. Commit `6eca5ac` (landed mid-work) reversed §17.1's Astro-Starlight decision
-> in favour of integrated MDX routes; §17.1 and §21 are updated to match, and the change removed
-> the docs/app build seam rather than adding to it. Gate is green: typecheck, lint, 326 unit tests,
-> build, bundle budget, 21 e2e.
->
-> **v8 — 2026-09-04.** Reframes the plan around the app it has actually become: a **client-side
-> multi-page application**, not a single playground. A **new §21** is the route map and the feature
-> catalogue — the Playground hub plus stage explainers, standalone tools, a query gallery, a
-> comparison view, a classroom track, settings and a trace inspector — with each feature given an
-> address, a URL-state schema and a build status. §21.1 is a count of what routing already exists
-> and the five things a count finds wrong with it (no SPA rewrite, so every deep link 404s on a
-> hard load; a dead `src/router.tsx`; a 404 page that still says "QueryLens is a single page"; a
-> stale `index.html` title; routes that are not actually code-split). §21.5 is a one-day P0 to fix
-> those, added to §10 as **M13**. §5 gains the shell layer, §6 gains the routing row, §19 and §20
-> gain pointers. No feature here is new scope — §21 gives the work already in §13 and §20 a
-> navigation model.
->
-> **v7 — 2026-09-04.** A **new §20**, from a list of ~12 feature and spin-off ideas across four
-> audiences — slide-makers, three different CS courses, EdTech graders, and DBAs. §20 is that list
-> **counted against `src/` rather than against the architecture diagram**: three items are cheap,
-> need no backend, and produce the launch artefacts §18.2 already wants, so they become **M12** in
-> §10; the rest is v1 or its own plan, each with a written trigger, because a solo part-time project
-> that adds four audiences before running the §9 study is §12's first risk played straight. Two
-> edits fall out of it — §2's "production query debugging" non-goal now points at §20.6 (a paste-in
-> `EXPLAIN` viewer was considered and kept separate, not missed), and §13's one-line futures point
-> at §20 for the worked version.
->
-> **v6 — 2026-09-03.** A research pass over §16–§18, plus a new §19. §16 is **rewritten against a
-> count of `src/` rather than an impression of it** — three of its four v5 claims were overstated or
-> backwards, and the largest tell in the app (a typeface named in CSS that is never actually served,
-> under a CSP that forbids loading it from anywhere but here) was missing entirely; a written design
-> direction is added ahead of the task list. §17 **reopens the docs-tool choice** — v5 picked a Vue
-> framework for a React app — restructures the user manual around task-shaped minimalism, and grows
-> licensing to the two obligations the project has actually incurred: prose is not code (CC BY 4.0),
-> and a bundled OFL font is not either. §18 is marked to its true status: every P0/P1 governance file
-> now exists. **New §19** is the landing page, which v5 had as one row in a table — including the
-> decision that the app *is* the landing page, and why. §10's M10 splits into M10 and M11.
->
-> **v5 — 2026-09-03.** Updated to add three new sections: §16, the visual design maturity gate
-> ("not AI-generated"); §17, documentation, user manual and licensing (VitePress, Diátaxis
-> structure, user manual chapter plan); §18, community and governance (CONTRIBUTING.md,
-> CODE_OF_CONDUCT.md, SECURITY.md, CHANGELOG.md, GitHub templates, README badges, social
-> presence strategy — socials deferred until deployed). New milestone M10 added to §10.
->
-> **v4 — 2026-09-02.** Updated to incorporate [RESEARCH.md Part III](RESEARCH.md#part-iii--uiux-production-readiness),
-> the UI/UX pass done by driving the running app. Changed since v3: **new §15, the UX gate**; M9 added to
-> the milestone table (§10); first-run behaviour, prompt placement and a shareable URL added to §8; the
-> first-thirty-seconds risk added (§12).
->
-> **v3 — 2026-09-02.** Updated to incorporate [RESEARCH.md Part II](RESEARCH.md#part-ii--production-readiness),
-> the production-readiness pass done after M0–M7 shipped. Changed since v2: **new §14, the deploy gate**
-> (P0/P1/P2); M8 added to the milestone table (§10); hosting revisit trigger noted (§6); a11y regression
-> testing added (§8); two operational risks added (§12); cost forks named (§11).
->
-> **v2 — 2026-09-01.** Updated to incorporate the pre-build research in [RESEARCH.md](RESEARCH.md).
-> Changed since v1: engagement features promoted into the MVP (§4, §8); Web Worker dropped for v0 (§5);
-> buffer replacement policy made pluggable (§7.5); stack corrections — TypeScript 6.0.3, CodeMirror 6,
-> Cloudflare Pages (§6); validation changed to a post-test against a text control (§9).
+**Document Status**: Production-Ready (v1)
+**Last Updated**: September 2026
+
+## Executive Summary
+QueryLens is a 100% client-side, interactive database internals visualizer built for educational purposes. It executes real SQL queries inside the browser (zero server), rendering step-by-step visualizations of parsing, query planning, B+Tree index traversal, buffer pool eviction, locking, and execution. Designed specifically for students and educators, QueryLens focuses on pedagogical clarity over enterprise performance.
+
+---
 
 ## 1. One-line pitch
 An in-browser, self-built toy relational database engine that visually animates how a SQL query actually flows through Parser → Planner → Optimizer → Execution → Buffer Pool → Index (B+Tree) → Locks → Result — positioned as a learning/interview-prep tool, not a production DB tool.
@@ -2517,3 +2306,225 @@ In the discipline of §20 and [RESEARCH.md §21](RESEARCH.md#21-what-i-deliberat
    - ~~Embed live mini-widgets into `src/pages/DocsContent/concepts/*.mdx`.~~ Done, v18: `BTreeMiniDemo`/`BufferPoolMiniDemo` (`src/ui/DocsBTreeDemo.tsx`, `src/ui/DocsBufferPoolDemo.tsx`), reusing the existing `BTreePanel`/`BufferPoolPanel` exactly as scoped. Had to pull both pages out of `vite.config.ts`'s shared `docs` codeSplitting group once built — forcing them in merged `BTreePanel`/`FlowTree`/the engine's trace code into the *one* combined docs chunk every other docs page shares too (measured: 15.5 → 49.8 kB), rather than the small shared chunk Playground already gets them from.
    - ~~Add the 4 new v14-focused challenges to `/challenges`.~~ Done, v19: Sort Spill, Hash Beats Loop, Dirty Eviction, Range Leap. Widened `Challenge` with an optional `database` (a one-off `Database` no `DatasetId` names — the `authors`/`posts` JOIN demo) and `engineOptions` (forces `bufferFrames: 2` for Hash Beats Loop, the same reason `/compare`'s own JOIN mode does), and `check` now also receives the raw SQL text so Hash Beats Loop can rerun it itself under `joinStrategy: 'hash'` and compare two *real* algorithms rather than an estimate.
 
+
+
+## Appendix: Development Changelog
+
+> **v13 — 2026-09-08.** A **new §22** — the feature-and-tool backlog, counted against `src/` the way
+> §20 counted the spin-offs. §13 named *"expand SQL coverage: joins, cost estimates"* in one line and
+> §4 has a "deferred to v1+" list; §22 gives each item an address, a cost against the actual code and
+> a trigger, and scores it on §20.1's filter plus a fifth question — *does it deepen the §9 contrast
+> or widen away from it?* The engine-depth pass (§22.2): JOIN with a join-algorithm comparison as a
+> third `/compare` mode, `ORDER BY`/`LIMIT` with an external sort that spills through the buffer pool,
+> aggregates, a **cost-based optimizer** that justifies the index choice §9 rests on (the strongest
+> v1 engine item, gated on the study), the `INSERT`/`UPDATE`/`DELETE` write path, with MVCC and WAL
+> marked explicitly as *second products* sharing a codebase. New tools (§22.3): a planner sandbox, a
+> lock/transaction sandbox, an external-sort visualiser, a slotted-**page inspector**, a
+> parser-derived grammar diagram. Learning surfaces (§22.4): the six missing `/learn` lessons, a
+> client-side challenge mode, a progress dashboard — and an in-app quiz held until *after* the §9
+> study, because the study's own question bank shipped in the app would contaminate it. Reach
+> (§22.6): an `aria-live` narration track over the `label` every event already carries — the tool is
+> not usable by a screen-reader user today and the data to fix that exists. **§22 adds no milestone**
+> — §20 added M12 and §21 added M13 because each had a do-it-now core; §22's do-it-now items (an
+> ASCII-art trace export beside the Mermaid one, trace JSON import/export, the narration track) fold
+> into M12 or land incrementally in v1, and everything else is a backlog behind the one experiment
+> that decides whether it is worth building. No MVP change, no §9 change, no §2 non-goal crossed.
+>
+> **v12 — 2026-09-08.** Cleared most of the §21.6 v2 backlog. **`/tools/parser`** is built: a
+> live token ribbon over the existing tokenizer (`tokenize` now re-exported from
+> `src/engine/index.ts`), the Playground's AST view (`AstTree`, driven directly from
+> `toDisplayTree`), a recursion-depth readout, and the parser's own error messages for both
+> tokenize and parse failures — no engine change, since the parse half already existed (§20.4).
+> **Four replacement policies** joined the buffer-pool sandbox and Compare: `fifo`,
+> `second-chance` (emitting the same `sweep` events clock does), `optimal` (Bélády's MIN —
+> `runBufferTrace` now hands `createBufferPool` the whole reference string as lookahead;
+> `optimal` degrades to FIFO without one, which is all the SQL path ever sees), and `midpoint`
+> (InnoDB midpoint-insertion LRU, §7.5 — an optional `onLoad` hook on `ReplacementPolicy` lets a
+> load land in the "old" sublist so a one-pass scan cannot flush the hot set). `ReplacementPolicyName`
+> widened to six; the Playground `<select>`, `urlState` and `/settings` still allow-list
+> `lru`/`clock` only, so the pipeline's contrast (§9) and every shared link are unchanged.
+> `ComparePage` now picks either side from the six rather than being fixed on LRU-vs-clock.
+> **`/tools/btree`** shipped in the same push — the last of the three §21.3 tool routes, and the
+> only one gated on an engine build. **B+Tree deletion** now exists (`deleteKey` in
+> `src/engine/index/btree.ts`): leaf underflow → borrow from a sibling or merge; internal underflow
+> → the same, pulling the parent separator down; root-collapse when the root thins to one child;
+> and a separator rewrite up the descent path so `validate`'s "every internal key is a real leaf
+> key" invariant survives any delete sequence. Strict, not lazy — the property tests
+> (`btreeDelete.test.ts`, five of them, `validate` asserted clean after *every* op against a `Set`
+> oracle, per §7.6) would catch a stale separator. The sandbox itself is small (§20.4 said it would
+> be): a number pad over `insert` / `deleteKey` / `search`, the tree re-rendered whole after each
+> edit through the Playground's own `BTreePanel`, a fan-out slider, `deleteKey`'s step log narrated,
+> and the invariant check shown as a badge. Stepping the restructure event-by-event (new `index`
+> event kinds) is left for later, the same line drawn for the parser cursor.
+>
+> **`/trace`** shipped alongside them — the raw `StepEvent[]` for a query as a filterable table
+> (per-stage toggles, a narration text filter) with per-row JSON and a Copy-JSON of the filtered
+> set. It runs the same `runQuery` the Playground does, so what you inspect is exactly what the
+> panels fold; each row's `#` opens the Playground at that step. Reads the Playground's `q`/`p`/`d`
+> keys (its `p` also takes the four buffer-pool-only policies); footer-only nav, next to Settings
+> and Assignments per §21.2. No engine change.
+>
+> **The assignment reveal-lock** shipped too — the last gap in a v10 feature. `/assignments/new`
+> gained a "lock the reveal" toggle that adds `&l=1`; the Playground then forces prediction on,
+> removes the prompt's "skip", and — via a new `ceiling` on `usePlayback` — stops the scrubber
+> (which `gates` deliberately never blocked) from crossing an unanswered prompt. The lock lifts one
+> prompt at a time, and the author is warned when the chosen step has no prompt to lock on.
+>
+> **`/compare` gained its full-pipeline half** (§13, §21.3's "not built" note). A mode toggle sits
+> above the existing policy comparison; the new "index vs. sequential scan" mode runs the same SQL
+> twice — once against the seed table, once against a copy with `indexedColumn` dropped, which is
+> all it takes to force a `SeqScan` — and scores them side by side (trace steps, disk reads,
+> evictions, B+Tree node reads, locks, rows). Scorecards, not two stepped panels: the contrast §13
+> is about is the *aggregate* work, and the Playground is where you step. A range query that cannot
+> use the index says so instead of scoring twins.
+>
+> **`/learn` shipped** — the last named v2 route. Four of §17.2's tasks as an ordered track: an
+> index with a `localStorage` completion mark, and `/learn/:lessonId` rendering the task as
+> numbered steps. Each step's "open in the Playground" button is a deep link whose step number is
+> *computed* from a real engine run — `GalleryPage`'s discipline — so a lesson going out of sync
+> with the pipeline fails a test rather than shipping a dead link. Primary nav (eight items now).
+> The docs stay the reference; this is the walked-through version.
+>
+> **M12 is complete (§20.8).** `src/export/toMermaid.ts` — a pure, unit-tested
+> `astToMermaid` / `planToMermaid` over the display trees (sequential `nN` ids, so no Mermaid
+> id-escaping) — behind a **Copy as Mermaid** button in `StageDetail`'s header, on the AST and plan
+> panels (not the B+Tree; §20.3). **Download PNG** on every implemented stage's panel:
+> `html-to-image@1.11.13` — the app's one runtime dependency past React / Router / CodeMirror —
+> `import()`ed on first use, into its own lazy chunk. Font inlining and `oklch()` verified in
+> Chromium (an e2e checks the PNG magic bytes); Safari's `foreignObject`→canvas colour bugs are
+> noted in the FAQ, not fought. And **`pnpm record`** (`scripts/record.ts`) — Playwright frame-steps
+> the built app over a `--from`/`--to` range and muxes a GIF + WebM, screenshotting the same live
+> panel DOM the PNG button uses; ffmpeg is `$FFMPEG_PATH` → `PATH` → Playwright's bundled copy, the
+> GIF degrading to "WebM + frames + the two commands" when only the bundled build is present.
+>
+> Gate: typecheck, lint, 381 unit tests (+43: 13 policy, 12 B+Tree delete incl. 5 property tests,
+> 5 reveal-lock, 8 learn, 5 toMermaid), build, bundle budget (`standalone-tools` 18→24 kB, new
+> `learn` and `html-to-image` groups, total 335→354 — the parser/B+Tree/trace/learn routes plus the
+> shared `FlowTree`/`BTreePanel`/`display` chunks that split out
+> once a second route imported them; `ComparePage` grew ~1.4 kB gzip for `runQuery`; `html-to-image`
+> is a 5 kB gzip lazy chunk), 37 e2e (+11),
+> zero axe violations on `/tools/parser`, `/tools/btree`, `/trace`, `/compare` (both modes),
+> `/tools`, `/tools/buffer-pool` (incl. midpoint), `/learn` and a lesson page, `/stages/*` with the
+> copy-as-Mermaid and download-PNG buttons, and the Playground in assignment mode, in both themes
+> (fixed a
+> pre-existing `opacity-70` contrast failure on the Tools index card, and swapped the trace
+> inspector's stage colours off the
+> text — some `--color-stage-*` fall under 4.5:1 as 13px body text — onto a swatch).
+>
+> **v11 — 2026-09-05.** A footer and docs-structure pass, prompted by a reference layout the user
+> shared. `Footer.tsx` is now four blocks — a brand block (mark, one-line description, a
+> licence/privacy badge) plus Explore / Documentation / Project columns — reading from
+> `src/routes.ts` and a new `src/docsNav.ts` rather than a hand-typed row of links, so nothing in it
+> can name a destination that has moved. It sits *outside* `Layout.tsx`'s fixed-height desktop shell
+> now, not inside it: a footer with real content is tall enough that folding it into the one-viewport
+> block would have shrunk the Playground's usable height on every load, which is exactly the
+> "stealing space from the app" failure §19 warns against — "below the fold" is no longer a
+> metaphor. `e2e/regressions.spec.ts`'s overflow test was rewritten to check that the page is at most
+> one viewport plus the footer's own height, not that it never exceeds one viewport.
+>
+> Restructuring the docs pages to have real hierarchy — a title, an audience/version-style meta
+> line, an on-this-page contents block, a callout for the one thing not to skim past — surfaced a
+> bug that had been live since the docs migration (`6eca5ac`) and touched every one of the eight
+> `.md` pages: **left at its default, `@mdx-js/rollup` compiles a `.md` file as plain CommonMark**,
+> with no JSX or `{expression}` support, and only a literal `.mdx` extension gets the real MDX
+> processor. Every doc page `import`s and uses a component — `<Steps>`, `<Card>`, and the three new
+> ones — so every one of them was silently rendering as escaped text
+> (`&lt;DocMeta items={...} /&gt;`) instead of a component, invisible until something asked more of
+> the page than a paragraph of prose. Forcing `format: 'mdx'` globally turns JSX on but breaks
+> `remark-frontmatter`'s recognition of a `.md`-extensioned file's leading `---` block — so the fix
+> that shipped is renaming all eight to `.mdx`, which sidesteps the interaction entirely. Discovering
+> that also surfaced a second, adjacent bug: three reference pages use markdown tables, which plain
+> `remark-parse` renders as a literal paragraph of pipe characters — `remark-gfm` is now in the
+> pipeline. And `@tailwindcss/typography` had been a dependency since the same migration commit
+> without ever being registered (no `@plugin` line in `index.css`), so `.prose` did nothing and
+> every doc page had no heading hierarchy at all; it is now registered and themed onto the app's own
+> semantic tokens rather than the plugin's default palette, and `prose-invert` — which hardcoded a
+> dark palette regardless of the viewer's chosen theme — is gone with it. Three flagship pages
+> (index, FAQ, getting started) carry the new `DocMeta`/`Contents`/`Callout` structure; the other six
+> got the extension fix, the link fix (see below), and the typography/table fixes for free but not
+> the new components — a deliberate scope line, not an oversight.
+>
+> Also fixed while in this code, because the docs restructure made them impossible not to notice:
+> 18 internal doc links across six pages still used Astro Starlight's trailing-slash form
+> (`/faq/`) from before `6eca5ac`, none of which resolve under this app's routes (`/docs/faq`) —
+> all corrected. Gate: typecheck, lint, 338 unit tests, build, bundle budget (raised for the
+> typography plugin's CSS), 26 e2e, zero axe violations across the footer and five checked docs
+> pages.
+>
+> **v10 — 2026-09-05.** §21.3's v1 tranche shipped: `/gallery`, `/tools`, `/tools/buffer-pool`,
+> `/compare`, `/settings` and `/assignments/new` are built, routed, in the nav manifest (seven
+> primary items now, plus two footer-only), and covered by a new `e2e/features.spec.ts`. The build
+> produced `src/engine/bufferTrace.ts` — a page-reference-string driver over the same
+> `createBufferPool` the SQL path uses — a milestone earlier than §20.2 #2 called for, because
+> Compare needed the same seam the buffer-pool tool did. §21.3's table now records three shipped
+> gaps rather than smoothing them over: Gallery has no B+Tree-split or index-dropped moment (the
+> engine cannot produce either yet), Compare covers only the buffer-pool half of §13's idea, and
+> assignment links default prediction on without yet withholding the reveal until commit. Full
+> status note under §21.3; §21.6 struck through as each item landed. Gate: typecheck, lint, 338
+> unit tests, build, budget (two new groups), 26 e2e, zero axe violations across all six new routes.
+>
+> **v9 — 2026-09-04.** **M13 executed** (§21.5, §21.8): the SPA rewrite (`public/_redirects`), the
+> dead `src/router.tsx` removed, the "single page" 404 and the stale `index.html` title corrected,
+> every route `React.lazy` behind `<Suspense>`, a `src/routes.ts` nav manifest feeding top nav and
+> footer, and `react-router-dom` pinned. The work surfaced three regressions the P0 list had not
+> named — the desktop fixed-height shell and the mobile scroll-snap both lost when `5c7ef5d` moved
+> the layout into `Layout.tsx` (two e2e tests red since), and a bundle budget whose 34 kB entry
+> line had been failing just as long — all now fixed, entry down to ~18 kB with the docs and the
+> trace UI split out. Commit `6eca5ac` (landed mid-work) reversed §17.1's Astro-Starlight decision
+> in favour of integrated MDX routes; §17.1 and §21 are updated to match, and the change removed
+> the docs/app build seam rather than adding to it. Gate is green: typecheck, lint, 326 unit tests,
+> build, bundle budget, 21 e2e.
+>
+> **v8 — 2026-09-04.** Reframes the plan around the app it has actually become: a **client-side
+> multi-page application**, not a single playground. A **new §21** is the route map and the feature
+> catalogue — the Playground hub plus stage explainers, standalone tools, a query gallery, a
+> comparison view, a classroom track, settings and a trace inspector — with each feature given an
+> address, a URL-state schema and a build status. §21.1 is a count of what routing already exists
+> and the five things a count finds wrong with it (no SPA rewrite, so every deep link 404s on a
+> hard load; a dead `src/router.tsx`; a 404 page that still says "QueryLens is a single page"; a
+> stale `index.html` title; routes that are not actually code-split). §21.5 is a one-day P0 to fix
+> those, added to §10 as **M13**. §5 gains the shell layer, §6 gains the routing row, §19 and §20
+> gain pointers. No feature here is new scope — §21 gives the work already in §13 and §20 a
+> navigation model.
+>
+> **v7 — 2026-09-04.** A **new §20**, from a list of ~12 feature and spin-off ideas across four
+> audiences — slide-makers, three different CS courses, EdTech graders, and DBAs. §20 is that list
+> **counted against `src/` rather than against the architecture diagram**: three items are cheap,
+> need no backend, and produce the launch artefacts §18.2 already wants, so they become **M12** in
+> §10; the rest is v1 or its own plan, each with a written trigger, because a solo part-time project
+> that adds four audiences before running the §9 study is §12's first risk played straight. Two
+> edits fall out of it — §2's "production query debugging" non-goal now points at §20.6 (a paste-in
+> `EXPLAIN` viewer was considered and kept separate, not missed), and §13's one-line futures point
+> at §20 for the worked version.
+>
+> **v6 — 2026-09-03.** A research pass over §16–§18, plus a new §19. §16 is **rewritten against a
+> count of `src/` rather than an impression of it** — three of its four v5 claims were overstated or
+> backwards, and the largest tell in the app (a typeface named in CSS that is never actually served,
+> under a CSP that forbids loading it from anywhere but here) was missing entirely; a written design
+> direction is added ahead of the task list. §17 **reopens the docs-tool choice** — v5 picked a Vue
+> framework for a React app — restructures the user manual around task-shaped minimalism, and grows
+> licensing to the two obligations the project has actually incurred: prose is not code (CC BY 4.0),
+> and a bundled OFL font is not either. §18 is marked to its true status: every P0/P1 governance file
+> now exists. **New §19** is the landing page, which v5 had as one row in a table — including the
+> decision that the app *is* the landing page, and why. §10's M10 splits into M10 and M11.
+>
+> **v5 — 2026-09-03.** Updated to add three new sections: §16, the visual design maturity gate
+> ("not AI-generated"); §17, documentation, user manual and licensing (VitePress, Diátaxis
+> structure, user manual chapter plan); §18, community and governance (CONTRIBUTING.md,
+> CODE_OF_CONDUCT.md, SECURITY.md, CHANGELOG.md, GitHub templates, README badges, social
+> presence strategy — socials deferred until deployed). New milestone M10 added to §10.
+>
+> **v4 — 2026-09-02.** Updated to incorporate [RESEARCH.md Part III](RESEARCH.md#part-iii--uiux-production-readiness),
+> the UI/UX pass done by driving the running app. Changed since v3: **new §15, the UX gate**; M9 added to
+> the milestone table (§10); first-run behaviour, prompt placement and a shareable URL added to §8; the
+> first-thirty-seconds risk added (§12).
+>
+> **v3 — 2026-09-02.** Updated to incorporate [RESEARCH.md Part II](RESEARCH.md#part-ii--production-readiness),
+> the production-readiness pass done after M0–M7 shipped. Changed since v2: **new §14, the deploy gate**
+> (P0/P1/P2); M8 added to the milestone table (§10); hosting revisit trigger noted (§6); a11y regression
+> testing added (§8); two operational risks added (§12); cost forks named (§11).
+>
+> **v2 — 2026-09-01.** Updated to incorporate the pre-build research in [RESEARCH.md](RESEARCH.md).
+> Changed since v1: engagement features promoted into the MVP (§4, §8); Web Worker dropped for v0 (§5);
+> buffer replacement policy made pluggable (§7.5); stack corrections — TypeScript 6.0.3, CodeMirror 6,
+> Cloudflare Pages (§6); validation changed to a post-test against a text control (§9).
