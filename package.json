@@ -37,7 +37,7 @@
     "@lezer/highlight": "1.2.3",
     "@mdx-js/react": "^3.1.1",
     "@mdx-js/rollup": "^3.1.1",
-    "flowinger": "github:Naveen-Boddepalli/flowinger#dc36570838194c38059d48c6c168a7ab4e8eca05",
+    "flowinger": "github:Naveen-Boddepalli/flowinger#0c74b6a8bbf30b8e224b3b99014dae12cf56eecb",
     "d3-hierarchy": "3.1.2",
     "html-to-image": "1.11.13",
     "react": "19.2.8",

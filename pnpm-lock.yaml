@@ -43,8 +43,8 @@ importers:
         specifier: 3.1.2
         version: 3.1.2
       flowinger:
-        specifier: github:Naveen-Boddepalli/flowinger#dc36570838194c38059d48c6c168a7ab4e8eca05
-        version: git+https://github.com/Naveen-Boddepalli/flowinger.git#dc36570838194c38059d48c6c168a7ab4e8eca05(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+        specifier: github:Naveen-Boddepalli/flowinger#0c74b6a8bbf30b8e224b3b99014dae12cf56eecb
+        version: git+https://github.com/Naveen-Boddepalli/flowinger.git#0c74b6a8bbf30b8e224b3b99014dae12cf56eecb(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       html-to-image:
         specifier: 1.11.13
         version: 1.11.13
@@ -1400,8 +1400,8 @@ packages:
   flatted@3.4.4:
     resolution: {integrity: sha512-5+ybhBZANEJxaH3X5evAFatUxLfEHSr7n6kYJ+1Qd0mUqr4eu9gIf6GDbWHf8RJijHrjjO8G+la14SlL2SeS1Q==}
 
-  flowinger@git+https://github.com/Naveen-Boddepalli/flowinger.git#dc36570838194c38059d48c6c168a7ab4e8eca05:
-    resolution: {commit: dc36570838194c38059d48c6c168a7ab4e8eca05, repo: https://github.com/Naveen-Boddepalli/flowinger.git, type: git}
+  flowinger@git+https://github.com/Naveen-Boddepalli/flowinger.git#0c74b6a8bbf30b8e224b3b99014dae12cf56eecb:
+    resolution: {commit: 0c74b6a8bbf30b8e224b3b99014dae12cf56eecb, repo: https://github.com/Naveen-Boddepalli/flowinger.git, type: git}
     version: 0.1.0
     peerDependencies:
       react: '>=18.0.0'
@@ -4030,7 +4030,7 @@ snapshots:
 
   flatted@3.4.4: {}
 
-  flowinger@git+https://github.com/Naveen-Boddepalli/flowinger.git#dc36570838194c38059d48c6c168a7ab4e8eca05(react-dom@19.2.8(react@19.2.8))(react@19.2.8):
+  flowinger@git+https://github.com/Naveen-Boddepalli/flowinger.git#0c74b6a8bbf30b8e224b3b99014dae12cf56eecb(react-dom@19.2.8(react@19.2.8))(react@19.2.8):
     dependencies:
       react: 19.2.8
       react-dom: 19.2.8(react@19.2.8)
