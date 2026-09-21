@@ -671,9 +671,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   flowinger's `prepare` script builds one. Publishing flowinger to a registry would remove that.
   The pin has since moved to flowinger `0c74b6a`, which adds the React Flow features it lacked
   (controlled flows, edge selection, delete, box selection, sub-flows, culling and more). `FlowTree` uses
-  none of them and is unchanged, but they live in the canvas and its store: the `flow` chunk is 21.7 kB
-  gzip (from 14.0) and the total 380.7 kB (from 373.9), so the flow budget rises 18 → 25. Typecheck, all
-  1170 unit tests and 79 / 79 e2e are unchanged.
+  none of them and is unchanged, but they lived in the canvas and its store: the `flow` chunk was 21.7 kB
+  gzip (from 14.0) and the total 380.7 kB (from 373.9). Typecheck, all 1170 unit tests and 79 / 79 e2e
+  are unchanged.
+  It now pins `d132971`, where the canvas is a small core plus opt-in features: `FlowTree` imports
+  `FlowingerCore` and `FlowingerProvider` (its only change) and names no feature, since it shows and pans
+  a tree and nothing more. The `flow` chunk is **18.2 kB** gzip — 24.0 with the same features carried in
+  the canvas — and the total 377.2 kB; the flow budget is 25 → 20. Typecheck, lint, all 1170 unit tests
+  and 79 / 79 e2e are unchanged.
 - **`README.md` restructured** (plan.md §18.4) from 682 lines of decision log down to 82 lines of
   badges, a three-sentence pitch, status, commands, deploying and testing — a front door, not an
   architecture reference. The removed content isn't lost: `plan.md` already narrates every one of

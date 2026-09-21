@@ -21,13 +21,14 @@ const DIST = 'dist/assets';
 const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
   { name: 'codemirror', test: /^codemirror-/, kb: 128, note: 'SQL editor, loaded with the Playground route' },
   // Cut 70 → 18 when `@xyflow/react` was replaced by flowinger. React Flow + d3
-  // measured 60.5 kB gzip in this chunk; flowinger + d3 measured 14.0. Raised 18 → 25
-  // when the pin moved to flowinger's second round of features (controlled flows,
-  // edge selection, delete, box selection, sub-flows, culling…): it measures 21.7
-  // now. FlowTree uses none of them, but they live in the canvas and its store, which
-  // tree-shaking cannot split. Still well under half of what React Flow cost here.
-  // Tight on purpose, so the headroom is not quietly spent again.
-  { name: 'flow', test: /^flow-.*\.js$/, kb: 25, note: 'flowinger + d3-hierarchy' },
+  // measured 60.5 kB gzip in this chunk; flowinger + d3 measured 14.0. It rose to
+  // 21.7, then 24.0, as flowinger gained the React Flow features it lacked —
+  // FlowTree uses none of them, but they lived in the canvas and its store. Now the
+  // canvas is a small core plus opt-in features and FlowTree names none
+  // (`FlowingerCore`): it measures 18.2. Tight on purpose, so the headroom is not
+  // quietly spent again — a feature FlowTree starts to use is imported by name and
+  // shows up here as exactly its own weight.
+  { name: 'flow', test: /^flow-.*\.js$/, kb: 20, note: 'flowinger + d3-hierarchy' },
   { name: 'react', test: /^react-/, kb: 62, note: 'react + react-dom' },
   // The entry chunk after M13 (plan.md §21.5). Every route is now `React.lazy`,
   // so this is App + Router + the layout shell and little else — down from the

@@ -3,10 +3,10 @@ import { createPortal } from 'react-dom';
 import {
   Background,
   BackgroundVariant,
+  FlowingerCore,
+  FlowingerProvider,
   Handle,
   Position,
-  ReactFlow,
-  ReactFlowProvider,
   useReactFlow,
   useStore,
 } from 'flowinger';
@@ -451,7 +451,7 @@ function Canvas({
       {controls && toolbarTarget && createPortal(toolbar, toolbarTarget)}
 
       <div ref={setPane} className="h-full w-full">
-        <ReactFlow
+        <FlowingerCore
           nodes={nodes}
           edges={edges}
           nodeTypes={nodeTypes}
@@ -464,7 +464,7 @@ function Canvas({
           elementsSelectable={false}
         >
           <Background variant={BackgroundVariant.Dots} gap={18} size={1} color="var(--color-edge)" />
-        </ReactFlow>
+        </FlowingerCore>
       </div>
     </>
   );
@@ -491,7 +491,7 @@ export function FlowTree({
   }
   return (
     <div className="h-full min-h-48 w-full">
-      <ReactFlowProvider>
+      <FlowingerProvider>
         <Canvas
           root={root}
           tones={tones}
@@ -504,7 +504,7 @@ export function FlowTree({
           toolbarTarget={toolbarTarget}
           focusIds={focusIds}
         />
-      </ReactFlowProvider>
+      </FlowingerProvider>
     </div>
   );
 }
