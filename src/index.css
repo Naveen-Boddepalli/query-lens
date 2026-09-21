@@ -106,7 +106,7 @@
      detail that separates a flat box from a lit one. Barely-there on purpose. */
   --color-hairline: oklch(1 0 0 / 0.055);
 
-  /* A dedicated colour for the hierarchy edges React Flow draws, one step
+  /* A dedicated colour for the hierarchy edges flowinger draws, one step
      brighter than `--color-edge` so a connector reads against a tinted node. */
   --color-flow-edge: oklch(0.44 0.02 264);
 
@@ -516,7 +516,7 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-/* The dash that crawls along a highlighted React Flow path. Its resting state
+/* The dash that crawls along a highlighted flowinger edge. Its resting state
    is a plain solid stroke, so reduced motion (which zeroes the duration) just
    stops the crawl. */
 @keyframes ql-flow-dash {
@@ -558,8 +558,10 @@ body {
   pointer-events: none;
 }
 
-/* The animated dash on a highlighted React Flow path (the active B+Tree hop,
-   an optimizer rewrite). The class is added by FlowTree to the edge. */
+/* The animated dash on a highlighted flowinger edge (the active B+Tree hop,
+   an optimizer rewrite). The class is added by FlowTree to the edge. The
+   `react-flow__*` class names are kept on flowinger's elements on purpose: this
+   rule and the e2e suite select on them. */
 .react-flow__edge.is-active .react-flow__edge-path {
   stroke: var(--color-accent-strong);
   stroke-width: 2;
@@ -760,24 +762,6 @@ select:disabled {
   background-color: var(--color-span-active);
   border-radius: 2px;
 }
-
-/* React Flow draws its own surface; make it inherit ours. */
-.react-flow__renderer,
-.react-flow__pane {
-  background: transparent;
-}
-.react-flow__attribution {
-  padding: 0 0.25rem !important;
-  border-radius: 0.25rem 0 0 0;
-  background: color-mix(in oklab, var(--color-surface-2) 88%, transparent) !important;
-}
-.react-flow__attribution a {
-  color: var(--color-ink-dim) !important;
-}
-.react-flow__attribution {
-  font-size: 0.625rem;
-}
-
 
 /* plan.md §15.1 item 8. The trace scrubber is the control a touch user leans
    on hardest, and the UA default draws a 16px-tall thumb — under WCAG 2.2

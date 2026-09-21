@@ -155,7 +155,7 @@ function build(
   activeSpan: Span | undefined,
   sideEdges: readonly SideEdge[],
 ) {
-  // d3-hierarchy does the layout maths; React Flow only draws it.
+  // d3-hierarchy does the layout maths; flowinger only draws it.
   const h = hierarchy<FlowNode>(root, (d) => d.children);
   const width = props.wide ? 200 : props.compact ? 104 : 132;
   tree<FlowNode>().nodeSize([width, props.compact ? 84 : 96])(h);
@@ -295,14 +295,19 @@ function Canvas({
   }, [pane]);
 
   /**
-   * React Flow's pan/zoom instance — the thing that actually moves the viewport.
+   * The pan/zoom instance — the thing that actually moves the viewport.
    *
-   * Every viewport call does nothing at all while this is null, silently, and it
-   * stays null until React Flow's own mount effect has built it. Depending on
-   * the instance rather than on elapsed time is what makes the framing below
-   * deterministic instead of a race against a timeout; depending on its
-   * *identity* also catches it being rebuilt, which resets the transform to the
-   * origin — StrictMode's double mount does exactly that in development.
+   * It is null until the canvas has mounted, so depending on it rather than on
+   * elapsed time is what makes the framing below deterministic instead of a
+   * race against a timeout.
+   *
+   * Its identity is stable for the life of the provider — which this effect
+   * *relies on*: it re-runs the framing (and so moves the viewport) whenever the
+   * instance changes, so an instance rebuilt per render would re-frame per
+   * render, without end. Flowinger's first provider did exactly that, and its
+   * regression test exists because of this effect. The viewport itself lives in
+   * flowinger's store, so a remount (StrictMode's, in development) gets back the
+   * transform it left rather than resetting to the origin.
    */
   const panZoom = useStore((state) => state.panZoom);
 
