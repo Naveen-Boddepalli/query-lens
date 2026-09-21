@@ -9,10 +9,9 @@ import {
   ReactFlowProvider,
   useReactFlow,
   useStore,
-} from '@xyflow/react';
-import type { Edge, Node, NodeProps } from '@xyflow/react';
+} from 'flowinger';
+import type { Edge, Node, NodeProps } from 'flowinger';
 import { hierarchy, tree } from 'd3-hierarchy';
-import '@xyflow/react/dist/style.css';
 import type { Span } from '../../engine/index.ts';
 import { durationMs } from '../motion.ts';
 import { useReducedMotion } from '../useReducedMotion.ts';

@@ -14,8 +14,11 @@ minimumReleaseAge: 10080
 # A transitive dependency may not resolve from a git URL or a tarball.
 blockExoticSubdeps: true
 
-# Verified empty: not one package in this graph has a preinstall, install or
-# postinstall script. Stating that explicitly means adding one becomes a diff
-# someone has to approve, rather than a script that just starts running.
-allowBuilds: []
+# One package in this graph has a build step: flowinger, our own node-graph
+# renderer, installed from git. A git-hosted package ships no dist/, so its
+# `prepare` script builds one (`vite build`, then declarations). That is the
+# reason this is no longer empty — and the reason to publish flowinger to a
+# registry instead, where dist/ is prebuilt and this entry can go again.
+allowBuilds:
+  flowinger: true
 
