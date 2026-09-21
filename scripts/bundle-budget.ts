@@ -25,7 +25,7 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
   // 21.7, then 24.0, as flowinger gained the React Flow features it lacked —
   // FlowTree uses none of them, but they lived in the canvas and its store. Now the
   // canvas is a small core plus opt-in features and FlowTree names none
-  // (`FlowingerCore`): it measures 18.2. Tight on purpose, so the headroom is not
+  // (`FlowingerCore`): it measured 18.2, and 18.0 from the published `flowinger@0.1.0`. Tight on purpose, so the headroom is not
   // quietly spent again — a feature FlowTree starts to use is imported by name and
   // shows up here as exactly its own weight.
   { name: 'flow', test: /^flow-.*\.js$/, kb: 20, note: 'flowinger + d3-hierarchy' },
