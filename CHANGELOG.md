@@ -650,6 +650,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   §19 (The Landing Page) added to `plan.md`
 
 ### Changed
+- **The AST, plan and B+Tree trees render through flowinger, our own graph renderer
+  (`github:Naveen-Boddepalli/flowinger`, pinned to a commit), instead of `@xyflow/react`.** It keeps
+  React Flow's API shape — `ReactFlow`, `Handle`, `Background`, `useReactFlow`, `useStore` — and its
+  `react-flow__*` class names, so `FlowTree` changed by imports alone and `index.css` and the e2e
+  selectors needed nothing. Measured against the React Flow build: the `flow` chunk falls 60.5 → 14.0 kB
+  gzip and the total 422.2 → 373.9 kB (against a 424 kB budget, so about 50 kB of headroom instead of
+  1.8); CSS 16.8 → 14.3 kB; typecheck, lint and all 1170 unit tests are unchanged, and the e2e suite
+  passes 79 / 79 on both builds. On the parse tree and the B+Tree the viewport transform and every node
+  rectangle are identical, and edge endpoints agree to within 0.2 units.
+  Three things behave differently, and two of them are improvements:
+  - **Tree nodes now receive pointer events.** React Flow sets `pointer-events: none` on nodes that are
+    neither draggable nor selectable, so the hover styling `FlowTree` documents (and the `title`
+    tooltip on a node's row estimate) never fired; it does now.
+  - **Nodes are no longer focusable.** React Flow left a `tabindex`, a `role`, an `aria-roledescription`
+    and an assertive live region on inert nodes (five no-op tab stops in the parse-tree pane, even
+    with `elementsSelectable={false}`); flowinger adds none unless a canvas opts in.
+  - **The "React Flow" attribution badge is gone** with the dependency.
+  `pnpm-workspace.yaml`'s `allowBuilds` is no longer empty: a git-hosted package ships no `dist/`, so
+  flowinger's `prepare` script builds one. Publishing flowinger to a registry would remove that.
 - **`README.md` restructured** (plan.md §18.4) from 682 lines of decision log down to 82 lines of
   badges, a three-sentence pitch, status, commands, deploying and testing — a front door, not an
   architecture reference. The removed content isn't lost: `plan.md` already narrates every one of
@@ -681,6 +700,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `pnpm-workspace.yaml`'s `minimumReleaseAgeExclude` for the list and the reasoning
 
 ### Removed
+- The `@xyflow/react` dependency and its 19 transitive packages, its stylesheet import, and the dead
+  `.react-flow__renderer` / `__pane` / `__attribution` overrides in `index.css`.
 - Release-planning vocabulary from the shipped UI: the `M1`–`M6` milestone codes stageMeta used to
   print ("Arrives in M4") were a sentence about the backlog, not about databases, and unreadable to
   anyone outside the repository. The not-implemented guard they lived in stays — every stage is
