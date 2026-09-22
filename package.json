@@ -38,7 +38,7 @@
     "@mdx-js/react": "^3.1.1",
     "@mdx-js/rollup": "^3.1.1",
     "d3-hierarchy": "3.1.2",
-    "flowinger": "0.1.0",
+    "flowinger": "0.2.0",
     "html-to-image": "1.11.13",
     "react": "19.2.8",
     "react-dom": "19.2.8",

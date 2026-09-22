@@ -64,7 +64,7 @@ It is a **learning tool**, not a production database. The user types SQL (`SELEC
 
 | Library | Version | Purpose |
 |---|---|---|
-| `flowinger` | 0.1.0 (npm) | Interactive node-based tree diagrams (AST, plan tree, B+Tree). Our own renderer; replaced `@xyflow/react` and keeps its API shape (`Handle`, `useReactFlow`; `ReactFlow` is its whole canvas, `FlowingerCore` the lean one `FlowTree` uses) |
+| `flowinger` | 0.2.0 (npm) | Interactive node-based tree diagrams (AST, plan tree, B+Tree). Our own renderer; replaced `@xyflow/react` and keeps its API shape (`Handle`, `useReactFlow`; `ReactFlow` is its whole canvas, `FlowingerCore` the lean one `FlowTree` uses) |
 | `@codemirror/*` | 6.x | SQL editor with syntax highlighting, autocomplete, error marks |
 | `d3-hierarchy` | 3.1.2 | Tree layout calculations for diagram rendering |
 | `html-to-image` | 1.11.13 | PNG export of panels (lazy-loaded) |
