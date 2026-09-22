@@ -2,7 +2,7 @@
  * plan.md §16.2 item 5 — the motion scale, reachable from JavaScript.
  *
  * The durations are defined once, in `src/index.css`, as `--dur-fast`,
- * `--dur-base` and `--dur-slow`. CSS transitions read them directly; React Flow
+ * `--dur-base` and `--dur-slow`. CSS transitions read them directly; flowinger
  * viewport animations cannot, because they take a number of milliseconds as a
  * function argument. That is exactly how a literal `duration: 400` ends up in a
  * component and stops matching anything — which is what `FlowTree` had.

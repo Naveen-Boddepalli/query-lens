@@ -650,6 +650,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   §19 (The Landing Page) added to `plan.md`
 
 ### Changed
+- **The AST, plan and B+Tree trees render through flowinger, our own graph renderer
+  (`flowinger` on npm), instead of `@xyflow/react`.** It keeps
+  React Flow's API shape — `ReactFlow`, `Handle`, `Background`, `useReactFlow`, `useStore` — and its
+  `react-flow__*` class names, so `FlowTree` changed by imports alone and `index.css` and the e2e
+  selectors needed nothing. Measured against the React Flow build: the `flow` chunk falls 60.5 → 14.0 kB
+  gzip and the total 422.2 → 373.9 kB (against a 424 kB budget, so about 50 kB of headroom instead of
+  1.8); CSS 16.8 → 14.3 kB; typecheck, lint and all 1170 unit tests are unchanged, and the e2e suite
+  passes 79 / 79 on both builds. On the parse tree and the B+Tree the viewport transform and every node
+  rectangle are identical, and edge endpoints agree to within 0.2 units.
+  Three things behave differently, and two of them are improvements:
+  - **Tree nodes now receive pointer events.** React Flow sets `pointer-events: none` on nodes that are
+    neither draggable nor selectable, so the hover styling `FlowTree` documents (and the `title`
+    tooltip on a node's row estimate) never fired; it does now.
+  - **Nodes are no longer focusable.** React Flow left a `tabindex`, a `role`, an `aria-roledescription`
+    and an assertive live region on inert nodes (five no-op tab stops in the parse-tree pane, even
+    with `elementsSelectable={false}`); flowinger adds none unless a canvas opts in.
+  - **The "React Flow" attribution badge is gone** with the dependency.
+  (While it was a git dependency, `pnpm-workspace.yaml`'s `allowBuilds` was not empty: a git-hosted package
+  ships no `dist/`, so flowinger's `prepare` script had to build one. Publishing removed that — see below.)
+  The pin has since moved to flowinger `0c74b6a`, which adds the React Flow features it lacked
+  (controlled flows, edge selection, delete, box selection, sub-flows, culling and more). `FlowTree` uses
+  none of them and is unchanged, but they lived in the canvas and its store: the `flow` chunk was 21.7 kB
+  gzip (from 14.0) and the total 380.7 kB (from 373.9). Typecheck, all 1170 unit tests and 79 / 79 e2e
+  are unchanged.
+  It now pins `d132971`, where the canvas is a small core plus opt-in features: `FlowTree` imports
+  `FlowingerCore` and `FlowingerProvider` (its only change) and names no feature, since it shows and pans
+  a tree and nothing more. The `flow` chunk is **18.2 kB** gzip — 24.0 with the same features carried in
+  the canvas — and the total 377.2 kB; the flow budget is 25 → 20. Typecheck, lint, all 1170 unit tests
+  and 79 / 79 e2e are unchanged.
+  The dependency is now the published package, **`flowinger@0.1.0` from npm** (built from flowinger
+  `68bbe79`, where selecting is a feature too), not a git pin. `pnpm-workspace.yaml` is byte-identical to
+  `main`'s — `allowBuilds: []`, nothing exempt from `minimumReleaseAge` — and a fresh
+  `pnpm install --frozen-lockfile` needs neither. (Resolving a release under a week old needs a one-off
+  `minimumReleaseAgeExclude`; once the lockfile holds the resolution it is not needed, so it is not committed.)
+  The `flow` chunk is 18.0 kB gzip, the total 377.0 kB; typecheck, lint, all 1170 unit tests and 79 / 79 e2e
+  are unchanged.
+  Bumped again to **`flowinger@0.2.0`** — mouse events on nodes/edges/the pane, `defaultViewport` and
+  `onMove*`, edge label styling and `interactionWidth`, and more of `NodeProps` (`dragging`, `width`,
+  `height`, `parentId`…), none of which `FlowTree` uses. The `flow` chunk is 18.9 kB gzip, the total
+  378.0 kB (budget still 20 / 424); typecheck, lint, all 1170 unit tests and 79 / 79 e2e are unchanged.
 - **`README.md` restructured** (plan.md §18.4) from 682 lines of decision log down to 82 lines of
   badges, a three-sentence pitch, status, commands, deploying and testing — a front door, not an
   architecture reference. The removed content isn't lost: `plan.md` already narrates every one of
@@ -681,6 +721,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `pnpm-workspace.yaml`'s `minimumReleaseAgeExclude` for the list and the reasoning
 
 ### Removed
+- The `@xyflow/react` dependency and its 19 transitive packages, its stylesheet import, and the dead
+  `.react-flow__renderer` / `__pane` / `__attribution` overrides in `index.css`.
 - Release-planning vocabulary from the shipped UI: the `M1`–`M6` milestone codes stageMeta used to
   print ("Arrives in M4") were a sentence about the backlog, not about databases, and unreadable to
   anyone outside the repository. The not-implemented guard they lived in stays — every stage is

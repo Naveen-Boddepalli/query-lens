@@ -109,7 +109,7 @@ export default defineConfig({
         codeSplitting: {
           groups: [
             { name: 'codemirror', test: /node_modules\/(@codemirror|@lezer|style-mod|w3c-keyname)\// },
-            { name: 'flow', test: /node_modules\/(@xyflow|d3-|classcat|zustand)/ },
+            { name: 'flow', test: /node_modules\/(flowinger|d3-)/ },
             { name: 'react', test: /node_modules\/(react|react-dom|scheduler)\// },
             // Panel PNG export (§20.3). `import()`ed on first use only, so this
             // gives it a stable chunk name rather than rolldown's generic `es-`.

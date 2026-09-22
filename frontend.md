@@ -64,7 +64,7 @@ It is a **learning tool**, not a production database. The user types SQL (`SELEC
 
 | Library | Version | Purpose |
 |---|---|---|
-| `@xyflow/react` | 12.11.6 | Interactive node-based tree diagrams (AST, plan tree, B+Tree) |
+| `flowinger` | 0.2.0 (npm) | Interactive node-based tree diagrams (AST, plan tree, B+Tree). Our own renderer; replaced `@xyflow/react` and keeps its API shape (`Handle`, `useReactFlow`; `ReactFlow` is its whole canvas, `FlowingerCore` the lean one `FlowTree` uses) |
 | `@codemirror/*` | 6.x | SQL editor with syntax highlighting, autocomplete, error marks |
 | `d3-hierarchy` | 3.1.2 | Tree layout calculations for diagram rendering |
 | `html-to-image` | 1.11.13 | PNG export of panels (lazy-loaded) |
@@ -214,10 +214,10 @@ QueryLens/
 │   │   │
 │   │   ├── panels/              # Visualization panels (one per pipeline stage)
 │   │   │   ├── StageDetail.tsx   # Orchestrator: picks the right panel for a stage
-│   │   │   ├── AstTree.tsx       # AST tree visualization (React Flow)
-│   │   │   ├── PlanTree.tsx      # Plan tree visualization (React Flow)
-│   │   │   ├── FlowTree.tsx      # Generic React Flow tree wrapper
-│   │   │   ├── BTreePanel.tsx    # B+Tree visualization (React Flow)
+│   │   │   ├── AstTree.tsx       # AST tree visualization (flowinger)
+│   │   │   ├── PlanTree.tsx      # Plan tree visualization (flowinger)
+│   │   │   ├── FlowTree.tsx      # Generic flowinger tree wrapper
+│   │   │   ├── BTreePanel.tsx    # B+Tree visualization (flowinger)
 │   │   │   ├── BufferPoolPanel.tsx # Buffer pool frame grid
 │   │   │   ├── LockPanel.tsx     # Lock visualization
 │   │   │   ├── ResultPanel.tsx   # Result rows table
@@ -288,7 +288,7 @@ QueryLens/
 │                        UI Layer (React)                      │
 │  ┌──────────┐  ┌────────────┐  ┌─────────────────────────┐  │
 │  │ SqlEditor │  │ Playback   │  │ StageDetail             │  │
-│  │           │  │ Controls   │  │  ├─ AstTree (React Flow) │  │
+│  │           │  │ Controls   │  │  ├─ AstTree (flowinger)  │  │
 │  │ CodeMirror│  │ usePlayback│  │  ├─ PlanTree             │  │
 │  │ SQL input │  │ hook       │  │  ├─ BufferPoolPanel      │  │
 │  │           │  │            │  │  ├─ BTreePanel           │  │
@@ -636,12 +636,12 @@ Each pipeline stage has a dedicated visualization:
 
 | Stage | Panel | Technology | What it Shows |
 |---|---|---|---|
-| `parse` | `AstTree` | React Flow | Abstract syntax tree with highlighted source spans |
-| `plan` | `PlanTree` | React Flow | Logical plan tree with estimated rows |
-| `optimize` | `PlanTree` ×2 | React Flow | Before/after plan trees side by side with rule name |
+| `parse` | `AstTree` | flowinger | Abstract syntax tree with highlighted source spans |
+| `plan` | `PlanTree` | flowinger | Logical plan tree with estimated rows |
+| `optimize` | `PlanTree` ×2 | flowinger | Before/after plan trees side by side with rule name |
 | `execute` | Operator list | Plain HTML | Volcano operators with row counts |
 | `buffer` | `BufferPoolPanel` | Custom grid | 8 buffer frames, hit/miss/evict coloring, stats, clock hand |
-| `index` | `BTreePanel` | React Flow | B+Tree with traversal path highlighted, sibling chain edges |
+| `index` | `BTreePanel` | flowinger | B+Tree with traversal path highlighted, sibling chain edges |
 | `lock` | `LockPanel` | Custom list | Held page locks (shared/exclusive) with counts |
 | `result` | `ResultPanel` | HTML table | Final result rows |
 
@@ -917,7 +917,7 @@ interface ViewState {
 }
 ```
 
-### Display Tree Shapes (for React Flow)
+### Display Tree Shapes (for flowinger)
 
 ```typescript
 // AST node
@@ -1096,7 +1096,7 @@ Every page is `React.lazy()` — no page loads until navigated to. Chunks are co
 | Chunk | Contents |
 |---|---|
 | `codemirror` | `@codemirror/*`, `@lezer/*`, `style-mod`, `w3c-keyname` |
-| `flow` | `@xyflow/*`, `d3-*`, `classcat`, `zustand` |
+| `flow` | `flowinger`, `d3-*` |
 | `react` | `react`, `react-dom`, `scheduler` |
 | `html-to-image` | PNG export (lazy-loaded on first use) |
 | `docs` | All docs MDX pages (except concepts with live widgets) |
@@ -1427,10 +1427,10 @@ Runs on every PR and push to `main`. All GitHub Actions are **pinned to immutabl
 | File | Stage | Technology |
 |---|---|---|
 | `StageDetail.tsx` | All | Orchestrator: picks panel, renders header/help/export buttons |
-| `AstTree.tsx` | parse | React Flow tree |
-| `PlanTree.tsx` | plan, optimize | React Flow tree |
-| `FlowTree.tsx` | — | Generic React Flow tree wrapper (used by AST, Plan, BTree) |
-| `BTreePanel.tsx` | index | React Flow tree with sibling edges |
+| `AstTree.tsx` | parse | flowinger tree |
+| `PlanTree.tsx` | plan, optimize | flowinger tree |
+| `FlowTree.tsx` | — | Generic flowinger tree wrapper (used by AST, Plan, BTree) |
+| `BTreePanel.tsx` | index | flowinger tree with sibling edges |
 | `BufferPoolPanel.tsx` | buffer | Custom grid of frames with hit/miss/evict colouring |
 | `LockPanel.tsx` | lock | List of held locks |
 | `ResultPanel.tsx` | result | HTML table of result rows |
@@ -1490,7 +1490,7 @@ As of the latest repository scan, the frontend is in a **highly mature, producti
 
 ### Implementation Status
 - **Core Playground (`PlaygroundPage.tsx`)**: Fully implemented (~800 lines). Supports all 8 pipeline stages, schema editing, inline data editing, prediction recording, and playback controls.
-- **Visualizations (`src/ui/panels/`)**: 100% complete. React Flow is heavily customized for AST, Plan Tree, and B+Tree panels. Custom HTML/CSS grids are used for the Buffer Pool and Slotted Page layouts.
+- **Visualizations (`src/ui/panels/`)**: 100% complete. The flowinger renderer draws the AST, Plan Tree, and B+Tree panels. Custom HTML/CSS grids are used for the Buffer Pool and Slotted Page layouts.
 - **Standalone Tools (`src/pages/tools/`)**: All 9 dedicated sandboxes are complete, functional, and heavily tested (B+Tree, Buffer Pool, Parser, Planner, Page, Sort, Locks, Grammar, Hash Join).
 - **Compare Mode (`ComparePage.tsx`)**: Fully implemented (~900 lines) with all 4 comparison algorithms functioning (Eviction Policies, Index vs. Seq Scan, Hash vs. Sort Aggregate, and Join Strategies).
 - **Documentation (`src/pages/DocsContent/`)**: Fully integrated using MDX. Live React components (`DocsBTreeDemo`, `DocsBufferPoolDemo`) successfully embed interactive DB state directly into the markdown documentation.
