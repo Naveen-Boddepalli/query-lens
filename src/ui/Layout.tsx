@@ -40,7 +40,14 @@ export function Layout() {
         <DisclaimerBanner />
         <TopNav />
         {showHint && <FirstVisitHint />}
-        <div className="flex min-h-0 flex-1">
+        {/* `overflow-y-auto` here, not on the shell: most routed pages (Learn,
+            Examples, Settings, …) are plain prose taller than one viewport and
+            have no internal scroll container of their own, so without this they
+            were simply clipped by the shell's `lg:overflow-hidden` above with no
+            way to reach the rest of the page. Playground and the /stages and
+            /docs layouts size themselves to fit exactly (or scroll a nested
+            panel), so this never shows a second scrollbar for them. */}
+        <div className="flex min-h-0 flex-1 overflow-y-auto">
           <Outlet />
         </div>
       </div>

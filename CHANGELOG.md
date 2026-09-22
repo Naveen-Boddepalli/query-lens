@@ -729,6 +729,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   built today, but `STAGES`/`IMPLEMENTED_STAGES` remain separate lists on purpose
 
 ### Fixed
+- Several routed pages — `/learn`, `/learn/:lessonId`, `/challenges`, `/tools`, and the
+  `/tools/sort`, `/tools/planner`, `/tools/grammar` and `/tools/hash-join` sandboxes — were
+  clipped on desktop with no way to reach the rest of their content. `Layout.tsx`'s app shell is
+  deliberately one viewport tall (`lg:h-dvh lg:overflow-hidden`, plan.md §15.5) so a long
+  Playground result scrolls inside its own panel instead of growing the page, but the `<div>`
+  wrapping `<Outlet />` had no scroll of its own, so any page taller than the viewport — most of
+  them plain prose with no internal scroll container — was simply cut off at the fold. `/stages`
+  and `/docs` had already worked around this locally by putting `overflow-y-auto` on their own
+  nested `<Outlet />` wrapper; that same `overflow-y-auto` now sits on the shared wrapper in
+  `Layout.tsx` instead, so every routed page gets it once. Verified across every route at
+  1440×900 that the shell height stays pinned to the viewport and, where content overflows, the
+  wrapper — not the shell — is what scrolls; Playground, `/stages`, `/docs` and the Presenter
+  overlay were unaffected, since each already sizes to fit or scrolls a nested panel of its own
 - `optimize.ts`'s constant-folding rule mishandled two reflexive comparisons: `age <= age`
   and `age >= age` folded to `false` (they are always `true` — a column always satisfies
   `<=`/`>=` against itself), and `foldLiteralCompare`'s own `<=`/`>=` cases silently fell

@@ -706,6 +706,15 @@ in states it did not visit and the third only in a browser it did not use.
 - **A phone scrolled sideways**, found while testing the fix above. Grid and flex children default to
   `min-width: auto` and will not shrink below their content, so a long email column pushed the page
   wider rather than letting the table's own scroller work.
+- **The fixed-height shell above silently clipped every page that never got its own scroller.** The
+  fix two bullets up only made the *Playground's own panels* scroll inside the fixed shell; `/stages`
+  and `/docs` each separately noticed the same problem for their own `<Outlet />` and patched it
+  locally. Every other routed page — `/learn`, `/challenges`, `/tools` and several of its sandboxes,
+  plain prose or lists with no scroll container of their own — was never patched, and on desktop
+  simply lost whatever fell past one viewport with no way to reach it, reported as "the Learn page
+  is not scrolling." `Layout.tsx`'s shared `<Outlet />` wrapper now carries the `overflow-y-auto`
+  `/stages`/`/docs` had each been adding for themselves, so the invariant applies once, everywhere,
+  instead of per-page as each page happens to need it.
 
 - **The B+Tree's zoom controls overlapped its leaf row.** React Flow's `<Controls>` float inside the
   pane; for this graph the bottom-right corner is where the leaves are. Moving them into the panel
