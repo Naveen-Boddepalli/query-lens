@@ -690,6 +690,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `onMove*`, edge label styling and `interactionWidth`, and more of `NodeProps` (`dragging`, `width`,
   `height`, `parentId`…), none of which `FlowTree` uses. The `flow` chunk is 18.9 kB gzip, the total
   378.0 kB (budget still 20 / 424); typecheck, lint, all 1170 unit tests and 79 / 79 e2e are unchanged.
+  Bumped again to **`flowinger@0.3.0`** — `getInternalNode`/`useInternalNode`, `useStoreApi`,
+  `ariaLabel`/`ariaRole`/`domAttributes` on nodes and edges, none of which `FlowTree` uses either. The
+  `flow` chunk is 19.0 kB gzip, the total 378.1 kB; typecheck, lint, all 1170 unit tests and 79 / 79 e2e
+  are unchanged.
 - **`README.md` restructured** (plan.md §18.4) from 682 lines of decision log down to 82 lines of
   badges, a three-sentence pitch, status, commands, deploying and testing — a front door, not an
   architecture reference. The removed content isn't lost: `plan.md` already narrates every one of
