@@ -742,8 +742,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   postinstall scripts to fetch native binaries. `pnpm-workspace.yaml`'s `allowBuilds: []`
   (plan.md §14.1 item 7's supply-chain hardening) blocks install scripts project-wide, which is
   correct for this project's own dependency graph — confirmed empty — but also silently blocked
-  Cloudflare's own deploy tooling. `allowBuilds` now names those two packages explicitly, with the
-  comment updated to say they are deploy-tooling exceptions, not part of the app's graph
+  Cloudflare's own deploy tooling. The first attempt at an exception (`allowBuilds: [esbuild,
+  workerd]`, a YAML list) did not actually fix it: under the `pnpm@11.1.2` this project pins,
+  `allowBuilds` is a *mapping*, not a list, and the list form parses without error but is silently
+  treated as empty — Cloudflare's next build failed identically. Confirmed by reproducing the
+  exact `[ERR_PNPM_IGNORED_BUILDS]` locally under the pinned pnpm version with the list form, then
+  again with `allowBuilds: { esbuild: true, workerd: true }`, which actually runs both postinstall
+  scripts
 - Several routed pages — `/learn`, `/learn/:lessonId`, `/challenges`, `/tools`, and the
   `/tools/sort`, `/tools/planner`, `/tools/grammar` and `/tools/hash-join` sandboxes — were
   clipped on desktop with no way to reach the rest of their content. `Layout.tsx`'s app shell is

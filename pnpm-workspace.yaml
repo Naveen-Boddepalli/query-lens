@@ -29,7 +29,14 @@ blockExoticSubdeps: true
 # 404.html), and wrangler's own esbuild/workerd need their install scripts to
 # fetch their native binaries. Blocking those broke every deploy with nothing
 # more specific than "error occurred while running deploy command".
+# `allowBuilds` is a *mapping*, not a list — under the pnpm@11.1.2 this
+# project pins, a `- esbuild` list form parses without error but is silently
+# treated as empty, which is why the first attempt at this exception did
+# nothing and the deploy kept failing identically. Confirmed by reproducing
+# the exact `[ERR_PNPM_IGNORED_BUILDS]` locally under pnpm@11.1.2 with the
+# list form, then again with the mapping form below, which actually runs
+# both postinstall scripts.
 allowBuilds:
-  - esbuild
-  - workerd
+  esbuild: true
+  workerd: true
 
