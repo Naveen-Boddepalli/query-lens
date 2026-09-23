@@ -734,6 +734,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   built today, but `STAGES`/`IMPLEMENTED_STAGES` remain separate lists on purpose
 
 ### Fixed
+- **The deploy step itself now clears Cloudflare's `_redirects` validator.** Once the build/install
+  side was working (previous entry), the deploy failed differently: "Invalid _redirects
+  configuration: Line 18: Infinite loop detected in this rule. This would cause a redirect to
+  strip '.html' or '/index' and end up triggering this rule again." `public/_redirects`' SPA
+  rewrite (`/*  /index.html  200`) and the platform's own automatic `.html`/`index` URL
+  normalization formed a genuine cycle — confirmed real, since the deploy's own API calls
+  (`/accounts/.../workers/scripts/query-lens/...`) show this project already runs on the newer
+  unified Workers-with-static-assets engine, not classic Pages, and that engine validates
+  `_redirects` against its own URL-handling rules rather than treating it as an opaque legacy file.
+  Added `wrangler.jsonc` (`name: "query-lens"`, matching the existing script so this updates the
+  same deployment rather than creating a new one; no `main`, since this project has no Worker code
+  of its own) with `assets.not_found_handling: "single-page-application"` — Cloudflare's current
+  documented replacement for exactly this pattern, scoped to navigation requests only rather than
+  every unmatched path, which does not hit the cycle. `_redirects`' rule is gone, its comment
+  redirected to explain where the behavior moved; `404.html` keeps its prior last-resort role
+  unchanged.
 - **The first real Cloudflare Pages deploy failed** with nothing more specific than "error occurred
   while running deploy command." Cloudflare's build step injects `wrangler` as a devDependency to
   actually publish `dist/` — this project has no Worker code of its own; wrangler is just the

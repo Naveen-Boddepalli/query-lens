@@ -1,0 +1,22 @@
+{
+  // Not a project dependency — `wrangler` itself is never installed here (see
+  // pnpm-workspace.yaml's `allowBuilds` comment); Cloudflare's build step
+  // injects its own copy to read this file and publish `dist/`.
+  //
+  // This project has no Worker code, only static assets — `main` is
+  // deliberately absent. `not_found_handling: "single-page-application"`
+  // replaces the old `public/_redirects` catch-all (`/* /index.html 200`):
+  // that rule and this platform's own automatic `.html`/`index` URL
+  // normalization formed a genuine redirect cycle — Cloudflare's deploy
+  // validator refused to publish, citing "Line 18: Infinite loop detected in
+  // this rule" — where this native mechanism (scoped to navigation requests
+  // only, per Cloudflare's docs) does not. `public/404.html` stays the
+  // last-resort fallback for when the app bundle itself fails to load, same
+  // as before (plan.md §21.5 item 1).
+  "name": "query-lens",
+  "compatibility_date": "2026-09-23",
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "single-page-application"
+  }
+}

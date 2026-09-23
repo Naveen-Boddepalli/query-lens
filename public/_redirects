@@ -1,18 +1,20 @@
 # plan.md §21.5 item 1. QueryLens is a client-side multi-page app: every route
 # except `/` (the stage explainers, `/examples`, and the integrated docs under
-# `/docs/*`) is drawn by React Router, not by a file on disk. Without this line
-# a hard load of one of those paths — a refresh, a shared link, a new tab —
-# matches no asset and Cloudflare serves `404.html`, which carries `noindex`.
-# The whole distribution model is a shared link (§14.1, §19.3), so that is the
-# deploy-day blocker this closes.
+# `/docs/*`) is drawn by React Router, not by a file on disk. A hard load of
+# one of those paths — a refresh, a shared link, a new tab — needs an SPA
+# rewrite to `index.html` or it matches no asset. The whole distribution model
+# is a shared link (§14.1, §19.3), so that was the original deploy-day
+# blocker this file closed.
 #
-# Cloudflare Pages checks static assets before `_redirects`, so `/assets/*`,
-# `/fonts/*`, `/og.png`, `/favicon.svg`, `/robots.txt` and the rest still serve
-# directly; only unmatched paths fall through to the SPA entry. The 200 keeps
-# the requested URL in the address bar (a 301/302 would rewrite it), which is
-# what lets React Router read the path it was asked for.
+# The rewrite used to live here, as `/*  /index.html  200` — moved to
+# `wrangler.jsonc`'s `assets.not_found_handling: "single-page-application"`
+# instead, because that rule and this platform's own automatic `.html`/
+# `index` URL normalization formed a genuine redirect cycle: Cloudflare's
+# deploy validator refused to publish, citing "Infinite loop detected in this
+# rule. This would cause a redirect to strip '.html' or '/index'...". The
+# native mechanism replaces it without hitting that cycle, and is scoped to
+# navigation requests only rather than every unmatched path.
 #
-# `404.html` is now a last resort only — reached when the app bundle itself
-# fails to load, not for ordinary unknown routes, which React Router's `*`
-# route renders as `NotFoundPage` inside the loaded app.
-/*  /index.html  200
+# `404.html` stays the last resort — reached when the app bundle itself fails
+# to load, not for ordinary unknown routes, which React Router's `*` route
+# renders as `NotFoundPage` inside the loaded app.

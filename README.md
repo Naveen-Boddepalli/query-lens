@@ -62,10 +62,13 @@ committed setting or start an exclude list.
 
 ## Deploying
 
-Cloudflare Pages (plan.md §6). `pnpm build` outputs a static `dist/`;
-`public/_headers` carries a tested CSP and the full security header set
-([plan.md §14.3](plan.md#143-the-security-headers-tested-rather-than-assumed)). There is **no
-telemetry of any kind** — no analytics, no error tracking, no cookies — a decision recorded in
+Cloudflare, on the unified Workers-with-static-assets engine (plan.md §6). `pnpm build` outputs a
+static `dist/`; `wrangler.jsonc` (`assets.directory` + `assets.not_found_handling:
+"single-page-application"`) is the SPA rewrite, and `public/_headers` carries a tested CSP and the
+full security header set ([plan.md §14.3](plan.md#143-the-security-headers-tested-rather-than-assumed)).
+This project has no Worker code of its own — `wrangler` publishes static assets only, and is not a
+project dependency; Cloudflare's own build step supplies it. There is **no telemetry of any kind**
+— no analytics, no error tracking, no cookies — a decision recorded in
 [plan.md §14.4](plan.md#144-the-telemetry-decision-stated-rather-than-drifted-into), not an
 omission. `VITE_SITE_URL` sets the canonical/`og:image` URL if the site gets a custom domain.
 
