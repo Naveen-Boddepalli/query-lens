@@ -19,8 +19,17 @@ minimumReleaseAgeExclude:
 # A transitive dependency may not resolve from a git URL or a tarball.
 blockExoticSubdeps: true
 
-# Verified empty: not one package in this graph has a preinstall, install or
-# postinstall script. Stating that explicitly means adding one becomes a diff
-# someone has to approve, rather than a script that just starts running.
-allowBuilds: []
+# Verified empty for the app's own dependency graph — not one package there has
+# a preinstall, install or postinstall script. Stating that explicitly means
+# adding one becomes a diff someone has to approve, rather than a script that
+# just starts running. The two entries below are the one deliberate exception,
+# and are not part of that graph at all: this project has no Worker code of its
+# own, but Cloudflare's build step injects `wrangler` as a devDependency to
+# actually publish `dist/` (it's what serves public/_headers, _redirects and
+# 404.html), and wrangler's own esbuild/workerd need their install scripts to
+# fetch their native binaries. Blocking those broke every deploy with nothing
+# more specific than "error occurred while running deploy command".
+allowBuilds:
+  - esbuild
+  - workerd
 

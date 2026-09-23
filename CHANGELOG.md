@@ -734,6 +734,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   built today, but `STAGES`/`IMPLEMENTED_STAGES` remain separate lists on purpose
 
 ### Fixed
+- **The first real Cloudflare Pages deploy failed** with nothing more specific than "error occurred
+  while running deploy command." Cloudflare's build step injects `wrangler` as a devDependency to
+  actually publish `dist/` — this project has no Worker code of its own; wrangler is just the
+  mechanism the newer unified Workers/Pages platform uses to serve `public/_headers`, `_redirects`
+  and `404.html` — and wrangler pulls in `esbuild` and `workerd`, both of which need their
+  postinstall scripts to fetch native binaries. `pnpm-workspace.yaml`'s `allowBuilds: []`
+  (plan.md §14.1 item 7's supply-chain hardening) blocks install scripts project-wide, which is
+  correct for this project's own dependency graph — confirmed empty — but also silently blocked
+  Cloudflare's own deploy tooling. `allowBuilds` now names those two packages explicitly, with the
+  comment updated to say they are deploy-tooling exceptions, not part of the app's graph
 - Several routed pages — `/learn`, `/learn/:lessonId`, `/challenges`, `/tools`, and the
   `/tools/sort`, `/tools/planner`, `/tools/grammar` and `/tools/hash-join` sandboxes — were
   clipped on desktop with no way to reach the rest of their content. `Layout.tsx`'s app shell is
