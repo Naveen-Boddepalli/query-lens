@@ -29,13 +29,19 @@ const BUILD_TIME = new Date().toISOString();
 
 // og:image and canonical have to be absolute — a relative one is dropped by
 // most scrapers, and the preview card *is* the landing page (plan.md §14.1
-// item 8). Cloudflare Pages sets CF_PAGES_URL per deployment; the default is
-// the project's production hostname. Override with VITE_SITE_URL if the site
-// ever moves to a custom domain, rather than editing markup.
+// item 8). CF_PAGES_URL is classic-Pages-only and this project runs on the
+// unified Workers-with-static-assets engine instead (plan.md §6) — Cloudflare
+// documents no equivalent auto-injected URL for a Workers Builds deploy, so
+// it is never set here and the fallback below is the real, live default, not
+// a placeholder. It was wrong once already: `query-lens.pages.dev` never
+// resolved (no such project existed under that exact slug), which silently
+// broke every og:url/og:image tag until the live URL was checked by hand
+// post-deploy. Override with VITE_SITE_URL if the site moves to a custom
+// domain, rather than editing markup or this fallback.
 const SITE_URL = (
   process.env.VITE_SITE_URL ??
   process.env.CF_PAGES_URL ??
-  'https://query-lens.pages.dev'
+  'https://query-lens.1234naveenboddepalli.workers.dev'
 ).replace(/\/$/, '');
 
 // https://vite.dev/config/

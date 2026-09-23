@@ -734,6 +734,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   built today, but `STAGES`/`IMPLEMENTED_STAGES` remain separate lists on purpose
 
 ### Fixed
+- **`og:url`/`og:image`/canonical pointed at a domain that has never resolved.**
+  `vite.config.ts`'s `SITE_URL` fell back to `CF_PAGES_URL`, then a hardcoded
+  `https://query-lens.pages.dev` — both wrong once the project turned out to run on the unified
+  Workers-with-static-assets engine (previous entry) rather than classic Pages: Cloudflare sets no
+  `CF_PAGES_URL`-equivalent for a Workers Builds deploy, and the hardcoded guess had never actually
+  been checked against DNS — `query-lens.pages.dev` does not resolve at all. Every social/canonical
+  tag silently pointed at a dead domain until the real deployed URL
+  (`query-lens.1234naveenboddepalli.workers.dev`) was checked by hand post-deploy. The hardcoded
+  fallback now names that real, live URL instead of a placeholder; `VITE_SITE_URL` remains the
+  override for a future custom domain. Verified live: `og:url`/`og:image`/canonical now resolve,
+  `og.png` serves correctly, and securityheaders.com's real scan of the live deploy reports **A+**
 - **The deploy step itself now clears Cloudflare's `_redirects` validator.** Once the build/install
   side was working (previous entry), the deploy failed differently: "Invalid _redirects
   configuration: Line 18: Infinite loop detected in this rule. This would cause a redirect to

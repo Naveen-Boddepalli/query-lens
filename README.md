@@ -15,6 +15,7 @@ it: which access path the optimizer chose and why, which pages the buffer pool e
 locks a B+Tree descent held at once. Predictions are asked for before each reveal, seed data is
 editable in place, and every moment on screen is a shareable link.
 
+**[Live](https://query-lens.1234naveenboddepalli.workers.dev)** ·
 **[Contributing](CONTRIBUTING.md)** · **[Code of Conduct](CODE_OF_CONDUCT.md)** ·
 **[Security](SECURITY.md)** · **[Changelog](CHANGELOG.md)** · **[License](LICENSE)** ·
 **[Docs license](LICENSE-DOCS)**

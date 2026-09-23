@@ -581,14 +581,23 @@ The URL may be shared publicly when all ten P0 items are true, and specifically 
       *Verified by forcing a throw in `BufferPoolPanel` against the running app: the rest of the
       trace stayed live, and the fallback carried build SHA, page, browser, error, component
       stack and the four repro values.*
-- [~] securityheaders.com reports A or A+, and the SQL editor is still styled under the live CSP.
-      *The editor half is verified — `dist/` was served under the exact `_headers` policy and
-      CodeMirror renders styled, with zero CSP violations in the console. The grade itself needs
-      the public URL and is the one item that cannot be closed before the first deploy.*
+- [x] securityheaders.com reports A or A+, and the SQL editor is still styled under the live CSP.
+      *Both now verified against the real first deploy
+      (`https://query-lens.1234naveenboddepalli.workers.dev`), not just a local `dist/` serve:
+      securityheaders.com's actual scan reports **A+**, every header from §14.3's policy present
+      byte-for-byte, `X-Frame-Options` correctly absent in favour of `frame-ancestors`. The editor
+      renders styled with zero console errors on the live page.*
 - [x] `LICENSE` exists and the README names it.
-- [~] Pasting the URL into Slack or Twitter shows an image of the product.
+- [x] Pasting the URL into Slack or Twitter shows an image of the product.
       *`public/og.png` (1200×630, the buffer pool mid-eviction) plus `og:`/`twitter:` tags with an
-      absolute URL from `VITE_SITE_URL`/`CF_PAGES_URL`. Unverifiable until something can fetch it.*
+      absolute URL. Verified live: `og.png` serves 200/image/png, and `og:url`/`og:image` resolve
+      to the real deployed domain — which needed its own fix first. The fallback in
+      `vite.config.ts` assumed `CF_PAGES_URL` would be set and hardcoded `query-lens.pages.dev` as
+      a backup; neither held once the project turned out to run on the unified
+      Workers-with-static-assets engine rather than classic Pages (§6) — Cloudflare sets no
+      equivalent URL variable for a Workers Builds deploy, and the hardcoded guess had never been
+      checked against a real DNS lookup, so it silently pointed at a domain that does not resolve.
+      Caught only by checking the live `og:url`/`og:image` tags against the real deployment.*
 - [x] The live page reports which commit it was built from.
       *`<meta name="querylens:build">` in the served HTML and a console banner, both from the
       same `define`.*
