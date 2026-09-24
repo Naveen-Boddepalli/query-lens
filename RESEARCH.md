@@ -1320,16 +1320,17 @@ leaves your browser" (§14.4).
   first and only escalates if it cannot reach ~10k rows.
 - **Accounts, graded submission, telemetry, real-time collaboration** — unchanged: own product / not done.
 
-**Questions for you.**
-1. **Keep the name, or rename before the launch post?** (§45.) My lean: decide this week.
-2. **Run the §9 study during v2.0, with a self-serve kit, or keep building?** My lean: run it — §12's
-   first risk grows with every subject added (§25.6).
+**Questions for you — answered 2026-09-24** (plan.md §25.9, appendix v22).
+1. **Keep the name, or rename before the launch post?** (§45.) **Decided: keep, paired with the descriptor.**
+   Checked first — npm `querylens` / `query-lens` unclaimed, `@querylens` empty, `querylens.com/.io/.ai/.cc/.tech`
+   registered by others, `.org` / `.net` unregistered in WHOIS. Recommended domain: `querylens.org`, to be bought.
+2. **Run the §9 study during v2.0, with a self-serve kit, or keep building?** **Decided: run it.** The kit is built; it needs participants.
 3. **Transactions before storage engines?** The syllabus gap (six lectures) says yes; LSM has more
    interview-prep pull. My lean: transactions on the main line, LSM as a parallel standalone.
 4. **Will anyone maintain a non-English locale?** i18n is expensive here because the engine emits English
    narration strings (§25.4 H5). Without a named maintainer it stays deferred.
-5. **npm scope.** Publishing `@querylens/*` needs an npm organisation, and the name collision (§45) applies
-   there too.
+5. **npm scope.** **Decided:** org `querylens` for `@querylens/engine` and `@querylens/mcp`; the CLI unscoped as
+   `querylens`. The scope is unclaimed today, so no collision blocks it; the org itself must be created by you.
 
 ---
 

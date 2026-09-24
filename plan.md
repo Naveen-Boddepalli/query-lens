@@ -2532,10 +2532,10 @@ Costs are against the modules that exist today (paths verified 2026-09-24). "Rel
 | ID | Rel. | Item | Shape | Cost |
 |---|---|---|---|---|
 | **A1** | 2.0 | **SQLite oracle + metamorphic tests** | (a) Metamorphic inside QueryLens: rules-off vs rules-on return the same rows (NoREC-shaped); all join algorithms and both aggregate strategies agree; `Sort`+`Limit`. (b) Differential vs **`node:sqlite`** (in the pinned Node ≥ 22.13; **no new dependency, no bundle bytes**) using **`fast-check`** (already a devDependency) over generated typed tables and grammar-derived queries; compare multisets (sequences under `ORDER BY`), aggregates with a tolerance, `NULL`s. (c) TLP once B1 lands three-valued logic. A **divergence ledger** for documented semantic differences instead of `skip`s. CI runs a **seeded, bounded** count; a long run lives in a scheduled read-only workflow. Ship a docs page, **"How we know the answers are right."** | 1–1.5 wk |
-| **A2** | 2.0 | **§9 study kit** | An unlisted `/study` route: consent text; arm assignment by link (`?arm=`); the QueryLens arm gets guided tasks, the control arm gets `STUDY.md`'s text; a **fixed five-question post-test disjoint from any in-app question bank**; a result blob the participant copies back. **No network.** Makes remote participation possible; the study can finally happen | ~1 wk + calendar |
+| **A2** | 2.0 | **§9 study kit** | **Built, 2026-09-24 — not yet run.** As planned it was to be a fixed post-test inside an unlisted route; building it exposed a conflict with `STUDY.md` (the questions and control text must never ship publicly), so the design changed: `/study` is an inert **runner** and the whole instrument — consent, reading or lessons, questions, timings — travels in each participant's link *fragment* (`#p=…`, never sent to a server), generated from `STUDY.md` by `pnpm study links`. Kiosk mode (no nav or footer, so the control arm is not one click from the app's own explanations), reload-resume, timestamp-driven clocks, a copyable result code; `pnpm study collate` writes a **blind** scoring sheet (participant and arm removed) and `report` prints descriptive per-arm results with no p-value. An e2e test fails the build if study text ever reaches `dist/`. See STUDY.md §4 | built: ~1 wk; run: calendar |
 | **A3** | 2.0 | **"Report a confusing step"** | On any moment: a prefilled GitHub issue carrying the share URL, step, build stamp. A privacy-preserving feedback channel for a product with, by decision (§14.4), no telemetry. Complements the crash repro | 1 day |
-| **A4** | 2.0 | **Release discipline** | T0 above; release notes from CHANGELOG; a "config verified on a preview deploy" checklist item for any change touching `_headers`, `wrangler.jsonc` or `public/` (§25.5) | ½ day |
-| **A5** | 2.0 | **Name, domain, launch** | Decide keep / pair-with-descriptor / rename (RESEARCH.md §45) **before** the §18.2 post; then a custom domain via the existing `VITE_SITE_URL` | decision + 1 day |
+| **A4** | 2.0 | **Release discipline** | T0 above — **done**; release notes from CHANGELOG; a "config verified on a preview deploy" checklist item for any change touching `_headers`, `wrangler.jsonc` or `public/` (§25.5) | ½ day |
+| **A5** | 2.0 | **Name, domain, launch** | **Name decided, 2026-09-24: keep "QueryLens", always paired with the descriptor "a database internals visualizer"** (the site's `<title>` already led with it; `package.json` and the README now do too). Why not rename: no namespace forces it — the unscoped npm names `querylens` and `query-lens` are unclaimed and nothing exists under `@querylens`; the repo lives at `Naveen-Boddepalli/query-lens`; and a rename touches the wordmark, favicon, OG card, `localStorage` keys, the CLI's name and every doc, for a problem a descriptor mostly solves (people find an education tool by "B+Tree visualizer", not by name). Why not the domains: `querylens.com`, `.io`, `.ai`, `.cc` and `.tech` are registered by others. **Domain — needs you to buy it:** `querylens.org` and `.net` show as unregistered in WHOIS, `.dev` and `.app` as not found in their registries' RDAP (WHOIS for Google's TLDs is inconclusive) — **confirm at a registrar; I checked, I cannot buy.** Recommendation: **`querylens.org`** (an education / open-source signal, matching MIT + CC BY docs). Then in the Cloudflare dashboard add it under the `query-lens` project's *Domains* and set `VITE_SITE_URL` in the build environment; the `vite.config.ts` fallback is then updated to match. **Revisit if** a rival contests the name or post-launch feedback shows confusion — rename while it is still cheap | decision made; domain: 1 day once bought |
 | **A6** | 2.0 | **Field performance without telemetry** | CrUX (public) once there is traffic; opt-in INP timing inside the study kit on participants' real hardware (§14.2's open item) | ½ day |
 
 #### B. Raise the engine's ceiling
@@ -2609,7 +2609,7 @@ Costs are against the modules that exist today (paths verified 2026-09-24). "Rel
 |---|---|---|---|---|
 | **H1** | 2.5 | **PWA / offline** | A hand-written service worker precaching hashed assets, a manifest, `worker-src 'self'` / `manifest-src 'self'` in the CSP, the build stamp driving invalidation. **No new dependency** (Workbox declined for weight). Makes a lecture hall with bad Wi-Fi a non-event. Verify on a preview deploy first (§25.5) | 2–3 days |
 | **H2** | 2.5 | **Embeds + essays** | `/embed/:view` routes with `frame-ancestors *` on that path only (a per-path `_headers` block), a documented `postMessage` API; 2–3 interactive essays (B+Tree, buffer pool, isolation anomalies) that double as launch content | 1 wk |
-| **H3** | 2.0 | **Publish the CLI and `@querylens/engine` 0.x** | `dist` build, `files` allow-list, npm provenance from a tag-triggered OIDC workflow, a stability disclaimer. The "second consumer" trigger (§22.8) is met — the site and the CLI already are two. Needs the npm-scope decision | 3–4 days |
+| **H3** | 2.0 | **Publish the CLI and `@querylens/engine` 0.x** | `dist` build, `files` allow-list, npm provenance from a tag-triggered OIDC workflow, a stability disclaimer. The "second consumer" trigger (§22.8) is met — the site and the CLI already are two. **Scope decided, 2026-09-24:** `@querylens/engine` and `@querylens/mcp` under an npm organisation named `querylens`; the CLI unscoped as `querylens` (free, so `npx querylens` works — claim it early, since an unclaimed name can be taken). **Needs you:** create the organisation (free for public packages; I cannot create accounts) and enable trusted publishing (OIDC) for this repository; then I wire the tag-triggered workflow. *Caveat:* "unclaimed" comes from a package search, and a scope can be held by an account with no packages — if creating `querylens` says it is taken, fall back to `@query-lens` | 3–4 days |
 | **H4** | 2.0 | **`@querylens/mcp` + `llms.txt`** | `run_query`, `explain_trace`, `compare_policies` over the engine for the *user's own* assistant — grounded by construction. Runs locally; no hosted service (RESEARCH.md §44) | 3 days |
 | **H5** | 2.5 | **i18n (conditional)** | Engine events carry `{key, params}` beside the English `label`; a catalogue; one locale **only with a named maintainer** (§22.6's standing rule) | 2–3 wk + per locale |
 | **H6** | 2.5 | **Accessibility depth** | Arrow-key navigation among diagram nodes; a **manual** NVDA / VoiceOver / TalkBack pass; a published WCAG 2.2 AA conformance statement; a data-table view for every new panel | 1 wk + ongoing |
@@ -2634,7 +2634,9 @@ Costs are against the modules that exist today (paths verified 2026-09-24). "Rel
 ### 25.6 Gates and kill criteria — the §9 checkpoint
 
 v14 lifted §9's *blocking* of the backlog; v2 keeps building but installs **a checkpoint before 2.2** — the
-first release that adds a subject §22.1 called a second product. The study (A2) runs during 2.0.
+first release that adds a subject §22.1 called a second product. The study (A2) runs during 2.0. **Decided, 2026-09-24: run it, do not keep building first.** The kit is
+built (A2); what remains is people — pilot with two or three (one on a phone), then recruit. Nothing in 2.0's
+other items depends on the result, so they proceed in parallel; only 2.2 waits.
 
 | §9 result | Reading | Action |
 |---|---|---|
@@ -2671,10 +2673,10 @@ first release that adds a subject §22.1 called a second product. The study (A2)
 **2.0 — Trust & ceiling**
 - [x] `1.0.0` tagged; CHANGELOG cut (T0).
 - [ ] The oracle runs in CI (seeded, bounded); a divergence ledger and "How we know the answers are right" exist.
-- [ ] The study kit is live and at least one participant has completed it end to end on a phone *and* a laptop.
+- [ ] The study kit is live *(built 2026-09-24; automated tests pass on desktop and a phone-width run was checked by hand)* and at least one **real participant** has completed it end to end on a phone *and* a laptop.
 - [ ] A homework-shaped query using `OR`, `IN`, `LIKE`, `DISTINCT`, `HAVING` and a **non-unique** indexed column runs and narrates end to end; `sql.mdx`, `limits.mdx` and `/tools/grammar` all agree.
 - [ ] `limits.mdx` no longer says "unique key" or that a join never uses an index.
-- [ ] Name / domain decided and recorded; custom domain live; the launch post published; CLI, engine and MCP on npm.
+- [ ] Name decided and recorded *(done: keep, with descriptor)*; custom domain live; the launch post published; CLI, engine and MCP on npm.
 - [ ] Per-route budgets replace the single sum.
 
 **2.1 — The optimizer, honestly**
@@ -2700,8 +2702,10 @@ first release that adds a subject §22.1 called a second product. The study (A2)
 | Item | Verdict | Earliest | Trigger to revisit |
 |---|---|---|---|
 | SQLite oracle (A1) | **Planned, 2.0** | now | — |
-| §9 study kit (A2) | **Planned, 2.0** | now | — |
-| Rename before launch (A5) | **Decision needed** | now | Before the §18.2 post |
+| §9 study kit (A2) | **Built, 2026-09-24** — runner + `pnpm study`; the instrument travels in the link, not the bundle | now | Awaiting participants |
+| **Run the §9 study during 2.0** | **Decided, 2026-09-24** | now | §25.6 checkpoint before 2.2 |
+| Rename before launch (A5) | **Decided: keep the name, paired with a descriptor** | 2026-09-24 | A rival contests it, or launch feedback shows confusion |
+| Custom domain (A5) | **Recommended: `querylens.org`** — awaiting purchase | after purchase | — |
 | SQL tier 2 (B1, B2) | **Planned, 2.0** | now | — |
 | Non-unique / composite indexes (B3) | **Planned, 2.0** | now | — |
 | Index nested-loop join (B4) | **Planned, 2.0** | after B3 | — |
@@ -2713,7 +2717,7 @@ first release that adds a subject §22.1 called a second product. The study (A2)
 | Confidence ratings (G2) | **Planned, 2.5** | any | Verify the literature first |
 | PWA / offline (H1) | **Planned, 2.5** | any | Preview-deploy check |
 | Embeds + essays (H2) | **Planned, 2.5** | any | — (§20.3's "named author" trigger superseded: the launch needs them) |
-| Publish CLI + `@querylens/engine` (H3) | **Planned, 2.0** | now | npm-scope decision |
+| Publish CLI + `@querylens/engine` (H3) | **Planned, 2.0 — scope decided:** org `querylens`; CLI unscoped | after the org exists | You create the org + enable trusted publishing |
 | MCP server + `llms.txt` (H4) | **Planned, 2.0** | after H3 | — |
 | i18n (H5) | **Conditional** | — | A named locale maintainer |
 | In-app LLM explainer | **Declined for v2** | post-§9 | Kill criteria in §25.6 |
@@ -2738,6 +2742,19 @@ In the discipline of §20 and [RESEARCH.md §21](RESEARCH.md#21-what-i-deliberat
 ---
 
 ## Appendix: Development Changelog
+
+> **v22 — 2026-09-24.** Four §25 decisions taken and carried out. **(1) Name:** keep "QueryLens", always
+> with the descriptor — checked first: unscoped npm names free, `@querylens` empty, `querylens.com/.io/.ai/.cc/.tech`
+> registered by others, `.org`/`.net` unregistered in WHOIS; recommended domain `querylens.org`, awaiting purchase.
+> **(2) Study:** run it during 2.0 — and the kit is **built** (A2). Building it overturned the plan's own design:
+> `STUDY.md` forbids the questions and control text from being public, so a `/study` route bundling them would
+> have shipped the instrument; the runner is inert and the pack rides in each link's fragment instead, with an
+> e2e test that fails the build if study text reaches `dist/`. Viewing it also caught a protocol leak the tests
+> had not — the site nav one click from the control arm — so `/study` became a kiosk. A test caught a real bug
+> (`Array.some` skips the hole a missing rubric row leaves). **(3) Release:** `v1.0.0` already existed on the remote
+> at the deployed commit; the CHANGELOG cut and `package.json` bump landed after it, and the tag was not moved.
+> **(4) npm:** scope `@querylens` for the engine and MCP server, unscoped `querylens` for the CLI — needs an org
+> only you can create. Still open: participants, the domain purchase, the npm org.
 
 > **v21 — 2026-09-24.** A **retrospective and a plan for product v2** — new **§24** and **§25**, with the
 > evidence in a new [RESEARCH.md Part IV](RESEARCH.md#part-iv--v2-research). §24 summarises v1 as

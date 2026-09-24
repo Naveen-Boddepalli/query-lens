@@ -1,6 +1,6 @@
-# QueryLens
+# QueryLens — a database internals visualizer
 
-![CI](https://github.com/Naveen-Boddepalli/QueryLens/actions/workflows/ci.yml/badge.svg)
+![CI](https://github.com/Naveen-Boddepalli/query-lens/actions/workflows/ci.yml/badge.svg)
 ![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)
 ![TypeScript](https://img.shields.io/badge/TypeScript-6.0.3-blue.svg)
 ![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)
@@ -37,7 +37,8 @@ editable, and the deploy and comprehension gates ([plan.md §14](plan.md#14-prod
 engine has grown well past its original v0 scope — see [Supported SQL](src/pages/DocsContent/reference/sql.mdx)
 for exactly what runs today. The one thing still outside this repo's control is
 [plan.md §9](plan.md#9-validation-strategy-before-building-breadth)'s validation study — a post-test
-against a text-explanation control, which needs real participants, not commits.
+against a text-explanation control. The study kit (`/study` and `pnpm study`, [STUDY.md §4](STUDY.md))
+now makes it runnable end to end without a server; it still needs real participants, not commits.
 
 **v1 is shipped and live.** [plan.md §24](plan.md#24-where-v1-stands--the-retrospective) summarises what
 it is and what it did and did not prove; **[§25](plan.md#25-querylens-v2--trust-ceiling-and-the-next-two-subjects)
@@ -58,7 +59,9 @@ pnpm test:e2e   # playwright against the built output, including axe
 ```
 
 CI runs exactly that sequence on every PR and push to `main`. `pnpm test:e2e` needs a browser once:
-`pnpm exec playwright install chromium`.
+`pnpm exec playwright install chromium`. `pnpm study` is the researcher's CLI for the §9 study kit
+(links, blind scoring, a descriptive report — see [STUDY.md §4](STUDY.md)); CI does not run it, but its
+tests run under `pnpm test`.
 
 **Adding a dependency trips the release-age floor.** `minimumReleaseAge: 10080` is a resolution-time
 rule and pnpm re-resolves every direct dependency when `package.json` changes, so `pnpm add` fails
