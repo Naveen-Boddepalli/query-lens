@@ -39,6 +39,11 @@ for exactly what runs today. The one thing still outside this repo's control is
 [plan.md §9](plan.md#9-validation-strategy-before-building-breadth)'s validation study — a post-test
 against a text-explanation control, which needs real participants, not commits.
 
+**v1 is shipped and live.** [plan.md §24](plan.md#24-where-v1-stands--the-retrospective) summarises what
+it is and what it did and did not prove; **[§25](plan.md#25-querylens-v2--trust-ceiling-and-the-next-two-subjects)
+plans v2** — prove the claims first, raise the engine's ceiling, then transactions and recovery — on the
+evidence in [RESEARCH.md Part IV](RESEARCH.md#part-iv--v2-research).
+
 ## Commands
 
 ```bash

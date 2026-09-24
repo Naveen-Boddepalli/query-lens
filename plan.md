@@ -1,10 +1,12 @@
 # Project Plan: QueryLens — Interactive Database Internals Visualizer
 
-**Document Status**: Production-Ready (v1)
-**Last Updated**: September 2026
+**Document Status**: v1 shipped and live (first deploy 2026-09-23) · **v2 planned** — retrospective §24, plan §25
+**Last Updated**: 2026-09-24
 
 ## Executive Summary
 QueryLens is a 100% client-side, interactive database internals visualizer built for educational purposes. It executes real SQL queries inside the browser (zero server), rendering step-by-step visualizations of parsing, query planning, B+Tree index traversal, buffer pool eviction, locking, and execution. Designed specifically for students and educators, QueryLens focuses on pedagogical clarity over enterprise performance.
+
+**Where it stands.** v1 is built, gated and deployed: eight real pipeline stages, a write path, three join algorithms, a cost model, nine sandboxes, a learning track, and an A+ / axe-clean deploy with no telemetry — summarised in §24. What it has *not* done is prove that it teaches (the §9 study has not run). **v2 (§25) is therefore not "more SQL"**: it proves the claims first (a SQLite correctness oracle, a runnable study kit), raises the engine's ceiling, makes the optimizer decide, and only then adds the two subjects courses teach after query execution — transactions and recovery — behind a checkpoint on the study's result. Evidence: [RESEARCH.md Part IV](RESEARCH.md#part-iv--v2-research).
 
 ---
 
@@ -73,6 +75,11 @@ An in-browser, self-built toy relational database engine that visually animates 
 
 *§22 gives each of these an address, a cost against `src/` and a trigger — most stay gated on the §9
 study.*
+
+***v2 (§25) re-homes what remains.** Of this list, join algorithms and visible cost estimates shipped in
+v1 (the cost model *deciding* between plans is release 2.1, §25.4 C5); MVCC / transaction isolation is
+planned as release 2.2 (§25.4 D); the WASM/Rust rewrite is declined in favour of the Web Worker path
+(§25.4 C6); user accounts stay out (§25.10).*
 
 ---
 
@@ -309,6 +316,14 @@ happens. §12's first risk — breadth before validation — is accepted with ey
 cost model (§7.3), `Sort` / `ORDER BY` (§22.2), the write path, multi-table + JOIN, and the
 remaining `/tools/*` sandboxes are now the active queue, not "post-§9".
 
+**v21 — the study becomes runnable, and gets a checkpoint.** Lifting the gate left the study
+*unscheduled*, and every tranche since has widened the product it would have to measure. §25.4 A2 builds
+a self-serve **study kit** (an unlisted `/study` route, no network, a fixed post-test disjoint from any
+in-app bank) so participants can take part remotely, and §25.6 installs a **checkpoint before release 2.2**
+— the first that adds a second subject — with a decision table for each possible result. A note on
+power: with 5–10 participants per arm the study can only detect a very large effect (n ≈ 15.7/d² per arm:
+~11 for d = 1.2, ~63 for d = 0.5); write it up as an exploratory signal (RESEARCH.md §39).
+
 ---
 
 ## 10. Milestones & Rough Timeline (solo, part-time)
@@ -332,7 +347,8 @@ remaining `/tools/*` sandboxes are now the active queue, not "post-§9".
 | M12 | **Portable artefacts (§20.3):** ~~copy-as-Mermaid (AST, plan), PNG export of any panel~~ **done v12**; ~~`scripts/record.ts` for launch GIFs/WebM~~ **done v13**. Complete. No backend, no new engine code — feeds the §18.2 launch post | ~1 week |
 | M13 | **Site structure — routing consolidation (§21.5):** SPA rewrite so deep links resolve, delete the dead `src/router.tsx`, correct the "single page" 404 and the stale `index.html` title, code-split routes, one nav manifest. Gates every new page because a multi-page app whose links 404 is not one | ~1 day — **done (v9), + 3 regressions it uncovered** |
 | v1 | Expand SQL coverage: joins, cost estimates, InnoDB midpoint-LRU as a third policy. **§20/§21 v1 tranche — shipped (v10):** the non-SQL event driver (`src/engine/bufferTrace.ts`, ahead of schedule), the Buffer Pool standalone (`/tools/buffer-pool`, LRU/clock only — extra policies still open), assignment links (`/assignments/new`, no reveal-lock yet), the query gallery (`/gallery`), the comparison view (`/compare`, buffer-pool half only). **v12:** the parser and B+Tree standalones (`/tools/parser`, `/tools/btree` + B+Tree delete), `/trace`, `/learn`, four more buffer-pool policies (FIFO, second-chance, Bélády, InnoDB midpoint-LRU), the assignment reveal-lock, the full-pipeline half of Compare, and M12's copy-as-Mermaid and PNG export. **v13:** M12's `scripts/record.ts` (`pnpm record` — GIF/WebM of a trace range), completing M12. **v14 — §9 gate lifted (§9's v14 note):** the cost-based optimizer (`planner/cost.ts` — cost estimates on plan nodes), in-app **EXPLAIN** (`explainToText`, estimate next to actual on the result stage), `LIMIT` (a real Volcano short-circuit), and `ORDER BY` with a real external-merge-sort `Sort` operator whose spill writes and re-reads run through the actual buffer pool (`exec/sort.ts`, `BufferPool.write()`) — the full §22.2 engine-depth item that was the reason the gate mattered — and the complete write path: `DELETE`, `INSERT` and `UPDATE`, all real in the pipeline, not just `/tools/btree`. One broader parser entry point (`parseStatement`) dispatches all four statement kinds; `DELETE`/`UPDATE` find matches with a dedicated pass and reuse `predicate-pushdown`/`index-selection` via a throwaway `Project *` wrapper; every index change runs the real `deleteKey`/`insert` B+Tree algorithms, including `UPDATE` running both in sequence when the indexed column itself changes, since a tree has no in-place rekey; `BufferPool` gained `write()` (fresh pages) and `markDirty()` (a writeback on eviction) to complete the read/write pair — and a third optimizer rule, `constant-folding` (two literals, or a column compared with itself, folded to a boolean and dropped from the predicate when always true), running first so the rules and cost model after it see the simplified form — and a hash aggregate for `COUNT`/`SUM`/`AVG`/`MIN`/`MAX` and `GROUP BY`, the largest single addition to the SELECT grammar since v0: a `SelectItem` union replaces the flat column-name list, `HashAggregate` sits between `Filter` and `Project` as the second operator here that cannot stream, and all three optimizer rules see past it exactly as they already saw past `Sort`/`Limit`. Its second strategy followed in the same milestone: a sort aggregate (`SortAggregate`) computing the identical `groupBy`/`aggregates` by sorting the input on the `GROUP BY` columns first — `externalMergeSort` generalised to a composite-tuple key so `Sort` and `SortAggregate` share one driver — then a streaming pass collapsing runs of equal keys, with `EngineOptions.aggregateStrategy` (defaulting to `'hash'`, so nothing existing changes) the seam `/compare`'s new third mode uses to force each side and score them: same groups out either way, only the sort aggregate ever spills — and a fourth optimizer rule, `index-only-scan`: when the SELECT list needs nothing but the indexed column, the B+Tree leaf's key already answers the query, so `emitIndexLookup` gained a `touchHeap` flag that skips the heap page's fetch and lock entirely — a real, measured discount (3 pages instead of 4 on the seed data), priced honestly by the cost model rather than claimed — and enforced concurrency, real at last as `/tools/locks`'s own driver (`src/ui/lockSimulation.ts`, pure and total like `externalSort.ts`): two transactions, real blocking, a wait-for graph rebuilt fresh on every request, deadlock detection, and victim selection (the youngest transaction in the cycle). The SQL pipeline's own lock manager stays untouched — v0 runs one query at a time, so nothing there ever contends. And the grammar sandbox (`/tools/grammar`): `src/ui/grammar.ts` holds the v0 grammar as data, mirroring `parser.ts`'s own BNF comment, rendered as a keyword-pill-and-clickable-box diagram; `__tests__/grammar.test.ts` is the actual drift guard, checking every rule reference and keyword against the real tokenizer and running one representative query per rule through the real parser — it caught two real grammar-data bugs and one real drift bug in `parser.ts`'s own comment while it was being written. And v14's last item, `JOIN`: `FROM t1 JOIN t2 ON t1.a = t2.b`, an implicit inner join computed by nested-loop — the only algorithm so far. Qualified `table.column` references (`Expr`/`SelectItem` gained an optional `table`) are the real new grammar surface, required on every reference once a query joins two tables and validated against the tables the query actually names, so ambiguity is refused rather than silently resolved. The `Join` node's two children are always a bare `SeqScan` (no predicate pushdown into either side yet); its executor rescans the right side whole per left row — the same reset every operator's `open()` already means — with both tables' heaps sharing one real buffer pool, so the rescans' cost is genuinely counted, not claimed; the cost model prices it at `left × right / ndistinct(right key)` rows and `leftPages + leftRows × rightPages`, the honest nested-loop number. `GROUP BY`, `ORDER BY` and an aggregate SELECT item all stay unsupported combined with a `JOIN` for now, each rejected at parse time. Reachable today via `/tools/planner`'s small fixed `authors`/`posts` pair (`createJoinDemoDatabase`). Its second algorithm followed in the same milestone: hash join, `Join.algorithm` widened to `'nested-loop' | 'hash'`, a `hashJoin` operator that drains the right side once into a plain `Map` keyed by a new `equalityKeyOf` (mirroring `compare`'s own coercion exactly, so the two algorithms can never disagree on which rows match), then streams and probes the left side rather than rescanning — priced by the cost model at `left.estPages + right.estPages` against nested-loop's repeated-rescan number, and forced explicitly by `EngineOptions.joinStrategy` the way `aggregateStrategy` already forces an aggregate strategy. `/compare` gained its fourth mode naming the two against each other on the same `authors`/`posts` pair, deliberately under `bufferFrames: 2` — the demo's 5 heap pages otherwise fit entirely inside the default 8 frames, which would let nested-loop's rescans hit cache and hide the very difference the mode exists to show. The multi-table schema editor followed in the same v14 push (§22.7): `SchemaEditor.tsx` + `customDatabase.ts`, a fourth "Custom" data chip in the Playground — add a table, declare an index, edit its rows in a nested `DataEditor`, JOIN across tables the user built themselves, kept local to the browser (`localStorage`, deliberately outside the URL/trace-file scheme). And v14's last item, true vector SVG export (§20.3): `renderSvg.ts` draws the AST, plan and B+Tree trees as real `<rect>`/`<text>`/`<path>` from the same d3 layout `FlowTree` already computes, wrapping text with a fixed monospace character-width estimate rather than any DOM measurement, and resolving each tree's *existing* tone map (no second colour table) through a two-step pipeline — a DOM element resolves `var()`/`color-mix()`, then a 1×1 canvas rasterises the result to plain `rgb()`, since current Chrome's `getComputedStyle` now preserves `oklch()` rather than normalising it, which would have silently reproduced the exact "imports inconsistently" problem this feature exists to fix. **Nothing is left open from this push.** **v15:** the two manual pages the §9 study needed (§17.2, `/docs/manual/eviction` and `/docs/manual/btree-split`) and the §9 study's own materials (`STUDY.md` — control-group reading text, five mechanism questions, a scoring rubric), then sort-merge join, `JOIN`'s third algorithm (§22.2): `Join.algorithm` widened to `'nested-loop' | 'hash' | 'sort-merge'`, sorting both sides on the join key (each its own `externalMergeSort` call, real spill I/O) and merging the two sorted lists in one generator-driven pass that replays a repeated key's full matching run on both sides rather than a plain two-pointer merge, which would silently drop all but the first pairing once the join column isn't unique — the sort key runs through `equalityKeyOf`'s own coercion so it can never disagree with the other two algorithms on which rows match, the same property hash join's mixed-type test already defended. `/compare`'s join mode is now a genuine three-way, each column flagged only where it isn't the best of the three. And v15's last item, predicate pushdown into a `Join`'s own children: a new optimizer rule, `join-predicate-pushdown`, splits a `WHERE` clause's conjuncts by which table they qualify (every reference is qualified once a query has a `JOIN`, so there is no ambiguity) and pushes each single-table conjunct into that side's own `SeqScan`, with its table qualifier stripped — a scan reads that table's raw rows, and a qualified reference against them would silently match nothing. A conjunct naming both sides (including the join predicate itself, restated in `WHERE`) stays a residual `Filter` above the `Join`, unchanged. Needed no multi-join grammar, unlike join order — it rewrites one `Join`'s two existing children, not an ordering choice among several — and needed no cost-model change either, since a filtered `SeqScan`'s estimate already flows into the `Join`'s own row estimate. And v15's last item, a second candidate index: `Table.indexedColumn?: string` widened to `indexedColumns?: string[]`, `buildIndexes` chaining independent single-column B+Trees over one heap with no page-id collisions, and `index-selection` picking the more selective candidate by `ndistinct` when two or more match — honestly narrated as a tie when they're equally selective, not as one falsely "beating" the other, a bug caught live against the shipped `posts` fixture before it shipped. `posts` now indexes `id` and `title` (not `authorId`, which repeats — this B+Tree assumes a unique key). `SchemaEditor.tsx`'s index picker became a real multi-select. **v16:** three quick §23.1 hygiene items. `vite.config.ts`'s `output.advancedChunks` → `output.codeSplitting` (rolldown deprecated the former in favour of the latter, same `groups: [{ name, test }]` shape — no behavior change, just the warning gone). `LICENSE-DOCS` (CC BY 4.0), plus a "Docs licence" link in `Footer.tsx`'s Project column pointing at it — the footer already carried a "CC BY 4.0 docs" badge (v-unknown, predates this session) but nothing to link to. And undo/redo in `DataEditor.tsx`: a `past`/`future` row-snapshot stack, with repeated keystrokes into the same cell folded into a single undo step (a `lastEditTarget` ref, cleared on any structural change) rather than one step per character — add-row, remove-row and CSV-import each push their own step. `SchemaEditor.tsx` got the same `past`/`future` shape over its own `working: Database`, one entry per add-table, remove-table, or a committed row edit from its nested `DataEditor` — no per-keystroke coalescing needed there, since every mutation at that level is already a discrete, deliberate action. Both are button-driven only (↶ Undo / ↷ Redo in each footer); `Ctrl+Z`/`Ctrl+Y` were deliberately left out, since binding them on a dialog full of plain `<input>`s would fight the browser's own native per-field undo rather than complement it. **v17:** B+Tree leaf-chaining range scans (§23.1) — `>`, `<`, `>=`, `<=` and `BETWEEN` on an indexed column now descend the tree once and walk the leaf sibling chain horizontally, instead of falling back to a full scan the way every range predicate did before this. The grammar gained `<=`/`>=` (the tokenizer already lexed them, just to reject them) and `BETWEEN lo AND hi`, desugared to `col >= lo AND col <= hi` at parse time rather than a new `Expr` kind — the two comparisons that come out are indistinguishable from ones written by hand, so every conjunct-walking piece of the engine (the optimizer, the cost model, `evaluate.ts`) handles a `BETWEEN` for free. A new optimizer rule, `range-index-selection`, runs right after `index-selection` and only ever sees a plan the equality rule left untouched — an equality conjunct on any indexed column always wins, by rule order alone, never a cost-model comparison; at most one lower and one upper bound per column are consumed, a second bound in the same direction stays a residual recheck. The new `IndexRangeScan` plan node and its executor operator (`index/rangeLookup.ts`'s `emitRangeStart` for the vertical descent, `nextInRange` for the horizontal walk) pull one matching row at a time — as lazily as every other operator — narrating a `chain-next` step each time a leaf runs out and the walk follows its sibling pointer to the next one, real B+Tree traversal, not a shortcut. Priced with a dedicated `boundedRangeSelectivity`, not `selectivityOf`'s `AND` path: a range's own lower and upper bound are the *same* column, not two independent ones, so multiplying their separate fractions would double-discount a `BETWEEN` (§12) — this instead computes the true linear-density interval overlap directly, provably identical to the existing single-bound formula when one side is left at the column's own min or max. `FlowTree.tsx`'s sibling edges (the B+Tree's dashed leaf-chain lines, always drawn) now get the same `.is-active` treatment a lit hierarchical edge already gets when both its leaves were actually visited, so `BTreePanel` highlights the real horizontal path a scan took rather than just the static chain. Deliberately excluded from `DELETE`/`UPDATE`'s own optimizer pass (`WRITE_PATH_RULES`, a new exported rule set) — their executors only know how to run a `SeqScan` or a single-row `IndexScan` to find the rows to touch, not an `IndexRangeScan`'s multi-row walk, and reaching one in would have silently fallen back to "no filter at all" rather than erroring; a dedicated regression test locks this in. No index-only variant — always touches the heap, one page per matching row, the same granularity `IndexScan`'s own single row already costs. Fixed two real reflexive-comparison bugs in `optimize.ts`'s constant-folding along the way (`age <= age`/`age >= age` were folding to `false`, and `foldLiteralCompare`'s own `<=`/`>=` cases were silently falling through to `>`) — both caught by review before `<=`/`>=` could reach them, not by a failing test. 55 new unit tests, 1 new e2e; live-verified against the shipped `posts`/`users` fixtures, including watching the trace narrate two real sibling hops across a wide range. **v18:** live interactive component embeds in the Concepts docs (§23.1, closing §17.4's last open DoD checkbox) — `concepts/btree.mdx` gets `BTreeMiniDemo` (`src/ui/DocsBTreeDemo.tsx`), a single "find a key" input over a 14-key tree rendered through the exact `search()`/`BTreePanel` pair `/tools/btree` already drives; `concepts/buffer-pool.mdx` gets `BufferPoolMiniDemo` (`src/ui/DocsBufferPoolDemo.tsx`), the same `runBufferTrace`/`BufferPoolPanel` pair with its own LRU/clock-sweep toggle, stepped through a fixed eight-page reference string chosen so page 0 gets read three times before pages 4 and 5 need room — both policies keep it, but clock sweep visibly takes more steps to get there than LRU's direct lookup, the actual cost/benefit trade. Both reuse existing panels exactly as scoped, no new visualisation code. Building them surfaced a real bundle-architecture problem: `vite.config.ts`'s `docs` codeSplitting group forces every `DocsContent/` module into one shared chunk so nine light prose pages cost one round trip — but once two of those pages import `BTreePanel`/`FlowTree`/the engine's trace machinery, the *same* forced grouping merged all of that into the shared chunk too, so a bare FAQ visit would have paid for a B+Tree panel it never touches (measured: `docs` 15.5 → 49.8 kB). Fixed by excluding just those two pages from the group, so they fall to rolldown's own default chunking and share the *existing* chunk Playground already gets that code from, rather than a forced duplicate — landed at 18.7 kB combined for genuinely new glue code, not 34. **v19, closing §23:** the expanded challenge pack, four new puzzles built on v15–v17's own features. "The sort spill" makes `ORDER BY` write enough runs (`writes(events) >= 5`) that the spill is unmistakably real, not a one-row degenerate case. "Hash beats loop" is the first challenge whose database isn't a `DatasetId` at all — `Challenge` gained an optional `database: () => Database` (here, `createJoinDemoDatabase`'s `authors`/`posts` pair) and `engineOptions` (`{ bufferFrames: 2 }`, the same reason `/compare`'s own JOIN mode forces it — at the default 8 frames the 5-page demo fits entirely in cache and the two algorithms cost the same, hiding the very contrast the challenge exists to teach); its `check` is also the first to take the raw SQL text as a second argument, since proving hash actually beats nested-loop means rerunning the player's own query a second time under `joinStrategy: 'hash'` and comparing two real page-read counts, not trusting an estimate. "The dirty eviction" needed no new engine surface, just a wide enough `UPDATE` that a page it already dirtied gets evicted before the statement ends (`writtenBack` on an `evict` event). "The range leap" is the most direct consequence of v17 landing at all: a range predicate on the indexed column versus one on `age`, unindexed and still a full 12-page scan. `challengeStats` grew three fields (`writes`, `dirtyEvictions`, `usesRangeScan`) so the page's own stats grid gives feedback toward every new goal, not just the four solved-or-not messages. 12 new/updated unit tests, 2 new e2e — including one confirming the "step through in the Playground" link correctly disappears for the one challenge whose database the Playground's own URL scheme has no way to name. **v20, closing §18 and this whole §23 tranche:** the README restructure. 682 lines → 82 — badges, a three-sentence pitch, the links row, Learn more, Status, Commands, Deploying, Testing. The 600 lines that came out were **not** moved verbatim into a new docs Architecture page as originally planned (§18.4): the README's own decision-log content had drifted to v0-era scope by the time this shipped — "two optimizer rules" (now six), a SQL grammar excluding `JOIN`/`GROUP BY`/writes/`<=`/`>=`/`BETWEEN` (all shipped versions ago), and a description of a separate `docs/` Astro package and `pnpm build:site`, both removed in v9. Moving that forward would have shipped known-false documentation, so the new [Architecture](src/pages/DocsContent/architecture.mdx) page was written fresh instead, verified against `src/` as it stands — the engine/UI split, the event model, the Volcano executor's current operator list, all six optimizer rules in order, storage, locks, and a short "how to extend it" for contributors. The same staleness turned out to reach two Reference pages that predated this session entirely: [Supported SQL](src/pages/DocsContent/reference/sql.mdx) still said "QueryLens only runs SELECT" and rejected `<=`/`>=`; [Engine limits](src/pages/DocsContent/reference/limits.mdx) still said "no aggregates, no GROUP BY, no joins, no writes, no cost estimation" — years after all of those shipped. Both rewritten to match the engine as it actually runs today. `docs` chunk grew 18.7 → 24.8 kB for the new content — real documentation weight, not code, and the ceiling moved with it rather than the number being argued down to fit. | Post-MVP |
-| v2+ | **Each its own plan (§20.5–§20.6):** graded submission (first backend), the interactive-embed package, the Visual `EXPLAIN` viewer. The B+Tree standalone (§20.4) is here until B+Tree delete exists | Not committed |
+| **v2** | **Product v2 — planned in §25 (v21).** Six releases, evidence in [RESEARCH.md Part IV](RESEARCH.md#part-iv--v2-research). *T0:* tag v1 as `1.0.0` (§24). **2.0 — Trust & ceiling:** **M14** Trust (SQLite differential oracle, §9 study kit, "report a confusing step", name + domain decision) · **M15** Ceiling I (`OR`/`NOT`/`IN`/`LIKE`/`IS NULL` with three-valued logic, `DISTINCT`/`HAVING`, relational-algebra view) · **M16** Ceiling II + launch kit (non-unique + composite indexes, index nested-loop join, course map, CLI / engine / MCP on npm, per-route budgets). **2.1 — M17 The optimizer, honestly:** statistics + q-error, multi-join + outer join, DP join order, cost-based choice + "Why not?", Web Worker + larger data. **2.2 — M18 Transactions** (gated on the §9 checkpoint, §25.6): schedules as input, enforced locks, isolation levels, MVCC, the Hermitage matrix. **2.3 — M19 Durability:** WAL, steal/force, ARIES. **2.4 — M20 Storage engines & access methods** (parallelisable): LSM + Bloom, hash indexes, columnar, vectorized, latch crabbing, vector index. **2.5 — M21 Reach & the learning layer** (parallel): confidence ratings, misconception challenges, generated quiz (after §9), PWA, embeds, a11y depth, workspaces, i18n if a maintainer appears. Main line 2.0→2.3 ≈ 31–39 weeks part-time | Planned (§25) |
+| v2+ (v3 horizon) | **Each its own plan (§20.5–§20.6):** graded submission (first backend), the Visual `EXPLAIN` viewer; distributed databases and parallel execution (§25.9). The interactive-embed package is superseded by iframe embeds in 2.5 (H2). The B+Tree standalone (§20.4) shipped in v12 | Not committed |
 
 M8 sits between "the app works" and "the URL is public." It is not polish — every item on the P0 list in
 §14 fails *silently* if skipped, which is why it gets its own gate rather than being folded into M7.
@@ -409,6 +425,15 @@ Two places where a decision in §14 could introduce a bill, both optional and bo
   ten seconds and presses Run to no apparent effect leaves — and §9's post-test never gets taken. The
   engine being correct underneath does not survive that; this risk sits upstream of every pedagogical
   one already listed. Mitigation: §15's P0, which is a day's work.
+- **Building v2 on an unvalidated v1** (v21). The first risk above — breadth before validation — was
+  accepted at v14 and has compounded through every tranche since; v2 proposes three more subjects
+  (transactions, recovery, storage engines). Mitigation: the study becomes runnable (§25.4 A2), the
+  second-subject releases sit behind a checkpoint on its result (§25.6), and each new subject must be
+  *computed by the engine and checked against an external oracle* rather than scripted (§25.1, §25.2).
+- **A shared name** (v21). "QueryLens" is in use by at least five unrelated products, including a
+  commercial SaaS for *explaining production queries* — the audience §2 excludes. Searchers land on the
+  wrong tool, and every backlink from the launch post raises the price of changing it. Mitigation: decide
+  before launch (§25.4 A5; RESEARCH.md §45).
 - **Checklist ceremony.** The opposite failure: importing a service-shaped production checklist into an
   application with no server, no secrets and no user data, and spending three weeks on secret rotation,
   uptime monitoring and incident tiers that reduce no risk here. Mitigation: [RESEARCH.md §21](RESEARCH.md#21-what-i-deliberately-left-out)
@@ -433,6 +458,12 @@ course-packaging and query-sharing lines in particular are expanded there (§20.
 learning-surface ideas, counted against `src/` the same way: JOIN with a join-algorithm comparison,
 an external sort that spills through the buffer pool, a cost-based optimizer that justifies the index
 choice §9 rests on, the write path, and MVCC/WAL marked as second products.
+
+**§25 takes the v2 line** — after v1 shipped, the syllabus, competition and evidence were re-read
+(RESEARCH.md Part IV) and the list above was re-sorted: MVCC and WAL move from "second products" to
+planned, gated releases (2.2, 2.3); a Rust/WASM rewrite is declined in favour of a Web Worker; comparison
+mode's remaining halves and the course/curriculum packaging become a course map (§25.4 G1); community
+query-sharing stays out (it needs a backend, §25.10).
 
 ---
 
@@ -2223,13 +2254,13 @@ URL-state schema. None needs a backend.
 | Full text transcript | **Done, v13** (`/trace` Transcript view + print stylesheet) | v1 | — |
 | Non-colour hue encoding | **Done, v13** (glyph channel on B+Tree nodes + buffer moods/stats) | v1 | — |
 | Cost-based optimizer | **Done, v14** (`planner/cost.ts` — `~N rows` + heuristic on every plan/optimize node and in `/tools/planner`, estimate-vs-actual in the result narration; `__tests__/cost.test.ts`) | v1 | — |
-| More optimizer rules | **`constant-folding` done (v14)** | v1 | Projection pushdown out of scope (no real I/O to save in a row-oriented heap); `OR`→`IN` needs `OR` in the grammar first |
+| More optimizer rules | **`constant-folding` done (v14)** | v1 | Projection pushdown out of scope (no real I/O to save in a row-oriented heap) — **re-opened by §25.4 F3**, whose columnar `ColumnScan` gives it something to save; `OR`→`IN` needs `OR` in the grammar first — **`OR` lands in §25.4 B1** |
 | In-app `EXPLAIN` | **Done, v14** (**Copy as EXPLAIN** on the result stage — `explainToText`, estimate next to actual per operator) | v1 | — |
 | `ORDER BY` / `LIMIT` + external sort | **Done, v14** (`Limit` — a real Volcano short-circuit; `Sort` — `exec/sort.ts`, a real external merge sort spilling through the actual buffer pool, `BufferPool.write()`) | v1 | — |
 | Aggregates / `GROUP BY` | **Done, v14** — hash aggregate, sort aggregate, and the `/compare` mode naming both | v1 | — |
 | Write path (`INSERT`/`UPDATE`/`DELETE`) | **Done, v14** (all three statements — `exec/delete.ts`, `exec/insert.ts`, `exec/update.ts`; `BufferPool.markDirty()`/`write()`) | v1 | — |
-| Composite / covering indexes | **Index-only scan done (v14); a second candidate index, chosen by selectivity, done (v15)** | v1 | True composite (multi-column) indexes still open |
-| JOIN + join-algorithm compare | **All three algorithms and predicate pushdown into a `Join` done (v14–v15)**, plus `/compare`'s join mode naming all three | v1 | Join order still open, gated on multi-join grammar |
+| Composite / covering indexes | **Index-only scan done (v14); a second candidate index, chosen by selectivity, done (v15)** | v1 | True composite (multi-column) and non-unique indexes: **planned, v2.0 (§25.4 B3)** |
+| JOIN + join-algorithm compare | **All three algorithms and predicate pushdown into a `Join` done (v14–v15)**, plus `/compare`'s join mode naming all three | v1 | Join order: **planned, v2.1 (§25.4 C3–C4)** — needs the multi-join grammar. An index nested-loop join is v2.0 (B4) |
 | Multi-table schema editor | **Done, v14** (`SchemaEditor.tsx` + `customDatabase.ts` — a fourth "Custom" data chip in the Playground, local-only via `localStorage`, not the URL or a trace file) | v1 | Column rename after creation, still out of scope |
 | CSV / paste import | **Done, v13** (`parseCsv.ts` + an Import CSV panel in the seed editor) | v1 | — |
 | Preset dataset library | **Done, v13** (`datasets.ts` + `datasetCatalogue.ts` — `users` / `orders` / `logins`, a `Data:` chip row, a `t=` share key; `lineitem` dropped as JOIN-free filler) | v1 (with §19.2) | — |
@@ -2244,16 +2275,16 @@ URL-state schema. None needs a backend.
 | Assignment sets | **Done, v13** (`assignmentSet.ts` + a set panel on `/assignments/new` — Markdown worksheet + JSON) | v1 | — |
 | Presenter mode | **Done, v13** (`PresenterView.tsx` — `?present=1` overlay on the Playground) | v1 | — |
 | Print stylesheet | **Done, v13** (`TraceWorksheet.tsx` + a **Print** link on the Playground; the `[data-print]` `@media print` hook also covers `/trace` and docs) | v1–v2 | — |
-| In-app quiz / self-check | Deferred | post-§9 | The §9 study has run (contamination) |
+| In-app quiz / self-check | **Planned, v2.5 (§25.4 G4) — as *generated* questions**, disjoint from the study's fixed bank | post-§9 | The §9 study has run (contamination) |
 | Enforced concurrency + deadlocks | **Done (v14)**, as `/tools/locks`'s own driver (`src/ui/lockSimulation.ts`) | v1–v2 | — |
-| `npx querylens` CLI | **Built, v13; unpublished** (`bin/querylens.ts` — query + `--policy` / `--dataset` / `--json`, pure render + arg-parse unit-tested; `npm publish` is the deliberate remaining step) | v1–v2 | — |
-| `@querylens/engine` package | Deferred | v1+ | A second consumer exists |
+| `npx querylens` CLI | **Built, v13; unpublished** (`bin/querylens.ts` — query + `--policy` / `--dataset` / `--json`, pure render + arg-parse unit-tested; `npm publish` is the deliberate remaining step) — **publish planned, v2.0 (§25.4 H3)**, with an MCP wrapper (H4) | v1–v2 | — |
+| `@querylens/engine` package | **Planned, v2.0 (§25.4 H3), as 0.x** — the trigger is met: the site and the CLI already are two consumers | v2 | npm-scope decision |
 | Operator / stage plugin seam | Deferred | v2+ | The package and CLI find users |
-| MVCC / snapshot isolation | Own product | v2+ | §9 validates, then a separate surface |
-| WAL / crash recovery | Own product | v2+ | §9 validates, then a separate surface |
+| MVCC / snapshot isolation | **Planned, v2.2 (§25.4 D) — gated** | v2 | §25.6 checkpoint on the §9 result |
+| WAL / crash recovery | **Planned, v2.3 (§25.4 E) — gated** | v2 | 2.2 shipped |
 | B+Tree copy-as-Mermaid | Maybe | v1+ | A `classDiagram` layout proves acceptable |
-| `@querylens/embed` | Own plan | v1+ | A named author needs an in-page embed (§20.3) |
-| i18n | Deferred | v2 | A maintainer commits to a locale |
+| `@querylens/embed` | **Superseded by iframe embeds + essays, v2.5 (§25.4 H2)**; a package stays deferred | v2 | Verify CSP on a preview deploy first |
+| i18n | **Conditional, v2.5 (§25.4 H5)** | v2 | A maintainer commits to a locale |
 | Window functions / CTEs / full grammar | Declined | — | §4's subset stops teaching something it should |
 | Visual `EXPLAIN` (paste-in real plans) | Declined here | — | §20.6 — a decision to serve DBAs, not this plan |
 
@@ -2326,7 +2357,403 @@ In the discipline of §20 and [RESEARCH.md §21](RESEARCH.md#21-what-i-deliberat
 
 
 
+---
+
+## 24. Where v1 Stands — the Retrospective
+
+> Added in v21 (2026-09-24), the day after the first deploy. §1–§23 are the decision log of *how* v1 was
+> built; this section is the one-page answer to *what it is*, *what it proved* and *what it did not* —
+> the input to §25. Method and evidence: [RESEARCH.md Part IV](RESEARCH.md#part-iv--v2-research).
+>
+> **Numbering.** Two schemes coexist in this document. "**v1**" and "**v2**" in §24–§25 mean **product
+> releases**: v1 is the application as deployed on 2026-09-23 — every tranche labelled v10–v20 in §10 and
+> the appendix is *inside* v1 (those are build-revision counters, not releases); v2 is what §25 plans,
+> delivered as releases 2.0–2.5. The first act of §25 is to tag v1 as `1.0.0` — `package.json` still says
+> `0.0.0`.
+
+### 24.1 What v1 is
+
+A 100% client-side, zero-server, zero-telemetry toy relational database engine — written from scratch in
+TypeScript — that animates a SQL statement through **Parser → Planner → Optimizer → Execution → Buffer
+Pool → B+Tree Index → Locks → Result**, one inspectable step at a time. Every number on screen is the
+engine's own. The engine is a **pure synchronous function** (`runQuery(sql, db)` → events + rows) with no
+React, no DOM and no async; the UI folds the event array into state, which is what makes scrubbing
+backwards, share links, trace files and the CLI all fall out of one contract (§5, §7.8). The learner
+*predicts before each reveal* and *edits the data*, because the evidence (§12, RESEARCH.md Part I) says
+engagement, not fidelity, is what teaches. Live at `https://query-lens.1234naveenboddepalli.workers.dev`
+(Cloudflare Workers static assets, `wrangler.jsonc`).
+
+### 24.2 v1 by the numbers **[counted from the repo, RESEARCH.md §36]**
+
+| | |
+|---|---|
+| First commit → first deploy | **23 days** (2026-09-01 → 2026-09-23), 106 commits — against §10's 10–14 weeks for the MVP alone |
+| Source | 23.7k lines TS/TSX (8.7k in `src/engine/`, **0 files import React**) + 0.9k lines MDX |
+| Tests | **1,170 unit** (56 files, 9.6k lines) + **79 e2e** (2.0k lines, axe in both themes) |
+| Surface | 14 top-level routes · 8 stage explainers · 9 lessons · 12 challenges · 9 `/tools/*` · 12 docs pages |
+| Engine | 4 statements · 6 optimizer rules · 3 join algorithms · 2 aggregate strategies · 6 buffer-pool policies · cost estimates on every node |
+| Bundle | **377.9 / 424 kB** gzip; `standalone-tools` 42.7/43 and `trace-ui` 55.5/56 are **at their ceilings** |
+| Quality | securityheaders.com **A+** · axe clean · CI: 6 jobs + a gate, SHA-pinned actions, read-only token · no telemetry |
+| Validation | **§9 post-test not run** |
+
+### 24.3 What shipped, by layer
+
+| Layer | Shipped in v1 |
+|---|---|
+| **Engine** | Tokenizer + recursive-descent parser (`SELECT`/`INSERT`/`UPDATE`/`DELETE`; `WHERE` with `=` `<` `>` `<=` `>=` `BETWEEN` `AND`; `GROUP BY` + 5 aggregates; `ORDER BY`; `LIMIT`; one `JOIN`) → planner → six-rule optimizer (`constant-folding`, `predicate-pushdown`, `join-predicate-pushdown`, `index-selection`, `range-index-selection`, `index-only-scan`) → cost annotations → Volcano executor (`SeqScan`, `IndexScan`, `IndexOnlyScan`, `IndexRangeScan`, `Filter`, `Project`, `Sort`, `Limit`, `HashAggregate`, `SortAggregate`, nested-loop / hash / sort-merge `Join`) → buffer pool (LRU + clock in the pipeline; + FIFO, second-chance, Bélády, InnoDB midpoint-LRU in the sandbox; dirty writeback) → B+Tree (insert, delete with borrow/merge, point, range with leaf chain) → page-level lock tracker |
+| **Playground** | Run / step / scrub / speed; predict-then-reveal; editable seed rows + CSV import + undo/redo; 3 datasets + a **Custom** multi-table schema editor; share links; trace files; presenter mode; print worksheet; a 60-second tour; keyboard shortcuts |
+| **Learn** | 9 lessons that deep-link into the exact step · 12 challenges (each a pure predicate over a run) · `/progress` · 8 stage explainers · a gallery of named moments · `/compare` (index vs scan · policy vs policy · hash vs sort aggregate · three join algorithms) |
+| **Sandboxes** | Buffer pool · parser · B+Tree · slotted page · external merge sort · planner · locks (2 transactions, deadlock, victim) · grammar · Grace hash join |
+| **Classroom** | Assignment links with a reveal-lock, and sets (Markdown worksheet + JSON) · presenter · `/trace` inspector + printable transcript |
+| **Export** | Copy as Mermaid / text / EXPLAIN · PNG · vector SVG · trace JSON · GIF/WebM recorder (`pnpm record`) · a CLI (`bin/querylens.ts`, built, **unpublished**) |
+| **Docs** | 12 in-app MDX pages: getting started, task-shaped manual, concepts with live widgets, reference, architecture, FAQ; `LICENSE` (MIT) + `LICENSE-DOCS` (CC BY 4.0) |
+| **Platform** | Light/dark/system theme · CSP + full header set (A+) · error boundary with a copyable repro · `aria-live` narration · non-colour encoding · gzip budget in CI · supply-chain floor (`minimumReleaseAge`, `allowBuilds`, `blockExoticSubdeps`) · own renderer `flowinger` for the trees |
+
+### 24.4 The path, in one line each
+
+| Stage | What happened |
+|---|---|
+| M0–M7 | The MVP: the eight-stage pipeline for a point lookup + the sequential-scan contrast; predict-then-reveal; editable data |
+| M8, M9 | The deploy gate (§14) and UX gate (§15): CI, error boundary, headers, licence · run-on-load, native dialog, share URL, light theme |
+| M10, M11 | Visual design + landing page (§16, §19) · docs, manual, licensing, governance (§17, §18) |
+| M12, M13 | Portable artefacts (Mermaid / PNG / GIF) · site structure: SPA rewrite, code-splitting, one nav manifest |
+| Builds v10–v13 | The multi-page app: gallery, tools, compare, learn, challenges, progress, assignments, presenter, print |
+| Builds v14–v15 | **§9's *blocking* lifted.** Cost model, EXPLAIN, `LIMIT`/`ORDER BY` (external sort), the write path, aggregates ×2, index-only scan, `JOIN` ×3 + pushdown, schema editor, SVG export, locks / hash-join / grammar tools |
+| Builds v16–v20 | Hygiene, undo/redo, B+Tree range scans, live docs widgets, four more challenges, README + Architecture rewrite |
+| First deploy, 2026-09-23 | Needed **three fixes that no local check could have found**: an install-script allowlist written in the wrong YAML shape, an SPA rewrite that formed a redirect cycle on the newer Cloudflare engine, and a canonical URL pointing at a domain that never resolved (CHANGELOG, *Fixed*) |
+
+### 24.5 What v1 proved — and did not
+
+**Proved.**
+1. **A real engine can be honest and still teachable.** Pure, synchronous, React-free, 1,170 tests; every
+   visual is derived from events, so nothing can disagree with the engine.
+2. **The multi-page tool shape ships accessibly and safely** — A+ headers, axe-clean in both themes, an
+   accessible narration track, no third-party origin.
+3. **Scope discipline held** — every tranche went through §20.1 / §22.1 and the backlog was worked in
+   order, not by enthusiasm.
+4. **Build speed is not the constraint.** 23 days against a 10–14 week estimate.
+
+**Did not prove.**
+1. **That it teaches.** The §9 post-test has never run; the prediction layer stands on literature, not on
+   a measurement of *this* tool. §12's first risk (breadth before validation) was accepted at v14 and has
+   grown with every tranche since.
+2. **That anyone will come.** No launch, no traffic; the name is shared with at least five unrelated
+   products (RESEARCH.md §45) and the live URL is a `workers.dev` subdomain with an account name in it.
+3. **Correctness beyond self-consistency.** "True to this engine" has no external oracle behind it.
+4. **Field performance.** INP on a lecture-hall laptop is still unmeasured (§14.2).
+5. **That the deploy path is understood.** Three fixes on the first attempt say config was written
+   against assumptions the platform had not been asked to confirm.
+
+### 24.6 The known-limits ledger — v1's honest ceiling
+
+From `reference/limits.mdx`, mapped to where §25 addresses each. **A sceptical student hits the first two
+in ten minutes.**
+
+| v1 limit | v2 item |
+|---|---|
+| Every B+Tree assumes a **unique key**; a duplicate silently overwrites (so `posts` cannot index `authorId`) | B3 |
+| A `JOIN` **never consults an index** — "nested-loop wins with a tiny outer and an indexed inner" cannot be shown | B4 |
+| No `OR` / `NOT` / `IN` / `LIKE` / `IS NULL` / `DISTINCT` / `HAVING` / `OFFSET` / outer joins / subqueries | B1, B2, C3 |
+| At most two single-column indexes per table; no composite / covering / unique | B3 |
+| One `JOIN` per query — so no join *order* — and no `GROUP BY` / `ORDER BY` / aggregate beside it | C3, C4 |
+| Rules fire on structure; **cost never decides**; no statistics, no plan enumeration | C1–C5 |
+| Locks are visual-only: no transactions, one query at a time | D |
+| No log, no recovery | E |
+| Row store only; 48–120-row datasets (trees ≤ ~3 levels); engine on the main thread | F3, C6 |
+| A custom database lives in `localStorage` only — not shareable | H7 |
+| Narration is English strings emitted by the engine | H5 |
+
+---
+
+## 25. QueryLens v2 — Trust, Ceiling, and the Next Two Subjects
+
+> Added in v21 (2026-09-24). Evidence: [RESEARCH.md Part IV](RESEARCH.md#part-iv--v2-research) (§36–§46);
+> what v1 is: §24. This section plans **product v2** as six releases, 2.0–2.5, milestones **M14–M21**
+> (§10). It follows §20 / §22 / §23's discipline: every item has a cost against `src/`, a dependency and a
+> trigger; every subject that widens the product past §9's contrast is *gated*, not banned; and §25.10
+> says what it does not add.
+
+### 25.1 The thesis — v2 is not "more SQL"
+
+1. **v1's largest unknown is evidence, not engineering** (§24.5). 23 days of building bought an engine;
+   nothing yet says it teaches. v2 must spend effort where time could not.
+2. **The course syllabus has a hole exactly where v1 stops.** Against CMU 15-445 Fall 2026's 23 content
+   lectures v1 covers **6, partly covers 7, and misses 10** — and the six lectures from concurrency-control
+   theory through recovery (**18–23, 26% of the course**) are all misses (RESEARCH.md §38).
+3. **Two ceilings show in the first ten minutes** (§24.6): unique-key indexes, and joins that never use one.
+4. **Competitors already own the breadth of scripted animations** — LSM, WAL, isolation levels, slotted page
+   (RESEARCH.md §37). The moat is the thing a script cannot do: **outcomes computed by running the engine**
+   and checkable against external ground truth (SQLite; Hermitage).
+
+So the order is **Prove → Raise the ceiling → Make the optimizer decide → Add transactions → Add recovery →
+Broaden storage engines**, with **reach and the learning layer** as a parallel track.
+
+### 25.2 The filter — §20.1's four, §22.1's fifth, plus three
+
+§20.1 (serves the §9 study? serves the launch? needs a backend / breaks "nothing leaves your browser"?
+forks the audience?) and §22.1's fifth (deepens the §9 contrast or widens away?) all apply unchanged.
+v2 **knowingly** answers the fifth with "widens" for transactions, recovery and storage engines — the
+"second products" §22.1 named — which is why they sit behind a gate (§25.6) rather than in 2.0. Three new
+questions, each earned by something v1 got wrong or nearly did:
+
+6. **Does it ship with a lesson, a challenge and a text alternative?** A tool without the first two is a
+   demo; a visualization without a data-table view is an accessibility regression (RESEARCH.md Part II §17).
+7. **Does it keep the engine pure?** Concurrency, crashes and faults enter as **inputs** — a schedule, a
+   fault point — never as threads, timers or `async` inside `src/engine/`. That is what keeps traces
+   replayable, shareable and testable (RESEARCH.md §42).
+8. **Does it fit a per-route budget?** `standalone-tools` and `trace-ui` are at their ceilings (§24.2).
+   A new tool is its own lazy chunk with its own budget row; it may not grow a shared group to fit.
+
+### 25.3 Release plan
+
+| Release | Milestone | Theme | Scope (item IDs, §25.4) | Est. | Gate |
+|---|---|---|---|---|---|
+| **T0** | — | Cut v1 | Tag `1.0.0`: CHANGELOG `[Unreleased]` → `[1.0.0] - 2026-09-23`, `package.json` → `1.0.0` | ½ day | — |
+| **2.0** | **M14** Trust | Prove it | A1–A6: SQLite oracle, §9 study kit, "report a confusing step", name + domain | 3–4 wk | none — start now |
+| | **M15** | Ceiling I | B1, B2, B5, B6: expressions, `DISTINCT`/`HAVING`, relational-algebra view | 3–4 wk | — |
+| | **M16** | Ceiling II + launch | B3, B4 (real indexes, index join) · G1, H3, H4, H8 (course map, CLI/engine/MCP, budgets) | 4–5 wk | — |
+| **2.1** | **M17** | The optimizer, honestly | C1–C6: statistics, q-error, multi-join + outer join, DP join order, cost-based choice + "Why not?", Worker | 8–10 wk | 2.0 |
+| **2.2** | **M18** | Transactions | D1–D6: schedules, enforced locks, isolation levels, MVCC, the Hermitage matrix, CC compare | 8–10 wk | **§9 checkpoint** (§25.6) |
+| **2.3** | **M19** | Durability | E1–E4: WAL, steal/force, checkpoints + crash + ARIES | 5–6 wk | 2.2 |
+| **2.4** | **M20** | Storage engines & access methods | F1–F7: LSM + Bloom, hash indexes, columnar, vectorized, latch crabbing, vector index, pool depth | 8–10 wk, **parallelisable** | each passes Q6 |
+| **2.5** | **M21** | Reach & the learning layer | G2–G6, H1, H2, H5–H7: confidence, misconception challenges, **generated quiz**, PWA, embeds, i18n, a11y depth, workspaces | 8–11 wk, **parallel track** | quiz after §9 |
+
+**Main line 2.0 → 2.3 ≈ 31–39 weeks part-time; everything ≈ 11–14 months serial, or 7–9 months with 2.4 and
+2.5 run alongside.** Estimates are in §10 / §22's units and are ceilings, not promises: v1 beat its own
+estimate 3–4×. The schedule risk in v2 is **validation and maintenance, not typing** (§24.5, §25.7).
+
+### 25.4 The item catalogue
+
+Costs are against the modules that exist today (paths verified 2026-09-24). "Rel." is the release.
+
+#### A. Trust — make the claims checkable
+
+| ID | Rel. | Item | Shape | Cost |
+|---|---|---|---|---|
+| **A1** | 2.0 | **SQLite oracle + metamorphic tests** | (a) Metamorphic inside QueryLens: rules-off vs rules-on return the same rows (NoREC-shaped); all join algorithms and both aggregate strategies agree; `Sort`+`Limit`. (b) Differential vs **`node:sqlite`** (in the pinned Node ≥ 22.13; **no new dependency, no bundle bytes**) using **`fast-check`** (already a devDependency) over generated typed tables and grammar-derived queries; compare multisets (sequences under `ORDER BY`), aggregates with a tolerance, `NULL`s. (c) TLP once B1 lands three-valued logic. A **divergence ledger** for documented semantic differences instead of `skip`s. CI runs a **seeded, bounded** count; a long run lives in a scheduled read-only workflow. Ship a docs page, **"How we know the answers are right."** | 1–1.5 wk |
+| **A2** | 2.0 | **§9 study kit** | An unlisted `/study` route: consent text; arm assignment by link (`?arm=`); the QueryLens arm gets guided tasks, the control arm gets `STUDY.md`'s text; a **fixed five-question post-test disjoint from any in-app question bank**; a result blob the participant copies back. **No network.** Makes remote participation possible; the study can finally happen | ~1 wk + calendar |
+| **A3** | 2.0 | **"Report a confusing step"** | On any moment: a prefilled GitHub issue carrying the share URL, step, build stamp. A privacy-preserving feedback channel for a product with, by decision (§14.4), no telemetry. Complements the crash repro | 1 day |
+| **A4** | 2.0 | **Release discipline** | T0 above; release notes from CHANGELOG; a "config verified on a preview deploy" checklist item for any change touching `_headers`, `wrangler.jsonc` or `public/` (§25.5) | ½ day |
+| **A5** | 2.0 | **Name, domain, launch** | Decide keep / pair-with-descriptor / rename (RESEARCH.md §45) **before** the §18.2 post; then a custom domain via the existing `VITE_SITE_URL` | decision + 1 day |
+| **A6** | 2.0 | **Field performance without telemetry** | CrUX (public) once there is traffic; opt-in INP timing inside the study kit on participants' real hardware (§14.2's open item) | ½ day |
+
+#### B. Raise the engine's ceiling
+
+| ID | Rel. | Item | Shape | Cost |
+|---|---|---|---|---|
+| **B1** | 2.0 | **SQL tier 2a — expressions** | `OR` / `NOT` / parentheses · `IN (…)` · `LIKE` · `IS [NOT] NULL` with real **three-valued logic** · arithmetic in `SELECT` / `WHERE` · `OFFSET`. Seams: `parser/parser.ts` (`parseExpr`), `parser/ast.ts`, `exec/evaluate.ts`, `planner/optimize.ts` — whose conjunct-walkers assume AND-only, so a disjunction is one opaque conjunct; `OR`→`IN` (§22.9's deferred rule) becomes possible; **index union stays out of scope** — plus `ui/grammar.ts` and its drift test, `sql.mdx`, `limits.mdx` in the same commit | 2 wk |
+| **B2** | 2.0 | **SQL tier 2b** | `DISTINCT` — via hash *or* sort on the existing `aggregateStrategy` seam, a **third** hash-vs-sort compare — and `HAVING` | 1 wk |
+| **B3** | 2.0 | **Index realism** | **Non-unique indexes** (uniquify internally as `(key, row-id)` so duplicates coexist; point and range lookups return several row ids) · **composite** indexes with the leftmost-prefix rule · `UNIQUE` · **bulk-load vs. incremental insert** (fill factor → visibly different height) · clustered (index-organized) vs. heap table. Seams: `index/btree.ts` (insert is last-writer-wins today), `index/build.ts`, `Table.indexedColumns` → a richer descriptor, `index-selection`, `index/rangeLookup.ts`, `planner/cost.ts`, `SchemaEditor.tsx`. Closes lecture 8's gap | 2.5–3 wk |
+| **B4** | 2.0 | **Index nested-loop join** | The inner side consults its own B+Tree — the missing fourth `Join.algorithm`; makes "tiny outer + indexed inner" demonstrable; `/compare` becomes four-way. Needs B3 for a non-unique `authorId` | 4–5 days |
+| **B5** | 2.0 | **Plan as relational algebra** | σ π ⋈ γ notation toggle + copy-as-RA beside Mermaid / text. On-ramp to lecture 1 | 2 days |
+| **B6** | 2.0 | **`EXPLAIN [ANALYZE]` as SQL** | Accept the keyword in the editor (today it is a button) | ½ day |
+
+#### C. The optimizer, honestly (RESEARCH.md §41)
+
+| ID | Rel. | Item | Shape | Cost |
+|---|---|---|---|---|
+| **C1** | 2.1 | **`ANALYZE` + statistics objects** | `n_distinct`, null fraction, most-common values, equi-depth histogram, correlation — a Stats panel a learner can open; `planner/cost.ts` reads them | 1.5 wk |
+| **C2** | 2.1 | **Correlated dataset + q-error** | A preset where the independence assumption fails; est-vs-actual per operator shown as **q-error** ("off by 40×") | 3 days |
+| **C3** | 2.1 | **Multi-join, `LEFT JOIN`, `IN (subquery)`** | 3+ tables (left-deep), outer join, uncorrelated subquery → semi-join. Lifts the "one `JOIN`, nothing beside it" limits | 2 wk |
+| **C4** | 2.1 | **Join ordering by dynamic programming** | Selinger DP with the **subset lattice visible**; `/tools/join-order` + Playground. Needs C1, C3 | 1.5 wk |
+| **C5** | 2.1 | **Cost-based choice + "Why not?"** | Enumerate candidate plans (access path × join algorithm × order), **choose by cost**, show the runner-up and the delta (the alternative-plans idea, RESEARCH.md §39.6). Retires `limits.mdx`'s "rules never decided by cost" | 1.5 wk |
+| **C6** | 2.1 | **Worker engine + larger data** | `runQuery` behind the §5-designed worker seam; 1k–10k-row datasets; taller B+Trees; a genuinely thrashing pool; **focus + context** tree rendering (collapse subtrees), since `flowinger` draws HTML nodes. Trigger reached: C1 needs bigger tables | 2 wk |
+
+#### D. Transactions — the second subject (lectures 18–21; gated, §25.6)
+
+| ID | Rel. | Item | Shape | Cost |
+|---|---|---|---|---|
+| **D1** | 2.2 | **Schedules + sessions** | `runSchedule([(session, stmt), …], db)` — **the interleaving is an input**, so the engine stays pure; `BEGIN` / `COMMIT` / `ROLLBACK`; Session A / B lanes with a shared timeline; the schedule is a share URL | 2 wk |
+| **D2** | 2.2 | **Enforced lock manager** | Graduate `ui/lockSimulation.ts` (FIFO waiters, wait-for graph, deadlock, youngest victim) into `engine/locks/lockManager.ts`; **strict 2PL**; page-vs-row granularity. The Locks stage stops being "visual only" | 1.5 wk |
+| **D3** | 2.2 | **Isolation by locking** | READ UNCOMMITTED / COMMITTED / REPEATABLE READ / SERIALIZABLE via lock-duration rules; a toy predicate-lock case for phantoms | 1 wk |
+| **D4** | 2.2 | **MVCC / snapshot isolation** | Hidden `xmin` / `xmax` per tuple version; snapshots; the visibility rule as a **predict-then-reveal** ("can T2 see this version?"); first-committer-wins; **write skew**; vacuum and dead-tuple bloat interacting with the buffer pool | 2.5 wk |
+| **D5** | 2.2 | **`/tools/isolation` — the Hermitage matrix** | The ten Hermitage anomalies × five levels × {2PL, MVCC}, **computed by running each schedule**; tests assert PostgreSQL's and InnoDB's *documented* outcomes (behaviour, not implementation) | 1 wk |
+| **D6** | 2.2 | **Concurrency-control compare** | 2PL vs. timestamp ordering vs. OCC vs. MVCC on one schedule: aborts, waiting, anomalies (lectures 19–21) | 1 wk |
+
+#### E. Durability — the third subject (lectures 22–23)
+
+| ID | Rel. | Item | Shape | Cost |
+|---|---|---|---|---|
+| **E1** | 2.3 | **WAL** | Log records (LSN, prevLSN, txn, page, redo/undo), a log buffer and flush, the **log-before-data rule enforced on the buffer pool** | 1.5 wk |
+| **E2** | 2.3 | **Steal/no-steal × force/no-force** | The four combinations with their visible consequence — the payoff of v1's dirty writeback (§22.2: "the buffer pool's other half") | 1 wk |
+| **E3** | 2.3 | **Checkpoints, crash, ARIES** | Fuzzy checkpoints; a **crash button** that drops the pool and keeps disk + log; analysis → redo → undo with the dirty-page table, transaction table and CLRs as panels — `/tools/recovery` | 2 wk |
+| **E4** | 2.3 | **Recovery in the pipeline** | Run `UPDATE`s in the Playground, crash, recover, compare with the committed state | 1 wk |
+
+#### F. Storage engines & access methods (lectures 5–10, 14; parallelisable; Q6 applies to each)
+
+| ID | Rel. | Item | Shape | Cost |
+|---|---|---|---|---|
+| **F1** | 2.4 | **`/tools/lsm` + Bloom filter** | Memtable → L0 → leveled / tiered compaction; per-SSTable Bloom filter with a false-positive slider; write / read / space amplification counters; a **B+Tree vs. LSM** mode in `/compare` on the same workload | 2 wk |
+| **F2** | 2.4 | **`/tools/hash-index`** | Extendible and linear hashing (directory doubling, local / global depth); why a hash index cannot range-scan | 1 wk |
+| **F3** | 2.4 | **`/tools/columnar`** | NSM / DSM / PAX layouts; dictionary / RLE / delta / bit-packing with compressed-size counters; late materialization; a `ColumnScan` operator — which finally gives **projection pushdown** something real to save (§22.9 declined it for lack of that) | 2 wk |
+| **F4** | 2.4 | **Vectorized vs. tuple-at-a-time** | Count of `next()` calls per row vs. per batch on the existing operators | 1 wk |
+| **F5** | 2.4 | **`/tools/latch-crabbing`** | Safe-node rule; optionally optimistic lock coupling; scripted threads | 1 wk |
+| **F6** | 2.4 | **`/tools/vector-index`** | Brute force vs. IVF vs. HNSW on 2-D points; recall vs. distance-computations; HNSW layers rendered with `flowinger`. The syllabus now lists vector indexes with trees and hash tables | 1.5 wk |
+| **F7** | 2.4 | **Buffer-pool depth** | LRU-K / 2Q, a scan-resistant ring buffer, sequential prefetch — in the sandbox and `/compare` | 1 wk |
+
+#### G. The learning layer
+
+| ID | Rel. | Item | Shape | Cost |
+|---|---|---|---|---|
+| **G1** | 2.0 | **Course map + interview roadmap** | Lecture-by-lecture alignment (RESEARCH.md §38's table, kept honest: ●/◐/○) and a week-by-week interview path mapped to routes. Content only. **States non-affiliation.** A launch asset — people search by course | 3–4 days |
+| **G2** | 2.5 | **Confidence ratings** | "How sure are you?" with each prediction; a calibration curve in `/progress`. **Verify the hypercorrection literature before building** (RESEARCH.md §39.2) | 2 days |
+| **G3** | 2.5 | **Misconception-tagged challenges** | ~6 challenges from the SQL-misconception categories: an index that *hurts*, "LRU is what real engines run", `COUNT(*)` vs `COUNT(col)`, a function on the column defeating the index | 1 wk |
+| **G4** | 2.5 | **Generated, graded questions + spaced review** | Seeded generators with engine-computed answers (next clock-sweep victim, split point, chosen index, visible tuple), a Leitner scheduler in `localStorage`. **After §9**, disjoint from `STUDY.md`'s bank; built as an experiment with its own measurement | 1.5 wk |
+| **G5** | 2.5 | **Detail levels** | Novice / standard / expert narration and panel set. Needs event-label variants — **do together with H5** | 1 wk |
+| **G6** | 2.5 | **Trace diff** | "What changed since my last run", reusing `/compare`'s scoring | 3 days |
+
+#### H. Reach & platform
+
+| ID | Rel. | Item | Shape | Cost |
+|---|---|---|---|---|
+| **H1** | 2.5 | **PWA / offline** | A hand-written service worker precaching hashed assets, a manifest, `worker-src 'self'` / `manifest-src 'self'` in the CSP, the build stamp driving invalidation. **No new dependency** (Workbox declined for weight). Makes a lecture hall with bad Wi-Fi a non-event. Verify on a preview deploy first (§25.5) | 2–3 days |
+| **H2** | 2.5 | **Embeds + essays** | `/embed/:view` routes with `frame-ancestors *` on that path only (a per-path `_headers` block), a documented `postMessage` API; 2–3 interactive essays (B+Tree, buffer pool, isolation anomalies) that double as launch content | 1 wk |
+| **H3** | 2.0 | **Publish the CLI and `@querylens/engine` 0.x** | `dist` build, `files` allow-list, npm provenance from a tag-triggered OIDC workflow, a stability disclaimer. The "second consumer" trigger (§22.8) is met — the site and the CLI already are two. Needs the npm-scope decision | 3–4 days |
+| **H4** | 2.0 | **`@querylens/mcp` + `llms.txt`** | `run_query`, `explain_trace`, `compare_policies` over the engine for the *user's own* assistant — grounded by construction. Runs locally; no hosted service (RESEARCH.md §44) | 3 days |
+| **H5** | 2.5 | **i18n (conditional)** | Engine events carry `{key, params}` beside the English `label`; a catalogue; one locale **only with a named maintainer** (§22.6's standing rule) | 2–3 wk + per locale |
+| **H6** | 2.5 | **Accessibility depth** | Arrow-key navigation among diagram nodes; a **manual** NVDA / VoiceOver / TalkBack pass; a published WCAG 2.2 AA conformance statement; a data-table view for every new panel | 1 wk + ongoing |
+| **H7** | 2.5 | **Workspaces** | Named custom databases and saved queries in IndexedDB / OPFS with **export / import** (no backend); lifts `localStorage`'s ~5 MB and makes a custom database shareable as a file | 4–5 days |
+| **H8** | 2.0 | **Budgets by route** | Replace the single 424 kB sum with per-route "what a visitor downloads" ceilings and one row per tool; keep entry ≤ 24 kB. **Prerequisite for everything in 2.2+** | 1 day |
+
+### 25.5 Engineering rules for v2
+
+1. **Concurrency, crashes and faults are inputs** (§25.2 Q7) — schedules and fault points, never threads.
+2. **Budgets by route** (H8) before 2.2. Each tool is its own lazy chunk.
+3. **No new runtime dependency without review.** The release-age floor and `allowBuilds` exist for a reason,
+   and the first deploy showed `allowBuilds` is a *mapping*, not a list. Prefer none: the oracle uses a
+   built-in module and an existing devDependency; the service worker is hand-written.
+4. **Exercise platform config on a preview deploy before relying on it.** The first deploy failed three
+   ways on config no local check could see (§24.4). Any change to `_headers`, `wrangler.jsonc`, `public/` or
+   the CSP — every one of H1, H2 touches them — gets a preview-deploy check.
+5. **A text alternative and an axe check for every new panel** (Q6).
+6. **Docs move with capability, in the same commit** — `sql.mdx`, `limits.mdx`, `ui/grammar.ts`. v20 found
+   three stale reference pages; the drift test on the grammar is the model.
+7. **Fuzz is seeded and bounded in CI**; long runs live in a scheduled, read-only workflow.
+
+### 25.6 Gates and kill criteria — the §9 checkpoint
+
+v14 lifted §9's *blocking* of the backlog; v2 keeps building but installs **a checkpoint before 2.2** — the
+first release that adds a subject §22.1 called a second product. The study (A2) runs during 2.0.
+
+| §9 result | Reading | Action |
+|---|---|---|
+| QueryLens beats the text control on the post-test | The format works | Proceed with 2.2–2.4; fund G4 |
+| **No detectable difference** | **Inconclusive, and the likely outcome at 5–10 per arm** — that n detects only d ≳ 1.2; typical animation effects are d ≈ 0.4 (RESEARCH.md §39) | Proceed with 2.2, but fund the learning layer (G2–G4) alongside; seek larger n through a course adoption |
+| Text control beats QueryLens | Something is wrong | **Freeze 2.2–2.4.** Diagnose by question and by panel; fix narration and prediction first |
+
+- **Time-box.** If fewer than 10 completed per arm by **2026-12-31**, decide with what exists — and record
+  that *no data is not no effect*.
+- **Signals without telemetry** are qualitative by decision (§14.4): the study, A3's issues, GitHub
+  Discussions, instructor requests. Ship at most **one F-tool per release** until one of those points at it.
+- **AI kill criteria** (RESEARCH.md §44): a constrained in-app explainer is considered only after §9, and
+  is opt-in, local-only, never answers a pending prediction, and discards any output containing a number
+  not present in the event stream.
+
+### 25.7 Risks specific to v2
+
+| Risk | Why it matters | Mitigation |
+|---|---|---|
+| **Widening** past §9's contrast | Three "second products" in one plan; §12's first risk, compounded | One subject per release; the §25.6 checkpoint; "computed, not drawn" |
+| **Model honesty** for MVCC, ARIES, histograms | A toy that looks like Postgres is §12's "plausible but false" | Label every simplification; assert behaviour against Hermitage / SQLite, never claim implementation; name each heuristic |
+| **Bundle and complexity growth** | Two groups are already at their ceiling | H8 first; lazy per-tool chunks; the Worker (C6) |
+| **Maintainer capacity** | ~31–39 weeks on the main line, solo | 2.4 and 2.5 are self-contained modules — `CONTRIBUTING.md` and the tool template make them contributor-sized |
+| **Quiz contaminates §9** | The blocker §22.4 named | *Generated* bank (G4), disjoint from `STUDY.md`, built after the study |
+| **Name / brand** | Every backlink raises the price of changing it | Decide in 2.0 (A5), before the launch post |
+| **Accessibility debt** from new visual panels | Automated checks catch ~30–57% of failures | Q6; H6's manual pass |
+| **i18n blast radius** | The engine emits English strings | H5 is conditional on a named maintainer and shares a refactor with G5 |
+| **Oracle flakiness / CI time** | A slow or flaky fuzz job gets disabled | Seeded, bounded counts; long runs scheduled |
+| **Unverified platform config** | The first deploy needed three fixes | §25.5 rule 4 |
+| **AI scope creep** | Hallucination and answer leakage cut against the core mechanism | Declined for v2 with written kill criteria; MCP instead |
+
+### 25.8 Definition of done
+
+**2.0 — Trust & ceiling**
+- [ ] `1.0.0` tagged; CHANGELOG cut (T0).
+- [ ] The oracle runs in CI (seeded, bounded); a divergence ledger and "How we know the answers are right" exist.
+- [ ] The study kit is live and at least one participant has completed it end to end on a phone *and* a laptop.
+- [ ] A homework-shaped query using `OR`, `IN`, `LIKE`, `DISTINCT`, `HAVING` and a **non-unique** indexed column runs and narrates end to end; `sql.mdx`, `limits.mdx` and `/tools/grammar` all agree.
+- [ ] `limits.mdx` no longer says "unique key" or that a join never uses an index.
+- [ ] Name / domain decided and recorded; custom domain live; the launch post published; CLI, engine and MCP on npm.
+- [ ] Per-route budgets replace the single sum.
+
+**2.1 — The optimizer, honestly**
+- [ ] `ANALYZE` statistics are inspectable; at least one dataset shows a q-error ≥ 10×.
+- [ ] A three-table query is ordered by DP with the lattice visible; "Why not?" shows the runner-up.
+- [ ] `limits.mdx`'s "cost never decides" is replaced by the true statement.
+
+**2.2 — Transactions**
+- [ ] Two sessions interleave in the Playground from a URL; a deadlock resolves live *in the engine*.
+- [ ] The isolation matrix's PostgreSQL and InnoDB columns match Hermitage's documented outcomes **in tests**; write skew reproduces under SI and is prevented under SER.
+
+**2.3 — Durability**
+- [ ] Crash → recover restores exactly the committed state; all four steal / force combinations are demonstrated; analysis, redo and undo are each a stage in the trace.
+
+**2.4 — Storage engines**
+- [ ] Every shipped tool has a lesson, a challenge, a data-table view and its own budget row; B+Tree vs. LSM reports amplification numbers from real counters.
+
+**2.5 — Reach & learning layer**
+- [ ] A course map with a non-affiliation note; the generated quiz shipped *after* §9; a published accessibility statement backed by a manual screen-reader pass; the app works offline on a real device.
+
+### 25.9 Decision log
+
+| Item | Verdict | Earliest | Trigger to revisit |
+|---|---|---|---|
+| SQLite oracle (A1) | **Planned, 2.0** | now | — |
+| §9 study kit (A2) | **Planned, 2.0** | now | — |
+| Rename before launch (A5) | **Decision needed** | now | Before the §18.2 post |
+| SQL tier 2 (B1, B2) | **Planned, 2.0** | now | — |
+| Non-unique / composite indexes (B3) | **Planned, 2.0** | now | — |
+| Index nested-loop join (B4) | **Planned, 2.0** | after B3 | — |
+| Statistics, DP join order, cost-based choice (C) | **Planned, 2.1** | after 2.0 | — |
+| Transactions: locks, isolation, MVCC (D) | **Planned, 2.2 — gated** | after 2.1 | §25.6 checkpoint |
+| WAL / ARIES recovery (E) | **Planned, 2.3 — gated** | after 2.2 | 2.2 shipped |
+| LSM, hash index, columnar, vectorized, latch crabbing, vector index (F) | **Planned, 2.4** | independent | Q6; one per release until a signal |
+| Generated quiz (G4) | **Planned, 2.5** | after §9 | The study has run |
+| Confidence ratings (G2) | **Planned, 2.5** | any | Verify the literature first |
+| PWA / offline (H1) | **Planned, 2.5** | any | Preview-deploy check |
+| Embeds + essays (H2) | **Planned, 2.5** | any | — (§20.3's "named author" trigger superseded: the launch needs them) |
+| Publish CLI + `@querylens/engine` (H3) | **Planned, 2.0** | now | npm-scope decision |
+| MCP server + `llms.txt` (H4) | **Planned, 2.0** | after H3 | — |
+| i18n (H5) | **Conditional** | — | A named locale maintainer |
+| In-app LLM explainer | **Declined for v2** | post-§9 | Kill criteria in §25.6 |
+| Distributed (2PC, Raft, sharding) | **Horizon (v3)** | — | Its own plan |
+| Parallel / morsel-driven execution | **Horizon (v3)** | — | Needs scripted threads (Q7) |
+| Rust / WASM engine | **Declined** | — | The Worker path cannot reach ~10k rows |
+
+### 25.10 What v2 deliberately does not add
+
+In the discipline of §20 and [RESEARCH.md §21](RESEARCH.md#21-what-i-deliberately-left-out) and Part IV §46:
+
+- **No bundled or local LLM** (§25.6, RESEARCH.md §44). An MCP server instead.
+- **No distributed subject, no parallel execution** — separate models; a v3 horizon.
+- **No window functions or recursive CTEs** — §4's reasoning stands. v2 adds expressions, `DISTINCT`,
+  `HAVING`, outer joins and an uncorrelated `IN (subquery)`, and stops.
+- **No Postgres-dialect `EXPLAIN` viewer** (§20.6) and **no APM use case** (§2).
+- **No accounts, no graded submission, no telemetry, no real-time collaboration.** The MCP server runs
+  where the user runs it; nothing new leaves the browser.
+- **No Rust / WASM rewrite.**
+- **No claim of affiliation** with any course or institution whose syllabus is used as a checklist (G1).
+
+---
+
 ## Appendix: Development Changelog
+
+> **v21 — 2026-09-24.** A **retrospective and a plan for product v2** — new **§24** and **§25**, with the
+> evidence in a new [RESEARCH.md Part IV](RESEARCH.md#part-iv--v2-research). §24 summarises v1 as
+> deployed (23 days from first commit, 1,170 unit + 79 e2e tests, A+ headers) and is candid about what it
+> did not prove: the §9 study never ran, the name is shared with at least five unrelated products, and the
+> first deploy needed three fixes. §25 plans v2 as six releases (2.0–2.5, M14–M21) after a research pass
+> over the competition, the CMU 15-445 Fall 2026 syllabus (v1 covers 6 of 23 content lectures, partly 7,
+> misses 10 — including all six on concurrency control through recovery), the learning-science evidence,
+> and testing methodology. Its central claim: **v2 is not more SQL.** It is *prove it* (a SQLite
+> differential oracle that costs no dependency, and a runnable §9 study kit), *raise the ceiling*
+> (expressions, non-unique and composite indexes, an index join), *make the optimizer decide* (statistics,
+> q-error, DP join order, "Why not?"), then *transactions* and *recovery* — computed by running schedules
+> through the engine and checked against Hermitage — and only then storage engines. The §9 gate is
+> replaced by a **checkpoint before 2.2**. An in-app LLM is declined with written kill criteria; an MCP
+> server is planned instead. §22.9's rows for MVCC, WAL, the engine package, the quiz and i18n are
+> re-pointed at §25. Note: v14–v20 have no entries here — they are the internal build revisions recorded
+> in §10's v1 row, all inside product v1.
 
 > **v13 — 2026-09-08.** A **new §22** — the feature-and-tool backlog, counted against `src/` the way
 > §20 counted the spin-offs. §13 named *"expand SQL coverage: joins, cost estimates"* in one line and

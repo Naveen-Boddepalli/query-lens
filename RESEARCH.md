@@ -1,6 +1,6 @@
 # QueryLens — Research Findings
 
-Three passes, in one file.
+Four passes, in one file.
 
 - **Part I — Pre-build (2026-09-01, §1–§8).** Is this worth building, and is the design right?
   Written before any code existed.
@@ -10,6 +10,8 @@ Three passes, in one file.
 - **[Part III — UI/UX production readiness](#part-iii--uiux-production-readiness) (2026-09-02, §24–§35).**
   The same question asked of the interface, by driving the running app on desktop and phone and measuring
   what it does.
+- **[Part IV — v2 research](#part-iv--v2-research) (2026-09-24, §36–§46).** Written the day after the
+  first deploy. v1 is built and live; what should v2 be? The evidence behind plan.md §24–§25.
 
 ---
 
@@ -941,3 +943,414 @@ it open, two Tabs land outside · `getComputedStyle(document.documentElement).co
 root font-size doubled: all rem type scaled, the 8 `text-[10px]`/`text-[11px]` elements did not · scrubber
 rect 16px tall · composited contrast sweep: 66 elements, 0 failures, min 5.29:1 · `grep` for platform
 detection in `src/`: no matches · 375px: `scrollWidth === innerWidth`, document 1218px tall.
+
+---
+
+## Part IV — v2 research
+
+Research pass done 2026-09-24, the day after the first deploy (`query-lens.1234naveenboddepalli.workers.dev`),
+asking one question: **v1 is built and live — what should v2 be?** Method: (1) measure v1 from the repo
+rather than from memory; (2) read the competition and the field's own current syllabus; (3) go back to the
+learning-science evidence Part I leaned on and ask what it implies for features Part I never considered
+(a quiz, confidence ratings, an AI explainer); (4) find the cheapest ways to make the engine *credible*
+rather than merely correct; (5) check the biggest-ticket ideas (transactions, recovery, storage engines)
+against what already exists in `src/`.
+
+Verdict up front: **v2 should not be "more SQL."** It should be four things, in this order — *prove it
+works* (run the §9 study, add a correctness oracle), *raise the engine's ceiling* to where a homework query
+survives (SQL tier 2, real indexes, a cost model that decides rather than decorates), *add the two subjects
+courses teach right after query execution* (transactions, then recovery), and only then *broaden into
+storage engines and access methods*. **An in-app LLM should not ship; an MCP server should.** And the
+project's name needs a decision before the launch post, not after it.
+
+Confidence labels as in Part I: **[verified]** = I checked it directly this pass (ran it, fetched it,
+counted it). **[sourced]** = from a credible secondary source or a search summary I could not open in
+full. **[judgment]** = my reasoning, not a citation.
+
+---
+
+## 36. v1 in numbers **[verified]**
+
+Counted from the repository on 2026-09-24 (commands under *Verified locally*, below).
+
+| | |
+|---|---|
+| Calendar time, first commit → first deploy | **23 days** (2026-09-01 → 2026-09-23), 106 commits. §10 estimated the MVP alone at 10–14 weeks part-time |
+| Source | 23.7k lines of TS/TSX (8.7k of it `src/engine/`, **zero files importing React**), plus 0.9k lines of MDX docs |
+| Tests | 9.6k lines of unit tests (**1,170 tests, 56 files**), 2.0k lines of e2e (**79 tests**, incl. axe in both themes) |
+| Surface | 14 top-level routes · 8 stage explainers · 9 lessons · 12 challenges · 9 `/tools/*` sandboxes · 12 docs pages |
+| Engine | 8 pipeline stages · `SELECT`/`INSERT`/`UPDATE`/`DELETE` · 6 optimizer rules · 3 join algorithms · 2 aggregate strategies · 6 buffer-pool policies · cost estimates on every plan node |
+| Bundle | **377.9 kB** gzip of a 424 kB budget (headroom **46 kB, 11%**); `standalone-tools` at 42.7/43, `trace-ui` at 55.5/56 — **two groups are already at their ceiling** |
+| Security / a11y | securityheaders.com **A+** (live); axe: zero violations, both themes; `aria-live` narration track |
+| Validation | **The §9 post-test has not been run.** No participant has used it |
+
+**The observation that matters most for planning:** 23 days against a 10–14 week estimate says *typing
+speed is not v2's constraint.* The things v1 could not buy with time are the ones v2 has to spend effort
+on — evidence that it teaches, and a reason for anyone to arrive. **[judgment]**
+
+---
+
+## 37. The landscape — what exists, and what none of it does **[verified: fetched 2026-09-24]**
+
+Part I §4 concluded the differentiation holds. Re-checked against what is live today:
+
+| Tool | What it is | What it visualizes | What it does not |
+|---|---|---|---|
+| **sql-execution-visualizer.vercel.app** | Browser-only SQL runner (`CREATE`/`INSERT`/`SELECT`/`UPDATE`/`DELETE`) | Animated B+Tree (insert/split/delete); the logical clause order (`FROM → JOIN → WHERE → …`); an execution-plan walkthrough | By its own page: **no buffer pool, no locking, no memory management** |
+| **systemdesignsimulator.org/internals** | Interview-prep site: B-Tree, **LSM Tree, Copy-on-Write B-tree, Slotted Page, Write-Ahead Log, Isolation Levels** simulators; "8-Week Interview Roadmap", "Top 50 System Design Questions" | Scripted animations per concept | On the page fetched: no quizzes or progress tracking; no SQL engine underneath (**[sourced]** — the simulators themselves were not opened) |
+| **PlanetScale, "B-trees and database indexes"** (Ben Dicken) | A single, very well-made interactive essay | B-tree insert/split, keys-per-node slider | One subject. Reported at ~2 months of work for that one piece **[sourced]** |
+| **Research prototypes** (NEURON, arXiv 1805.05670; TIPS, arXiv 2210.13722) | NL explanation of query plans; selection of informative *alternative* plans for teaching | Plans, not execution | Not products |
+
+Three things follow.
+
+1. **The breadth of scripted simulators is already someone else's.** LSM, WAL and isolation levels exist
+   on a competitor as animations. QueryLens cannot win a "who has more animations" race, and should not
+   enter it. Its answer must be the thing a scripted simulator cannot do: **the isolation matrix, the
+   compaction cost, the recovery outcome are *computed by running the engine*, not drawn from a script**
+   — and they are checkable against external ground truth (§40, §42).
+2. **What QueryLens has that none of the three does** — real SQL through a real pipeline, a buffer pool
+   with six policies, a write path with dirty-page writeback, external sort spilling through that pool,
+   predict-then-reveal, shareable moments, presenter/print/assignment surfaces, an accessible narration
+   track, and no telemetry — is the moat, and v2 should deepen it before diluting it.
+3. **The interview-prep audience is real and underserved by rigour.** The competitor's framing (roadmap,
+   "top 50 questions" linking to simulators) is a distribution pattern worth copying in *content*, not in
+   architecture (plan.md §3 already names interview prep as target user #2). **[judgment]**
+
+---
+
+## 38. The syllabus test — v1 against CMU 15-445/645 Fall 2026 **[verified titles; coverage is judgment]**
+
+The plan's first target user is "CS students taking DB courses (e.g., CMU 15-445 style curriculum)"
+(§3). The course's own current schedule is the most objective coverage checklist available. Lecture
+*titles* were fetched from `15445.courses.cs.cmu.edu/fall2026/schedule.html`; I did not read lecture
+content, so "coverage" below is my reading of the titles against what `src/` does. **This is not a claim of
+endorsement by, or affiliation with, the course.**
+
+The syllabus's own one-line summary of the topic list: *data models · storage models (n-ary,
+decomposition) · query languages · storage architectures (heaps, log-structured) · indexes + filters
+(trees, hash tables, vector) · transaction processing (ACID, concurrency control) · recovery (logging,
+checkpoints) · query processing (joins, sorting, aggregation, optimization) · parallel architectures
+(multi-core, distributed).*
+
+| # | Lecture | v1 | What v1 has / lacks | v2 |
+|---|---|---|---|---|
+| 1 | Relational Model & Algebra | ◐ | Logical plan tree, but no relational-algebra notation | 2.0 plan-as-RA toggle |
+| 2 | Modern SQL | ◐ | Subset (no `OR`/`NOT`/`IN`/`LIKE`/`DISTINCT`/`HAVING`/outer joins/subqueries) | 2.0 SQL tier 2 |
+| 3 | Database Storage I | ● | Heap pages; slotted-page inspector | — |
+| 4 | Memory Management | ● | Buffer pool, six policies, dirty writeback | 2.4 scan resistance |
+| 5 | Database Storage II | ◐ | Tuple layout ✓; **log-structured ✗** | 2.4 LSM |
+| 6 | Storage Models & Compression | ○ | Row store only | 2.4 columnar + compression |
+| 7 | Hash Tables | ◐ | Grace hash join's bucket collisions; no static/dynamic hashing | 2.4 hash indexes |
+| 8 | Indexes & Filters I | ● | B+Tree, range scans — **unique keys only** | 2.0 non-unique/composite |
+| 9 | Indexes & Filters II | ○ | No filters (Bloom), tries or vector indexes | 2.4 Bloom + vector |
+| 10 | Index Concurrency Control | ○ | No latch crabbing | 2.4 latch crabbing |
+| 11 | Sorting & Aggregations | ● | External merge sort; hash vs sort aggregate | — |
+| 13 | Joins | ● | Nested-loop, hash, sort-merge, Grace tool — **join never uses an index** | 2.0 index nested-loop |
+| 14 | Query Execution I | ◐ | Volcano ✓; materialization / vectorized ✗ | 2.4 vectorized |
+| 15 | Query Execution II | ○ | No parallel execution | horizon |
+| 16 | Query Planning & Optimization I | ● | Six rules, cost annotations | — |
+| 17 | Query Planning & Optimization II | ◐ | Cost estimates ✓; **no join ordering, no plan enumeration, no statistics** | 2.1 |
+| 18 | Concurrency Control Theory | ○ | Nothing in the pipeline | 2.2 |
+| 19 | Two-Phase Locking | ◐ | `/tools/locks`: S/X, waiters, deadlock, victim — outside the engine | 2.2 |
+| 20 | Timestamp Ordering | ○ | — | 2.2 |
+| 21 | Multi-Version Concurrency Control | ○ | — | 2.2 |
+| 22 | Database Logging | ○ | — | 2.3 |
+| 23 | Database Recovery | ○ | — | 2.3 |
+| 24 | Distributed Databases | ○ | — | horizon |
+
+(12 and 25 are in-class exam-style sessions and carry no content.) **Of 23 content lectures: 6 covered (●),
+7 partly (◐), 10 not at all (○).** The largest single hole is **lectures 18–23 — concurrency control
+through recovery, six lectures, 26% of the course, zero covered** in the main pipeline. That is the
+strongest evidence for v2's "second and third subject" pillar, and it is independent of anyone's taste.
+Note also the syllabus now lists **vector** indexes alongside trees and hash tables, and **log-structured**
+storage alongside heaps.
+
+Two gaps are *internal* rather than syllabus-driven, and both are visible in v1's own docs
+(`reference/limits.mdx`): every B+Tree assumes a **unique key** (a duplicate silently overwrites — which is
+why `posts` could not index `authorId`), and a `JOIN` **never consults an index**, so "nested-loop wins
+when the outer is tiny and the inner is indexed" — a sentence §23.1 itself writes — cannot be demonstrated.
+A sceptical student finds both in the first ten minutes.
+
+---
+
+## 39. What the learning-science evidence says, beyond Part I
+
+Part I §1 rested the product on one finding: how learners *use* a visualization matters more than what it
+shows. This pass re-checked that and looked for what it implies for features Part I did not consider.
+
+1. **Engagement beats viewing — still.** The engagement-level cut of that literature **[sourced]**: where
+   learners did something beyond watching (predicted, answered questions, constructed input), **10 of 12**
+   comparisons found a significant learning gain; among **view-only** comparisons, **3 of 9** did. (Part I
+   read the meta-study's own 24-experiment / 11-significant tally directly; the two cuts agree in direction.)
+   A controlled comparison found *responding* (predicting what the animation would do) produced
+   significantly higher active engagement than watching with instructor commentary. **This is v1's
+   design and the evidence for it is intact.**
+2. **Predict-then-reveal has its own literature: the pretesting effect** **[sourced]**. Kornell et al.
+   (2009) and Richland et al. (2009) showed learning benefits from attempting answers *before* instruction
+   even when the attempt is wrong; a 2023 review in *Educational Psychology Review* and 2025 replication
+   work in *Memory & Cognition* both appear. Mechanism named in the sources: errorful generation — the
+   learner commits, then notices the mismatch. It works **only when feedback follows**, which v1's
+   reveal provides. *Implication:* asking for a **confidence rating** with each prediction is a candidate
+   upgrade — hypercorrection (a confidently held error is corrected more strongly) is the mechanism people
+   cite, but I am recalling that from Butterfield & Metcalfe (2001) and did **not** re-verify it this pass
+   **[judgment — verify before building]**.
+3. **Animation vs static, and pacing** **[sourced]**. Höffler & Leutner (2007), 26 studies / 76
+   comparisons: animation beats static pictures overall, **d = 0.37** (95% CI 0.25–0.49); larger when the
+   animation is *representational* (d = 0.40) and largest for *procedural-motor* knowledge (d = 1.06).
+   Mayer's segmenting principle — learner-paced segments rather than a continuous animation — improved
+   transfer in 3 of 3 tests (**d ≈ 0.98**), most where material is complex, fast, and the learner is a
+   novice. *Implication:* v1's step-through, learner-paced playback is the right default; auto-play stays
+   secondary; and a **detail level** (novice / standard / expert) is worth considering because the same
+   source class says instructional supports that help novices can hinder experts (the *expertise reversal*
+   effect — **[judgment]**, not fetched this pass).
+4. **Retrieval practice and spacing** **[sourced]**. One meta-analytic figure reported in the sources found
+   for this pass: mean **g = 0.50** (159 effects) for retrieval practice against reading. But the most
+   relevant *field* study — spaced retrieval across nine introductory STEM courses (*Int. J. STEM
+   Education*, 2024) — is titled *"is the glass half full or half empty?"* and the effect is uneven.
+   *Implication:* an in-app quiz is worth building **as an experiment with its own measurement**, not on the
+   assumption it works. And there is a design opening no static quiz has: the engine is ground truth, so
+   questions can be **generated and graded from a seed** ("here is a clock-sweep state; which frame goes
+   next?") — an unbounded bank that cannot contaminate §9's fixed study questions (§22.4's stated blocker).
+5. **What novices get wrong** **[sourced]**. A think-aloud study of SQL novices (ICER 2021) organized
+   misconceptions into four categories: from *previous course knowledge*, *generalization-based*,
+   *language-based*, and *incomplete or incorrect mental models*. The last is exactly what an internals
+   visualizer targets. *Implication [judgment]:* v1's challenges are goal-shaped but not
+   *misconception-shaped*. Each of "an index always speeds a query up", "LRU is what real databases run",
+   "`COUNT(*)` and `COUNT(col)` are the same", "a function on the column still uses the index" is a
+   testable claim the engine can refute in one run — a natural challenge, tagged by category.
+6. **Showing what the optimizer *didn't* choose** **[sourced]**. The TIPS paper (arXiv 2210.13722) starts
+   from the observation that DBMSs show students only the chosen plan, so the optimizer stays a black box;
+   it selects *k informative alternative plans* to show, and reports a three-year in-class evaluation.
+   *Implication:* v1 shows the chosen plan with estimates; a **"Why not?" panel** showing the runner-up and
+   its cost is the natural v2 step, and it needs a cost model that actually chooses (§41).
+
+**Statistical honesty about §9.** §9 proposes 5–10 participants per arm. For a two-sample comparison
+(normal approximation, two-sided α = .05, power .80) the required n per arm is ≈ 15.7 / d²: **d = 1.2 →
+~11; d = 0.8 → ~25; d = 0.5 → ~63; d = 0.37 (the animation meta-analysis average) → ~115.** A 10-per-arm
+study can only detect a *very large* effect; it is an exploratory signal, and its write-up should say so.
+**[judgment / calculation]**
+
+---
+
+## 40. Correctness credibility — an oracle that costs nothing **[verified]**
+
+v1's promise is that "every number is true to this engine." That is a claim about *consistency*, not about
+*correctness of SQL semantics*. The cheapest available upgrade turns it into a checkable claim about result
+sets, and it needs **no new dependency and no bundle bytes**:
+
+- **`node:sqlite` ships in the Node this project already pins.** `.node-version` is `22`; the module was
+  added in v22.5.0 and stopped requiring `--experimental-sqlite` in **v22.13.0 / v23.4.0**. Node marks it
+  *Stability 1.2, release candidate*. Verified here: Node v24.16.0 embeds **SQLite 3.53.1** and an
+  in-memory `DatabaseSync` runs `CREATE`/`INSERT`/`SELECT`.
+- **`fast-check` 4.9.0 is already a devDependency**, used by four test files (B+Tree insert/delete, external
+  sort, hash join). Property-based testing is an established idiom in this repo.
+- **The technique has a track record.** SQLancer's oracles have found hundreds of logic bugs in SQLite,
+  DuckDB, ClickHouse, TiDB and CockroachDB **[sourced]**: *NoREC* (an optimized query must return what its
+  unoptimized translation returns), *TLP* (partition a predicate `p` into `p`, `NOT p`, `p IS NULL`; the
+  three results, composed, must equal the original), *PQS* (a query built around a chosen "pivot" row must
+  return it).
+
+**Design [judgment].** Three layers, cheapest first:
+(a) **Metamorphic, inside QueryLens** — same query with every optimizer rule off vs. on returns the same
+rows (NoREC-shaped); all three join algorithms and both aggregate strategies agree; `Sort`+`Limit` vs.
+reference. Needs nothing external.
+(b) **Differential against SQLite** — generate tables and queries from the toy grammar, run both, compare
+result multisets (sequences under `ORDER BY`), aggregates with a float tolerance, `NULL` behaviour.
+(c) **TLP, once `NULL` three-valued logic exists** (v2.0 SQL tier 2 adds it).
+**Caveats to design in, not discover:** SQLite is dynamically typed with type *affinity*, so generated data
+must be typed so semantics coincide; some divergences will be **documented semantic differences** (string
+collation, integer division), not bugs — keep a *divergence ledger* rather than a list of `skip`s; and CI
+must run a **seeded, bounded** number of cases (a long fuzz belongs in a scheduled job with the same
+read-only token discipline as `ci.yml`).
+**Product payoff:** a docs page, "How we know the answers are right," listing exactly what is compared
+against SQLite — which strengthens the honesty claim (§2, §12) from *consistent* to *checked*.
+
+---
+
+## 41. The optimizer story — make it decide, then make it wrong on purpose
+
+v1's cost model annotates every node and reconciles estimate against actual in the narration; but
+`limits.mdx` is explicit that **rules fire on structure and never on a cost comparison** — the estimates
+justify a rewrite's *narration*, they do not *decide* it. The field's own evidence says where the teaching
+value is **[sourced]**:
+
+- Leis et al., *How Good Are Query Optimizers, Really?* (VLDB 2015; a 2025 follow-up, *Still Asking*, is in
+  VLDB vol. 18): cardinality estimators **routinely** produce large errors that grow with query
+  complexity — often **an order of magnitude or more** for larger expressions — because real data is
+  correlated and non-uniform, which breaks the independence assumption. Exhaustive dynamic-programming
+  join enumeration **still helps** despite bad estimates, and the **cost model matters much less than the
+  cardinality estimates**.
+
+**Implications [judgment].** A v2 optimizer lesson worth having has five parts: (1) **statistics as
+inspectable objects** — `ANALYZE` producing distinct counts, null fraction, most-common values and an
+equi-depth histogram the learner can open; (2) a **deliberately correlated dataset** where the independence
+assumption fails and the estimate is off by 10–100×, shown as **q-error** (max of est/act and act/est) — the
+metric that paper uses; (3) **join ordering by dynamic programming** with the subset table visible — which
+needs the multi-join grammar v1 lacks (`limits.mdx`: "no more than one `JOIN` per query, so no join-order
+choice"); (4) **plan enumeration that actually chooses**, so a rule can be *skipped because the cost says
+no*; (5) the **"Why not?" panel** (§39.6). Keep §12's rule: name every heuristic, and say real optimizers
+differ. A histogram that pretends to be Postgres's is exactly the "plausible but false" §12 prohibits.
+
+---
+
+## 42. The transactions and recovery block — what exists, what an external oracle offers
+
+**The external ground truth already exists.** Kleppmann's **Hermitage** defines **ten anomaly tests** —
+G0 (write cycles), G1a (aborted reads), G1b (intermediate reads), G1c (circular information flow), OTV
+(observed transaction vanishes), PMP (predicate-many-preceders), P4 (lost update), G-single (read skew),
+G2-item (write skew), G2 (anti-dependency cycles) — and records the outcome at each isolation level for
+**eight databases** (PostgreSQL, MySQL/InnoDB, Oracle, SQL Server, FoundationDB, CockroachDB, YugabyteDB,
+Memgraph) **[verified: README fetched]**. Snapshot isolation is the canonical case: it exhibits none of the
+anomalies the SQL standard prohibited yet is not serializable — **write skew** — which is the single
+best "looks safe, isn't" example in the field **[sourced]**.
+
+**Design [judgment].** An isolation matrix — *anomaly × isolation level × mechanism (locking vs. MVCC)* —
+that is **computed by running each anomaly's scripted schedule through the engine**, not drawn. Tests then
+assert the computed cells against Hermitage's *documented behaviour* for PostgreSQL and InnoDB. That is
+behavioural ground truth (what the outcome is), explicitly **not** a claim about implementation, and it is
+exactly the "real engine underneath" answer to §37's first point.
+
+**What v1 already contains that this builds on:**
+- `src/ui/lockSimulation.ts` — pure and total: FIFO waiter queues, a wait-for graph rebuilt per request,
+  deadlock detection, youngest-transaction victim selection — currently *outside* the engine, driving only
+  `/tools/locks`. `src/engine/locks/lockManager.ts` (the pipeline's own) tracks holders only, by design
+  ("v0 runs one query at a time").
+- `BufferPool.markDirty()` / `write()` and evict-with-writeback — §22.2 called dirty writeback "the buffer
+  pool's other half." It is also the precondition for the steal/no-steal and force/no-force matrix that
+  recovery teaches.
+- **The engine is a pure synchronous function** (§5). Concurrency must not break that. The way to keep it:
+  make the *interleaving an input* — `runSchedule([(session, statement), …], db)` returns events like
+  `runQuery` does. Deterministic, replayable, shareable as a URL, testable — and no threads, timers or
+  async ever enter `src/engine/`.
+
+**Recovery (lectures 22–23).** ARIES's three phases — analysis, redo, undo — with the dirty-page table,
+transaction table and compensation log records as visible panels, a **crash button** that drops the buffer
+pool and keeps disk + log, and the buffer pool's flush rule ("log before data page") as the visible
+constraint. Scope it as its own tool first (`/tools/recovery`), then connect it to the pipeline's writes.
+
+---
+
+## 43. Storage engines and access methods — breadth, gated on lessons
+
+**What is demanded.** The syllabus lists log-structured storage, filters, hash tables, vector indexes,
+storage models and compression (§38). Pavlo's 2025 year-in-review **[verified: fetched]** records five new
+columnar file formats challenging Parquet (FastLanes, F3, Vortex, AnyBlox, Amudai) and that "every major
+DBMS vendor released" an MCP server after March 2025; the Stonebraker/Pavlo discussion treats vector
+indexes as ordinary indexes **[sourced]**. LSM has interactive explainers in the wild (a DEV Community
+simulator covering memtable, flush, sparse index, Bloom filters and leveled compaction **[sourced]**) and a
+competitor simulator (§37).
+
+**What each needs from v1, and what it teaches that v1 cannot:**
+
+| Tool | Reuses | Teaches | Honest counter |
+|---|---|---|---|
+| `/tools/lsm` — memtable → L0 → leveled/tiered compaction, per-SSTable Bloom filter | Page I/O counting through the buffer-pool primitives | Write/read/space amplification; **B+Tree vs LSM on the same workload** in `/compare` | Real LSMs have far more knobs; label the model |
+| `/tools/hash-index` — extendible + linear hashing | `hashJoin.ts`'s driver style | Directory doubling, local/global depth; why a hash index cannot range-scan | — |
+| `/tools/columnar` — NSM / DSM / PAX layouts, dictionary / RLE / delta / bit-packing, late materialization | `slottedPage.ts` | **Finally gives *projection pushdown* something real to save** — §22.9 declined it because a row heap has nothing to skip | — |
+| Vectorized vs tuple-at-a-time | Volcano operators | Count of `next()` calls per row vs per batch | Toy batch sizes |
+| `/tools/latch-crabbing` — safe-node rule, optionally optimistic lock coupling | `BTreePanel`, `lockSimulation.ts` | Why the root latch is a bottleneck; lectures 10 | Threads are *scripted*, not real |
+| `/tools/vector-index` — brute force vs IVF vs HNSW on 2-D points | flowinger (HNSW layers are a graph) | Recall vs distance-computations trade-off | 2-D only; say so |
+
+**A rule worth writing down:** a tool without a lesson and a challenge is a **demo**, not a tool; a
+visualization without a text alternative ships an accessibility regression (§17 of Part II already says
+automated checks catch only 30–57% of WCAG failures). Every row above ships with a lesson, a challenge, and
+a data-table view. **[judgment]**
+
+---
+
+## 44. In-browser AI — feasible, and the wrong first move **[sourced; verdict is judgment]**
+
+**Feasibility.** WebLLM runs small open models in the browser on WebGPU with no server; a 1.5B-parameter
+model is roughly a **1.5 GB download** and runs at **30–60 tokens/s on a decent GPU**; WebGPU is stable in
+Chrome and Edge and Safari is reported as behind (sources vary — treat as indicative). It fits "nothing
+leaves your browser" (§14.4).
+
+**Why it should not ship in v2:**
+- **It fails §12's oldest rule.** A model that *narrates* a trace can state a number the trace does not
+  contain — "plausible but false," in its purest form. One 2026 SIGCSE study rated GPT-4 only *"marginal"*
+  as a Theory-of-Computing tutor: good at conceptual explanation, weak where precision matters.
+- **It undermines the pedagogy.** An April 2026 arXiv paper tests *answer leakage* in LLM tutors under
+  adversarial students. QueryLens's central mechanism is that the learner commits *before* the answer is
+  shown; an assistant that will happily tell them is a bypass around the one feature the evidence supports.
+- **1.5 GB is a heavy price** for a tool whose first-visit budget is 24 kB of entry code.
+
+**What to do instead [judgment].**
+1. **An MCP server** (`@querylens/mcp`): `run_query`, `explain_trace`, `compare_policies` over the existing
+   engine, for the *user's own* assistant. The model then explains by *calling the engine and quoting the
+   trace* — grounded by construction — and the cost is a thin wrapper over the CLI's `--json` mode. Pavlo's
+   review is the trend evidence: MCP became table stakes for DBMSs in 2025.
+2. **`llms.txt` and machine-readable docs** for the same reason. Trivial cost.
+3. **Leave the door open** to a *constrained* in-app explainer **after §9**, with kill criteria written now:
+   opt-in, local-only, never answers a pending prediction, and every number in its output must appear in
+   the event stream or the output is discarded.
+
+---
+
+## 45. Name, URL, distribution
+
+- **The name is in use.** Searching "QueryLens" alongside database terms returns at least **five unrelated
+  projects**: a commercial SaaS (`querylens.tech`, "Query Explanation & Optimization for Data Teams"),
+  `querylens.ai`, `querylens.cc`, and several GitHub repositories (a JavaFX SQLite plan analyzer, a .NET
+  desktop slow-query tool, a Rails engine). `querylens.pages.dev` — found while diagnosing the first
+  deploy — serves the SaaS's marketing site. **[verified: searched and fetched]**
+- **This is a discoverability problem more than a legal one** — and this pass makes no legal claim (no
+  trademark search was done). Everyone searching the name will land on tools that *explain your production
+  queries*, which is the audience §2 declares a non-goal. Every backlink created by the §18.2 launch post
+  raises the price of changing it. **The cheapest moment to decide is now.** Options: keep the name and
+  always pair it with the descriptor; keep it but lead with a distinctive domain; or rename. **[judgment]**
+- **The live URL is a `workers.dev` subdomain carrying an account name.** Fine for verification, weak for
+  sharing. `VITE_SITE_URL` is already wired for a custom domain (~$10–15/yr, §11).
+- **What travels is the interactive essay.** PlanetScale's B-tree piece is the reference for a format that
+  gets shared. v2's embed work (§25) should produce two or three essays that double as launch content.
+  **[judgment]**
+
+---
+
+## 46. What I deliberately left out, and questions for you
+
+**Left out of v2, and why** (in the discipline of Part II §21):
+- **Distributed databases** (2PC, Raft, sharding) — lecture 24, and Pavlo's review notes three competing
+  Postgres-sharding projects. A different subject with its own model; a v3 horizon, not a v2 line item.
+- **Parallel query execution** (exchange operators, morsel-driven) — lecture 15. Real threads would break
+  the pure-engine rule (§42) unless scripted.
+- **Query compilation / JIT, learned indexes, graph/document/KV models** — interesting, no demand
+  evidence found this pass.
+- **Window functions, recursive CTEs** — still declined for §4's reason.
+- **A Rust/WASM engine rewrite** — TypeScript is fine at toy scale; the Web Worker path (§5, §22.7) comes
+  first and only escalates if it cannot reach ~10k rows.
+- **Accounts, graded submission, telemetry, real-time collaboration** — unchanged: own product / not done.
+
+**Questions for you.**
+1. **Keep the name, or rename before the launch post?** (§45.) My lean: decide this week.
+2. **Run the §9 study during v2.0, with a self-serve kit, or keep building?** My lean: run it — §12's
+   first risk grows with every subject added (§25.6).
+3. **Transactions before storage engines?** The syllabus gap (six lectures) says yes; LSM has more
+   interview-prep pull. My lean: transactions on the main line, LSM as a parallel standalone.
+4. **Will anyone maintain a non-English locale?** i18n is expensive here because the engine emits English
+   narration strings (§25.4 H5). Without a named maintainer it stays deferred.
+5. **npm scope.** Publishing `@querylens/*` needs an npm organisation, and the name collision (§45) applies
+   there too.
+
+---
+
+## Sources (Part IV)
+
+- Competition: [SQL Execution Visualizer](https://sql-execution-visualizer.vercel.app/) · [System Design Simulator — internals](https://systemdesignsimulator.org/internals/btree) · [PlanetScale — B-trees and database indexes](https://planetscale.com/blog/btrees-and-database-indexes) · [NEURON (arXiv 1805.05670)](https://arxiv.org/pdf/1805.05670) · [TIPS — informative alternative plans for DB education (arXiv 2210.13722)](https://arxiv.org/abs/2210.13722)
+- Syllabus: [CMU 15-445/645 Fall 2026 — schedule](https://15445.courses.cs.cmu.edu/fall2026/schedule.html) · [syllabus](https://15445.courses.cs.cmu.edu/fall2026/syllabus.html) · [Lecture 9, Index Concurrency Control (notes)](https://15445.courses.cs.cmu.edu/fall2023/notes/09-indexconcurrency.pdf)
+- Learning science: [A Meta-Study of Algorithm Visualization Effectiveness](http://s3.amazonaws.com/publicationslist.org/data/helplab/ref-52/JVLC-AVMetaStudy.pdf) · [Algorithm Visualization in CS Education: Comparing Levels of Student Engagement (SoftVis 2003)](https://dl.acm.org/doi/10.1145/774833.774846) · [Prequestioning and Pretesting Effects: a Review (Educ. Psychol. Rev. 2023)](https://link.springer.com/article/10.1007/s10648-023-09814-5) · [Richland, Kornell & Kao — the pretesting effect](https://learninglab.uchicago.edu/Pre-Testing_files/RichlandKornellKao.pdf) · [Höffler & Leutner (2007), instructional animation vs static pictures](https://www.sciencedirect.com/science/article/abs/pii/S0959475207001077) · [Mayer — segmenting principle](https://www.cambridge.org/core/books/abs/multimedia-learning/segmenting-principle/37240877DDA0362355ADB39936027982) · [Spaced retrieval in nine introductory STEM courses (IJ STEM Ed. 2024)](https://link.springer.com/article/10.1186/s40594-024-00468-5) · [Identifying SQL Misconceptions of Novices (ICER 2021)](https://dl.acm.org/doi/fullHtml/10.1145/3446871.3469759)
+- Correctness: [SQLancer](https://github.com/sqlancer/sqlancer) · [Node.js `node:sqlite`](https://nodejs.org/api/sqlite.html) · [How Good Are Query Optimizers, Really? (VLDB 2015)](https://www.vldb.org/pvldb/vol9/p204-leis.pdf) · [Still Asking: How Good Are Query Optimizers, Really? (VLDB 2025)](http://www.vldb.org/pvldb/vol18/p5531-viktor.pdf)
+- Transactions: [Hermitage (Kleppmann)](https://github.com/ept/hermitage) · [A Critique of ANSI SQL Isolation Levels](https://arxiv.org/pdf/cs/0701157) · [What write skew looks like (Cockroach Labs)](https://www.cockroachlabs.com/blog/what-write-skew-looks-like/)
+- Field trends: [Databases in 2025: A Year in Review (Pavlo)](https://www.cs.cmu.edu/~pavlo/blog/2026/01/2025-databases-retrospective.html) · [LSM tree simulator (DEV Community)](https://dev.to/ebendttl/engineering-a-high-performance-lsm-tree-storage-engine-memtables-sstables-and-compaction-3jfk)
+- AI: [WebLLM](https://github.com/mlc-ai/web-llm) · [WebLLM paper (arXiv 2412.15803)](https://arxiv.org/html/2412.15803v2) · [Viability of LLMs as CS Theory Tutors (SIGCSE TS 2026)](https://doi.org/10.1145/3770761.3777358) · [Evaluating Answer Leakage Robustness of LLM Tutors (arXiv 2604.18660)](https://arxiv.org/pdf/2604.18660)
+- Name: [querylens.tech](https://querylens.tech/) · [querylens.ai](https://querylens.ai/) · [querylens.cc](https://querylens.cc/)
+
+### Verified locally on 2026-09-24
+
+`git log --reverse` first commit 2026-09-01, last 2026-09-23, 106 commits · `find src -name '*.ts*' -not -path
+'*__tests__*' | xargs cat | wc -l` = 23,706; `src/engine/` = 8,742; `grep -rl "from 'react" src/engine` = 0 files ·
+unit-test lines 9,630 (`pnpm test`: 1,170 tests / 56 files); e2e lines 1,971 (`pnpm test:e2e`: 79 tests) ·
+`.node-version` = `22`; `node -v` = v24.16.0; `require('node:sqlite')` opens `:memory:`, creates, inserts and
+selects; `process.versions.sqlite` = 3.53.1 · `grep -rl fast-check src bin scripts` = 4 test files ·
+`pnpm budget`: total 377.9 / 424 kB gzip · live `securityheaders.com` scan of the deployed URL = A+ ·
+`limits.mdx` states unique-key B+Tree, one `JOIN` per query, no `OR`/`NOT`/`DISTINCT`/`HAVING`/`OFFSET`/outer
+joins/subqueries/transactions.
