@@ -125,6 +125,13 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
   // The `/challenges` puzzles (plan.md §22.4): the index, one challenge page,
   // the pure check list, and the localStorage solved-set. Lazy.
   { name: 'challenges', test: /^(ChallengesPage|ChallengePage|challenges|challengeProgress)-/, kb: 8, note: '/challenges — index, challenge page, the check list, and solved-set storage (plan.md §22.4)' },
+  // The §9 study kit's runner, `/study` (plan.md §25.4 A2): the page plus the
+  // pure protocol underneath it (pack/result codecs, the session state machine).
+  // Its own row rather than a share of a group — §25.5 rule 2: a new route is
+  // its own lazy chunk with its own ceiling, never a slice of a group that is
+  // already at its limit. It carries no study content: the questions and the
+  // control-arm reading arrive in each participant's link (`src/study/pack.ts`).
+  { name: 'study', test: /^StudyPage-/, kb: 7, note: '/study — the §9 study runner (unlisted); the instrument travels in the link, not the bundle (plan.md §25.4 A2)' },
   // `html-to-image`, behind the panel "Download PNG" button (§20.3). `import()`ed
   // on the first export, never at route load — the one runtime dependency the
   // app adds beyond its framework and editor.

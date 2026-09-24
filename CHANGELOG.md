@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **The §9 study kit** (plan.md §25.4 A2) — the validation study can now be run end to end without a
+  server. `/study` is an unlisted, `noindex`, kiosk-mode runner (no nav, footer or docs links, so a
+  control-arm participant is not one click from the app's own explanation of the material): consent →
+  fixed-time material → five questions on a countdown with no way back → a copyable result code, with
+  reload-resume and a clock driven by timestamps rather than a counter. **The instrument is not in the
+  bundle.** `STUDY.md` says the questions and the control-arm reading must never be shown early or
+  shipped publicly, so the runner is inert on its own and the pack — consent text, reading or lessons,
+  questions, timings — arrives in each participant's link *fragment* (`/study#p=…`, raw deflate +
+  base64url), which is never sent to a server; an e2e test fails the build if any of the study's text
+  ever appears in `dist/`. A pack is treated as a stranger's input: every field bounded, task links
+  restricted to same-origin paths, decompression capped against a zip bomb, prose rendered as text nodes
+  by a four-mark renderer rather than a Markdown library. `pnpm study` is the researcher's side:
+  `links` (equal-group random allocation, seeded and reproducible, a private `key.csv`), `collate`
+  (a scoring sheet with participant and arm removed and answers shuffled, plus a separate map — STUDY.md
+  §3's "score blind"), and `report` (per-arm n, mean, SD, min, max and the smallest detectable effect —
+  deliberately no p-value). Adds `src/study/` (58 tests, incl. off-site links and a decompression bomb),
+  a `study` bundle row (5.4 kB gzip, its own lazy chunk), six Playwright tests, and STUDY.md §4.
+
+### Changed
+- `package.json` now carries a description, homepage, repository, bugs and keywords (it had none), and
+  the README title reads "QueryLens — a database internals visualizer". The name is shared with at least
+  five unrelated products (RESEARCH.md §45); the decision is to keep it and always pair it with the
+  descriptor, which the site's `<title>` and `og:title` already did.
+- The README's CI badge pointed at the old `QueryLens` repository name; it now points at `query-lens`.
+- Vitest also runs tests under `scripts/`.
+
 ## [1.0.0] - 2026-09-23
 
 The first public release: the application as first deployed to Cloudflare (Workers static assets),

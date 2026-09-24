@@ -127,6 +127,11 @@ const LessonPage = lazy(() =>
 const SettingsPage = lazy(() =>
   import('./pages/SettingsPage.tsx').then((m) => ({ default: m.SettingsPage })),
 );
+// Unlisted (plan.md §25.4 A2): the §9 study kit's runner. Inert without a pack
+// in the link's fragment; not in `routes.ts`, so no nav or footer entry.
+const StudyPage = lazy(() =>
+  import('./pages/StudyPage.tsx').then((m) => ({ default: m.StudyPage })),
+);
 const AssignmentsNewPage = lazy(() =>
   import('./pages/AssignmentsNewPage.tsx').then((m) => ({ default: m.AssignmentsNewPage })),
 );
@@ -182,6 +187,7 @@ export default function App() {
               <Route path=":challengeId" element={suspended(ChallengePage)} />
             </Route>
             <Route path="settings" element={suspended(SettingsPage)} />
+            <Route path="study" element={suspended(StudyPage)} />
             <Route path="assignments/new" element={suspended(AssignmentsNewPage)} />
 
             <Route path="tools">

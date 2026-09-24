@@ -19,10 +19,17 @@ import { Footer } from './Footer.tsx';
  *
  * `snap-sections` arms the mobile scroll-snap (§16.2 item 10) that
  * PlaygroundPage's `.snap-section` children expect; it is inert elsewhere.
+ *
+ * `/study` is a kiosk (plan.md §25.4 A2): no disclaimer bar, nav or footer. A
+ * control-arm participant reading a fixed text must not be one click from the
+ * app's own explanation of the same material — that would contaminate the very
+ * comparison the study exists to make — and an app-arm participant reaches the
+ * lessons through the page's own links, in new tabs.
  */
 export function Layout() {
   const { pathname, search } = useLocation();
   const isLanding = pathname === '/';
+  const isStudy = pathname === '/study';
   // The first-visit hint (plan.md §19.2) belongs on the app's own front door
   // only: `/playground` with nothing in the URL. A shared-moment link
   // (`?q=…`) is someone else's onboarding, not a cold first visit.
@@ -37,8 +44,8 @@ export function Layout() {
           isLanding ? '' : 'lg:h-dvh lg:overflow-hidden',
         ].join(' ')}
       >
-        <DisclaimerBanner />
-        <TopNav />
+        {!isStudy && <DisclaimerBanner />}
+        {!isStudy && <TopNav />}
         {showHint && <FirstVisitHint />}
         {/* `overflow-y-auto` here, not on the shell: most routed pages (Learn,
             Examples, Settings, …) are plain prose taller than one viewport and
@@ -51,7 +58,7 @@ export function Layout() {
           <Outlet />
         </div>
       </div>
-      <Footer />
+      {!isStudy && <Footer />}
     </div>
   );
 }

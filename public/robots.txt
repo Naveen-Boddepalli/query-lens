@@ -2,3 +2,5 @@
 # plan.md §13's course packaging depends on it being indexable.
 User-agent: *
 Allow: /
+# The study runner is inert without a personal link, and research pages are not for search.
+Disallow: /study

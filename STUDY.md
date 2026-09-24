@@ -10,10 +10,10 @@ the study instrument, so they must never be shown to a participant before the te
 the app, and never posted publicly before the study runs. Treat this file as participant-blind
 material, not a docs page.
 
-**Recruitment, control group, and post-test logistics — the "how do I actually run this" side of
-§9 — are handled outside this file** (a survey tool, a recruitment post, a spreadsheet). This file
-covers only the three artifacts a survey/form tool can't generate for you: the control-group reading
-material, the five mechanism questions, and the scoring rubric.
+**Recruitment is handled outside this file** (a recruitment post, a message to a class). This file holds
+the three artifacts a survey tool can't generate for you — the control-group reading material, the five
+mechanism questions, and the scoring rubric — and, as of the study kit (§4), the app can *run* the
+session and hand you a blind scoring sheet, so no survey tool is needed at all.
 
 ---
 
@@ -185,3 +185,70 @@ distributions (means, and the spread — 5–10 people per arm is too small for 
 mean much, so report it descriptively rather than chasing a p-value). Report the result honestly
 wherever §9 lands in the docs, including if the control arm matches or beats the app — that's the
 entire reason this is a post-test and not a satisfaction survey.
+
+---
+
+## 4. Running it with the study kit
+
+The app ships only a *runner* (`/study`) and a researcher CLI (`pnpm study`). **Neither contains the
+instrument** — the reading and the questions above travel inside each participant's personal link, so they
+are not in the public JavaScript bundle (`e2e/study.spec.ts` fails the build if they ever are). That is what
+keeps this file's rule — participant-blind, never shown before the test — true of a live site.
+
+**1. Generate one link per participant.**
+
+```bash
+pnpm study links --study spring-pilot --n 12 --out key.csv
+```
+
+Arms (`app` = QueryLens, `text` = the reading in §1) are assigned at random in equal groups and the seed is
+printed, so the allocation is reproducible. `key.csv` is `pid,arm,url` — **it records who is in which arm, so
+keep it private.** Add `--base https://your-domain` once the site has a custom domain (the default is the
+current live URL); `--material-minutes` (default 12) and `--test-minutes` (default 5) set the fixed times.
+`--out` refuses to overwrite an existing key without `--force`.
+
+**2. Send each participant their own link — one link, one person.** It carries their participant code
+(`P07`, never a name). A text-arm link is about **6,000 characters** because it contains the reading: send it
+by email or a messaging app, not SMS, and if a client truncates it, paste it into a file instead. An app-arm
+link is ~2,300.
+
+**3. What the participant sees.** Plain-language consent → the material for the fixed time (the reading, or
+two lessons that open in their own tabs) → the five questions with a countdown, no way back to the material
+→ a **result code** to copy and send you. Nothing is transmitted by the page; the link's fragment is never
+sent to a server. The page is a kiosk (no nav, footer or docs links) so the control arm is not one click from
+the app's own explanations. A reload mid-session resumes it; the clock runs on timestamps, so it cannot be
+stretched. Close-and-abandon records nothing anywhere.
+
+**4. Collect the codes** — one per line in a text file (`codes.txt`). Then:
+
+```bash
+pnpm study collate --key key.csv --results codes.txt --out-dir scoring
+```
+
+This writes `scoring/blind.md` (every answer, in random order, **participant and arm removed**, with each
+question's maximum points), `scoring/map.csv` (code → participant → arm; keep it closed until you have
+finished scoring) and `scoring/scores-template.csv`. Anything it rejects — a damaged code, a participant not
+in the key, an arm that disagrees with the key, a duplicate — is printed to stderr and the exit code is
+non-zero. Free-text answers can contain anything: read `blind.md` once before sharing it with a second scorer,
+in case a participant typed something identifying.
+
+**5. Score blind** against §3, entering points in a copy of the template saved as `scoring/scores.csv`
+(one row per code, columns `q1`–`q5`). Then:
+
+```bash
+pnpm study report --map scoring/map.csv --scores scoring/scores.csv
+```
+
+which prints each arm's n, mean, SD, min, max and how many hit the clock. **There is deliberately no p-value.**
+With 5–10 per arm the study can only detect a very large effect (n ≈ 15.7 / d² per arm: about 11 for d = 1.2,
+about 63 for d = 0.5); the report says so. Present it as an exploratory signal, and include a result where the
+text arm matches or beats the app (plan.md §25.6 has the decision table for each outcome).
+
+**Before you recruit anyone.**
+- **Pilot with two or three people first**, at least one on a phone, and read their result codes end to end.
+- **The consent text is a template, not ethics advice.** If you are affiliated with a school or university,
+  its ethics or review rules apply to you; adapt the consent paragraphs (`CONSENT_TEMPLATE` in
+  `scripts/study.ts`) to what they require.
+- **Keep the links, `key.csv` and this file private.** A link *is* the instrument. If this repository is ever
+  made public, this file — including the rubric and answers in §3 — becomes public with it; move §1–§3 out of
+  the repository first.
