@@ -2368,8 +2368,9 @@ In the discipline of §20 and [RESEARCH.md §21](RESEARCH.md#21-what-i-deliberat
 > **Numbering.** Two schemes coexist in this document. "**v1**" and "**v2**" in §24–§25 mean **product
 > releases**: v1 is the application as deployed on 2026-09-23 — every tranche labelled v10–v20 in §10 and
 > the appendix is *inside* v1 (those are build-revision counters, not releases); v2 is what §25 plans,
-> delivered as releases 2.0–2.5. The first act of §25 is to tag v1 as `1.0.0` — `package.json` still says
-> `0.0.0`.
+> delivered as releases 2.0–2.5. v1 is tagged **`v1.0.0`** (on the deployed commit `2b9a37d`, 2026-09-23);
+> the CHANGELOG's `[1.0.0]` header and `package.json`'s `1.0.0` landed in the commit after the tag, so the
+> tag itself still carries `0.0.0` in `package.json` — a published tag is not moved.
 
 ### 24.1 What v1 is
 
@@ -2508,7 +2509,7 @@ questions, each earned by something v1 got wrong or nearly did:
 
 | Release | Milestone | Theme | Scope (item IDs, §25.4) | Est. | Gate |
 |---|---|---|---|---|---|
-| **T0** | — | Cut v1 | Tag `1.0.0`: CHANGELOG `[Unreleased]` → `[1.0.0] - 2026-09-23`, `package.json` → `1.0.0` | ½ day | — |
+| **T0** | — | Cut v1 | **Done.** Tag `v1.0.0` at `2b9a37d`; CHANGELOG `[Unreleased]` → `[1.0.0] - 2026-09-23` and `package.json` → `1.0.0` in the next commit | — | — |
 | **2.0** | **M14** Trust | Prove it | A1–A6: SQLite oracle, §9 study kit, "report a confusing step", name + domain | 3–4 wk | none — start now |
 | | **M15** | Ceiling I | B1, B2, B5, B6: expressions, `DISTINCT`/`HAVING`, relational-algebra view | 3–4 wk | — |
 | | **M16** | Ceiling II + launch | B3, B4 (real indexes, index join) · G1, H3, H4, H8 (course map, CLI/engine/MCP, budgets) | 4–5 wk | — |
@@ -2668,7 +2669,7 @@ first release that adds a subject §22.1 called a second product. The study (A2)
 ### 25.8 Definition of done
 
 **2.0 — Trust & ceiling**
-- [ ] `1.0.0` tagged; CHANGELOG cut (T0).
+- [x] `1.0.0` tagged; CHANGELOG cut (T0).
 - [ ] The oracle runs in CI (seeded, bounded); a divergence ledger and "How we know the answers are right" exist.
 - [ ] The study kit is live and at least one participant has completed it end to end on a phone *and* a laptop.
 - [ ] A homework-shaped query using `OR`, `IN`, `LIKE`, `DISTINCT`, `HAVING` and a **non-unique** indexed column runs and narrates end to end; `sql.mdx`, `limits.mdx` and `/tools/grammar` all agree.

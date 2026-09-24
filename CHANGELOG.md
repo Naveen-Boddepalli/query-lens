@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-09-23
+
+The first public release: the application as first deployed to Cloudflare (Workers static assets),
+tagged `v1.0.0` at `2b9a37d`. Everything below this line, down to `[0.1.0]`, shipped in it. The
+retrospective — what it is, and what it did and did not prove — is [plan.md §24](plan.md#24-where-v1-stands--the-retrospective);
+the plan for what comes next is §25. (The tag marks the deployed commit; this version header and the
+`package.json` bump landed in the commit after it.)
+
 ### Added
 - **An Architecture docs page** (`/docs/architecture`, plan.md §18.4/§23) — the engine/UI split, the
   event model, the Volcano executor's current operator list, all six optimizer rules in the order
@@ -833,5 +841,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Tested CSP security headers
 - 326 unit tests, 14 end-to-end tests
 
-[Unreleased]: https://github.com/Naveen-Boddepalli/QueryLens/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/Naveen-Boddepalli/query-lens/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/Naveen-Boddepalli/query-lens/releases/tag/v1.0.0
 [0.1.0]: https://github.com/Naveen-Boddepalli/QueryLens/releases/tag/v0.1.0
