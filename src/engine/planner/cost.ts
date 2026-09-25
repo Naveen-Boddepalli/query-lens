@@ -439,10 +439,14 @@ function estimateNode(
     }
     case 'Limit': {
       const child = estimateNode(plan.child, table, rowsPerPage, into, otherTables);
+      const offset = plan.offset ?? 0;
       estimate = {
-        estRows: Math.min(child.estRows, plan.count),
+        estRows: Math.min(Math.max(0, child.estRows - offset), plan.count),
         estPages: child.estPages,
-        basis: `min(${String(child.estRows)}, LIMIT ${String(plan.count)})`,
+        basis:
+          offset > 0
+            ? `min(${String(child.estRows)} − ${String(offset)} skipped, LIMIT ${String(plan.count)})`
+            : `min(${String(child.estRows)}, LIMIT ${String(plan.count)})`,
       };
       break;
     }

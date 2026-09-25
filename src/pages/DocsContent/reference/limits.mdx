@@ -81,6 +81,6 @@ choice), no outer joins, no true composite (multi-column) indexes, no transactio
 concurrency (the Locks panel is visual only), and no cost-based query optimization — every
 rewrite rule fires on a structural match, never a cost comparison, and the cost *estimates* shown
 alongside a plan exist to justify a rewrite's narration, not to decide whether it happens. `DISTINCT`,
-`UNION`, `HAVING` and `OFFSET` are also not accepted. These are deliberate exclusions for this
+`UNION` and `HAVING` are also not accepted. These are deliberate exclusions for this
 release, not bugs — see the parser's own error messages in [Supported SQL](/docs/reference/sql)
 for exactly which keywords are recognised and rejected.

@@ -4,7 +4,7 @@
  *   statement     := select | delete | insert | update
  *   select        := SELECT selectList FROM identifier [join] [WHERE expr]
  *                     [GROUP BY identifier (',' identifier)*]
- *                     [ORDER BY identifier [ASC|DESC]] [LIMIT number] [';'] EOF
+ *                     [ORDER BY identifier [ASC|DESC]] [LIMIT number [OFFSET number]] [';'] EOF
  *   join          := JOIN identifier ON qualifiedColumn '=' qualifiedColumn
  *   delete        := DELETE FROM identifier [WHERE expr] [';'] EOF
  *   insert        := INSERT INTO identifier [columnList] VALUES valueList [';'] EOF
@@ -104,7 +104,6 @@ const OUT_OF_SCOPE: Record<string, string> = {
   CROSS: 'CROSS JOIN is not in the v0 subset — JOIN ... ON needs an equality.',
   USING: 'USING is not in the v0 subset — write the equality out: JOIN t ON a.x = t.y.',
   HAVING: 'HAVING is not in the v0 subset — filter before GROUP BY with WHERE instead.',
-  OFFSET: 'OFFSET is not in the v0 subset — LIMIT on its own is.',
   DISTINCT: 'DISTINCT is not in the v0 subset.',
   UNION: 'UNION is not in the v0 subset.',
   CREATE: 'QueryLens only runs SELECT, DELETE, INSERT and UPDATE. Edit the seed data to change the table.',
@@ -890,6 +889,25 @@ function parseSelectBody(c: Cursor): SelectStatement {
     }
     c.next();
     limit = { value: Number(token.value), span: { from: limitToken.from, to: token.to } };
+
+    // `OFFSET m` rides on a LIMIT (plan.md §25.4 B1c) — SQLite's rule; an OFFSET alone is rejected below.
+    if (isKeyword(c.peek(), 'OFFSET')) {
+      c.next();
+      const skip = c.peek();
+      if (skip.type !== 'number' || skip.value.includes('.')) {
+        c.guardScope(skip);
+        throw new ParseError(`Expected a whole number after OFFSET, found ${describe(skip)}.`, skip);
+      }
+      c.next();
+      limit = { ...limit, offset: Number(skip.value), span: { from: limitToken.from, to: skip.to } };
+    }
+  }
+  if (!limit && isKeyword(c.peek(), 'OFFSET')) {
+    throw new ParseError(
+      'OFFSET needs a LIMIT before it.',
+      c.peek(),
+      'Write `LIMIT n OFFSET m` — skip m rows, then return the next n.',
+    );
   }
 
   expectStatementEnd(c);

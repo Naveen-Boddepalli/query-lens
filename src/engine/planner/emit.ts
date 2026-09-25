@@ -117,11 +117,14 @@ export function emitPlanEvents(
 
   if (ast.limit !== undefined) {
     const count = ast.limit.value;
-    current = { op: 'Limit', count, child: current };
+    const offset = ast.limit.offset ?? 0;
+    current = { op: 'Limit', count, ...(offset > 0 ? { offset } : {}), child: current };
     emit(
-      `LIMIT becomes a Limit on top: it stops pulling rows once ${plural(count, 'row')} ${
-        count === 1 ? 'has' : 'have'
-      } come through — whatever is beneath it is never asked for the rest.`,
+      offset > 0
+        ? `LIMIT ... OFFSET becomes a Limit on top: it discards the first ${plural(offset, 'row')} that come through, then passes ${plural(count, 'row')} and stops. The discarded rows are still produced by everything beneath — an OFFSET saves the client nothing, only the network.`
+        : `LIMIT becomes a Limit on top: it stops pulling rows once ${plural(count, 'row')} ${
+            count === 1 ? 'has' : 'have'
+          } come through — whatever is beneath it is never asked for the rest.`,
       { stage: 'plan', planTree: display(current) },
     );
   }

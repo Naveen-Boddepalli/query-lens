@@ -189,7 +189,7 @@ function limitNode(limit: LimitClause): ASTNode {
     id: 'limit',
     kind: 'Limit',
     label: 'LIMIT',
-    detail: String(limit.value),
+    detail: limit.offset === undefined ? String(limit.value) : `${String(limit.value)} OFFSET ${String(limit.offset)}`,
     span: limit.span,
   };
 }
@@ -338,11 +338,12 @@ export function emitParseEvents(emit: Emit, ast: SelectStatement): void {
 
   if (ast.limit) {
     children.push(limitNode(ast.limit));
-    emit(`Read the LIMIT clause: cap the result at ${ast.limit.value}.`, {
-      stage: 'parse',
-      ast: root([...children], ast.span),
-      span: ast.limit.span,
-    });
+    emit(
+      ast.limit.offset === undefined
+        ? `Read the LIMIT clause: cap the result at ${ast.limit.value}.`
+        : `Read the LIMIT clause: skip the first ${ast.limit.offset} rows, then cap the result at ${ast.limit.value}.`,
+      { stage: 'parse', ast: root([...children], ast.span), span: ast.limit.span },
+    );
   }
 
   const tree = root([...children], ast.span);

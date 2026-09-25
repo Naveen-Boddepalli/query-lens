@@ -159,5 +159,5 @@ export function buildPlan(
 
   return ast.limit === undefined
     ? projected
-    : { op: 'Limit', count: ast.limit.value, child: projected };
+    : { op: 'Limit', count: ast.limit.value, ...(ast.limit.offset ? { offset: ast.limit.offset } : {}), child: projected };
 }

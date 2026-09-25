@@ -38,11 +38,16 @@ type Rule = (plan: Plan, table: Table) => Rewrite | null;
  * result, means `predicatePushdown` and `indexSelection` stay written against
  * `Project → … → scan`, whether or not a `LIMIT` sits above it.
  */
-function unwrapLimit(plan: Plan): { limit: number | null; rest: Plan } {
-  return plan.op === 'Limit' ? { limit: plan.count, rest: plan.child } : { limit: null, rest: plan };
+type LimitSpec = { count: number; offset: number };
+function unwrapLimit(plan: Plan): { limit: LimitSpec | null; rest: Plan } {
+  return plan.op === 'Limit'
+    ? { limit: { count: plan.count, offset: plan.offset ?? 0 }, rest: plan.child }
+    : { limit: null, rest: plan };
 }
-function rewrapLimit(limit: number | null, plan: Plan): Plan {
-  return limit === null ? plan : { op: 'Limit', count: limit, child: plan };
+function rewrapLimit(limit: LimitSpec | null, plan: Plan): Plan {
+  return limit === null
+    ? plan
+    : { op: 'Limit', count: limit.count, ...(limit.offset > 0 ? { offset: limit.offset } : {}), child: plan };
 }
 
 /**

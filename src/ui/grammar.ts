@@ -55,7 +55,7 @@ export const GRAMMAR: GrammarRule[] = [
       opt(lit('WHERE'), rule('expr')),
       opt(lit('GROUP'), lit('BY'), rule('identifier'), repeat(lit(','), rule('identifier'))),
       opt(lit('ORDER'), lit('BY'), rule('identifier'), opt(choice([lit('ASC')], [lit('DESC')]))),
-      opt(lit('LIMIT'), rule('number')),
+      opt(lit('LIMIT'), rule('number'), opt(lit('OFFSET'), rule('number'))),
       opt(lit(';')),
     ],
   },

@@ -135,13 +135,19 @@ export interface SelectStatement {
    * mutually exclusive on every `SelectStatement` this parser produces).
    */
   orderBy?: OrderByClause;
-  /** `LIMIT n` — a non-negative whole number, checked at parse time. */
+  /** `LIMIT n [OFFSET m]` — non-negative whole numbers, checked at parse time. */
   limit?: LimitClause;
   span: Span;
 }
 
 export interface LimitClause {
   value: number;
+  /**
+   * `OFFSET m` (plan.md §25.4 B1c): skip the first `m` rows of the (ordered)
+   * result before the `LIMIT` counts. Only ever present beside a `LIMIT`, as in
+   * SQLite. The span of the whole clause takes it in.
+   */
+  offset?: number;
   span: Span;
 }
 

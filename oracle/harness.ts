@@ -45,7 +45,7 @@ export interface OracleRun {
 }
 
 const withoutLimit = (q: ReadQuery): ReadQuery => {
-  const { limit: _limit, ...rest } = q;
+  const { limit: _limit, offset: _offset, ...rest } = q;
   return rest;
 };
 

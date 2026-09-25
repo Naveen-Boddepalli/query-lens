@@ -16,7 +16,6 @@ import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import { OPTIMIZER_RULES } from '../src/engine/planner/index.ts';
 import { runQuery } from '../src/engine/runQuery.ts';
-import { ORACLE_SEED } from './config.ts';
 import { optionsArb, sessionArb } from './generate.ts';
 import { toDatabase } from './harness.ts';
 import { applyWrite } from './harness.ts';
@@ -24,9 +23,11 @@ import { isWrite, renderQuery, walkPred } from './model.ts';
 import type { TableSpec } from './model.ts';
 
 const N = 1500;
+/** Its own seed, not `ORACLE_SEED`: this test asks whether the *generators* still reach everything, which must not vary with the seed a long run happens to pick. */
+const COVERAGE_SEED = 20260925;
 
 describe('the generators reach what the oracle is meant to check', () => {
-  const sessions = fc.sample(fc.tuple(sessionArb('any'), optionsArb), { seed: ORACLE_SEED, numRuns: N });
+  const sessions = fc.sample(fc.tuple(sessionArb('any'), optionsArb), { seed: COVERAGE_SEED, numRuns: N });
 
   const stats = {
     reads: 0,

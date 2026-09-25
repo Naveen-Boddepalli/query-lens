@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`LIMIT n OFFSET m`** (plan.md §25.4 B1, third and last slice) — page through an ordered result. The trace
+  is honest about the cost most tutorials leave out: the skipped rows are still produced by everything beneath
+  the `Limit` and then thrown away, so `OFFSET 30` visibly reads more of the table than `OFFSET 0`, and the cost
+  model and the plan node say so. An `OFFSET` needs its `LIMIT` (SQLite's rule), and both must be whole numbers.
 - **Arithmetic and computed columns** (plan.md §25.4 B1, second slice) — `+ - * / %`, unary minus and
   parentheses in `SELECT`, `WHERE` and `UPDATE … SET`, and `AS` to name a computed column
   (`SELECT price * qty AS total`). NULL in, NULL out; `x / 0` is NULL; whole-number `/` truncates toward zero.

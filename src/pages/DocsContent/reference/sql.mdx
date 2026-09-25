@@ -20,6 +20,7 @@ SELECT id, age * 12 AS months, age + 1 FROM users WHERE age % 2 = 0;
 SELECT authors.name, posts.title FROM authors JOIN posts ON authors.id = posts.authorId;
 SELECT status, COUNT(*), AVG(attempts) FROM logins GROUP BY status;
 SELECT * FROM users ORDER BY age DESC LIMIT 5;
+SELECT * FROM users ORDER BY id LIMIT 10 OFFSET 20;
 ```
 
 - **Column list**: `*` on its own; or a comma-separated list of columns, [computed columns](#expressions),
@@ -38,7 +39,10 @@ SELECT * FROM users ORDER BY age DESC LIMIT 5;
   a column. Every plain column in the SELECT list must be grouped or wrapped in an aggregate.
   Mutually exclusive with `ORDER BY`.
 - **`ORDER BY`**: exactly one column, `ASC` (default) or `DESC`.
-- **`LIMIT`**: a non-negative integer, always the outermost clause.
+- **`LIMIT`**: a non-negative integer, always the outermost clause, optionally followed by
+  **`OFFSET m`** to skip the first `m` rows of the (ordered) result: `LIMIT 10 OFFSET 20` is page three.
+  An `OFFSET` needs its `LIMIT`. It is *not* free — the skipped rows are still produced by everything
+  beneath and then thrown away, so paging deeper reads more (the trace says so).
 - Keywords are case-insensitive, `--` starts a line comment, `/* */` a block comment, and a
   trailing `;` is optional.
 
@@ -146,7 +150,6 @@ with a generic syntax error:
 | `JOIN ... USING (...)` | *USING is not in the v0 subset — write the equality out.* |
 | A second `JOIN` | *Only one JOIN per query.* |
 | `HAVING` | *HAVING is not in the v0 subset — filter before GROUP BY with WHERE instead.* |
-| `OFFSET` | *OFFSET is not in the v0 subset — LIMIT on its own is.* |
 | `DISTINCT` | *DISTINCT is not in the v0 subset.* |
 | `UNION` | *UNION is not in the v0 subset.* |
 | A subquery, `x IN (SELECT …)` | *A subquery is not supported here — write the values out, or join the two tables.* |

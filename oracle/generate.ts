@@ -272,7 +272,16 @@ export function refsOf(table: TableSpec, qualify: boolean): Ref[] {
   return table.columns.map((c) => ({ name: c.name, type: c.type, ...(qualify ? { table: table.name } : {}) }));
 }
 
-const limitArb = fc.option(fc.integer({ min: 0, max: 8 }), { nil: undefined, freq: 3 });
+/** A page: no limit, a limit, or a limit with an offset — `OFFSET` never appears without a `LIMIT`, as in SQLite. */
+const pageArb: fc.Arbitrary<{ limit?: number; offset?: number }> = fc.oneof(
+  { weight: 5, arbitrary: fc.constant<{ limit?: number; offset?: number }>({}) },
+  { weight: 2, arbitrary: fc.integer({ min: 0, max: 8 }).map((limit) => ({ limit })) },
+  // Small offsets: a big one just returns nothing, and an empty answer tests very little.
+  {
+    weight: 2,
+    arbitrary: fc.tuple(fc.integer({ min: 0, max: 8 }), fc.integer({ min: 0, max: 3 })).map(([limit, offset]) => ({ limit, offset })),
+  },
+);
 const uniqueRefs = (refs: readonly Ref[], min: number, max: number) =>
   fc.uniqueArray(fc.constantFrom(...refs), { minLength: min, maxLength: max, selector: (r) => r.name + (r.table ?? '') });
 
@@ -301,13 +310,13 @@ function lookupArb(t: TableSpec, pool: Pool): fc.Arbitrary<Query> {
   );
   // Half the time nothing else is checked, so `SELECT id … WHERE id = x` can become an index-only scan.
   const extra = fc.oneof({ weight: 1, arbitrary: fc.constant<Pred[]>([]) }, { weight: 1, arbitrary: whereArb(refs, pool, 1) });
-  return fc.tuple(projection, keyPred, extra, limitArb).map(
-    ([proj, pred, extra, limit]): Query => ({
+  return fc.tuple(projection, keyPred, extra, pageArb).map(
+    ([proj, pred, extra, page]): Query => ({
       kind: 'select',
       table: t.name,
       proj,
       where: [pred, ...extra],
-      ...(limit === undefined ? {} : { limit }),
+      ...page,
     }),
   );
 }
@@ -323,9 +332,9 @@ export function selectArb(t: TableSpec, pool: Pool): fc.Arbitrary<Query> {
         freq: 2,
       }),
       computed: fc.oneof({ weight: 3, arbitrary: fc.constant<{ e: Arith; alias: string }[]>([]) }, { weight: 1, arbitrary: computedArb(refs) }),
-      limit: limitArb,
+      page: pageArb,
     })
-    .map(({ proj, where, order, computed, limit }): Query => ({
+    .map(({ proj, where, order, computed, page }): Query => ({
       kind: 'select',
       table: t.name,
       // `*` cannot share a SELECT list with anything else in QueryLens (SQLite allows `*, x`; a documented
@@ -334,7 +343,7 @@ export function selectArb(t: TableSpec, pool: Pool): fc.Arbitrary<Query> {
       ...(computed.length > 0 ? { computed } : {}),
       where,
       ...(order ? { order } : {}),
-      ...(limit === undefined ? {} : { limit }),
+      ...page,
     }));
   return fc.oneof({ weight: 3, arbitrary: general }, { weight: 2, arbitrary: lookupArb(t, pool) });
 }
@@ -355,9 +364,9 @@ export function aggregateArb(t: TableSpec, pool: Pool): fc.Arbitrary<Query> {
       aggs: fc.uniqueArray(agg, { minLength: 0, maxLength: 3, selector: (a) => `${a.fn}(${a.arg === '*' ? '*' : a.arg.name})` }),
       showAll: fc.boolean(),
       where: whereArb(refs, pool, 2),
-      limit: limitArb,
+      page: pageArb,
     })
-    .map(({ group, aggs, showAll, where, limit }): Query => {
+    .map(({ group, aggs, showAll, where, page }): Query => {
       // A query with no aggregate and no GROUP BY is a plain SELECT — force at least one aggregate then.
       const items = group.length === 0 && aggs.length === 0 ? ([{ fn: 'COUNT', arg: '*' }] as AggItem[]) : aggs;
       return {
@@ -367,7 +376,7 @@ export function aggregateArb(t: TableSpec, pool: Pool): fc.Arbitrary<Query> {
         shownGroup: showAll ? group : group.slice(0, 1),
         aggs: items,
         where,
-        ...(limit === undefined ? {} : { limit }),
+        ...page,
       };
     });
 }
@@ -383,9 +392,9 @@ export function joinArb(t: TableSpec, u: TableSpec, pool: Pool): fc.Arbitrary<Qu
       proj: uniqueRefs(all, 1, 5),
       computed: fc.oneof({ weight: 3, arbitrary: fc.constant<{ e: Arith; alias: string }[]>([]) }, { weight: 1, arbitrary: computedArb(all) }),
       where: whereArb(all, pool, 2),
-      limit: limitArb,
+      page: pageArb,
     })
-    .map(({ on, proj, computed, where, limit }): Query => ({
+    .map(({ on, proj, computed, where, page }): Query => ({
       kind: 'join',
       left: t.name,
       right: u.name,
@@ -393,7 +402,7 @@ export function joinArb(t: TableSpec, u: TableSpec, pool: Pool): fc.Arbitrary<Qu
       proj,
       ...(computed.length > 0 ? { computed } : {}),
       where,
-      ...(limit === undefined ? {} : { limit }),
+      ...page,
     }));
 }
 

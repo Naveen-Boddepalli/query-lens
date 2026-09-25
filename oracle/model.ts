@@ -103,6 +103,8 @@ export type Query =
       where: Pred[];
       order?: OrderSpec;
       limit?: number;
+      /** `OFFSET m`, only ever beside a `limit` (plan.md §25.4 B1c). */
+      offset?: number;
     }
   | {
       kind: 'aggregate';
@@ -113,6 +115,7 @@ export type Query =
       aggs: AggItem[];
       where: Pred[];
       limit?: number;
+      offset?: number;
     }
   | {
       kind: 'join';
@@ -123,6 +126,7 @@ export type Query =
       computed?: { e: Arith; alias: string }[];
       where: Pred[];
       limit?: number;
+      offset?: number;
     }
   | { kind: 'insert'; table: string; columns?: string[]; values: SqlValue[] }
   | { kind: 'update'; table: string; set: { col: string; value: SqlValue; expr?: Arith }[]; where: Pred[] }
@@ -225,7 +229,8 @@ export function outputKeys(q: ReadQuery, tables: readonly TableSpec[]): string[]
 export type Dialect = 'querylens' | 'sqlite';
 
 export function renderQuery(q: Query, dialect: Dialect = 'querylens'): string {
-  const limit = (n: number | undefined) => (n === undefined ? '' : ` LIMIT ${n}`);
+  const page = (n: number | undefined, offset: number | undefined) =>
+    n === undefined ? '' : ` LIMIT ${n}${offset ? ` OFFSET ${offset}` : ''}`;
   switch (q.kind) {
     case 'select': {
       const list = [q.proj === '*' ? '*' : q.proj.map(renderRef).join(', '), ...renderComputed(q.computed)]
@@ -236,15 +241,15 @@ export function renderQuery(q: Query, dialect: Dialect = 'querylens'): string {
             dialect === 'sqlite' ? (q.order.dir === 'asc' ? ' NULLS LAST' : ' NULLS FIRST') : ''
           }`
         : '';
-      return `SELECT ${list} FROM ${q.table}${renderWhere(q.where)}${order}${limit(q.limit)}`;
+      return `SELECT ${list} FROM ${q.table}${renderWhere(q.where)}${order}${page(q.limit, q.offset)}`;
     }
     case 'aggregate': {
       const items = [...q.shownGroup.map(renderRef), ...q.aggs.map(renderAgg)].join(', ');
       const group = q.group.length > 0 ? ` GROUP BY ${q.group.map(renderRef).join(', ')}` : '';
-      return `SELECT ${items} FROM ${q.table}${renderWhere(q.where)}${group}${limit(q.limit)}`;
+      return `SELECT ${items} FROM ${q.table}${renderWhere(q.where)}${group}${page(q.limit, q.offset)}`;
     }
     case 'join':
-      return `SELECT ${[...q.proj.map(renderRef), ...renderComputed(q.computed)].join(', ')} FROM ${q.left} JOIN ${q.right} ON ${renderRef(q.on.l)} = ${renderRef(q.on.r)}${renderWhere(q.where)}${limit(q.limit)}`;
+      return `SELECT ${[...q.proj.map(renderRef), ...renderComputed(q.computed)].join(', ')} FROM ${q.left} JOIN ${q.right} ON ${renderRef(q.on.l)} = ${renderRef(q.on.r)}${renderWhere(q.where)}${page(q.limit, q.offset)}`;
     case 'insert': {
       const cols = q.columns ? ` (${q.columns.join(', ')})` : '';
       return `INSERT INTO ${q.table}${cols} VALUES (${q.values.map(renderLiteral).join(', ')})`;

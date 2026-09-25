@@ -616,10 +616,16 @@ function sort(plan: Extract<Plan, { op: 'Sort' }>, child: Operator, ctx: ExecCon
  * that has not been pulled yet is simply never asked: a `SeqScan` beneath one
  * can leave most of the table unread, which `close()` on the child makes
  * final rather than merely paused.
+ *
+ * `offset` (plan.md §25.4 B1c) is the part that is *not* free: the first
+ * `offset` rows have to be produced by everything beneath before they can be
+ * thrown away, so `LIMIT 10 OFFSET 1000` reads a thousand rows to return
+ * ten — the reason deep OFFSET pagination gets slower the further you page.
  */
-function limit(count: number, child: Operator, ctx: ExecContext): Operator {
+function limit(count: number, offset: number, child: Operator, ctx: ExecContext): Operator {
   const produced = counter(ctx, 'Limit');
   let taken = 0;
+  let skipped = 0;
   let stopped = false;
 
   return {
@@ -627,6 +633,25 @@ function limit(count: number, child: Operator, ctx: ExecContext): Operator {
     open: child.open,
     next() {
       if (stopped || taken >= count) return null;
+
+      if (skipped < offset) {
+        while (skipped < offset) {
+          const discarded = child.next();
+          if (!discarded) {
+            ctx.emit(
+              `Limit discards ${String(skipped)} row${skipped === 1 ? '' : 's'} and then the input runs out — fewer than the OFFSET of ${String(offset)}, so nothing is left to return.`,
+              { stage: 'execute', op: 'Limit', rowsProduced: 0 },
+            );
+            return null;
+          }
+          skipped += 1;
+        }
+        ctx.emit(
+          `Limit discards the first ${String(offset)} row${offset === 1 ? '' : 's'}: everything beneath still produced each one, and Limit threw it away. That is the cost of OFFSET.`,
+          { stage: 'execute', op: 'Limit', rowsProduced: 0 },
+        );
+      }
+
       const row = child.next();
       if (!row) return null;
       taken += 1;
@@ -1026,6 +1051,6 @@ export function buildOperator(plan: Plan, ctx: ExecContext): Operator {
     case 'Project':
       return project(plan.columns, buildOperator(plan.child, ctx), ctx);
     case 'Limit':
-      return limit(plan.count, buildOperator(plan.child, ctx), ctx);
+      return limit(plan.count, plan.offset ?? 0, buildOperator(plan.child, ctx), ctx);
   }
 }

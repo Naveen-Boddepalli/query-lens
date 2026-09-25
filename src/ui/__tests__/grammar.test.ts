@@ -59,6 +59,7 @@ describe('grammar data — every rule is demonstrated by a query the real parser
     ['statement (update)', 'UPDATE users SET age = 1'],
     ['select — every optional clause at once', 'SELECT age, COUNT(*) FROM users WHERE age > 30 GROUP BY age LIMIT 5'],
     ['select — ORDER BY with ASC/DESC', 'SELECT * FROM users ORDER BY age DESC'],
+    ['select — LIMIT with OFFSET', 'SELECT * FROM users ORDER BY id LIMIT 5 OFFSET 10'],
     ['select — with a join', 'SELECT * FROM authors JOIN posts ON authors.id = posts.authorId'],
     ['join', 'SELECT * FROM authors JOIN posts ON authors.id = posts.authorId'],
     ['delete — with WHERE', 'DELETE FROM users WHERE id = 5'],

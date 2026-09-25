@@ -129,7 +129,7 @@ export type Plan =
   | { op: 'Sort'; column: string; direction: 'asc' | 'desc'; child: Plan }
   | { op: 'Project'; columns: ProjectList; child: Plan }
   /** `LIMIT n`, always the outermost node when present: `Limit → Project → …`. */
-  | { op: 'Limit'; count: number; child: Plan };
+  | { op: 'Limit'; count: number; /** Rows skipped first (`OFFSET m`); absent means none. */ offset?: number; child: Plan };
 
 export function childOf(plan: Plan): Plan | undefined {
   return plan.op === 'Filter' ||
@@ -419,6 +419,7 @@ function convert(
         id,
         op: 'Limit',
         label: `Limit ${String(plan.count)}`,
+        ...(plan.offset ? { detail: `offset ${String(plan.offset)}` } : {}),
         ...(highlight ? { highlight } : {}),
         ...cost,
         children: kid(plan.child),
