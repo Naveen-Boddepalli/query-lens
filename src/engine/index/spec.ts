@@ -24,7 +24,9 @@ export const columnsOfIndex = (name: string): string[] => name.split(INDEX_NAME_
 export function indexSpecsOf(table: Pick<Table, 'indexedColumns' | 'indexes'>): IndexSpec[] {
   const byName = new Map<string, IndexSpec>();
   for (const column of table.indexedColumns ?? []) byName.set(column, { columns: [column] });
-  for (const spec of table.indexes ?? []) byName.set(indexNameOf(spec.columns), { columns: [...spec.columns] });
+  for (const spec of table.indexes ?? []) {
+    byName.set(indexNameOf(spec.columns), { columns: [...spec.columns], ...(spec.unique ? { unique: true } : {}) });
+  }
   return [...byName.values()];
 }
 

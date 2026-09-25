@@ -61,6 +61,8 @@ describe('the generators reach what the oracle is meant to check', () => {
     /** An equality prefix plus a range on the next column, walking the run — and writes that find their rows by a range scan. */
     prefixRanges: 0,
     rangeWrites: 0,
+    /** Writes that consulted a UNIQUE index (and found the key free). */
+    uniqueChecks: 0,
   };
 
   for (const [{ tables: initial, steps }, options] of sessions) {
@@ -104,6 +106,7 @@ describe('the generators reach what the oracle is meant to check', () => {
       if (planned.includes('"op":"IndexOnlyScan","label":"IndexOnlyScan t.(')) stats.compositeCovering += 1;
       if (/"op":"IndexRangeScan","label":"IndexRangeScan [tu]\.\([^"]*\)","detail":"range: [a-z_]+ = /.test(planned)) stats.prefixRanges += 1;
       if (isWrite(q) && planned.includes('"op":"IndexRangeScan"')) stats.rangeWrites += 1;
+      if (isWrite(q) && result.events.some((e) => e.label.includes('so the key is free'))) stats.uniqueChecks += 1;
       if (planned.includes('"op":"IndexProbe","label":"IndexProbe u.(')) stats.compositeProbes += 1;
       if (result.events.some((e) => e.label.includes('cannot help: the predicate constrains'))) stats.compositeRefused += 1;
       if (isWrite(q)) {
@@ -174,6 +177,10 @@ describe('the generators reach what the oracle is meant to check', () => {
     expect(stats.compositeProbes, 'joins probing a composite index').toBeGreaterThan(3);
     expect(stats.prefixRanges, 'an equality prefix plus a range on the next column').toBeGreaterThan(10);
     expect(stats.rangeWrites, 'writes finding their rows by a range scan').toBeGreaterThan(10);
+  });
+
+  it('writes through UNIQUE indexes without tripping them (plan.md §25.4 B3c)', () => {
+    expect(stats.uniqueChecks, 'writes that checked a unique index').toBeGreaterThan(20);
   });
 
   it('includes empty tables, NULLs, and writes that really change rows', () => {

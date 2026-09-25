@@ -20,6 +20,7 @@ import type { Row } from '../types.ts';
 import type { Expr, UpdateAssignment } from '../parser/index.ts';
 import type { Plan } from '../planner/index.ts';
 import type { ExecContext } from './operators.ts';
+import { enforceUniqueOnUpdate } from './unique.ts';
 import { indexLookupMatches, indexRangeMatches } from './writeScan.ts';
 import type { Match, WriteVerb } from './writeScan.ts';
 import { evaluateValue, passes } from './evaluate.ts';
@@ -76,6 +77,8 @@ function reindexRow(ctx: ExecContext, before: Row, after: Row, pointer: RowPoint
     }
 
     if (afterValues[0] !== null) {
+      // Its old entry is out, so what remains is everyone else's: a UNIQUE index must not already hold the new key.
+      enforceUniqueOnUpdate(ctx, spec, afterValues);
       const nodesBefore = Object.keys(tree.nodes).length;
       const heightBefore = height(tree);
       insert(tree, entryKey(afterValues, pointer), pointer);

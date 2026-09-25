@@ -36,6 +36,13 @@ concept explanation.
 - **NULL leading columns are never indexed** (an equality on NULL is never true, so there is
   nothing to find); a NULL in a *later* column is an ordinary entry, so `(1, NULL)` is still found
   by `a = 1`. A `JOIN` can probe a composite index through its leading column.
+- **`UNIQUE`** is an index that refuses repeats: declare it in the Custom database's *Manage tables*
+  (`Unique indexes: email, team+role`). `INSERT` and `UPDATE` look the new key up in the index first
+  and, if it is taken, are rejected — the trace shows the lookup that found it, and **nothing changes**.
+  NULLs never conflict. The check runs row by row in the order rows are visited, so a multi-row
+  `UPDATE` that repeats a key part-way through (`SET id = id + 1`) is rejected, as PostgreSQL's
+  immediate constraints reject it. There is no `CREATE UNIQUE INDEX`; a table whose rows already
+  repeat a key cannot be given one (the editor refuses to apply it).
 - **Fan-out**: each node holds at most **4 keys** (5 children) before splitting; adjustable 3–6 in
   the [standalone sandbox](/tools/btree).
 - Supported operations: **insert**, **delete** (borrow/merge/root-collapse), **point lookup**, and

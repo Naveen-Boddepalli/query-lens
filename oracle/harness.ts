@@ -24,7 +24,14 @@ export function toDatabase(tables: readonly TableSpec[], indexed = true): Databa
       columns: t.columns.map((c) => c.name),
       rows: t.rows.map((r) => ({ ...r })),
       ...(indexed && t.indexed.length > 0 ? { indexedColumns: [...t.indexed] } : {}),
-      ...(indexed && t.composite && t.composite.length > 0 ? { indexes: t.composite.map((columns) => ({ columns: [...columns] })) } : {}),
+      ...(indexed && ((t.composite?.length ?? 0) > 0 || (t.unique?.length ?? 0) > 0)
+        ? {
+            indexes: [
+              ...(t.composite ?? []).map((columns) => ({ columns: [...columns] })),
+              ...(t.unique ?? []).map((column) => ({ columns: [column], unique: true })),
+            ],
+          }
+        : {}),
     };
   }
   return db;

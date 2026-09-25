@@ -81,6 +81,8 @@ export function emitIndexLookup(
    * never pays for the rest.
    */
   touchHeap = true,
+  /** Replaces the "Found …" sentence when the lookup is not answering a query — a `UNIQUE` check's own words. */
+  foundNote?: string,
 ): LookupOutcome {
   const label = describeKeys(keys);
   const wide = tree.tiebreak === true && entryWidth(tree) > 1;
@@ -183,13 +185,17 @@ export function emitIndexLookup(
     // Read along the leaves while the key holds. A hop is taken only when the run reached the end of a leaf and the
     // leaf's high key (its parent's separator) still starts with this key — otherwise the next leaf starts above it.
     let at = lowerBound(leaf.keys, target);
+    // A UNIQUE index holds at most one entry per whole key, so the first match is the only one — no run to read, and
+    // no reason to look at the next leaf even when the match is the last entry of this one.
+    const single = tree.unique === true && keys.length >= entryWidth(tree);
     for (;;) {
-      while (at < leaf.keys.length && startsWith(leaf.keys[at]!, keys)) {
+      while (at < leaf.keys.length && startsWith(leaf.keys[at]!, keys) && !(single && pointers.length > 0)) {
         if (pointers.length === 0) foundLeaf = leaf.id;
         pointers.push(leaf.pointers[at]!);
         entries.push([...valuesOf(leaf.keys[at]!)]);
         at += 1;
       }
+      if (single && pointers.length > 0) break;
       if (at < leaf.keys.length || leaf.next === null) break;
       const high = highKey(tree, leaf);
       if (high === null || !startsWith(high, keys)) break;
@@ -240,9 +246,10 @@ export function emitIndexLookup(
       : '';
   const partial = wide && keys.length < entryWidth(tree) ? ` (a leftmost prefix of the ${String(entryWidth(tree))}-column key)` : '';
   emit(
-    touchHeap
-      ? `Found ${label}${partial}. The leaf stores a pointer to the row, not the row itself: heap page ${pointer.pageId}, slot ${pointer.slot}.${also}`
-      : `Found ${label}${partial}. This query only needs \`${column}\` itself, which the leaf already holds — the heap page the pointer names is never read.${also}`,
+    foundNote ??
+      (touchHeap
+        ? `Found ${label}${partial}. The leaf stores a pointer to the row, not the row itself: heap page ${pointer.pageId}, slot ${pointer.slot}.${also}`
+        : `Found ${label}${partial}. This query only needs \`${column}\` itself, which the leaf already holds — the heap page the pointer names is never read.${also}`),
     { stage: 'index', action: 'found', nodeId: foundLeaf, key: keys[0]! },
   );
 

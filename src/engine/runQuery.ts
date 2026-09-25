@@ -26,7 +26,7 @@ import {
   needsSortSpill,
 } from './planner/index.ts';
 import { buildHeap, createBufferPool } from './storage/index.ts';
-import { buildIndexes, findIndexSpec, indexSpecsOf, pageCountFor } from './index/index.ts';
+import { buildIndexes, describeUniqueKey, findIndexSpec, indexSpecsOf, pageCountFor } from './index/index.ts';
 import type { BPlusTree } from './index/index.ts';
 import type { Heap } from './storage/index.ts';
 import { walkExpr } from './parser/index.ts';
@@ -34,12 +34,26 @@ import { execute } from './exec/index.ts';
 import { executeDelete } from './exec/delete.ts';
 import { executeInsert } from './exec/insert.ts';
 import { executeUpdate } from './exec/update.ts';
+import { UniqueViolation } from './exec/unique.ts';
 import { sortTempPageCount } from './exec/sort.ts';
 import { createLockManager } from './locks/index.ts';
 import { explainResult } from './explain.ts';
 import { createTracer } from './trace.ts';
 import { DEFAULT_ENGINE_OPTIONS } from './types.ts';
-import type { Database, EngineOptions, Row, RunResult, Table } from './types.ts';
+import type { Database, EngineOptions, QueryError, Row, RunResult, Table } from './types.ts';
+
+/** The error a rejected `INSERT` or `UPDATE` reports: which key is taken, by which row, and that nothing changed. */
+function uniqueError(violation: UniqueViolation, heap: Heap, span: { from: number; to: number }): QueryError {
+  const holder = heap.pages.find((p) => p.pageId === violation.holder.pageId)?.rows[violation.holder.slot];
+  return {
+    message: `Duplicate key — the UNIQUE index on \`${violation.index}\` already holds ${describeUniqueKey(violation.columns, violation.values)}.`,
+    hint: `A UNIQUE index allows one row per key (NULLs excepted: NULL is not equal to NULL).${
+      holder ? ` The row that has it: ${JSON.stringify(holder)}.` : ''
+    } Use a different value, or change or delete that row first. Nothing was changed.`,
+    from: span.from,
+    to: span.to,
+  };
+}
 
 /**
  * A look inside a run that the trace does not give. `afterWrite` receives the indexes a write left behind — the
@@ -147,7 +161,17 @@ export function runQuery(
     const insertNeedsNewPage = lastPage.rows.length >= options.rowsPerPage;
     const pool = createBufferPool(pageCountFor(heap, trees) + (insertNeedsNewPage ? 1 : 0), options, emit);
 
-    const { row: inserted } = executeInsert(row, { emit, pool, locks, heap, trees, table, options });
+    let inserted: Row;
+    try {
+      inserted = executeInsert(row, { emit, pool, locks, heap, trees, table, options }).row;
+    } catch (e) {
+      if (e instanceof UniqueViolation) {
+        const error = uniqueError(e, heap, ast.values.span);
+        emit(`INSERT is rejected — ${error.message} Nothing was changed.`, { stage: 'result', rows: [] });
+        return { events: drain(), rows: [], error };
+      }
+      throw e;
+    }
     hooks.afterWrite?.(trees);
     const rows = [...table.rows, inserted];
 
@@ -198,15 +222,18 @@ export function runQuery(
     const plan = emitUpdatePlanEvents(emit, ast, table, options.rowsPerPage);
     const pool = createBufferPool(pageCountFor(heap, trees), options, emit);
 
-    const { before, after } = executeUpdate(plan, ast.set.assignments, {
-      emit,
-      pool,
-      locks,
-      heap,
-      trees,
-      table,
-      options,
-    });
+    let changed: ReturnType<typeof executeUpdate>;
+    try {
+      changed = executeUpdate(plan, ast.set.assignments, { emit, pool, locks, heap, trees, table, options });
+    } catch (e) {
+      if (e instanceof UniqueViolation) {
+        const error = uniqueError(e, heap, ast.set.span);
+        emit(`UPDATE is rejected — ${error.message} Nothing was changed.`, { stage: 'result', rows: [] });
+        return { events: drain(), rows: [], error };
+      }
+      throw e;
+    }
+    const { before, after } = changed;
     hooks.afterWrite?.(trees);
     const replacements = new Map(before.map((row, i) => [row, after[i]!]));
     const rows = table.rows.map((r) => replacements.get(r) ?? r);

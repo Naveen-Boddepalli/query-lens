@@ -5,10 +5,12 @@ import {
   loadCustomDatabase,
   parseColumnList,
   parseCompositeIndexes,
+  parseUniqueIndexes,
   saveCustomDatabase,
   starterCustomDatabase,
   validateCompositeIndexes,
   validateNewTable,
+  validateUniqueRows,
 } from '../customDatabase.ts';
 import type { Database } from '../../engine/index.ts';
 
@@ -50,6 +52,24 @@ describe('composite indexes (plan.md §25.4 B3b)', () => {
     expect(describeIndexes({ indexedColumns: ['id'] })).toBe('indexed on id');
     expect(describeIndexes({ indexedColumns: ['id'], indexes: [{ columns: ['a', 'b'] }] })).toBe('indexed on id · composite (a, b)');
     expect(describeIndexes({ indexes: [{ columns: ['a', 'b'] }, { columns: ['c', 'd', 'e'] }] })).toBe('composite (a, b), (c, d, e)');
+  });
+
+  it('UNIQUE indexes use the same syntax, and one column is enough', () => {
+    expect(parseUniqueIndexes('email, team + role,')).toEqual([['email'], ['team', 'role']]);
+    expect(describeIndexes({ indexedColumns: ['id'], indexes: [{ columns: ['email'], unique: true }, { columns: ['a', 'b'] }] })).toBe(
+      'indexed on id · composite (a, b) · unique (email)',
+    );
+    // A column declared both plain and unique is described once, as unique.
+    expect(describeIndexes({ indexedColumns: ['email'], indexes: [{ columns: ['email'], unique: true }] })).toBe('unique (email)');
+  });
+
+  it('rows that repeat a unique key are refused with the key; NULLs never conflict', () => {
+    const table = (rows: Database['tables'][string]['rows']) => ({
+      tables: { t: { name: 't', columns: ['id', 'email'], rows, indexes: [{ columns: ['email'], unique: true }] } },
+    });
+    expect(validateUniqueRows(table([{ id: 1, email: 'a' }, { id: 2, email: 'b' }]))).toBeNull();
+    expect(validateUniqueRows(table([{ id: 1, email: null }, { id: 2, email: null }]))).toBeNull();
+    expect(validateUniqueRows(table([{ id: 1, email: 'a' }, { id: 2, email: 'a' }]))).toContain("(email) = ('a')");
   });
 
   describe('a saved database with composite indexes', () => {

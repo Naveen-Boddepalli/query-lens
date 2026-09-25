@@ -13,7 +13,7 @@
  * scheme exists to avoid. A custom database is this browser's own workspace,
  * the same privacy footing as `challengeProgress.ts`/`progress.ts`.
  */
-import { createJoinDemoDatabase, tokenize } from '../engine/index.ts';
+import { createJoinDemoDatabase, tokenize, uniqueViolation } from '../engine/index.ts';
 import type { Database, Row, SqlValue, Table } from '../engine/index.ts';
 
 const STORAGE_KEY = 'querylens.customDatabase.v1';
@@ -73,6 +73,8 @@ function isValidTable(key: string, value: unknown): value is Table {
     const named = new Set<string>();
     for (const spec of specs) {
       if (typeof spec !== 'object' || spec === null) return false;
+      const unique = (spec as { unique?: unknown }).unique;
+      if (unique !== undefined && typeof unique !== 'boolean') return false;
       const cols = (spec as { columns?: unknown }).columns;
       if (!Array.isArray(cols) || cols.length === 0) return false;
       if (!cols.every((c) => typeof c === 'string' && columns.includes(c))) return false;
@@ -146,6 +148,17 @@ export function parseCompositeIndexes(raw: string): string[][] {
     .filter((columns) => columns.length > 1);
 }
 
+/**
+ * `UNIQUE` indexes typed in the same `a+b` syntax, except that one column is a valid index too
+ * (`email, team+role` is one on `email` and one on the pair) — plan.md §25.4 B3c.
+ */
+export function parseUniqueIndexes(raw: string): string[][] {
+  return raw
+    .split(',')
+    .map((index) => index.split('+').map((c) => c.trim()).filter((c) => c !== ''))
+    .filter((columns) => columns.length > 0);
+}
+
 /** Why a set of composite indexes cannot be declared over `columns`, or `null` when they can. */
 export function validateCompositeIndexes(columns: readonly string[], indexes: readonly (readonly string[])[]): string | null {
   const seen = new Set<string>();
@@ -164,13 +177,30 @@ export function validateCompositeIndexes(columns: readonly string[], indexes: re
 /** A table's indexes in words, for the table lists: `indexed on id, title · composite (a, b)`; empty when it has none. */
 export function describeIndexes(table: Pick<Table, 'indexedColumns' | 'indexes'>): string {
   const plain = table.indexedColumns ?? [];
-  const composite = (table.indexes ?? []).filter((spec) => spec.columns.length > 1);
-  const single = (table.indexes ?? []).filter((spec) => spec.columns.length === 1).map((spec) => spec.columns[0]!);
+  const uniqueColumns = new Set((table.indexes ?? []).filter((spec) => spec.unique && spec.columns.length === 1).map((spec) => spec.columns[0]!));
+  const composite = (table.indexes ?? []).filter((spec) => spec.columns.length > 1 && !spec.unique);
+  const unique = (table.indexes ?? []).filter((spec) => spec.unique);
+  const single = (table.indexes ?? []).filter((spec) => spec.columns.length === 1 && !spec.unique).map((spec) => spec.columns[0]!);
+  // A column declared both plain and unique is described once, as unique.
+  const plainOnly = [...plain, ...single].filter((c) => !uniqueColumns.has(c));
   const parts = [
-    ...([...plain, ...single].length > 0 ? [`indexed on ${[...plain, ...single].join(', ')}`] : []),
+    ...(plainOnly.length > 0 ? [`indexed on ${plainOnly.join(', ')}`] : []),
     ...(composite.length > 0 ? [`composite ${composite.map((spec) => `(${spec.columns.join(', ')})`).join(', ')}`] : []),
+    ...(unique.length > 0 ? [`unique ${unique.map((spec) => `(${spec.columns.join(', ')})`).join(', ')}`] : []),
   ];
   return parts.join(' · ');
+}
+
+/** Why `db`'s rows cannot sit under the unique indexes they are declared with, or `null` when they can. */
+export function validateUniqueRows(db: Database): string | null {
+  for (const table of Object.values(db.tables)) {
+    const violation = uniqueViolation(table, table.rows);
+    if (violation) {
+      const key = violation.values.map((v) => (typeof v === 'string' ? `'${v}'` : String(v))).join(', ');
+      return `Table "${table.name}" has two rows with (${violation.columns.join(', ')}) = (${key}), but its UNIQUE index on ${violation.index} allows one. Fix the rows, or drop the index.`;
+    }
+  }
+  return null;
 }
 
 /** Splits a comma-separated column list into trimmed, non-empty names. */

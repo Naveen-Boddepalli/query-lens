@@ -421,6 +421,8 @@ const joinPredicatePushdown: Rule = (input) => {
 interface EqualityCandidate {
   name: string;
   columns: readonly string[];
+  /** A `UNIQUE` index (plan.md §25.4 B3c): a lookup of its whole key returns at most one row. */
+  unique: boolean;
   matched: { column: string; partIndex: number; key: SqlValue }[];
   /** Independent per-column selectivity, multiplied — the same assumption an `AND` in a `WHERE` already makes. */
   fraction: number;
@@ -517,6 +519,7 @@ const indexSelection: Rule = (input, table) => {
       {
         name: indexNameOf(spec.columns),
         columns: spec.columns,
+        unique: spec.unique === true,
         matched,
         fraction: matched.reduce((product, m) => product / ndistinct(table.rows, m.column), 1),
         ...(next ? { next } : {}),
@@ -587,6 +590,10 @@ const indexSelection: Rule = (input, table) => {
       : `The predicate has an equality on ${named.map((c) => `\`${c}\``).join(' and ')} — ${named.length === 1 ? 'the leftmost column' : 'the leftmost columns'} of the composite index (${chosen.columns.join(', ')}), which is all an index needs to be entered: \`${chosen.columns[named.length]}\` only orders the entries inside each run`
     : '';
   const unusable = leftmostPrefixNote(table, scan.filter);
+  const uniqueClause =
+    chosen.unique && named.length === chosen.columns.length && !chosen.next
+      ? ' The index is UNIQUE, so the lookup returns at most one row and stops at the first entry it finds.'
+      : '';
   const rangeClause = chosen.next
     ? ` The next column, \`${chosen.next.column}\`, has a range (${formatRangeBounds(chosen.next.column, chosen.next.low, chosen.next.high)}), so the index narrows it within that run: one descent to where the range begins inside ${describeKeysText(keys)}, then along the leaf chain until the run ends.`
     : '';
@@ -599,7 +606,7 @@ const indexSelection: Rule = (input, table) => {
         : residual
           ? `\`${chosen.name}\` is indexed${choiceClause}, so the equality becomes an index lookup. The rest of the predicate cannot be answered by the index and is rechecked on each row the index returns.`
           : `\`${chosen.name}\` is indexed${choiceClause} and the predicate is an equality on it, so the scan becomes a B+Tree lookup — a handful of pages instead of the whole table.`
-    }${rangeClause}${unusable ? ` ${unusable}` : ''}`,
+    }${uniqueClause}${rangeClause}${unusable ? ` ${unusable}` : ''}`,
     plan: root,
     changed: new Set<Plan>([indexScan]),
     prompt:

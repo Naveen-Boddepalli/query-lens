@@ -41,3 +41,4 @@ export type { LookupOutcome } from './lookup.ts';
 export { emitRangeStart, nextInRange } from './rangeLookup.ts';
 export type { ChainIO, RangeBoundValue, RangeMatch, RangeStart } from './rangeLookup.ts';
 export { validate } from './validate.ts';
+export { describeUniqueKey, uniqueViolation } from './unique.ts';

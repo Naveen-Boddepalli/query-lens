@@ -732,6 +732,43 @@ test('a composite index is entered by its leftmost column and declined without i
   await expect(page.getByText(/3 rows returned/)).toBeVisible();
 });
 
+test('a UNIQUE index rejects a repeated key, with the lookup that found it (plan.md §25.4 B3c)', async ({ page }) => {
+  await page.addInitScript(() => {
+    const rows = [
+      { id: 1, email: 'ada@x.org' },
+      { id: 2, email: 'alan@x.org' },
+      { id: 3, email: null },
+    ];
+    localStorage.setItem(
+      'querylens.customDatabase.v1',
+      JSON.stringify({ tables: { accounts: { name: 'accounts', columns: ['id', 'email'], rows, indexes: [{ columns: ['email'], unique: true }] } } }),
+    );
+  });
+  await page.goto('/playground?x=0');
+  await page.getByRole('button', { name: 'Custom', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Manage tables (1)' })).toBeVisible();
+
+  const editor = page.locator('.cm-content');
+  await editor.click();
+  await page.keyboard.press('ControlOrMeta+A');
+  await page.keyboard.type("INSERT INTO accounts (id, email) VALUES (4, 'ada@x.org');");
+  await page.getByRole('button', { name: /^Run/ }).click();
+
+  // The trace is kept: it shows the check that found the duplicate, and the page says the statement was rejected.
+  await expect(page.getByText(/Rejected after \d+ steps/)).toBeVisible();
+  await expect(page.getByText(/Duplicate key — the UNIQUE index on/).first()).toBeVisible();
+  await page.getByLabel('Scrub to step').press('End');
+  await expect(page.getByText(/INSERT is rejected/)).toBeVisible();
+
+  // A free key goes in, and the table grows; a NULL is never a conflict.
+  await editor.click();
+  await page.keyboard.press('ControlOrMeta+A');
+  await page.keyboard.type("INSERT INTO accounts (id, email) VALUES (4, NULL);");
+  await page.getByRole('button', { name: /^Run/ }).click();
+  await page.getByLabel('Scrub to step').press('End');
+  await expect(page.getByText(/1 row inserted/)).toBeVisible();
+});
+
 test('UPDATE changes a row for real, rekeying the index when the indexed column changes', async ({
   page,
 }) => {

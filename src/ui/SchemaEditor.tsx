@@ -1,6 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Database } from '../engine/index.ts';
-import { describeIndexes, parseColumnList, parseCompositeIndexes, validateCompositeIndexes, validateNewTable } from './customDatabase.ts';
+import {
+  describeIndexes,
+  parseColumnList,
+  parseCompositeIndexes,
+  parseUniqueIndexes,
+  validateCompositeIndexes,
+  validateNewTable,
+  validateUniqueRows,
+} from './customDatabase.ts';
 import { DataEditor } from './DataEditor.tsx';
 import { btnGhost, btnPrimary, btnSecondary, inputField } from './primitives.ts';
 
@@ -31,6 +39,7 @@ export function SchemaEditor({ db, onApply, onClose }: SchemaEditorProps) {
   const [columnsInput, setColumnsInput] = useState('');
   const [indexInput, setIndexInput] = useState<string[]>([]);
   const [compositeInput, setCompositeInput] = useState('');
+  const [uniqueInput, setUniqueInput] = useState('');
   const [error, setError] = useState<string | null>(null);
   const dialog = useRef<HTMLDialogElement>(null);
 
@@ -78,7 +87,8 @@ export function SchemaEditor({ db, onApply, onClose }: SchemaEditorProps) {
       return;
     }
     const composite = parseCompositeIndexes(compositeInput);
-    const compositeProblem = validateCompositeIndexes(columns, composite);
+    const unique = parseUniqueIndexes(uniqueInput);
+    const compositeProblem = validateCompositeIndexes(columns, [...composite, ...unique]);
     if (compositeProblem) {
       setError(compositeProblem);
       return;
@@ -92,7 +102,14 @@ export function SchemaEditor({ db, onApply, onClose }: SchemaEditorProps) {
           columns,
           rows: [],
           ...(indexInput.length > 0 ? { indexedColumns: indexInput } : {}),
-          ...(composite.length > 0 ? { indexes: composite.map((cols) => ({ columns: cols })) } : {}),
+          ...(composite.length + unique.length > 0
+            ? {
+                indexes: [
+                  ...composite.map((cols) => ({ columns: cols })),
+                  ...unique.map((cols) => ({ columns: cols, unique: true })),
+                ],
+              }
+            : {}),
         },
       },
     }));
@@ -101,6 +118,7 @@ export function SchemaEditor({ db, onApply, onClose }: SchemaEditorProps) {
     setColumnsInput('');
     setIndexInput([]);
     setCompositeInput('');
+    setUniqueInput('');
     setError(null);
   }
 
@@ -226,6 +244,20 @@ export function SchemaEditor({ db, onApply, onClose }: SchemaEditorProps) {
                     lookup on a, or on a and b — not on b alone.
                   </span>
                 </label>
+                <label className="flex flex-1 min-w-48 flex-col gap-1 text-label text-ink-dim">
+                  Unique indexes
+                  <input
+                    value={uniqueInput}
+                    onChange={(e) => { setUniqueInput(e.target.value); setError(null); }}
+                    placeholder="email, team+role"
+                    className={`${inputField} font-mono`}
+                    spellCheck={false}
+                  />
+                  <span className="text-ink-dim/80">
+                    Same syntax, one column is fine. An INSERT or UPDATE that repeats a key is rejected (NULLs never
+                    conflict).
+                  </span>
+                </label>
               </div>
               {error && <p role="alert" className="text-label text-evict">{error}</p>}
               <div className="flex gap-2">
@@ -268,11 +300,19 @@ export function SchemaEditor({ db, onApply, onClose }: SchemaEditorProps) {
               </button>
               <button
                 type="button"
-                onClick={() => { close(); onApply(working); }}
+                onClick={() => {
+                  // Rows edited into a table under a UNIQUE index can repeat a key; refuse them here, with the row.
+                  const problem = validateUniqueRows(working);
+                  if (problem) { setError(problem); return; }
+                  setError(null);
+                  close();
+                  onApply(working);
+                }}
                 className={`ml-auto ${btnPrimary}`}
               >
                 Apply &amp; re-run
               </button>
+              {error && <p role="alert" className="basis-full text-label text-evict">{error}</p>}
             </div>
           )}
         </div>

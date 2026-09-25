@@ -28,6 +28,7 @@ export function buildIndex(
   // Entry keys (values + row address), so the key may repeat: two rows with the same values are two
   // distinct entries, adjacent in the leaves, and neither overwrites the other.
   const tree = createTree(maxKeys, firstPageId, true);
+  if (typeof index !== 'string' && index.unique) tree.unique = true;
 
   heap.pages.forEach((page) => {
     page.rows.forEach((row, slot) => {

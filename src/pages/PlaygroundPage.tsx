@@ -216,7 +216,8 @@ export function PlaygroundPage() {
   // is never re-created with the very text it needed to announce.
   const announcement = stepAnnouncement({
     narration: state.narration,
-    error: result.error !== undefined,
+    // A statement rejected part-way (a UNIQUE key already taken) has a trace to read; only one that never ran has none.
+    error: result.error !== undefined && result.events.length === 0,
     prediction: prompt && upcoming ? { prompt, answer: answers[upcoming.id] } : undefined,
   });
 
@@ -588,8 +589,13 @@ export function PlaygroundPage() {
 
           <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-label text-ink-dim">
             <p>
-              {result.error ? (
+              {result.error && result.events.length === 0 ? (
                 <span className="text-evict">The query did not run — see the error by the editor.</span>
+              ) : result.error ? (
+                // A statement the engine started and then rejected (a UNIQUE key already taken): the trace shows how far it got.
+                <span className="text-evict">
+                  Rejected after {result.events.length} steps — the trace shows how far it got; the error is by the editor.
+                </span>
               ) : (
                 <>
                   {result.events.length} steps in this trace · showing step{' '}

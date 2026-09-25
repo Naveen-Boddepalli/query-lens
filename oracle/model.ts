@@ -30,6 +30,12 @@ export interface TableSpec {
   indexed: string[];
   /** Composite indexes, each a list of columns in key order (plan.md §25.4 B3b). */
   composite?: string[][];
+  /**
+   * Columns with a UNIQUE index in QueryLens (plan.md §25.4 B3c). Only ever ones the session cannot make repeat
+   * (`id` and `k` start unique, INSERT numbers them from a serial, and UPDATE never sets them here); a statement that
+   * *does* violate one is `unique.test.ts`'s business, against SQLite's own UNIQUE INDEX.
+   */
+  unique?: string[];
 }
 
 /** A column reference. `table` is set exactly when the query has a JOIN (the parser requires it there). */

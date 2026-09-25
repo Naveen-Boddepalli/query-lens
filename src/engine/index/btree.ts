@@ -97,6 +97,8 @@ export type BTreeNode = LeafNode | InternalNode;
 export interface BPlusTree {
   /** True for an index over a table: its keys are `EntryKey`s, displayed by their values only. */
   tiebreak?: boolean;
+  /** A `UNIQUE` index: a lookup of a whole key can stop at the first entry it finds (plan.md §25.4 B3c). */
+  unique?: boolean;
   rootId: string;
   nodes: Record<string, BTreeNode>;
   maxKeys: number;

@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`UNIQUE` indexes** (plan.md §25.4 B3, third slice) — declare one in the Custom database's *Manage tables*
+  (`email, team+role`). A unique constraint is an index lookup made before a key goes in: `INSERT` and `UPDATE`
+  ask the index whether the key is already there, and if it is the statement is rejected with the key and the
+  row that holds it, and changes nothing. The Playground keeps the trace of a rejected statement — the lookup that
+  found the duplicate — rather than saying the query did not run. NULLs never conflict. Checked against SQLite's own
+  `UNIQUE INDEX` on random sequences of writes.
 - **Composite indexes** (plan.md §25.4 B3, second slice) — one B+Tree over several columns, entered through a
   *leftmost prefix*: an index on `(city, age)` answers `city = 'oslo'` and `city = 'oslo' AND age = 30`, but not
   `age = 30` alone, because its entries are ordered by `city` first. The plan says so when it declines one, and a

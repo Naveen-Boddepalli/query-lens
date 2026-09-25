@@ -80,6 +80,15 @@ few distinct values is often *worse* than a scan. Try
 in the Planner sandbox — `posts` is indexed on `authorId`, which repeats (four authors, ten posts) — and read
 the row estimate the cost model gives the `IndexScan`.
 
+## UNIQUE is a lookup
+
+A `UNIQUE` constraint is not a rule checked somewhere else — it is an index lookup made *before* a key goes
+in. `INSERT INTO accounts … VALUES (4, 'ada@x.org')` first asks the index on `email` whether an entry for
+`'ada@x.org'` already exists: a descent from the root, exactly like a `SELECT`. If it finds one, the
+statement is rejected and nothing is written; if not, the key is free and the insert goes on. That is why
+every unique constraint is backed by an index, and why a table with one reads index pages on every write.
+A key with a NULL in it never conflicts (NULL is not equal to NULL), so it is not even looked up.
+
 ## Composite indexes and the leftmost-prefix rule
 
 An index can be over more than one column. An index on `(city, age)` holds entries ordered by `city`

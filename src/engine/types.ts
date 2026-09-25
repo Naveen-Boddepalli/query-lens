@@ -232,6 +232,13 @@ export interface Table {
 /** One index a table declares — its columns in key order. More than one column makes it composite. */
 export interface IndexSpec {
   columns: string[];
+  /**
+   * A `UNIQUE` index (plan.md §25.4 B3c): at most one row may hold any given key. `INSERT` and `UPDATE` look the new
+   * key up in the index first and reject the statement if it is already there — that lookup *is* the enforcement,
+   * which is why a unique constraint is always backed by an index. A key with a NULL in it never conflicts (NULL is
+   * not equal to NULL), so any number of rows may hold NULL.
+   */
+  unique?: boolean;
 }
 
 /**

@@ -54,6 +54,7 @@ export const tableT: fc.Arbitrary<TableSpec> = fc.integer({ min: 0, max: 24 }).c
       ns: columnArray(nullable(fc.integer({ min: -5, max: 9 })), count),
       ss: columnArray(nullable(fc.constantFrom(...TEXT_POOL)), count),
       rs: columnArray(nullable(quarter), count),
+      unique: fc.oneof({ weight: 3, arbitrary: fc.constant<string[]>([]) }, { weight: 2, arbitrary: fc.subarray(['id', 'k'], { minLength: 1 }) }),
       composite: fc.oneof(
         { weight: 5, arbitrary: fc.constant<string[][]>([]) },
         { weight: 6, arbitrary: fc.constantFrom<string[][]>([['n', 's']], [['s', 'n']], [['n', 'r']], [['r', 'n']], [['id', 'n']], [['k', 's']], [['s', 'r']]) },
@@ -70,7 +71,7 @@ export const tableT: fc.Arbitrary<TableSpec> = fc.integer({ min: 0, max: 24 }).c
         )
         .map((cols) => [...cols]),
     })
-    .map(({ ids, ks, kNull, ns, ss, rs, indexed, composite }): TableSpec => ({
+    .map(({ ids, ks, kNull, ns, ss, rs, indexed, composite, unique }): TableSpec => ({
       name: 't',
       columns: T_COLUMNS,
       rows: ids.map(
@@ -78,6 +79,7 @@ export const tableT: fc.Arbitrary<TableSpec> = fc.integer({ min: 0, max: 24 }).c
       ),
       indexed,
       ...(composite.length > 0 ? { composite } : {}),
+      ...(unique.length > 0 ? { unique } : {}),
     })),
 );
 
@@ -644,7 +646,7 @@ function writeWhereArb(t: TableSpec, refs: readonly Ref[], pool: Pool): fc.Arbit
 export function updateArb(t: TableSpec, pool: Pool): fc.Arbitrary<WriteQuery> {
   const refs = refsOf(t, false);
   // Any column but the join key's partner: SET on an *indexed* column moves that row's index entry, which is the point.
-  const settable = t.columns.filter((c) => ['id', 'k', 'n', 's', 'r'].includes(c.name));
+  const settable = t.columns.filter((c) => ['id', 'k', 'n', 's', 'r'].includes(c.name) && !(t.unique ?? []).includes(c.name));
   return fc
     .record({
       set: fc.uniqueArray(fc.constantFrom(...settable), { minLength: 1, maxLength: 2, selector: (c) => c.name }),

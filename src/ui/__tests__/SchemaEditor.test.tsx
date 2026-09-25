@@ -127,6 +127,46 @@ describe('SchemaEditor', () => {
     });
   });
 
+  it('declares UNIQUE indexes — one column or several — from the unique field', () => {
+    const { onApply } = setup();
+    fireEvent.click(screen.getByRole('button', { name: '+ Add table' }));
+    fireEvent.change(screen.getByPlaceholderText('reviews'), { target: { value: 'users' } });
+    fireEvent.change(screen.getByPlaceholderText('id, rating, comment'), { target: { value: 'id, email, team, role' } });
+    fireEvent.change(screen.getByLabelText(/Unique indexes/), { target: { value: 'email, team+role' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add table' }));
+    expect(screen.getByText(/unique \(email\), \(team, role\)/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Apply/ }));
+
+    expect(onApply).toHaveBeenCalledWith({
+      tables: {
+        ...DB.tables,
+        users: {
+          name: 'users',
+          columns: ['id', 'email', 'team', 'role'],
+          rows: [],
+          indexes: [{ columns: ['email'], unique: true }, { columns: ['team', 'role'], unique: true }],
+        },
+      },
+    });
+  });
+
+  it('will not apply rows that repeat a key its UNIQUE index forbids, and names the key', () => {
+    const db: Database = {
+      tables: {
+        users: {
+          name: 'users',
+          columns: ['id', 'email'],
+          rows: [{ id: 1, email: 'a@x' }, { id: 2, email: 'a@x' }],
+          indexes: [{ columns: ['email'], unique: true }],
+        },
+      },
+    };
+    const { onApply } = setup({ db });
+    fireEvent.click(screen.getByRole('button', { name: /Apply/ }));
+    expect(screen.getByRole('alert')).toHaveTextContent("(email) = ('a@x')");
+    expect(onApply).not.toHaveBeenCalled();
+  });
+
   it('refuses a composite index over a column the table does not have, and says which', () => {
     const { onApply } = setup();
     fireEvent.click(screen.getByRole('button', { name: '+ Add table' }));

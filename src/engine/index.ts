@@ -52,6 +52,7 @@ export {
   keyList,
   search,
   toIndexDisplay,
+  uniqueViolation,
   validate,
 } from './index/index.ts';
 export type {

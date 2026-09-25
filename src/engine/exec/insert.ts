@@ -10,6 +10,7 @@
  */
 
 import type { Row } from '../types.ts';
+import { enforceUniqueOnInsert } from './unique.ts';
 import type { ExecContext } from './operators.ts';
 import { entryKey, height, indexNameOf, indexSpecsOf, insert, keyText, keyValuesOf, pageCountFor } from '../index/index.ts';
 import type { RowPointer } from '../index/index.ts';
@@ -63,6 +64,9 @@ function insertIntoIndex(ctx: ExecContext, row: Row, pointer: RowPointer): void 
 }
 
 export function executeInsert(row: Row, ctx: ExecContext): InsertOutcome {
+  // A UNIQUE index is asked first — a rejected INSERT must not have touched the heap or any other tree.
+  enforceUniqueOnInsert(ctx, row);
+
   const { pageId, slot, isNewPage } = targetPage(ctx);
 
   ctx.locks.acquire(
