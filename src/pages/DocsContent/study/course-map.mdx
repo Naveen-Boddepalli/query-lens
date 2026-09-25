@@ -1,0 +1,82 @@
+---
+title: Course map
+description: A database course, topic by topic — where QueryLens lets you watch the idea happen, where it only touches it, and where it has nothing to offer.
+---
+
+import { Callout, Contents, DocMeta } from '../../../ui/DocsComponents.tsx';
+
+# Course map
+
+<DocMeta items={[
+  { label: 'For', value: 'Students in an undergraduate or graduate database-systems course, and anyone following one on their own' },
+  { label: 'Honest about', value: 'what is covered, what is only touched, and what is missing' },
+]} />
+
+<Callout>
+  **Not affiliated with any course or university.** This page follows the *shape* of a typical
+  database-internals syllabus — the public schedule of Carnegie Mellon's 15-445/645 was read for its
+  lecture *titles* only, never its content or materials — and is one person's reading of what this
+  engine does. Nothing here is endorsed by, reviewed by, or a claim about any instructor or course.
+  Yours will order and name things differently; use the topic names to find the row.
+</Callout>
+
+<Contents items={[
+  { href: '#how-to-read-this', label: 'How to read this' },
+  { href: '#the-map', label: 'The map' },
+  { href: '#where-it-is-strongest', label: 'Where it is strongest' },
+  { href: '#the-biggest-holes', label: 'The biggest holes' },
+]} />
+
+## How to read this
+
+Each topic gets one of three marks, and the words matter more than the symbol:
+
+- **Covered** — you can watch the mechanism run, step by step, on a real (small) implementation of it.
+- **Partly** — something real is here, but a large part of the topic is not.
+- **Not covered** — nothing in QueryLens will help you with it. Use your course's material.
+
+"Covered" never means *the way a production system does it*. Every number is true to this toy engine —
+four rows to a page, eight buffer frames, four keys to an index node. What transfers is the *mechanism*;
+[the FAQ](/docs/faq) and [the engine limits](/docs/reference/limits) say exactly where it simplifies.
+
+## The map
+
+| Topic | Coverage | Where to practise | What is missing |
+|---|---|---|---|
+| Relational model and algebra | Partly | The plan drawn as relational algebra — σ, π, ⋈, γ, τ, δ, λ — with **Show as → Relational algebra** on the [Playground](/playground)'s planner panel, and *Copy as LaTeX* for a homework answer | Set operators (∪, −, ×) and division; only the operators the engine executes |
+| SQL | Partly | [Supported SQL](/docs/reference/sql): `WHERE` with `AND`/`OR`/`NOT`/`IN`/`LIKE`/`IS NULL`, arithmetic, `GROUP BY`/`HAVING`, `DISTINCT`, `ORDER BY`/`LIMIT`/`OFFSET`, one `JOIN`, `INSERT`/`UPDATE`/`DELETE`, and `EXPLAIN [ANALYZE]` — with results [checked against SQLite](/docs/reference/answers) | Outer joins, subqueries, more than one join, window functions, CTEs, DDL |
+| Storage: heap files and pages | Covered | The [slotted-page inspector](/tools/page) lays a page out byte by byte; the Playground reads real heap pages | Variable-length overflow, free-space maps |
+| Memory management: the buffer pool | Covered | [The buffer pool](/docs/concepts/buffer-pool), the [pool sandbox](/tools/buffer-pool) (LRU, clock, FIFO, second-chance, optimal, midpoint LRU), the [policy comparison](/compare), the *eviction storm* and *dirty eviction* [challenges](/challenges) | Pin/unpin contention between real concurrent queries |
+| Log-structured storage | Not covered | — | LSM trees, memtables, compaction |
+| Storage models and compression | Not covered | — | Column stores, compression, PAX — every table here is a row store |
+| Hash tables | Partly | The [Grace hash join sandbox](/tools/hash-join) (partitioning, spill, bucket collisions) and the engine's hash join and hash aggregate | Static and dynamic hashing schemes (linear, extendible) as indexes |
+| Tree indexes | Covered | [The B+Tree](/docs/concepts/btree): splits and merges in the [sandbox](/tools/btree), point lookups and range scans, **repeated keys**, **composite indexes and the leftmost-prefix rule**, **covering scans**, **`UNIQUE`**, bulk load vs one-at-a-time ([Compare → Index build](/compare)) | Clustered (index-organized) tables; secondary indexes that point at a key rather than a row address |
+| Filters, tries, vector indexes | Not covered | — | Bloom filters, tries, similarity search |
+| Index concurrency | Partly | Every lookup narrates *latch crabbing* — lock the child before releasing the parent — in the [Locks panel](/playground) | Concurrent queries: the crab is drawn, never contested |
+| Sorting and aggregation | Covered | The [external merge sort sandbox](/tools/sort), the engine's real spill through the buffer pool, hash aggregate vs sort aggregate and `DISTINCT` in [Compare](/compare), the *sort spill* challenge | Parallel and replacement-selection sorts |
+| Joins | Covered | Nested-loop, hash, sort-merge and **index nested-loop**, forced onto one query in [Compare](/compare) — including the case where the index join *loses*; the *hash beats loop* challenge | Multi-way joins and join order; outer joins |
+| Query execution models | Partly | The Volcano model: every row is one pull down the operator tree, one trace step at a time | Materialization and vectorized execution |
+| Parallel execution | Not covered | — | Multi-core operators, exchange |
+| Query planning and optimization | Covered | The rule-based optimizer, one rewrite at a time in the [planner sandbox](/tools/planner); predicate pushdown, index selection, index-only scans; **`EXPLAIN ANALYZE`** with estimated rows beside the executor's actual rows | — |
+| Cost models and join ordering | Partly | Row and page estimates on every plan node, and `EXPLAIN ANALYZE` putting each estimate beside the executor's actual count | Statistics beyond distinct counts, join-order search, plan enumeration |
+| Concurrency-control theory, timestamp ordering, MVCC | Not covered | — | Schedules, serializability, versions, snapshots |
+| Two-phase locking | Partly | The [lock simulator](/tools/locks): shared/exclusive locks, waiters, deadlock detection and victim choice | Locks do not yet belong to the query engine's transactions |
+| Logging and recovery | Not covered | — | WAL, checkpoints, ARIES |
+| Distributed databases | Not covered | — | Replication, partitioning, consensus |
+
+## Where it is strongest
+
+If your course is at the *storage, indexing and query-processing* end, most of it is here and you can
+run it: pages and the buffer pool, B+Trees in more shapes than a lecture has time for, the four join
+algorithms, sorting and aggregation, and an optimizer you can step through. The
+[interview roadmap](/docs/study/interview-roadmap) turns the same material into a six-week path.
+
+## The biggest holes
+
+Everything from **transactions onward** — concurrency-control theory, MVCC, logging, recovery,
+distributed systems — is either absent or (for two-phase locking) a standalone tool outside the
+engine. That is roughly a quarter of a typical course. Nothing on this page should be read as
+covering it. Column stores, LSM trees, and filters and tries are also absent.
+
+If a topic above says *Not covered* and you need it, that is the right signal to reach for your
+course notes or the textbook — not a gap in your understanding.

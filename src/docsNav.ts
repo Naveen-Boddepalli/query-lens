@@ -33,6 +33,13 @@ export const DOCS_NAV: readonly DocsNavGroup[] = [
     ],
   },
   {
+    title: 'Study',
+    items: [
+      { to: '/docs/study/course-map', label: 'Course map' },
+      { to: '/docs/study/interview-roadmap', label: 'Interview roadmap' },
+    ],
+  },
+  {
     title: 'Reference',
     items: [
       { to: '/docs/reference/sql', label: 'Supported SQL' },

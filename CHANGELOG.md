@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Course map and interview roadmap** (plan.md §25.4 G1) — two pages under a new *Study* section of the docs.
+  The **course map** lines a typical database course up against QueryLens topic by topic, marking each *covered*,
+  *partly* or *not covered* in words, with where to practise it and what is missing — including the large part
+  (transactions, recovery, MVCC, column stores, LSM trees) it does not touch. The **interview roadmap** is a
+  six-week path through the site: watch, explain out loud, and check with the challenges. Neither is affiliated with
+  a course, university or employer, and says so first.
 - **Bulk-loaded indexes, and an *Index build* comparison** (plan.md §25.4 B3, fourth slice) — an index can be
   built by sorting the entries and packing the leaves to a fill factor instead of inserting one row at a time. It
   is a smaller, often shallower tree with identical answers: over 400 rows a point lookup costs **5 disk reads**

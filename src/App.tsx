@@ -153,6 +153,8 @@ const DocsBufferPool = lazy(() => import('./pages/DocsContent/concepts/buffer-po
 const DocsBTree = lazy(() => import('./pages/DocsContent/concepts/btree.mdx'));
 const DocsManualEviction = lazy(() => import('./pages/DocsContent/manual/eviction.mdx'));
 const DocsManualBTreeSplit = lazy(() => import('./pages/DocsContent/manual/btree-split.mdx'));
+const DocsCourseMap = lazy(() => import('./pages/DocsContent/study/course-map.mdx'));
+const DocsInterviewRoadmap = lazy(() => import('./pages/DocsContent/study/interview-roadmap.mdx'));
 const DocsSql = lazy(() => import('./pages/DocsContent/reference/sql.mdx'));
 const DocsUrlParameters = lazy(() => import('./pages/DocsContent/reference/url-parameters.mdx'));
 const DocsShortcuts = lazy(() => import('./pages/DocsContent/reference/shortcuts.mdx'));
@@ -212,6 +214,8 @@ export default function App() {
               <Route path="concepts/btree" element={<DocsBTree />} />
               <Route path="manual/eviction" element={<DocsManualEviction />} />
               <Route path="manual/btree-split" element={<DocsManualBTreeSplit />} />
+              <Route path="study/course-map" element={<DocsCourseMap />} />
+              <Route path="study/interview-roadmap" element={<DocsInterviewRoadmap />} />
               <Route path="reference/sql" element={<DocsSql />} />
               <Route path="reference/url-parameters" element={<DocsUrlParameters />} />
               <Route path="reference/shortcuts" element={<DocsShortcuts />} />

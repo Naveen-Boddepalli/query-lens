@@ -136,12 +136,15 @@ const T = (name: string): string => `src/pages/tools/${name}.tsx`;
  *    for the routes that went over are now their measured size + 3 (was +2), so a small engine change stops touching the
  *    table. Splitting the engine out of the routes that barely use it (the landing page, /tools/page) is the real fix,
  *    and is not done yet.
+ *  - 2026-09-25, the course map and interview roadmap (§25.4 G1): two prose pages, ~7 kB gzip, into the one shared docs
+ *    chunk, so /docs moves from 141 to 149. (The entry chunk grew by two lazy routes, which is why /stages and
+ *    /stages/:id moved by a hair as well.)
  */
 export const ROUTES: readonly RouteBudget[] = [
   { route: '/', roots: [P('LandingPage')], kb: 157, note: 'the landing page' },
   { route: '/playground', roots: [P('PlaygroundPage')], kb: 307, note: 'the Playground: the editor, every stage panel, the engine — the heaviest route, and the one most people land on' },
-  { route: '/stages', roots: ['src/ui/StagesLayout.tsx', P('StagesIndex')], kb: 153, note: 'the stage explainers, index' },
-  { route: '/stages/:id', roots: ['src/ui/StagesLayout.tsx', P('StagePage')], kb: 170, note: 'one stage explainer' },
+  { route: '/stages', roots: ['src/ui/StagesLayout.tsx', P('StagesIndex')], kb: 157, note: 'the stage explainers, index' },
+  { route: '/stages/:id', roots: ['src/ui/StagesLayout.tsx', P('StagePage')], kb: 173, note: 'one stage explainer' },
   { route: '/learn', roots: [P('LearnPage')], kb: 162, note: 'the lesson track' },
   { route: '/learn/:id', roots: [P('LessonPage')], kb: 159, note: 'one lesson' },
   { route: '/examples', roots: [P('ExamplesPage')], kb: 115, note: 'preset queries' },
@@ -164,7 +167,7 @@ export const ROUTES: readonly RouteBudget[] = [
   { route: '/tools/locks', roots: [T('LocksToolPage')], kb: 117, note: 'lock simulator' },
   { route: '/tools/grammar', roots: [T('GrammarToolPage')], kb: 116, note: 'the SQL grammar diagram' },
   { route: '/tools/hash-join', roots: [T('HashJoinToolPage')], kb: 118, note: 'Grace hash join' },
-  { route: '/docs', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 141, note: 'the docs shell and every prose page (one shared chunk)' },
+  { route: '/docs', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 149, note: 'the docs shell and every prose page (one shared chunk)' },
   { route: '/docs/concepts/btree', roots: ['src/ui/DocsLayout.tsx', 'src/pages/DocsContent/concepts/btree.mdx'], kb: 163, note: 'a concept page with a live B+Tree widget' },
   { route: '/docs/concepts/buffer-pool', roots: ['src/ui/DocsLayout.tsx', 'src/pages/DocsContent/concepts/buffer-pool.mdx'], kb: 163, note: 'a concept page with a live buffer-pool widget' },
   { route: '/* (404)', roots: [P('NotFoundPage')], kb: 114, note: 'the not-found page' },

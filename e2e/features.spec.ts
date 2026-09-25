@@ -795,6 +795,32 @@ test('a UNIQUE index rejects a repeated key, with the lookup that found it (plan
   await expect(page.getByText(/1 row inserted/)).toBeVisible();
 });
 
+test('every link on the course map and the interview roadmap goes somewhere real (plan.md §25.4 G1)', async ({ page }) => {
+  const targets = new Set<string>();
+  for (const [path, marker] of [
+    ['/docs/study/course-map', /Not affiliated with any course or university/],
+    ['/docs/study/interview-roadmap', /Week 6/],
+  ] as const) {
+    await page.goto(path);
+    await expect(page.getByText(marker).first()).toBeVisible();
+    // The page's own links: everything but the header, the docs sidebar and the footer.
+    const hrefs = await page.locator('a[href^="/"]').evaluateAll((links) =>
+      links
+        .filter((a) => !a.closest('nav, header, footer, aside'))
+        .map((a) => (a as HTMLAnchorElement).getAttribute('href') ?? ''),
+    );
+    expect(hrefs.length, `${path} has links`).toBeGreaterThan(10);
+    for (const href of hrefs) if (!href.startsWith('/docs/study/')) targets.add(href.split('#')[0]);
+  }
+  for (const href of targets) {
+    const response = await page.goto(href);
+    expect(response?.status(), `${href} status`).toBeLessThan(400);
+    // The app's own not-found page says so; every real route renders something else.
+    await expect(page.getByText(/simplified educational model/).first(), `${href}: app shell missing`).toBeVisible();
+    await expect(page.locator('body'), `${href} is the not-found page`).not.toContainText(/This node has no child pointer/);
+  }
+});
+
 test('UPDATE changes a row for real, rekeying the index when the indexed column changes', async ({
   page,
 }) => {

@@ -1058,6 +1058,11 @@ checkpoints) · query processing (joins, sorting, aggregation, optimization) · 
 | 23 | Database Recovery | ○ | — | 2.3 |
 | 24 | Distributed Databases | ○ | — | horizon |
 
+> **Update, 2026-09-25 (v2):** the live, maintained version of this table is the docs page
+> `/docs/study/course-map` (plan.md §25.4 G1), in course-neutral topic names and with the v2 coverage — relational
+> algebra, SQL tier 2, non-unique/composite/unique/bulk-loaded indexes and the index nested-loop join have all landed
+> since the table below was written. The table below is left as the v1 baseline.
+
 (12 and 25 are in-class exam-style sessions and carry no content.) **Of 23 content lectures: 6 covered (●),
 7 partly (◐), 10 not at all (○).** The largest single hole is **lectures 18–23 — concurrency control
 through recovery, six lectures, 26% of the course, zero covered** in the main pipeline. That is the

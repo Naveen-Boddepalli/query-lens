@@ -41,6 +41,7 @@ const EXPLORE_LINKS: FooterLink[] = NAV_ITEMS.filter((item) => item.nav && item.
 const DOCS_LINKS: FooterLink[] = [
   ...(DOCS_NAV.find((g) => g.title === 'Introduction')?.items ?? []),
   { to: DOCS_NAV.find((g) => g.title === 'Concepts')?.items[0]?.to ?? '/docs', label: 'Concepts' },
+  { to: DOCS_NAV.find((g) => g.title === 'Study')?.items[0]?.to ?? '/docs', label: 'Course map & interview path' },
   { to: DOCS_NAV.find((g) => g.title === 'Reference')?.items[0]?.to ?? '/docs', label: 'Reference' },
 ].map((item) => ({ label: item.label, href: item.to }));
 
