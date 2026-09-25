@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Bundle budgets by route** (plan.md §25.4 H8) — `pnpm budget` now prices **each of 30 routes, every page and every
+  tool, by what a visitor to it downloads**: the entry chunk, that route's own lazy chunk and every static
+  dependency of either, read from Vite's manifest. A change that grows the Playground can only raise the
+  Playground's row; a chunk no route reaches fails the build, so a new tool must bring its own row. It also says
+  something the old group sums never did: the landing page costs **147 kB** gzip, the Playground **296 kB**
+  (CodeMirror is 116 of it), and every route pays a **110 kB floor** (React, the app shell and CSS). The single
+  424 kB sum is printed as information, no longer a gate.
 - **`EXPLAIN` and `EXPLAIN ANALYZE` as SQL** (plan.md §25.4 B6) — type it in the editor. `EXPLAIN SELECT …` returns a
   `QUERY PLAN` result, one line per operator with the cost model's `est ~N rows`, and **executes nothing** — no page
   is read. `EXPLAIN ANALYZE SELECT …` runs the query for real (the trace you step through is that run) and puts the

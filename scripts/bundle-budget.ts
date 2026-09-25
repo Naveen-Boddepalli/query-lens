@@ -1,386 +1,235 @@
 /**
- * A gzip budget for `dist/`, checked in CI (plan.md §14.2).
+ * A gzip budget for `dist/`, checked in CI (plan.md §14.2, reworked by §25.4 H8).
  *
  * The point is not the numbers, it is that they cannot drift silently. A bundle
  * grows one import at a time and nobody notices until the lecture-hall laptop
  * on hotel wifi does — which is the audience §14 question 7 is about.
  *
+ * **What is budgeted is what a visitor downloads.** Until v2 this was a handful
+ * of chunk-name groups and one sum, and every feature that touched shared code
+ * ("trace-ui") had to raise a ceiling that six routes shared — while a new tool
+ * could hide inside a group with room to spare. That says nothing about the one
+ * question that matters: *how many kilobytes does someone landing on /compare
+ * pay?* So each route below is priced as the gzip size of the entry chunk plus
+ * that route's own lazy chunk plus every static dependency of either — read from
+ * Vite's manifest (`dist/.vite/manifest.json`), the same graph the browser walks.
+ * A route can no longer grow another route's ceiling to fit, and **every tool
+ * has its own row** (§25.2 Q8: a new tool is its own lazy chunk with its own
+ * budget, and may not grow a shared one).
+ *
+ * Not counted: fonts and images (they are separate, cacheable requests, and
+ * `public/` is checked by the deploy notice, §25.4 A4) — this is JS and CSS.
+ *
  * Budgets are set a little above the current size: tight enough that adding a
  * dependency shows up here, loose enough that a normal change does not fail the
- * build. Raising one is a deliberate act with a diff, which is the whole idea.
+ * build. Raising one is a deliberate act with a diff, and a comment saying why.
+ * The history of the old group ceilings is in git (last version: e28df0d).
  *
  * Run: pnpm budget   (after pnpm build)
  */
 import { gzipSync } from 'node:zlib';
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const DIST = 'dist/assets';
+/** The parts of a Vite manifest entry this reads. */
+export interface ManifestChunk {
+  file: string;
+  imports?: string[];
+  css?: string[];
+}
+export type Manifest = Record<string, ManifestChunk>;
 
-/** Matched against the chunk name; the first match wins. */
-const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
-  { name: 'codemirror', test: /^codemirror-/, kb: 128, note: 'SQL editor, loaded with the Playground route' },
-  // Cut 70 → 18 when `@xyflow/react` was replaced by flowinger. React Flow + d3
-  // measured 60.5 kB gzip in this chunk; flowinger + d3 measured 14.0. It rose to
-  // 21.7, then 24.0, as flowinger gained the React Flow features it lacked —
-  // FlowTree uses none of them, but they lived in the canvas and its store. Now the
-  // canvas is a small core plus opt-in features and FlowTree names none
-  // (`FlowingerCore`): it measured 18.2, 18.0 from `flowinger@0.1.0`, 18.9 from `flowinger@0.2.0`, and 19.0
-  // from `flowinger@0.3.0` (mouse events, `defaultViewport`, edge label styling, getInternalNode/useStoreApi,
-  // ARIA fields — FlowTree uses none of it). Tight on purpose, so the headroom is not
-  // quietly spent again — a feature FlowTree starts to use is imported by name and
-  // shows up here as exactly its own weight.
-  { name: 'flow', test: /^flow-.*\.js$/, kb: 20, note: 'flowinger + d3-hierarchy' },
-  { name: 'react', test: /^react-/, kb: 62, note: 'react + react-dom' },
-  // The entry chunk after M13 (plan.md §21.5). Every route is now `React.lazy`,
-  // so this is App + Router + the layout shell and little else — down from the
-  // ~44 kB it had crept to across `5c7ef5d` and the docs migration, neither of
-  // which moved the old 34 kB line. Tight on purpose: a jump here means a page
-  // (or its deps) stopped being lazy.
-  { name: 'entry', test: /^index-.*\.js$/, kb: 24, note: 'App + Router + layout shell — most commits touch this' },
-  // The trace UI: the Playground page, the StageDetail panel it shares with the
-  // stage explainers, and the engine-core plumbing (the tracer, the seed data,
-  // playback controls) two or more lazy routes now import — rolldown hoists a
-  // module into its own chunk the moment a second entry point needs it, which
-  // is why `seed-*.js` and `trace-*.js` exist as their own files rather than
-  // being duplicated into every page that touches the demo database.
-  // Raised 32 → 34 for the presenter view (`PresenterView.tsx`, plan.md §22.5) —
-  // a room-facing overlay over the same playback and panels, lazy with the
-  // Playground route.
-  // Raised 34 → 35 for the panel `?` "what am I looking at?" affordance (plan.md
-  // §19.2 P1): a disclosure in `StageDetail` plus a two-sentence `help` string
-  // and a concept-page `doc` link per stage in `stageMeta` — which also
-  // replaced the near-duplicate `STAGE_DESCRIPTIONS` on the `/stages` index, so
-  // `routes` shrank and the total barely moved.
-  // Raised 35 → 37 for the 60-second tour (`PlaygroundTour.tsx`, plan.md §19.2
-  // P1) — the last of §19.2's four onboarding items. Two render modes in the
-  // Playground chunk (same call as `PresenterView`): a stepped spotlight and,
-  // for `prefers-reduced-motion`, a static numbered overlay.
-  // `datasets`/`datasetCatalogue` (plan.md §22.7's preset dataset library) join
-  // this group — the Playground and the trace inspector share both.
-  // Raised 37 → 38 for the print worksheet (`TraceWorksheet.tsx`, §22.6) —
-  // bundled into the Playground chunk, rendered only while printing.
-  // `engine-*.js` joined this group once `/tools/planner` (§22.3) became a
-  // second importer of the planner + `buildPlan` + `toPlanDisplay`, so rolldown
-  // hoisted that shared engine code out of the Playground chunk into its own —
-  // a move between chunks, not growth, but it shows here.
-  // Raised 46 → 48 for JOIN (§22.2): a `Join` plan node and its nested-loop
-  // operator, `createJoinDemoDatabase`'s small `authors`/`posts` fixture, and
-  // the cost model's/parser's growth to carry a second table through —
-  // `engine-*.js` is the largest single mover, `/tools/planner` (this group)
-  // and `/tools/grammar` (`standalone-tools`) both import it.
-  // Raised 48 → 49 for hash join, JOIN's second algorithm (§22.2): a
-  // `hashJoin` operator in `exec/operators.ts`, the cost model's
-  // per-algorithm estimate, and `equalityKeyOf` in `exec/evaluate.ts` — all
-  // in `engine-*.js`, which this group still hoists.
-  // Raised 49 → 51 for the multi-table schema editor (§22.7): `SchemaEditor.tsx`
-  // + `customDatabase.ts` (localStorage load/save, name validation reusing the
-  // real tokenizer, the starter database) — the piece JOIN shipped without,
-  // so it can finally run from the Playground itself instead of staying
-  // `/tools/planner` + `/compare`-only.
-  // Raised 51 → 53 for the true vector SVG export (§20.3): `renderSvg.ts` (the
-  // shared d3-hierarchy-to-`<svg>` renderer) + `DownloadSvgButton.tsx`, plus
-  // `astTreeTones.ts`/`planTreeTones.ts`/`btreeTones.ts` — each tree's own tone
-  // map and `toFlow`, split out of its component file so Fast Refresh still
-  // works (a component file can only export components) and so `StageDetail`
-  // can reuse the exact same map the on-screen tree already renders with,
-  // rather than a second one that could drift.
-  { name: 'trace-ui', test: /^(PlaygroundPage|PlaygroundTour|TraceWorksheet|StageDetail|stageMeta|datasets|datasetCatalogue|types|seed|trace|runQuery|engine|SqlEditor|PlaybackControls|PresenterView|AstTree|PlanTree|BTreePanel|FlowTree|display|SchemaEditor|customDatabase|renderSvg|DownloadSvgButton|astTreeTones|planTreeTones|btreeTones)-/, kb: 66, note: 'Playground + the presenter view + the SQL editor + the shared panel/tree renderers (AstTree, BTreePanel, FlowTree, the two display transformers) plus the engine core (runQuery and the planner split into their own chunks once a third / second route imported them; SqlEditor split once /challenges became a second) plus the preset dataset library, the print worksheet, LIMIT, ORDER BY + the Sort operator, the full DELETE + INSERT + UPDATE write path, GROUP BY + aggregates, JOIN — all three algorithms plus predicate pushdown into its own children, the multi-table schema editor, true vector SVG export (plan.md §22.2, §22.7, §20.3), a second candidate index, and B+Tree leaf-chaining range scans (§23.1), and "Report a confusing step" (§25.4 A3) — `stepReport.ts` plus its link, with the ladder that keeps a prefilled issue URL under GitHub\'s limit. Raised 56 → 57 (55.5 → 56.3 kB); the per-route budgets (§25.4 H8) replace this group ceiling. Raised 57 → 60 for the SQL expression tier (§25.4 B1): `OR`/`NOT`/parentheses, `IS [NOT] NULL`, `IN`, `LIKE`, `<>` — a precedence-climbing parser, the three-valued evaluator and `likeMatches`, `exprToSql`\'s parenthesisation, and the cost model\'s selectivity for each — all in `engine-*.js` (56.3 → 57.7 kB for the predicates alone); B1\'s arithmetic and `OFFSET`, and B3/B4\'s index work, draw on the same 2 kB of headroom. Raised 60 → 64 for B1\'s arithmetic and `OFFSET` (59.3 kB) and B2\'s `HAVING` (60.7): an aggregate node inside expressions, a `Having` plan node the rewrite rules see through, per-group evaluation, and the narration for each — all in `engine-*.js`; `DISTINCT`, B3\'s non-unique/composite indexes and B4\'s index join are still to land in it. Raised 64 → 66 for B5\'s relational-algebra notation (`ra` on every plan node, `toRelationalAlgebra.ts`) and B6\'s `EXPLAIN [ANALYZE]` (`explain.ts`): 63.8 → 64.8 kB. The last bump of this kind — §25.4 H8\'s per-route budgets replace this group ceiling next' },
-  // The small per-route shells: landing hub, stage index, examples, docs shell,
-  // 404, tools index — plus the redesign's shared UI kit (primitives.ts,
-  // PageHeader, Hero) that two or more of them import.
-  { name: 'routes', test: /^(LandingPage|Hero|PageHeader|primitives|StagePage|StagesIndex|StagesLayout|ExamplesPage|DocsLayout|NotFoundPage|ToolsIndexPage)-/, kb: 12, note: 'lazy per-route chunks + shared UI kit, loaded on navigation' },
-  // The §21.3 feature routes: Gallery, Compare, Settings, Assignments, the
-  // buffer-pool sandbox, and what they share — the standalone buffer-trace
-  // driver (src/engine/bufferTrace.ts), the panel it renders through, and the
-  // thin `preferences`/`urlState` helpers. None of it loads unless one of
-  // these routes is visited.
-  // Raised 24 → 26 for the slotted-page inspector (`/tools/page`, plan.md §22.3)
-  // and its `slottedPage.ts` layout module — a fourth `/tools/*` sandbox, lazy.
-  // Raised 26 → 27 for assignment sets (`assignmentSet.ts` + the set panel in
-  // `/assignments/new`, §22.4).
-  // Raised 27 → 31 for the external-merge-sort sandbox (`/tools/sort`, §22.3):
-  // `SortToolPage.tsx` + its `externalSort.ts` plan builder — a fifth `/tools/*`
-  // sandbox, lazy, plus the `t=`-aware `urlState` from v13's dataset library
-  // which also lands in this group.
-  // Raised 36 → 37 for the grammar sandbox (`/tools/grammar`, §22.3):
-  // `GrammarToolPage.tsx` + `grammar.ts`'s pure rule data — a seventh
-  // `/tools/*` sandbox, lazy, and the smallest of the set.
-  // Raised 37 → 38 for `/compare`'s third mode, hash aggregate vs. sort
-  // aggregate (§22.2): `ComparePage.tsx` grows an `AggregateCompare` panel,
-  // the same shape as `IndexCompare`'s scorecards.
-  // Raised 38 → 39 for `/compare`'s fourth mode, nested-loop join vs. hash
-  // join (§22.2): a `JoinCompare` panel, the same shape as the other three,
-  // plus its own small `authors`/`posts` demo database.
-  // Raised 39 → 43 for `/tools/hash-join` (§22.3): `HashJoinToolPage.tsx` +
-  // its own driver, `hashJoin.ts` (partitioning, per-level spill, and the
-  // bucket-collision build/probe model) — an eighth `/tools/*` sandbox,
-  // lazy, and the first to need its own recursive tree renderer.
-  { name: 'standalone-tools', test: /^(GalleryPage|ComparePage|SettingsPage|AssignmentsNewPage|TracePage|BufferPoolToolPage|ParserToolPage|BTreeToolPage|PageToolPage|SortToolPage|PlannerToolPage|LocksToolPage|lockSimulation|GrammarToolPage|grammar|HashJoinToolPage|hashJoin|BufferPoolPanel|bufferTrace|slottedPage|externalSort|assignmentSet|preferences|urlState)-/, kb: 44, note: 'Gallery, Tools, Compare, Settings, Assignments (+ assignment sets), the trace inspector, and the buffer-pool / parser / B+Tree / slotted-page / external-merge-sort / planner / locks / grammar / hash-join sandboxes (plan.md §21.3, §20.4, §22.3, §22.4). Raised 43 → 44 for B2 (§25.4): `/compare`\'s aggregate mode gaining `SELECT DISTINCT` presets and its Hash/Sort distinct labels, plus `/tools/grammar`\'s longer rule table (predicates, arithmetic, HAVING, DISTINCT, OFFSET)' },
-  // The `/learn` guided track (plan.md §21.3): the index, one lesson page, the
-  // localStorage progress helper, and `lessons.tsx` — the lesson prose plus the
-  // link-builder that computes each step from a real engine run. Lazy; loads
-  // only when someone visits `/learn`.
-  { name: 'learn', test: /^(LearnPage|LessonPage|ProgressPage|learnProgress|progress|lessons)-/, kb: 10, note: 'the /learn track (index, lesson page, nine lessons) plus the /progress dashboard, which shares the lesson list' },
-  // The `/challenges` puzzles (plan.md §22.4): the index, one challenge page,
-  // the pure check list, and the localStorage solved-set. Lazy.
-  { name: 'challenges', test: /^(ChallengesPage|ChallengePage|challenges|challengeProgress)-/, kb: 8, note: '/challenges — index, challenge page, the check list, and solved-set storage (plan.md §22.4)' },
-  // The §9 study kit's runner, `/study` (plan.md §25.4 A2): the page plus the
-  // pure protocol underneath it (pack/result codecs, the session state machine).
-  // Its own row rather than a share of a group — §25.5 rule 2: a new route is
-  // its own lazy chunk with its own ceiling, never a slice of a group that is
-  // already at its limit. It carries no study content: the questions and the
-  // control-arm reading arrive in each participant's link (`src/study/pack.ts`).
-  // plan.md §25.4 A6: the opt-in INP recorder. Its own lazy chunk, fetched by
-  // `main.tsx` only for someone who ticked the study's optional box, so nobody
-  // else downloads a byte of it (the study page imports its storage helpers too,
-  // which is why it is a shared chunk and not folded into `StudyPage-*`).
-  { name: 'inp', test: /^inp-/, kb: 2, note: 'opt-in INP recorder for the §9 study (plan.md §25.4 A6) — lazy, fetched only after a participant opts in' },
-  { name: 'study', test: /^StudyPage-/, kb: 7, note: '/study — the §9 study runner (unlisted); the instrument travels in the link, not the bundle (plan.md §25.4 A2)' },
-  // `html-to-image`, behind the panel "Download PNG" button (§20.3). `import()`ed
-  // on the first export, never at route load — the one runtime dependency the
-  // app adds beyond its framework and editor.
-  { name: 'html-to-image', test: /^html-to-image-/, kb: 8, note: 'panel PNG export, lazy-loaded on first use (plan.md §20.3)' },
-  // The nine docs pages, folded into one async chunk by vite.config.ts. Loads
-  // on the first `/docs` hit, never at first paint.
-  {
-    name: 'docs',
-    test: /^(docs|btree|buffer-pool)-.*\.js$/,
-    kb: 33,
-    note: 'integrated MDX docs (plan.md §17.1), lazy — the concepts/btree and concepts/buffer-pool pages are their own chunks, not folded into the shared docs-*.js, since they embed BTreePanel/BufferPoolPanel/FlowTree (§23.1\'s interactive-docs item) and forcing that into the group every other docs page shares would have made a simple FAQ visit pay for it too. Raised 20 → 27 for the new Architecture page and rewriting the Supported SQL / Engine limits reference pages, which had drifted to describing v0-era scope (no JOIN, no writes, one index) years after all three shipped. Raised 27 → 30 for the "How we know the answers are right" reference page (plan.md §25.4 A1) — prose and the divergence-ledger table, documentation weight and no code; v2\'s own SQL / limits page rewrites (B1–B4) draw on the same headroom. Raised 30 → 33 for B1\'s Supported SQL page — the predicate truth tables and the arithmetic rules — plus the answers page\'s longer ledger table; still prose, no code',
-  },
-  // Raised 14 → 17: @tailwindcss/typography (the docs' `.prose` styling,
-  // themed onto the app's own tokens rather than its default palette — see
-  // index.css) is a real, one-time addition to the generated stylesheet.
-  // Raised 17 → 20: the premium-minimal redesign adds an elevation/shadow
-  // scale, hero gradient + grain tokens, three keyframes, themed scrollbars,
-  // the `.ql-sheen` top-highlight utility and an expanded `.prose` block — all
-  // one-time additions to the generated stylesheet, none of it JS.
-  { name: 'css', test: /\.css$/, kb: 20, note: "Tailwind's output, the typography plugin, and the redesign's elevation/motion layer" },
-  { name: 'runtime', test: /^rolldown-runtime-/, kb: 2, note: 'module loader emitted by rolldown' },
+export interface RouteBudget {
+  /** What a reader would recognise: `/compare`, `/tools/btree`. */
+  route: string;
+  /** Manifest keys (source paths, or `_chunk-…` names) whose closures this route loads *besides the entry's*. */
+  roots: string[];
+  /** Gzip ceiling for the whole download, in kB. */
+  kb: number;
+  note: string;
+}
+
+/** The entry chunk's own ceiling: the app shell every route pays before anything else (§25.4 H8: keep it ≤ 24 kB). */
+export const ENTRY_KB = 24;
+export const ENTRY_KEY = 'index.html';
+
+export const gzipKb = (bytes: Buffer): number => gzipSync(bytes, { level: 9 }).length / 1024;
+
+/**
+ * A root is a source path (`src/pages/X.tsx`, exact) or the name of a shared chunk the bundler made
+ * (`_docs`, matching `_docs-<hash>.js`) — whose hash changes with every build, so it cannot be spelled out.
+ */
+export function resolveKey(manifest: Manifest, root: string): string {
+  if (manifest[root]) return root;
+  const shared = Object.keys(manifest).filter((k) => k.startsWith(`${root}-`) && k.endsWith('.js'));
+  if (shared.length === 1) return shared[0];
+  throw new Error(
+    shared.length === 0
+      ? `the manifest has no chunk "${root}" — a route's roots must name real chunks`
+      : `"${root}" matches several chunks (${shared.join(', ')}) — name one exactly`,
+  );
+}
+
+/** Every file `key` needs — its own chunk, its stylesheets, and everything it statically imports, transitively. */
+export function closure(manifest: Manifest, keys: readonly string[]): Set<string> {
+  const files = new Set<string>();
+  const seen = new Set<string>();
+  const visit = (key: string): void => {
+    if (seen.has(key)) return;
+    seen.add(key);
+    const chunk = manifest[key];
+    if (!chunk) throw new Error(`the manifest has no chunk "${key}"`);
+    files.add(chunk.file);
+    for (const css of chunk.css ?? []) files.add(css);
+    for (const dep of chunk.imports ?? []) visit(dep);
+  };
+  keys.forEach((k) => { visit(resolveKey(manifest, k)); });
+  return files;
+}
+
+export interface RouteResult {
+  route: string;
+  kb: number;
+  budget: number;
+  files: string[];
+  over: boolean;
+}
+
+/** Prices every route with `size(file)` (gzip kB), the entry's closure included in each. */
+export function priceRoutes(
+  manifest: Manifest,
+  routes: readonly RouteBudget[],
+  size: (file: string) => number,
+): RouteResult[] {
+  const entry = closure(manifest, [ENTRY_KEY]);
+  return routes.map((r) => {
+    const files = [...new Set([...entry, ...closure(manifest, r.roots)])];
+    const kb = files.reduce((sum, f) => sum + size(f), 0);
+    return { route: r.route, kb, budget: r.kb, files, over: kb > r.kb };
+  });
+}
+
+/** Files in `dist/assets` that no route and no extra reaches — a chunk with no budget is a gap in this file. */
+export function unbudgeted(all: readonly string[], results: readonly RouteResult[], extras: readonly string[]): string[] {
+  const covered = new Set([...results.flatMap((r) => r.files), ...extras]);
+  return all.filter((f) => !covered.has(f));
+}
+
+/* -------------------------------------------------------------------------- */
+/* The budgets                                                                 */
+/* -------------------------------------------------------------------------- */
+
+const P = (name: string): string => `src/pages/${name}.tsx`;
+const T = (name: string): string => `src/pages/tools/${name}.tsx`;
+
+export const ROUTES: readonly RouteBudget[] = [
+  { route: '/', roots: [P('LandingPage')], kb: 150, note: 'the landing page' },
+  { route: '/playground', roots: [P('PlaygroundPage')], kb: 299, note: 'the Playground: the editor, every stage panel, the engine — the heaviest route, and the one most people land on' },
+  { route: '/stages', roots: ['src/ui/StagesLayout.tsx', P('StagesIndex')], kb: 150, note: 'the stage explainers, index' },
+  { route: '/stages/:id', roots: ['src/ui/StagesLayout.tsx', P('StagePage')], kb: 167, note: 'one stage explainer' },
+  { route: '/learn', roots: [P('LearnPage')], kb: 155, note: 'the lesson track' },
+  { route: '/learn/:id', roots: [P('LessonPage')], kb: 155, note: 'one lesson' },
+  { route: '/examples', roots: [P('ExamplesPage')], kb: 115, note: 'preset queries' },
+  { route: '/gallery', roots: [P('GalleryPage')], kb: 151, note: 'named moments' },
+  { route: '/compare', roots: [P('ComparePage')], kb: 157, note: 'index vs scan, policy vs policy, hash vs sort, join algorithms' },
+  { route: '/trace', roots: [P('TracePage')], kb: 153, note: 'the trace inspector' },
+  { route: '/progress', roots: [P('ProgressPage')], kb: 157, note: 'the progress dashboard' },
+  { route: '/challenges', roots: [P('ChallengesPage')], kb: 152, note: 'challenge index' },
+  { route: '/challenges/:id', roots: [P('ChallengePage')], kb: 272, note: 'one challenge' },
+  { route: '/settings', roots: [P('SettingsPage')], kb: 116, note: 'preferences' },
+  { route: '/study', roots: [P('StudyPage')], kb: 122, note: 'the §9 study runner (unlisted); the instrument travels in the link, not the bundle (§25.4 A2)' },
+  { route: '/assignments/new', roots: [P('AssignmentsNewPage')], kb: 152, note: 'assignment-link builder' },
+  { route: '/tools', roots: [P('ToolsIndexPage')], kb: 116, note: 'the tools index' },
+  { route: '/tools/buffer-pool', roots: [T('BufferPoolToolPage')], kb: 154, note: 'buffer-pool sandbox' },
+  { route: '/tools/parser', roots: [T('ParserToolPage')], kb: 153, note: 'tokenizer + parser sandbox' },
+  { route: '/tools/btree', roots: [T('BTreeToolPage')], kb: 154, note: 'B+Tree sandbox' },
+  { route: '/tools/page', roots: [T('PageToolPage')], kb: 151, note: 'slotted-page inspector' },
+  { route: '/tools/sort', roots: [T('SortToolPage')], kb: 118, note: 'external merge sort' },
+  { route: '/tools/planner', roots: [T('PlannerToolPage')], kb: 154, note: 'planner sandbox' },
+  { route: '/tools/locks', roots: [T('LocksToolPage')], kb: 117, note: 'lock simulator' },
+  { route: '/tools/grammar', roots: [T('GrammarToolPage')], kb: 116, note: 'the SQL grammar diagram' },
+  { route: '/tools/hash-join', roots: [T('HashJoinToolPage')], kb: 118, note: 'Grace hash join' },
+  { route: '/docs', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 141, note: 'the docs shell and every prose page (one shared chunk)' },
+  { route: '/docs/concepts/btree', roots: ['src/ui/DocsLayout.tsx', 'src/pages/DocsContent/concepts/btree.mdx'], kb: 154, note: 'a concept page with a live B+Tree widget' },
+  { route: '/docs/concepts/buffer-pool', roots: ['src/ui/DocsLayout.tsx', 'src/pages/DocsContent/concepts/buffer-pool.mdx'], kb: 156, note: 'a concept page with a live buffer-pool widget' },
+  { route: '/* (404)', roots: [P('NotFoundPage')], kb: 114, note: 'the not-found page' },
 ];
 
 /**
- * Everything together, so a chunk moving between groups cannot hide growth.
- * Raised 315 → 335 for the §21.3 feature routes (Gallery, Tools, Compare,
- * Settings, Assignments).
- * Raised 335 → 342 for the §20.4 standalone tools — the parser and B+Tree
- * sandboxes, plus the shared panel renderers (FlowTree, BTreePanel, the two
- * display transformers) that split into their own chunks once a second route
- * imported them.
- * Raised 342 → 348 for the `/learn` guided track (two routes plus the lesson
- * content).
- * Raised 348 → 354 for `html-to-image` behind the panel PNG export (§20.3) —
- * `import()`ed on first use, so still never first-paint.
- * Raised 354 → 357 for five more `/learn` lessons (§22.4 — B+Tree split, edit
- * the seed data, predict, share a moment, when something goes wrong): pure
- * teaching prose in the lazy `learn` chunk, never first-paint, plus small
- * additions to `stepAnnouncement`/`traceFile` from the same v13 batch.
- * Raised 357 → 360 for `/tools/page`, the slotted-page inspector (§22.3): its
- * own lazy chunk plus `runQuery-*.js`, which rolldown hoisted out of `trace-ui`
- * once a third route imported the engine core — a move between groups, not
- * growth, but it shows in the total.
- * Raised 360 → 362 for the presenter view (`PresenterView.tsx`, §22.5) — the
- * room-facing overlay, lazy with the Playground route.
- * Raised 362 → 363 for the `/progress` dashboard (§22.4) and its `progress.ts`
- * localStorage helper — a lazy route plus a few lines in the Playground.
- * Raised 363 → 364 for CSV paste-import in the seed editor (`parseCsv.ts`, §22.7)
- * — a small reader plus the panel in `DataEditor`, both in the Playground chunk.
- * Raised 364 → 368 for `/challenges` (§22.4): the two pages, the check list and
- * the solved-set, plus `SqlEditor-*.js` splitting out of `trace-ui` once the
- * challenge page became its second importer — a move, mostly, but visible here.
- * Raised 368 → 369 for the first-visit hint (§19.2 P1): `FirstVisitHint.tsx` +
- * `firstVisit.ts` in the entry chunk, since `Layout` mounts the one line under
- * the header for a cold visitor to `/playground`.
- * Raised 369 → 371 for the 60-second tour (`PlaygroundTour.tsx`, §19.2 P1) — a
- * spotlight-over-the-real-UI mode and a static numbered-overlay fallback for
- * reduced motion, in the Playground chunk; closes out §19.2's P1 list.
- * Raised 371 → 373 for the preset dataset library (§22.7): `datasets.ts` builds
- * `orders` and `logins` alongside `users`, `datasetCatalogue.ts` holds their
- * copy + preset queries, and the Playground / trace inspector / URL (`t=`) /
- * trace file all learned to carry a dataset id.
- * Raised 373 → 377 for `/tools/sort` (§22.3) — the external-merge-sort sandbox
- * (`SortToolPage.tsx` + `externalSort.ts`), a fifth lazy `/tools/*` route.
- * Raised 377 → 379 for `/tools/planner` (§22.3) — the optimizer sandbox
- * (`PlannerToolPage.tsx`); most of the delta is rolldown hoisting the shared
- * planner code into `engine-*.js` rather than new bytes.
- * Raised 379 → 381 for the cost model (`planner/cost.ts`, §22.2, §7.3) — per-node
- * row/page estimates in the `engine-*.js` chunk, the `~N rows` line in `FlowTree`,
- * and the estimate-vs-actual reconciliation in the plan/optimize/result narration.
- * Raised 381 → 383 for `LIMIT` and `ORDER BY` + a real `Sort` operator (§22.2):
- * a `Limit`/`Sort` plan node and executor operator each, `exec/sort.ts` (the
- * external-merge-sort driver), the buffer pool's new `write` path for spill
- * pages, and the matching additions to `PlanTree`/`AstTree`/`BufferPoolPanel`.
- * Raised 383 → 385 for the write path's first statement, `DELETE` (§22.2):
- * a second parser entry point (`parseStatement`, SELECT or DELETE) sharing
- * every grammar rule with `parse`, `exec/delete.ts` (finds matches, then runs
- * the real `deleteKey` B+Tree algorithm and marks heap pages dirty), and the
- * buffer pool's `markDirty` — a dirty page's eviction now costs a write, not
- * just a discard, completing the read/write pair `write()` started.
- * Raised 385 → 387 for the write path's second statement, `INSERT` (§22.2):
- * `parseStatement` grows a third grammar (an optional column list, a VALUES
- * list of literals, sharing the parenthesised-list plumbing with the column
- * list), `exec/insert.ts` (writes the new row onto the last heap page or a
- * fresh one, then runs the real `insert` B+Tree algorithm — real leaf/internal
- * splits, narrated the same way `/tools/btree` narrates its own), and the
- * matching additions to `AstTree`/`display.ts`. INSERT has no predicate to
- * plan or optimize, so it is also the first statement to skip straight from
- * parse to execute — a real, honest gap in the pipeline tracker, not a bug.
- * Raised 387 → 388 for the write path's third and last statement, `UPDATE`
- * (§22.2), completing it: a fourth grammar (`SET col = value, ...`, reusing
- * INSERT's literal-value parsing), `exec/update.ts` (finds matches exactly
- * the way `DELETE` does, applies the assignments, and — if the indexed
- * column changed — drops the old key and adds the new one through the real
- * `deleteKey`/`insert` algorithms; the delete-then-reinsert pair those two
- * statements already built, reused rather than reimplemented), and
- * `planner/emitUpdate.ts` reusing the same optimizer-wrapping trick
- * `DELETE`'s plan does. The full `INSERT`/`UPDATE`/`DELETE` write path is
- * now real, in the pipeline, not just `/tools/btree`.
- * Raised 388 → 390 for aggregates and `GROUP BY` (§22.2), the largest single
- * addition to the SELECT grammar since v0: a `SelectItem` union (a plain
- * column, or `COUNT`/`SUM`/`AVG`/`MIN`/`MAX` over one), a `HashAggregate`
- * plan node between `Filter` and `Project`, and its operator — the second
- * one here that cannot stream, for the same reason `Sort` cannot, building
- * one hash-table bucket per distinct `GROUP BY` combination. `constant-folding`,
- * `predicate-pushdown` and `index-selection` all learned to see past a
- * `HashAggregate` the same way they already saw past `Sort`/`Limit` — WHERE
- * always applies before aggregation, so pushing a predicate underneath one is
- * never a shortcut. One strategy only; a sort aggregate and the `/compare`
- * mode plan.md names as the point of the pair are a later milestone.
- * Index-only scan (a fourth optimizer rule) fit within the existing budget —
- * no bump needed.
- * Raised 390 → 393 for `/tools/locks` (§22.2 "enforced concurrency" / §22.3):
- * `src/ui/lockSimulation.ts`, a pure two-transaction lock simulator — real
- * blocking, a wait-for graph, deadlock detection and victim selection — with
- * its own driver, the same way `/tools/sort` has one; the SQL pipeline itself
- * stays single-query on purpose, so nothing there needed to change.
- * Raised 393 → 394 for `/tools/grammar` (§22.3): `grammar.ts`'s rule data plus
- * `GrammarToolPage.tsx`'s chip-diagram renderer — the smallest `/tools/*`
- * sandbox yet, since it is pure display over data the parser already defines.
- * Raised 394 → 396 for the sort aggregate and `/compare`'s third mode
- * (§22.2): `SortAggregate`, a second aggregate strategy in `engine-*.js`
- * (a composite-key generalisation of `externalMergeSort`, shared with `Sort`,
- * plus a new streaming collapse pass over the now-sorted rows), and
- * `ComparePage.tsx`'s `AggregateCompare` panel forcing each strategy in turn
- * via `EngineOptions.aggregateStrategy` and scoring the two side by side.
- * Raised 396 → 399 for JOIN (§22.2) — v1's first: a qualified `table.column`
- * reference throughout the parser (`Expr`/`SelectItem` gain an optional
- * `table`), a `JoinClause` AST node and its parse-time validity checks, a
- * `Join` plan node and nested-loop operator (the executor's first two-table
- * `ExecContext`, `joinRight`, sharing one real buffer pool with the FROM
- * table's own heap), and the cost model's join estimate. `/tools/planner`
- * gained a small fixed `authors`/`posts` pair (`createJoinDemoDatabase`) to
- * try it against, without touching `users`' own index toggle.
- * `trace-ui` and `standalone-tools` both bumped for hash join, JOIN's second
- * algorithm, and `/compare`'s fourth mode naming it against nested-loop — the
- * total itself still fits under 399, so it stays put this time.
- * Raised 399 → 403 for `/tools/hash-join` (§22.3): a new lazy route plus its
- * own driver, `hashJoin.ts` — an eighth `/tools/*` sandbox.
- * Raised 403 → 406 for the multi-table schema editor (§22.7): `SchemaEditor.tsx`
- * + `customDatabase.ts` in the Playground chunk, and a small `DataEditor.tsx`
- * change (an optional `onReset`) it reuses for per-table row editing.
- * Raised 406 → 409 for true vector SVG export (§20.3): `renderSvg.ts` +
- * `DownloadSvgButton.tsx`, plus each tree's tone map/`toFlow` moving into its
- * own file so `StageDetail` can reuse them without a second colour table.
- * `trace-ui`'s own ceiling raised 53 → 54 kB for sort-merge join, JOIN's
- * third algorithm, and `join-predicate-pushdown`, a new optimizer rule
- * pushing a WHERE conjunct into whichever side of a Join it names (both in
- * `engine-*.js`) — the total itself still fit under 409, so it stayed put.
- * Raised 409 → 410 for the second-candidate-index item (§22.2): `Table`'s
- * `indexedColumn` widened to `indexedColumns`, `buildIndexes` chaining
- * several single-column trees over one heap, and `index-selection` choosing
- * the more selective candidate by `ndistinct` when more than one matches —
- * all in `engine-*.js` — plus `SchemaEditor.tsx`'s single-index `<select>`
- * becoming a real multi-select. The total landed at 409.0, exactly the old
- * ceiling with no slack for the next commit that touches this chunk; one kB
- * of headroom is cheaper than re-deriving this measurement next time.
- * `trace-ui`'s own ceiling raised 54 → 56 kB, total 410 → 412, for B+Tree
- * leaf-chaining range scans (§23.1): `<=`/`>=`/`BETWEEN` in the grammar, a
- * new `IndexRangeScan` plan node and executor operator, `range-index-selection`
- * (a new optimizer rule) and `boundedRangeSelectivity` (a new cost-model
- * function) — all in `engine-*.js` — plus `FlowTree.tsx`'s sibling-edge
- * highlighting so `BTreePanel` shows the horizontal leaf walk, not just the
- * vertical descent. Landed at 411.3/55.6; two kB of headroom this time
- * rather than the exact edge, since the last "no slack" bump turned into
- * friction almost immediately.
- * Raised 412 → 416 for the interactive-docs item (§23.1): live
- * `BTreeMiniDemo`/`BufferPoolMiniDemo` widgets embedded in the
- * concepts/btree and concepts/buffer-pool pages. Naively adding them to the
- * shared `docs` group (every other docs page's own chunk) took `docs` from
- * 15.5 to 49.8 kB — those two pages' embedded panels pulled in
- * `BTreePanel`/`BufferPoolPanel`/`FlowTree` and the engine's trace code,
- * and being folded into the *one* combined docs chunk meant a bare FAQ visit
- * paid for a B+Tree panel it never uses. Fixed by excluding those two pages
- * from `vite.config.ts`'s `docs` codeSplitting group, so they fall to
- * rolldown's own default chunking instead and share the *existing*
- * `trace-ui`-tracked chunk Playground already needs, rather than a forced
- * copy inside `docs`. `docs`'s own regex here widened to also catch the two
- * resulting small standalone chunks (`btree-*.js`, `buffer-pool-*.js`) and
- * its ceiling raised 16 → 20 kB for their real combined weight (measured
- * 18.7 kB) — the true cost of the feature was ~7 kB of genuinely new glue
- * code, not the 34 kB the naive grouping made it look like.
- * Raised 416 → 418 for the four new §23.1 challenges (Sort Spill, Hash Beats
- * Loop, Dirty Eviction, Range Leap) — `challenges` 4.6 → 5.8 kB for the new
- * `database`/`engineOptions` override plumbing and three more stat fields.
- * Landed at 416.0/416, the exact edge with nothing left for the next commit
- * that touches this chunk.
- * Raised 418 → 424 for the README restructure (§17.4/§18.4): a new
- * Architecture docs page, and the Supported SQL / Engine limits reference
- * pages rewritten to describe the current engine instead of v0. `docs`
- * 18.7 → 24.8 kB. Real documentation weight, not code.
+ * Lazy chunks loaded *on top of* a route only after an explicit opt-in, so they belong to no route's budget
+ * but must still stay small: [manifest key, kB ceiling, why].
  */
-const TOTAL_KB = 424;
+export const OPT_IN: readonly { key: string; kb: number; note: string }[] = [
+  { key: '_html-to-image', kb: 8, note: 'panel PNG export (§20.3) — fetched on the first click of Download PNG' },
+  { key: 'src/perf/inp.ts', kb: 2, note: 'the opt-in INP recorder for the §9 study (§25.4 A6) — fetched only after a participant opts in' },
+];
 
-const gzipKb = (bytes: Buffer): number => gzipSync(bytes, { level: 9 }).length / 1024;
+/* -------------------------------------------------------------------------- */
+/* Main                                                                        */
+/* -------------------------------------------------------------------------- */
 
-let total = 0;
-const failures: string[] = [];
-const unbudgeted: string[] = [];
-
-// Summed per group, not per file: two stylesheets that each fit the CSS budget
-// but together do not is exactly the drift this is meant to catch.
-const measured = new Map<string, number>(BUDGETS.map((b) => [b.name, 0]));
-
-for (const file of readdirSync(DIST).sort()) {
-  const size = gzipKb(readFileSync(join(DIST, file)));
-  total += size;
-
-  const budget = BUDGETS.find((b) => b.test.test(file));
-  if (!budget) {
-    // A new chunk with no budget is not a pass — it is a gap in this file.
-    if (size > 1) unbudgeted.push(`${file} (${size.toFixed(1)} kB)`);
-    continue;
+function main(): number {
+  const DIST = 'dist';
+  const manifestPath = join(DIST, '.vite', 'manifest.json');
+  if (!existsSync(manifestPath)) {
+    console.error(`No ${manifestPath} — run \`pnpm build\` first (vite.config.ts sets build.manifest).`);
+    return 1;
   }
-  measured.set(budget.name, (measured.get(budget.name) ?? 0) + size);
-}
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8')) as Manifest;
 
-for (const budget of BUDGETS) {
-  const size = measured.get(budget.name) ?? 0;
-  const over = size > budget.kb;
-  console.log(
-    `${over ? '✗' : '✓'} ${budget.name.padEnd(11)} ${size.toFixed(1).padStart(7)} kB / ${String(budget.kb).padStart(4)} kB  ${budget.note}`,
-  );
-  if (over) {
-    failures.push(
-      `${budget.name} is ${size.toFixed(1)} kB gzip, over its ${String(budget.kb)} kB budget`,
-    );
+  const sizes = new Map<string, number>();
+  const size = (file: string): number => {
+    let kb = sizes.get(file);
+    if (kb === undefined) {
+      kb = gzipKb(readFileSync(join(DIST, file)));
+      sizes.set(file, kb);
+    }
+    return kb;
+  };
+
+  const results = priceRoutes(manifest, ROUTES, size);
+  const failures: string[] = [];
+
+  const entryKb = [...closure(manifest, [ENTRY_KEY])].filter((f) => f.endsWith('.js') && f === manifest[ENTRY_KEY]?.file).reduce((s, f) => s + size(f), 0);
+  const entryOver = entryKb > ENTRY_KB;
+  console.log(`${entryOver ? '✗' : '✓'} ${'entry chunk'.padEnd(20)} ${entryKb.toFixed(1).padStart(6)} kB / ${String(ENTRY_KB).padStart(3)} kB  the app shell every route pays first (App + Router + layout)`);
+  if (entryOver) failures.push(`the entry chunk is ${entryKb.toFixed(1)} kB gzip, over its ${String(ENTRY_KB)} kB budget`);
+
+  const width = Math.max(...ROUTES.map((r) => r.route.length));
+  for (const [i, r] of results.entries()) {
+    console.log(`${r.over ? '✗' : '✓'} ${r.route.padEnd(width)} ${r.kb.toFixed(1).padStart(6)} kB / ${String(r.budget).padStart(3)} kB  ${ROUTES[i].note}`);
+    if (r.over) failures.push(`${r.route} downloads ${r.kb.toFixed(1)} kB gzip, over its ${String(r.budget)} kB budget`);
   }
-}
-console.log(
-  `${total > TOTAL_KB ? '✗' : '✓'} ${'total'.padEnd(11)} ${total.toFixed(1).padStart(7)} kB / ${String(TOTAL_KB).padStart(4)} kB`,
-);
 
-if (total > TOTAL_KB) {
-  failures.push(`total is ${total.toFixed(1)} kB gzip, over the ${String(TOTAL_KB)} kB budget`);
-}
-if (unbudgeted.length > 0) {
-  failures.push(`unbudgeted chunk(s): ${unbudgeted.join(', ')} — add them to scripts/bundle-budget.ts`);
+  const extras: string[] = [];
+  for (const o of OPT_IN) {
+    const files = [...closure(manifest, [o.key])];
+    extras.push(...files);
+    // Only what the opt-in adds beyond the entry — its shared imports are already paid for by the route.
+    const own = files.filter((f) => !closure(manifest, [ENTRY_KEY]).has(f));
+    const kb = own.reduce((s, f) => s + size(f), 0);
+    const over = kb > o.kb;
+    console.log(`${over ? '✗' : '✓'} ${`opt-in: ${o.key.split('/').pop() ?? o.key}`.padEnd(width)} ${kb.toFixed(1).padStart(6)} kB / ${String(o.kb).padStart(3)} kB  ${o.note}`);
+    if (over) failures.push(`the opt-in chunk ${o.key} is ${kb.toFixed(1)} kB gzip, over its ${String(o.kb)} kB budget`);
+  }
+
+  const all = readdirSync(join(DIST, 'assets')).filter((f) => /\.(js|css)$/.test(f)).map((f) => `assets/${f}`);
+  const total = all.reduce((s, f) => s + size(f), 0);
+  console.log(`  ${'all chunks'.padEnd(width)} ${total.toFixed(1).padStart(6)} kB            informational — no visitor downloads all of it, so it is no longer a gate`);
+
+  const orphans = unbudgeted(all, results, extras).filter((f) => size(f) > 0.5);
+  if (orphans.length > 0) {
+    failures.push(`chunk(s) no route reaches: ${orphans.join(', ')} — add a route (or an opt-in) for them in scripts/bundle-budget.ts`);
+  }
+
+  if (failures.length > 0) {
+    console.error(`\nBundle budget exceeded:\n${failures.map((f) => `  - ${f}`).join('\n')}`);
+    console.error('\nEither shrink it or raise the budget deliberately, in a commit that says why.');
+    return 1;
+  }
+  console.log('\nWithin budget.');
+  return 0;
 }
 
-if (failures.length > 0) {
-  console.error(`\nBundle budget exceeded:\n${failures.map((f) => `  - ${f}`).join('\n')}`);
-  console.error('\nEither shrink it or raise the budget deliberately, in a commit that says why.');
-  process.exit(1);
-}
-
-console.log('\nWithin budget.');
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) process.exit(main());

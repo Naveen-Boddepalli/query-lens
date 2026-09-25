@@ -23,7 +23,7 @@ pnpm typecheck    # TypeScript
 pnpm lint         # ESLint + jsx-a11y
 pnpm test         # unit tests + the seeded SQLite oracle (vitest)
 pnpm build        # production build
-pnpm budget       # gzip bundle budget
+pnpm budget       # gzip bundle budget, per route (what a visitor to each route downloads)
 pnpm test:e2e     # Playwright (needs: pnpm exec playwright install chromium)
 ```
 
@@ -82,6 +82,14 @@ See [plan.md](plan.md) for the full design and [RESEARCH.md](RESEARCH.md) for th
 - Events are deltas, not snapshots — the UI folds them to derive state
 - Playback is an index into an array
 - The engine is worker-ready but runs on the main thread (see plan.md §5)
+
+## Bundle budgets
+
+`pnpm budget` prices **each route by what a visitor to it downloads** — the entry chunk, that route's own lazy
+chunk and every static dependency of either, read from Vite's manifest — against a ceiling in
+`scripts/bundle-budget.ts`. There is no shared group to squeeze into: a change that grows the Playground can only
+raise the Playground's row. **A new page or tool needs its own row** (the script fails on a chunk no route
+reaches), and raising a ceiling is a deliberate act with a comment saying why. Fonts and images are not counted.
 
 ## Releases and deploy config
 

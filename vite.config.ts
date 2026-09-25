@@ -95,6 +95,9 @@ export default defineConfig({
     },
   ],
   build: {
+    // `dist/.vite/manifest.json`: which chunks each lazy route pulls in. `scripts/bundle-budget.ts` walks it to
+    // price a route by what a visitor to that route actually downloads (plan.md §25.4 H8).
+    manifest: true,
     /**
      * plan.md §14.2 asked for the panels to be lazy-loaded behind Run, on the
      * grounds that React Flow and d3-hierarchy "render nothing until Run".
