@@ -17,7 +17,7 @@ import { Contents, DocMeta } from '../../ui/DocsComponents.tsx';
   { href: '#can-i-use-this-in-my-course', label: 'Can I use this in my course?' },
   { href: '#how-accurate-is-the-buffer-pool--btree--locking-model', label: 'How accurate is the model?' },
   { href: '#can-i-embed-querylens-in-my-own-page', label: 'Can I embed it?' },
-  { href: '#why-no-joins-subqueries-or-group-by', label: 'Why no joins?' },
+  { href: '#what-sql-is-missing', label: 'What SQL is missing?' },
 ]} />
 
 ## Is this a real database?
@@ -72,23 +72,33 @@ is how this documentation itself links out to worked examples.
 
 ## Can I get the diagrams out?
 
-Three ways, from the panel header on any stage. **Copy as Mermaid** puts the AST or the plan on your
+Several ways, from the panel header on any stage. **Copy as Mermaid** puts the AST or the plan on your
 clipboard as a `flowchart` in a fenced code block, ready to paste into a pull request or a doc —
 not the B+Tree, which Mermaid lays out badly. **Copy as text** is the plain-monospace twin: a
 `tree`-style indented list in a bare code fence, for a review comment or an email — and it *does*
 take the B+Tree, which a fixed-width tree renders fine. **Download PNG** saves any panel as an image
 with the app's real typeface and colours baked in; it renders correctly in Chrome and Firefox, and
-may fall back to plain sRGB in Safari, whose SVG-to-canvas path has known colour bugs. All three run
-entirely in your browser.
+may fall back to plain sRGB in Safari, whose SVG-to-canvas path has known colour bugs.
+
+On the plan and optimizer panels there is a fourth: **Show as → Relational algebra** rewrites every node in
+the notation a database course opens with — `σ` selection, `π` projection, `⋈` join, `γ` grouping, `τ` order,
+`δ` distinct, `λ` limit — with the physical operator that runs it kept underneath, so an `IndexScan` and a
+filtered `SeqScan` both read as `σ_{id = 5}(users)`: *what* is computed beside *how*. **Copy as relational
+algebra** and **Copy as LaTeX** put the whole plan on your clipboard as an expression for a homework answer or
+a slide, e.g. `π_{name}(σ_{age > 30}(users))`. Everything here runs entirely in your browser.
 
 A moving version — a GIF or a WebM of a trace playing over a range of steps — is produced by the
 project's own `pnpm record` script rather than an in-app button, because a GIF encoder is a poor
 fit for the browser (bundle weight, and 256 colours wreck the palette). Contributors can read
 `scripts/record.ts` for how it drives the built app.
 
-## Why no joins, subqueries, or `GROUP BY`?
+## What SQL is missing?
 
-They are out of scope for this release, not forgotten — see [Supported SQL](/docs/reference/sql) for
-what runs today. QueryLens's parser recognises the keywords for all of them and tells you so directly
-rather than failing with a generic syntax error, which is usually the fastest way to find out whether
-a query you typed is simply not supported yet.
+Less than it used to be. `JOIN` (three algorithms), `GROUP BY` with aggregates and `HAVING`, `DISTINCT`, `ORDER BY`
+with `LIMIT`/`OFFSET`, `OR`/`NOT`/`IN`/`LIKE`/`IS NULL` with real three-valued logic, arithmetic and computed
+columns, and `INSERT`/`UPDATE`/`DELETE` all run. What does not, yet: **subqueries**, **outer joins** and more than
+one `JOIN` per query, **window functions**, `UNION`, `COUNT(DISTINCT …)`, and `SELECT *, expr`. They are out of
+scope for this release, not forgotten — see [Supported SQL](/docs/reference/sql) for what runs today.
+QueryLens's parser recognises the keywords for most of them and tells you so directly rather than failing with a
+generic syntax error, which is usually the fastest way to find out whether a query you typed is simply not
+supported yet.

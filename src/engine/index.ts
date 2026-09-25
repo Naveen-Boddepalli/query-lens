@@ -82,6 +82,7 @@ export type {
   PredictionOption,
   PredictionPrompt,
   QueryError,
+  RaInfo,
   ReplacementPolicyName,
   Row,
   RunResult,

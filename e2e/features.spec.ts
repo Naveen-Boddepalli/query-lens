@@ -1345,3 +1345,34 @@ test('"Report a confusing step" prefills an issue form with this exact moment, a
   await page.getByRole('button', { name: 'Step forward' }).click();
   await expect.poll(async () => (await read()).moment).toContain('step 8 of 33');
 });
+
+/**
+ * plan.md §25.4 B5 — the plan as relational algebra. The plan tree says *how* the
+ * engine runs a query; the algebra says *what* it computes.
+ */
+test('the plan can be read as relational algebra, and copied as a σ π ⋈ γ expression or LaTeX', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await page.goto('/playground?q=SELECT%20name%20FROM%20users%20WHERE%20age%20%3E%2030%20ORDER%20BY%20age%20LIMIT%203&x=0&s=8');
+  await page.getByRole('button', { name: /^Planner/ }).click();
+
+  const group = page.getByRole('group', { name: 'Plan notation' });
+  await expect(group.getByRole('button', { name: 'Operators' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('.react-flow__node').getByText('Filter', { exact: true }).first()).toBeVisible();
+
+  await group.getByRole('button', { name: 'Relational algebra' }).click();
+  await expect(group.getByRole('button', { name: 'Relational algebra' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('.react-flow__node').getByText('σ age > 30')).toBeVisible();
+  // The physical operator is still there, beneath: what beside how.
+  await expect(page.locator('.react-flow__node').getByText('SeqScan users').first()).toBeVisible();
+
+  // Step on to the point where the whole plan is built, then copy it.
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('ArrowRight');
+  await page.getByRole('button', { name: 'Copy as relational algebra' }).click();
+  const text = await page.evaluate(() => navigator.clipboard.readText());
+  expect(text).toContain('σ_{age > 30}(users)');
+  expect(text).toMatch(/^[πτλδ]|^π/);
+
+  await page.getByRole('button', { name: 'Copy as LaTeX' }).click();
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toContain('\\sigma_{age > 30}');
+});

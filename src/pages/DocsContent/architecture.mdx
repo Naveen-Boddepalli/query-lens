@@ -107,6 +107,15 @@ Deliberately absent: **join order** (needs multi-join grammar this parser doesn'
 has at most one `JOIN`) and **true composite (multi-column) indexes** — each an independent
 single-column B+Tree today.
 
+### The plan as relational algebra
+
+Every plan node carries an `ra` field (`{ symbol, sub, rel }`) derived from the real `Plan`, not parsed back out
+of its label: `Filter` and a filtered `SeqScan` and an `IndexScan` are all `σ`; `Project` is `π`; `Join` is `⋈`;
+the aggregate nodes are `γ`; `Sort` is `τ`; `Limit` is `λ`; the distinct nodes are `δ`. The algebra is *logical*
+— it says what is computed — while the node's label stays *physical* — how. `src/export/toRelationalAlgebra.ts`
+turns a tree of them into `π_{name}(σ_{age > 30}(users))` (or LaTeX) and the plan panels can draw the tree in
+either notation; the colours follow the physical operator in both, so switching never changes which node is which.
+
 ## Storage: the buffer pool and the B+Tree
 
 Both are covered in depth, with a live embedded widget each, in [Concepts](/docs/concepts/btree)

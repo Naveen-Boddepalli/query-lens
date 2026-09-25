@@ -4,7 +4,7 @@
  * what the optimizer actually chooses (plan.md §7.2–7.4).
  */
 
-import type { PlanNode, SqlValue } from '../types.ts';
+import type { PlanNode, RaInfo, SqlValue } from '../types.ts';
 import { exprToSql } from '../parser/print.ts';
 import type { AggregateFn, CompareOp, Expr } from '../parser/index.ts';
 import type { PlanCost } from './cost.ts';
@@ -329,7 +329,78 @@ export function toPlanDisplay(
   return convert(plan, 'p', changed, estimates);
 }
 
+/** A predicate over `column` for a range bound, as SQL — `age >= 30`. */
+function boundSql(column: string, bound: RangeBound, side: 'low' | 'high'): string {
+  const op = side === 'low' ? (bound.inclusive ? '>=' : '>') : bound.inclusive ? '<=' : '<';
+  return `${column} ${op} ${format(bound.value)}`;
+}
+
+/**
+ * The relational-algebra reading of a plan node (plan.md §25.4 B5). Physical
+ * choices vanish — a sequential scan with a filter and an index lookup both
+ * become σ over the relation — which is exactly the point: the algebra says
+ * *what* is computed, the plan tree says *how*.
+ */
+function raOf(plan: Plan): RaInfo {
+  switch (plan.op) {
+    case 'SeqScan':
+      return plan.filter
+        ? { symbol: 'σ', sub: exprToSql(plan.filter), rel: plan.table }
+        : { symbol: 'rel', rel: plan.table };
+    case 'IndexScan':
+    case 'IndexOnlyScan': {
+      const parts = [`${plan.column} = ${format(plan.key)}`];
+      if (plan.op === 'IndexScan' && plan.residual) parts.push(exprToSql(plan.residual));
+      return { symbol: 'σ', sub: parts.join(' AND '), rel: plan.table };
+    }
+    case 'IndexRangeScan': {
+      const parts = [
+        ...(plan.low ? [boundSql(plan.column, plan.low, 'low')] : []),
+        ...(plan.high ? [boundSql(plan.column, plan.high, 'high')] : []),
+        ...(plan.residual ? [exprToSql(plan.residual)] : []),
+      ];
+      return { symbol: 'σ', sub: parts.join(' AND '), rel: plan.table };
+    }
+    case 'Filter':
+    case 'Having':
+      return { symbol: 'σ', sub: exprToSql(plan.predicate) };
+    case 'Join':
+      return { symbol: '⋈', sub: `${plan.leftTable}.${plan.leftColumn} = ${plan.rightTable}.${plan.rightColumn}` };
+    case 'HashAggregate':
+    case 'SortAggregate': {
+      const keys = plan.aggregates.map((a) => a.key).join(', ');
+      return { symbol: 'γ', sub: plan.groupBy.length > 0 ? `${plan.groupBy.join(', ')}; ${keys}` : keys };
+    }
+    case 'Sort':
+      return { symbol: 'τ', sub: `${plan.column} ${plan.direction === 'asc' ? '↑' : '↓'}` };
+    case 'Project':
+      return {
+        symbol: 'π',
+        sub:
+          plan.columns.kind === 'star'
+            ? '*'
+            : plan.columns.kind === 'columns'
+              ? plan.columns.names.join(', ')
+              : plan.columns.items.map((i) => i.sql).join(', '),
+      };
+    case 'HashDistinct':
+    case 'SortDistinct':
+      return { symbol: 'δ' };
+    case 'Limit':
+      return { symbol: 'λ', sub: plan.offset ? `${String(plan.count)}, offset ${String(plan.offset)}` : String(plan.count) };
+  }
+}
+
 function convert(
+  plan: Plan,
+  id: string,
+  changed: ReadonlySet<Plan>,
+  estimates: PlanCost | undefined,
+): PlanNode {
+  return { ...convertBody(plan, id, changed, estimates), ra: raOf(plan) };
+}
+
+function convertBody(
   plan: Plan,
   id: string,
   changed: ReadonlySet<Plan>,

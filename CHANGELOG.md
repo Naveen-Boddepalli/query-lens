@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **The plan as relational algebra** (plan.md §25.4 B5) — the notation a database course opens with, derived from
+  the plan the engine actually built. A **Show as → Relational algebra** toggle on the Planner and Optimizer
+  panels rewrites each node as `σ` (selection), `π` (projection), `⋈` (join), `γ` (grouping), `τ` (order), `δ`
+  (distinct) or `λ` (limit), keeping the physical operator underneath — so a filtered `SeqScan` and an
+  `IndexScan` both read `σ_{id = 5}(users)`: *what* is computed beside *how*. **Copy as relational algebra**
+  (`π_{name}(σ_{age > 30}(users))`) and **Copy as LaTeX** put the whole plan on the clipboard for a homework
+  answer or a slide.
 - **`SELECT DISTINCT`** (plan.md §25.4 B2, second slice) — each distinct row once, NULLs counted as equal, applied
   after `WHERE`/`GROUP BY`/`HAVING` and before `LIMIT`/`OFFSET`. Two strategies on the setting `GROUP BY` already
   uses: a streaming **`HashDistinct`** (a hash set of rows seen, no I/O, and a `LIMIT` above it can stop the scan
@@ -111,6 +118,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Vitest also runs tests under `scripts/` and `oracle/`; `oracle/` joins `tsconfig.node.json`.
 
 ### Fixed
+- **The FAQ still asked "Why no joins, subqueries, or `GROUP BY`?"** — a question the product stopped deserving
+  several releases ago. It is now "What SQL is missing?", and lists what really is.
 - **The crash report's "Open an issue" and the footer's "Report an issue" opened a blank form.** Both used
   `issues/new?body=…`, but the repository disables blank issues, and with blank issues off GitHub sends a bare
   `issues/new` to the template chooser — dropping the prefilled body. They now name a template

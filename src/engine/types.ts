@@ -61,12 +61,34 @@ export interface IndexNode {
   children?: IndexNode[];
 }
 
+/**
+ * A plan node's *logical* meaning in relational algebra (plan.md §25.4 B5) — the
+ * on-ramp from "Filter above SeqScan" to σ, π, ⋈, γ. It is derived from the real
+ * plan, not parsed back out of the label, so `IndexScan users.id` and `SeqScan
+ * users` with a filter both read as the same `σ_{id = 5}(users)`: what differs is
+ * the *physical* operator, which stays in `label`/`detail`.
+ *
+ *   rel  a relation (a table, with no selection applied)     users
+ *   σ    selection            π  projection       ⋈  join
+ *   γ    grouping/aggregation τ  ordering         λ  limit (an extension)
+ *   δ    duplicate elimination
+ */
+export interface RaInfo {
+  symbol: 'rel' | 'σ' | 'π' | '⋈' | 'γ' | 'τ' | 'λ' | 'δ';
+  /** What sits in the subscript: the predicate, the columns, the join condition. */
+  sub?: string;
+  /** The relation a leaf reads — set on scans, whether or not they carry a σ. */
+  rel?: string;
+}
+
 export interface PlanNode {
   /** Stable across a rewrite, so before/after trees can be compared. */
   id: string;
   op: string;
   label: string;
   detail?: string;
+  /** The node's meaning in relational algebra (plan.md §25.4 B5). */
+  ra?: RaInfo;
   /** Set on the nodes a rewrite rule produced. */
   highlight?: boolean;
   /** Cost model's estimated output rows for this node (plan.md §22.2). */
