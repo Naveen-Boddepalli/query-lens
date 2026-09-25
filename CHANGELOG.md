@@ -15,10 +15,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   run). `/compare`'s aggregate mode gains `SELECT DISTINCT` presets, so the contrast is measured, not asserted.
   With `ORDER BY`, the sort column must be in the select list (PostgreSQL's rule). `COUNT(DISTINCT x)` is not
   supported yet.
-
-### Changed
-- The oracle's default run is now **1,000 cases per property** (was 200), about two seconds: injected bugs in rare
-  query shapes survived 200 and 400 and die at 800.
 - **`HAVING`** (plan.md §25.4 B2, first slice) — filter *groups* after their aggregates are computed:
   `GROUP BY dept HAVING COUNT(*) > 2 AND SUM(pay) < 500`. `WHERE` filters rows before grouping and so can
   never mention an aggregate; an aggregate in a `WHERE` is now an error that points at `HAVING`. A `HAVING`
@@ -105,6 +101,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a `study` bundle row (5.4 kB gzip, its own lazy chunk), six Playwright tests, and STUDY.md §4.
 
 ### Changed
+- The oracle's default run is now **1,000 cases per property** (was 200), about two seconds: injected bugs in rare
+  query shapes survived 200 and 400 and die at 800.
 - `package.json` now carries a description, homepage, repository, bugs and keywords (it had none), and
   the README title reads "QueryLens — a database internals visualizer". The name is shared with at least
   five unrelated products (RESEARCH.md §45); the decision is to keep it and always pair it with the
