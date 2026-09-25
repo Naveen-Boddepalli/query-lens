@@ -58,6 +58,9 @@ describe('the generators reach what the oracle is meant to check', () => {
     compositeRefused: 0,
     compositeWrites: 0,
     compositeProbes: 0,
+    /** An equality prefix plus a range on the next column, walking the run — and writes that find their rows by a range scan. */
+    prefixRanges: 0,
+    rangeWrites: 0,
   };
 
   for (const [{ tables: initial, steps }, options] of sessions) {
@@ -99,6 +102,8 @@ describe('the generators reach what the oracle is meant to check', () => {
       const planned = result.events.map((e) => (e.stage === 'optimize' ? JSON.stringify(e.after) : e.stage === 'plan' ? JSON.stringify(e.planTree) : '')).join('\n');
       if (planned.includes('"op":"IndexScan","label":"IndexScan t.(') || planned.includes('"op":"IndexScan","label":"IndexScan u.(')) stats[isWrite(q) ? 'compositeWrites' : 'compositeScans'] += 1;
       if (planned.includes('"op":"IndexOnlyScan","label":"IndexOnlyScan t.(')) stats.compositeCovering += 1;
+      if (/"op":"IndexRangeScan","label":"IndexRangeScan [tu]\.\([^"]*\)","detail":"range: [a-z_]+ = /.test(planned)) stats.prefixRanges += 1;
+      if (isWrite(q) && planned.includes('"op":"IndexRangeScan"')) stats.rangeWrites += 1;
       if (planned.includes('"op":"IndexProbe","label":"IndexProbe u.(')) stats.compositeProbes += 1;
       if (result.events.some((e) => e.label.includes('cannot help: the predicate constrains'))) stats.compositeRefused += 1;
       if (isWrite(q)) {
@@ -167,6 +172,8 @@ describe('the generators reach what the oracle is meant to check', () => {
     expect(stats.compositeRefused, 'composite indexes refused for lack of a leading column').toBeGreaterThan(10);
     expect(stats.compositeWrites, 'writes finding rows through a composite index').toBeGreaterThan(10);
     expect(stats.compositeProbes, 'joins probing a composite index').toBeGreaterThan(3);
+    expect(stats.prefixRanges, 'an equality prefix plus a range on the next column').toBeGreaterThan(10);
+    expect(stats.rangeWrites, 'writes finding their rows by a range scan').toBeGreaterThan(10);
   });
 
   it('includes empty tables, NULLs, and writes that really change rows', () => {

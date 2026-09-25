@@ -12,7 +12,7 @@ import type { Emit } from '../trace.ts';
 import type { EngineOptions, Row, SqlValue, Table } from '../types.ts';
 import type { Expr } from '../parser/index.ts';
 import { lookupKeysOf } from '../planner/index.ts';
-import type { AggregateSpec, Plan, ProjectList } from '../planner/index.ts';
+import type { AggregateSpec, Plan, ProjectList, RangeBound } from '../planner/index.ts';
 import type { BufferPool, Heap } from '../storage/index.ts';
 import type { LockManager } from '../locks/index.ts';
 import type { BPlusTree, RowPointer } from '../index/index.ts';
@@ -154,6 +154,21 @@ export function fetchHeapPage(ctx: ExecContext, pointer: RowPointer): void {
   ctx.locks.release(pointer.pageId, 'shared');
 }
 
+/**
+ * Does `row` satisfy the range `plan` scans? The walk already stays inside it, so this is a second, independent
+ * check on the row itself — with `compare`'s own rules, not the index's. It matters inside a composite index, where a
+ * NULL in the range column sorts among the entries but never satisfies a range, and it means a mixed-type
+ * comparison the index orders one way and SQL another can only ever lose a row, never invent one.
+ */
+export function rangeHolds(row: Row, plan: { column: string; prefix?: SqlValue[]; low?: RangeBound; high?: RangeBound }): boolean {
+  const column = columnsOfIndex(plan.column)[plan.prefix?.length ?? 0];
+  if (column === undefined) return true;
+  const value = row[column] ?? null;
+  if (plan.low && compare(plan.low.inclusive ? '>=' : '>', value, plan.low.value) !== true) return false;
+  if (plan.high && compare(plan.high.inclusive ? '<=' : '<', value, plan.high.value) !== true) return false;
+  return true;
+}
+
 /** The row an index entry points at, read out of `heap` — this query's own, unless a join's other side is meant. */
 export function rowAt(ctx: ExecContext, pointer: RowPointer, heap: Heap = ctx.heap): Row | null {
   const page = heap.pages.find((p) => p.pageId === pointer.pageId);
@@ -274,7 +289,7 @@ function indexRangeScan(plan: Extract<Plan, { op: 'IndexRangeScan' }>, ctx: Exec
     open() {
       const tree = ctx.trees[plan.column];
       if (!tree) return;
-      const start = emitRangeStart(ctx.emit, tree, plan.column, plan.low, ctx.pool, ctx.locks);
+      const start = emitRangeStart(ctx.emit, tree, plan.column, plan.low, ctx.pool, ctx.locks, plan.prefix);
       leafId = start.leafId;
       cursorIndex = start.startIndex;
       started = true;
@@ -286,7 +301,7 @@ function indexRangeScan(plan: Extract<Plan, { op: 'IndexRangeScan' }>, ctx: Exec
 
       for (;;) {
         if (leafId === null) return null;
-        const found = nextInRange(ctx.emit, tree, leafId, cursorIndex, plan.high, { pool: ctx.pool, locks: ctx.locks });
+        const found = nextInRange(ctx.emit, tree, leafId, cursorIndex, plan.high, { pool: ctx.pool, locks: ctx.locks }, plan.prefix);
         if (!found) {
           leafId = null;
           return null;
@@ -298,7 +313,7 @@ function indexRangeScan(plan: Extract<Plan, { op: 'IndexRangeScan' }>, ctx: Exec
         const row = rowAt(ctx, found.pointer);
         if (!row) continue;
 
-        if (!passes(plan.residual, row)) continue;
+        if (!rangeHolds(row, plan) || !passes(plan.residual, row)) continue;
 
         produced(`IndexRangeScan returns a row via leaf ${found.leafId}.`);
         return row;

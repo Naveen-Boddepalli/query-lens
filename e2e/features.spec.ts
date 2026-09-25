@@ -721,6 +721,11 @@ test('a composite index is entered by its leftmost column and declined without i
   await page.getByLabel('Scrub to step').press('End');
   await expect(page.getByText(/8 rows returned/)).toBeVisible();
 
+  // A range on the next column narrows *within* that city's run.
+  expect(await narrationContains("SELECT * FROM people WHERE city = 'oslo' AND age > 25", /narrows it within that run/)).toBe(true);
+  await page.getByLabel('Scrub to step').press('End');
+  await expect(page.getByText(/2 rows returned/)).toBeVisible();
+
   // …but the second column alone cannot: the plan says why, and the rows still come back.
   expect(await narrationContains('SELECT * FROM people WHERE age = 22', /The index on \(city, age\) cannot help/)).toBe(true);
   await page.getByLabel('Scrub to step').press('End');

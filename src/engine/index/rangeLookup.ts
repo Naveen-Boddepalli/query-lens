@@ -27,6 +27,7 @@ import {
 } from './btree.ts';
 import type { BPlusTree, IndexKey, LeafNode, RowPointer } from './btree.ts';
 import { keyList, toIndexDisplay } from './display.ts';
+import { describeKeys } from './lookup.ts';
 
 export interface RangeBoundValue {
   value: SqlValue;
@@ -48,17 +49,33 @@ export interface RangeMatch {
   nextIndex: number;
 }
 
-function describe(key: SqlValue): string {
-  return typeof key === 'string' ? `'${key}'` : String(key);
-}
 
-function withinHigh(key: IndexKey, high: RangeBoundValue | undefined): boolean {
+/**
+ * Is `key` still inside the range? An entry carries its row address as well as its values, so it is never *equal* to a
+ * bare bound — the bound becomes a probe instead: just after every entry with this value (an inclusive `<=`) or just
+ * before them all (`<`). Within a composite index's equality `prefix` the probe carries the prefix too, and with no
+ * upper bound the end of the range is the end of the prefix's run — the first entry that no longer starts with it.
+ */
+function withinHigh(key: IndexKey, high: RangeBoundValue | undefined, prefix: readonly SqlValue[]): boolean {
+  if (isEntry(key)) {
+    const upper = high ? probe([...prefix, high.value], high.inclusive ? 'high' : 'low') : probe(prefix, 'high');
+    return compareKeys(key, upper) < 0;
+  }
   if (!high) return true;
-  // An entry carries its row address as well as its value, so it is never *equal* to a bare bound. Instead the bound
-  // becomes a probe: just after every entry with this value (an inclusive `<=`) or just before them all (`<`).
-  if (isEntry(key)) return compareKeys(key, probe([high.value], high.inclusive ? 'high' : 'low')) < 0;
   const c = compareKeys(key, high.value);
   return high.inclusive ? c <= 0 : c < 0;
+}
+
+/**
+ * Where the walk begins. A plain index descends toward the lower bound (an inclusive `>= v` starts at the first entry
+ * *for* v, an exclusive `> v` just past the last). Inside a composite index's equality `prefix` the target carries
+ * the prefix; with no lower bound it is the first entry *after the NULLs* of the range column — NULL sorts first,
+ * and a range never matches one, so there is no reason to read them.
+ */
+function startTarget(tree: BPlusTree, low: RangeBoundValue | undefined, prefix: readonly SqlValue[]): IndexKey | undefined {
+  if (!tree.tiebreak) return low?.value;
+  if (low) return probe([...prefix, low.value], low.inclusive ? 'low' : 'high');
+  return prefix.length > 0 ? probe([...prefix, null], 'high') : undefined;
 }
 
 /**
@@ -74,23 +91,23 @@ export function emitRangeStart(
   low: RangeBoundValue | undefined,
   pool: BufferPool,
   locks: LockManager,
+  /** A composite index's equality values for the columns before the range one — the range runs *within* them. */
+  prefix: readonly SqlValue[] = [],
 ): RangeStart {
   const h = height(tree);
+  const within = prefix.length > 0 ? ` within ${describeKeys(prefix)}` : '';
   emit(
     `Open the B+Tree on \`${column}\`: ${String(h)} level${h === 1 ? '' : 's'}. ${
       low
-        ? `Descend once toward ${describe(low.value)} — not to find that exact key, but to find where the range begins.`
-        : "This range has no lower bound, so descend to the tree's leftmost leaf instead."
+        ? `Descend once toward ${describeKeys([...prefix, low.value])} — not to find that exact key, but to find where the range begins${within}.`
+        : prefix.length > 0
+          ? `This range has no lower bound${within}, so descend toward where the entries starting ${describeKeys(prefix)} begin.`
+          : "This range has no lower bound, so descend to the tree's leftmost leaf instead."
     }`,
     { stage: 'index', action: 'open', tree: toIndexDisplay(tree), nodeId: tree.rootId, height: h },
   );
 
-  // On a table's index an inclusive `>= v` starts at the first entry *for* v; an exclusive `> v` starts just past the last.
-  const target: IndexKey | undefined = low
-    ? tree.tiebreak
-      ? probe([low.value], low.inclusive ? 'low' : 'high')
-      : low.value
-    : undefined;
+  const target = startTarget(tree, low, prefix);
   const path = target !== undefined ? descend(tree, target) : leftmostPath(tree);
   let parentPage: number | null = null;
 
@@ -122,8 +139,10 @@ export function emitRangeStart(
       emit(
         `Node ${nodeId} separates on ${keyList(n.keys)}. ${
           low
-            ? `${describe(low.value)} routes to child ${String(childIndex)}.`
-            : 'With no lower bound, follow the leftmost child.'
+            ? `${describeKeys([...prefix, low.value])} routes to child ${String(childIndex)}.`
+            : prefix.length > 0
+              ? `The entries starting ${describeKeys(prefix)} route to child ${String(childIndex)}.`
+              : 'With no lower bound, follow the leftmost child.'
         }`,
         { stage: 'index', action: 'traverse', nodeId, ...(low ? { key: low.value } : {}), childIndex },
       );
@@ -179,6 +198,8 @@ export function nextInRange(
   index: number,
   high: RangeBoundValue | undefined,
   io?: ChainIO,
+  /** A composite index's equality values before the range column — see `emitRangeStart`. */
+  prefix: readonly SqlValue[] = [],
 ): RangeMatch | null {
   let currentLeafId: string | null = leafId;
   let currentIndex = index;
@@ -208,7 +229,7 @@ export function nextInRange(
     }
 
     const key = leaf.keys[currentIndex]!;
-    if (!withinHigh(key, high)) return null;
+    if (!withinHigh(key, high, prefix)) return null;
 
     return {
       key,

@@ -89,6 +89,8 @@ order is what decides which questions it can answer:
 - `city = 'oslo'` — yes. All the Oslo entries sit together, so the search descends to the first one and
   reads along the run. This is a **leftmost prefix** of the key.
 - `city = 'oslo' AND age = 30` — yes, and narrower: the run for that pair.
+- `city = 'oslo' AND age > 30` — yes: one descent to where Oslo's entries reach age 30, then along that
+  run only, stopping when the city changes.
 - `age = 30` alone — **no.** The people aged 30 are scattered through every city's run; there is no
   contiguous stretch of the index to read. The index is not entered, and the plan says so.
 

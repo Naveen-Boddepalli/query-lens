@@ -12,6 +12,7 @@
 
 import type { PredictionPrompt, SqlValue, Table } from '../types.ts';
 import { indexSelectionPrompt, leftmostPrefixPrompt } from '../predict.ts';
+import { describeKeys as describeKeysText } from '../index/lookup.ts';
 import { columnsOfIndex, indexNameOf, indexSpecsOf } from '../index/spec.ts';
 import { mapChildren, walkExpr } from '../parser/index.ts';
 import { arithmetic, negate } from '../value.ts';
@@ -423,6 +424,21 @@ interface EqualityCandidate {
   matched: { column: string; partIndex: number; key: SqlValue }[];
   /** Independent per-column selectivity, multiplied — the same assumption an `AND` in a `WHERE` already makes. */
   fraction: number;
+  /** The range conjuncts on the column *after* the prefix (`a = 1 AND b > 5` on `(a, b)`): the index can narrow within the run. */
+  next?: { column: string; low?: RangeBound; high?: RangeBound; consumed: number[] };
+}
+
+/** The lower and upper bound `parts` put on `column`, and which conjuncts they are — at most one of each direction. */
+function rangeBoundsOn(parts: readonly Expr[], column: string, taken: ReadonlySet<number>) {
+  const matches = parts
+    .map((p, i) => ({ i, match: taken.has(i) ? undefined : rangeOn(p, column) }))
+    .filter((m): m is { i: number; match: NonNullable<ReturnType<typeof rangeOn>> } => m.match !== undefined);
+  const lower = matches.find((m) => m.match.op === '>' || m.match.op === '>=');
+  const upper = matches.find((m) => m.match.op === '<' || m.match.op === '<=');
+  if (!lower && !upper) return undefined;
+  const low: RangeBound | undefined = lower ? { value: lower.match.value, inclusive: lower.match.op === '>=' } : undefined;
+  const high: RangeBound | undefined = upper ? { value: upper.match.value, inclusive: upper.match.op === '<=' } : undefined;
+  return { column, ...(low ? { low } : {}), ...(high ? { high } : {}), consumed: [lower?.i, upper?.i].filter((i): i is number => i !== undefined) };
 }
 
 /** The composite indexes `parts` cannot enter: it constrains one of their columns, but not their leftmost one. */
@@ -495,36 +511,55 @@ const indexSelection: Rule = (input, table) => {
       matched.push({ column, partIndex, key: equalityOn(parts[partIndex]!, column)! });
     }
     if (matched.length === 0) return [];
+    const nextColumn = spec.columns[matched.length];
+    const next = nextColumn === undefined ? undefined : rangeBoundsOn(parts, nextColumn, used);
     return [
       {
         name: indexNameOf(spec.columns),
         columns: spec.columns,
         matched,
         fraction: matched.reduce((product, m) => product / ndistinct(table.rows, m.column), 1),
+        ...(next ? { next } : {}),
       },
     ];
   });
   if (candidates.length === 0) return null;
 
   const distinctOf = (c: EqualityCandidate): number => Math.round(1 / c.fraction);
-  const chosen = candidates.reduce((best, c) =>
-    c.fraction < best.fraction || (c.fraction === best.fraction && c.matched.length > best.matched.length) ? c : best,
-  );
+  // Narrower wins: a smaller fraction, then more columns pinned, then a range on the next column to narrow the run further.
+  const better = (c: EqualityCandidate, best: EqualityCandidate): boolean =>
+    c.fraction !== best.fraction
+      ? c.fraction < best.fraction
+      : c.matched.length !== best.matched.length
+        ? c.matched.length > best.matched.length
+        : c.next !== undefined && best.next === undefined;
+  const chosen = candidates.reduce((best, c) => (better(c, best) ? c : best));
   const runnersUp = candidates.filter((c) => c !== chosen);
 
-  const consumed = new Set(chosen.matched.map((m) => m.partIndex));
+  const consumed = new Set([...chosen.matched.map((m) => m.partIndex), ...(chosen.next?.consumed ?? [])]);
   const residual = conjoin(parts.filter((_, i) => !consumed.has(i)));
   const keys = chosen.matched.map((m) => m.key);
   const composite = chosen.columns.length > 1;
 
-  const indexScan: Plan = {
-    op: 'IndexScan',
-    table: scan.table,
-    column: chosen.name,
-    key: keys[0]!,
-    ...(composite ? { keys } : {}),
-    ...(residual ? { residual } : {}),
-  };
+  // An equality prefix with a range on the next column becomes a range scan *within* the prefix's run; otherwise a lookup.
+  const indexScan: Plan = chosen.next
+    ? {
+        op: 'IndexRangeScan',
+        table: scan.table,
+        column: chosen.name,
+        prefix: keys,
+        ...(chosen.next.low ? { low: chosen.next.low } : {}),
+        ...(chosen.next.high ? { high: chosen.next.high } : {}),
+        ...(residual ? { residual } : {}),
+      }
+    : {
+        op: 'IndexScan',
+        table: scan.table,
+        column: chosen.name,
+        key: keys[0]!,
+        ...(composite ? { keys } : {}),
+        ...(residual ? { residual } : {}),
+      };
   const root = rewrapLimit(
     limit,
     {
@@ -552,6 +587,9 @@ const indexSelection: Rule = (input, table) => {
       : `The predicate has an equality on ${named.map((c) => `\`${c}\``).join(' and ')} — ${named.length === 1 ? 'the leftmost column' : 'the leftmost columns'} of the composite index (${chosen.columns.join(', ')}), which is all an index needs to be entered: \`${chosen.columns[named.length]}\` only orders the entries inside each run`
     : '';
   const unusable = leftmostPrefixNote(table, scan.filter);
+  const rangeClause = chosen.next
+    ? ` The next column, \`${chosen.next.column}\`, has a range (${formatRangeBounds(chosen.next.column, chosen.next.low, chosen.next.high)}), so the index narrows it within that run: one descent to where the range begins inside ${describeKeysText(keys)}, then along the leaf chain until the run ends.`
+    : '';
 
   return {
     rule: 'index-selection',
@@ -561,7 +599,7 @@ const indexSelection: Rule = (input, table) => {
         : residual
           ? `\`${chosen.name}\` is indexed${choiceClause}, so the equality becomes an index lookup. The rest of the predicate cannot be answered by the index and is rechecked on each row the index returns.`
           : `\`${chosen.name}\` is indexed${choiceClause} and the predicate is an equality on it, so the scan becomes a B+Tree lookup — a handful of pages instead of the whole table.`
-    }${unusable ? ` ${unusable}` : ''}`,
+    }${rangeClause}${unusable ? ` ${unusable}` : ''}`,
     plan: root,
     changed: new Set<Plan>([indexScan]),
     prompt:
@@ -705,7 +743,7 @@ const indexOnlyScan: Rule = (input) => {
     rule: 'index-only-scan',
     label:
       covered.length > 1
-        ? `Every column this query needs — ${needs} — is one the composite index (${scan.column}) holds, so the index *covers* the query: the entries answer it without ever fetching the heap page the pointers name.`
+        ? `Every column this query needs — ${needs} — is one the composite index (${scan.column}) holds, so the index covers the query: the entries answer it without ever fetching the heap page the pointers name.`
         : `Every column this query needs — \`${scan.column}\` — is already the index key, so the lookup answers it without ever fetching the heap page the pointer names.`,
     plan: root,
     changed: new Set<Plan>([indexOnly]),
@@ -725,20 +763,14 @@ const RULES: { name: string; apply: Rule }[] = [
 export const OPTIMIZER_RULES: readonly string[] = RULES.map((r) => r.name);
 
 /**
- * `DELETE`/`UPDATE` reuse this same optimizer (`emitDeletePlanEvents`,
- * `emitUpdatePlanEvents`) to find the rows to touch, wrapped in a throwaway
- * `Project *` — but their executors (`exec/delete.ts`, `exec/update.ts`)
- * only know how to run a `SeqScan` or a single-row `IndexScan`
- * (`indexScanForMatch`), not an `IndexRangeScan`'s multi-row leaf walk. Every
- * other rule name is safe to reuse as-is; only `range-index-selection` is
- * excluded, so a write statement's plan can only ever come out as one of
- * the two shapes those executors already handle. Reaching an `IndexRangeScan`
- * into DELETE/UPDATE is its own follow-on, not something silently unsafe
- * today only because this excludes it.
+ * `DELETE`/`UPDATE` reuse this same optimizer (`emitDeletePlanEvents`, `emitUpdatePlanEvents`) to find the rows to touch,
+ * wrapped in a throwaway `Project *`. Until §25.4 B3b their executors could only run a `SeqScan` or an `IndexScan`,
+ * so `range-index-selection` was left out and a write could never use a range index; `exec/writeScan.ts` now runs an
+ * `IndexRangeScan` too, so every rule applies. (`index-only-scan` never fires on a write — the `Project *` wants every
+ * column — which is the point: a write reads the rows it changes.) Kept as its own export so the write path's rule set
+ * stays a named decision, not an accident of reusing `OPTIMIZER_RULES`.
  */
-export const WRITE_PATH_RULES: ReadonlySet<string> = new Set(
-  OPTIMIZER_RULES.filter((name) => name !== 'range-index-selection'),
-);
+export const WRITE_PATH_RULES: ReadonlySet<string> = new Set(OPTIMIZER_RULES);
 
 /**
  * Applies every enabled rule that fires, in order. Returns each step for

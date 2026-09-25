@@ -131,6 +131,105 @@ describe('covering', () => {
   });
 });
 
+describe('a range on the column after an equality prefix', () => {
+  it('narrows within the prefix: one descent to where the range begins, then along the run', () => {
+    const db = people();
+    const { rows, events } = run('SELECT * FROM t WHERE a = 1 AND b > 2', db);
+    expect(byId(rows)).toEqual(all(db).filter((r) => r.a === 1 && (r.b as number) > 2));
+    expect(ops(events, 'IndexRangeScan').length).toBeGreaterThan(0);
+    expect(ops(events, 'IndexScan')).toHaveLength(0);
+    const scan = scanOf(events);
+    expect(scan.label).toBe('IndexRangeScan t.(a, b)');
+    expect(scan.detail).toBe('range: a = 1, `b` > 2');
+    const text = events.filter((e) => e.stage === 'optimize').map((e) => e.label).join('\n');
+    expect(text).toContain('narrows it within that run');
+  });
+
+  it('honours both bounds, inclusive and exclusive, and never leaves the prefix', () => {
+    const db = people();
+    for (const [sql, keep] of [
+      ['SELECT * FROM t WHERE a = 2 AND b >= 1 AND b <= 3', (r: Row) => r.a === 2 && (r.b as number) >= 1 && (r.b as number) <= 3],
+      ['SELECT * FROM t WHERE a = 2 AND b > 1 AND b < 3', (r: Row) => r.a === 2 && (r.b as number) > 1 && (r.b as number) < 3],
+      ['SELECT * FROM t WHERE a = 3 AND b < 2', (r: Row) => r.a === 3 && (r.b as number) < 2],
+      ['SELECT * FROM t WHERE a = 0 AND b BETWEEN 1 AND 2', (r: Row) => r.a === 0 && (r.b as number) >= 1 && (r.b as number) <= 2],
+      ['SELECT * FROM t WHERE a = 1 AND b > 99', () => false],
+    ] as const) {
+      const { rows, events } = run(sql, db);
+      expect(byId(rows), sql).toEqual(all(db).filter(keep));
+      expect(scanOf(events).op, sql).toBe('IndexRangeScan'); // by the plan: an empty result emits no execute event
+    }
+  });
+
+  it('never returns a NULL in the range column, though NULLs sit among the entries', () => {
+    const db: Database = {
+      tables: {
+        t: {
+          name: 't',
+          columns: ['id', 'a', 'b'],
+          rows: [
+            { id: 1, a: 1, b: null },
+            { id: 2, a: 1, b: 1 },
+            { id: 3, a: 1, b: 7 },
+            { id: 4, a: 2, b: null },
+            { id: 5, a: 1, b: null },
+          ],
+          indexes: [{ columns: ['a', 'b'] }],
+        },
+      },
+    };
+    expect(run('SELECT id FROM t WHERE a = 1 AND b < 5', db).rows.map((r) => r.id)).toEqual([2]);
+    expect(run('SELECT id FROM t WHERE a = 1 AND b > 0', db).rows.map((r) => r.id).sort()).toEqual([2, 3]);
+  });
+
+  it('prefers the index that can narrow further when two match the equality equally', () => {
+    const db = people({ indexedColumns: ['a'] });
+    expect(scanOf(run('SELECT * FROM t WHERE a = 1 AND b > 2', db).events).label).toBe('IndexRangeScan t.(a, b)');
+  });
+
+  it('prices it inside the prefix — fewer rows than the prefix alone', () => {
+    const range = flatten(finalPlan(run('SELECT * FROM t WHERE a = 1 AND b > 2').events)).find((n) => n.op === 'IndexRangeScan')!;
+    const prefix = flatten(finalPlan(run('SELECT * FROM t WHERE a = 1').events)).find((n) => n.op === 'IndexScan')!;
+    expect(range.estRows!).toBeLessThan(prefix.estRows!);
+    expect(range.estBasis).toContain('1/4 on a');
+  });
+});
+
+describe('writes that find their rows by a range', () => {
+  const written = (sql: string, db: Database = people()) => {
+    const captured: Record<string, BPlusTree> = {};
+    const result = runQuery(sql, db, DEFAULT_ENGINE_OPTIONS, { afterWrite: (t) => Object.assign(captured, t) });
+    return { ...result, captured };
+  };
+
+  it('DELETE with a range on an indexed column walks the leaf chain, and leaves every tree sound', () => {
+    const db: Database = { tables: { t: { ...people().tables.t!, indexedColumns: ['id'] } } };
+    const { write, events, captured } = written('DELETE FROM t WHERE id > 50', db);
+    expect(write?.rows).toHaveLength(50);
+    expect(ops(events, 'IndexRangeScan').length).toBeGreaterThan(0);
+    expect(ops(events, 'SeqScan')).toHaveLength(0);
+    for (const tree of Object.values(captured)) expect(validate(tree)).toEqual([]);
+    const ids = leafChain(captured['id']!).flatMap((id) => (node(captured['id']!, id) as LeafNode).keys.map((k) => valuesOf(k)[0]));
+    expect(ids.sort((x, y) => (x as number) - (y as number))).toEqual(Array.from({ length: 50 }, (_, i) => i + 1));
+  });
+
+  it('UPDATE that moves the very column it scans still touches each row once', () => {
+    // Setting `id` beyond the scanned range: an update that found its own output again would loop or double-apply.
+    const db: Database = { tables: { t: { ...people().tables.t!, indexedColumns: ['id'] } } };
+    const { rows, write } = written('UPDATE t SET id = id + 100 WHERE id > 55', db);
+    expect(rows).toHaveLength(5);
+    expect(write?.rows.filter((r) => (r.id as number) > 100).map((r) => r.id).sort()).toEqual([156, 157, 158, 159, 160]);
+  });
+
+  it('DELETE by an equality prefix and a range keeps the composite index sound', () => {
+    const { write, captured, events } = written('DELETE FROM t WHERE a = 1 AND b > 2');
+    expect(ops(events, 'IndexRangeScan').length).toBeGreaterThan(0);
+    expect(write?.rows.some((r) => r.a === 1 && (r.b as number) > 2)).toBe(false);
+    expect(validate(captured['a, b']!)).toEqual([]);
+    const held = leafChain(captured['a, b']!).flatMap((id) => (node(captured['a, b']!, id) as LeafNode).keys.map((k) => JSON.stringify(valuesOf(k)))).sort();
+    expect(held).toEqual(write!.rows.map((r) => JSON.stringify([r.a, r.b])).sort());
+  });
+});
+
 describe('NULLs in a composite index', () => {
   const db = (): Database => ({
     tables: {

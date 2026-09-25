@@ -371,8 +371,18 @@ function lookupArb(t: TableSpec, pool: Pool): fc.Arbitrary<Query> {
       })
       .chain(({ k, skipLead }) => {
         const named = skipLead ? cols.slice(1, Math.max(2, k)) : cols.slice(0, k);
+        // Sometimes a range on the column just after the prefix (`a = 1 AND b > 3`): the index narrows it within the run.
+        const after = skipLead ? undefined : cols[k];
+        const range: fc.Arbitrary<Pred[]> = after
+          ? fc.oneof(
+              { weight: 1, arbitrary: fc.constant<Pred[]>([]) },
+              { weight: 2, arbitrary: fc.tuple(opArb.filter((op) => op !== '=' && op !== '<>'), literalFor(after, pool)).map(([op, lit]): Pred[] => [{ k: 'cmp', ref: after, op, lit }]) },
+              { weight: 1, arbitrary: fc.tuple(literalFor(after, pool), literalFor(after, pool)).map(([lo, hi]): Pred[] => [{ k: 'between', ref: after, lo, hi }]) },
+            )
+          : fc.constant<Pred[]>([]);
         return fc.tuple(
           fc.tuple(...named.map((r) => literalFor(r, pool).map((lit): Pred => ({ k: 'cmp', ref: r, op: '=', lit })))),
+          range,
           fc.oneof(
             { weight: 1, arbitrary: uniqueRefs(cols, 1, cols.length) },
             { weight: 1, arbitrary: fc.constant<Ref[] | '*'>('*') },
@@ -383,11 +393,11 @@ function lookupArb(t: TableSpec, pool: Pool): fc.Arbitrary<Query> {
         );
       })
       .map(
-        ([preds, proj, extra, page]): Query => ({
+        ([preds, range, proj, extra, page]): Query => ({
           kind: 'select',
           table: t.name,
           proj,
-          where: [...preds, ...extra],
+          where: [...preds, ...range, ...extra],
           ...page,
         }),
       );
@@ -604,7 +614,31 @@ function writeWhereArb(t: TableSpec, refs: readonly Ref[], pool: Pool): fc.Arbit
   const viaIndex = fc
     .oneof(...[...single, ...prefix])
     .chain((eqs) => fc.oneof(fc.constant<Pred[]>(eqs), whereArb(refs, pool, 1).map((rest): Pred[] => [...eqs, ...rest])));
-  return fc.oneof({ weight: 3, arbitrary: general }, { weight: 2, arbitrary: viaIndex });
+  // A range on an indexed column's leading column (or, for a composite, on the one after an equality prefix): the write
+  // walks the leaf chain to find its rows, and must keep the index sound as it changes them.
+  const rangeCols = [...t.indexed, ...composites.map((c) => c[0])];
+  const viaRange = fc
+    .constantFrom(...rangeCols.map((name) => refs.find((r) => r.name === name)!))
+    .chain((ref) =>
+      fc.oneof(
+        { weight: 3, arbitrary: fc.tuple(opArb.filter((op) => op !== '=' && op !== '<>'), literalFor(ref, pool)).map(([op, lit]): Pred[] => [{ k: 'cmp', ref, op, lit }]) },
+        { weight: 1, arbitrary: fc.tuple(literalFor(ref, pool), literalFor(ref, pool)).map(([lo, hi]): Pred[] => [{ k: 'between', ref, lo, hi }]) },
+      ),
+    );
+  const viaPrefixRange = composites.map((columns) =>
+    fc.tuple(literalFor(refs.find((r) => r.name === columns[0])!, pool), fc.tuple(opArb.filter((op) => op !== '=' && op !== '<>'), literalFor(refs.find((r) => r.name === columns[1])!, pool))).map(
+      ([lit, [op, rlit]]): Pred[] => [
+        { k: 'cmp', ref: refs.find((r) => r.name === columns[0])!, op: '=', lit },
+        { k: 'cmp', ref: refs.find((r) => r.name === columns[1])!, op, lit: rlit },
+      ],
+    ),
+  );
+  return fc.oneof(
+    { weight: 3, arbitrary: general },
+    { weight: 2, arbitrary: viaIndex },
+    ...(rangeCols.length > 0 ? [{ weight: 2, arbitrary: viaRange }] : []),
+    ...viaPrefixRange.map((arbitrary) => ({ weight: 1, arbitrary })),
+  );
 }
 
 export function updateArb(t: TableSpec, pool: Pool): fc.Arbitrary<WriteQuery> {

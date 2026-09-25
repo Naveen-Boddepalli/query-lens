@@ -14,7 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   new predict-then-reveal question asks it before the answer. A query that reads only the index's columns is
   *covered*: an index-only scan answers it from the entries without touching the heap. Writes maintain the
   entries, an index join can probe one through its leading column, and the Custom database's *Manage tables*
-  takes `city+age`. A range on the column after an equality prefix is not narrowed by the index yet.
+  takes `city+age`. A range on the column after an equality prefix (`city = 'oslo' AND age > 30`) walks just
+  that run of entries.
 - **Index nested-loop join** (plan.md §25.4 B4) — the fourth join algorithm. Instead of rescanning the inner table
   for every outer row, it descends the inner table's own B+Tree on the join column: a few page reads per outer
   row, whatever the inner table's size. The plan gains an `IndexProbe` node for the inner side. It needs an
@@ -142,6 +143,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a `study` bundle row (5.4 kB gzip, its own lazy chunk), six Playwright tests, and STUDY.md §4.
 
 ### Changed
+- **`DELETE` and `UPDATE` can find their rows by a range of an index.** `DELETE FROM users WHERE id > 40` walks the
+  leaf chain instead of scanning the table (a write could only use an equality lookup before); the rows it touches
+  are locked and their index entries dropped or moved exactly as before.
 - The oracle's default run is now **1,000 cases per property** (was 200), about two seconds: injected bugs in rare
   query shapes survived 200 and 400 and die at 800.
 - `package.json` now carries a description, homepage, repository, bugs and keywords (it had none), and
