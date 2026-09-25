@@ -1309,3 +1309,31 @@ test('assignments bundle into a set worksheet', async ({ page, context }) => {
   await page.getByRole('button', { name: 'Clear set' }).click();
   await expect(page.getByText(/assignments? in this set/)).toHaveCount(0);
 });
+
+/**
+ * plan.md §25.4 A3. QueryLens has no telemetry (§14.4), so "which step confused
+ * you" is only ever a message a reader chooses to send. The link is a prefilled
+ * GitHub issue *form* — never a request the page makes itself.
+ */
+test('"Report a confusing step" prefills an issue form with this exact moment, and follows the playhead', async ({ page }) => {
+  await page.goto('/playground?q=SELECT%20*%20FROM%20users%20WHERE%20id%20%3D%205&p=clock&x=0&s=7');
+  const link = page.getByRole('link', { name: /Report a confusing step/ });
+  await expect(link).toBeVisible();
+  await expect(link).toHaveAttribute('target', '_blank');
+  await expect(link).toHaveAttribute('rel', /noreferrer/);
+
+  const read = async () => {
+    const url = new URL((await link.getAttribute('href'))!);
+    return { template: url.searchParams.get('template'), moment: url.searchParams.get('moment') ?? '' };
+  };
+
+  const before = await read();
+  expect(before.template).toBe('confusing_step.yml');
+  expect(before.moment).toContain('step 7 of 33');
+  expect(before.moment).toContain('SELECT * FROM users WHERE id = 5');
+  // The link that reopens the moment names the same step, and points at this app.
+  expect(before.moment).toMatch(/Reopen this moment:\*\* http:\/\/localhost:\d+\/playground\?.*s=7/);
+
+  await page.getByRole('button', { name: 'Step forward' }).click();
+  await expect.poll(async () => (await read()).moment).toContain('step 8 of 33');
+});

@@ -6,7 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thank you for reporting a bug! Please check [existing issues](https://github.com/Naveen-Boddepalli/QueryLens/issues) first to avoid duplicates.
+        Thank you for reporting a bug! Please check [existing issues](https://github.com/Naveen-Boddepalli/query-lens/issues) first to avoid duplicates.
 
         **Tip:** If the app showed an error boundary with a copyable repro, paste it below — it contains everything needed to reproduce the bug.
   - type: textarea

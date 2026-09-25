@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **"Report a confusing step"** (plan.md §25.4 A3) — QueryLens has no telemetry by decision, so the only
+  signal about *which moment confused someone* is one they choose to send. A link under the Playground's
+  narration opens a prefilled GitHub issue form (`confusing_step.yml`) carrying the build, the step and stage,
+  what the narration said, the query, and a link that reopens the exact moment. It is a plain link — nothing
+  is sent until the reader presses Submit on GitHub, where every field can be edited or deleted — and it
+  degrades (drops the edited rows, then the link, then the query text) rather than overrun GitHub's URL limit.
 - **A SQLite oracle and a divergence ledger** (plan.md §25.4 A1) — the engine's *rows* are now checked
   against an outside authority on every build. `oracle/` drives `node:sqlite` (Node's built-in; no new
   dependency, nothing in the bundle) with `fast-check`: generated typed tables and grammar-derived statements
@@ -50,6 +56,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Vitest also runs tests under `scripts/` and `oracle/`; `oracle/` joins `tsconfig.node.json`.
 
 ### Fixed
+- **The crash report's "Open an issue" and the footer's "Report an issue" opened a blank form.** Both used
+  `issues/new?body=…`, but the repository disables blank issues, and with blank issues off GitHub sends a bare
+  `issues/new` to the template chooser — dropping the prefilled body. They now name a template
+  (`bug_report.yml` with its `description` / `repro` / `error-boundary` fields; the footer goes to the chooser).
+  Three issue templates also still linked to the repository's old `QueryLens` name.
 - **`WHERE id > NULL` (and `>=`, `<`, `<=`, `BETWEEN … NULL …`, `= NULL`) on an indexed column returned
   rows.** A comparison with `NULL` is UNKNOWN and matches nothing, but the index rules read a `NULL` literal
   as "no bound" and walked the whole index. A `NULL` literal is now never an index key or bound; the

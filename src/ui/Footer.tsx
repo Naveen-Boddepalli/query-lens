@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { newIssueUrl, REPO_URL } from '../buildInfo.ts';
+import { REPO_URL } from '../buildInfo.ts';
 import { DOCS_NAV } from '../docsNav.ts';
 import { NAV_ITEMS } from '../routes.ts';
 import { Logo } from './Logo.tsx';
@@ -61,8 +61,8 @@ const PROJECT_LINKS: FooterLink[] = [
   { label: 'Changelog', href: `${REPO_URL}/blob/main/CHANGELOG.md`, title: 'What changed, and when', external: true },
   {
     label: 'Report an issue',
-    href: newIssueUrl('', 'What happened, and the query / step you were on when it did:\n\n'),
-    title: 'Opens a pre-fillable issue on GitHub',
+    href: `${REPO_URL}/issues/new/choose`,
+    title: 'Pick a bug report, a confusing step, or a feature request on GitHub',
     external: true,
   },
   ...NAV_ITEMS.filter((item) => item.footer).map((item) => ({ label: item.label, href: item.path })),

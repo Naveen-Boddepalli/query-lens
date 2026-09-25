@@ -24,6 +24,8 @@ import {
 } from '../ui/customDatabase.ts';
 import { ErrorBoundary } from '../ui/ErrorBoundary.tsx';
 import { publishRepro } from '../ui/errorReport.ts';
+import { ReportStepLink } from '../ui/ReportStepLink.tsx';
+import type { Moment } from '../ui/stepReport.ts';
 import { PipelineTracker } from '../ui/PipelineTracker.tsx';
 import { PlaybackControls } from '../ui/PlaybackControls.tsx';
 import { SqlEditor } from '../ui/SqlEditor.tsx';
@@ -242,9 +244,12 @@ export function PlaygroundPage() {
     rowsEdited,
   });
 
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      const query = encodeShareState(
+  // The moment as a query string. One derivation feeds both the address bar
+  // (below) and "Report a confusing step", so the link a report carries is
+  // always exactly the one Copy link would give.
+  const shareQuery = useMemo(
+    () =>
+      encodeShareState(
         {
           sql,
           policy,
@@ -257,13 +262,34 @@ export function PlaygroundPage() {
           ...(rowsEdited && table ? { rows: table.rows } : {}),
         },
         table,
-      );
+      ),
+    [sql, policy, predictOn, playback.step, datasetId, isCustom, rowsEdited, table],
+  );
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
       // `present` is a view flag, not part of the shared moment — appended after
       // `encodeShareState` so a copied link still opens the presenter.
-      writeShareState(presenting ? `${query}&present=1` : query);
+      writeShareState(presenting ? `${shareQuery}&present=1` : shareQuery);
     }, 250);
     return () => { window.clearTimeout(timer); };
-  }, [sql, policy, predictOn, playback.step, datasetId, isCustom, rowsEdited, table, presenting]);
+  }, [shareQuery, presenting]);
+
+  // plan.md §25.4 A3 — everything a "confusing step" report needs, from state
+  // the page already holds. Read at render, not from `location`, which trails
+  // the playhead by the address bar's 250 ms debounce.
+  const moment: Moment = {
+    sql,
+    policy,
+    predictOn,
+    step: playback.step,
+    stepCount: result.events.length,
+    stage: state.stage ?? null,
+    narration: state.narration ?? '',
+    dataset: isCustom ? 'a custom database' : datasetId,
+    rowsEdited,
+    shareUrl: `${location.origin}${location.pathname}${shareQuery ? `?${shareQuery}` : ''}`,
+  };
 
   const [copied, setCopied] = useState(false);
   async function copyLink() {
@@ -728,9 +754,12 @@ export function PlaygroundPage() {
             }
           >
             {!prompt && (
-              <h2 className="mb-1 text-label font-medium tracking-[0.12em] text-ink-dim uppercase">
-                Narration
-              </h2>
+              <div className="mb-1 flex items-center justify-between gap-2">
+                <h2 className="text-label font-medium tracking-[0.12em] text-ink-dim uppercase">
+                  Narration
+                </h2>
+                <ReportStepLink moment={moment} />
+              </div>
             )}
             <p className="min-h-10 text-body leading-relaxed" aria-live="polite" aria-atomic="true">
               <span className="sr-only">
