@@ -26,7 +26,7 @@ function queryLens(entry: (typeof LEDGER)[number]): Outcome {
 }
 
 function sqlite(entry: (typeof LEDGER)[number]): Outcome {
-  const db = sqliteWith(entry.tables);
+  const db = sqliteWith(entry.tables, { likeIsCaseSensitive: false });
   try {
     let rows: Raw[][] = [];
     for (const [i, sql] of entry.steps.entries()) {

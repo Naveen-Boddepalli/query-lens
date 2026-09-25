@@ -76,7 +76,7 @@ See [Supported SQL](/docs/reference/sql) for the complete accepted grammar.
 
 ## What's out of scope entirely
 
-No `OR`/`NOT` in `WHERE`, no subqueries, no more than one `JOIN` per query (so no join-order
+No subqueries, no more than one `JOIN` per query (so no join-order
 choice), no outer joins, no true composite (multi-column) indexes, no transactions, no real
 concurrency (the Locks panel is visual only), and no cost-based query optimization — every
 rewrite rule fires on a structural match, never a cost comparison, and the cost *estimates* shown

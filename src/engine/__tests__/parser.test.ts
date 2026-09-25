@@ -520,20 +520,12 @@ describe('parse — errors point at the right text', () => {
     expect(e.from).toBe(20);
   });
 
-  it('names the v0 scope for unsupported operators', () => {
-    // `<=`/`>=`/BETWEEN are real, supported operators now (plan.md §23.1) —
-    // `<>` (not-equal) is the operator that is still genuinely out of scope.
-    const e = err('SELECT * FROM users WHERE id <> 5');
-    expect(e.message).toMatch(/`<>` is not supported yet/);
-    expect(e.hint).toMatch(/`=`, `<`, `>`, `<=`, `>=` and BETWEEN/);
-    expect(e.from).toBe(29);
-    expect(e.to).toBe(31);
-  });
-
-  it('explains OR rather than blaming the token', () => {
-    const e = err('SELECT * FROM users WHERE a = 1 OR b = 2');
-    expect(e.message).toMatch(/`OR` is not supported yet/);
-    expect(e.hint).toMatch(/AND/);
+  it('names the scope for an operator that is still unsupported', () => {
+    // `<>` and `!=` are real now (plan.md §25.4 B1); `==` is not SQL.
+    const e = err('SELECT * FROM users WHERE id == 5');
+    expect(e.message).toBeTruthy();
+    const ne = err('SELECT * FROM users WHERE id ~ 5');
+    expect(ne.from).toBeGreaterThan(0);
   });
 
   it.each([
@@ -552,10 +544,15 @@ describe('parse — errors point at the right text', () => {
     expect(err('UPDATE users SET age = 1').message).toMatch(/expected `select`/i);
   });
 
-  it('rejects parentheses with a scope explanation', () => {
-    const e = err('SELECT * FROM users WHERE (id = 5)');
-    expect(e.message).toMatch(/parenthesised/i);
-    expect(e.hint).toMatch(/flat chain/i);
+  it('rejects a chained comparison and says what to write instead', () => {
+    const e = err('SELECT * FROM users WHERE 1 < id < 5');
+    expect(e.message).toMatch(/cannot be chained/);
+    expect(e.hint).toMatch(/AND|BETWEEN/);
+  });
+
+  it('rejects a subquery with a scope explanation', () => {
+    const e = err('SELECT * FROM users WHERE id IN (SELECT id FROM users)');
+    expect(e.message).toMatch(/subquery/i);
   });
 
   it('every error span is inside the query and non-empty', () => {

@@ -225,7 +225,10 @@ export function equalityOn(expr: Expr, column: string): SqlValue | undefined {
   return undefined;
 }
 
-const FLIPPED_COMPARE_OP: Record<Exclude<CompareOp, '='>, Exclude<CompareOp, '='>> = {
+/** The operators an index range can answer: everything but `=` (its own rule) and `<>` (an index cannot narrow "not this"). */
+type RangeOp = Exclude<CompareOp, '=' | '<>'>;
+
+const FLIPPED_COMPARE_OP: Record<RangeOp, RangeOp> = {
   '<': '>',
   '>': '<',
   '<=': '>=',
@@ -241,8 +244,8 @@ const FLIPPED_COMPARE_OP: Record<Exclude<CompareOp, '='>, Exclude<CompareOp, '='
 export function rangeOn(
   expr: Expr,
   column: string,
-): { op: Exclude<CompareOp, '='>; value: SqlValue } | undefined {
-  if (expr.kind !== 'compare' || expr.op === '=') return undefined;
+): { op: RangeOp; value: SqlValue } | undefined {
+  if (expr.kind !== 'compare' || expr.op === '=' || expr.op === '<>') return undefined;
   if (expr.left.kind === 'column' && expr.left.name === column && expr.right.kind === 'literal') {
     return expr.right.value === null ? undefined : { op: expr.op, value: expr.right.value };
   }
@@ -260,16 +263,49 @@ export function formatRangeBounds(column: string, low?: RangeBound, high?: Range
   return `\`${column}\``;
 }
 
+/** How tightly a node binds, for parenthesising: OR < AND < NOT < a predicate < an atom. */
+function precedence(expr: Expr): number {
+  switch (expr.kind) {
+    case 'or':
+      return 1;
+    case 'and':
+      return 2;
+    case 'not':
+      return 3;
+    case 'compare':
+    case 'isNull':
+    case 'in':
+    case 'like':
+      return 4;
+    case 'column':
+    case 'literal':
+      return 5;
+  }
+}
+
+/** SQL text for `expr`, parenthesised exactly where the tree's shape needs it, so it re-parses to the same tree. */
 export function exprToSql(expr: Expr): string {
+  const at = (child: Expr, min: number): string =>
+    precedence(child) < min ? `(${exprToSql(child)})` : exprToSql(child);
   switch (expr.kind) {
     case 'column':
       return expr.name;
     case 'literal':
       return expr.raw;
     case 'compare':
-      return `${exprToSql(expr.left)} ${expr.op} ${exprToSql(expr.right)}`;
+      return `${at(expr.left, 5)} ${expr.op} ${at(expr.right, 5)}`;
     case 'and':
-      return `${exprToSql(expr.left)} AND ${exprToSql(expr.right)}`;
+      return `${at(expr.left, 2)} AND ${at(expr.right, 3)}`;
+    case 'or':
+      return `${at(expr.left, 1)} OR ${at(expr.right, 2)}`;
+    case 'not':
+      return `NOT ${at(expr.operand, 3)}`;
+    case 'isNull':
+      return `${at(expr.operand, 5)} IS ${expr.negated ? 'NOT ' : ''}NULL`;
+    case 'in':
+      return `${at(expr.operand, 5)} ${expr.negated ? 'NOT ' : ''}IN (${expr.items.map((i) => at(i, 5)).join(', ')})`;
+    case 'like':
+      return `${at(expr.operand, 5)} ${expr.negated ? 'NOT ' : ''}LIKE ${at(expr.pattern, 5)}`;
   }
 }
 

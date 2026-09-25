@@ -37,14 +37,25 @@ export interface Ref {
   table?: string;
 }
 
-export type Op = '=' | '<' | '>' | '<=' | '>=';
+export type Op = '=' | '<>' | '<' | '>' | '<=' | '>=';
 
+/**
+ * A predicate. Leaves compare or test a column; `and` / `or` / `not` nest them
+ * (plan.md §25.4 B1a). A query's `where` is a *list* of predicates joined by
+ * AND, so a top-level `or` is one element and is rendered parenthesised.
+ */
 export type Pred =
   | { k: 'cmp'; ref: Ref; op: Op; lit: SqlValue }
   | { k: 'colcmp'; a: Ref; op: Op; b: Ref }
   /** Two literals — the optimizer's constant-folding rule exists for these. */
   | { k: 'litcmp'; a: SqlValue; op: Op; b: SqlValue }
-  | { k: 'between'; ref: Ref; lo: SqlValue; hi: SqlValue };
+  | { k: 'between'; ref: Ref; lo: SqlValue; hi: SqlValue; neg?: boolean }
+  | { k: 'isnull'; ref: Ref; neg: boolean }
+  | { k: 'in'; ref: Ref; list: SqlValue[]; neg: boolean }
+  | { k: 'like'; ref: Ref; pattern: string; neg: boolean }
+  | { k: 'not'; p: Pred }
+  | { k: 'and'; a: Pred; b: Pred }
+  | { k: 'or'; a: Pred; b: Pred };
 
 export type AggFn = 'COUNT' | 'SUM' | 'AVG' | 'MIN' | 'MAX';
 export interface AggItem {
@@ -110,7 +121,7 @@ export function renderLiteral(value: SqlValue): string {
   return String(value);
 }
 
-function renderPred(p: Pred): string {
+export function renderPred(p: Pred): string {
   switch (p.k) {
     case 'cmp':
       return `${renderRef(p.ref)} ${p.op} ${renderLiteral(p.lit)}`;
@@ -119,11 +130,34 @@ function renderPred(p: Pred): string {
     case 'litcmp':
       return `${renderLiteral(p.a)} ${p.op} ${renderLiteral(p.b)}`;
     case 'between':
-      return `${renderRef(p.ref)} BETWEEN ${renderLiteral(p.lo)} AND ${renderLiteral(p.hi)}`;
+      return `${renderRef(p.ref)} ${p.neg ? 'NOT ' : ''}BETWEEN ${renderLiteral(p.lo)} AND ${renderLiteral(p.hi)}`;
+    case 'isnull':
+      return `${renderRef(p.ref)} IS ${p.neg ? 'NOT ' : ''}NULL`;
+    case 'in':
+      return `${renderRef(p.ref)} ${p.neg ? 'NOT ' : ''}IN (${p.list.map(renderLiteral).join(', ')})`;
+    case 'like':
+      return `${renderRef(p.ref)} ${p.neg ? 'NOT ' : ''}LIKE ${renderLiteral(p.pattern)}`;
+    // Compound predicates are always parenthesised: the text never relies on precedence to mean what it says.
+    case 'not':
+      return `NOT (${renderPred(p.p)})`;
+    case 'and':
+      return `(${renderPred(p.a)} AND ${renderPred(p.b)})`;
+    case 'or':
+      return `(${renderPred(p.a)} OR ${renderPred(p.b)})`;
   }
 }
 
-const renderWhere = (where: readonly Pred[]): string =>
+/** Depth-first over a predicate tree. */
+export function walkPred(p: Pred, visit: (p: Pred) => void): void {
+  visit(p);
+  if (p.k === 'not') walkPred(p.p, visit);
+  else if (p.k === 'and' || p.k === 'or') {
+    walkPred(p.a, visit);
+    walkPred(p.b, visit);
+  }
+}
+
+export const renderWhere = (where: readonly Pred[]): string =>
   where.length === 0 ? '' : ` WHERE ${where.map(renderPred).join(' AND ')}`;
 
 const renderAgg = (a: AggItem): string => `${a.fn}(${a.arg === '*' ? '*' : renderRef(a.arg)})`;

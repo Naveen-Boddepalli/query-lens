@@ -12,6 +12,7 @@
 
 import type { PredictionPrompt, SqlValue, Table } from '../types.ts';
 import { indexSelectionPrompt } from '../predict.ts';
+import { mapChildren, walkExpr } from '../parser/index.ts';
 import type { CompareOp, Expr } from '../parser/index.ts';
 import { conjoin, conjuncts, equalityOn, exprToSql, formatRangeBounds, rangeOn } from './plan.ts';
 import type { Plan, RangeBound } from './plan.ts';
@@ -99,6 +100,8 @@ function orderedCompare<T extends number | string>(op: CompareOp, a: T, b: T): b
   switch (op) {
     case '=':
       return a === b;
+    case '<>':
+      return a !== b;
     case '<':
       return a < b;
     case '>':
@@ -218,15 +221,11 @@ const predicatePushdown: Rule = (input) => {
 
 /** Every table a qualified column reference inside `expr` names. Empty for a literal. */
 function tablesReferencedBy(expr: Expr): Set<string> {
-  switch (expr.kind) {
-    case 'literal':
-      return new Set();
-    case 'column':
-      return expr.table ? new Set([expr.table]) : new Set();
-    case 'compare':
-    case 'and':
-      return new Set([...tablesReferencedBy(expr.left), ...tablesReferencedBy(expr.right)]);
-  }
+  const tables = new Set<string>();
+  walkExpr(expr, (e) => {
+    if (e.kind === 'column' && e.table) tables.add(e.table);
+  });
+  return tables;
 }
 
 /**
@@ -239,19 +238,12 @@ function tablesReferencedBy(expr: Expr): Set<string> {
  * off a row that has no such key and silently match nothing.
  */
 function stripTableQualifiers(expr: Expr): Expr {
-  switch (expr.kind) {
-    case 'literal':
-      return expr;
-    case 'column': {
-      if (!expr.table) return expr;
-      const { table: _table, ...rest } = expr;
-      return rest;
-    }
-    case 'compare':
-      return { ...expr, left: stripTableQualifiers(expr.left), right: stripTableQualifiers(expr.right) };
-    case 'and':
-      return { ...expr, left: stripTableQualifiers(expr.left), right: stripTableQualifiers(expr.right) };
+  if (expr.kind === 'column') {
+    if (!expr.table) return expr;
+    const { table: _table, ...rest } = expr;
+    return rest;
   }
+  return mapChildren(expr, stripTableQualifiers);
 }
 
 /**

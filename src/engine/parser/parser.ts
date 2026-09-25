@@ -16,10 +16,17 @@
  *   selectList    := '*' | selectItem (',' selectItem)*
  *   selectItem    := qualifiedColumn | aggregateCall
  *   aggregateCall := ('COUNT'|'SUM'|'AVG'|'MIN'|'MAX') '(' ('*' | qualifiedColumn) ')'
- *   expr          := comparison (AND comparison)*
- *   comparison    := operand ('=' | '<' | '>' | '<=' | '>=') operand
- *                     | operand BETWEEN operand AND operand
- *   operand       := qualifiedColumn | number | string | NULL | TRUE | FALSE
+ *   expr          := orExpr
+ *   orExpr        := andExpr (OR andExpr)*
+ *   andExpr       := notExpr (AND notExpr)*
+ *   notExpr       := NOT notExpr | predicate
+ *   predicate     := operand ( compareOp operand
+ *                            | [NOT] BETWEEN operand AND operand
+ *                            | IS [NOT] NULL
+ *                            | [NOT] IN '(' operand (',' operand)* ')'
+ *                            | [NOT] LIKE operand )?
+ *   compareOp     := '=' | '<>' | '!=' | '<' | '>' | '<=' | '>='
+ *   operand       := qualifiedColumn | number | string | NULL | TRUE | FALSE | '(' expr ')'
  *   qualifiedColumn := identifier ['.' identifier]
  *
  * `GROUP BY` and `ORDER BY` are mutually exclusive — the parser rejects a
@@ -93,8 +100,6 @@ const OUT_OF_SCOPE: Record<string, string> = {
   OFFSET: 'OFFSET is not in the v0 subset — LIMIT on its own is.',
   DISTINCT: 'DISTINCT is not in the v0 subset.',
   UNION: 'UNION is not in the v0 subset.',
-  OR: 'v0 supports AND only. Combine predicates with AND.',
-  NOT: 'v0 supports =, <, >, <=, >= and BETWEEN, combined with AND.',
   CREATE: 'QueryLens only runs SELECT, DELETE, INSERT and UPDATE. Edit the seed data to change the table.',
   DROP: 'QueryLens only runs SELECT, DELETE, INSERT and UPDATE. Edit the seed data to change the table.',
 };
@@ -108,6 +113,8 @@ const describe = (t: Token): string =>
 
 interface Cursor {
   peek: () => Token;
+  /** `n` tokens past the current one (`peekAt(0)` is `peek()`); the EOF token once past the end. */
+  peekAt: (n: number) => Token;
   next: () => Token;
   atEnd: () => boolean;
   guardScope: (token: Token) => void;
@@ -118,6 +125,7 @@ interface Cursor {
 function makeCursor(tokens: Token[]): Cursor {
   let pos = 0;
   const peek = (): Token => tokens[pos]!;
+  const peekAt = (n: number): Token => tokens[Math.min(pos + n, tokens.length - 1)]!;
   const next = (): Token => tokens[pos++]!;
   const atEnd = (): boolean => peek().type === 'eof';
 
@@ -149,7 +157,7 @@ function makeCursor(tokens: Token[]): Cursor {
     throw new ParseError(`Expected ${what}, found ${describe(token)}.`, token);
   }
 
-  return { peek, next, atEnd, guardScope, expectKeyword, expectIdentifier };
+  return { peek, peekAt, next, atEnd, guardScope, expectKeyword, expectIdentifier };
 }
 
 /** The v0 aggregate functions. Not tokenizer keywords — they parse as identifiers, recognised by name here. */
@@ -403,6 +411,9 @@ function checkJoinValidity(
   }
 }
 
+const isKeyword = (t: Token, ...words: string[]): boolean => t.type === 'keyword' && words.includes(t.upper);
+
+/** A literal, a column, or a parenthesised expression — the leaves every predicate is built from. */
 function parseOperand(c: Cursor): Expr {
   const token = c.peek();
 
@@ -445,27 +456,39 @@ function parseOperand(c: Cursor): Expr {
     };
   }
   if (token.type === 'lparen') {
-    throw new ParseError(
-      'Parenthesised expressions are not supported yet.',
-      token,
-      'v0 predicates are a flat chain of comparisons joined by AND.',
-    );
+    c.next();
+    const inner = parseExpr(c);
+    const close = c.peek();
+    if (close.type !== 'rparen') {
+      c.guardScope(close);
+      throw new ParseError(`Expected \`)\` to close the parenthesis, found ${describe(close)}.`, close);
+    }
+    c.next();
+    // The span takes in the parentheses, so the editor highlights what was actually written.
+    return { ...inner, span: { from: token.from, to: close.to } };
   }
 
+  if (isKeyword(token, 'SELECT')) {
+    throw new ParseError(
+      'A subquery is not supported here.',
+      token,
+      'v2 has no subqueries yet — write the values out, or join the two tables.',
+    );
+  }
   c.guardScope(token);
   throw new ParseError(`Expected a column name or a value, found ${describe(token)}.`, token);
 }
 
-const COMPARE_OPS = ['=', '<', '>', '<=', '>='];
+const COMPARE_OPS = ['=', '<>', '!=', '<', '>', '<=', '>='];
 
-/** `left op operand`, given `left` already parsed — shared by `parseComparison` and the plain (non-BETWEEN) half of `parseComparisonOrBetween`. */
+/** `left op operand`, given `left` already parsed — shared by `parseComparison` and the plain (non-BETWEEN) half of `parsePredicate`. */
 function finishComparison(c: Cursor, left: Expr): Extract<Expr, { kind: 'compare' }> {
   const opToken = c.peek();
 
   if (opToken.type !== 'operator') {
     c.guardScope(opToken);
     throw new ParseError(
-      `Expected \`=\`, \`<\`, \`>\`, \`<=\`, \`>=\` or \`BETWEEN\`, found ${describe(opToken)}.`,
+      `Expected \`=\`, \`<>\`, \`<\`, \`>\`, \`<=\`, \`>=\`, \`BETWEEN\`, \`IN\`, \`LIKE\` or \`IS\`, found ${describe(opToken)}.`,
       opToken,
     );
   }
@@ -473,15 +496,24 @@ function finishComparison(c: Cursor, left: Expr): Extract<Expr, { kind: 'compare
     throw new ParseError(
       `\`${opToken.value}\` is not supported yet.`,
       opToken,
-      'v0 supports `=`, `<`, `>`, `<=`, `>=` and BETWEEN.',
+      'QueryLens compares with `=`, `<>`, `<`, `>`, `<=`, `>=`, and also has BETWEEN, IN, LIKE and IS NULL.',
     );
   }
   c.next();
 
   const right = parseOperand(c);
+  // `a < b < c` is legal in some engines and means something nobody intends; say what to write instead.
+  const again = c.peek();
+  if (again.type === 'operator' && COMPARE_OPS.includes(again.value)) {
+    throw new ParseError(
+      'A comparison compares two things — it cannot be chained.',
+      again,
+      'Write `a < b AND b < c`, or use `b BETWEEN a AND c`.',
+    );
+  }
   return {
     kind: 'compare',
-    op: opToken.value as CompareOp,
+    op: (opToken.value === '!=' ? '<>' : opToken.value) as CompareOp,
     left,
     right,
     span: { from: left.span.from, to: right.span.to },
@@ -493,39 +525,100 @@ function parseComparison(c: Cursor): Extract<Expr, { kind: 'compare' }> {
   return finishComparison(c, parseOperand(c));
 }
 
-/**
- * `operand BETWEEN operand AND operand` desugars to `operand >= lo AND
- * operand <= hi` right here, rather than adding a `between` `Expr` kind — the
- * two comparisons that come out are indistinguishable from ones written by
- * hand, so `index-selection`'s range rule, the cost model's selectivity
- * estimate, `evaluate.ts`, and every other conjunct-walking piece of the
- * engine all handle a `BETWEEN` for free, with zero new code.
- */
-function parseComparisonOrBetween(c: Cursor): Expr {
-  const left = parseOperand(c);
+/** True for a node that is a truth value on its own, so `WHERE (a = 1 OR b = 2)` needs no operator after it. */
+const isBooleanNode = (e: Expr): boolean => e.kind !== 'column' && e.kind !== 'literal';
 
-  if (c.peek().type === 'keyword' && c.peek().upper === 'BETWEEN') {
+/**
+ * One predicate: an operand followed by whatever it is being tested against.
+ *
+ * `x BETWEEN lo AND hi` desugars to `x >= lo AND x <= hi` right here, rather
+ * than adding a `between` `Expr` kind — the two comparisons that come out are
+ * indistinguishable from ones written by hand, so `index-selection`'s range
+ * rule, the cost model's selectivity estimate, `evaluate.ts`, and every other
+ * conjunct-walking piece of the engine all handle a `BETWEEN` for free.
+ * `NOT BETWEEN` is that, wrapped in `not`.
+ */
+function parsePredicate(c: Cursor): Expr {
+  const left = parseOperand(c);
+  const first = c.peek();
+
+  // A parenthesised predicate is already a truth value: `(a = 1 OR b = 2)`.
+  if (isBooleanNode(left) && !(first.type === 'operator' || isKeyword(first, 'IS', 'NOT', 'IN', 'LIKE', 'BETWEEN'))) {
+    return left;
+  }
+
+  if (isKeyword(first, 'IS')) {
+    c.next();
+    const negated = isKeyword(c.peek(), 'NOT') ? (c.next(), true) : false;
+    const nullToken = c.expectKeyword('NULL', 'after IS' + (negated ? ' NOT' : ''));
+    return { kind: 'isNull', operand: left, negated, span: { from: left.span.from, to: nullToken.to } };
+  }
+
+  const negated = isKeyword(first, 'NOT') && isKeyword(c.peekAt(1), 'BETWEEN', 'IN', 'LIKE');
+  if (negated) c.next();
+  const word = c.peek();
+
+  if (isKeyword(word, 'BETWEEN')) {
     c.next();
     const low = parseOperand(c);
     c.expectKeyword('AND', 'between the two bounds of a BETWEEN range');
     const high = parseOperand(c);
-    return {
+    const between: Expr = {
       kind: 'and',
       left: { kind: 'compare', op: '>=', left, right: low, span: { from: left.span.from, to: low.span.to } },
       right: { kind: 'compare', op: '<=', left, right: high, span: { from: left.span.from, to: high.span.to } },
       span: { from: left.span.from, to: high.span.to },
     };
+    return negated ? { kind: 'not', operand: between, span: between.span } : between;
+  }
+
+  if (isKeyword(word, 'IN')) {
+    c.next();
+    const open = c.peek();
+    if (open.type !== 'lparen') {
+      c.guardScope(open);
+      throw new ParseError(`Expected \`(\` after IN, found ${describe(open)}.`, open, 'IN takes a list of values: `x IN (1, 2, 3)`.');
+    }
+    const list = parseParenList(c, 'IN list', parseOperand);
+    return { kind: 'in', operand: left, items: list.items, negated, span: { from: left.span.from, to: list.to } };
+  }
+
+  if (isKeyword(word, 'LIKE')) {
+    c.next();
+    const pattern = parseOperand(c);
+    return { kind: 'like', operand: left, pattern, negated, span: { from: left.span.from, to: pattern.span.to } };
   }
 
   return finishComparison(c, left);
 }
 
-function parseExpr(c: Cursor): Expr {
-  let left: Expr = parseComparisonOrBetween(c);
-  while (c.peek().type === 'keyword' && c.peek().upper === 'AND') {
+function parseNotExpr(c: Cursor): Expr {
+  const token = c.peek();
+  if (isKeyword(token, 'NOT')) {
     c.next();
-    const right = parseComparisonOrBetween(c);
+    const operand = parseNotExpr(c);
+    return { kind: 'not', operand, span: { from: token.from, to: operand.span.to } };
+  }
+  return parsePredicate(c);
+}
+
+function parseAndExpr(c: Cursor): Expr {
+  let left = parseNotExpr(c);
+  while (isKeyword(c.peek(), 'AND')) {
+    c.next();
+    const right = parseNotExpr(c);
     left = { kind: 'and', left, right, span: { from: left.span.from, to: right.span.to } };
+  }
+  return left;
+}
+
+/** `OR` binds loosest, then `AND`, then `NOT` — so `a OR b AND c` is `a OR (b AND c)`. */
+function parseExpr(c: Cursor): Expr {
+  let left = parseAndExpr(c);
+  while (isKeyword(c.peek(), 'OR')) {
+    c.next();
+    const right = parseAndExpr(c);
+    left = { kind: 'or', left, right, span: { from: left.span.from, to: right.span.to } };
   }
   return left;
 }

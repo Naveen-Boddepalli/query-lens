@@ -94,7 +94,7 @@ export const tableU = (t: TableSpec): fc.Arbitrary<TableSpec> => {
 /* Predicates                                                                  */
 /* -------------------------------------------------------------------------- */
 
-const OPS: Op[] = ['=', '<', '>', '<=', '>='];
+const OPS: Op[] = ['=', '<>', '<', '>', '<=', '>='];
 const opArb = fc.constantFrom(...OPS);
 
 const numeric = (t: ColType): boolean => t === 'int' || t === 'real';
@@ -133,14 +133,19 @@ function literalFor(ref: Ref, pool: Pool): fc.Arbitrary<SqlValue> {
 const literalArb = (type: ColType): fc.Arbitrary<SqlValue> =>
   fc.oneof({ weight: 12, arbitrary: typedLiteral(type) }, { weight: 1, arbitrary: fc.constant(null) });
 
-function predArb(refs: readonly Ref[], pool: Pool): fc.Arbitrary<Pred> {
+const LIKE_PATTERNS = ['a%', '%a', '_b', 'a_c', '%b%', '%', 'ab', '', 'z%', 'Z%', '_', '__', '%_', "it%", "i_'s", 'b_', '%z'] as const;
+
+/** A leaf predicate: one comparison or one test on a column (or two literals). */
+function leafArb(refs: readonly Ref[], pool: Pool): fc.Arbitrary<Pred> {
   const refArb = fc.constantFrom(...refs);
   const cmp = fc
     .tuple(refArb, opArb)
     .chain(([ref, op]) => literalFor(ref, pool).map((lit): Pred => ({ k: 'cmp', ref, op, lit })));
-  const between = refArb.chain((ref) =>
-    fc.tuple(literalFor(ref, pool), literalFor(ref, pool)).map(([lo, hi]): Pred => ({ k: 'between', ref, lo, hi })),
-  );
+  const between = fc
+    .tuple(refArb, fc.boolean())
+    .chain(([ref, neg]) =>
+      fc.tuple(literalFor(ref, pool), literalFor(ref, pool)).map(([lo, hi]): Pred => ({ k: 'between', ref, lo, hi, neg })),
+    );
   // `a` against itself is included on purpose: `n = n` is UNKNOWN when `n` is NULL, not TRUE.
   const pairs = refs.flatMap((a) => refs.filter((b) => comparable(a, b)).map((b) => [a, b] as const));
   const colcmp =
@@ -157,7 +162,47 @@ function predArb(refs: readonly Ref[], pool: Pool): fc.Arbitrary<Pred> {
   const litcmp = fc
     .tuple(fc.constantFrom<ColType>('int', 'text'), opArb)
     .chain(([type, op]) => fc.tuple(literalArb(type), literalArb(type)).map(([a, b]): Pred => ({ k: 'litcmp', a, op, b })));
-  return fc.oneof({ weight: 6, arbitrary: cmp }, { weight: 2, arbitrary: between }, { weight: 1, arbitrary: litcmp }, ...colcmp);
+  const isnull = fc.tuple(refArb, fc.boolean()).map(([ref, neg]): Pred => ({ k: 'isnull', ref, neg }));
+  // IN's list may hold a NULL (literalFor allows one) — `x NOT IN (1, NULL)` is the classic trap.
+  const inList = fc
+    .tuple(refArb, fc.boolean())
+    .chain(([ref, neg]) =>
+      fc.array(literalFor(ref, pool), { minLength: 1, maxLength: 4 }).map((list): Pred => ({ k: 'in', ref, list, neg })),
+    );
+  const textRefs = refs.filter((r) => r.type === 'text');
+  const like =
+    textRefs.length === 0
+      ? []
+      : [
+          {
+            weight: 2,
+            arbitrary: fc
+              .tuple(fc.constantFrom(...textRefs), fc.constantFrom(...LIKE_PATTERNS), fc.boolean())
+              .map(([ref, pattern, neg]): Pred => ({ k: 'like', ref, pattern, neg })),
+          },
+        ];
+  return fc.oneof(
+    { weight: 6, arbitrary: cmp },
+    { weight: 2, arbitrary: between },
+    { weight: 1, arbitrary: litcmp },
+    { weight: 2, arbitrary: isnull },
+    { weight: 2, arbitrary: inList },
+    ...like,
+    ...colcmp,
+  );
+}
+
+/** A predicate tree at most `depth` levels of `AND` / `OR` / `NOT` deep. */
+export function predArb(refs: readonly Ref[], pool: Pool, depth = 2): fc.Arbitrary<Pred> {
+  const leaf = leafArb(refs, pool);
+  if (depth <= 0) return leaf;
+  const sub = predArb(refs, pool, depth - 1);
+  return fc.oneof(
+    { weight: 6, arbitrary: leaf },
+    { weight: 1, arbitrary: fc.tuple(sub, sub).map(([a, b]): Pred => ({ k: 'or', a, b })) },
+    { weight: 1, arbitrary: fc.tuple(sub, sub).map(([a, b]): Pred => ({ k: 'and', a, b })) },
+    { weight: 1, arbitrary: sub.map((p): Pred => ({ k: 'not', p })) },
+  );
 }
 
 /** Zero predicates a third of the time — an over-constrained WHERE returns nothing, and an empty answer tests very little. */

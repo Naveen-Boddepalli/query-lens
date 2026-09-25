@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Richer `WHERE`: `OR`, `NOT`, parentheses, `<>`, `IS [NOT] NULL`, `IN`, `LIKE`** (plan.md §25.4 B1, first slice) —
+  the ceiling a sceptical student hit in ten minutes. A predicate is now a tree (`OR` binds loosest, then `AND`,
+  then `NOT`, then one test on an operand) with real three-valued logic: `NOT` of UNKNOWN stays UNKNOWN, so
+  `NOT (age > 40)` does not return the NULL-age rows, and `x NOT IN (1, NULL)` is never true — the trap, modelled
+  rather than papered over. `[NOT] BETWEEN`, `!=` (as `<>`) and `[NOT] LIKE` (`%` and `_`, case-sensitive,
+  PostgreSQL's rule) come with them. An `OR` is one opaque conjunct, so `id = 5 AND (a OR b)` still becomes an
+  index lookup; `OR`, `NOT`, `IN`, `LIKE` and `<>` are never index candidates. The plan and AST trees show every
+  new node, the cost model estimates each one (and names the heuristic), and the Supported SQL page has the truth
+  tables. Checked by a new **ternary-logic-partitioning** suite (a predicate, its negation and its `IS NULL`
+  must partition every table — no external oracle needed) and by the SQLite differential run.
 - **Opt-in field performance in the study kit** (plan.md §25.4 A6) — §14.2's open question, *does it feel fast
   on a lecture-hall laptop?*, cannot be answered by telemetry the project refuses to have, so it can only be
   *volunteered*. The study's consent screen gains a separate, unticked box: record this device's **INP**

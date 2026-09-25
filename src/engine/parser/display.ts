@@ -102,6 +102,44 @@ function exprNode(expr: Expr, id: string): ASTNode {
         span: expr.span,
         children: [exprNode(expr.left, `${id}.l`), exprNode(expr.right, `${id}.r`)],
       };
+    case 'or':
+      return {
+        id,
+        kind: 'Or',
+        label: 'OR',
+        span: expr.span,
+        children: [exprNode(expr.left, `${id}.l`), exprNode(expr.right, `${id}.r`)],
+      };
+    case 'not':
+      return { id, kind: 'Not', label: 'NOT', span: expr.span, children: [exprNode(expr.operand, `${id}.o`)] };
+    case 'isNull':
+      return {
+        id,
+        kind: 'IsNull',
+        label: expr.negated ? 'IS NOT NULL' : 'IS NULL',
+        span: expr.span,
+        children: [exprNode(expr.operand, `${id}.o`)],
+      };
+    case 'in':
+      return {
+        id,
+        kind: 'In',
+        label: expr.negated ? 'NOT IN' : 'IN',
+        detail: `${expr.items.length} value${expr.items.length === 1 ? '' : 's'}`,
+        span: expr.span,
+        children: [
+          exprNode(expr.operand, `${id}.o`),
+          ...expr.items.map((item, i) => exprNode(item, `${id}.i${i}`)),
+        ],
+      };
+    case 'like':
+      return {
+        id,
+        kind: 'Like',
+        label: expr.negated ? 'NOT LIKE' : 'LIKE',
+        span: expr.span,
+        children: [exprNode(expr.operand, `${id}.o`), exprNode(expr.pattern, `${id}.p`)],
+      };
   }
 }
 

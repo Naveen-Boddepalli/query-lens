@@ -14,6 +14,8 @@ syntax error.
 SELECT * FROM users;
 SELECT id, name FROM users WHERE age > 30 AND name = 'Ada';
 SELECT * FROM users WHERE id BETWEEN 10 AND 20;
+SELECT * FROM users WHERE (age < 30 OR age > 60) AND name LIKE 'a%' AND email IS NOT NULL;
+SELECT * FROM users WHERE id IN (1, 5, 9) OR NOT age >= 18;
 SELECT authors.name, posts.title FROM authors JOIN posts ON authors.id = posts.authorId;
 SELECT status, COUNT(*), AVG(attempts) FROM logins GROUP BY status;
 SELECT * FROM users ORDER BY age DESC LIMIT 5;
@@ -28,10 +30,8 @@ SELECT * FROM users ORDER BY age DESC LIMIT 5;
   than one `JOIN` per query. Every column reference is qualified (`authors.id`, not `id`) once a
   query has a `JOIN` — there is no ambiguity resolution. A `JOIN` cannot combine with `GROUP BY`,
   `ORDER BY`, or an aggregate in the SELECT list.
-- **`WHERE`**: any number of comparisons joined with `AND` (no `OR`, no `NOT`).
-  - Operators: `=`, `<`, `>`, `<=`, `>=`.
-  - `BETWEEN lo AND hi` — sugar for `col >= lo AND col <= hi`.
-  - Literals: numbers, single-quoted strings, `TRUE`/`FALSE`, `NULL`.
+- **`WHERE`**: a predicate built from comparisons and tests, combined with `AND`, `OR` and `NOT`
+  and grouped with parentheses — see [Predicates](#predicates) below.
 - **`GROUP BY`**: one or more columns. Aggregates: `COUNT(*)`, `COUNT`/`SUM`/`AVG`/`MIN`/`MAX` over
   a column. Every plain column in the SELECT list must be grouped or wrapped in an aggregate.
   Mutually exclusive with `ORDER BY`.
@@ -39,6 +39,43 @@ SELECT * FROM users ORDER BY age DESC LIMIT 5;
 - **`LIMIT`**: a non-negative integer, always the outermost clause.
 - Keywords are case-insensitive, `--` starts a line comment, `/* */` a block comment, and a
   trailing `;` is optional.
+
+## Predicates
+
+A `WHERE` clause is a tree. From loosest to tightest binding: `OR`, then `AND`, then `NOT`, then one
+*test* on an operand — so `a OR b AND c` means `a OR (b AND c)`, and parentheses override it.
+
+| Test | Meaning |
+|---|---|
+| `x = y`, `x <> y` (or `x != y`), `x < y`, `x > y`, `x <= y`, `x >= y` | Comparison. A comparison cannot be chained (`a < b < c` is an error) — write `a < b AND b < c`. |
+| `x BETWEEN lo AND hi`, `x NOT BETWEEN lo AND hi` | Sugar for `x >= lo AND x <= hi`, and `NOT (…)` of that. |
+| `x IS NULL`, `x IS NOT NULL` | Whether the value is NULL. The only test that is never UNKNOWN. |
+| `x IN (a, b, …)`, `x NOT IN (a, b, …)` | Equal to any listed value. Values only — no subquery. |
+| `x LIKE pattern`, `x NOT LIKE pattern` | `%` matches any run of characters, `_` exactly one. **Case-sensitive**, no escape character. |
+
+An operand is a column, a literal (number, single-quoted string, `TRUE`/`FALSE`, `NULL`), or a
+parenthesised predicate.
+
+**Three-valued logic.** Comparing anything with `NULL` is neither true nor false but **UNKNOWN**, and
+only TRUE passes a `WHERE`. So `x = NULL` matches nothing (write `x IS NULL`), and `NOT (age > 40)`
+does *not* return the rows `age > 40` left out: a row whose `age` is NULL is in neither. The rules:
+
+| | AND | OR | NOT |
+|---|---|---|---|
+| TRUE, TRUE | TRUE | TRUE | — |
+| TRUE, UNKNOWN | UNKNOWN | **TRUE** | — |
+| FALSE, UNKNOWN | **FALSE** | UNKNOWN | — |
+| UNKNOWN, UNKNOWN | UNKNOWN | UNKNOWN | — |
+| (single operand) | — | — | UNKNOWN stays UNKNOWN |
+
+The one that catches everybody: **`x NOT IN (1, 2, NULL)` is never TRUE.** `x <> NULL` is UNKNOWN for
+every `x`, so a NULL anywhere in the list turns every miss into UNKNOWN — the query returns nothing.
+Run it in the [Playground](/playground) on a table with a NULL in it (**Edit data** to add one) and open
+the parse stage: the WHERE tree shows every node of the predicate.
+
+`OR`, `NOT`, `IN`, `LIKE` and `<>` never become an index lookup — only a top-level `AND`ed equality or
+range on an indexed column does. `WHERE id = 5 AND (age < 30 OR age IS NULL)` still uses the index for
+`id = 5` and rechecks the parenthesised part on the one row it finds.
 
 ## DELETE, INSERT, UPDATE
 
@@ -75,9 +112,7 @@ with a generic syntax error:
 | `OFFSET` | *OFFSET is not in the v0 subset — LIMIT on its own is.* |
 | `DISTINCT` | *DISTINCT is not in the v0 subset.* |
 | `UNION` | *UNION is not in the v0 subset.* |
-| `OR` | *v0 supports AND only. Combine predicates with AND.* |
-| `NOT` | *v0 supports =, &lt;, &gt;, &lt;=, &gt;= and BETWEEN, combined with AND.* |
-| `<>`, `!=` | *Not supported yet — v0 supports =, &lt;, &gt;, &lt;=, &gt;= and BETWEEN.* |
+| A subquery, `x IN (SELECT …)` | *A subquery is not supported here — write the values out, or join the two tables.* |
 | `CREATE` / `DROP` | *QueryLens only runs SELECT, DELETE, INSERT and UPDATE. Edit the seed data to change the table.* |
 
 ## The seed tables

@@ -119,10 +119,29 @@ export const GRAMMAR: GrammarRule[] = [
       lit(')'),
     ],
   },
-  { name: 'expr', parts: [rule('comparison'), repeat(lit('AND'), rule('comparison'))] },
+  // A predicate, loosest binding first: OR, then AND, then NOT, then one test on an operand (plan.md §25.4 B1).
+  { name: 'expr', parts: [rule('orExpr')] },
+  { name: 'orExpr', parts: [rule('andExpr'), repeat(lit('OR'), rule('andExpr'))] },
+  { name: 'andExpr', parts: [rule('notExpr'), repeat(lit('AND'), rule('notExpr'))] },
+  { name: 'notExpr', parts: [choice([lit('NOT'), rule('notExpr')], [rule('predicate')])] },
   {
-    name: 'comparison',
-    parts: [rule('operand'), choice([lit('=')], [lit('<')], [lit('>')]), rule('operand')],
+    name: 'predicate',
+    parts: [
+      rule('operand'),
+      opt(
+        choice(
+          [rule('compareOp'), rule('operand')],
+          [opt(lit('NOT')), lit('BETWEEN'), rule('operand'), lit('AND'), rule('operand')],
+          [lit('IS'), opt(lit('NOT')), lit('NULL')],
+          [opt(lit('NOT')), lit('IN'), lit('('), rule('operand'), repeat(lit(','), rule('operand')), lit(')')],
+          [opt(lit('NOT')), lit('LIKE'), rule('operand')],
+        ),
+      ),
+    ],
+  },
+  {
+    name: 'compareOp',
+    parts: [choice([lit('=')], [lit('<>')], [lit('!=')], [lit('<')], [lit('>')], [lit('<=')], [lit('>=')])],
   },
   {
     name: 'operand',
@@ -134,6 +153,7 @@ export const GRAMMAR: GrammarRule[] = [
         [lit('NULL')],
         [lit('TRUE')],
         [lit('FALSE')],
+        [lit('('), rule('expr'), lit(')')],
       ),
     ],
   },

@@ -12,7 +12,7 @@ export {
   toDisplayTree,
   updateDisplayTree,
 } from './display.ts';
-export { columnKey, columnsIn, selectItemArgColumn, selectItemKey, walkExpr } from './ast.ts';
+export { childrenOf, columnKey, columnsIn, mapChildren, selectItemArgColumn, selectItemKey, walkExpr } from './ast.ts';
 export type {
   AggregateFn,
   CompareOp,

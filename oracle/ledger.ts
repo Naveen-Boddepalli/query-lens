@@ -116,6 +116,17 @@ export const LEDGER: Divergence[] = [
     expect: { querylens: { rows: [['😀'], ['�']] }, sqlite: { rows: [['�'], ['😀']] } },
   },
   {
+    id: 'like-case-sensitivity',
+    title: 'Is LIKE case-sensitive?',
+    kind: 'design',
+    querylens: 'Yes — `LIKE \'z%\'` matches `zz` but not `Z`, as in PostgreSQL. (There is no `ILIKE`.)',
+    sqlite: 'No, by default — for ASCII letters `LIKE` ignores case, so it matches both. (`PRAGMA case_sensitive_like` turns it off; the oracle does, so `LIKE` itself is compared.)',
+    tables: t([{ name: 's', type: 'text' }], [{ s: 'Z' }, { s: 'zz' }, { s: 'a' }]),
+    steps: ["SELECT s FROM t WHERE s LIKE 'z%'"],
+    columns: ['s'],
+    expect: { querylens: { rows: [['zz']] }, sqlite: { rows: [['Z'], ['zz']] } },
+  },
+  {
     id: 'identifier-case',
     title: 'Are column names case-sensitive?',
     kind: 'design',

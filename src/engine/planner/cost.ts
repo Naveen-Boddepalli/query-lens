@@ -21,6 +21,11 @@ import type { Plan } from './plan.ts';
 export const OPEN_RANGE_SELECTIVITY = 1 / 3;
 /** Default equality selectivity when a column has no distinct-value stats. */
 export const NO_STATS_EQ_SELECTIVITY = 0.1;
+/**
+ * `LIKE` has no honest closed form without a histogram of prefixes — a guess of
+ * one row in ten, the classic optimizer default. Named as a default on the node.
+ */
+export const LIKE_SELECTIVITY = 0.1;
 /** B+Tree fan-out — `DEFAULT_MAX_KEYS` in src/engine/index/btree.ts. */
 const FANOUT = 4;
 
@@ -73,7 +78,7 @@ function equalitySelectivity(column: string | null, table: Table): Selectivity {
 
 function rangeSelectivity(
   column: string | null,
-  op: Exclude<CompareOp, '='>,
+  op: Exclude<CompareOp, '=' | '<>'>,
   literal: SqlValue | null,
   table: Table,
 ): Selectivity {
@@ -138,7 +143,27 @@ export function boundedRangeSelectivity(
   return { fraction, basis: `~${String(Math.round(fraction * 100))}% by range (${boundsLabel})` };
 }
 
-/** Selectivity of a predicate, with the heuristic that produced it. */
+/** The fraction of `column`'s values that are NULL — counted from the data, not guessed. */
+function nullSelectivity(column: string | null, table: Table): Selectivity {
+  if (!column || !table.columns.includes(column) || table.rows.length === 0) {
+    return { fraction: NO_STATS_EQ_SELECTIVITY, basis: '0.1 default' };
+  }
+  const nulls = table.rows.filter((row) => (row[column] ?? null) === null).length;
+  return { fraction: nulls / table.rows.length, basis: `${String(nulls)}/${String(table.rows.length)} NULL in ${column}` };
+}
+
+/** The column an operand names, when it is a bare column reference. */
+const columnOf = (expr: Expr): string | null => (expr.kind === 'column' ? expr.name : null);
+
+const clampFraction = (f: number): number => Math.min(1, Math.max(0, f));
+
+/**
+ * Selectivity of a predicate, with the heuristic that produced it.
+ *
+ * `OR` uses inclusion–exclusion (`a + b − a·b`) and, like `AND`'s product,
+ * assumes the two parts are independent; `NOT` is the complement. Both are
+ * exactly the assumptions plan.md §25.4 C2 later sets out to break on purpose.
+ */
 export function selectivityOf(expr: Expr, table: Table): Selectivity {
   switch (expr.kind) {
     case 'and': {
@@ -149,10 +174,46 @@ export function selectivityOf(expr: Expr, table: Table): Selectivity {
         basis: `${left.basis} × ${right.basis}`,
       };
     }
-    case 'compare':
-      return expr.op === '='
-        ? equalitySelectivity(columnName(expr), table)
-        : rangeSelectivity(columnName(expr), expr.op, literalValue(expr), table);
+    case 'or': {
+      const left = selectivityOf(expr.left, table);
+      const right = selectivityOf(expr.right, table);
+      return {
+        fraction: clampFraction(left.fraction + right.fraction - left.fraction * right.fraction),
+        basis: `${left.basis} ∪ ${right.basis}`,
+      };
+    }
+    case 'not': {
+      const inner = selectivityOf(expr.operand, table);
+      return { fraction: clampFraction(1 - inner.fraction), basis: `1 − (${inner.basis})` };
+    }
+    case 'isNull': {
+      const nulls = nullSelectivity(columnOf(expr.operand), table);
+      return expr.negated
+        ? { fraction: clampFraction(1 - nulls.fraction), basis: `1 − ${nulls.basis}` }
+        : nulls;
+    }
+    case 'in': {
+      const one = equalitySelectivity(columnOf(expr.operand), table);
+      const k = expr.items.length;
+      const fraction = clampFraction(k * one.fraction);
+      return {
+        fraction: expr.negated ? clampFraction(1 - fraction) : fraction,
+        basis: `${expr.negated ? '1 − ' : ''}${String(k)} × ${one.basis}`,
+      };
+    }
+    case 'like':
+      return {
+        fraction: expr.negated ? 1 - LIKE_SELECTIVITY : LIKE_SELECTIVITY,
+        basis: expr.negated ? '0.9 default (NOT LIKE)' : '0.1 default (LIKE)',
+      };
+    case 'compare': {
+      if (expr.op === '=') return equalitySelectivity(columnName(expr), table);
+      if (expr.op === '<>') {
+        const eq = equalitySelectivity(columnName(expr), table);
+        return { fraction: clampFraction(1 - eq.fraction), basis: `1 − ${eq.basis}` };
+      }
+      return rangeSelectivity(columnName(expr), expr.op, literalValue(expr), table);
+    }
     default:
       return { fraction: 1, basis: 'no predicate' };
   }

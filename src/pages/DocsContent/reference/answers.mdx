@@ -91,6 +91,7 @@ deliberate; **gap** means a known limit the roadmap intends to close.
 | `sum-avg-over-text` | design | `SUM` and `AVG` of a text column are `NULL` | Text is coerced to `0`, silently |
 | `boolean-values` | design | `TRUE` comes back as `true` | There is no boolean type; `TRUE` is `1` |
 | `text-order-above-the-bmp` | design | Strings compare by UTF-16 code unit, so an emoji sorts before U+FFFD | Bytes of UTF-8 — the emoji sorts after |
+| `like-case-sensitivity` | design | `LIKE` is case-sensitive, as in PostgreSQL | Case-insensitive for ASCII by default (the oracle switches that off to compare `LIKE` itself) |
 | `identifier-case` | design | Column names are case-sensitive, and the error lists the real ones | Identifiers ignore case |
 
 ## Run it yourself

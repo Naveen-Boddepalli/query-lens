@@ -13,8 +13,15 @@ import type { TableSpec } from './model.ts';
 
 const SQL_TYPE = { int: 'INTEGER', text: 'TEXT', real: 'REAL' } as const;
 
-export function sqliteWith(tables: readonly TableSpec[]): DatabaseSync {
+/**
+ * `likeIsCaseSensitive` — QueryLens's `LIKE` is case-sensitive (PostgreSQL's
+ * rule); SQLite's default is not. The differential runs SQLite in
+ * QueryLens's mode so `LIKE` itself is compared; the ledger runs it with the
+ * default to pin the difference (`like-case-sensitivity`).
+ */
+export function sqliteWith(tables: readonly TableSpec[], { likeIsCaseSensitive = true } = {}): DatabaseSync {
   const db = new DatabaseSync(':memory:');
+  if (likeIsCaseSensitive) db.exec('PRAGMA case_sensitive_like = ON');
   for (const t of tables) {
     db.exec(`CREATE TABLE ${t.name} (${t.columns.map((c) => `${c.name} ${SQL_TYPE[c.type]}`).join(', ')})`);
     const insert = db.prepare(`INSERT INTO ${t.name} VALUES (${t.columns.map(() => '?').join(', ')})`);

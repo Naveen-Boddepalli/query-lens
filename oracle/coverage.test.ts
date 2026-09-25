@@ -20,7 +20,7 @@ import { ORACLE_SEED } from './config.ts';
 import { optionsArb, sessionArb } from './generate.ts';
 import { toDatabase } from './harness.ts';
 import { applyWrite } from './harness.ts';
-import { isWrite, renderQuery } from './model.ts';
+import { isWrite, renderQuery, walkPred } from './model.ts';
 import type { TableSpec } from './model.ts';
 
 const N = 1500;
@@ -39,6 +39,7 @@ describe('the generators reach what the oracle is meant to check', () => {
     joins: new Map<string, number>(),
     aggregates: new Map<string, number>(),
     nullsSeen: 0,
+    preds: new Map<string, number>(),
   };
 
   for (const [{ tables: initial, steps }, options] of sessions) {
@@ -48,6 +49,14 @@ describe('the generators reach what the oracle is meant to check', () => {
 
     for (const q of steps) {
       stats.kinds.set(q.kind, (stats.kinds.get(q.kind) ?? 0) + 1);
+      if ('where' in q) {
+        for (const w of q.where) {
+          walkPred(w, (p) => {
+            const key = p.k === 'between' && p.neg ? 'not-between' : p.k === 'in' && p.neg ? 'not-in' : p.k === 'like' && p.neg ? 'not-like' : p.k === 'isnull' && p.neg ? 'is-not-null' : p.k === 'cmp' && p.op === '<>' ? '<>' : p.k;
+            stats.preds.set(key, (stats.preds.get(key) ?? 0) + 1);
+          });
+        }
+      }
       const result = runQuery(renderQuery(q), toDatabase(tables), options);
       if (result.error) continue;
       for (const e of result.events) {
@@ -76,6 +85,12 @@ describe('the generators reach what the oracle is meant to check', () => {
 
   it('fires every optimizer rule', () => {
     for (const rule of OPTIMIZER_RULES) expect(stats.rules.get(rule) ?? 0, `rule ${rule} fired too rarely`).toBeGreaterThan(5);
+  });
+
+  it('generates every predicate form, including the negated ones and the NULL-in-list trap', () => {
+    for (const form of ['cmp', 'colcmp', 'litcmp', 'between', 'not-between', 'isnull', 'is-not-null', 'in', 'not-in', 'like', 'not-like', 'not', 'and', 'or', '<>']) {
+      expect(stats.preds.get(form) ?? 0, `predicate form ${form}`).toBeGreaterThan(N / 30);
+    }
   });
 
   it('gets non-empty answers a healthy share of the time, not just empty ones', () => {

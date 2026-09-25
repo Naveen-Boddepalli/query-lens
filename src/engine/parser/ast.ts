@@ -6,12 +6,13 @@ export interface Span {
 }
 
 /**
- * The comparison operators v0 supports. plan.md §4, widened by §23.1's
- * leaf-chaining range scans: `BETWEEN lo AND hi` is not its own operator —
- * the parser desugars it to `col >= lo AND col <= hi` at parse time, so
- * `<=`/`>=` are the only new surface here.
+ * The comparison operators. plan.md §4, widened by §23.1's leaf-chaining range
+ * scans: `BETWEEN lo AND hi` is not its own operator — the parser desugars it
+ * to `col >= lo AND col <= hi` at parse time, so `<=`/`>=` are the only new
+ * surface there. `<>` is not-equal (`!=` is accepted and normalised to it,
+ * plan.md §25.4 B1): never an index equality or range, so it is a filter.
  */
-export type CompareOp = '=' | '<' | '>' | '<=' | '>=';
+export type CompareOp = '=' | '<>' | '<' | '>' | '<=' | '>=';
 
 /**
  * `table` is set only by a qualified reference (`authors.id`) — v0 requires
@@ -19,12 +20,25 @@ export type CompareOp = '=' | '<' | '>' | '<=' | '>=';
  * reference alone can never be ambiguous. A single-table query may still
  * qualify redundantly (`SELECT users.id FROM users`), validated against the
  * one table in scope.
+ *
+ * A predicate is a tree of these (plan.md §25.4 B1). `and`, `or` and `not`
+ * combine truth values under SQL's three-valued logic — `null` from `evaluate.ts`
+ * is UNKNOWN, and only TRUE passes a filter. `isNull` is the one test that is
+ * never UNKNOWN; `in` and `like` are UNKNOWN when their operand is NULL.
  */
 export type Expr =
   | { kind: 'column'; name: string; table?: string; span: Span }
   | { kind: 'literal'; value: SqlValue; raw: string; span: Span }
   | { kind: 'compare'; op: CompareOp; left: Expr; right: Expr; span: Span }
-  | { kind: 'and'; left: Expr; right: Expr; span: Span };
+  | { kind: 'and'; left: Expr; right: Expr; span: Span }
+  | { kind: 'or'; left: Expr; right: Expr; span: Span }
+  | { kind: 'not'; operand: Expr; span: Span }
+  /** `x IS NULL` / `x IS NOT NULL` (`negated`). TRUE or FALSE, never UNKNOWN. */
+  | { kind: 'isNull'; operand: Expr; negated: boolean; span: Span }
+  /** `x [NOT] IN (a, b, …)` — `items` are literals or columns, never a subquery (§25.10). */
+  | { kind: 'in'; operand: Expr; items: Expr[]; negated: boolean; span: Span }
+  /** `x [NOT] LIKE 'pattern'` — `%` any run, `_` one character, case-sensitive, no escape character. */
+  | { kind: 'like'; operand: Expr; pattern: Expr; negated: boolean; span: Span };
 
 /** The aggregate functions v0 supports (plan.md §22.2). */
 export type AggregateFn = 'COUNT' | 'SUM' | 'AVG' | 'MIN' | 'MAX';
@@ -181,13 +195,50 @@ export interface UpdateStatement {
 /** Every statement form `parseStatement` can produce. `parse` stays SELECT-only. */
 export type Statement = SelectStatement | DeleteStatement | InsertStatement | UpdateStatement;
 
+/** The direct sub-expressions of a node, in source order. */
+export function childrenOf(expr: Expr): Expr[] {
+  switch (expr.kind) {
+    case 'column':
+    case 'literal':
+      return [];
+    case 'compare':
+    case 'and':
+    case 'or':
+      return [expr.left, expr.right];
+    case 'not':
+    case 'isNull':
+      return [expr.operand];
+    case 'in':
+      return [expr.operand, ...expr.items];
+    case 'like':
+      return [expr.operand, expr.pattern];
+  }
+}
+
+/** `expr` with `f` applied to each direct sub-expression — the rebuild half of `childrenOf`. */
+export function mapChildren(expr: Expr, f: (child: Expr) => Expr): Expr {
+  switch (expr.kind) {
+    case 'column':
+    case 'literal':
+      return expr;
+    case 'compare':
+    case 'and':
+    case 'or':
+      return { ...expr, left: f(expr.left), right: f(expr.right) };
+    case 'not':
+    case 'isNull':
+      return { ...expr, operand: f(expr.operand) };
+    case 'in':
+      return { ...expr, operand: f(expr.operand), items: expr.items.map(f) };
+    case 'like':
+      return { ...expr, operand: f(expr.operand), pattern: f(expr.pattern) };
+  }
+}
+
 /** Depth-first walk, parents before children. */
 export function walkExpr(expr: Expr, visit: (e: Expr) => void): void {
   visit(expr);
-  if (expr.kind === 'compare' || expr.kind === 'and') {
-    walkExpr(expr.left, visit);
-    walkExpr(expr.right, visit);
-  }
+  for (const child of childrenOf(expr)) walkExpr(child, visit);
 }
 
 /** Every column name referenced anywhere in a predicate. */

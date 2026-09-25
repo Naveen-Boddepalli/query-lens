@@ -26,6 +26,7 @@ import {
 import { buildHeap, createBufferPool } from './storage/index.ts';
 import { buildIndexes, pageCountFor } from './index/index.ts';
 import type { Heap } from './storage/index.ts';
+import { walkExpr } from './parser/index.ts';
 import { execute } from './exec/index.ts';
 import { executeDelete } from './exec/delete.ts';
 import { executeInsert } from './exec/insert.ts';
@@ -275,12 +276,9 @@ function referencedColumns(ast: Statement): ColumnRef[] {
     }
   }
   if (ast.kind !== 'insert' && ast.where) {
-    const stack = [ast.where];
-    while (stack.length > 0) {
-      const e = stack.pop()!;
+    walkExpr(ast.where, (e) => {
       if (e.kind === 'column') push(e);
-      if (e.kind === 'compare' || e.kind === 'and') stack.push(e.left, e.right);
-    }
+    });
   }
   if (ast.kind === 'select' && ast.join) {
     if (ast.join.on.left.kind === 'column') push(ast.join.on.left);
