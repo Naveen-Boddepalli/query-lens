@@ -532,7 +532,6 @@ describe('parse — errors point at the right text', () => {
 
   it.each([
     ['SELECT * FROM a LEFT JOIN b ON a.id = b.id', /LEFT.*not supported/, /inner JOIN/],
-    ['SELECT dept, COUNT(*) FROM users GROUP BY dept HAVING COUNT(*) > 1', /HAVING/, /WHERE instead/],
   ])('explains out-of-scope SQL: %s', (sql, message, hint) => {
     const e = err(sql);
     expect(e.message).toMatch(message);

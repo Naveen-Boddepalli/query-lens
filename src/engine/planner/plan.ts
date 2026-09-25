@@ -108,6 +108,14 @@ export type Plan =
     }
   | { op: 'Filter'; predicate: Expr; child: Plan }
   /**
+   * `HAVING` (plan.md §25.4 B2): a filter on the *groups* the aggregate produced —
+   * `Project → Having → HashAggregate → Filter → …`. Like `Filter` it evaluates a
+   * predicate per row, but the rows are groups and its aggregate operands read the
+   * values the aggregate node already computed. A separate op so the rewrite rules
+   * (which push WHERE *below* the aggregate) never confuse the two.
+   */
+  | { op: 'Having'; predicate: Expr; child: Plan }
+  /**
    * `GROUP BY` / aggregate functions, between Filter and Sort or Project:
    * `Project → HashAggregate → Filter → …`. Builds one group per distinct
    * combination of `groupBy` values (or a single group over everything when
@@ -133,6 +141,7 @@ export type Plan =
 
 export function childOf(plan: Plan): Plan | undefined {
   return plan.op === 'Filter' ||
+    plan.op === 'Having' ||
     plan.op === 'HashAggregate' ||
     plan.op === 'SortAggregate' ||
     plan.op === 'Sort' ||
@@ -368,6 +377,16 @@ function convert(
         id,
         op: 'Filter',
         label: 'Filter',
+        detail: exprToSql(plan.predicate),
+        ...(highlight ? { highlight } : {}),
+        ...cost,
+        children: kid(plan.child),
+      };
+    case 'Having':
+      return {
+        id,
+        op: 'Having',
+        label: 'Having',
         detail: exprToSql(plan.predicate),
         ...(highlight ? { highlight } : {}),
         ...cost,

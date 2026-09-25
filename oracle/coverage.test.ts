@@ -51,7 +51,7 @@ describe('the generators reach what the oracle is meant to check', () => {
     for (const q of steps) {
       stats.kinds.set(q.kind, (stats.kinds.get(q.kind) ?? 0) + 1);
       if ('where' in q) {
-        for (const w of q.where) {
+        for (const w of [...q.where, ...(q.kind === 'aggregate' && q.having ? [q.having] : [])]) {
           walkPred(w, (p) => {
             const key = p.k === 'between' && p.neg ? 'not-between' : p.k === 'in' && p.neg ? 'not-in' : p.k === 'like' && p.neg ? 'not-like' : p.k === 'isnull' && p.neg ? 'is-not-null' : p.k === 'cmp' && p.op === '<>' ? '<>' : p.k;
             stats.preds.set(key, (stats.preds.get(key) ?? 0) + 1);
@@ -89,7 +89,7 @@ describe('the generators reach what the oracle is meant to check', () => {
   });
 
   it('generates every predicate form, including the negated ones and the NULL-in-list trap', () => {
-    for (const form of ['cmp', 'colcmp', 'litcmp', 'between', 'not-between', 'isnull', 'is-not-null', 'in', 'not-in', 'like', 'not-like', 'not', 'and', 'or', '<>', 'acmp', 'ccmp']) {
+    for (const form of ['cmp', 'colcmp', 'litcmp', 'between', 'not-between', 'isnull', 'is-not-null', 'in', 'not-in', 'like', 'not-like', 'not', 'and', 'or', '<>', 'acmp', 'ccmp', 'hagg']) {
       expect(stats.preds.get(form) ?? 0, `predicate form ${form}`).toBeGreaterThan(N / 30);
     }
   });

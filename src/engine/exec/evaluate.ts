@@ -17,7 +17,7 @@
  * against SQLite) check these tables against an outside authority.
  */
 
-import { columnKey } from '../parser/index.ts';
+import { aggregateKeyOf, columnKey } from '../parser/index.ts';
 import type { CompareOp, Expr } from '../parser/index.ts';
 import { arithmetic, negate as negateValue } from '../value.ts';
 import type { Row, SqlValue } from '../types.ts';
@@ -36,6 +36,9 @@ export function evaluateValue(expr: Expr, row: Row): SqlValue {
       return arithmetic(expr.op, evaluateValue(expr.left, row), evaluateValue(expr.right, row));
     case 'neg':
       return negateValue(evaluateValue(expr.operand, row));
+    // A HAVING aggregate is a value the aggregate operator already computed for this group (plan.md §25.4 B2).
+    case 'aggregate':
+      return row[aggregateKeyOf(expr.fn, expr.arg)] ?? null;
     default:
       return evaluatePredicate(expr, row);
   }
@@ -163,6 +166,7 @@ export function evaluatePredicate(expr: Expr, row: Row): Truth {
       return negate(likeMatches(textOf(value), textOf(pattern)), expr.negated);
     }
 
+    case 'aggregate':
     case 'arith':
     case 'neg': {
       // A number used where a truth value is wanted: non-zero is TRUE, NULL is UNKNOWN.

@@ -1,4 +1,9 @@
-import type { Expr } from './ast.ts';
+import type { AggregateArg, AggregateFn, Expr } from './ast.ts';
+
+/** The canonical key an aggregate's value is stored under — `COUNT(*)`, `SUM(age)`, `SUM(t.age)`. */
+export function aggregateKeyOf(fn: AggregateFn, arg: AggregateArg): string {
+  return `${fn}(${arg.kind === 'star' ? '*' : arg.table ? `${arg.table}.${arg.name}` : arg.name})`;
+}
 
 /**
  * How tightly a node binds, for parenthesising: OR < AND < NOT < a predicate <
@@ -23,6 +28,7 @@ function precedence(expr: Expr): number {
       return 7;
     case 'column':
     case 'literal':
+    case 'aggregate':
       return 8;
   }
 }
@@ -40,6 +46,8 @@ export function exprToSql(expr: Expr): string {
       return expr.table ? `${expr.table}.${expr.name}` : expr.name;
     case 'literal':
       return expr.raw;
+    case 'aggregate':
+      return aggregateKeyOf(expr.fn, expr.arg);
     case 'compare':
       return `${at(expr.left, 5)} ${expr.op} ${at(expr.right, 5)}`;
     case 'and':

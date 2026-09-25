@@ -3,7 +3,7 @@
  *
  *   statement     := select | delete | insert | update
  *   select        := SELECT selectList FROM identifier [join] [WHERE expr]
- *                     [GROUP BY identifier (',' identifier)*]
+ *                     [GROUP BY identifier (',' identifier)*] [HAVING expr]
  *                     [ORDER BY identifier [ASC|DESC]] [LIMIT number [OFFSET number]] [';'] EOF
  *   join          := JOIN identifier ON qualifiedColumn '=' qualifiedColumn
  *   delete        := DELETE FROM identifier [WHERE expr] [';'] EOF
@@ -32,6 +32,7 @@
  *   multiplicative := unary (('*' | '/' | '%') unary)*
  *   unary         := '-' unary | primary
  *   primary       := qualifiedColumn | number | string | NULL | TRUE | FALSE | '(' expr ')'
+ *                    | aggregateCall              -- only inside HAVING
  *   qualifiedColumn := identifier ['.' identifier]
  *
  * `GROUP BY` and `ORDER BY` are mutually exclusive — the parser rejects a
@@ -58,6 +59,7 @@
 
 import type { QueryError, SqlValue } from '../types.ts';
 import type {
+  AggregateArg,
   AggregateFn,
   CompareOp,
   DeleteStatement,
@@ -103,7 +105,6 @@ const OUT_OF_SCOPE: Record<string, string> = {
   FULL: 'Outer joins are not in the v0 subset — only an inner JOIN.',
   CROSS: 'CROSS JOIN is not in the v0 subset — JOIN ... ON needs an equality.',
   USING: 'USING is not in the v0 subset — write the equality out: JOIN t ON a.x = t.y.',
-  HAVING: 'HAVING is not in the v0 subset — filter before GROUP BY with WHERE instead.',
   DISTINCT: 'DISTINCT is not in the v0 subset.',
   UNION: 'UNION is not in the v0 subset.',
   CREATE: 'QueryLens only runs SELECT, DELETE, INSERT and UPDATE. Edit the seed data to change the table.',
@@ -118,6 +119,11 @@ const describe = (t: Token): string =>
 /* -------------------------------------------------------------------------- */
 
 interface Cursor {
+  /**
+   * True only while a HAVING predicate is being parsed (plan.md §25.4 B2): an aggregate call is a value
+   * there — the group's `COUNT(*)` — and an error anywhere else, where it would have no group to read.
+   */
+  allowAggregates: boolean;
   peek: () => Token;
   /** `n` tokens past the current one (`peekAt(0)` is `peek()`); the EOF token once past the end. */
   peekAt: (n: number) => Token;
@@ -163,7 +169,7 @@ function makeCursor(tokens: Token[]): Cursor {
     throw new ParseError(`Expected ${what}, found ${describe(token)}.`, token);
   }
 
-  return { peek, peekAt, next, atEnd, guardScope, expectKeyword, expectIdentifier };
+  return { allowAggregates: false, peek, peekAt, next, atEnd, guardScope, expectKeyword, expectIdentifier };
 }
 
 /** The v0 aggregate functions. Not tokenizer keywords — they parse as identifiers, recognised by name here. */
@@ -223,10 +229,10 @@ function parseSelectItem(c: Cursor): SelectItem {
   return { kind: 'expression', expr, ...(alias === undefined ? {} : { alias }), span: { from: expr.span.from, to: end } };
 }
 
-/** The part of an aggregate call after `FN(`. */
-function parseAggregateCall(c: Cursor, token: Token, upper: string): SelectItem {
+/** The argument and closing parenthesis of an aggregate call, after `FN(` has been consumed. */
+function parseAggregateArgs(c: Cursor, upper: string): { arg: AggregateArg; close: Token } {
   const argToken = c.peek();
-  let arg: Extract<SelectItem, { kind: 'aggregate' }>['arg'];
+  let arg: AggregateArg;
   if (argToken.type === 'star') {
     c.next();
     if (upper !== 'COUNT') {
@@ -238,6 +244,13 @@ function parseAggregateCall(c: Cursor, token: Token, upper: string): SelectItem 
     }
     arg = { kind: 'star', span: { from: argToken.from, to: argToken.to } };
   } else {
+    if (isKeyword(argToken, 'DISTINCT')) {
+      throw new ParseError(
+        '`COUNT(DISTINCT …)` is not supported yet.',
+        argToken,
+        '`SELECT DISTINCT` is supported; inside an aggregate it is not — count the distinct rows another way.',
+      );
+    }
     const colToken = c.expectIdentifier(`a column name, or \`*\` for COUNT`);
     const ref = parseQualifiedColumnTail(c, colToken);
     arg = {
@@ -254,6 +267,12 @@ function parseAggregateCall(c: Cursor, token: Token, upper: string): SelectItem 
     throw new ParseError(`Expected \`)\` after the aggregate's argument, found ${describe(close)}.`, close);
   }
   c.next();
+  return { arg, close };
+}
+
+/** The part of an aggregate SELECT item after `FN(`. */
+function parseAggregateCall(c: Cursor, token: Token, upper: string): SelectItem {
+  const { arg, close } = parseAggregateArgs(c, upper);
 
   const after = c.peek();
   if ((after.type === 'operator' && ['+', '-', '/', '%'].includes(after.value)) || after.type === 'star') {
@@ -351,6 +370,47 @@ function checkGroupingValidity(select: SelectList, groupBy: GroupByClause | unde
       groupBy
         ? 'Every plain column in the SELECT list must be one you GROUP BY, or wrapped in an aggregate like COUNT(...).'
         : 'Mixing a plain column with an aggregate needs a GROUP BY — add one, or wrap the column in an aggregate too.',
+    );
+  }
+}
+
+/**
+ * A HAVING predicate filters *groups*, so what it may mention is what a group
+ * has: the grouped columns and aggregates. A plain column that is neither is as
+ * undefined here as it is in the SELECT list — which of a group's many rows
+ * would it come from? And HAVING only means something where there are groups:
+ * with `GROUP BY`, or an aggregate that collapses the table into one.
+ */
+function checkHavingValidity(
+  having: Expr,
+  select: SelectList,
+  groupBy: GroupByClause | undefined,
+  havingToken: Token,
+): void {
+  let hasAggregate = select.kind === 'columns' && select.items.some((item) => item.kind === 'aggregate');
+  const columns: Extract<Expr, { kind: 'column' }>[] = [];
+  walkExpr(having, (e) => {
+    if (e.kind === 'aggregate') hasAggregate = true;
+    if (e.kind === 'column') columns.push(e);
+  });
+
+  if (!groupBy && !hasAggregate) {
+    throw new ParseError(
+      'HAVING needs GROUP BY or an aggregate.',
+      havingToken,
+      'HAVING filters groups. To filter individual rows, use WHERE.',
+    );
+  }
+
+  const groupNames = new Set(groupBy?.columns.map((c) => c.name) ?? []);
+  const ungrouped = columns.find((col) => !groupNames.has(col.name));
+  if (ungrouped) {
+    throw new ParseError(
+      `\`${ungrouped.name}\` is not aggregated and is not in the GROUP BY list.`,
+      ungrouped.span,
+      groupBy
+        ? 'A HAVING predicate may test grouped columns and aggregates like COUNT(*) — not a plain column.'
+        : 'Without a GROUP BY the whole table is one group, so HAVING can only test aggregates.',
     );
   }
 }
@@ -471,6 +531,20 @@ const isKeyword = (t: Token, ...words: string[]): boolean => t.type === 'keyword
 function parsePrimary(c: Cursor): Expr {
   const token = c.peek();
 
+  if (token.type === 'identifier' && AGGREGATE_FNS.has(token.value.toUpperCase()) && c.peekAt(1).type === 'lparen') {
+    if (!c.allowAggregates) {
+      throw new ParseError(
+        `\`${token.value.toUpperCase()}(…)\` cannot be used here.`,
+        token,
+        'An aggregate has no group to read in a WHERE clause — WHERE filters rows *before* they are grouped. Put it in HAVING, which filters the groups.',
+      );
+    }
+    c.next();
+    c.next(); // '('
+    const upper = token.value.toUpperCase();
+    const { arg, close } = parseAggregateArgs(c, upper);
+    return { kind: 'aggregate', fn: upper as AggregateFn, arg, span: { from: token.from, to: close.to } };
+  }
   if (token.type === 'identifier') {
     c.next();
     const ref = parseQualifiedColumnTail(c, token);
@@ -848,6 +922,25 @@ function parseSelectBody(c: Cursor): SelectStatement {
   checkGroupingValidity(select, groupBy);
   checkJoinValidity(select, join, where, from);
 
+  let having: Expr | undefined;
+  if (isKeyword(c.peek(), 'HAVING')) {
+    const havingToken = c.next();
+    if (join) {
+      throw new ParseError(
+        'HAVING is not supported yet in a query with JOIN.',
+        havingToken,
+        'JOIN queries return plain rows for now — group and filter the result in a later version.',
+      );
+    }
+    c.allowAggregates = true;
+    try {
+      having = parseExpr(c);
+    } finally {
+      c.allowAggregates = false;
+    }
+    checkHavingValidity(having, select, groupBy, havingToken);
+  }
+
   let orderBy: SelectStatement['orderBy'];
   if (c.peek().type === 'keyword' && c.peek().upper === 'ORDER') {
     if (groupBy) {
@@ -913,7 +1006,13 @@ function parseSelectBody(c: Cursor): SelectStatement {
   expectStatementEnd(c);
 
   const end =
-    limit?.span.to ?? orderBy?.span.to ?? groupBy?.span.to ?? where?.span.to ?? join?.span.to ?? from.span.to;
+    limit?.span.to ??
+    orderBy?.span.to ??
+    having?.span.to ??
+    groupBy?.span.to ??
+    where?.span.to ??
+    join?.span.to ??
+    from.span.to;
   return {
     kind: 'select',
     select,
@@ -921,6 +1020,7 @@ function parseSelectBody(c: Cursor): SelectStatement {
     ...(join === undefined ? {} : { join }),
     ...(where === undefined ? {} : { where }),
     ...(groupBy === undefined ? {} : { groupBy }),
+    ...(having === undefined ? {} : { having }),
     ...(orderBy === undefined ? {} : { orderBy }),
     ...(limit === undefined ? {} : { limit }),
     span: { from: selectToken.from, to: end },

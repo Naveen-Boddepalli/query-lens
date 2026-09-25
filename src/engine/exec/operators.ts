@@ -283,12 +283,18 @@ function indexRangeScan(plan: Extract<Plan, { op: 'IndexRangeScan' }>, ctx: Exec
   };
 }
 
-function filter(predicate: Expr, child: Operator, ctx: ExecContext): Operator {
-  const produced = counter(ctx, 'Filter');
+/**
+ * `Filter` and — with `name: 'Having'` — HAVING (plan.md §25.4 B2): the same
+ * per-row predicate, but what flows through a `Having` is a *group* the
+ * aggregate below produced, and its aggregate operands read the values that
+ * aggregate already computed.
+ */
+function filter(predicate: Expr, child: Operator, ctx: ExecContext, name: 'Filter' | 'Having' = 'Filter'): Operator {
+  const produced = counter(ctx, name);
   let rejected = 0;
 
   return {
-    name: 'Filter',
+    name,
     open: child.open,
     next() {
       for (;;) {
@@ -299,7 +305,9 @@ function filter(predicate: Expr, child: Operator, ctx: ExecContext): Operator {
           continue;
         }
         produced(
-          `Filter passes a row through${rejected > 0 ? `, having rejected ${rejected}` : ''}.`,
+          name === 'Having'
+            ? `Having passes a group through${rejected > 0 ? `, having rejected ${rejected}` : ''} — its aggregates satisfy the predicate.`
+            : `Filter passes a row through${rejected > 0 ? `, having rejected ${rejected}` : ''}.`,
         );
         return row;
       }
@@ -1042,6 +1050,8 @@ export function buildOperator(plan: Plan, ctx: ExecContext): Operator {
       return buildJoinOperator(plan, ctx);
     case 'Filter':
       return filter(plan.predicate, buildOperator(plan.child, ctx), ctx);
+    case 'Having':
+      return filter(plan.predicate, buildOperator(plan.child, ctx), ctx, 'Having');
     case 'HashAggregate':
       return hashAggregate(plan, buildOperator(plan.child, ctx), ctx);
     case 'SortAggregate':

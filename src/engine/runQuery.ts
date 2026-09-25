@@ -286,6 +286,13 @@ function referencedColumns(ast: Statement): ColumnRef[] {
     if (ast.join.on.right.kind === 'column') push(ast.join.on.right);
   }
   if (ast.kind === 'select' && ast.groupBy) refs.push(...ast.groupBy.columns);
+  if (ast.kind === 'select' && ast.having) {
+    // A HAVING predicate names grouped columns and aggregate arguments — each must exist.
+    walkExpr(ast.having, (e) => {
+      if (e.kind === 'column') push(e);
+      else if (e.kind === 'aggregate' && e.arg.kind === 'column') push(e.arg);
+    });
+  }
   if (ast.kind === 'select' && ast.orderBy) refs.push({ name: ast.orderBy.column, span: ast.orderBy.span });
   if (ast.kind === 'insert' && ast.columns) refs.push(...ast.columns.names);
   if (ast.kind === 'update') {

@@ -75,6 +75,8 @@ export type Pred =
   /** Two literals — the optimizer's constant-folding rule exists for these. */
   | { k: 'litcmp'; a: SqlValue; op: Op; b: SqlValue }
   | { k: 'between'; ref: Ref; lo: SqlValue; hi: SqlValue; neg?: boolean }
+  /** An aggregate compared with a literal — only meaningful in a HAVING (plan.md §25.4 B2). */
+  | { k: 'hagg'; agg: AggItem; op: Op; lit: SqlValue }
   | { k: 'isnull'; ref: Ref; neg: boolean }
   | { k: 'in'; ref: Ref; list: SqlValue[]; neg: boolean }
   | { k: 'like'; ref: Ref; pattern: string; neg: boolean }
@@ -114,6 +116,8 @@ export type Query =
       shownGroup: Ref[];
       aggs: AggItem[];
       where: Pred[];
+      /** `HAVING`, a predicate over the groups (plan.md §25.4 B2). Absent when there is none. */
+      having?: Pred;
       limit?: number;
       offset?: number;
     }
@@ -167,6 +171,8 @@ export function renderPred(p: Pred): string {
       return `${renderLiteral(p.a)} ${p.op} ${renderLiteral(p.b)}`;
     case 'between':
       return `${renderRef(p.ref)} ${p.neg ? 'NOT ' : ''}BETWEEN ${renderLiteral(p.lo)} AND ${renderLiteral(p.hi)}`;
+    case 'hagg':
+      return `${renderAgg(p.agg)} ${p.op} ${renderLiteral(p.lit)}`;
     case 'isnull':
       return `${renderRef(p.ref)} IS ${p.neg ? 'NOT ' : ''}NULL`;
     case 'in':
@@ -246,7 +252,8 @@ export function renderQuery(q: Query, dialect: Dialect = 'querylens'): string {
     case 'aggregate': {
       const items = [...q.shownGroup.map(renderRef), ...q.aggs.map(renderAgg)].join(', ');
       const group = q.group.length > 0 ? ` GROUP BY ${q.group.map(renderRef).join(', ')}` : '';
-      return `SELECT ${items} FROM ${q.table}${renderWhere(q.where)}${group}${page(q.limit, q.offset)}`;
+      const having = q.having ? ` HAVING ${renderPred(q.having)}` : '';
+      return `SELECT ${items} FROM ${q.table}${renderWhere(q.where)}${group}${having}${page(q.limit, q.offset)}`;
     }
     case 'join':
       return `SELECT ${[...q.proj.map(renderRef), ...renderComputed(q.computed)].join(', ')} FROM ${q.left} JOIN ${q.right} ON ${renderRef(q.on.l)} = ${renderRef(q.on.r)}${renderWhere(q.where)}${page(q.limit, q.offset)}`;

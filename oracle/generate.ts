@@ -257,11 +257,15 @@ export function predArb(refs: readonly Ref[], pool: Pool, depth = 2): fc.Arbitra
   );
 }
 
-/** Zero predicates a third of the time — an over-constrained WHERE returns nothing, and an empty answer tests very little. */
+/**
+ * Zero predicates two times in five — an over-constrained WHERE returns nothing, and an empty answer tests
+ * very little. Every new predicate form makes an empty answer likelier, so this weight is what keeps the
+ * generators' non-empty share (asserted in `coverage.test.ts`) from eroding as the SQL grows.
+ */
 const whereArb = (refs: readonly Ref[], pool: Pool, max = 3): fc.Arbitrary<Pred[]> =>
   fc.oneof(
-    { weight: 1, arbitrary: fc.constant<Pred[]>([]) },
-    { weight: 2, arbitrary: fc.array(predArb(refs, pool), { minLength: 1, maxLength: max }) },
+    { weight: 2, arbitrary: fc.constant<Pred[]>([]) },
+    { weight: 3, arbitrary: fc.array(predArb(refs, pool), { minLength: 1, maxLength: max }) },
   );
 
 /* -------------------------------------------------------------------------- */
@@ -358,6 +362,36 @@ export function aggregateArb(t: TableSpec, pool: Pool): fc.Arbitrary<Query> {
     fc.tuple(fc.constantFrom('MIN', 'MAX'), fc.constantFrom(...refs)).map(([fn, arg]): AggItem => ({ fn, arg })),
   );
   const groupCandidates = refs.filter((r) => r.name !== 'r'); // grouping by a REAL is legal but adds nothing the others don't
+  // HAVING (plan.md §25.4 B2): a predicate over the groups. Its aggregates need not be in the SELECT list, and its
+  // plain columns must be grouped ones — so the leaves are drawn from the group columns chosen *for this query*.
+  const havingLeaf = (group: readonly Ref[]): fc.Arbitrary<Pred> =>
+    fc.oneof(
+      // The literal must be the aggregate's own type: `MIN(text) > 0` is a mixed-type comparison, which the two
+      // engines define differently (ledger: `mixed-type-comparison`), and never a generated case.
+      {
+        weight: 4,
+        arbitrary: fc.tuple(agg, opArb).chain(([a, op]) => {
+          const text = (a.fn === 'MIN' || a.fn === 'MAX') && a.arg !== '*' && a.arg.type === 'text';
+          const lit: fc.Arbitrary<SqlValue> = text
+            ? fc.constantFrom(...TEXT_POOL)
+            : fc.oneof({ weight: 3, arbitrary: fc.integer({ min: 0, max: 3 }) }, { weight: 1, arbitrary: literalArb('int') });
+          return lit.map((l): Pred => ({ k: 'hagg', agg: a, op, lit: l }));
+        }),
+      },
+      ...(group.length === 0
+        ? []
+        : [{ weight: 2, arbitrary: fc.constantFrom(...group).chain((ref) => fc.tuple(opArb, literalFor(ref, pool)).map(([op, lit]): Pred => ({ k: 'cmp', ref, op, lit }))) }]),
+    );
+  const havingArb = (group: readonly Ref[]): fc.Arbitrary<Pred | undefined> => {
+    const leaf = havingLeaf(group);
+    return fc.oneof(
+      { weight: 6, arbitrary: fc.constant<Pred | undefined>(undefined) },
+      { weight: 2, arbitrary: leaf },
+      { weight: 1, arbitrary: fc.tuple(leaf, leaf).map(([a, b]): Pred => ({ k: 'and', a, b })) },
+      { weight: 1, arbitrary: fc.tuple(leaf, leaf).map(([a, b]): Pred => ({ k: 'or', a, b })) },
+      { weight: 1, arbitrary: leaf.map((p): Pred => ({ k: 'not', p })) },
+    );
+  };
   return fc
     .record({
       group: uniqueRefs(groupCandidates, 0, 2),
@@ -366,7 +400,8 @@ export function aggregateArb(t: TableSpec, pool: Pool): fc.Arbitrary<Query> {
       where: whereArb(refs, pool, 2),
       page: pageArb,
     })
-    .map(({ group, aggs, showAll, where, page }): Query => {
+    .chain((base) => havingArb(base.group).map((having) => ({ ...base, having })))
+    .map(({ group, aggs, showAll, where, having, page }): Query => {
       // A query with no aggregate and no GROUP BY is a plain SELECT — force at least one aggregate then.
       const items = group.length === 0 && aggs.length === 0 ? ([{ fn: 'COUNT', arg: '*' }] as AggItem[]) : aggs;
       return {
@@ -376,6 +411,7 @@ export function aggregateArb(t: TableSpec, pool: Pool): fc.Arbitrary<Query> {
         shownGroup: showAll ? group : group.slice(0, 1),
         aggs: items,
         where,
+        ...(having ? { having } : {}),
         ...page,
       };
     });

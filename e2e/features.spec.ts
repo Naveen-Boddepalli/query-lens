@@ -86,8 +86,8 @@ test('the parser sandbox shows the token stream and the parser\'s own errors', a
   await expect(page.getByText(/Parsed ·/)).toContainText('recursion depth');
 
   // Unsupported SQL tokenizes fine but the parser rejects it by name.
-  await src.fill('SELECT * FROM users HAVING id > 5');
-  await expect(page.getByText(/`HAVING` is not supported yet/)).toBeVisible();
+  await src.fill('SELECT * FROM users UNION SELECT * FROM users');
+  await expect(page.getByText(/`UNION` is not supported yet/)).toBeVisible();
   await expect(page.getByText(/not in the v0 subset/)).toBeVisible();
 
   // A lexing failure is reported where it happens, not swallowed — the ribbon

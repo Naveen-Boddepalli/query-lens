@@ -76,16 +76,28 @@ function rewrapSort(sort: SortSpec | null, plan: Plan): Plan {
  * not a shortcut.
  */
 type AggregateNode = Extract<Plan, { op: 'HashAggregate' }> | Extract<Plan, { op: 'SortAggregate' }>;
-function unwrapAggregate(plan: Plan): { aggregate: AggregateNode | null; rest: Plan } {
+/**
+ * The aggregate node together with the `Having` (plan.md §25.4 B2) that may sit
+ * directly above it. The rules treat the pair as one unit, so a WHERE
+ * predicate is still pushed *below* it and a HAVING is never touched.
+ */
+type AggregateChain = { node: AggregateNode; having: Extract<Plan, { op: 'Having' }> | null };
+function unwrapAggregate(plan: Plan): { aggregate: AggregateChain | null; rest: Plan } {
+  if (plan.op === 'Having' && (plan.child.op === 'HashAggregate' || plan.child.op === 'SortAggregate')) {
+    return { aggregate: { node: plan.child, having: plan }, rest: plan.child.child };
+  }
   return plan.op === 'HashAggregate' || plan.op === 'SortAggregate'
-    ? { aggregate: plan, rest: plan.child }
+    ? { aggregate: { node: plan, having: null }, rest: plan.child }
     : { aggregate: null, rest: plan };
 }
-function rewrapAggregate(aggregate: AggregateNode | null, plan: Plan): Plan {
+function rewrapAggregate(aggregate: AggregateChain | null, plan: Plan): Plan {
   if (aggregate === null) return plan;
-  return aggregate.op === 'HashAggregate'
-    ? { op: 'HashAggregate', groupBy: aggregate.groupBy, aggregates: aggregate.aggregates, child: plan }
-    : { op: 'SortAggregate', groupBy: aggregate.groupBy, aggregates: aggregate.aggregates, child: plan };
+  const { node, having } = aggregate;
+  const rebuilt: Plan =
+    node.op === 'HashAggregate'
+      ? { op: 'HashAggregate', groupBy: node.groupBy, aggregates: node.aggregates, child: plan }
+      : { op: 'SortAggregate', groupBy: node.groupBy, aggregates: node.aggregates, child: plan };
+  return having ? { op: 'Having', predicate: having.predicate, child: rebuilt } : rebuilt;
 }
 
 /**
@@ -631,6 +643,7 @@ export function scanPredicate(plan: Plan): Expr | undefined {
   if (plan.op === 'SeqScan') return plan.filter;
   if (plan.op === 'IndexScan' || plan.op === 'IndexRangeScan') return plan.residual;
   return plan.op === 'Filter' ||
+    plan.op === 'Having' ||
     plan.op === 'HashAggregate' ||
     plan.op === 'SortAggregate' ||
     plan.op === 'Sort' ||

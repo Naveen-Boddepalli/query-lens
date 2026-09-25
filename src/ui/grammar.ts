@@ -54,6 +54,7 @@ export const GRAMMAR: GrammarRule[] = [
       opt(rule('join')),
       opt(lit('WHERE'), rule('expr')),
       opt(lit('GROUP'), lit('BY'), rule('identifier'), repeat(lit(','), rule('identifier'))),
+      opt(lit('HAVING'), rule('expr')),
       opt(lit('ORDER'), lit('BY'), rule('identifier'), opt(choice([lit('ASC')], [lit('DESC')]))),
       opt(lit('LIMIT'), rule('number'), opt(lit('OFFSET'), rule('number'))),
       opt(lit(';')),
@@ -169,6 +170,8 @@ export const GRAMMAR: GrammarRule[] = [
         [lit('TRUE')],
         [lit('FALSE')],
         [lit('('), rule('expr'), lit(')')],
+        // Only inside HAVING — an aggregate has no group to read in a WHERE.
+        [rule('aggregateCall')],
       ),
     ],
   },

@@ -86,6 +86,14 @@ export function emitPlanEvents(
     );
   }
 
+  if (ast.having) {
+    current = { op: 'Having', predicate: ast.having, child: current };
+    emit(
+      `HAVING becomes a Having filter above the aggregate: \`${exprToSql(ast.having)}\` is tested on each finished group, after its aggregates are computed. That is the difference from WHERE, which filters rows *before* they are grouped and so can never mention an aggregate.`,
+      { stage: 'plan', planTree: display(current) },
+    );
+  }
+
   if (ast.orderBy) {
     current = {
       op: 'Sort',

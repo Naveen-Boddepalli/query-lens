@@ -36,6 +36,9 @@ export const TONES: Record<string, string> = {
   Into: 'border-hue-violet/60 bg-hue-violet/10 text-hue-violet-ink hover:border-hue-violet/90 hover:bg-hue-violet/20',
   Where:
     'border-hue-amber/60 bg-hue-amber/10 text-hue-amber-ink hover:border-hue-amber/90 hover:bg-hue-amber/20',
+  // HAVING is WHERE's counterpart for groups (plan.md §25.4 B2) — same family, same tone.
+  Having:
+    'border-hue-amber/60 bg-hue-amber/10 text-hue-amber-ink hover:border-hue-amber/90 hover:bg-hue-amber/20',
   And: 'border-hue-amber/50 bg-hue-amber/5 text-hue-amber-ink hover:border-hue-amber/80 hover:bg-hue-amber/15',
   // The rest of a predicate's vocabulary (plan.md §25.4 B1) shares the predicate tone — they are all tests on a row.
   Or: 'border-hue-amber/50 bg-hue-amber/5 text-hue-amber-ink hover:border-hue-amber/80 hover:bg-hue-amber/15',

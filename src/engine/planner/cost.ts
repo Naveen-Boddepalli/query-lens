@@ -381,6 +381,14 @@ function estimateNode(
       estimate = { estRows: clampRows(child.estRows * fraction), estPages: child.estPages, basis };
       break;
     }
+    case 'Having': {
+      const child = estimateNode(plan.child, table, rowsPerPage, into, otherTables);
+      // Aggregate values have no column statistics to consult, so every comparison against one falls to the
+      // range/equality *defaults* (`selectivityOf` finds no column) — honest, and labelled as such.
+      const { fraction, basis } = selectivityOf(plan.predicate, table);
+      estimate = { estRows: clampRows(child.estRows * fraction), estPages: child.estPages, basis: `HAVING: ${basis}` };
+      break;
+    }
     case 'HashAggregate':
     case 'SortAggregate': {
       const child = estimateNode(plan.child, table, rowsPerPage, into, otherTables);

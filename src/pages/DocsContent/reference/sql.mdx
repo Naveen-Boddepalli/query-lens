@@ -38,6 +38,7 @@ SELECT * FROM users ORDER BY id LIMIT 10 OFFSET 20;
 - **`GROUP BY`**: one or more columns. Aggregates: `COUNT(*)`, `COUNT`/`SUM`/`AVG`/`MIN`/`MAX` over
   a column. Every plain column in the SELECT list must be grouped or wrapped in an aggregate.
   Mutually exclusive with `ORDER BY`.
+- **`HAVING`**: a predicate over the *groups*, after `GROUP BY` — see [HAVING](#having) below.
 - **`ORDER BY`**: exactly one column, `ASC` (default) or `DESC`.
 - **`LIMIT`**: a non-negative integer, always the outermost clause, optionally followed by
   **`OFFSET m`** to skip the first `m` rows of the (ordered) result: `LIMIT 10 OFFSET 20` is page three.
@@ -82,6 +83,30 @@ the parse stage: the WHERE tree shows every node of the predicate.
 `OR`, `NOT`, `IN`, `LIKE` and `<>` never become an index lookup — only a top-level `AND`ed equality or
 range on an indexed column does. `WHERE id = 5 AND (age < 30 OR age IS NULL)` still uses the index for
 `id = 5` and rechecks the parenthesised part on the one row it finds.
+
+## HAVING
+
+`WHERE` filters **rows before** they are grouped; `HAVING` filters **groups after** their aggregates are
+computed — which is why only `HAVING` may mention an aggregate.
+
+```sql
+SELECT status, COUNT(*) FROM logins GROUP BY status HAVING COUNT(*) > 10;
+SELECT dept FROM emp GROUP BY dept HAVING SUM(pay) / COUNT(*) >= 90 AND dept <> 'hr';
+SELECT COUNT(*) FROM emp HAVING COUNT(*) > 3;
+```
+
+- A `HAVING` predicate is built exactly like a [`WHERE`](#predicates) one (`AND`, `OR`, `NOT`, `IN`, `IS NULL`, arithmetic…),
+  and its operands are **aggregates** (`COUNT(*)`, `SUM(col)`, …) and **grouped columns** — a plain column
+  that is neither is as undefined here as in the `SELECT` list, and the parser says so.
+- The aggregates need not be in the `SELECT` list: `SELECT dept … HAVING COUNT(*) > 2` computes a count nobody
+  selected.
+- It needs groups: a `GROUP BY`, or an aggregate that collapses the whole table into one group (as in the
+  last example, which returns one row or none).
+- An aggregate that is NULL for a group makes the comparison UNKNOWN, and the group is dropped — under the
+  predicate and under its `NOT`.
+- An aggregate in a `WHERE` is an error that points here. `COUNT(DISTINCT x)` is not supported yet.
+- In the plan it is its own `Having` node above the aggregate. The optimizer still moves your `WHERE`
+  *below* the aggregate (an index lookup, a pushdown) and never touches the `HAVING`.
 
 ## Expressions
 
@@ -149,7 +174,6 @@ with a generic syntax error:
 | `CROSS JOIN` | *CROSS JOIN is not in the v0 subset — JOIN ... ON needs an equality.* |
 | `JOIN ... USING (...)` | *USING is not in the v0 subset — write the equality out.* |
 | A second `JOIN` | *Only one JOIN per query.* |
-| `HAVING` | *HAVING is not in the v0 subset — filter before GROUP BY with WHERE instead.* |
 | `DISTINCT` | *DISTINCT is not in the v0 subset.* |
 | `UNION` | *UNION is not in the v0 subset.* |
 | A subquery, `x IN (SELECT …)` | *A subquery is not supported here — write the values out, or join the two tables.* |

@@ -12,9 +12,9 @@
  * legible when the two are shown side by side.
  */
 
-import type { DeleteStatement, Expr, JoinClause, SelectItem, SelectStatement, UpdateStatement } from '../parser/index.ts';
+import type { DeleteStatement, Expr, JoinClause, SelectStatement, UpdateStatement } from '../parser/index.ts';
 import { exprToSql } from '../parser/print.ts';
-import { selectItemArgColumn, selectItemKey } from '../parser/index.ts';
+import { aggregateKeyOf, columnKey, selectItemArgColumn, selectItemKey, walkExpr } from '../parser/index.ts';
 import type { AggregateSpec, Plan, ProjectList } from './plan.ts';
 
 /**
@@ -41,8 +41,33 @@ export function buildUpdatePlan(ast: UpdateStatement): Plan {
 export function isAggregateQuery(ast: SelectStatement): boolean {
   return (
     ast.groupBy !== undefined ||
+    ast.having !== undefined ||
     (ast.select.kind === 'columns' && ast.select.items.some((item) => item.kind === 'aggregate'))
   );
+}
+
+/**
+ * Every aggregate the query needs computed per group: the SELECT list's, then any
+ * that only a HAVING predicate mentions (`SELECT dept … HAVING COUNT(*) > 2` needs a
+ * count nobody selected), each once, keyed by its canonical text.
+ */
+export function aggregateSpecsOf(ast: SelectStatement): AggregateSpec[] {
+  const specs = new Map<string, AggregateSpec>();
+  if (ast.select.kind === 'columns') {
+    for (const item of ast.select.items) {
+      if (item.kind !== 'aggregate') continue;
+      const key = selectItemKey(item);
+      specs.set(key, { key, fn: item.fn, column: selectItemArgColumn(item) });
+    }
+  }
+  if (ast.having) {
+    walkExpr(ast.having, (e) => {
+      if (e.kind !== 'aggregate') return;
+      const key = aggregateKeyOf(e.fn, e.arg);
+      if (!specs.has(key)) specs.set(key, { key, fn: e.fn, column: e.arg.kind === 'star' ? null : columnKey(e.arg) });
+    });
+  }
+  return [...specs.values()];
 }
 
 /**
@@ -60,12 +85,7 @@ export function buildAggregatePlan(
   strategy: 'hash' | 'sort' = 'hash',
 ): Plan {
   const groupBy = ast.groupBy?.columns.map((c) => c.name) ?? [];
-  const aggregates: AggregateSpec[] =
-    ast.select.kind === 'columns'
-      ? ast.select.items
-          .filter((item): item is Extract<SelectItem, { kind: 'aggregate' }> => item.kind === 'aggregate')
-          .map((item) => ({ key: selectItemKey(item), fn: item.fn, column: selectItemArgColumn(item) }))
-      : [];
+  const aggregates = aggregateSpecsOf(ast);
   return { op: strategy === 'sort' ? 'SortAggregate' : 'HashAggregate', groupBy, aggregates, child };
 }
 
@@ -147,11 +167,14 @@ export function buildPlan(
     ? buildAggregatePlan(ast, filtered, aggregateStrategy)
     : filtered;
 
+  // HAVING runs after the aggregate, on the groups it produced.
+  const having: Plan = ast.having ? { op: 'Having', predicate: ast.having, child: aggregated } : aggregated;
+
   // ORDER BY and GROUP BY are mutually exclusive (the parser enforces this),
   // so Sort only ever sits above the filtered scan, never above an aggregate.
   const sorted: Plan = ast.orderBy
-    ? { op: 'Sort', column: ast.orderBy.column, direction: ast.orderBy.direction, child: aggregated }
-    : aggregated;
+    ? { op: 'Sort', column: ast.orderBy.column, direction: ast.orderBy.direction, child: having }
+    : having;
 
   const columns = projectListFor(ast.select);
 

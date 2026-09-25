@@ -1,6 +1,7 @@
 import type { SqlValue } from '../types.ts';
 import type { ArithOp } from '../value.ts';
-import { exprToSql } from './print.ts';
+import { aggregateKeyOf, exprToSql } from './print.ts';
+export { aggregateKeyOf } from './print.ts';
 
 export interface Span {
   from: number;
@@ -48,7 +49,17 @@ export type Expr =
    */
   | { kind: 'arith'; op: ArithOp; left: Expr; right: Expr; span: Span }
   /** Unary minus on anything that is not a plain numeric literal (`-5` is folded to a literal at parse time). */
-  | { kind: 'neg'; operand: Expr; span: Span };
+  | { kind: 'neg'; operand: Expr; span: Span }
+  /**
+   * An aggregate call inside a `HAVING` predicate (plan.md §25.4 B2) — `COUNT(*) > 1`. It is a *reference to a
+   * value the aggregate operator computes per group*: at run time it reads the group row's `key`
+   * (`aggregateKeyOf`). Only the parser's HAVING context produces one; a WHERE with an aggregate is an error.
+   */
+  | { kind: 'aggregate'; fn: AggregateFn; arg: AggregateArg; span: Span };
+
+/** What an aggregate reads: `*` (only `COUNT`) or one column. */
+export type AggregateArg = { kind: 'star'; span: Span } | { kind: 'column'; name: string; table?: string; span: Span };
+
 
 /** The aggregate functions v0 supports (plan.md §22.2). */
 export type AggregateFn = 'COUNT' | 'SUM' | 'AVG' | 'MIN' | 'MAX';
@@ -67,7 +78,7 @@ export type SelectItem =
       kind: 'aggregate';
       fn: AggregateFn;
       /** `*` only appears on `COUNT` — every other function needs a real column. */
-      arg: { kind: 'star'; span: Span } | { kind: 'column'; name: string; table?: string; span: Span };
+      arg: AggregateArg;
       span: Span;
     };
 
@@ -85,7 +96,7 @@ export function selectItemArgColumn(item: Extract<SelectItem, { kind: 'aggregate
 export function selectItemKey(item: SelectItem): string {
   if (item.kind === 'column') return columnKey(item);
   if (item.kind === 'expression') return item.alias ?? exprToSql(item.expr);
-  return `${item.fn}(${item.arg.kind === 'star' ? '*' : columnKey(item.arg)})`;
+  return aggregateKeyOf(item.fn, item.arg);
 }
 
 export type SelectList =
@@ -129,6 +140,11 @@ export interface SelectStatement {
   join?: JoinClause;
   where?: Expr;
   groupBy?: GroupByClause;
+  /**
+   * `HAVING predicate` (plan.md §25.4 B2) — a filter on the *groups*, after aggregation, so it may test
+   * aggregates (`COUNT(*) > 1`) and grouped columns. Only with `GROUP BY` or an aggregate `SELECT` list.
+   */
+  having?: Expr;
   /**
    * `ORDER BY column [ASC|DESC]` — v0 sorts on one column, and not together
    * with `GROUP BY` (checked at parse time; `groupBy` and `orderBy` are
@@ -228,6 +244,7 @@ export function childrenOf(expr: Expr): Expr[] {
   switch (expr.kind) {
     case 'column':
     case 'literal':
+    case 'aggregate':
       return [];
     case 'compare':
     case 'and':
@@ -250,6 +267,7 @@ export function mapChildren(expr: Expr, f: (child: Expr) => Expr): Expr {
   switch (expr.kind) {
     case 'column':
     case 'literal':
+    case 'aggregate':
       return expr;
     case 'compare':
     case 'and':

@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`HAVING`** (plan.md §25.4 B2, first slice) — filter *groups* after their aggregates are computed:
+  `GROUP BY dept HAVING COUNT(*) > 2 AND SUM(pay) < 500`. `WHERE` filters rows before grouping and so can
+  never mention an aggregate; an aggregate in a `WHERE` is now an error that points at `HAVING`. A `HAVING`
+  predicate is built like a `WHERE` one (`AND`, `OR`, `NOT`, `IN`, arithmetic…) over aggregates and grouped
+  columns, may use aggregates the `SELECT` list does not, and works on a whole-table aggregate too. In the
+  plan it is its own `Having` node above the aggregate; the optimizer still pushes a `WHERE` below it.
 - **`LIMIT n OFFSET m`** (plan.md §25.4 B1, third and last slice) — page through an ordered result. The trace
   is honest about the cost most tutorials leave out: the skipped rows are still produced by everything beneath
   the `Limit` and then thrown away, so `OFFSET 30` visibly reads more of the table than `OFFSET 0`, and the cost

@@ -25,7 +25,7 @@ import type {
   UpdateStatement,
 } from './ast.ts';
 import { selectItemKey } from './ast.ts';
-import { exprToSql } from './print.ts';
+import { aggregateKeyOf, exprToSql } from './print.ts';
 
 function selectItemNode(item: SelectItem, id: string): ASTNode {
   if (item.kind === 'column') return { id, kind: 'Column', label: item.name, span: item.span };
@@ -142,6 +142,8 @@ function exprNode(expr: Expr, id: string): ASTNode {
           ...expr.items.map((item, i) => exprNode(item, `${id}.i${i}`)),
         ],
       };
+    case 'aggregate':
+      return { id, kind: 'Aggregate', label: aggregateKeyOf(expr.fn, expr.arg), span: expr.span };
     case 'arith':
       return {
         id,
@@ -170,6 +172,16 @@ function whereNode(where: Expr): ASTNode {
     label: 'WHERE',
     span: where.span,
     children: [exprNode(where, 'where.expr')],
+  };
+}
+
+function havingNode(having: Expr): ASTNode {
+  return {
+    id: 'having',
+    kind: 'Having',
+    label: 'HAVING',
+    span: having.span,
+    children: [exprNode(having, 'having.expr')],
   };
 }
 
@@ -279,6 +291,7 @@ export function toDisplayTree(ast: SelectStatement): ASTNode {
   const children = [selectListNode(ast.select), fromNode(ast.from)];
   if (ast.where) children.push(whereNode(ast.where));
   if (ast.groupBy) children.push(groupByNode(ast.groupBy));
+  if (ast.having) children.push(havingNode(ast.having));
   if (ast.orderBy) children.push(orderByNode(ast.orderBy));
   if (ast.limit) children.push(limitNode(ast.limit));
   return root(children, ast.span);
@@ -323,6 +336,14 @@ export function emitParseEvents(emit: Emit, ast: SelectStatement): void {
         .map((c) => `\`${c.name}\``)
         .join(', ')}. Nothing has been computed yet — this is still only structure.`,
       { stage: 'parse', ast: root([...children], ast.span), span: ast.groupBy.span },
+    );
+  }
+
+  if (ast.having) {
+    children.push(havingNode(ast.having));
+    emit(
+      'Read the HAVING clause: a predicate over the *groups* — unlike WHERE it may test aggregates, because it runs after they are computed. Nothing has been computed yet — this is still only structure.',
+      { stage: 'parse', ast: root([...children], ast.span), span: ast.having.span },
     );
   }
 
