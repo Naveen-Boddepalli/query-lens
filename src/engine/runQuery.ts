@@ -26,7 +26,7 @@ import {
   needsSortSpill,
 } from './planner/index.ts';
 import { buildHeap, createBufferPool } from './storage/index.ts';
-import { buildIndexes, pageCountFor } from './index/index.ts';
+import { buildIndexes, findIndexSpec, indexSpecsOf, pageCountFor } from './index/index.ts';
 import type { BPlusTree } from './index/index.ts';
 import type { Heap } from './storage/index.ts';
 import { walkExpr } from './parser/index.ts';
@@ -136,7 +136,7 @@ export function runQuery(
   }
 
   const heap = buildHeap(table, options.rowsPerPage);
-  const trees = buildIndexes(heap, table.indexedColumns ?? []);
+  const trees = buildIndexes(heap, indexSpecsOf(table));
   const locks = createLockManager(emit);
 
   if (ast.kind === 'insert') {
@@ -246,11 +246,12 @@ export function runQuery(
     ? buildHeap(joinTable, options.rowsPerPage, heap.pages.length)
     : undefined;
   const indexJoin = findIndexNestedLoopJoin(plan);
+  const probeIndex = indexJoin?.right.op === 'IndexProbe' && joinTable ? findIndexSpec(joinTable, indexJoin.right.column) : undefined;
   const rightTrees =
-    indexJoin && rightHeap
+    probeIndex && rightHeap
       ? buildIndexes(
           rightHeap,
-          [indexJoin.rightColumn],
+          [probeIndex],
           undefined,
           Math.max(pageCountFor(heap, trees), heap.pages.length + rightHeap.pages.length),
         )
@@ -277,7 +278,7 @@ export function runQuery(
     ? sortTempPageCount(distinctRows, options.rowsPerPage, options.bufferFrames)
     : 0;
   const heapsEnd = pageCountFor(heap, trees) + (rightHeap ? rightHeap.pages.length : 0);
-  const distinctBase = (rightHeap && indexJoin ? Math.max(heapsEnd, pageCountFor(rightHeap, rightTrees)) : heapsEnd) + sortTemp;
+  const distinctBase = (rightHeap && probeIndex ? Math.max(heapsEnd, pageCountFor(rightHeap, rightTrees)) : heapsEnd) + sortTemp;
   const pool = createBufferPool(distinctBase + distinctSpill, options, emit);
 
   const rows = execute(plan, {

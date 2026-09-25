@@ -67,6 +67,21 @@ function isValidTable(key: string, value: unknown): value is Table {
     if (!t.indexedColumns.every((c) => typeof c === 'string' && columns.includes(c))) return false;
     if (new Set(t.indexedColumns).size !== t.indexedColumns.length) return false;
   }
+  if (t.indexes !== undefined) {
+    if (!Array.isArray(t.indexes)) return false;
+    const specs = t.indexes as unknown[];
+    const named = new Set<string>();
+    for (const spec of specs) {
+      if (typeof spec !== 'object' || spec === null) return false;
+      const cols = (spec as { columns?: unknown }).columns;
+      if (!Array.isArray(cols) || cols.length === 0) return false;
+      if (!cols.every((c) => typeof c === 'string' && columns.includes(c))) return false;
+      if (new Set(cols).size !== cols.length) return false;
+      const name = cols.join(', ');
+      if (named.has(name)) return false;
+      named.add(name);
+    }
+  }
   return true;
 }
 
@@ -118,6 +133,44 @@ export function validateNewTable(
     seen.add(column);
   }
   return null;
+}
+
+/**
+ * Composite indexes typed as `a+b, c+d+e` — each index is its columns joined by `+`, in key order, and the indexes are
+ * separated by commas (plan.md §25.4 B3b). An index of one column is just the ordinary one, so it is dropped here.
+ */
+export function parseCompositeIndexes(raw: string): string[][] {
+  return raw
+    .split(',')
+    .map((index) => index.split('+').map((c) => c.trim()).filter((c) => c !== ''))
+    .filter((columns) => columns.length > 1);
+}
+
+/** Why a set of composite indexes cannot be declared over `columns`, or `null` when they can. */
+export function validateCompositeIndexes(columns: readonly string[], indexes: readonly (readonly string[])[]): string | null {
+  const seen = new Set<string>();
+  for (const index of indexes) {
+    for (const column of index) {
+      if (!columns.includes(column)) return `The composite index (${index.join(', ')}) names "${column}", which is not one of the columns.`;
+    }
+    if (new Set(index).size !== index.length) return `The composite index (${index.join(', ')}) lists a column twice.`;
+    const name = index.join(', ');
+    if (seen.has(name)) return `The composite index (${name}) is declared twice.`;
+    seen.add(name);
+  }
+  return null;
+}
+
+/** A table's indexes in words, for the table lists: `indexed on id, title · composite (a, b)`; empty when it has none. */
+export function describeIndexes(table: Pick<Table, 'indexedColumns' | 'indexes'>): string {
+  const plain = table.indexedColumns ?? [];
+  const composite = (table.indexes ?? []).filter((spec) => spec.columns.length > 1);
+  const single = (table.indexes ?? []).filter((spec) => spec.columns.length === 1).map((spec) => spec.columns[0]!);
+  const parts = [
+    ...([...plain, ...single].length > 0 ? [`indexed on ${[...plain, ...single].join(', ')}`] : []),
+    ...(composite.length > 0 ? [`composite ${composite.map((spec) => `(${spec.columns.join(', ')})`).join(', ')}`] : []),
+  ];
+  return parts.join(' · ');
 }
 
 /** Splits a comma-separated column list into trimmed, non-empty names. */

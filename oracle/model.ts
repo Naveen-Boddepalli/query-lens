@@ -28,6 +28,8 @@ export interface TableSpec {
   rows: Row[];
   /** Columns QueryLens builds a B+Tree on — unique or not (plan.md §25.4 B3a). */
   indexed: string[];
+  /** Composite indexes, each a list of columns in key order (plan.md §25.4 B3b). */
+  composite?: string[][];
 }
 
 /** A column reference. `table` is set exactly when the query has a JOIN (the parser requires it there). */

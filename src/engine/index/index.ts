@@ -7,6 +7,7 @@ export {
   deleteKey,
   descend,
   entryKey,
+  entryWidth,
   height,
   highKey,
   insert,
@@ -32,9 +33,10 @@ export type {
   RowPointer,
   SearchResult,
 } from './btree.ts';
-export { buildIndex, buildIndexes, pageCountFor } from './build.ts';
-export { keyList, toIndexDisplay } from './display.ts';
-export { emitIndexLookup } from './lookup.ts';
+export { buildIndex, buildIndexes, keyValuesOf, pageCountFor } from './build.ts';
+export { columnsOfIndex, findIndexSpec, indexNameOf, indexSpecsOf, joinIndexFor } from './spec.ts';
+export { keyList, keyText, toIndexDisplay } from './display.ts';
+export { describeKeys, emitIndexLookup } from './lookup.ts';
 export type { LookupOutcome } from './lookup.ts';
 export { emitRangeStart, nextInRange } from './rangeLookup.ts';
 export type { ChainIO, RangeBoundValue, RangeMatch, RangeStart } from './rangeLookup.ts';

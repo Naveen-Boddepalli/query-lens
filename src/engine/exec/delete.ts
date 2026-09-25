@@ -14,13 +14,14 @@
  * so the Execute panel reads the same way a `SELECT`'s does.
  */
 
-import type { Row, SqlValue } from '../types.ts';
+import type { Row } from '../types.ts';
 import type { Expr } from '../parser/index.ts';
 import type { Plan } from '../planner/index.ts';
 import type { ExecContext } from './operators.ts';
 import { fetchHeapPage, rowAt } from './operators.ts';
 import { passes } from './evaluate.ts';
-import { deleteKey, emitIndexLookup, entryKey } from '../index/index.ts';
+import { deleteKey, emitIndexLookup, entryKey, indexNameOf, indexSpecsOf, keyText, keyValuesOf } from '../index/index.ts';
+import { lookupKeysOf } from '../planner/index.ts';
 import type { DeleteStep, RowPointer } from '../index/index.ts';
 
 export interface DeleteOutcome {
@@ -45,22 +46,23 @@ export function summarizeSteps(steps: DeleteStep[]): string {
 }
 
 /**
- * Removes the entry for the row at `pointer` from every index the table declares, skipping a column whose key is
- * NULL. An entry is the value *and* the row's address, so this drops exactly this row's entry even when other rows
- * share its value.
+ * Removes the entry for the row at `pointer` from every index the table declares, skipping one whose leading column
+ * is NULL. An entry is the values *and* the row's address, so this drops exactly this row's entry even when other
+ * rows share its values.
  */
 function deleteFromIndex(ctx: ExecContext, row: Row, pointer: RowPointer): string[] {
   const details: string[] = [];
-  for (const column of ctx.table.indexedColumns ?? []) {
-    const tree = ctx.trees[column];
+  for (const spec of indexSpecsOf(ctx.table)) {
+    const name = indexNameOf(spec.columns);
+    const tree = ctx.trees[name];
     if (!tree) continue;
-    const key: SqlValue = row[column] ?? null;
-    if (key === null) continue; // NULLs were never indexed — nothing to remove
+    const values = keyValuesOf(row, spec.columns);
+    if (values[0] === null) continue; // a NULL leading column was never indexed — nothing to remove
 
-    const result = deleteKey(tree, entryKey([key], pointer));
+    const result = deleteKey(tree, entryKey(values, pointer));
     if (!result.found) continue; // defensive: every row here came from the heap this tree indexes
     details.push(
-      `The \`${column}\` B+Tree drops key ${JSON.stringify(key)} from leaf ${
+      `The \`${name}\` B+Tree drops key ${keyText(values)} from leaf ${
         result.steps[0]?.node ?? '?'
       } — ${summarizeSteps(result.steps)}.`,
     );
@@ -108,7 +110,7 @@ function indexScanForMatch(ctx: ExecContext, plan: Extract<Plan, { op: 'IndexSca
   const tree = ctx.trees[plan.column];
   if (!tree) return [];
 
-  const { pointers } = emitIndexLookup(emit, tree, plan.key, ctx.pool, plan.column, ctx.locks);
+  const { pointers } = emitIndexLookup(emit, tree, lookupKeysOf(plan), ctx.pool, plan.column, ctx.locks);
   const matched: Match[] = [];
 
   pointers.forEach((pointer, at) => {

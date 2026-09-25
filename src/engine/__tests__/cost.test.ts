@@ -339,7 +339,7 @@ describe('the cost model in the trace', () => {
   it('justifies index selection with a scan-vs-lookup page comparison', () => {
     const { events } = runQuery('SELECT * FROM users WHERE id = 5', db);
     const step = events.find((e) => e.stage === 'optimize' && e.rule === 'index-selection');
-    expect(step?.label).toMatch(/Estimated cost decides it/);
+    expect(step?.label).toMatch(/Estimated cost agrees/);
     expect(step?.label).toMatch(/reads all \d+ pages/);
   });
 });

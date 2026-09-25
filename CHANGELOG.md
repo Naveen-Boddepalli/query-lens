@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Composite indexes** (plan.md §25.4 B3, second slice) — one B+Tree over several columns, entered through a
+  *leftmost prefix*: an index on `(city, age)` answers `city = 'oslo'` and `city = 'oslo' AND age = 30`, but not
+  `age = 30` alone, because its entries are ordered by `city` first. The plan says so when it declines one, and a
+  new predict-then-reveal question asks it before the answer. A query that reads only the index's columns is
+  *covered*: an index-only scan answers it from the entries without touching the heap. Writes maintain the
+  entries, an index join can probe one through its leading column, and the Custom database's *Manage tables*
+  takes `city+age`. A range on the column after an equality prefix is not narrowed by the index yet.
 - **Index nested-loop join** (plan.md §25.4 B4) — the fourth join algorithm. Instead of rescanning the inner table
   for every outer row, it descends the inner table's own B+Tree on the join column: a few page reads per outer
   row, whatever the inner table's size. The plan gains an `IndexProbe` node for the inner side. It needs an
@@ -145,6 +152,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Vitest also runs tests under `scripts/` and `oracle/`; `oracle/` joins `tsconfig.node.json`.
 
 ### Fixed
+- **The optimizer claimed "estimated cost decides it" when it does not.** Its rules fire on the shape of the
+  predicate, so an index over a repeated value could be chosen and cost more than the scan it replaced. The note
+  now says whether the estimate agrees or disagrees and, when it disagrees, that the index was taken anyway.
 - **The plan stage said "nested-loop" for a sort-merge join.** When no rewrite rule applied, its note named the wrong
   algorithm; it now names the one that runs.
 - **A range scan now reads the leaves it walks.** Each hop along the sibling chain fetches that leaf through the

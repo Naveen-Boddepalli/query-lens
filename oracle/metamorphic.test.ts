@@ -151,7 +151,10 @@ describe('metamorphic — index and heap agree after writes', () => {
           const sql = `SELECT * FROM t WHERE id = ${String(id)}`;
           const viaIndex = runQuery(sql, toDatabase(settled, true), options).rows;
           const viaScan = runQuery(sql, toDatabase(settled, false), options).rows;
-          expect(viaIndex, sql).toEqual(viaScan);
+          // Without an ORDER BY the order is not defined, and a composite index returns matching rows in *key* order
+          // (its later columns) where a scan returns them in heap order — the same rows, so compare them as a bag.
+          const bag = (rows: unknown[]) => rows.map((r) => JSON.stringify(r)).sort();
+          expect(bag(viaIndex), sql).toEqual(bag(viaScan));
           expect(viaIndex.length, sql).toBe(t.rows.filter((r) => r.id === id).length);
         }
       }),

@@ -220,6 +220,18 @@ export interface Table {
    * query, by which is more selective.
    */
   indexedColumns?: string[];
+  /**
+   * Indexes that are more than one plain column (plan.md §25.4 B3): a **composite** index over several columns, in
+   * key order. It is searched through a *leftmost prefix* of its columns — an equality on `a`, or on `a` and `b`,
+   * can enter an index on `(a, b)`; an equality on `b` alone cannot, because the entries are ordered by `a` first.
+   * Declared alongside `indexedColumns` (the one-column shorthand), and `indexSpecsOf` merges the two.
+   */
+  indexes?: IndexSpec[];
+}
+
+/** One index a table declares — its columns in key order. More than one column makes it composite. */
+export interface IndexSpec {
+  columns: string[];
 }
 
 /**

@@ -688,6 +688,45 @@ test('an index on a column that repeats returns every matching row, one entry ea
   expect(sawRepeat).toBe(true);
 });
 
+test('a composite index is entered by its leftmost column and declined without it (plan.md §25.4 B3b)', async ({ page }) => {
+  // A custom database with one table indexed on (city, age): 24 people, three cities.
+  await page.addInitScript(() => {
+    const cities = ['oslo', 'rome', 'kyiv'];
+    const rows = Array.from({ length: 24 }, (_, i) => ({ id: i + 1, city: cities[i % 3], age: 20 + (i % 8) }));
+    localStorage.setItem(
+      'querylens.customDatabase.v1',
+      JSON.stringify({ tables: { people: { name: 'people', columns: ['id', 'city', 'age'], rows, indexes: [{ columns: ['city', 'age'] }] } } }),
+    );
+  });
+  await page.goto('/playground?x=0');
+  await page.getByRole('button', { name: 'Custom', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Manage tables (1)' })).toBeVisible();
+
+  async function narrationContains(sql: string, text: RegExp): Promise<boolean> {
+    const editor = page.locator('.cm-content');
+    await editor.click();
+    await page.keyboard.press('ControlOrMeta+A');
+    await page.keyboard.type(sql);
+    await page.getByRole('button', { name: /^Run/ }).click();
+    await page.getByLabel('Scrub to step').press('Home');
+    for (let i = 0; i < 40; i++) {
+      if ((await page.getByText(text).count()) > 0) return true;
+      await page.getByRole('button', { name: 'Step forward' }).click();
+    }
+    return (await page.getByText(text).count()) > 0;
+  }
+
+  // The leading column alone is enough to enter the index…
+  expect(await narrationContains("SELECT * FROM people WHERE city = 'oslo'", /leftmost column of the composite index \(city, age\)/)).toBe(true);
+  await page.getByLabel('Scrub to step').press('End');
+  await expect(page.getByText(/8 rows returned/)).toBeVisible();
+
+  // …but the second column alone cannot: the plan says why, and the rows still come back.
+  expect(await narrationContains('SELECT * FROM people WHERE age = 22', /The index on \(city, age\) cannot help/)).toBe(true);
+  await page.getByLabel('Scrub to step').press('End');
+  await expect(page.getByText(/3 rows returned/)).toBeVisible();
+});
+
 test('UPDATE changes a row for real, rekeying the index when the indexed column changes', async ({
   page,
 }) => {

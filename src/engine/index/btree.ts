@@ -107,9 +107,12 @@ export interface BPlusTree {
 export const DEFAULT_MAX_KEYS = 4;
 
 function compareScalar(a: SqlValue, b: SqlValue): number {
+  // NULL sorts before everything and equals only NULL. A NULL never reaches a plain index's leading column (it is
+  // not indexed), but a composite index's *later* columns can hold one — and `(0, NULL)` must not read as `(0, '')`.
+  if (a === null || b === null) return a === b ? 0 : a === null ? -1 : 1;
   if (typeof a === 'number' && typeof b === 'number') return a - b;
-  const sa = a === null ? '' : typeof a === 'boolean' ? String(Number(a)) : String(a);
-  const sb = b === null ? '' : typeof b === 'boolean' ? String(Number(b)) : String(b);
+  const sa = typeof a === 'boolean' ? String(Number(a)) : String(a);
+  const sb = typeof b === 'boolean' ? String(Number(b)) : String(b);
   return sa < sb ? -1 : sa > sb ? 1 : 0;
 }
 
@@ -215,6 +218,13 @@ export function descend(tree: BPlusTree, key: IndexKey): string[] {
   }
 
   return path;
+}
+
+/** How many values an entry of this tree holds: one for a plain index, more for a composite one. */
+export function entryWidth(tree: BPlusTree): number {
+  const first = node(tree, leftmostPath(tree).at(-1)!) as LeafNode;
+  const key = first.keys[0];
+  return key === undefined ? 1 : valuesOf(key).length;
 }
 
 /**

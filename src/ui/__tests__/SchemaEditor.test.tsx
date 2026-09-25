@@ -107,6 +107,37 @@ describe('SchemaEditor', () => {
     });
   });
 
+  it('declares a composite index from the a+b field, next to the plain ones', () => {
+    const { onApply } = setup();
+    fireEvent.click(screen.getByRole('button', { name: '+ Add table' }));
+    fireEvent.change(screen.getByPlaceholderText('reviews'), { target: { value: 'reviews' } });
+    fireEvent.change(screen.getByPlaceholderText('id, rating, comment'), {
+      target: { value: 'id, rating, comment' },
+    });
+    fireEvent.change(screen.getByLabelText(/Composite \(multi-column\) indexes/), { target: { value: 'rating+id' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add table' }));
+    expect(screen.getByText(/composite \(rating, id\)/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Apply/ }));
+
+    expect(onApply).toHaveBeenCalledWith({
+      tables: {
+        ...DB.tables,
+        reviews: { name: 'reviews', columns: ['id', 'rating', 'comment'], rows: [], indexes: [{ columns: ['rating', 'id'] }] },
+      },
+    });
+  });
+
+  it('refuses a composite index over a column the table does not have, and says which', () => {
+    const { onApply } = setup();
+    fireEvent.click(screen.getByRole('button', { name: '+ Add table' }));
+    fireEvent.change(screen.getByPlaceholderText('reviews'), { target: { value: 'reviews' } });
+    fireEvent.change(screen.getByPlaceholderText('id, rating, comment'), { target: { value: 'id, rating' } });
+    fireEvent.change(screen.getByLabelText(/Composite \(multi-column\) indexes/), { target: { value: 'id+nope' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add table' }));
+    expect(screen.getByRole('alert')).toHaveTextContent('"nope"');
+    expect(onApply).not.toHaveBeenCalled();
+  });
+
   it('rejects a duplicate table name with a visible error, and does not add it', () => {
     setup();
     fireEvent.click(screen.getByRole('button', { name: '+ Add table' }));

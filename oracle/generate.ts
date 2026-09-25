@@ -54,6 +54,11 @@ export const tableT: fc.Arbitrary<TableSpec> = fc.integer({ min: 0, max: 24 }).c
       ns: columnArray(nullable(fc.integer({ min: -5, max: 9 })), count),
       ss: columnArray(nullable(fc.constantFrom(...TEXT_POOL)), count),
       rs: columnArray(nullable(quarter), count),
+      composite: fc.oneof(
+        { weight: 5, arbitrary: fc.constant<string[][]>([]) },
+        { weight: 6, arbitrary: fc.constantFrom<string[][]>([['n', 's']], [['s', 'n']], [['n', 'r']], [['r', 'n']], [['id', 'n']], [['k', 's']], [['s', 'r']]) },
+        { weight: 2, arbitrary: fc.constantFrom<string[][]>([['n', 's', 'r']], [['s', 'n', 'r']], [['n', 's'], ['s', 'n']], [['n', 'r'], ['n', 's']]) },
+      ),
       indexed: fc
         .oneof(
           { weight: 2, arbitrary: fc.subarray(['id', 'k']) },
@@ -65,13 +70,14 @@ export const tableT: fc.Arbitrary<TableSpec> = fc.integer({ min: 0, max: 24 }).c
         )
         .map((cols) => [...cols]),
     })
-    .map(({ ids, ks, kNull, ns, ss, rs, indexed }): TableSpec => ({
+    .map(({ ids, ks, kNull, ns, ss, rs, indexed, composite }): TableSpec => ({
       name: 't',
       columns: T_COLUMNS,
       rows: ids.map(
         (id, i): Row => ({ id, k: kNull[i] ? null : ks[i], n: ns[i]!, s: ss[i]!, r: rs[i]! }),
       ),
       indexed,
+      ...(composite.length > 0 ? { composite } : {}),
     })),
 );
 
@@ -95,12 +101,18 @@ export const tableU = (t: TableSpec): fc.Arbitrary<TableSpec> => {
         ws: columnArray(nullable(quarter), count),
         // `t_id` is the foreign-key shape: it repeats, and is the column a join would want an index on.
         indexed: fc.subarray(['id', 't_id', 'v']),
+        // A composite index that *leads with* the foreign key can be probed by a join (plan.md §25.4 B3b/B4).
+        composite: fc.oneof(
+          { weight: 3, arbitrary: fc.constant<string[][]>([]) },
+          { weight: 2, arbitrary: fc.constantFrom<string[][]>([['t_id', 'v']], [['t_id', 'w']], [['v', 't_id']], [['t_id', 'v', 'w']]) },
+        ),
       })
-      .map(({ ids, tIds, vs, ws, indexed }): TableSpec => ({
+      .map(({ ids, tIds, vs, ws, indexed, composite }): TableSpec => ({
         name: 'u',
         columns: U_COLUMNS,
         rows: ids.map((id, i): Row => ({ id, t_id: tIds[i]!, v: vs[i]!, w: ws[i]! })),
         indexed,
+        ...(composite.length > 0 ? { composite } : {}),
       })),
   );
 };
@@ -335,7 +347,7 @@ function lookupArb(t: TableSpec, pool: Pool): fc.Arbitrary<Query> {
   );
   // Half the time nothing else is checked, so `SELECT id … WHERE id = x` can become an index-only scan.
   const extra = fc.oneof({ weight: 1, arbitrary: fc.constant<Pred[]>([]) }, { weight: 1, arbitrary: whereArb(refs, pool, 1) });
-  return fc.tuple(projection, keyPred, extra, pageArb).map(
+  const single = fc.tuple(projection, keyPred, extra, pageArb).map(
     ([proj, pred, extra, page]): Query => ({
       kind: 'select',
       table: t.name,
@@ -344,6 +356,43 @@ function lookupArb(t: TableSpec, pool: Pool): fc.Arbitrary<Query> {
       ...page,
     }),
   );
+  const composites = t.composite ?? [];
+  if (composites.length === 0) return single;
+
+  // Composite indexes (plan.md §25.4 B3b): equalities on a leftmost prefix of the columns (which enters the index), or —
+  // one time in six — on the columns *after* the first (which cannot, and must fall back to a scan without changing the
+  // answer). Half the projections read only index columns, so the index can cover the query.
+  const composite = fc.constantFrom(...composites).chain((columns) => {
+    const cols = columns.map(ref);
+    return fc
+      .record({
+        k: fc.integer({ min: 1, max: cols.length }),
+        skipLead: fc.integer({ min: 0, max: 5 }).map((x) => x === 0),
+      })
+      .chain(({ k, skipLead }) => {
+        const named = skipLead ? cols.slice(1, Math.max(2, k)) : cols.slice(0, k);
+        return fc.tuple(
+          fc.tuple(...named.map((r) => literalFor(r, pool).map((lit): Pred => ({ k: 'cmp', ref: r, op: '=', lit })))),
+          fc.oneof(
+            { weight: 1, arbitrary: uniqueRefs(cols, 1, cols.length) },
+            { weight: 1, arbitrary: fc.constant<Ref[] | '*'>('*') },
+            { weight: 1, arbitrary: uniqueRefs(refs, 1, 3) },
+          ),
+          extra,
+          pageArb,
+        );
+      })
+      .map(
+        ([preds, proj, extra, page]): Query => ({
+          kind: 'select',
+          table: t.name,
+          proj,
+          where: [...preds, ...extra],
+          ...page,
+        }),
+      );
+  });
+  return fc.oneof({ weight: 1, arbitrary: single }, { weight: 2, arbitrary: composite });
 }
 
 /**
@@ -531,11 +580,30 @@ export function insertArb(t: TableSpec): fc.Arbitrary<WriteQuery> {
  */
 function writeWhereArb(t: TableSpec, refs: readonly Ref[], pool: Pool): fc.Arbitrary<Pred[]> {
   const general = whereArb(refs, pool, 2);
-  if (t.indexed.length === 0) return general;
+  const composites = t.composite ?? [];
+  if (t.indexed.length === 0 && composites.length === 0) return general;
+  const single = t.indexed.length === 0
+    ? []
+    : [
+        fc
+          .constantFrom(...t.indexed.map((name) => refs.find((r) => r.name === name)!))
+          .chain((ref) => literalFor(ref, pool).map((lit): Pred => ({ k: 'cmp', ref, op: '=', lit })))
+          .map((eq): Pred[] => [eq]),
+      ];
+  // Equalities on a leftmost prefix of a composite index: the write finds its rows through it and maintains it.
+  const prefix = composites.map((columns) =>
+    fc.integer({ min: 1, max: columns.length }).chain((k) =>
+      fc.tuple(
+        ...columns.slice(0, k).map((name) => {
+          const ref = refs.find((r) => r.name === name)!;
+          return literalFor(ref, pool).map((lit): Pred => ({ k: 'cmp', ref, op: '=', lit }));
+        }),
+      ),
+    ),
+  );
   const viaIndex = fc
-    .constantFrom(...t.indexed.map((name) => refs.find((r) => r.name === name)!))
-    .chain((ref) => literalFor(ref, pool).map((lit): Pred => ({ k: 'cmp', ref, op: '=', lit })))
-    .chain((eq) => fc.oneof(fc.constant<Pred[]>([eq]), whereArb(refs, pool, 1).map((rest): Pred[] => [eq, ...rest])));
+    .oneof(...[...single, ...prefix])
+    .chain((eqs) => fc.oneof(fc.constant<Pred[]>(eqs), whereArb(refs, pool, 1).map((rest): Pred[] => [...eqs, ...rest])));
   return fc.oneof({ weight: 3, arbitrary: general }, { weight: 2, arbitrary: viaIndex });
 }
 

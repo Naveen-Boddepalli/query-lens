@@ -6,7 +6,7 @@
 
 import type { DatabaseSync } from 'node:sqlite';
 import { runQuery } from '../src/engine/runQuery.ts';
-import { leafChain, node, validate, valuesOf } from '../src/engine/index/index.ts';
+import { columnsOfIndex, leafChain, node, validate, valuesOf } from '../src/engine/index/index.ts';
 import type { BPlusTree, LeafNode } from '../src/engine/index/index.ts';
 import { DEFAULT_ENGINE_OPTIONS } from '../src/engine/types.ts';
 import type { Database, EngineOptions, RunResult, Row } from '../src/engine/types.ts';
@@ -24,6 +24,7 @@ export function toDatabase(tables: readonly TableSpec[], indexed = true): Databa
       columns: t.columns.map((c) => c.name),
       rows: t.rows.map((r) => ({ ...r })),
       ...(indexed && t.indexed.length > 0 ? { indexedColumns: [...t.indexed] } : {}),
+      ...(indexed && t.composite && t.composite.length > 0 ? { indexes: t.composite.map((columns) => ({ columns: [...columns] })) } : {}),
     };
   }
   return db;
@@ -36,25 +37,28 @@ export function toDatabase(tables: readonly TableSpec[], indexed = true): Databa
  * (Counts and values, not addresses: the executors leave a deleted row's slot in place rather than compacting.)
  */
 export function checkIndexes(trees: Record<string, BPlusTree>, rows: readonly Row[]): string | null {
-  for (const [column, tree] of Object.entries(trees)) {
+  for (const [name, tree] of Object.entries(trees)) {
+    const columns = columnsOfIndex(name);
     const problems = validate(tree);
-    if (problems.length > 0) return `the index on ${column} is not a sound B+Tree after the write: ${problems[0]}`;
+    if (problems.length > 0) return `the index on ${name} is not a sound B+Tree after the write: ${problems[0]}`;
 
+    // Whole keys, not just the leading column: a composite index holds one entry per row, valued by every column.
     const held = new Map<string, number>();
     for (const id of leafChain(tree)) {
       for (const key of (node(tree, id) as LeafNode).keys) {
-        const value = JSON.stringify(valuesOf(key)[0]);
+        const value = JSON.stringify(valuesOf(key));
         held.set(value, (held.get(value) ?? 0) + 1);
       }
     }
     const want = new Map<string, number>();
     for (const row of rows) {
-      const v = row[column] ?? null;
-      if (v !== null) want.set(JSON.stringify(v), (want.get(JSON.stringify(v)) ?? 0) + 1);
+      const values = columns.map((c) => row[c] ?? null);
+      // A NULL leading column is never indexed; a NULL further along is an ordinary entry.
+      if (values[0] !== null) want.set(JSON.stringify(values), (want.get(JSON.stringify(values)) ?? 0) + 1);
     }
     for (const value of new Set([...held.keys(), ...want.keys()])) {
       if ((held.get(value) ?? 0) !== (want.get(value) ?? 0)) {
-        return `the index on ${column} holds ${String(held.get(value) ?? 0)} entries for ${value}, but the table has ${String(want.get(value) ?? 0)} such rows`;
+        return `the index on ${name} holds ${String(held.get(value) ?? 0)} entries for ${value}, but the table has ${String(want.get(value) ?? 0)} such rows`;
       }
     }
   }

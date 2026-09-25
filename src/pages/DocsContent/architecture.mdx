@@ -105,8 +105,8 @@ the changed nodes highlighted:
 
 When nothing fires, the optimizer says so out loud rather than silently emitting nothing.
 Deliberately absent: **join order** (needs multi-join grammar this parser doesn't have — a query
-has at most one `JOIN`) and **true composite (multi-column) indexes** — each an independent
-single-column B+Tree today.
+has at most one `JOIN`) and **clustered (index-organized) tables** — every table is a heap, and each
+index (plain or composite) is a separate B+Tree pointing at it.
 
 ### The plan as relational algebra
 

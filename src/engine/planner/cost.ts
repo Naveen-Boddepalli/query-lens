@@ -15,6 +15,8 @@
 
 import type { CompareOp, Expr } from '../parser/index.ts';
 import type { Row, SqlValue, Table } from '../types.ts';
+import { columnsOfIndex } from '../index/spec.ts';
+import { lookupKeysOf } from './plan.ts';
 import type { Plan } from './plan.ts';
 
 /** Default selectivity for an open range with no usable min/max (Selinger et al., 1979). */
@@ -40,6 +42,21 @@ export interface CostEstimate {
 
 /** Per-node estimates for one plan tree, keyed by node identity. */
 export type PlanCost = Map<Plan, CostEstimate>;
+
+/**
+ * How selective an equality lookup on the first `width` columns of the index `name` is: `distinct` is the number of
+ * distinct keys it assumes (each column's distinct count multiplied — independence, the same assumption an `AND`
+ * makes), so `rows / distinct` rows match on average. For a plain index that is `ndistinct` of its one column.
+ */
+function lookupSelectivity(table: Table, name: string, width: number): { distinct: number; basis: string } {
+  const columns = columnsOfIndex(name).slice(0, width);
+  const counts = columns.map((column) => ndistinct(table.rows, column));
+  const distinct = counts.reduce((product, n) => product * n, 1);
+  return {
+    distinct,
+    basis: columns.length === 1 ? `1/${String(distinct)} on ${name}` : `${counts.map((n) => `1/${String(n)}`).join(' × ')} on ${columns.join(', ')}`,
+  };
+}
 
 /** Exported for `optimize.ts`'s `index-selection` rule — the same selectivity fact, reused to pick the more selective of two candidate indexes rather than re-deriving it. */
 export function ndistinct(rows: readonly Row[], column: string): number {
@@ -340,9 +357,9 @@ function estimateNode(
       break;
     }
     case 'IndexScan': {
-      const distinct = ndistinct(table.rows, plan.column);
+      const { distinct, basis: lookupBasis } = lookupSelectivity(table, plan.column, lookupKeysOf(plan).length);
       let fraction = 1 / distinct;
-      let basis = `1/${String(distinct)} on ${plan.column}`;
+      let basis = lookupBasis;
       if (plan.residual) {
         const residual = selectivityOf(plan.residual, table);
         fraction *= residual.fraction;
@@ -363,14 +380,18 @@ function estimateNode(
     case 'IndexRangeScan': {
       const low = plan.low && typeof plan.low.value === 'number' ? plan.low.value : null;
       const high = plan.high && typeof plan.high.value === 'number' ? plan.high.value : null;
+      const prefixLength = plan.prefix?.length ?? 0;
+      const rangeColumn = columnsOfIndex(plan.column)[prefixLength] ?? plan.column;
       const { fraction: rangeFraction, basis: rangeBasis } = boundedRangeSelectivity(
-        plan.column,
+        rangeColumn,
         low,
         high,
         table,
       );
-      let fraction = rangeFraction;
-      let basis = rangeBasis;
+      // Within a composite index's equality prefix the range narrows only that run.
+      const within = prefixLength > 0 ? lookupSelectivity(table, plan.column, prefixLength) : null;
+      let fraction = within ? rangeFraction / within.distinct : rangeFraction;
+      let basis = within ? `${within.basis} × ${rangeBasis}` : rangeBasis;
       if (plan.residual) {
         const residual = selectivityOf(plan.residual, table);
         fraction *= residual.fraction;
@@ -395,13 +416,13 @@ function estimateNode(
     case 'IndexOnlyScan': {
       // The tree levels alone — no heap page, the honest difference from IndexScan — plus any further leaves a
       // repeated value's run spans.
-      const distinct = ndistinct(table.rows, plan.column);
+      const { distinct, basis: lookupBasis } = lookupSelectivity(table, plan.column, lookupKeysOf(plan).length);
       const matches = Math.max(clampRows(rowCount / distinct), 1);
       const extraLeaves = Math.max(0, Math.ceil(matches / FANOUT) - 1);
       estimate = {
         estRows: matches,
         estPages: estimateIndexLevels(rowCount) + extraLeaves,
-        basis: `1/${String(distinct)} on ${plan.column} — index-only, no heap page`,
+        basis: `${lookupBasis} — index-only, no heap page`,
       };
       break;
     }

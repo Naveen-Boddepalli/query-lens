@@ -5,6 +5,7 @@
  */
 
 import type { JoinAlgorithm, PlanNode, RaInfo, SqlValue } from '../types.ts';
+import { columnsOfIndex } from '../index/spec.ts';
 import { exprToSql } from '../parser/print.ts';
 import type { AggregateFn, CompareOp, Expr } from '../parser/index.ts';
 import type { PlanCost } from './cost.ts';
@@ -76,9 +77,19 @@ export type Plan =
   | {
       op: 'IndexScan';
       table: string;
-      /** The indexed column the lookup keys on. */
+      /**
+       * The index the lookup goes through, by name (`indexNameOf`) — the indexed column for a plain index, the
+       * columns joined by `, ` for a composite one.
+       */
       column: string;
+      /** The lookup value — for a composite index, the first one (`keys` has them all). */
       key: SqlValue;
+      /**
+       * A composite index's equality values, for its leading columns in key order — `[1]` or `[1, 'x']` for an index
+       * on `(a, b)`: a *leftmost prefix*, so it may be shorter than the index is wide but never skips a column.
+       * Absent for a plain index, where `key` is the whole lookup.
+       */
+      keys?: SqlValue[];
       /** Conjuncts the index could not satisfy, re-checked per row. */
       residual?: Expr;
     }
@@ -94,7 +105,14 @@ export type Plan =
        */
       op: 'IndexRangeScan';
       table: string;
+      /** The index, by name — see `IndexScan.column`. */
       column: string;
+      /**
+       * A composite index's equality values for the columns *before* the range one, in key order: with `prefix`
+       * `[1]` on an index `(a, b)`, `low`/`high` bound `b` within `a = 1`. Absent (or empty) means the range is on
+       * the index's leading column.
+       */
+      prefix?: SqlValue[];
       /** Absent means "no lower bound" — start at the tree's leftmost leaf. */
       low?: RangeBound;
       /** Absent means "no upper bound" — walk until the leaf chain ends. */
@@ -113,8 +131,11 @@ export type Plan =
        */
       op: 'IndexOnlyScan';
       table: string;
+      /** The index, by name — see `IndexScan.column`. A composite index answers any query over *its own* columns. */
       column: string;
       key: SqlValue;
+      /** A composite index's leading-column equality values — see `IndexScan.keys`. */
+      keys?: SqlValue[];
     }
   | { op: 'Filter'; predicate: Expr; child: Plan }
   /**
@@ -328,6 +349,18 @@ export function formatRangeBounds(column: string, low?: RangeBound, high?: Range
   return `\`${column}\``;
 }
 
+/** The equality values an `IndexScan` / `IndexOnlyScan` looks up, in index-column order — one, unless the index is composite. */
+export const lookupKeysOf = (plan: { key: SqlValue; keys?: SqlValue[] }): SqlValue[] => plan.keys ?? [plan.key];
+
+/** An index's name as it reads in a plan label: `id`, or `(lastName, firstName)` for a composite one. */
+export const indexLabel = (name: string): string => (columnsOfIndex(name).length > 1 ? `(${name})` : name);
+
+/** `a = 1 AND b = 'x'` — the equalities a lookup on the index `name` makes, for as many leading columns as it has keys. */
+export function lookupText(name: string, keys: readonly SqlValue[]): string {
+  const columns = columnsOfIndex(name);
+  return keys.map((value, i) => `${columns[i] ?? name} = ${format(value)}`).join(' AND ');
+}
+
 /** Re-exported: the printer lives beside the AST (`parser/print.ts`) so `selectItemKey` can use it. */
 export { exprToSql } from '../parser/print.ts';
 
@@ -375,14 +408,16 @@ function raOf(plan: Plan): RaInfo {
       return { symbol: 'rel', rel: plan.table };
     case 'IndexScan':
     case 'IndexOnlyScan': {
-      const parts = [`${plan.column} = ${format(plan.key)}`];
+      const parts = [lookupText(plan.column, lookupKeysOf(plan))];
       if (plan.op === 'IndexScan' && plan.residual) parts.push(exprToSql(plan.residual));
       return { symbol: 'σ', sub: parts.join(' AND '), rel: plan.table };
     }
     case 'IndexRangeScan': {
+      const rangeColumn = columnsOfIndex(plan.column)[plan.prefix?.length ?? 0] ?? plan.column;
       const parts = [
-        ...(plan.low ? [boundSql(plan.column, plan.low, 'low')] : []),
-        ...(plan.high ? [boundSql(plan.column, plan.high, 'high')] : []),
+        ...(plan.prefix && plan.prefix.length > 0 ? [lookupText(plan.column, plan.prefix)] : []),
+        ...(plan.low ? [boundSql(rangeColumn, plan.low, 'low')] : []),
+        ...(plan.high ? [boundSql(rangeColumn, plan.high, 'high')] : []),
         ...(plan.residual ? [exprToSql(plan.residual)] : []),
       ];
       return { symbol: 'σ', sub: parts.join(' AND '), rel: plan.table };
@@ -466,7 +501,7 @@ function convertBody(
       return {
         id,
         op: 'IndexProbe',
-        label: `IndexProbe ${plan.table}.${plan.column}`,
+        label: `IndexProbe ${plan.table}.${indexLabel(plan.column)}`,
         detail: `key: ${plan.column} = ${plan.outerTable}.${plan.outerColumn} — once per ${plan.outerTable} row`,
         ...(highlight ? { highlight } : {}),
         ...cost,
@@ -475,10 +510,10 @@ function convertBody(
       return {
         id,
         op: 'IndexScan',
-        label: `IndexScan ${plan.table}.${plan.column}`,
+        label: `IndexScan ${plan.table}.${indexLabel(plan.column)}`,
         detail: plan.residual
-          ? `key: ${plan.column} = ${format(plan.key)} · recheck: ${exprToSql(plan.residual)}`
-          : `key: ${plan.column} = ${format(plan.key)}`,
+          ? `key: ${lookupText(plan.column, lookupKeysOf(plan))} · recheck: ${exprToSql(plan.residual)}`
+          : `key: ${lookupText(plan.column, lookupKeysOf(plan))}`,
         ...(highlight ? { highlight } : {}),
         ...cost,
       };
@@ -486,8 +521,8 @@ function convertBody(
       return {
         id,
         op: 'IndexOnlyScan',
-        label: `IndexOnlyScan ${plan.table}.${plan.column}`,
-        detail: `key: ${plan.column} = ${format(plan.key)} · never touches the heap`,
+        label: `IndexOnlyScan ${plan.table}.${indexLabel(plan.column)}`,
+        detail: `key: ${lookupText(plan.column, lookupKeysOf(plan))} · never touches the heap`,
         ...(highlight ? { highlight } : {}),
         ...cost,
       };
@@ -495,10 +530,13 @@ function convertBody(
       return {
         id,
         op: 'IndexRangeScan',
-        label: `IndexRangeScan ${plan.table}.${plan.column}`,
-        detail: plan.residual
-          ? `range: ${formatRangeBounds(plan.column, plan.low, plan.high)} · recheck: ${exprToSql(plan.residual)}`
-          : `range: ${formatRangeBounds(plan.column, plan.low, plan.high)}`,
+        label: `IndexRangeScan ${plan.table}.${indexLabel(plan.column)}`,
+        detail: (() => {
+          const rangeColumn = columnsOfIndex(plan.column)[plan.prefix?.length ?? 0] ?? plan.column;
+          const within = plan.prefix && plan.prefix.length > 0 ? `${lookupText(plan.column, plan.prefix)}, ` : '';
+          const range = `range: ${within}${formatRangeBounds(rangeColumn, plan.low, plan.high)}`;
+          return plan.residual ? `${range} · recheck: ${exprToSql(plan.residual)}` : range;
+        })(),
         ...(highlight ? { highlight } : {}),
         ...cost,
       };

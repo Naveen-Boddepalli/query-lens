@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Database } from '../engine/index.ts';
-import { parseColumnList, validateNewTable } from './customDatabase.ts';
+import { describeIndexes, parseColumnList, parseCompositeIndexes, validateCompositeIndexes, validateNewTable } from './customDatabase.ts';
 import { DataEditor } from './DataEditor.tsx';
 import { btnGhost, btnPrimary, btnSecondary, inputField } from './primitives.ts';
 
@@ -30,6 +30,7 @@ export function SchemaEditor({ db, onApply, onClose }: SchemaEditorProps) {
   const [nameInput, setNameInput] = useState('');
   const [columnsInput, setColumnsInput] = useState('');
   const [indexInput, setIndexInput] = useState<string[]>([]);
+  const [compositeInput, setCompositeInput] = useState('');
   const [error, setError] = useState<string | null>(null);
   const dialog = useRef<HTMLDialogElement>(null);
 
@@ -76,6 +77,12 @@ export function SchemaEditor({ db, onApply, onClose }: SchemaEditorProps) {
       setError(problem);
       return;
     }
+    const composite = parseCompositeIndexes(compositeInput);
+    const compositeProblem = validateCompositeIndexes(columns, composite);
+    if (compositeProblem) {
+      setError(compositeProblem);
+      return;
+    }
     pushHistory();
     setWorking((current) => ({
       tables: {
@@ -85,6 +92,7 @@ export function SchemaEditor({ db, onApply, onClose }: SchemaEditorProps) {
           columns,
           rows: [],
           ...(indexInput.length > 0 ? { indexedColumns: indexInput } : {}),
+          ...(composite.length > 0 ? { indexes: composite.map((cols) => ({ columns: cols })) } : {}),
         },
       },
     }));
@@ -92,6 +100,7 @@ export function SchemaEditor({ db, onApply, onClose }: SchemaEditorProps) {
     setNameInput('');
     setColumnsInput('');
     setIndexInput([]);
+    setCompositeInput('');
     setError(null);
   }
 
@@ -139,7 +148,7 @@ export function SchemaEditor({ db, onApply, onClose }: SchemaEditorProps) {
                 <span className="font-mono text-body font-medium text-ink">{name}</span>
                 <span className="text-label text-ink-dim">
                   {table.columns.join(', ')}
-                  {table.indexedColumns && table.indexedColumns.length > 0 && ` · indexed on ${table.indexedColumns.join(', ')}`}
+                  {describeIndexes(table) !== '' && ` · ${describeIndexes(table)}`}
                 </span>
                 <span className="text-label text-ink-dim/80">
                   {table.rows.length} row{table.rows.length === 1 ? '' : 's'}
@@ -202,6 +211,20 @@ export function SchemaEditor({ db, onApply, onClose }: SchemaEditorProps) {
                   >
                     {columns.map((c) => <option key={c} value={c}>{c}</option>)}
                   </select>
+                </label>
+                <label className="flex flex-1 min-w-48 flex-col gap-1 text-label text-ink-dim">
+                  Composite (multi-column) indexes
+                  <input
+                    value={compositeInput}
+                    onChange={(e) => { setCompositeInput(e.target.value); setError(null); }}
+                    placeholder="customer+status, status+total"
+                    className={`${inputField} font-mono`}
+                    spellCheck={false}
+                  />
+                  <span className="text-ink-dim/80">
+                    Columns joined by +, in key order; separate indexes with commas. An index on a+b answers a
+                    lookup on a, or on a and b — not on b alone.
+                  </span>
                 </label>
               </div>
               {error && <p role="alert" className="text-label text-evict">{error}</p>}

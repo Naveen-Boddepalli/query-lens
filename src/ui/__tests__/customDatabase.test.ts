@@ -1,10 +1,13 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
+  describeIndexes,
   isValidName,
   loadCustomDatabase,
   parseColumnList,
+  parseCompositeIndexes,
   saveCustomDatabase,
   starterCustomDatabase,
+  validateCompositeIndexes,
   validateNewTable,
 } from '../customDatabase.ts';
 import type { Database } from '../../engine/index.ts';
@@ -26,6 +29,51 @@ describe('parseColumnList', () => {
 
   it('an empty string yields no columns', () => {
     expect(parseColumnList('')).toEqual([]);
+  });
+});
+
+describe('composite indexes (plan.md §25.4 B3b)', () => {
+  it('parses columns joined by + into one index each, and drops a single column (that is the ordinary index)', () => {
+    expect(parseCompositeIndexes('a+b, c + d + e, f')).toEqual([['a', 'b'], ['c', 'd', 'e']]);
+    expect(parseCompositeIndexes('')).toEqual([]);
+  });
+
+  it('accepts columns the table has, in any order, and refuses the rest with a reason', () => {
+    expect(validateCompositeIndexes(['a', 'b', 'c'], [['b', 'a']])).toBeNull();
+    expect(validateCompositeIndexes(['a', 'b'], [['a', 'z']])).toContain('"z"');
+    expect(validateCompositeIndexes(['a', 'b'], [['a', 'a']])).toContain('twice');
+    expect(validateCompositeIndexes(['a', 'b'], [['a', 'b'], ['a', 'b']])).toContain('declared twice');
+  });
+
+  it('describes a table\'s indexes, plain and composite', () => {
+    expect(describeIndexes({})).toBe('');
+    expect(describeIndexes({ indexedColumns: ['id'] })).toBe('indexed on id');
+    expect(describeIndexes({ indexedColumns: ['id'], indexes: [{ columns: ['a', 'b'] }] })).toBe('indexed on id · composite (a, b)');
+    expect(describeIndexes({ indexes: [{ columns: ['a', 'b'] }, { columns: ['c', 'd', 'e'] }] })).toBe('composite (a, b), (c, d, e)');
+  });
+
+  describe('a saved database with composite indexes', () => {
+    beforeEach(() => { localStorage.clear(); });
+    const withIndexes = (indexes: unknown): unknown => ({
+      tables: { t: { name: 't', columns: ['a', 'b'], rows: [], indexes } },
+    });
+
+    it('round-trips', () => {
+      const db: Database = { tables: { t: { name: 't', columns: ['a', 'b'], rows: [{ a: 1, b: 2 }], indexes: [{ columns: ['a', 'b'] }] } } };
+      saveCustomDatabase(db);
+      expect(loadCustomDatabase()).toEqual(db);
+    });
+
+    it.each([
+      ['a column the table lacks', [{ columns: ['a', 'zzz'] }]],
+      ['no columns', [{ columns: [] }]],
+      ['a repeated column', [{ columns: ['a', 'a'] }]],
+      ['the same index twice', [{ columns: ['a', 'b'] }, { columns: ['a', 'b'] }]],
+      ['a non-array', 'a+b'],
+    ])('falls back to the starter for %s', (_, indexes) => {
+      localStorage.setItem('querylens.customDatabase.v1', JSON.stringify(withIndexes(indexes)));
+      expect(Object.keys(loadCustomDatabase().tables).sort()).toEqual(['authors', 'posts']);
+    });
   });
 });
 

@@ -17,6 +17,7 @@ import { exprToSql } from '../parser/print.ts';
 import { aggregateKeyOf, columnKey, selectItemArgColumn, selectItemKey, walkExpr } from '../parser/index.ts';
 import type { AggregateSpec, Plan, ProjectList } from './plan.ts';
 import type { JoinAlgorithm, Table } from '../types.ts';
+import { indexNameOf, joinIndexFor } from '../index/spec.ts';
 
 /**
  * A `DELETE`'s canonical plan is just the scan that finds the rows to
@@ -101,7 +102,9 @@ export function effectiveJoinAlgorithm(
   rightColumn: string,
 ): JoinAlgorithm {
   if (requested !== 'index-nested-loop') return requested;
-  return joinTable?.indexedColumns?.includes(rightColumn) ? requested : 'nested-loop';
+  // An index whose *leading* column is the join column will do — a composite one that starts with it is entered
+  // through that one-column leftmost prefix.
+  return joinTable && joinIndexFor(joinTable, rightColumn) ? requested : 'nested-loop';
 }
 
 /**
@@ -137,7 +140,14 @@ export function buildJoinPlan(
     left: { op: 'SeqScan', table: fromTable },
     right:
       effective === 'index-nested-loop'
-        ? { op: 'IndexProbe', table: join.table.name, column: rightColumn, outerTable: fromTable, outerColumn: leftColumn }
+        ? {
+            op: 'IndexProbe',
+            table: join.table.name,
+            // The index's name: the join column itself for a plain index, the composite's columns joined for one that leads with it.
+            column: indexNameOf(joinIndexFor(joinTable!, rightColumn)!.columns),
+            outerTable: fromTable,
+            outerColumn: leftColumn,
+          }
         : { op: 'SeqScan', table: join.table.name },
     leftTable: fromTable,
     rightTable: join.table.name,

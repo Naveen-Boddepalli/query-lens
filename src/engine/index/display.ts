@@ -13,6 +13,11 @@ function formatKey(key: IndexKey): string {
   return values.length === 1 ? formatValue(values[0]!) : `(${values.map(formatValue).join(', ')})`;
 }
 
+/** An index key as the write narration says it: `2`, `'ada'`, or `(2, 'ada')` for a composite index's. */
+export function keyText(values: readonly SqlValue[]): string {
+  return values.length === 1 ? JSON.stringify(values[0]) : `(${values.map((v) => JSON.stringify(v)).join(', ')})`;
+}
+
 export function keyList(keys: readonly IndexKey[]): string {
   return keys.length === 0 ? '·' : keys.map(formatKey).join(' ');
 }

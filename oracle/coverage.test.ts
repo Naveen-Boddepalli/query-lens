@@ -52,6 +52,12 @@ describe('the generators reach what the oracle is meant to check', () => {
     indexJoinFallbacks: 0,
     /** Index joins where one outer row's probe found two or more inner entries. */
     indexJoinsWithRepeats: 0,
+    /** Composite indexes (plan.md §25.4 B3b): entered by a leftmost prefix, covering a query, refused for lack of one, written through, probed by a join. */
+    compositeScans: 0,
+    compositeCovering: 0,
+    compositeRefused: 0,
+    compositeWrites: 0,
+    compositeProbes: 0,
   };
 
   for (const [{ tables: initial, steps }, options] of sessions) {
@@ -90,6 +96,11 @@ describe('the generators reach what the oracle is meant to check', () => {
           if (result.events.some((e) => / of [2-9]\d* its probe found/.test(e.label))) stats.indexJoinsWithRepeats += 1;
         } else stats.indexJoinFallbacks += 1;
       }
+      const planned = result.events.map((e) => (e.stage === 'optimize' ? JSON.stringify(e.after) : e.stage === 'plan' ? JSON.stringify(e.planTree) : '')).join('\n');
+      if (planned.includes('"op":"IndexScan","label":"IndexScan t.(') || planned.includes('"op":"IndexScan","label":"IndexScan u.(')) stats[isWrite(q) ? 'compositeWrites' : 'compositeScans'] += 1;
+      if (planned.includes('"op":"IndexOnlyScan","label":"IndexOnlyScan t.(')) stats.compositeCovering += 1;
+      if (planned.includes('"op":"IndexProbe","label":"IndexProbe u.(')) stats.compositeProbes += 1;
+      if (result.events.some((e) => e.label.includes('cannot help: the predicate constrains'))) stats.compositeRefused += 1;
       if (isWrite(q)) {
         stats.writes += 1;
         if ((result.write?.kind === 'insert' && result.write.insertedCount > 0) ||
@@ -148,6 +159,14 @@ describe('the generators reach what the oracle is meant to check', () => {
     expect(stats.indexJoins, 'index joins with rows').toBeGreaterThan(20);
     expect(stats.indexJoinsWithRepeats, 'index joins whose probe found several entries').toBeGreaterThan(5);
     expect(stats.indexJoinFallbacks, 'index joins with no index to probe').toBeGreaterThan(20);
+  });
+
+  it('enters composite indexes by a leftmost prefix, covers queries with them, and declines them without one (plan.md §25.4 B3b)', () => {
+    expect(stats.compositeScans, 'lookups through a composite index').toBeGreaterThan(30);
+    expect(stats.compositeCovering, 'queries a composite index covers').toBeGreaterThan(5);
+    expect(stats.compositeRefused, 'composite indexes refused for lack of a leading column').toBeGreaterThan(10);
+    expect(stats.compositeWrites, 'writes finding rows through a composite index').toBeGreaterThan(10);
+    expect(stats.compositeProbes, 'joins probing a composite index').toBeGreaterThan(3);
   });
 
   it('includes empty tables, NULLs, and writes that really change rows', () => {

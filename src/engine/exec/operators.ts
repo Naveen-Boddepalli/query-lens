@@ -11,11 +11,12 @@
 import type { Emit } from '../trace.ts';
 import type { EngineOptions, Row, SqlValue, Table } from '../types.ts';
 import type { Expr } from '../parser/index.ts';
+import { lookupKeysOf } from '../planner/index.ts';
 import type { AggregateSpec, Plan, ProjectList } from '../planner/index.ts';
 import type { BufferPool, Heap } from '../storage/index.ts';
 import type { LockManager } from '../locks/index.ts';
 import type { BPlusTree, RowPointer } from '../index/index.ts';
-import { emitIndexLookup, emitRangeStart, nextInRange, pageCountFor } from '../index/index.ts';
+import { columnsOfIndex, emitIndexLookup, emitRangeStart, nextInRange, pageCountFor } from '../index/index.ts';
 import { compare, equalityKeyOf, evaluateValue, passes } from './evaluate.ts';
 import { externalMergeSort, sortTempPageCount } from './sort.ts';
 
@@ -175,7 +176,7 @@ function indexScan(plan: Extract<Plan, { op: 'IndexScan' }>, ctx: ExecContext): 
     open() {
       const tree = ctx.trees[plan.column];
       if (!tree) return;
-      pointers = emitIndexLookup(ctx.emit, tree, plan.key, ctx.pool, plan.column, ctx.locks).pointers;
+      pointers = emitIndexLookup(ctx.emit, tree, lookupKeysOf(plan), ctx.pool, plan.column, ctx.locks).pointers;
     },
     next() {
       for (;;) {
@@ -219,25 +220,34 @@ function indexScan(plan: Extract<Plan, { op: 'IndexScan' }>, ctx: ExecContext): 
  * from a page read (plan.md §22.2). One row per entry the index holds for the value.
  */
 function indexOnlyScan(plan: Extract<Plan, { op: 'IndexOnlyScan' }>, ctx: ExecContext): Operator {
-  let matches = 0;
+  let entries: SqlValue[][] = [];
   let cursor = 0;
   const produced = counter(ctx, 'IndexOnlyScan');
+  const columns = columnsOfIndex(plan.column);
 
   return {
     name: 'IndexOnlyScan',
     open() {
       const tree = ctx.trees[plan.column];
       if (!tree) return;
-      matches = emitIndexLookup(ctx.emit, tree, plan.key, ctx.pool, plan.column, ctx.locks, false).pointers.length;
+      entries = emitIndexLookup(ctx.emit, tree, lookupKeysOf(plan), ctx.pool, plan.column, ctx.locks, false).entries;
     },
     next() {
-      if (cursor >= matches) return null;
+      const entry = entries[cursor];
+      if (!entry) return null;
       cursor += 1;
-      produced('IndexOnlyScan returns the key itself — the heap is never touched.');
-      return { [plan.column]: plan.key };
+      produced(
+        columns.length > 1
+          ? `IndexOnlyScan returns ${columns.map((c) => `\`${c}\``).join(' and ')} straight from the entry — the index covers the query, so the heap is never touched.`
+          : 'IndexOnlyScan returns the key itself — the heap is never touched.',
+      );
+      // The leaf's own values, one per indexed column — a row with exactly the columns the index holds.
+      const row: Row = {};
+      columns.forEach((column, i) => { row[column] = entry[i] ?? null; });
+      return row;
     },
     close() {
-      matches = 0;
+      entries = [];
       cursor = 0;
     },
   };
@@ -1062,7 +1072,7 @@ function indexNestedLoopJoin(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecConte
             `Join takes a row from ${plan.leftTable} whose ${plan.leftColumn} is ${typeof key === 'string' ? `'${key}'` : String(key)} and probes ${plan.rightTable}'s B+Tree on ${plan.rightColumn} for it (probe ${String(probes)}).`,
             { stage: 'execute', op: 'Join', rowsProduced: matched },
           );
-          pointers = emitIndexLookup(ctx.emit, tree, key, ctx.pool, inner.column, ctx.locks).pointers;
+          pointers = emitIndexLookup(ctx.emit, tree, [key], ctx.pool, inner.column, ctx.locks).pointers;
           continue;
         }
 

@@ -9,9 +9,9 @@
  * find-then-mutate pass: one row, one page, at most one tree insert.
  */
 
-import type { Row, SqlValue } from '../types.ts';
+import type { Row } from '../types.ts';
 import type { ExecContext } from './operators.ts';
-import { entryKey, height, insert, pageCountFor } from '../index/index.ts';
+import { entryKey, height, indexNameOf, indexSpecsOf, insert, keyText, keyValuesOf, pageCountFor } from '../index/index.ts';
 import type { RowPointer } from '../index/index.ts';
 
 export interface InsertOutcome {
@@ -40,22 +40,23 @@ export function summarizeInsert(nodesBefore: number, nodesAfter: number, heightB
   }`;
 }
 
-/** Adds `row`'s key to every index the table declares, skipping a column whose key is NULL. */
+/** Adds `row`'s entry to every index the table declares, skipping one whose leading column is NULL. */
 function insertIntoIndex(ctx: ExecContext, row: Row, pointer: RowPointer): void {
-  for (const column of ctx.table.indexedColumns ?? []) {
-    const tree = ctx.trees[column];
+  for (const spec of indexSpecsOf(ctx.table)) {
+    const name = indexNameOf(spec.columns);
+    const tree = ctx.trees[name];
     if (!tree) continue;
-    const key: SqlValue = row[column] ?? null;
-    if (key === null) continue; // NULLs are never indexed — nothing to add
+    const values = keyValuesOf(row, spec.columns);
+    if (values[0] === null) continue; // a NULL leading column is never indexed — nothing to add
 
     const nodesBefore = Object.keys(tree.nodes).length;
     const heightBefore = height(tree);
-    insert(tree, entryKey([key], pointer), pointer);
+    insert(tree, entryKey(values, pointer), pointer);
     const nodesAfter = Object.keys(tree.nodes).length;
     const heightAfter = height(tree);
 
     ctx.emit(
-      `The \`${column}\` B+Tree gets key ${JSON.stringify(key)} — ${summarizeInsert(nodesBefore, nodesAfter, heightBefore, heightAfter)}.`,
+      `The \`${name}\` B+Tree gets key ${keyText(values)} — ${summarizeInsert(nodesBefore, nodesAfter, heightBefore, heightAfter)}.`,
       { stage: 'execute', op: 'Insert', rowsProduced: 1 },
     );
   }

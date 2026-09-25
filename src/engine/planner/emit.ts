@@ -3,7 +3,7 @@ import type { JoinAlgorithm, Table } from '../types.ts';
 import type { SelectStatement } from '../parser/index.ts';
 import { buildAggregatePlan, buildJoinPlan, buildPlan, distinctNodeFor, isAggregateQuery, projectListFor } from './buildPlan.ts';
 import { estimatePlan, rootEstimate } from './cost.ts';
-import { optimize } from './optimize.ts';
+import { leftmostPrefixNote, optimize } from './optimize.ts';
 import { exprToSql, toPlanDisplay } from './plan.ts';
 import type { Plan, ProjectList } from './plan.ts';
 
@@ -23,6 +23,13 @@ function findJoinIn(plan: Plan): Extract<Plan, { op: 'Join' }> | undefined {
   if (plan.op === 'Join') return plan;
   if ('child' in plan) return findJoinIn(plan.child);
   return undefined;
+}
+
+/** Does any node of `plan` read through an index? */
+function usesIndex(plan: Plan): boolean {
+  if (plan.op === 'IndexScan' || plan.op === 'IndexRangeScan' || plan.op === 'IndexOnlyScan' || plan.op === 'IndexProbe') return true;
+  if (plan.op === 'Join') return usesIndex(plan.left) || usesIndex(plan.right);
+  return 'child' in plan ? usesIndex(plan.child) : false;
 }
 
 /** A join algorithm as a phrase for the "nothing to rewrite" note. */
@@ -207,7 +214,9 @@ export function emitPlanEvents(
     const note = ast.join
       ? `No rewrite rule applies to this JOIN — ${describeJoin(joined?.algorithm ?? joinStrategy, ast.from.name, ast.join.table.name)} is what runs.`
       : ast.where
-        ? `The cost model estimates about ${plural(rows, 'row')} out of ${String(table.rows.length)}, and no access path beats reading the table.`
+        ? `The cost model estimates about ${plural(rows, 'row')} out of ${String(table.rows.length)}, and no access path beats reading the table.${
+            leftmostPrefixNote(table, ast.where) ? ` ${leftmostPrefixNote(table, ast.where)!}` : ''
+          }`
         : 'With no WHERE there is nothing to narrow the scan — every row is returned.';
     emit(
       `No rewrite rule fires on this plan — the optimizer leaves it exactly as written. ${note}`,
@@ -220,6 +229,20 @@ export function emitPlanEvents(
     );
   }
 
+  // Rules fired, but none of them could use an index the table has: if that is because a composite index cannot be
+  // entered, say so here — the "nothing fired" note above never runs once, say, predicate pushdown has.
+  if (optimised !== canonical && !ast.join && !usesIndex(optimised)) {
+    const unusable = leftmostPrefixNote(table, ast.where);
+    if (unusable) {
+      emit(`No index is used. ${unusable}`, {
+        stage: 'optimize',
+        rule: 'none',
+        before: display(optimised),
+        after: display(optimised),
+      });
+    }
+  }
+
   return optimised;
 
   /** Appends the scan-vs-index page estimate that makes the rewrite a decision, not a reflex. */
@@ -227,7 +250,12 @@ export function emitPlanEvents(
     const scanPages = Math.max(1, Math.ceil(table.rows.length / rowsPerPage));
     const rows = rootEstimate(canonical, table, rowsPerPage, otherTables).estRows;
     const indexPages = rootEstimate(chosen, table, rowsPerPage, otherTables).estPages;
-    return `${label} Estimated cost decides it: the sequential scan reads all ${String(scanPages)} pages to return about ${plural(rows, 'row')}; the index lookup reads about ${String(indexPages)}.`;
+    const facts = `the sequential scan reads all ${String(scanPages)} pages to return about ${plural(rows, 'row')}; the index lookup reads about ${String(indexPages)}`;
+    // The rules fire on the *shape* of the predicate, never on cost — so an index can be chosen and still lose. A
+    // repeated value or a leftmost prefix that matches much of the table costs a heap page per match (plan.md §25.4 B3).
+    return indexPages < scanPages
+      ? `${label} Estimated cost agrees: ${facts}.`
+      : `${label} Estimated cost disagrees: ${facts} — no cheaper than the scan. The rules fire on the predicate's shape, not on cost, so the index is taken anyway; choosing by cost is what plan.md §25.4 C adds.`;
   }
 }
 

@@ -16,13 +16,14 @@
  * while applying) that `DELETE` and `INSERT` already use.
  */
 
-import type { Row, SqlValue } from '../types.ts';
+import type { Row } from '../types.ts';
 import type { Expr, UpdateAssignment } from '../parser/index.ts';
 import type { Plan } from '../planner/index.ts';
 import type { ExecContext } from './operators.ts';
 import { fetchHeapPage, rowAt } from './operators.ts';
 import { evaluateValue, passes } from './evaluate.ts';
-import { deleteKey, emitIndexLookup, entryKey, height, insert } from '../index/index.ts';
+import { deleteKey, emitIndexLookup, entryKey, height, indexNameOf, indexSpecsOf, insert, keyText, keyValuesOf } from '../index/index.ts';
+import { lookupKeysOf } from '../planner/index.ts';
 import type { RowPointer } from '../index/index.ts';
 import { summarizeSteps } from './delete.ts';
 import { summarizeInsert } from './insert.ts';
@@ -52,44 +53,43 @@ function applyAssignments(row: Row, assignments: UpdateAssignment[]): Row {
 }
 
 /**
- * Moves `pointer`'s key from `beforeKey` to `afterKey` in each index whose
- * own column actually changed. NULLs are never indexed, so a key on either
- * side that is NULL just drops the delete or the insert half. A table can
- * have several indexes; an assignment only reindexes the ones whose column
- * it touched, one sentence each.
+ * Moves the row's entry from its old values to its new ones in each index whose own columns actually changed.
+ * A NULL leading column is never indexed, so on either side it just drops the delete or the insert half. A table
+ * can have several indexes; an assignment only reindexes the ones whose columns it touched, one sentence each.
  */
 function reindexRow(ctx: ExecContext, before: Row, after: Row, pointer: RowPointer): string | null {
   const sentences: string[] = [];
 
-  for (const column of ctx.table.indexedColumns ?? []) {
-    const tree = ctx.trees[column];
+  for (const spec of indexSpecsOf(ctx.table)) {
+    const name = indexNameOf(spec.columns);
+    const tree = ctx.trees[name];
     if (!tree) continue;
-    const beforeKey: SqlValue = before[column] ?? null;
-    const afterKey: SqlValue = after[column] ?? null;
-    if (beforeKey === afterKey) continue; // this index's own column did not change
+    const beforeValues = keyValuesOf(before, spec.columns);
+    const afterValues = keyValuesOf(after, spec.columns);
+    if (beforeValues.every((v, i) => v === afterValues[i])) continue; // none of this index's columns changed
 
     const parts: string[] = [];
 
-    if (beforeKey !== null) {
-      const removed = deleteKey(tree, entryKey([beforeKey], pointer));
+    if (beforeValues[0] !== null) {
+      const removed = deleteKey(tree, entryKey(beforeValues, pointer));
       if (removed.found) {
-        parts.push(`drops key ${JSON.stringify(beforeKey)} — ${summarizeSteps(removed.steps)}`);
+        parts.push(`drops key ${keyText(beforeValues)} — ${summarizeSteps(removed.steps)}`);
       }
     }
 
-    if (afterKey !== null) {
+    if (afterValues[0] !== null) {
       const nodesBefore = Object.keys(tree.nodes).length;
       const heightBefore = height(tree);
-      insert(tree, entryKey([afterKey], pointer), pointer);
+      insert(tree, entryKey(afterValues, pointer), pointer);
       const nodesAfter = Object.keys(tree.nodes).length;
       const heightAfter = height(tree);
       parts.push(
-        `adds key ${JSON.stringify(afterKey)} — ${summarizeInsert(nodesBefore, nodesAfter, heightBefore, heightAfter)}`,
+        `adds key ${keyText(afterValues)} — ${summarizeInsert(nodesBefore, nodesAfter, heightBefore, heightAfter)}`,
       );
     }
 
     if (parts.length > 0) {
-      sentences.push(`Because \`${column}\` changed, its B+Tree ${parts.join(', then ')}.`);
+      sentences.push(`Because \`${name}\` changed, its B+Tree ${parts.join(', then ')}.`);
     }
   }
 
@@ -136,7 +136,7 @@ function indexScanForMatch(ctx: ExecContext, plan: Extract<Plan, { op: 'IndexSca
   const tree = ctx.trees[plan.column];
   if (!tree) return [];
 
-  const { pointers } = emitIndexLookup(emit, tree, plan.key, ctx.pool, plan.column, ctx.locks);
+  const { pointers } = emitIndexLookup(emit, tree, lookupKeysOf(plan), ctx.pool, plan.column, ctx.locks);
   const matched: Match[] = [];
 
   pointers.forEach((pointer, at) => {

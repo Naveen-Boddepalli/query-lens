@@ -21,9 +21,20 @@ concept explanation.
 
 ## B+Tree index
 
-- **Any number of indexed columns per table**, each its own independent single-column B+Tree — not a
-  composite (multi-column) key over several columns at once. When several candidates each match an
-  equality conjunct, the planner picks the most selective one by distinct-value count.
+- **Any number of indexes per table** — plain single-column ones (`indexedColumns`) and **composite**
+  ones (`indexes: [{ columns: ['city', 'age'] }]`, declared in the Custom database's *Manage tables*
+  as `city+age`). Each is its own B+Tree. When several candidates each match an equality conjunct,
+  the planner picks the one that pins the most rows down — the product of its matched columns'
+  distinct-value counts.
+- **A composite index is entered through a leftmost prefix.** An index on `(a, b)` answers `a = 1`
+  and `a = 1 AND b = 2`, but not `b = 2` alone: its entries are ordered by `a` first, so the `b`
+  matches are scattered through the whole index. The optimizer says so when it declines one. A range
+  enters it only through the leading column (`a > 5`); a range on `b` inside `a = 1` is not narrowed
+  by the index yet, and stays a per-row recheck. A query that reads only the index's own columns is
+  **covered** — an index-only scan returns them straight from the entries.
+- **NULL leading columns are never indexed** (an equality on NULL is never true, so there is
+  nothing to find); a NULL in a *later* column is an ordinary entry, so `(1, NULL)` is still found
+  by `a = 1`. A `JOIN` can probe a composite index through its leading column.
 - **Fan-out**: each node holds at most **4 keys** (5 children) before splitting; adjustable 3–6 in
   the [standalone sandbox](/tools/btree).
 - Supported operations: **insert**, **delete** (borrow/merge/root-collapse), **point lookup**, and
@@ -82,7 +93,7 @@ See [Supported SQL](/docs/reference/sql) for the complete accepted grammar.
 ## What's out of scope entirely
 
 No subqueries, no more than one `JOIN` per query (so no join-order
-choice), no outer joins, no true composite (multi-column) indexes, no transactions, no real
+choice), no outer joins, no `UNIQUE` or clustered indexes, no transactions, no real
 concurrency (the Locks panel is visual only), and no cost-based query optimization — every
 rewrite rule fires on a structural match, never a cost comparison, and the cost *estimates* shown
 alongside a plan exist to justify a rewrite's narration, not to decide whether it happens. `UNION` and `COUNT(DISTINCT …)` are also not accepted. These are deliberate exclusions for this

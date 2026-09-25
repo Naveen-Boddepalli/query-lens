@@ -123,36 +123,45 @@ export function unbudgeted(all: readonly string[], results: readonly RouteResult
 const P = (name: string): string => `src/pages/${name}.tsx`;
 const T = (name: string): string => `src/pages/tools/${name}.tsx`;
 
+/*
+ * Ceiling history since H8 (each bump is deliberate, and says why):
+ *
+ *  - 2026-09-25, composite indexes (§25.4 B3b): the engine chunk grew ~1.6 kB gzip — index specs, prefix lookups, the
+ *    leftmost-prefix narration and question, covering scans, composite maintenance in the write paths. Every route that
+ *    carries the engine moved up 3–5 kB (its measured size + 2, the H8 slack). Routes without the engine — /examples,
+ *    /settings, /study, /tools/{sort,locks,grammar,hash-join}, /docs, the 404 — did not move and did not change.
+ *    Earlier growth (non-unique indexes B3a, the index join B4) fit inside the H8 slack.
+ */
 export const ROUTES: readonly RouteBudget[] = [
-  { route: '/', roots: [P('LandingPage')], kb: 150, note: 'the landing page' },
-  { route: '/playground', roots: [P('PlaygroundPage')], kb: 299, note: 'the Playground: the editor, every stage panel, the engine — the heaviest route, and the one most people land on' },
-  { route: '/stages', roots: ['src/ui/StagesLayout.tsx', P('StagesIndex')], kb: 150, note: 'the stage explainers, index' },
-  { route: '/stages/:id', roots: ['src/ui/StagesLayout.tsx', P('StagePage')], kb: 167, note: 'one stage explainer' },
-  { route: '/learn', roots: [P('LearnPage')], kb: 155, note: 'the lesson track' },
-  { route: '/learn/:id', roots: [P('LessonPage')], kb: 155, note: 'one lesson' },
+  { route: '/', roots: [P('LandingPage')], kb: 153, note: 'the landing page' },
+  { route: '/playground', roots: [P('PlaygroundPage')], kb: 303, note: 'the Playground: the editor, every stage panel, the engine — the heaviest route, and the one most people land on' },
+  { route: '/stages', roots: ['src/ui/StagesLayout.tsx', P('StagesIndex')], kb: 153, note: 'the stage explainers, index' },
+  { route: '/stages/:id', roots: ['src/ui/StagesLayout.tsx', P('StagePage')], kb: 170, note: 'one stage explainer' },
+  { route: '/learn', roots: [P('LearnPage')], kb: 158, note: 'the lesson track' },
+  { route: '/learn/:id', roots: [P('LessonPage')], kb: 159, note: 'one lesson' },
   { route: '/examples', roots: [P('ExamplesPage')], kb: 115, note: 'preset queries' },
-  { route: '/gallery', roots: [P('GalleryPage')], kb: 151, note: 'named moments' },
-  { route: '/compare', roots: [P('ComparePage')], kb: 157, note: 'index vs scan, policy vs policy, hash vs sort, join algorithms' },
-  { route: '/trace', roots: [P('TracePage')], kb: 153, note: 'the trace inspector' },
-  { route: '/progress', roots: [P('ProgressPage')], kb: 157, note: 'the progress dashboard' },
-  { route: '/challenges', roots: [P('ChallengesPage')], kb: 152, note: 'challenge index' },
-  { route: '/challenges/:id', roots: [P('ChallengePage')], kb: 272, note: 'one challenge' },
+  { route: '/gallery', roots: [P('GalleryPage')], kb: 154, note: 'named moments' },
+  { route: '/compare', roots: [P('ComparePage')], kb: 160, note: 'index vs scan, policy vs policy, hash vs sort, join algorithms' },
+  { route: '/trace', roots: [P('TracePage')], kb: 156, note: 'the trace inspector' },
+  { route: '/progress', roots: [P('ProgressPage')], kb: 160, note: 'the progress dashboard' },
+  { route: '/challenges', roots: [P('ChallengesPage')], kb: 156, note: 'challenge index' },
+  { route: '/challenges/:id', roots: [P('ChallengePage')], kb: 275, note: 'one challenge' },
   { route: '/settings', roots: [P('SettingsPage')], kb: 116, note: 'preferences' },
   { route: '/study', roots: [P('StudyPage')], kb: 122, note: 'the §9 study runner (unlisted); the instrument travels in the link, not the bundle (§25.4 A2)' },
-  { route: '/assignments/new', roots: [P('AssignmentsNewPage')], kb: 152, note: 'assignment-link builder' },
+  { route: '/assignments/new', roots: [P('AssignmentsNewPage')], kb: 155, note: 'assignment-link builder' },
   { route: '/tools', roots: [P('ToolsIndexPage')], kb: 116, note: 'the tools index' },
-  { route: '/tools/buffer-pool', roots: [T('BufferPoolToolPage')], kb: 154, note: 'buffer-pool sandbox' },
-  { route: '/tools/parser', roots: [T('ParserToolPage')], kb: 153, note: 'tokenizer + parser sandbox' },
-  { route: '/tools/btree', roots: [T('BTreeToolPage')], kb: 154, note: 'B+Tree sandbox' },
-  { route: '/tools/page', roots: [T('PageToolPage')], kb: 151, note: 'slotted-page inspector' },
+  { route: '/tools/buffer-pool', roots: [T('BufferPoolToolPage')], kb: 157, note: 'buffer-pool sandbox' },
+  { route: '/tools/parser', roots: [T('ParserToolPage')], kb: 156, note: 'tokenizer + parser sandbox' },
+  { route: '/tools/btree', roots: [T('BTreeToolPage')], kb: 157, note: 'B+Tree sandbox' },
+  { route: '/tools/page', roots: [T('PageToolPage')], kb: 154, note: 'slotted-page inspector' },
   { route: '/tools/sort', roots: [T('SortToolPage')], kb: 118, note: 'external merge sort' },
-  { route: '/tools/planner', roots: [T('PlannerToolPage')], kb: 154, note: 'planner sandbox' },
+  { route: '/tools/planner', roots: [T('PlannerToolPage')], kb: 157, note: 'planner sandbox' },
   { route: '/tools/locks', roots: [T('LocksToolPage')], kb: 117, note: 'lock simulator' },
   { route: '/tools/grammar', roots: [T('GrammarToolPage')], kb: 116, note: 'the SQL grammar diagram' },
   { route: '/tools/hash-join', roots: [T('HashJoinToolPage')], kb: 118, note: 'Grace hash join' },
   { route: '/docs', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 141, note: 'the docs shell and every prose page (one shared chunk)' },
-  { route: '/docs/concepts/btree', roots: ['src/ui/DocsLayout.tsx', 'src/pages/DocsContent/concepts/btree.mdx'], kb: 154, note: 'a concept page with a live B+Tree widget' },
-  { route: '/docs/concepts/buffer-pool', roots: ['src/ui/DocsLayout.tsx', 'src/pages/DocsContent/concepts/buffer-pool.mdx'], kb: 156, note: 'a concept page with a live buffer-pool widget' },
+  { route: '/docs/concepts/btree', roots: ['src/ui/DocsLayout.tsx', 'src/pages/DocsContent/concepts/btree.mdx'], kb: 159, note: 'a concept page with a live B+Tree widget' },
+  { route: '/docs/concepts/buffer-pool', roots: ['src/ui/DocsLayout.tsx', 'src/pages/DocsContent/concepts/buffer-pool.mdx'], kb: 159, note: 'a concept page with a live buffer-pool widget' },
   { route: '/* (404)', roots: [P('NotFoundPage')], kb: 114, note: 'the not-found page' },
 ];
 

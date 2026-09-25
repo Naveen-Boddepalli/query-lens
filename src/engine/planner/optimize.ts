@@ -11,11 +11,12 @@
  */
 
 import type { PredictionPrompt, SqlValue, Table } from '../types.ts';
-import { indexSelectionPrompt } from '../predict.ts';
+import { indexSelectionPrompt, leftmostPrefixPrompt } from '../predict.ts';
+import { columnsOfIndex, indexNameOf, indexSpecsOf } from '../index/spec.ts';
 import { mapChildren, walkExpr } from '../parser/index.ts';
 import { arithmetic, negate } from '../value.ts';
 import type { CompareOp, Expr } from '../parser/index.ts';
-import { conjoin, conjuncts, equalityOn, exprToSql, formatRangeBounds, rangeOn } from './plan.ts';
+import { conjoin, conjuncts, equalityOn, exprToSql, formatRangeBounds, lookupText, rangeOn } from './plan.ts';
 import type { Plan, RangeBound } from './plan.ts';
 import { boundedRangeSelectivity, ndistinct } from './cost.ts';
 
@@ -413,6 +414,47 @@ const joinPredicatePushdown: Rule = (input) => {
 };
 
 /**
+ * One index the predicate can enter by equality, and how far: `matched` is the run of the index's *leading* columns
+ * that each have an equality conjunct — the leftmost prefix — and `fraction` how much of the table that run selects.
+ */
+interface EqualityCandidate {
+  name: string;
+  columns: readonly string[];
+  matched: { column: string; partIndex: number; key: SqlValue }[];
+  /** Independent per-column selectivity, multiplied — the same assumption an `AND` in a `WHERE` already makes. */
+  fraction: number;
+}
+
+/** The composite indexes `parts` cannot enter: it constrains one of their columns, but not their leftmost one. */
+function unusableComposites(table: Table, parts: readonly Expr[]): { name: string; columns: readonly string[]; named: string[] }[] {
+  return indexSpecsOf(table).flatMap((spec) => {
+    if (spec.columns.length < 2) return [];
+    const constrains = (column: string) => parts.some((p) => equalityOn(p, column) !== undefined || rangeOn(p, column) !== undefined);
+    if (constrains(spec.columns[0]!)) return [];
+    const named = spec.columns.slice(1).filter(constrains);
+    return named.length > 0 ? [{ name: indexNameOf(spec.columns), columns: spec.columns, named }] : [];
+  });
+}
+
+/**
+ * The leftmost-prefix rule, said aloud for whoever is looking at a plan that did *not* use an index it might have
+ * (plan.md §25.4 B3): a composite index on `(a, b)` is ordered by `a` first, so an equality on `b` alone matches entries
+ * scattered across the whole index — there is no run to read, and the index cannot be entered. `null` when there is
+ * nothing to say.
+ */
+export function leftmostPrefixNote(table: Table, where: Expr | undefined): string | null {
+  if (!where) return null;
+  const skipped = unusableComposites(table, conjuncts(where));
+  if (skipped.length === 0) return null;
+  return skipped
+    .map(
+      (c) =>
+        `The index on (${c.columns.join(', ')}) cannot help: the predicate constrains ${c.named.map((n) => `\`${n}\``).join(' and ')} but not \`${c.columns[0]}\`, and an index can only be entered through its leftmost column — its entries are ordered by \`${c.columns[0]}\` first, so ${c.named.length === 1 ? 'that value is' : 'those values are'} scattered across the whole index.`,
+    )
+    .join(' ');
+}
+
+/**
  * Swap a `SeqScan` for an `IndexScan` when a conjunct is an equality on an
  * indexed column. Conjuncts the index cannot answer stay behind as a
  * recheck — the index narrows the search, it does not verify the whole
@@ -427,6 +469,12 @@ const joinPredicatePushdown: Rule = (input) => {
  * consults no cost estimate here, only the data itself). The conjunct that
  * lost stays in the recheck, exactly like every other conjunct the chosen
  * index can't answer — v0 has no way to intersect two index lookups.
+ *
+ * A **composite** index (plan.md §25.4 B3) is entered through a *leftmost
+ * prefix*: the run of its leading columns that each have an equality. An
+ * equality on `a` enters an index on `(a, b)`; one on `b` alone cannot, and the
+ * rule leaves that index unused — and says why. The more columns a candidate's
+ * prefix pins, the fewer rows it selects, so that is what the choice compares.
  */
 const indexSelection: Rule = (input, table) => {
   const { limit, rest: plan } = unwrapLimit(input);
@@ -436,25 +484,45 @@ const indexSelection: Rule = (input, table) => {
   if (scan.op !== 'SeqScan' || !scan.filter) return null;
 
   const parts = conjuncts(scan.filter);
-  const candidates = (table.indexedColumns ?? []).flatMap((column) => {
-    const matchIndex = parts.findIndex((p) => equalityOn(p, column) !== undefined);
-    if (matchIndex === -1) return [];
-    return [{ column, matchIndex, key: equalityOn(parts[matchIndex]!, column)! }];
+  const candidates: EqualityCandidate[] = indexSpecsOf(table).flatMap((spec) => {
+    const matched: EqualityCandidate['matched'] = [];
+    const used = new Set<number>();
+    for (const column of spec.columns) {
+      // The run of matched columns stops at the first one with no equality — that is the leftmost-prefix rule.
+      const partIndex = parts.findIndex((p, i) => !used.has(i) && equalityOn(p, column) !== undefined);
+      if (partIndex === -1) break;
+      used.add(partIndex);
+      matched.push({ column, partIndex, key: equalityOn(parts[partIndex]!, column)! });
+    }
+    if (matched.length === 0) return [];
+    return [
+      {
+        name: indexNameOf(spec.columns),
+        columns: spec.columns,
+        matched,
+        fraction: matched.reduce((product, m) => product / ndistinct(table.rows, m.column), 1),
+      },
+    ];
   });
   if (candidates.length === 0) return null;
 
+  const distinctOf = (c: EqualityCandidate): number => Math.round(1 / c.fraction);
   const chosen = candidates.reduce((best, c) =>
-    ndistinct(table.rows, c.column) > ndistinct(table.rows, best.column) ? c : best,
+    c.fraction < best.fraction || (c.fraction === best.fraction && c.matched.length > best.matched.length) ? c : best,
   );
   const runnersUp = candidates.filter((c) => c !== chosen);
 
-  const residual = conjoin(parts.filter((_, i) => i !== chosen.matchIndex));
+  const consumed = new Set(chosen.matched.map((m) => m.partIndex));
+  const residual = conjoin(parts.filter((_, i) => !consumed.has(i)));
+  const keys = chosen.matched.map((m) => m.key);
+  const composite = chosen.columns.length > 1;
 
   const indexScan: Plan = {
     op: 'IndexScan',
     table: scan.table,
-    column: chosen.column,
-    key: chosen.key,
+    column: chosen.name,
+    key: keys[0]!,
+    ...(composite ? { keys } : {}),
     ...(residual ? { residual } : {}),
   };
   const root = rewrapLimit(
@@ -466,24 +534,42 @@ const indexSelection: Rule = (input, table) => {
     },
   );
 
-  const chosenDistinct = ndistinct(table.rows, chosen.column);
-  const runnerUpNames = runnersUp.map((c) => `\`${c.column}\``).join(', ');
-  const runnerUpDistinct = runnersUp.map((c) => ndistinct(table.rows, c.column));
+  const chosenDistinct = distinctOf(chosen);
+  const nameOf = (c: EqualityCandidate) => (c.columns.length > 1 ? `(${c.columns.join(', ')})` : `\`${c.name}\``);
+  const runnerUpNames = runnersUp.map(nameOf).join(', ');
+  const runnerUpDistinct = runnersUp.map(distinctOf);
   const choiceClause =
     runnersUp.length === 0
       ? ''
       : runnerUpDistinct.every((d) => d === chosenDistinct)
-        ? ` (tied with ${runnerUpNames} at ${String(chosenDistinct)} distinct values each — \`${chosen.column}\` wins only because it was declared first, not because it narrows the search any further)`
+        ? ` (tied with ${runnerUpNames} at ${String(chosenDistinct)} distinct values each — ${nameOf(chosen)} wins only because it was declared first, not because it narrows the search any further)`
         : ` (chosen over ${runnerUpNames} — ${String(chosenDistinct)} distinct values beats ${runnerUpDistinct.map(String).join('/')}, so it narrows the search more)`;
+
+  const named = chosen.matched.map((m) => m.column);
+  const prefixClause = composite
+    ? named.length === chosen.columns.length
+      ? `The predicate has an equality on every column of the composite index (${chosen.columns.join(', ')})`
+      : `The predicate has an equality on ${named.map((c) => `\`${c}\``).join(' and ')} — ${named.length === 1 ? 'the leftmost column' : 'the leftmost columns'} of the composite index (${chosen.columns.join(', ')}), which is all an index needs to be entered: \`${chosen.columns[named.length]}\` only orders the entries inside each run`
+    : '';
+  const unusable = leftmostPrefixNote(table, scan.filter);
 
   return {
     rule: 'index-selection',
-    label: residual
-      ? `\`${chosen.column}\` is indexed${choiceClause}, so the equality becomes an index lookup. The rest of the predicate cannot be answered by the index and is rechecked on each row the index returns.`
-      : `\`${chosen.column}\` is indexed${choiceClause} and the predicate is an equality on it, so the scan becomes a B+Tree lookup — a handful of pages instead of the whole table.`,
+    label: `${
+      composite
+        ? `${prefixClause}${choiceClause}, so the ${named.length > 1 ? 'equalities become' : 'equality becomes'} an index lookup.${residual ? ' The rest of the predicate cannot be answered by the index and is rechecked on each row the index returns.' : ''}`
+        : residual
+          ? `\`${chosen.name}\` is indexed${choiceClause}, so the equality becomes an index lookup. The rest of the predicate cannot be answered by the index and is rechecked on each row the index returns.`
+          : `\`${chosen.name}\` is indexed${choiceClause} and the predicate is an equality on it, so the scan becomes a B+Tree lookup — a handful of pages instead of the whole table.`
+    }${unusable ? ` ${unusable}` : ''}`,
     plan: root,
     changed: new Set<Plan>([indexScan]),
-    prompt: indexSelectionPrompt(chosen.column, chosen.key),
+    prompt:
+      composite && named.length < chosen.columns.length
+        ? leftmostPrefixPrompt(chosen.name, chosen.columns, named)
+        : composite
+          ? indexSelectionPrompt(`(${chosen.columns.join(', ')})`, keys[0]!, lookupText(chosen.name, keys))
+          : indexSelectionPrompt(chosen.name, chosen.matched[0]!.key),
   };
 };
 
@@ -515,7 +601,10 @@ const rangeIndexSelection: Rule = (input, table) => {
   if (scan.op !== 'SeqScan' || !scan.filter) return null;
 
   const parts = conjuncts(scan.filter);
-  const candidates = (table.indexedColumns ?? []).flatMap((column) => {
+  // A range enters an index through its *leading* column, plain or composite — the entries are ordered by it first.
+  const candidates = indexSpecsOf(table).flatMap((spec) => {
+    const column = spec.columns[0]!;
+    const name = indexNameOf(spec.columns);
     const matches = parts
       .map((p, i) => ({ i, match: rangeOn(p, column) }))
       .filter((m): m is { i: number; match: NonNullable<ReturnType<typeof rangeOn>> } => m.match !== undefined);
@@ -533,7 +622,7 @@ const rangeIndexSelection: Rule = (input, table) => {
     const numericLow = low && typeof low.value === 'number' ? low.value : null;
     const numericHigh = high && typeof high.value === 'number' ? high.value : null;
     const selectivity = boundedRangeSelectivity(column, numericLow, numericHigh, table);
-    return [{ column, consumed, low, high, selectivity }];
+    return [{ column, name, consumed, low, high, selectivity }];
   });
   if (candidates.length === 0) return null;
 
@@ -547,7 +636,7 @@ const rangeIndexSelection: Rule = (input, table) => {
   const rangeScan: Plan = {
     op: 'IndexRangeScan',
     table: scan.table,
-    column: chosen.column,
+    column: chosen.name,
     ...(chosen.low ? { low: chosen.low } : {}),
     ...(chosen.high ? { high: chosen.high } : {}),
     ...(residual ? { residual } : {}),
@@ -565,12 +654,16 @@ const rangeIndexSelection: Rule = (input, table) => {
         ? ` (tied with ${runnerUpNames} — \`${chosen.column}\` wins only because it was declared first, not because it narrows the search any further)`
         : ` (chosen over ${runnerUpNames} — a narrower estimated range)`;
   const boundsText = formatRangeBounds(chosen.column, chosen.low, chosen.high);
+  const indexedText =
+    chosen.name === chosen.column
+      ? `\`${chosen.column}\` is indexed`
+      : `the composite index (${chosen.name}) is ordered by \`${chosen.column}\` first, so it can be entered there`;
 
   return {
     rule: 'range-index-selection',
     label: residual
-      ? `\`${chosen.column}\` is indexed and ${boundsText}${choiceClause}, so the scan becomes a single descent to the first matching leaf, then a walk along the leaf chain — no full table scan. The rest of the predicate is rechecked on each row the index returns.`
-      : `\`${chosen.column}\` is indexed and the whole predicate is ${boundsText}${choiceClause}, so the scan becomes a single descent to the first matching leaf, then a walk along the leaf chain — no full table scan.`,
+      ? `${indexedText} and ${boundsText}${choiceClause}, so the scan becomes a single descent to the first matching leaf, then a walk along the leaf chain — no full table scan. The rest of the predicate is rechecked on each row the index returns.`
+      : `${indexedText} and the whole predicate is ${boundsText}${choiceClause}, so the scan becomes a single descent to the first matching leaf, then a walk along the leaf chain — no full table scan.`,
     plan: root,
     changed: new Set<Plan>([rangeScan]),
   };
@@ -592,15 +685,28 @@ const indexOnlyScan: Rule = (input) => {
   if (plan.child.op !== 'IndexScan' || plan.child.residual) return null;
 
   const scan = plan.child;
-  const onlyIndexedColumn = plan.columns.names.every((name) => name === scan.column);
-  if (!onlyIndexedColumn) return null;
+  // An index holds the values of every column it is on — one for a plain index, several for a composite one, which
+  // therefore *covers* any query that reads only those columns (plan.md §25.4 B3).
+  const covered = columnsOfIndex(scan.column);
+  const onlyIndexedColumns = plan.columns.names.every((name) => covered.includes(name));
+  if (!onlyIndexedColumns) return null;
 
-  const indexOnly: Plan = { op: 'IndexOnlyScan', table: scan.table, column: scan.column, key: scan.key };
+  const indexOnly: Plan = {
+    op: 'IndexOnlyScan',
+    table: scan.table,
+    column: scan.column,
+    key: scan.key,
+    ...(scan.keys ? { keys: scan.keys } : {}),
+  };
   const root = rewrapLimit(limit, { op: 'Project', columns: plan.columns, child: indexOnly });
+  const needs = plan.columns.names.map((n) => `\`${n}\``).join(', ');
 
   return {
     rule: 'index-only-scan',
-    label: `Every column this query needs — \`${scan.column}\` — is already the index key, so the lookup answers it without ever fetching the heap page the pointer names.`,
+    label:
+      covered.length > 1
+        ? `Every column this query needs — ${needs} — is one the composite index (${scan.column}) holds, so the index *covers* the query: the entries answer it without ever fetching the heap page the pointers name.`
+        : `Every column this query needs — \`${scan.column}\` — is already the index key, so the lookup answers it without ever fetching the heap page the pointer names.`,
     plan: root,
     changed: new Set<Plan>([indexOnly]),
   };
