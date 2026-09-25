@@ -361,6 +361,32 @@ test('compare forces a hash aggregate and a sort aggregate onto the same GROUP B
   await expect(page.getByText(/makes no difference/)).toBeVisible();
 });
 
+test('compare builds the same index two ways: bulk-loaded, it is shallower and a lookup reads fewer pages (plan.md §25.4 B3d)', async ({ page }) => {
+  await page.goto('/compare');
+  await page.getByRole('radio', { name: 'Index build' }).click();
+  await expect(page.getByText(/Same \d+ rows? every time/)).toBeVisible();
+
+  const column = (heading: string) =>
+    page.locator('div.flex.flex-col.gap-2', { has: page.getByRole('heading', { name: heading, exact: true }) });
+  const stat = async (heading: string, label: string) =>
+    Number(await column(heading).locator('div.contents', { hasText: label }).locator('dd').innerText());
+
+  const oneAtATime = { levels: await stat('One entry at a time', 'tree height'), pages: await stat('One entry at a time', 'index pages'), reads: await stat('One entry at a time', 'disk reads') };
+  const packed = { levels: await stat('Bulk load, 100% full', 'tree height'), pages: await stat('Bulk load, 100% full', 'index pages'), reads: await stat('Bulk load, 100% full', 'disk reads') };
+  const half = { levels: await stat('Bulk load, 50% full', 'tree height'), pages: await stat('Bulk load, 50% full', 'index pages') };
+
+  expect(packed.levels).toBeLessThan(oneAtATime.levels);
+  expect(packed.pages).toBeLessThan(oneAtATime.pages);
+  expect(packed.reads).toBeLessThan(oneAtATime.reads);
+  // Leaving room to grow costs pages: half-full leaves make the biggest tree of the three.
+  expect(half.pages).toBeGreaterThan(oneAtATime.pages);
+
+  // A query that never touches the index has no tree to compare.
+  await page.getByLabel('SQL').fill('SELECT * FROM readings WHERE value = 5');
+  await page.getByRole('button', { name: 'Run' }).click();
+  await expect(page.getByText(/does not use the index/)).toBeVisible();
+});
+
 test('compare forces nested-loop, hash, sort-merge and index nested-loop join onto the same JOIN query', async ({ page }) => {
   await page.goto('/compare');
   await page.getByRole('radio', { name: 'JOIN algorithms' }).click();

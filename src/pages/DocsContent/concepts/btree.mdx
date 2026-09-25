@@ -80,6 +80,20 @@ few distinct values is often *worse* than a scan. Try
 in the Planner sandbox — `posts` is indexed on `authorId`, which repeats (four authors, ten posts) — and read
 the row estimate the cost model gives the `IndexScan`.
 
+## Building an index: one row at a time, or all at once
+
+An index over a table that already exists can be built two ways. Inserting the rows **one at a time**
+splits a leaf whenever it overflows — and for keys that arrive in order, a full leaf splits and nothing is ever
+inserted into its left half again, so every leaf is left a quarter empty. A **bulk load** sorts the entries
+first, packs the leaves to a *fill factor* (100% leaves no room; 70% leaves 30% free so the next inserts do not
+split at once), and builds each level above from the one below — no splits at all. It is how `CREATE INDEX`
+works on a table full of rows, and why it is faster and yields a smaller, shallower tree.
+
+Shallower is the point: a lookup reads one page per level. Over 400 rows at this fan-out the one-at-a-time tree
+is 5 levels and the packed one 4, so a point lookup costs 5 disk reads instead of 7 — the
+[Index build](/compare) comparison runs it on the real engine. The price of packing is that the tree has no
+room to grow: the next row inserted into a full leaf splits it.
+
 ## UNIQUE is a lookup
 
 A `UNIQUE` constraint is not a rule checked somewhere else — it is an index lookup made *before* a key goes

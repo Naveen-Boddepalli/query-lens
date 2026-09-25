@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Bulk-loaded indexes, and an *Index build* comparison** (plan.md §25.4 B3, fourth slice) — an index can be
+  built by sorting the entries and packing the leaves to a fill factor instead of inserting one row at a time. It
+  is a smaller, often shallower tree with identical answers: over 400 rows a point lookup costs **5 disk reads**
+  bulk-loaded and **7** built the old way (whose leaves come out three-quarters full — the split rule at work),
+  and 7 again when the leaves are packed only half full. `/compare` has a fourth mode that runs the same query
+  over the three builds and scores tree height, index pages and disk reads.
 - **`UNIQUE` indexes** (plan.md §25.4 B3, third slice) — declare one in the Custom database's *Manage tables*
   (`email, team+role`). A unique constraint is an index lookup made before a key goes in: `INSERT` and `UPDATE`
   ask the index whether the key is already there, and if it is the statement is rejected with the key and the

@@ -9,7 +9,7 @@
  */
 
 import fc from 'fast-check';
-import type { EngineOptions, ReplacementPolicyName, Row, SqlValue } from '../src/engine/types.ts';
+import type { EngineOptions, IndexBuildOptions, ReplacementPolicyName, Row, SqlValue } from '../src/engine/types.ts';
 import type { AggItem, Arith, ArithOp, ColSpec, ColType, Op, Pred, Query, ReadQuery, Ref, TableSpec, WriteQuery } from './model.ts';
 
 /* -------------------------------------------------------------------------- */
@@ -732,4 +732,11 @@ export const optionsArb: fc.Arbitrary<EngineOptions> = fc
     policy: fc.constantFrom<ReplacementPolicyName>('lru', 'clock'),
     joinStrategy: fc.constantFrom('nested-loop', 'hash', 'sort-merge', 'index-nested-loop'),
     aggregateStrategy: fc.constantFrom('hash', 'sort'),
-  });
+    // How the indexes are built (plan.md §25.4 B3d): one entry at a time, or bulk-loaded and packed to a fill
+    // factor. The trees differ in shape and never in what a query returns.
+    indexBuild: fc.oneof(
+      { weight: 2, arbitrary: fc.constant<IndexBuildOptions | undefined>(undefined) },
+      { weight: 3, arbitrary: fc.constantFrom<IndexBuildOptions>({ method: 'bulk' }, { method: 'bulk', fillFactor: 0.75 }, { method: 'bulk', fillFactor: 0.5 }) },
+    ),
+  })
+  .map(({ indexBuild, ...rest }): EngineOptions => (indexBuild ? { ...rest, indexBuild } : rest));

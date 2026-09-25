@@ -33,6 +33,8 @@ export type {
   RowPointer,
   SearchResult,
 } from './btree.ts';
+export { bulkLoad, DEFAULT_FILL_FACTOR, MIN_FILL_FACTOR } from './bulk.ts';
+export type { BulkEntry } from './bulk.ts';
 export { buildIndex, buildIndexes, keyValuesOf, pageCountFor } from './build.ts';
 export { columnsOfIndex, findIndexSpec, indexNameOf, indexSpecsOf, joinIndexFor } from './spec.ts';
 export { keyList, keyText, toIndexDisplay } from './display.ts';

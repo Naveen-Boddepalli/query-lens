@@ -1,6 +1,8 @@
 import type { Heap } from '../storage/index.ts';
-import type { IndexSpec, Row, SqlValue } from '../types.ts';
+import type { IndexBuildOptions, IndexSpec, Row, SqlValue } from '../types.ts';
 import { createTree, entryKey, insert } from './btree.ts';
+import { bulkLoad, DEFAULT_FILL_FACTOR } from './bulk.ts';
+import type { BulkEntry } from './bulk.ts';
 import type { BPlusTree } from './btree.ts';
 import { DEFAULT_MAX_KEYS } from './btree.ts';
 import { indexNameOf } from './spec.ts';
@@ -23,13 +25,12 @@ export function buildIndex(
   index: string | IndexSpec,
   maxKeys = DEFAULT_MAX_KEYS,
   firstPageId = heap.pages.length,
+  /** How to build it — one entry at a time (the default), or bulk-loaded and packed to a fill factor (plan.md §25.4 B3d). */
+  build: IndexBuildOptions = { method: 'incremental' },
 ): BPlusTree {
   const columns = typeof index === 'string' ? [index] : index.columns;
-  // Entry keys (values + row address), so the key may repeat: two rows with the same values are two
-  // distinct entries, adjacent in the leaves, and neither overwrites the other.
-  const tree = createTree(maxKeys, firstPageId, true);
-  if (typeof index !== 'string' && index.unique) tree.unique = true;
 
+  const entries: BulkEntry[] = [];
   heap.pages.forEach((page) => {
     page.rows.forEach((row, slot) => {
       const values = keyValuesOf(row, columns);
@@ -38,10 +39,20 @@ export function buildIndex(
       // the row must still be found by an equality on the columns before it.
       if (values[0] === null) return;
       const pointer = { pageId: page.pageId, slot };
-      insert(tree, entryKey(values, pointer), pointer);
+      entries.push({ key: entryKey(values, pointer), pointer });
     });
   });
 
+  // Entry keys (values + row address), so the key may repeat: two rows with the same values are two
+  // distinct entries, adjacent in the leaves, and neither overwrites the other.
+  let tree: BPlusTree;
+  if (build.method === 'bulk') {
+    tree = bulkLoad(entries, maxKeys, firstPageId, build.fillFactor ?? DEFAULT_FILL_FACTOR, true);
+  } else {
+    tree = createTree(maxKeys, firstPageId, true);
+    for (const { key, pointer } of entries) insert(tree, key, pointer);
+  }
+  if (typeof index !== 'string' && index.unique) tree.unique = true;
   return tree;
 }
 
@@ -62,11 +73,12 @@ export function buildIndexes(
   maxKeys = DEFAULT_MAX_KEYS,
   /** Where the first tree's pages begin — the heap's end by default; a join's *inner* table starts past the outer's. */
   firstPageId = heap.pages.length,
+  build?: IndexBuildOptions,
 ): Record<string, BPlusTree> {
   const trees: Record<string, BPlusTree> = {};
   for (const index of indexes) {
     const name = indexNameOf(typeof index === 'string' ? [index] : index.columns);
-    const tree = buildIndex(heap, index, maxKeys, firstPageId);
+    const tree = buildIndex(heap, index, maxKeys, firstPageId, build);
     trees[name] = tree;
     firstPageId = tree.nextPageId;
   }

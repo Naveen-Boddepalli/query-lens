@@ -15,6 +15,8 @@ import type {
   BufferTraceResult,
   Database,
   EngineOptions,
+  IndexBuildOptions,
+  IndexNode,
   ReplacementPolicyName,
   RunResult,
 } from '../engine/index.ts';
@@ -59,7 +61,7 @@ import {
  *    left side is small and the right side big.
  */
 
-type Mode = 'policies' | 'index' | 'aggregate' | 'join';
+type Mode = 'policies' | 'index' | 'build' | 'aggregate' | 'join';
 
 /* -------------------------------------------------------------------------- */
 /* Replacement-policy comparison                                              */
@@ -458,6 +460,179 @@ function IndexCompare() {
               score={scan}
               compareTo={indexed}
             />
+          </div>
+        </>
+      )}
+    </>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Bulk-loaded vs. one-at-a-time index build (plan.md §25.4 B3d)              */
+/* -------------------------------------------------------------------------- */
+
+// 400 rows with a unique, ascending `id` — big enough that packing shows in the tree's height (at 48 rows the
+// trees are the same height however they were built). The index is on `id`.
+const BUILD_DB: Database = {
+  tables: {
+    readings: {
+      name: 'readings',
+      columns: ['id', 'sensor', 'value'],
+      rows: Array.from({ length: 400 }, (_, i) => ({ id: i + 1, sensor: `s${String(i % 12)}`, value: (i * 37) % 1000 })),
+      indexedColumns: ['id'],
+    },
+  },
+};
+
+const BUILD_PRESETS = [
+  { label: 'Point lookup', sql: 'SELECT * FROM readings WHERE id = 250' },
+  { label: 'A range of 30 ids', sql: 'SELECT * FROM readings WHERE id > 360 AND id <= 390' },
+] as const;
+
+const BUILDS: { label: string; sub: string; build: IndexBuildOptions }[] = [
+  { label: 'One entry at a time', sub: 'insert each row in order, splitting leaves as they fill', build: { method: 'incremental' } },
+  { label: 'Bulk load, 100% full', sub: 'sort, pack every leaf, build the levels above — no splits', build: { method: 'bulk', fillFactor: 1 } },
+  { label: 'Bulk load, 50% full', sub: 'leave half of every leaf free to grow into', build: { method: 'bulk', fillFactor: 0.5 } },
+];
+
+interface BuildScore {
+  levels: number;
+  nodes: number;
+  nodeReads: number;
+  diskReads: number;
+  steps: number;
+  rows: number;
+}
+
+const countNodes = (node: IndexNode): number => 1 + (node.children ?? []).reduce((sum, c) => sum + countNodes(c), 0);
+
+/** `null` when the query never touched the index — there is no tree to compare. */
+function buildScoreOf(result: RunResult): BuildScore | null {
+  const open = result.events.find((e) => e.stage === 'index' && e.action === 'open');
+  if (open?.stage !== 'index' || open.action !== 'open') return null;
+  const end = createTraceProjector(result.events, DEFAULT_ENGINE_OPTIONS).at(result.events.length);
+  return {
+    levels: open.height,
+    nodes: countNodes(open.tree),
+    nodeReads: end.indexPath.length,
+    diskReads: end.bufferStats.misses,
+    steps: result.events.length,
+    rows: result.rows.length,
+  };
+}
+
+const BUILD_STAT_ROWS: { key: keyof BuildScore; label: string }[] = [
+  { key: 'levels', label: 'tree height (levels)' },
+  { key: 'nodes', label: 'index pages' },
+  { key: 'nodeReads', label: 'B+Tree node reads' },
+  { key: 'diskReads', label: 'disk reads' },
+  { key: 'steps', label: 'trace steps' },
+  { key: 'rows', label: 'rows returned' },
+];
+
+function BuildCompare() {
+  const [sqlInput, setSqlInput] = useState<string>(BUILD_PRESETS[0].sql);
+  const [sql, setSql] = useState<string>(BUILD_PRESETS[0].sql);
+
+  const runs = useMemo(
+    () => BUILDS.map((b) => runQuery(sql, BUILD_DB, { ...DEFAULT_ENGINE_OPTIONS, indexBuild: b.build })),
+    [sql],
+  );
+  const scores = useMemo(() => runs.map(buildScoreOf), [runs]);
+  const error = runs[0]!.error;
+  const usable = scores.every((s): s is BuildScore => s !== null);
+  const best = usable
+    ? {
+        levels: Math.min(...scores.map((s) => s.levels)),
+        nodes: Math.min(...scores.map((s) => s.nodes)),
+        nodeReads: Math.min(...scores.map((s) => s.nodeReads)),
+        diskReads: Math.min(...scores.map((s) => s.diskReads)),
+        steps: Math.min(...scores.map((s) => s.steps)),
+      }
+    : null;
+
+  return (
+    <>
+      <p className="text-body text-ink-dim">
+        The same index over the same 400 rows, built three ways (plan.md §25.4 B3d). Inserting rows one at a
+        time splits a leaf whenever it overflows, and for keys that arrive in order that leaves every leaf a
+        quarter empty. A <strong className="text-ink">bulk load</strong> sorts the entries first and packs the
+        leaves to a <em>fill factor</em>, then builds each level above from the one below — no splits at all.
+        Same rows out every time; a fuller tree is smaller and shallower, so a lookup reads fewer pages, but
+        it has no room to grow: the next insert into a 100%-full leaf splits it.
+      </p>
+
+      <div className="mt-2 flex flex-col gap-3 rounded-xl border border-edge bg-surface-2 p-3 shadow-e1">
+        <label htmlFor="build-preset" className="flex flex-col gap-1 text-label text-ink-dim">
+          Query
+          <select
+            id="build-preset"
+            value={BUILD_PRESETS.some((p) => p.sql === sqlInput) ? sqlInput : 'custom'}
+            onChange={(e) => { if (e.target.value !== 'custom') setSqlInput(e.target.value); }}
+            className={inputField}
+          >
+            {BUILD_PRESETS.map((p) => (
+              <option key={p.label} value={p.sql}>{p.label}</option>
+            ))}
+            <option value="custom">Custom (edit below)</option>
+          </select>
+        </label>
+        <div className="flex flex-wrap items-end gap-3">
+          <label htmlFor="build-sql" className="flex flex-1 min-w-64 flex-col gap-1 text-label text-ink-dim">
+            SQL
+            <input
+              id="build-sql"
+              type="text"
+              value={sqlInput}
+              onChange={(e) => { setSqlInput(e.target.value); }}
+              className={`${inputField} font-mono`}
+              spellCheck={false}
+            />
+          </label>
+          <button type="button" onClick={() => { setSql(sqlInput); }} className={btnPrimary}>
+            Run
+          </button>
+        </div>
+      </div>
+
+      {error ? (
+        <p className="rounded-lg border border-evict/40 bg-evict/10 p-3 text-label text-ink">{error.message}</p>
+      ) : !usable || !best ? (
+        <p className="rounded-xl border border-edge bg-surface-2 px-3 py-2 text-label text-ink-dim shadow-e1">
+          This query does not use the index on <code className="font-mono text-ink">id</code> — there is no tree to
+          compare. Try an equality or a range on <code className="font-mono text-ink">id</code>.
+        </p>
+      ) : (
+        <>
+          <p className="rounded-xl border border-accent/40 bg-accent-soft px-3 py-2 text-label text-ink shadow-e1">
+            Same <span className="font-mono">{scores[0]!.rows}</span> row{scores[0]!.rows === 1 ? '' : 's'} every
+            time. Built one at a time the tree is <span className="font-mono">{scores[0]!.levels}</span> levels and{' '}
+            <span className="font-mono">{scores[0]!.nodes}</span> pages; packed full, <span className="font-mono">{scores[1]!.levels}</span>{' '}
+            levels and <span className="font-mono">{scores[1]!.nodes}</span> pages; packed half full,{' '}
+            <span className="font-mono">{scores[2]!.levels}</span> and <span className="font-mono">{scores[2]!.nodes}</span>.
+          </p>
+
+          <div className="flex flex-col gap-4 lg:flex-row">
+            {BUILDS.map((b, i) => (
+              <div key={b.label} className="flex min-w-0 flex-1 flex-col gap-2">
+                <div>
+                  <h3 className="text-body font-semibold text-ink">{b.label}</h3>
+                  <p className="text-label text-ink-dim">{b.sub}</p>
+                </div>
+                <dl className={`${panelSurface} grid grid-cols-[1fr_auto] gap-x-4 gap-y-1.5 p-3 text-label`}>
+                  {BUILD_STAT_ROWS.map(({ key, label }) => {
+                    const mine = scores[i]![key];
+                    const worse = key !== 'rows' && mine > best[key];
+                    return (
+                      <div key={key} className="contents">
+                        <dt className="text-ink-dim">{label}</dt>
+                        <dd className={`text-right font-mono tabular-nums ${worse ? 'text-evict' : 'text-ink'}`}>{mine}</dd>
+                      </div>
+                    );
+                  })}
+                </dl>
+              </div>
+            ))}
           </div>
         </>
       )}
@@ -912,6 +1087,7 @@ export function ComparePage() {
           [
             ['policies', 'Replacement policies'],
             ['index', 'Index vs. sequential scan'],
+            ['build', 'Index build'],
             ['aggregate', 'Hash aggregate vs. sort aggregate'],
             ['join', 'JOIN algorithms'],
           ] as const
@@ -933,6 +1109,8 @@ export function ComparePage() {
         <PolicyCompare />
       ) : mode === 'index' ? (
         <IndexCompare />
+      ) : mode === 'build' ? (
+        <BuildCompare />
       ) : mode === 'aggregate' ? (
         <AggregateCompare />
       ) : (

@@ -261,6 +261,13 @@ export interface Database {
   tables: Record<string, Table>;
 }
 
+/** How indexes are built — see `EngineOptions.indexBuild`. */
+export interface IndexBuildOptions {
+  method: 'incremental' | 'bulk';
+  /** Bulk only: how full each node is packed, 0.5–1. */
+  fillFactor?: number;
+}
+
 /** The physical algorithms a `JOIN` can run — see `EngineOptions.joinStrategy`. */
 export type JoinAlgorithm = 'nested-loop' | 'hash' | 'sort-merge' | 'index-nested-loop';
 
@@ -295,6 +302,14 @@ export interface EngineOptions {
    * (plan.md §22.2).
    */
   joinStrategy?: JoinAlgorithm;
+  /**
+   * How a table's indexes are built before the query runs (plan.md §25.4 B3d). `incremental` (the default, when
+   * absent) inserts the entries one at a time in row order, splitting nodes as they overflow — which, for keys arriving
+   * in order, leaves every left leaf about three-quarters full at the default fan-out. `bulk` sorts the entries and packs the leaves left to right up to
+   * `fillFactor` (a fraction from 0.5 to 1, default 1), building each level from the one below with no splits: a
+   * smaller, often shallower tree, so a lookup reads fewer pages. The answers are identical either way.
+   */
+  indexBuild?: IndexBuildOptions;
 }
 
 export const DEFAULT_ENGINE_OPTIONS: EngineOptions = {

@@ -150,7 +150,7 @@ export function runQuery(
   }
 
   const heap = buildHeap(table, options.rowsPerPage);
-  const trees = buildIndexes(heap, indexSpecsOf(table));
+  const trees = buildIndexes(heap, indexSpecsOf(table), undefined, undefined, options.indexBuild);
   const locks = createLockManager(emit);
 
   if (ast.kind === 'insert') {
@@ -281,6 +281,7 @@ export function runQuery(
           [probeIndex],
           undefined,
           Math.max(pageCountFor(heap, trees), heap.pages.length + rightHeap.pages.length),
+          options.indexBuild,
         )
       : {};
 

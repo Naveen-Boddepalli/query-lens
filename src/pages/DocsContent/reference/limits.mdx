@@ -36,6 +36,10 @@ concept explanation.
 - **NULL leading columns are never indexed** (an equality on NULL is never true, so there is
   nothing to find); a NULL in a *later* column is an ordinary entry, so `(1, NULL)` is still found
   by `a = 1`. A `JOIN` can probe a composite index through its leading column.
+- **Indexes are built when the query runs** — one entry at a time, in row order, by default. The
+  setting `indexBuild` can *bulk-load* them instead (sort the entries, pack the leaves to a fill
+  factor between 50% and 100%, build the levels above with no splits): a smaller, often shallower tree
+  with identical answers. [Compare](/compare)'s *Index build* mode scores the three on 400 rows.
 - **`UNIQUE`** is an index that refuses repeats: declare it in the Custom database's *Manage tables*
   (`Unique indexes: email, team+role`). `INSERT` and `UPDATE` look the new key up in the index first
   and, if it is taken, are rejected — the trace shows the lookup that found it, and **nothing changes**.
@@ -77,7 +81,7 @@ concept explanation.
 - `COUNT(*)`, and `COUNT`/`SUM`/`AVG`/`MIN`/`MAX` over a column.
 - **Two strategies** — a hash aggregate (default) and a sort aggregate, which sorts the input on
   the `GROUP BY` columns first, spilling through the buffer pool exactly as `ORDER BY` does. Same
-  groups out either way; [Compare](/compare)'s third mode scores the difference in I/O.
+  groups out either way; [Compare](/compare)'s aggregate mode scores the difference in I/O.
 
 ## Writes
 

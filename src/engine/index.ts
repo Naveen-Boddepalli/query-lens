@@ -81,6 +81,7 @@ export type {
   Database,
   EngineOptions,
   EventOf,
+  IndexBuildOptions,
   IndexNode,
   IndexSpec,
   JoinAlgorithm,
