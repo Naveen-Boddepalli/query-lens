@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`EXPLAIN` and `EXPLAIN ANALYZE` as SQL** (plan.md §25.4 B6) — type it in the editor. `EXPLAIN SELECT …` returns a
+  `QUERY PLAN` result, one line per operator with the cost model's `est ~N rows`, and **executes nothing** — no page
+  is read. `EXPLAIN ANALYZE SELECT …` runs the query for real (the trace you step through is that run) and puts the
+  executor's `actual N rows` beside every estimate, then the result size and what the buffer pool did. No timings:
+  the engine makes no latency claim. `SELECT` only — `EXPLAIN ANALYZE DELETE` would perform the delete, and says so.
+  An `EXPLAIN ANALYZE` chip joins the Playground's presets.
 - **The plan as relational algebra** (plan.md §25.4 B5) — the notation a database course opens with, derived from
   the plan the engine actually built. A **Show as → Relational algebra** toggle on the Planner and Optimizer
   panels rewrites each node as `σ` (selection), `π` (projection), `⋈` (join), `γ` (grouping), `τ` (order), `δ`

@@ -1376,3 +1376,24 @@ test('the plan can be read as relational algebra, and copied as a σ π ⋈ γ e
   await page.getByRole('button', { name: 'Copy as LaTeX' }).click();
   expect(await page.evaluate(() => navigator.clipboard.readText())).toContain('\\sigma_{age > 30}');
 });
+
+/**
+ * plan.md §25.4 B6 — EXPLAIN [ANALYZE] as SQL: the keyword works in the editor,
+ * and its answer is a result you can read like any other.
+ */
+test('EXPLAIN ANALYZE is a statement: a QUERY PLAN with estimate beside actual, and EXPLAIN alone reads nothing', async ({ page }) => {
+  // The chip fills the editor; the trace runs to its end, where the plan is the result.
+  await page.goto('/playground');
+  await page.getByRole('button', { name: 'EXPLAIN ANALYZE' }).click();
+  await expect(page.locator('.cm-content')).toContainText('EXPLAIN ANALYZE');
+
+  await page.goto('/playground?q=EXPLAIN%20ANALYZE%20SELECT%20*%20FROM%20users%20WHERE%20age%20%3E%2030&x=0&s=9999');
+  await expect(page.getByRole('columnheader', { name: 'QUERY PLAN' })).toBeVisible();
+  await expect(page.getByRole('cell', { name: /SeqScan users .*est ~\d+ rows; actual \d+ rows/ })).toBeVisible();
+  await expect(page.getByRole('cell', { name: /^Buffer pool: \d+ hits?, \d+ miss(es)?, \d+ evictions?$/ })).toBeVisible();
+
+  // Plain EXPLAIN never touches a page: its trace has no buffer or execute stage to step through.
+  await page.goto('/playground?q=EXPLAIN%20SELECT%20*%20FROM%20users%20WHERE%20id%20%3D%205&x=0&s=9999');
+  await expect(page.getByRole('cell', { name: /IndexScan users\.id/ })).toBeVisible();
+  await expect(page.getByRole('cell', { name: /actual/ })).toHaveCount(0);
+});

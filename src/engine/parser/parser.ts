@@ -1,7 +1,8 @@
 /**
  * Recursive-descent parser for the v0 SQL subset (plan.md §4):
  *
- *   statement     := select | delete | insert | update
+ *   statement     := explain | select | delete | insert | update
+ *   explain       := EXPLAIN [ANALYZE] select
  *   select        := SELECT [DISTINCT] selectList FROM identifier [join] [WHERE expr]
  *                     [GROUP BY identifier (',' identifier)*] [HAVING expr]
  *                     [ORDER BY identifier [ASC|DESC]] [LIMIT number [OFFSET number]] [';'] EOF
@@ -63,6 +64,7 @@ import type {
   AggregateFn,
   CompareOp,
   DeleteStatement,
+  ExplainStatement,
   Expr,
   GroupByClause,
   InsertStatement,
@@ -1157,6 +1159,35 @@ function parseUpdateBody(c: Cursor): UpdateStatement {
   };
 }
 
+/* -------------------------------------------------------------------------- */
+/* EXPLAIN                                                                     */
+/* -------------------------------------------------------------------------- */
+
+function parseExplainBody(c: Cursor): ExplainStatement {
+  const explainToken = c.expectKeyword('EXPLAIN', 'to begin an explain');
+  const analyze = isKeyword(c.peek(), 'ANALYZE') ? (c.next(), true) : false;
+
+  const next = c.peek();
+  if (next.type === 'eof' || next.type === 'semicolon') {
+    throw new ParseError('Nothing to explain.', next.type === 'eof' ? explainToken : next, 'Follow EXPLAIN with a SELECT: `EXPLAIN SELECT * FROM users WHERE id = 5`.');
+  }
+  if (isKeyword(next, 'DELETE', 'INSERT', 'UPDATE')) {
+    throw new ParseError(
+      `EXPLAIN${analyze ? ' ANALYZE' : ''} of a ${next.upper} is not supported.`,
+      next,
+      analyze
+        ? 'EXPLAIN ANALYZE runs what it explains, and running a write would perform it. EXPLAIN a SELECT.'
+        : 'EXPLAIN takes a SELECT — a write is planned the same way, but not shown yet.',
+    );
+  }
+  if (isKeyword(next, 'EXPLAIN')) {
+    throw new ParseError('EXPLAIN cannot be nested.', next, 'One EXPLAIN, then the SELECT.');
+  }
+
+  const select = parseSelectBody(c);
+  return { kind: 'explain', analyze, select, span: { from: explainToken.from, to: select.span.to } };
+}
+
 export type StatementOutcome = { ok: true; ast: Statement } | { ok: false; error: QueryError };
 
 /**
@@ -1168,6 +1199,7 @@ export function parseStatement(sql: string): StatementOutcome {
   return runParse(sql, (c) => {
     if (c.atEnd()) throw new ParseError('Nothing to run — the query is empty.', c.peek());
     const first = c.peek();
+    if (first.type === 'keyword' && first.upper === 'EXPLAIN') return parseExplainBody(c);
     if (first.type === 'keyword' && first.upper === 'DELETE') return parseDeleteBody(c);
     if (first.type === 'keyword' && first.upper === 'INSERT') return parseInsertBody(c);
     if (first.type === 'keyword' && first.upper === 'UPDATE') return parseUpdateBody(c);

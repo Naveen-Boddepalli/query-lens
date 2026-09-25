@@ -3,7 +3,7 @@ title: Supported SQL
 description: The exact SQL subset QueryLens's parser accepts, and what it says when you write something outside it.
 ---
 
-QueryLens implements four statements — `SELECT`, `DELETE`, `INSERT` and `UPDATE` — over one table
+QueryLens implements four statements — `SELECT`, `DELETE`, `INSERT` and `UPDATE` — plus `EXPLAIN` for a `SELECT`, over one table
 at a time (two, for a `JOIN`). This page is the complete subset: if it isn't listed here, the
 parser does not accept it yet, and it will tell you so by name rather than failing with a generic
 syntax error.
@@ -168,6 +168,27 @@ UPDATE items SET qty = qty + 1, price = -price WHERE id = 5;
   index can then answer `id = 5`.
 - **Not yet:** arithmetic on an aggregate (`COUNT(*) + 1`), a computed column beside `GROUP BY`, and
   arithmetic in `ORDER BY` or `GROUP BY`.
+
+## EXPLAIN
+
+```sql
+EXPLAIN SELECT * FROM users WHERE id = 5;
+EXPLAIN ANALYZE SELECT age, COUNT(*) FROM users GROUP BY age HAVING COUNT(*) > 1;
+```
+
+`EXPLAIN` shows how a `SELECT` will run, as a result — one `QUERY PLAN` row per operator, each with the
+cost model's **estimate** (`est ~37 rows`):
+
+- **`EXPLAIN`** plans and optimizes but **executes nothing** — the trace stops before the executor, and no page
+  is read. The plan shown is exactly the one that would run: after the optimizer's rewrites.
+- **`EXPLAIN ANALYZE`** runs the query for real (the trace you step through *is* that run) and puts the
+  executor's **actual** row count beside every estimate (`est ~37 rows; actual 40 rows`), then the result size and
+  what the buffer pool did (hits, misses, evictions). It reports **no timings** — QueryLens makes no claim
+  about latency — where a real engine would print milliseconds.
+- **`SELECT` only.** `EXPLAIN ANALYZE DELETE …` would perform the delete, so writes are refused with that
+  reason.
+
+The Planner panel's **Copy as EXPLAIN** button gives the same text for a query you have already run.
 
 ## DELETE, INSERT, UPDATE
 

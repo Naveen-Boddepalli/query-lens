@@ -42,8 +42,9 @@ const repeat = (separator: GrammarPart, ...parts: GrammarPart[]): GrammarPart =>
 export const GRAMMAR: GrammarRule[] = [
   {
     name: 'statement',
-    parts: [choice([rule('select')], [rule('delete')], [rule('insert')], [rule('update')])],
+    parts: [choice([rule('explain')], [rule('select')], [rule('delete')], [rule('insert')], [rule('update')])],
   },
+  { name: 'explain', parts: [lit('EXPLAIN'), opt(lit('ANALYZE')), rule('select')] },
   {
     name: 'select',
     parts: [

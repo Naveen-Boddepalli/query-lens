@@ -35,7 +35,7 @@ export const KEYWORDS = new Set([
   'SELECT', 'FROM', 'WHERE', 'AND', 'OR', 'NOT', 'AS', 'NULL', 'TRUE', 'FALSE', 'BETWEEN', 'IN', 'IS', 'LIKE',
   'JOIN', 'INNER', 'LEFT', 'RIGHT', 'OUTER', 'FULL', 'CROSS', 'ON', 'USING',
   'GROUP', 'ORDER', 'BY', 'ASC', 'DESC', 'HAVING', 'LIMIT', 'OFFSET', 'DISTINCT', 'UNION',
-  'INSERT', 'UPDATE', 'DELETE', 'INTO', 'VALUES', 'SET', 'CREATE', 'DROP',
+  'INSERT', 'UPDATE', 'DELETE', 'INTO', 'VALUES', 'SET', 'CREATE', 'DROP', 'EXPLAIN', 'ANALYZE',
 ]);
 
 export class TokenizeError extends Error {

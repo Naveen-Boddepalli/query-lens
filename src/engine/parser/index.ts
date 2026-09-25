@@ -18,6 +18,7 @@ export type {
   AggregateFn,
   CompareOp,
   DeleteStatement,
+  ExplainStatement,
   Expr,
   GroupByClause,
   InsertColumnList,

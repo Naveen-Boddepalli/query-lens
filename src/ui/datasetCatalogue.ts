@@ -23,6 +23,8 @@ export const DATASET_CATALOGUE: Record<DatasetId, DatasetCatalogueEntry> = {
       { label: 'Point lookup', sql: 'SELECT *\nFROM users\nWHERE id = 5;' },
       { label: 'Sequential scan', sql: 'SELECT *\nFROM users\nWHERE age > 30;' },
       { label: 'Lookup, no index', sql: "SELECT *\nFROM users\nWHERE name = 'grace';" },
+      // plan.md §25.4 B6: the plan, and what actually ran, as a result you can read — estimate beside actual.
+      { label: 'EXPLAIN ANALYZE', sql: 'EXPLAIN ANALYZE\nSELECT *\nFROM users\nWHERE age > 30;' },
     ],
   },
   orders: {

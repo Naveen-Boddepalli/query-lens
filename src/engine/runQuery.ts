@@ -34,6 +34,7 @@ import { executeInsert } from './exec/insert.ts';
 import { executeUpdate } from './exec/update.ts';
 import { sortTempPageCount } from './exec/sort.ts';
 import { createLockManager } from './locks/index.ts';
+import { explainResult } from './explain.ts';
 import { createTracer } from './trace.ts';
 import { DEFAULT_ENGINE_OPTIONS } from './types.ts';
 import type { Database, EngineOptions, Row, RunResult, Table } from './types.ts';
@@ -50,6 +51,10 @@ export function runQuery(
     return { events: drain(), rows: [], error: parsed.error };
   }
   const ast = parsed.ast;
+  // EXPLAIN [ANALYZE] SELECT (plan.md §25.4 B6): the inner query, run and then reported as a plan.
+  if (ast.kind === 'explain') {
+    return explainResult(sql, ast, (inner) => runQuery(inner, db, options));
+  }
   const tableRef = ast.kind === 'insert' ? ast.into : ast.kind === 'update' ? ast.table : ast.from;
 
   const table = db.tables[tableRef.name];
@@ -270,7 +275,7 @@ interface ColumnRef {
   span: { from: number; to: number };
 }
 
-function referencedColumns(ast: Statement): ColumnRef[] {
+function referencedColumns(ast: Exclude<Statement, { kind: 'explain' }>): ColumnRef[] {
   const refs: ColumnRef[] = [];
   const push = (ref: { name: string; table?: string; span: { from: number; to: number } }) =>
     refs.push({ name: ref.name, ...(ref.table === undefined ? {} : { table: ref.table }), span: ref.span });

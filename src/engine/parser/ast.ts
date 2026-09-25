@@ -238,8 +238,27 @@ export interface UpdateStatement {
   span: Span;
 }
 
+/**
+ * `EXPLAIN [ANALYZE] SELECT …` (plan.md §25.4 B6): show the plan for a query,
+ * with the cost model's estimate for every operator. Plain `EXPLAIN` plans and
+ * optimises but never executes; `ANALYZE` runs the query for real and puts the
+ * executor's actual row count beside each estimate. SELECT only — an
+ * `EXPLAIN ANALYZE` of a write would perform it.
+ */
+export interface ExplainStatement {
+  kind: 'explain';
+  analyze: boolean;
+  select: SelectStatement;
+  span: Span;
+}
+
 /** Every statement form `parseStatement` can produce. `parse` stays SELECT-only. */
-export type Statement = SelectStatement | DeleteStatement | InsertStatement | UpdateStatement;
+export type Statement =
+  | SelectStatement
+  | DeleteStatement
+  | InsertStatement
+  | UpdateStatement
+  | ExplainStatement;
 
 /** The direct sub-expressions of a node, in source order. */
 export function childrenOf(expr: Expr): Expr[] {
