@@ -33,6 +33,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   descriptor, which the site's `<title>` and `og:title` already did.
 - The README's CI badge pointed at the old `QueryLens` repository name; it now points at `query-lens`.
 - Vitest also runs tests under `scripts/`.
+- **Dependency updates** (Dependabot #4, #10): `react`/`react-dom` 19.2.8 → 19.3.0 (with their `@types`),
+  `vite` 8.2.2 → 8.3.0, `vitest` 5.0.0 → 5.0.1, `jsdom` 30.0.1 → 30.1.0, `eslint-plugin-react-refresh`
+  0.5.6 → 0.5.7. Typecheck, lint, all unit tests, the CLI smoke steps and all 85 Playwright tests pass
+  unchanged. React 19.3.0 is materially larger (`react-dom-client.production.js` +17% unminified;
+  the `react` chunk went 54.2 → 62.5 kB gzip), which tripped the bundle budget on `main` — the
+  `react` ceiling is raised 62 → 63 kB in `scripts/bundle-budget.ts`, with the measurement recorded
+  beside it. Total is 392.2 of 424 kB.
 
 ## [1.0.0] - 2026-09-23
 

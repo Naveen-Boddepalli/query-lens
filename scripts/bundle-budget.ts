@@ -31,7 +31,13 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
   // quietly spent again — a feature FlowTree starts to use is imported by name and
   // shows up here as exactly its own weight.
   { name: 'flow', test: /^flow-.*\.js$/, kb: 20, note: 'flowinger + d3-hierarchy' },
-  { name: 'react', test: /^react-/, kb: 62, note: 'react + react-dom' },
+  // 62 → 63 for react/react-dom 19.2.8 → 19.3.0, which measured 54.2 → 62.5 kB gzip.
+  // That is upstream's own growth, not ours: `react-dom-client.production.js` went 536 →
+  // 625 kB unminified, the built chunk holds no development-build strings, and there is
+  // one copy of react, react-dom and scheduler in the graph. There is nothing here to
+  // shrink, so the ceiling follows the dependency — set to the new size plus the same
+  // half-kB the other rows carry, not the ~8 kB of slack the old number had.
+  { name: 'react', test: /^react-/, kb: 63, note: 'react + react-dom' },
   // The entry chunk after M13 (plan.md §21.5). Every route is now `React.lazy`,
   // so this is App + Router + the layout shell and little else — down from the
   // ~44 kB it had crept to across `5c7ef5d` and the docs migration, neither of
