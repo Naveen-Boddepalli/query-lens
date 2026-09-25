@@ -83,6 +83,12 @@ See [plan.md](plan.md) for the full design and [RESEARCH.md](RESEARCH.md) for th
 - Playback is an index into an array
 - The engine is worker-ready but runs on the main thread (see plan.md §5)
 
+## Releases and deploy config
+
+Releases are cut as one commit with the tag on it, and notes are derived from `CHANGELOG.md` (`pnpm release-notes`).
+A change to `public/`, `wrangler.jsonc`, `index.html`, `pnpm-workspace.yaml` or `.node-version` needs a look at a
+preview deploy before it merges — CI flags those files. Both are in [RELEASING.md](RELEASING.md).
+
 ## Release-Age Floor
 
 `minimumReleaseAge: 10080` is set in `pnpm-workspace.yaml`. If `pnpm add` fails on existing pins under a week old, run:

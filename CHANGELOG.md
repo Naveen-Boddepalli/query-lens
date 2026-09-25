@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Release discipline** (plan.md §25.4 A4). `RELEASING.md` writes down how a release is cut — one commit, the
+  tag on that commit (1.0.0's tag sits on the deployed commit and its `package.json` still says `0.0.0`) — and
+  what to check after a deploy. `pnpm release-notes [version]` derives the GitHub release body from
+  `CHANGELOG.md`, so release notes are written once. A list of files whose effect only a real deploy can judge
+  (`wrangler.jsonc`, `public/`, `index.html`, `pnpm-workspace.yaml`, `.node-version`) drives a non-blocking CI
+  job that annotates a pull request touching them, and a new pull-request checklist item: the first deploy
+  needed three fixes no local check could find, and the answer is to look at a preview deploy first.
 - **"Report a confusing step"** (plan.md §25.4 A3) — QueryLens has no telemetry by decision, so the only
   signal about *which moment confused someone* is one they choose to send. A link under the Playground's
   narration opens a prefilled GitHub issue form (`confusing_step.yml`) carrying the build, the step and stage,

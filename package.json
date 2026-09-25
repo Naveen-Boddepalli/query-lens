@@ -43,6 +43,7 @@
     "og": "node --experimental-strip-types scripts/build-og.ts",
     "record": "node --experimental-strip-types scripts/record.ts",
     "study": "node --experimental-strip-types scripts/study.ts",
+    "release-notes": "node --experimental-strip-types scripts/release-notes.ts",
     "test:cli": "node --experimental-strip-types bin/querylens.ts --help",
     "test:e2e": "playwright test"
   },
