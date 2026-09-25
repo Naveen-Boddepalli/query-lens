@@ -354,12 +354,15 @@ const joinPredicatePushdown: Rule = (input) => {
   const { aggregate, rest: belowProject } = unwrapAggregate(belowSort);
   if (belowProject.op !== 'Filter') return null;
   const join = belowProject.child;
+  // The inner side is a bare `SeqScan` — or, for an index nested-loop join, an `IndexProbe`, which has no scan to
+  // filter: a conjunct naming only the inner table then stays above the Join as a residual, never pushed.
+  const probesInner = join.op === 'Join' && join.right.op === 'IndexProbe';
   if (
     join.op !== 'Join' ||
     join.left.op !== 'SeqScan' ||
     join.left.filter ||
-    join.right.op !== 'SeqScan' ||
-    join.right.filter
+    (join.right.op !== 'SeqScan' && join.right.op !== 'IndexProbe') ||
+    (join.right.op === 'SeqScan' && join.right.filter)
   ) {
     return null;
   }
@@ -371,7 +374,7 @@ const joinPredicatePushdown: Rule = (input) => {
   for (const part of parts) {
     const tables = tablesReferencedBy(part);
     if (tables.size === 1 && tables.has(join.leftTable)) leftParts.push(part);
-    else if (tables.size === 1 && tables.has(join.rightTable)) rightParts.push(part);
+    else if (tables.size === 1 && tables.has(join.rightTable) && !probesInner) rightParts.push(part);
     else residualParts.push(part);
   }
   if (leftParts.length === 0 && rightParts.length === 0) return null;

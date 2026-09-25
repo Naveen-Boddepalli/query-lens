@@ -6,7 +6,7 @@ export {
   runBufferTrace,
 } from './bufferTrace.ts';
 export type { BufferTraceResult } from './bufferTrace.ts';
-export { createJoinDemoDatabase, createSeedDatabase } from './seed.ts';
+export { createJoinCompareDatabase, createJoinDemoDatabase, createSeedDatabase } from './seed.ts';
 export {
   DATASETS,
   DATASET_IDS,
@@ -78,6 +78,7 @@ export type {
   EngineOptions,
   EventOf,
   IndexNode,
+  JoinAlgorithm,
   PlanNode,
   PredictionOption,
   PredictionPrompt,

@@ -263,9 +263,21 @@ function estimateNode(
       // literal. Row count never depends on the algorithm — only the page
       // cost does.
       const rightDistinct = ndistinct(tableNamed(plan.rightTable).rows, plan.rightColumn);
-      const estRows = clampRows((left.estRows * right.estRows) / rightDistinct);
-      const rowsBasis = `${String(left.estRows)} × ${String(right.estRows)} / ndistinct(${plan.rightTable}.${plan.rightColumn})`;
+      // An `IndexProbe`'s own estimate is *per outer row*, so the full inner size comes from the table itself.
+      const rightRows = plan.algorithm === 'index-nested-loop' ? tableNamed(plan.rightTable).rows.length : right.estRows;
+      const estRows = clampRows((left.estRows * rightRows) / rightDistinct);
+      const rowsBasis = `${String(left.estRows)} × ${String(rightRows)} / ndistinct(${plan.rightTable}.${plan.rightColumn})`;
       switch (plan.algorithm) {
+        case 'index-nested-loop':
+          estimate = {
+            // The outer is read once; then each outer row pays one probe — the descent, any extra leaves the run of
+            // equal keys spans, and a heap page per match (`right` is that per-probe estimate). This is the number
+            // that beats a rescan whenever the outer is small and the inner is big.
+            estRows,
+            estPages: left.estPages + left.estRows * right.estPages,
+            basis: `${rowsBasis}; index nested-loop reads ${plan.leftTable} once, then probes ${plan.rightTable}'s index on ${plan.rightColumn} once per row`,
+          };
+          break;
         case 'hash':
           estimate = {
             // Build the right side into a hash table once, then probe with
@@ -312,6 +324,19 @@ function estimateNode(
       } else {
         estimate = { estRows: rowCount, estPages: heapPages, basis: 'every row' };
       }
+      break;
+    }
+    case 'IndexProbe': {
+      // One probe of `table`'s index for one outer row: the per-probe cost, which the Join multiplies by its outer rows.
+      const inner = tableNamed(plan.table);
+      const distinct = ndistinct(inner.rows, plan.column);
+      const matches = Math.max(clampRows(inner.rows.length / distinct), 1);
+      const extraLeaves = Math.max(0, Math.ceil(matches / FANOUT) - 1);
+      estimate = {
+        estRows: matches,
+        estPages: estimateIndexLevels(inner.rows.length) + extraLeaves + matches,
+        basis: `per outer row: 1/${String(distinct)} on ${plan.column}; ${String(estimateIndexLevels(inner.rows.length))} to descend, ${String(matches)} heap page${matches === 1 ? '' : 's'}`,
+      };
       break;
     }
     case 'IndexScan': {

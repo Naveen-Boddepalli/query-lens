@@ -23,6 +23,9 @@ export const TONES: Record<string, string> = {
     'border-hue-orange/60 bg-hue-orange/10 text-hue-orange-ink hover:border-hue-orange/90 hover:bg-hue-orange/20',
   IndexScan:
     'border-hue-emerald/60 bg-hue-emerald/10 text-hue-emerald-ink hover:border-hue-emerald/90 hover:bg-hue-emerald/20',
+  // An index join's inner side is an access method too — the same green as the lookup it repeats once per outer row.
+  IndexProbe:
+    'border-hue-emerald/60 bg-hue-emerald/10 text-hue-emerald-ink hover:border-hue-emerald/90 hover:bg-hue-emerald/20',
   // The palette has five hues and this is the sixth operator, so Sort shares
   // Limit's violet rather than adding a token for one more panel — the two
   // are rarely adjacent (Project sits between them in the common shape), so

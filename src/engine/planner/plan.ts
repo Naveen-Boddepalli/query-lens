@@ -4,7 +4,7 @@
  * what the optimizer actually chooses (plan.md §7.2–7.4).
  */
 
-import type { PlanNode, RaInfo, SqlValue } from '../types.ts';
+import type { JoinAlgorithm, PlanNode, RaInfo, SqlValue } from '../types.ts';
 import { exprToSql } from '../parser/print.ts';
 import type { AggregateFn, CompareOp, Expr } from '../parser/index.ts';
 import type { PlanCost } from './cost.ts';
@@ -51,11 +51,13 @@ export type Plan =
    * streamed; `sort-merge` sorts both sides on the join key (each side its
    * own call into `externalMergeSort`, spilling through the real buffer pool
    * exactly as `ORDER BY`'s `Sort` does) and then merges the two sorted
-   * lists in one pass.
+   * lists in one pass; `index-nested-loop` (plan.md §25.4 B4) never scans
+   * `right` at all — `right` is an `IndexProbe`, and each `left` row descends
+   * `right`'s own B+Tree on `rightColumn` to find its partners.
    */
   | {
       op: 'Join';
-      algorithm: 'nested-loop' | 'hash' | 'sort-merge';
+      algorithm: JoinAlgorithm;
       left: Plan;
       right: Plan;
       leftTable: string;
@@ -63,6 +65,14 @@ export type Plan =
       leftColumn: string;
       rightColumn: string;
     }
+  /**
+   * The inner side of an `index-nested-loop` `Join` (plan.md §25.4 B4): a lookup
+   * on `table`'s B+Tree over `column` whose key is not a constant but *the
+   * current outer row's* `outerColumn` — so it runs once per outer row rather
+   * than once. Only ever the `right` child of a `Join`, and only when `table`
+   * really has an index on `column`.
+   */
+  | { op: 'IndexProbe'; table: string; column: string; outerTable: string; outerColumn: string }
   | {
       op: 'IndexScan';
       table: string;
@@ -225,6 +235,19 @@ export function findSortMergeJoin(plan: Plan): Extract<Plan, { op: 'Join' }> | n
   return null;
 }
 
+/**
+ * The `Join` node, when it runs the `index-nested-loop` algorithm — `runQuery.ts` needs it before the buffer pool
+ * exists, to build the inner table's B+Tree (plan.md §25.4 B4) and give its pages ids of their own.
+ */
+export function findIndexNestedLoopJoin(plan: Plan): Extract<Plan, { op: 'Join' }> | null {
+  let node: Plan | undefined = plan;
+  while (node) {
+    if (node.op === 'Join' && node.algorithm === 'index-nested-loop') return node;
+    node = childOf(node);
+  }
+  return null;
+}
+
 /* -------------------------------------------------------------------------- */
 /* Predicate helpers                                                           */
 /* -------------------------------------------------------------------------- */
@@ -347,6 +370,9 @@ function raOf(plan: Plan): RaInfo {
       return plan.filter
         ? { symbol: 'σ', sub: exprToSql(plan.filter), rel: plan.table }
         : { symbol: 'rel', rel: plan.table };
+    case 'IndexProbe':
+      // In algebra the inner side of a join is just the relation; *how* it is reached is the physical plan's business.
+      return { symbol: 'rel', rel: plan.table };
     case 'IndexScan':
     case 'IndexOnlyScan': {
       const parts = [`${plan.column} = ${format(plan.key)}`];
@@ -435,6 +461,15 @@ function convertBody(
           convert(plan.left, `${id}.0`, changed, estimates),
           convert(plan.right, `${id}.1`, changed, estimates),
         ],
+      };
+    case 'IndexProbe':
+      return {
+        id,
+        op: 'IndexProbe',
+        label: `IndexProbe ${plan.table}.${plan.column}`,
+        detail: `key: ${plan.column} = ${plan.outerTable}.${plan.outerColumn} — once per ${plan.outerTable} row`,
+        ...(highlight ? { highlight } : {}),
+        ...cost,
       };
     case 'IndexScan':
       return {

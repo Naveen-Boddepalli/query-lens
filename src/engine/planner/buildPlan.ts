@@ -16,6 +16,7 @@ import type { DeleteStatement, Expr, JoinClause, SelectStatement, UpdateStatemen
 import { exprToSql } from '../parser/print.ts';
 import { aggregateKeyOf, columnKey, selectItemArgColumn, selectItemKey, walkExpr } from '../parser/index.ts';
 import type { AggregateSpec, Plan, ProjectList } from './plan.ts';
+import type { JoinAlgorithm, Table } from '../types.ts';
 
 /**
  * A `DELETE`'s canonical plan is just the scan that finds the rows to
@@ -90,6 +91,20 @@ export function buildAggregatePlan(
 }
 
 /**
+ * The algorithm a `JOIN` will actually run. Three of them work on any pair of tables; `index-nested-loop`
+ * (plan.md §25.4 B4) needs the inner table to have a B+Tree on the join column, so without one it cannot run
+ * and the join is an ordinary `nested-loop` — never an error, and never silent: `emit.ts` says so in the plan.
+ */
+export function effectiveJoinAlgorithm(
+  requested: JoinAlgorithm,
+  joinTable: Table | undefined,
+  rightColumn: string,
+): JoinAlgorithm {
+  if (requested !== 'index-nested-loop') return requested;
+  return joinTable?.indexedColumns?.includes(rightColumn) ? requested : 'nested-loop';
+}
+
+/**
  * Builds the `Join` node for a `FROM t1 JOIN t2 ON ...` — a bare `SeqScan` on
  * each side (v1 never pushes a predicate into either, plan.md §22.2) and the
  * ON equality's two columns resolved to `left`'s side and `right`'s side,
@@ -99,13 +114,15 @@ export function buildAggregatePlan(
  * Shared with `emit.ts`'s progressive plan-tree narration, like
  * `buildAggregatePlan` already is, so the two never drift. `algorithm`
  * defaults to `'nested-loop'` (the shipped behaviour); only `/compare`'s
- * join mode ever passes `'hash'` or `'sort-merge'`, via
- * `EngineOptions.joinStrategy`.
+ * join mode ever passes another, via `EngineOptions.joinStrategy`. The
+ * `index-nested-loop` algorithm replaces the inner scan with an `IndexProbe`,
+ * and needs `joinTable` to know the index exists (see `effectiveJoinAlgorithm`).
  */
 export function buildJoinPlan(
   join: JoinClause,
   fromTable: string,
-  algorithm: 'nested-loop' | 'hash' | 'sort-merge' = 'nested-loop',
+  algorithm: JoinAlgorithm = 'nested-loop',
+  joinTable?: Table,
 ): Plan {
   const { left, right } = join.on;
   if (left.kind !== 'column' || right.kind !== 'column') {
@@ -113,11 +130,15 @@ export function buildJoinPlan(
   }
   const leftColumn = left.table === fromTable ? left.name : right.name;
   const rightColumn = left.table === join.table.name ? left.name : right.name;
+  const effective = effectiveJoinAlgorithm(algorithm, joinTable, rightColumn);
   return {
     op: 'Join',
-    algorithm,
+    algorithm: effective,
     left: { op: 'SeqScan', table: fromTable },
-    right: { op: 'SeqScan', table: join.table.name },
+    right:
+      effective === 'index-nested-loop'
+        ? { op: 'IndexProbe', table: join.table.name, column: rightColumn, outerTable: fromTable, outerColumn: leftColumn }
+        : { op: 'SeqScan', table: join.table.name },
     leftTable: fromTable,
     rightTable: join.table.name,
     leftColumn,
@@ -170,10 +191,11 @@ export function distinctNodeFor(ast: SelectStatement, child: Plan, strategy: 'ha
 export function buildPlan(
   ast: SelectStatement,
   aggregateStrategy: 'hash' | 'sort' = 'hash',
-  joinStrategy: 'nested-loop' | 'hash' | 'sort-merge' = 'nested-loop',
+  joinStrategy: JoinAlgorithm = 'nested-loop',
+  joinTable?: Table,
 ): Plan {
   const scan: Plan = ast.join
-    ? buildJoinPlan(ast.join, ast.from.name, joinStrategy)
+    ? buildJoinPlan(ast.join, ast.from.name, joinStrategy, joinTable)
     : { op: 'SeqScan', table: ast.from.name };
 
   const filtered: Plan = ast.where

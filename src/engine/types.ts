@@ -242,6 +242,9 @@ export interface Database {
   tables: Record<string, Table>;
 }
 
+/** The physical algorithms a `JOIN` can run — see `EngineOptions.joinStrategy`. */
+export type JoinAlgorithm = 'nested-loop' | 'hash' | 'sort-merge' | 'index-nested-loop';
+
 export interface EngineOptions {
   /** Buffer frames available. Small on purpose so eviction is visible. */
   bufferFrames: number;
@@ -263,12 +266,16 @@ export interface EngineOptions {
    * hash table over the right table once, then probes it with the left
    * table streamed a row at a time; `sort-merge` sorts both sides on the
    * join key (spilling through the real buffer pool exactly as `ORDER BY`'s
-   * `Sort` does) and then merges the two sorted lists in one pass. Same rows
-   * out either way; nothing in the pipeline picks between them on its own —
-   * this is how `/compare`'s join mode forces each side explicitly, the same
-   * way `aggregateStrategy` above does for `GROUP BY` (plan.md §22.2).
+   * `Sort` does) and then merges the two sorted lists in one pass;
+   * `index-nested-loop` probes the right table's own B+Tree on the join
+   * column once per left row (plan.md §25.4 B4) — which needs that index, and
+   * quietly becomes a plain `nested-loop` (the plan says so) when it is
+   * missing. Same rows out either way; nothing in the pipeline picks between
+   * them on its own — this is how `/compare`'s join mode forces each side
+   * explicitly, the same way `aggregateStrategy` above does for `GROUP BY`
+   * (plan.md §22.2).
    */
-  joinStrategy?: 'nested-loop' | 'hash' | 'sort-merge';
+  joinStrategy?: JoinAlgorithm;
 }
 
 export const DEFAULT_ENGINE_OPTIONS: EngineOptions = {

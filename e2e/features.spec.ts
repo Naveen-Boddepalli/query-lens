@@ -361,12 +361,12 @@ test('compare forces a hash aggregate and a sort aggregate onto the same GROUP B
   await expect(page.getByText(/makes no difference/)).toBeVisible();
 });
 
-test('compare forces nested-loop, hash and sort-merge join onto the same JOIN query', async ({ page }) => {
+test('compare forces nested-loop, hash, sort-merge and index nested-loop join onto the same JOIN query', async ({ page }) => {
   await page.goto('/compare');
   await page.getByRole('radio', { name: 'JOIN algorithms' }).click();
 
-  // Same rows out of all three algorithms; the hash join reads far fewer
-  // pages than either — the demo purposely runs all three under few enough
+  // Same rows out of all four algorithms; the hash join reads far fewer
+  // pages than either — the demo purposely runs them under few enough
   // buffer frames that a nested-loop rescan (or a sort-merge spill) cannot
   // stay cached.
   await expect(page.getByText(/Same \d+ rows? every time/)).toBeVisible();
@@ -382,6 +382,19 @@ test('compare forces nested-loop, hash and sort-merge join onto the same JOIN qu
   expect(hashJoin).toBeLessThan(nestedLoop);
   expect(hashJoin).toBeLessThan(sortMergeJoin);
   expect(sortMergeJoin).toBeLessThan(nestedLoop);
+
+  // The index join is no free lunch: over ten small posts, probing a tree costs more than scanning them once.
+  const indexJoin = Number(await diskReads('Index nested-loop join').innerText());
+  expect(indexJoin).toBeGreaterThan(hashJoin);
+
+  // One outer row over a big indexed inner is where it earns its keep (plan.md §25.4 B4).
+  await page.getByLabel('Query').selectOption({ label: 'A tiny outer over a big indexed inner' });
+  await page.getByRole('button', { name: 'Run' }).click();
+  await expect(page.getByText(/the index join needed/)).toBeVisible();
+  const tinyIndex = Number(await diskReads('Index nested-loop join').innerText());
+  expect(tinyIndex).toBeLessThan(Number(await diskReads('Nested-loop join').innerText()));
+  expect(tinyIndex).toBeLessThan(Number(await diskReads('Hash join').innerText()));
+  expect(tinyIndex).toBeLessThan(Number(await diskReads('Sort-merge join').innerText()));
 
   // A query with no JOIN at all — the algorithm makes no difference.
   await page.getByLabel('SQL').fill('SELECT * FROM authors');

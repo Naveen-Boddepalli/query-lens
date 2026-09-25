@@ -153,9 +153,9 @@ export function fetchHeapPage(ctx: ExecContext, pointer: RowPointer): void {
   ctx.locks.release(pointer.pageId, 'shared');
 }
 
-/** The row an index entry points at, read out of the heap this query runs over. */
-export function rowAt(ctx: ExecContext, pointer: RowPointer): Row | null {
-  const page = ctx.heap.pages.find((p) => p.pageId === pointer.pageId);
+/** The row an index entry points at, read out of `heap` — this query's own, unless a join's other side is meant. */
+export function rowAt(ctx: ExecContext, pointer: RowPointer, heap: Heap = ctx.heap): Row | null {
+  const page = heap.pages.find((p) => p.pageId === pointer.pageId);
   return page?.rows[pointer.slot] ?? null;
 }
 
@@ -1003,6 +1003,92 @@ function hashJoin(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): Operat
 }
 
 /**
+ * Index nested-loop join — the fourth algorithm (plan.md §25.4 B4). The
+ * nested-loop join's shape (an outer loop over `left`, an inner lookup per
+ * row), but the inner lookup is a descent of `right`'s own B+Tree on the join
+ * column instead of a rescan of its whole heap: each outer row costs the
+ * tree's few levels plus a heap page per matching row, whatever the inner
+ * table's size. That is why "a small outer over a big indexed inner" is where
+ * this algorithm wins — and why it is the *worst* of the four when the outer is
+ * large and the inner is small enough that one scan of it would have done.
+ *
+ * The inner index may repeat a value (a foreign key: several posts per
+ * author), so a probe returns *every* entry for the key — the first entry's
+ * heap page is fetched by the lookup itself and each later one as its row is
+ * pulled, so a `LIMIT` above the join stops the probing early. A NULL join key
+ * is never probed: `= NULL` is never true and an index holds no NULLs.
+ * Every candidate is rechecked against the ON equality, so this can never
+ * return a row the other three would not.
+ */
+function indexNestedLoopJoin(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): Operator {
+  const joinRight = ctx.joinRight;
+  if (!joinRight) throw new Error('unreachable: a Join plan implies ExecContext.joinRight is set');
+  const inner = plan.right;
+  if (inner.op !== 'IndexProbe') throw new Error('unreachable: an index nested-loop Join has an IndexProbe as its inner side');
+  const tree = joinRight.trees[inner.column];
+  if (!tree) throw new Error('unreachable: an index nested-loop Join implies its inner index was built');
+
+  const left = buildOperator(plan.left, ctx);
+  const produced = counter(ctx, 'Join');
+  let leftRow: Row | null = null;
+  let pointers: RowPointer[] = [];
+  let cursor = 0;
+  let probes = 0;
+  let matched = 0;
+
+  return {
+    name: 'Join',
+    open() {
+      left.open();
+      leftRow = null;
+      pointers = [];
+      cursor = 0;
+      probes = 0;
+      matched = 0;
+    },
+    next() {
+      for (;;) {
+        const pointer = pointers[cursor];
+        if (pointer === undefined) {
+          leftRow = left.next();
+          if (!leftRow) return null;
+          pointers = [];
+          cursor = 0;
+
+          const key = leftRow[plan.leftColumn] ?? null;
+          if (key === null) continue; // NULL joins nothing, so there is nothing to look up
+          probes += 1;
+          ctx.emit(
+            `Join takes a row from ${plan.leftTable} whose ${plan.leftColumn} is ${typeof key === 'string' ? `'${key}'` : String(key)} and probes ${plan.rightTable}'s B+Tree on ${plan.rightColumn} for it (probe ${String(probes)}).`,
+            { stage: 'execute', op: 'Join', rowsProduced: matched },
+          );
+          pointers = emitIndexLookup(ctx.emit, tree, key, ctx.pool, inner.column, ctx.locks).pointers;
+          continue;
+        }
+
+        const at = cursor;
+        cursor += 1;
+        // The lookup itself fetched the first match's heap page; each later one is fetched as its row is pulled.
+        if (at > 0) fetchHeapPage(ctx, pointer);
+        const rightRow = rowAt(ctx, pointer, joinRight.heap);
+        if (!rightRow) continue;
+        if (compare('=', leftRow![plan.leftColumn] ?? null, rightRow[plan.rightColumn] ?? null) !== true) continue;
+
+        matched += 1;
+        produced(
+          `Join pairs a row from ${plan.leftTable} with entry ${String(at + 1)} of ${String(pointers.length)} its probe found in ${plan.rightTable} (${String(matched)} match${matched === 1 ? '' : 'es'} so far).`,
+        );
+        return mergeJoinedRow(plan.leftTable, leftRow!, plan.rightTable, rightRow);
+      }
+    },
+    close() {
+      left.close();
+      pointers = [];
+    },
+  };
+}
+
+/**
  * A join key, coerced the exact way `equalityKeyOf` already does for hash
  * join — so a value that hash join and nested-loop's `compare('=', ...)`
  * would call equal (a number and a numeric string, say) sorts to the *same*
@@ -1180,6 +1266,8 @@ function buildJoinOperator(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext
       return sortMergeJoin(plan, ctx);
     case 'nested-loop':
       return join(plan, ctx);
+    case 'index-nested-loop':
+      return indexNestedLoopJoin(plan, ctx);
   }
 }
 
@@ -1194,6 +1282,9 @@ export function buildOperator(plan: Plan, ctx: ExecContext): Operator {
       return indexOnlyScan(plan, ctx);
     case 'IndexRangeScan':
       return indexRangeScan(plan, ctx);
+    case 'IndexProbe':
+      // Only ever the inner side of an index nested-loop `Join`, which probes it itself, once per outer row.
+      throw new Error('unreachable: an IndexProbe is driven by its Join, never built on its own');
     case 'Join':
       return buildJoinOperator(plan, ctx);
     case 'Filter':

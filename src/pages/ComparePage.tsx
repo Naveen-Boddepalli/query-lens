@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import {
-  createJoinDemoDatabase,
+  createJoinCompareDatabase,
   createSeedDatabase,
   createTraceProjector,
   DATASETS,
@@ -47,14 +47,16 @@ import {
  *    same groups out either way, but only the sort aggregate spills through
  *    the buffer pool. "One strategy, nothing to compare" is exactly the gap
  *    this closes.
- *  - **nested-loop vs. hash vs. sort-merge join** (§22.2): the same JOIN query
- *    run once with each of the three algorithms forced via
- *    `EngineOptions.joinStrategy`, against the small `authors`/`posts` demo
- *    pair (`createJoinDemoDatabase`, the same fixture `/tools/planner` uses).
- *    Same rows out every time; nested-loop rescans the right table whole per
- *    left row, hash join reads each side exactly once via an in-memory
- *    table, and sort-merge reads each side once too but pays for it by
- *    sorting both first.
+ *  - **nested-loop vs. hash vs. sort-merge vs. index nested-loop join**
+ *    (§22.2, §25.4 B4): the same JOIN query run once with each of the four
+ *    algorithms forced via `EngineOptions.joinStrategy`, against the small
+ *    `authors`/`posts` demo pair plus a larger `comments` table
+ *    (`createJoinCompareDatabase`). Same rows out every time; nested-loop
+ *    rescans the right table whole per left row, hash join reads each side
+ *    exactly once via an in-memory table, sort-merge reads each side once too
+ *    but pays for it by sorting both first, and the index join probes the
+ *    right table's own B+Tree once per left row — which wins only when the
+ *    left side is small and the right side big.
  */
 
 type Mode = 'policies' | 'index' | 'aggregate' | 'join';
@@ -654,10 +656,10 @@ function AggregateCompare() {
 }
 
 /* -------------------------------------------------------------------------- */
-/* Nested-loop vs. hash vs. sort-merge join comparison                        */
+/* Nested-loop vs. hash vs. sort-merge vs. index nested-loop join comparison  */
 /* -------------------------------------------------------------------------- */
 
-const JOIN_DB = createJoinDemoDatabase();
+const JOIN_DB = createJoinCompareDatabase();
 
 const JOIN_PRESETS = [
   {
@@ -667,6 +669,10 @@ const JOIN_PRESETS = [
   {
     label: 'Filtered after the join',
     sql: "SELECT authors.name, posts.title FROM authors JOIN posts ON authors.id = posts.authorId WHERE authors.name = 'ada'",
+  },
+  {
+    label: 'A tiny outer over a big indexed inner',
+    sql: 'SELECT posts.title, comments.body FROM posts JOIN comments ON posts.id = comments.postId WHERE posts.id = 3',
   },
 ] as const;
 
@@ -743,6 +749,7 @@ const JOIN_FRAMES = 2;
 const NESTED_LOOP_OPTIONS = { ...DEFAULT_ENGINE_OPTIONS, bufferFrames: JOIN_FRAMES, joinStrategy: 'nested-loop' } as const;
 const HASH_JOIN_OPTIONS = { ...DEFAULT_ENGINE_OPTIONS, bufferFrames: JOIN_FRAMES, joinStrategy: 'hash' } as const;
 const SORT_MERGE_JOIN_OPTIONS = { ...DEFAULT_ENGINE_OPTIONS, bufferFrames: JOIN_FRAMES, joinStrategy: 'sort-merge' } as const;
+const INDEX_JOIN_OPTIONS = { ...DEFAULT_ENGINE_OPTIONS, bufferFrames: JOIN_FRAMES, joinStrategy: 'index-nested-loop' } as const;
 
 /** The best (lowest) figure across every scorecard shown — see `JoinScoreColumn`'s doc comment. */
 function bestOf(scores: readonly JoinScorecard[]): JoinScorecard {
@@ -761,26 +768,34 @@ function JoinCompare() {
   const nestedRun = useMemo(() => runQuery(sql, JOIN_DB, NESTED_LOOP_OPTIONS), [sql]);
   const hashRun = useMemo(() => runQuery(sql, JOIN_DB, HASH_JOIN_OPTIONS), [sql]);
   const sortMergeRun = useMemo(() => runQuery(sql, JOIN_DB, SORT_MERGE_JOIN_OPTIONS), [sql]);
+  const indexRun = useMemo(() => runQuery(sql, JOIN_DB, INDEX_JOIN_OPTIONS), [sql]);
 
   const nestedScore = useMemo(() => joinScoreOf(nestedRun), [nestedRun]);
   const hashScore = useMemo(() => joinScoreOf(hashRun), [hashRun]);
   const sortMergeScore = useMemo(() => joinScoreOf(sortMergeRun), [sortMergeRun]);
-  const best = useMemo(() => bestOf([nestedScore, hashScore, sortMergeScore]), [nestedScore, hashScore, sortMergeScore]);
+  const indexScore = useMemo(() => joinScoreOf(indexRun), [indexRun]);
+  const best = useMemo(
+    () => bestOf([nestedScore, hashScore, sortMergeScore, indexScore]),
+    [nestedScore, hashScore, sortMergeScore, indexScore],
+  );
+  // The index join needs an index on the inner join column; without one the engine runs a plain nested-loop and says so.
+  const probed = indexRun.events.some((e) => e.stage === 'plan' && JSON.stringify(e.planTree).includes('"op":"IndexProbe"'));
 
   const isJoinQuery = nestedRun.events.some((e) => e.stage === 'execute' && e.op === 'Join');
 
   return (
     <>
       <p className="text-body text-ink-dim">
-        The same JOIN query, run once with each of the three algorithms forced (plan.md §22.2),
+        The same JOIN query, run once with each of the four algorithms forced (plan.md §22.2, §25.4 B4),
         against the small <code className="font-mono text-ink">authors</code>/
-        <code className="font-mono text-ink">posts</code> pair. A nested-loop join rescans{' '}
-        <code className="font-mono text-ink">posts</code> whole for every{' '}
-        <code className="font-mono text-ink">authors</code> row; a hash join builds one in-memory
-        hash table over <code className="font-mono text-ink">posts</code> and probes it instead;
-        a sort-merge join sorts both tables on the join key first, then merges the two sorted
-        lists in a single pass. Same rows out every time; the difference is entirely in how many
-        pages get read, and when.
+        <code className="font-mono text-ink">posts</code> pair and a larger{' '}
+        <code className="font-mono text-ink">comments</code> table. A nested-loop join rescans the
+        inner table whole for every outer row; a hash join builds one in-memory hash table over it
+        and probes that instead; a sort-merge join sorts both tables on the join key first, then
+        merges the two sorted lists in a single pass; an index nested-loop join descends the inner
+        table&rsquo;s own B+Tree once per outer row. Same rows out every time; the difference is
+        entirely in how many pages get read, and when — and which one wins depends on how big the
+        outer side is.
       </p>
 
       <div className="mt-2 flex flex-col gap-3 rounded-xl border border-edge bg-surface-2 p-3 shadow-e1">
@@ -832,23 +847,33 @@ function JoinCompare() {
             Same <span className="font-mono">{nestedScore.rows}</span> row
             {nestedScore.rows === 1 ? '' : 's'} every time. The nested-loop join needed{' '}
             <span className="font-mono">{nestedScore.diskReads}</span> disk read
-            {nestedScore.diskReads === 1 ? '' : 's'}, rescanning <code className="font-mono">posts</code>{' '}
-            once per author; the hash join needed only{' '}
-            <span className="font-mono">{hashScore.diskReads}</span>, reading each table once; the
-            sort-merge join needed <span className="font-mono">{sortMergeScore.diskReads}</span>,
-            reading each table once too but paying for the sort spill it does first.
+            {nestedScore.diskReads === 1 ? '' : 's'}, rescanning the inner table once per outer row; the hash
+            join needed <span className="font-mono">{hashScore.diskReads}</span>, reading each table once; the
+            sort-merge join needed <span className="font-mono">{sortMergeScore.diskReads}</span>, reading each
+            table once too but paying for the sort spill it does first;{' '}
+            {probed ? (
+              <>
+                the index join needed <span className="font-mono">{indexScore.diskReads}</span>, probing the
+                inner table&rsquo;s B+Tree once per outer row — cheap for a few outer rows, costly for many.
+              </>
+            ) : (
+              <>
+                the index join needed <span className="font-mono">{indexScore.diskReads}</span> — the inner
+                table has no index on the join column, so it ran as a plain nested-loop.
+              </>
+            )}
           </p>
 
           <div className="flex flex-col gap-4 lg:flex-row">
             <JoinScoreColumn
               label="Nested-loop join"
-              sub="rescans posts once per authors row"
+              sub="rescans the inner table once per outer row"
               score={nestedScore}
               compareTo={best}
             />
             <JoinScoreColumn
               label="Hash join"
-              sub="builds one hash table over posts, then probes it"
+              sub="builds one hash table over the inner table, then probes it"
               score={hashScore}
               compareTo={best}
             />
@@ -856,6 +881,12 @@ function JoinCompare() {
               label="Sort-merge join"
               sub="sorts both tables on the join key, then merges them"
               score={sortMergeScore}
+              compareTo={best}
+            />
+            <JoinScoreColumn
+              label="Index nested-loop join"
+              sub={probed ? 'probes the inner table’s B+Tree once per outer row' : 'no index on the join column — ran as a nested-loop'}
+              score={indexScore}
               compareTo={best}
             />
           </div>

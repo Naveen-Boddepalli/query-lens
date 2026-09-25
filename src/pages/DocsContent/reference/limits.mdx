@@ -45,9 +45,12 @@ concept explanation.
 
 - **One `JOIN` per query**, an implicit inner join: `JOIN table ON a.col = b.col`, always an
   equality between one qualified column from each side.
-- **Three algorithms** — nested-loop, hash, and sort-merge — chosen by whichever
-  [Compare](/compare) or the engine's own default forces; none of the three consults either side's
-  own index yet, so a joined table's index (if it has one) is never used inside the `JOIN`.
+- **Four algorithms** — nested-loop (the default), hash, sort-merge, and **index nested-loop** —
+  chosen by whichever [Compare](/compare) forces; the engine never picks between them on its own.
+  The index join probes the *inner* (`JOIN`ed) table's own B+Tree once per outer row, so it needs an
+  index on that table's join column; without one it quietly runs as a plain nested-loop, and the plan
+  says so. The other three never consult an index, and no `JOIN` side ever becomes an `IndexScan` —
+  a `WHERE` conjunct on the outer table is pushed into its scan, but that scan stays sequential.
 - Cannot combine with `GROUP BY`, `ORDER BY`, or an aggregate in the SELECT list.
 
 ## GROUP BY and aggregates

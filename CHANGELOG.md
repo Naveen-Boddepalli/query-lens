@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Index nested-loop join** (plan.md §25.4 B4) — the fourth join algorithm. Instead of rescanning the inner table
+  for every outer row, it descends the inner table's own B+Tree on the join column: a few page reads per outer
+  row, whatever the inner table's size. The plan gains an `IndexProbe` node for the inner side. It needs an
+  index on the inner join column and, without one, runs as a plain nested-loop and says why. **`/compare`'s JOIN
+  mode is now four-way**, with a larger `comments` table and a new preset — *a tiny outer over a big indexed
+  inner*, where one outer row costs 23 disk reads against 33 for nested-loop and hash — and it shows the other
+  half too: with every post as the outer, the index join needs 202 reads to hash's 33.
 - **Indexes on columns that repeat** (plan.md §25.4 B3, first slice) — an index entry is now the value plus the
   row's own address, so two rows with the same `authorId` are two entries side by side in the leaves instead of
   one silently overwriting the other. An equality finds every match: it descends toward the *first* entry (going
@@ -138,6 +145,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Vitest also runs tests under `scripts/` and `oracle/`; `oracle/` joins `tsconfig.node.json`.
 
 ### Fixed
+- **The plan stage said "nested-loop" for a sort-merge join.** When no rewrite rule applied, its note named the wrong
+  algorithm; it now names the one that runs.
 - **A range scan now reads the leaves it walks.** Each hop along the sibling chain fetches that leaf through the
   buffer pool, as the cost model already assumed — so an `EXPLAIN ANALYZE` estimate and its actual agree on how
   many leaves a range touched.

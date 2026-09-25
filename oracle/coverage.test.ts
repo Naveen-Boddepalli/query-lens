@@ -47,6 +47,11 @@ describe('the generators reach what the oracle is meant to check', () => {
     repeatedIndexWrites: 0,
     /** An UPDATE that sets an indexed column, so the write moves an index entry. */
     reindexingUpdates: 0,
+    /** JOINs that really probed an inner index (an `IndexProbe` in the plan), and ones that asked to but had no index and fell back. */
+    indexJoins: 0,
+    indexJoinFallbacks: 0,
+    /** Index joins where one outer row's probe found two or more inner entries. */
+    indexJoinsWithRepeats: 0,
   };
 
   for (const [{ tables: initial, steps }, options] of sessions) {
@@ -78,6 +83,13 @@ describe('the generators reach what the oracle is meant to check', () => {
       );
       if (repeated) stats[isWrite(q) ? 'repeatedIndexWrites' : 'repeatedIndexReads'] += 1;
       if (q.kind === 'update' && q.set.some((a) => tables[0].indexed.includes(a.col))) stats.reindexingUpdates += 1;
+      if (q.kind === 'join' && options.joinStrategy === 'index-nested-loop') {
+        const probed = result.events.some((e) => e.stage === 'plan' && JSON.stringify(e.planTree).includes('"op":"IndexProbe"'));
+        if (probed) {
+          stats.indexJoins += result.rows.length > 0 ? 1 : 0;
+          if (result.events.some((e) => / of [2-9]\d* its probe found/.test(e.label))) stats.indexJoinsWithRepeats += 1;
+        } else stats.indexJoinFallbacks += 1;
+      }
       if (isWrite(q)) {
         stats.writes += 1;
         if ((result.write?.kind === 'insert' && result.write.insertedCount > 0) ||
@@ -122,7 +134,7 @@ describe('the generators reach what the oracle is meant to check', () => {
   });
 
   it('runs every join algorithm and both aggregate strategies to a non-empty result', () => {
-    for (const algorithm of ['nested-loop', 'hash', 'sort-merge']) expect(stats.joins.get(algorithm) ?? 0, algorithm).toBeGreaterThan(20);
+    for (const algorithm of ['nested-loop', 'hash', 'sort-merge', 'index-nested-loop']) expect(stats.joins.get(algorithm) ?? 0, algorithm).toBeGreaterThan(20);
     for (const strategy of ['hash', 'sort']) expect(stats.aggregates.get(strategy) ?? 0, strategy).toBeGreaterThan(20);
   });
 
@@ -130,6 +142,12 @@ describe('the generators reach what the oracle is meant to check', () => {
     expect(stats.repeatedIndexReads, 'equality lookups returning several rows from an index').toBeGreaterThan(10);
     expect(stats.repeatedIndexWrites, 'UPDATE/DELETE finding several rows through an index').toBeGreaterThan(5);
     expect(stats.reindexingUpdates, 'UPDATEs that move an index entry').toBeGreaterThan(30);
+  });
+
+  it('runs an index nested-loop join to a non-empty answer, repeats included, and exercises the fallback (plan.md §25.4 B4)', () => {
+    expect(stats.indexJoins, 'index joins with rows').toBeGreaterThan(20);
+    expect(stats.indexJoinsWithRepeats, 'index joins whose probe found several entries').toBeGreaterThan(5);
+    expect(stats.indexJoinFallbacks, 'index joins with no index to probe').toBeGreaterThan(20);
   });
 
   it('includes empty tables, NULLs, and writes that really change rows', () => {

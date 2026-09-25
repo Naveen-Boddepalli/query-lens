@@ -51,9 +51,10 @@ export function buildIndexes(
   heap: Heap,
   columns: readonly string[],
   maxKeys = DEFAULT_MAX_KEYS,
+  /** Where the first tree's pages begin — the heap's end by default; a join's *inner* table starts past the outer's. */
+  firstPageId = heap.pages.length,
 ): Record<string, BPlusTree> {
   const trees: Record<string, BPlusTree> = {};
-  let firstPageId = heap.pages.length;
   for (const column of columns) {
     const tree = buildIndex(heap, column, maxKeys, firstPageId);
     trees[column] = tree;

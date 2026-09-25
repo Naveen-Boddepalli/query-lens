@@ -497,10 +497,9 @@ export function joinArb(t: TableSpec, u: TableSpec, pool: Pool): fc.Arbitrary<Qu
 /* -------------------------------------------------------------------------- */
 
 /**
- * `id` and `k` of an INSERT are assigned by `sessionArb` (a serial no existing
- * row uses), so a generated write can never create a duplicate in a column
- * the engine indexes — duplicate keys are the documented B3 limit
- * (`limits.mdx`), not something the oracle should trip over every run.
+ * `id` and `k` of an INSERT are assigned by `sessionArb` (a serial no existing row uses), so an INSERT keeps them
+ * unique the way a key column would be — an index could hold duplicates now (plan.md §25.4 B3), but `id`/`k` are the
+ * columns a generated table starts out unique on, and the repeating columns (`n`, `s`, `r`) are where duplicates come from.
  */
 const INSERT_COLUMNS = ['id', 'k', 'n', 's', 'r'] as const;
 
@@ -627,6 +626,6 @@ export const optionsArb: fc.Arbitrary<EngineOptions> = fc
     bufferFrames: fc.integer({ min: 3, max: 12 }),
     rowsPerPage: fc.integer({ min: 1, max: 6 }),
     policy: fc.constantFrom<ReplacementPolicyName>('lru', 'clock'),
-    joinStrategy: fc.constantFrom('nested-loop', 'hash', 'sort-merge'),
+    joinStrategy: fc.constantFrom('nested-loop', 'hash', 'sort-merge', 'index-nested-loop'),
     aggregateStrategy: fc.constantFrom('hash', 'sort'),
   });

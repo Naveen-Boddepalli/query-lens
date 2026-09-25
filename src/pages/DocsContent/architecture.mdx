@@ -62,7 +62,8 @@ events in a trace shows.
 
 Current operators: `SeqScan`, `IndexScan` (equality), `IndexOnlyScan` (equality, never touches the
 heap), `IndexRangeScan` (a range predicate, walking the leaf sibling chain), `Join` (dispatching to
-`nested-loop`, `hash`, or `sort-merge`), `Filter`, `HashAggregate`, `SortAggregate`, `Sort`,
+`nested-loop`, `hash`, `sort-merge`, or `index-nested-loop` — whose inner side is an `IndexProbe`, a
+lookup keyed by the current outer row), `Filter`, `HashAggregate`, `SortAggregate`, `Sort`,
 `Project`, `Limit`. `DELETE`/`INSERT`/`UPDATE` have their own executors (`exec/delete.ts`,
 `exec/insert.ts`, `exec/update.ts`) that reuse the same scan/index-lookup machinery to find their
 target rows.

@@ -20,6 +20,7 @@ import {
   emitDeletePlanEvents,
   emitPlanEvents,
   emitUpdatePlanEvents,
+  findIndexNestedLoopJoin,
   findSortDistinct,
   findSortMergeJoin,
   needsSortSpill,
@@ -237,12 +238,23 @@ export function runQuery(
 
   // A JOIN's second table gets its own heap, its pages numbered right after
   // the FROM table's — so both compete for the same buffer frames, the same
-  // way a Sort's spill pages do. None of the three join algorithms consults
-  // either side's own index (an index-aware join is a later strategy for all
-  // three), so there is no B+Tree to build for the right side at all.
+  // way a Sort's spill pages do. Nested-loop, hash and sort-merge never
+  // consult either side's index, so there is no B+Tree to build for the right
+  // side; an index nested-loop join (plan.md §25.4 B4) does, and the inner
+  // table's tree gets page ids past every heap page so nothing collides.
   const rightHeap: Heap | undefined = joinTable
     ? buildHeap(joinTable, options.rowsPerPage, heap.pages.length)
     : undefined;
+  const indexJoin = findIndexNestedLoopJoin(plan);
+  const rightTrees =
+    indexJoin && rightHeap
+      ? buildIndexes(
+          rightHeap,
+          [indexJoin.rightColumn],
+          undefined,
+          Math.max(pageCountFor(heap, trees), heap.pages.length + rightHeap.pages.length),
+        )
+      : {};
 
   // A Sort's (or a SortAggregate's own internal sort's) spill needs its own
   // page ids, reserved up front — sized against the whole table (the worst
@@ -264,7 +276,8 @@ export function runQuery(
   const distinctSpill = findSortDistinct(plan)
     ? sortTempPageCount(distinctRows, options.rowsPerPage, options.bufferFrames)
     : 0;
-  const distinctBase = pageCountFor(heap, trees) + (rightHeap ? rightHeap.pages.length : 0) + sortTemp;
+  const heapsEnd = pageCountFor(heap, trees) + (rightHeap ? rightHeap.pages.length : 0);
+  const distinctBase = (rightHeap && indexJoin ? Math.max(heapsEnd, pageCountFor(rightHeap, rightTrees)) : heapsEnd) + sortTemp;
   const pool = createBufferPool(distinctBase + distinctSpill, options, emit);
 
   const rows = execute(plan, {
@@ -276,7 +289,7 @@ export function runQuery(
     table,
     options,
     distinctBase,
-    ...(joinTable && rightHeap ? { joinRight: { table: joinTable, heap: rightHeap, trees: {} } } : {}),
+    ...(joinTable && rightHeap ? { joinRight: { table: joinTable, heap: rightHeap, trees: rightTrees } } : {}),
   });
 
   return { events: drain(), rows };

@@ -1,5 +1,5 @@
 import type { Emit } from '../trace.ts';
-import type { Table } from '../types.ts';
+import type { JoinAlgorithm, Table } from '../types.ts';
 import type { SelectStatement } from '../parser/index.ts';
 import { buildAggregatePlan, buildJoinPlan, buildPlan, distinctNodeFor, isAggregateQuery, projectListFor } from './buildPlan.ts';
 import { estimatePlan, rootEstimate } from './cost.ts';
@@ -18,6 +18,27 @@ import type { Plan, ProjectList } from './plan.ts';
  * needed only so the cost model can estimate that side of a `Join` too —
  * `undefined` for every query without one.
  */
+/** The `Join` node inside a plan, wherever the wrappers above it put it. */
+function findJoinIn(plan: Plan): Extract<Plan, { op: 'Join' }> | undefined {
+  if (plan.op === 'Join') return plan;
+  if ('child' in plan) return findJoinIn(plan.child);
+  return undefined;
+}
+
+/** A join algorithm as a phrase for the "nothing to rewrite" note. */
+function describeJoin(algorithm: JoinAlgorithm, outer: string, inner: string): string {
+  switch (algorithm) {
+    case 'hash':
+      return 'a hash join over two full scans';
+    case 'sort-merge':
+      return 'a sort-merge join over two full scans';
+    case 'index-nested-loop':
+      return `an index nested-loop join — a full scan of ${outer}, then a B+Tree probe of ${inner} for each row`;
+    case 'nested-loop':
+      return 'a nested-loop join over two full scans';
+  }
+}
+
 export function emitPlanEvents(
   emit: Emit,
   ast: SelectStatement,
@@ -25,7 +46,7 @@ export function emitPlanEvents(
   rowsPerPage: number,
   aggregateStrategy: 'hash' | 'sort' = 'hash',
   joinTable?: Table,
-  joinStrategy: 'nested-loop' | 'hash' | 'sort-merge' = 'nested-loop',
+  joinStrategy: JoinAlgorithm = 'nested-loop',
 ): Plan {
   const otherTables = joinTable ? { [joinTable.name]: joinTable } : undefined;
   const display = (plan: Plan, changed?: ReadonlySet<Plan>) =>
@@ -40,16 +61,24 @@ export function emitPlanEvents(
   let current: Plan = leftScan;
 
   if (ast.join) {
-    current = buildJoinPlan(ast.join, ast.from.name, joinStrategy);
+    current = buildJoinPlan(ast.join, ast.from.name, joinStrategy, joinTable);
     const join = current.op === 'Join' ? current : undefined;
+    const algorithm = join?.algorithm ?? joinStrategy;
+    // Asked for an index join, but the inner table has no index on the join column: say so, and run the plain one.
+    const fallback =
+      joinStrategy === 'index-nested-loop' && algorithm !== 'index-nested-loop'
+        ? `You asked for an index nested-loop join, but \`${ast.join.table.name}\` has no index on \`${join?.rightColumn}\` for it to probe — so this runs as an ordinary nested-loop. `
+        : '';
     const mechanism =
-      joinStrategy === 'hash'
+      algorithm === 'index-nested-loop'
+        ? `for every row \`${ast.from.name}\` produces, it descends \`${ast.join.table.name}\`'s B+Tree on \`${join?.rightColumn}\` with that row's \`${join?.leftColumn}\` — a few page reads per outer row instead of a rescan of the whole inner table, which is why a small outer over a big indexed inner is where this algorithm wins`
+        : algorithm === 'hash'
         ? `it builds an in-memory hash table over all of \`${ast.join.table.name}\`, keyed on \`${join?.rightColumn}\`, once — then probes it with each \`${ast.from.name}\` row's \`${join?.leftColumn}\`, reading \`${ast.join.table.name}\` exactly once regardless of how many rows \`${ast.from.name}\` has`
-        : joinStrategy === 'sort-merge'
+        : algorithm === 'sort-merge'
           ? `it sorts both \`${ast.from.name}\` and \`${ast.join.table.name}\` on the join key, then merges the two sorted lists in a single pass — no per-row rescan and no table held in memory, at the cost of sorting both sides first`
           : `for every row \`${ast.from.name}\` produces, it rescans all of \`${ast.join.table.name}\` looking for a match on \`${join?.leftColumn}\` = \`${join?.rightColumn}\` — nested-loop, the simplest join algorithm, and the most expensive once neither side has an index to speed the inner scan up`;
     emit(
-      `JOIN adds a second scan of \`${ast.join.table.name}\` and a Join above both: ${mechanism}.`,
+      `${fallback}JOIN adds ${algorithm === 'index-nested-loop' ? 'an index probe on' : 'a second scan of'} \`${ast.join.table.name}\` and a Join above both: ${mechanism}.`,
       { stage: 'plan', planTree: display(current) },
     );
   }
@@ -149,7 +178,7 @@ export function emitPlanEvents(
 
   // The canonical plan is a direct translation of the query text. Everything
   // below is the optimizer earning its keep.
-  const canonical = buildPlan(ast, aggregateStrategy, joinStrategy);
+  const canonical = buildPlan(ast, aggregateStrategy, joinStrategy, joinTable);
   let optimised = canonical;
   let before = canonical;
 
@@ -174,8 +203,9 @@ export function emitPlanEvents(
 
   if (optimised === canonical) {
     const rows = rootEstimate(canonical, table, rowsPerPage, otherTables).estRows;
+    const joined = findJoinIn(canonical);
     const note = ast.join
-      ? `No rewrite rule reaches into a JOIN yet — ${joinStrategy === 'hash' ? 'a hash join over two full scans' : 'nested-loop over two full scans'} is what runs.`
+      ? `No rewrite rule applies to this JOIN — ${describeJoin(joined?.algorithm ?? joinStrategy, ast.from.name, ast.join.table.name)} is what runs.`
       : ast.where
         ? `The cost model estimates about ${plural(rows, 'row')} out of ${String(table.rows.length)}, and no access path beats reading the table.`
         : 'With no WHERE there is nothing to narrow the scan — every row is returned.';

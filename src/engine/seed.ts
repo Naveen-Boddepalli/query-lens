@@ -85,3 +85,27 @@ export function createJoinDemoDatabase(): Database {
     },
   };
 }
+
+/**
+ * `createJoinDemoDatabase`'s pair plus a larger third table, for `/compare`'s JOIN mode (plan.md §25.4 B4). Ten
+ * posts on three pages cannot show what an index join is *for* — a probe of `posts` costs more than one scan
+ * of it. `comments` is the inner table that can: 120 rows on 30 pages, twelve per post and scattered across them
+ * (every tenth row is one post's), indexed on `postId` (a foreign key, so it repeats). One outer row probing that
+ * index reads a few tree pages and the pages holding its own twelve comments — well under the thirty a scan reads —
+ * while ten outer rows probing it cost more than one scan of the lot, which is the other half of the lesson.
+ */
+export function createJoinCompareDatabase(): Database {
+  const base = createJoinDemoDatabase();
+  return {
+    tables: {
+      ...base.tables,
+      comments: {
+        name: 'comments',
+        columns: ['id', 'postId', 'body'],
+        // `i * 7 mod 10` visits every post id in a scrambled order, so one post's comments sit on many pages.
+        rows: Array.from({ length: 120 }, (_, i) => ({ id: i + 1, postId: ((i * 7) % 10) + 1, body: `comment ${String(i + 1)}` })),
+        indexedColumns: ['postId'],
+      },
+    },
+  };
+}
