@@ -2531,7 +2531,7 @@ Costs are against the modules that exist today (paths verified 2026-09-24). "Rel
 
 | ID | Rel. | Item | Shape | Cost |
 |---|---|---|---|---|
-| **A1** | 2.0 | **SQLite oracle + metamorphic tests** | (a) Metamorphic inside QueryLens: rules-off vs rules-on return the same rows (NoREC-shaped); all join algorithms and both aggregate strategies agree; `Sort`+`Limit`. (b) Differential vs **`node:sqlite`** (in the pinned Node ≥ 22.13; **no new dependency, no bundle bytes**) using **`fast-check`** (already a devDependency) over generated typed tables and grammar-derived queries; compare multisets (sequences under `ORDER BY`), aggregates with a tolerance, `NULL`s. (c) TLP once B1 lands three-valued logic. A **divergence ledger** for documented semantic differences instead of `skip`s. CI runs a **seeded, bounded** count; a long run lives in a scheduled read-only workflow. Ship a docs page, **"How we know the answers are right."** | 1–1.5 wk |
+| **A1** | 2.0 | **SQLite oracle + metamorphic tests** | **Built, 2026-09-25 — and it paid for itself on its first run.** `oracle/` (top-level, Node-only; never imported by `src/`): (a) **metamorphic** — buffer size, page size, policy, join algorithm, aggregate strategy and index presence never change the rows; the optimized plan agrees with a direct evaluation of the predicate over the raw rows (NoREC-shaped); after writes an index lookup finds what a scan does; the trace is deterministic. (b) **Differential vs `node:sqlite`** (no dependency, no bundle bytes) with `fast-check` over generated typed tables (few distinct values, many NULLs, keys that overlap across two tables) and grammar-derived statements — `SELECT`/`WHERE`/`ORDER BY`/`LIMIT`, aggregates + `GROUP BY`, `JOIN`, and sessions of up to three writes followed by a read — with the engine options drawn per session so every join algorithm and both aggregate strategies are checked; multisets compare unordered, `ORDER BY … LIMIT` compares the *keys* of the first n rows (ties make the rows undefined). (c) TLP moves to B1, which is what introduces `NOT` and `IS NULL`. **A coverage suite fails the build if the generators stop reaching every optimizer rule, join algorithm, aggregate strategy, empty tables, NULLs or row-changing writes** — first-cut generators fired `index-only-scan` 5 times in 1,500 sessions, which is how a vacuous oracle looks; and injected bugs (`<` as `<=`, a `SUM` that drops a value, a hash join that indexes NULL keys, a sort-merge join that skips equal keys) are each caught. **A divergence ledger** (`oracle/ledger.ts`): seven runnable entries, each asserting both engines' recorded answers *and that they still differ*, so a fixed gap makes its own entry fail. CI runs seeded and bounded (200 cases/property, part of `pnpm test`); `.github/workflows/oracle.yml` runs 20,000 with a fresh printed seed weekly, read-only, SHA-pinned. Docs page **"How we know the answers are right"**, its ledger table drift-tested against the ledger. **Bugs found and fixed:** `WHERE id > NULL` on an indexed column returned rows (a NULL bound read as "no bound"); `DELETE FROM t WHERE k = k` deleted the NULL-`k` rows (`constant-folding` called a column compared with itself always true — under three-valued logic it is UNKNOWN). Both have minimal regressions in `src/engine/__tests__/oracleFindings.test.ts`, verified to fail on the old code | 1–1.5 wk → **built in a day** |
 | **A2** | 2.0 | **§9 study kit** | **Built, 2026-09-24 — not yet run.** As planned it was to be a fixed post-test inside an unlisted route; building it exposed a conflict with `STUDY.md` (the questions and control text must never ship publicly), so the design changed: `/study` is an inert **runner** and the whole instrument — consent, reading or lessons, questions, timings — travels in each participant's link *fragment* (`#p=…`, never sent to a server), generated from `STUDY.md` by `pnpm study links`. Kiosk mode (no nav or footer, so the control arm is not one click from the app's own explanations), reload-resume, timestamp-driven clocks, a copyable result code; `pnpm study collate` writes a **blind** scoring sheet (participant and arm removed) and `report` prints descriptive per-arm results with no p-value. An e2e test fails the build if study text ever reaches `dist/`. See STUDY.md §4 | built: ~1 wk; run: calendar |
 | **A3** | 2.0 | **"Report a confusing step"** | On any moment: a prefilled GitHub issue carrying the share URL, step, build stamp. A privacy-preserving feedback channel for a product with, by decision (§14.4), no telemetry. Complements the crash repro | 1 day |
 | **A4** | 2.0 | **Release discipline** | T0 above — **done**; release notes from CHANGELOG; a "config verified on a preview deploy" checklist item for any change touching `_headers`, `wrangler.jsonc` or `public/` (§25.5) | ½ day |
@@ -2672,7 +2672,7 @@ other items depends on the result, so they proceed in parallel; only 2.2 waits.
 
 **2.0 — Trust & ceiling**
 - [x] `1.0.0` tagged; CHANGELOG cut (T0).
-- [ ] The oracle runs in CI (seeded, bounded); a divergence ledger and "How we know the answers are right" exist.
+- [x] The oracle runs in CI (seeded, bounded); a divergence ledger and "How we know the answers are right" exist. *(built 2026-09-25; TLP lands with B1)*
 - [ ] The study kit is live *(built 2026-09-24; automated tests pass on desktop and a phone-width run was checked by hand)* and at least one **real participant** has completed it end to end on a phone *and* a laptop.
 - [ ] A homework-shaped query using `OR`, `IN`, `LIKE`, `DISTINCT`, `HAVING` and a **non-unique** indexed column runs and narrates end to end; `sql.mdx`, `limits.mdx` and `/tools/grammar` all agree.
 - [ ] `limits.mdx` no longer says "unique key" or that a join never uses an index.
@@ -2701,7 +2701,7 @@ other items depends on the result, so they proceed in parallel; only 2.2 waits.
 
 | Item | Verdict | Earliest | Trigger to revisit |
 |---|---|---|---|
-| SQLite oracle (A1) | **Planned, 2.0** | now | — |
+| SQLite oracle (A1) | **Built, 2026-09-25** — two engine bugs found on the first run; TLP follows B1 | now | — |
 | §9 study kit (A2) | **Built, 2026-09-24** — runner + `pnpm study`; the instrument travels in the link, not the bundle | now | Awaiting participants |
 | **Run the §9 study during 2.0** | **Decided, 2026-09-24** | now | §25.6 checkpoint before 2.2 |
 | Rename before launch (A5) | **Decided: keep the name, paired with a descriptor** | 2026-09-24 | A rival contests it, or launch feedback shows confusion |
@@ -2742,6 +2742,18 @@ In the discipline of §20 and [RESEARCH.md §21](RESEARCH.md#21-what-i-deliberat
 ---
 
 ## Appendix: Development Changelog
+
+> **v23 — 2026-09-25.** Work on product v2 begins on branch `version/v2`, one commit per §25 item.
+> **A1, the SQLite oracle, is built** — and its first run found two real bugs in an engine that had 1,170
+> passing tests: a `NULL` range bound on an indexed column scanned the whole index and returned rows, and
+> `constant-folding` treated `col = col` as always true, so `DELETE … WHERE k = k` deleted the rows where `k`
+> is `NULL`. Both are fixed with minimal regressions. The lesson worth keeping is not the bugs but how the
+> oracle nearly missed them: with purely random predicates it exercised `index-only-scan` five times in 1,500
+> sessions and hash / sort-merge joins not at all (a mutation check showed injected bugs in both surviving),
+> so the generators now draw literals from the values a column holds, draw the engine options per session,
+> and a coverage suite fails the build if any optimizer rule, join algorithm or aggregate strategy goes
+> unreached. One existing unit test asserted the `col = col` bug as intended behaviour — a reminder that a
+> test written from the implementation preserves its mistakes.
 
 > **v22 — 2026-09-24.** Four §25 decisions taken and carried out. **(1) Name:** keep "QueryLens", always
 > with the descriptor — checked first: unscoped npm names free, `@querylens` empty, `querylens.com/.io/.ai/.cc/.tech`

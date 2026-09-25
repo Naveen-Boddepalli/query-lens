@@ -88,7 +88,8 @@ Six rules, applied in this order, each producing one `optimize` event with befor
 the changed nodes highlighted:
 
 1. **`constant-folding`** — drops a conjunct that is always true regardless of the row (two
-   literals, or a column compared with itself).
+   literals). A column compared with *itself* is not folded: `age = age` is UNKNOWN where `age` is
+   NULL, and only TRUE passes a filter.
 2. **`predicate-pushdown`** — folds a `Filter` into the scan beneath it, so rows are discarded as
    they're read rather than materialised and thrown away.
 3. **`join-predicate-pushdown`** — the `Join` counterpart: pushes each `WHERE` conjunct naming only

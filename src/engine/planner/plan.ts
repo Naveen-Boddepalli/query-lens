@@ -205,14 +205,22 @@ export function conjoin(parts: Expr[]): Expr | undefined {
   }));
 }
 
-/** `col = literal` against the given column, in either operand order. */
+/**
+ * `col = literal` against the given column, in either operand order.
+ *
+ * A NULL literal is never a key: `col = NULL` is UNKNOWN for every row, so it
+ * matches nothing whatever the index holds — and NULLs are not in the tree at
+ * all (`buildIndex`). Returning `undefined` leaves the comparison where it
+ * belongs, in the filter, which says UNKNOWN and rejects every row. (Found by
+ * the SQLite oracle, plan.md §25.4 A1; the same rule guards `rangeOn`.)
+ */
 export function equalityOn(expr: Expr, column: string): SqlValue | undefined {
   if (expr.kind !== 'compare' || expr.op !== '=') return undefined;
   if (expr.left.kind === 'column' && expr.left.name === column && expr.right.kind === 'literal') {
-    return expr.right.value;
+    return expr.right.value ?? undefined;
   }
   if (expr.right.kind === 'column' && expr.right.name === column && expr.left.kind === 'literal') {
-    return expr.left.value;
+    return expr.left.value ?? undefined;
   }
   return undefined;
 }
@@ -236,10 +244,10 @@ export function rangeOn(
 ): { op: Exclude<CompareOp, '='>; value: SqlValue } | undefined {
   if (expr.kind !== 'compare' || expr.op === '=') return undefined;
   if (expr.left.kind === 'column' && expr.left.name === column && expr.right.kind === 'literal') {
-    return { op: expr.op, value: expr.right.value };
+    return expr.right.value === null ? undefined : { op: expr.op, value: expr.right.value };
   }
   if (expr.right.kind === 'column' && expr.right.name === column && expr.left.kind === 'literal') {
-    return { op: FLIPPED_COMPARE_OP[expr.op], value: expr.left.value };
+    return expr.left.value === null ? undefined : { op: FLIPPED_COMPARE_OP[expr.op], value: expr.left.value };
   }
   return undefined;
 }

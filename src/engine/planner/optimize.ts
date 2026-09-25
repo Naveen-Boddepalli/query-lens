@@ -112,13 +112,16 @@ function orderedCompare<T extends number | string>(op: CompareOp, a: T, b: T): b
 
 /**
  * A comparison whose truth value does not depend on the row at all: two
- * literals (`5 > 3`), or the same column compared with itself — `age = age`,
- * `age <= age` and `age >= age` are always true (reflexive); `age < age` and
- * `age > age` are always false (irreflexive). Anything else — a column
- * against a literal, or two different columns — depends on the data and
- * cannot be folded. "Same column" checks the table qualifier too: once a
- * JOIN is in play, `authors.id = posts.id` names the *same* column on two
- * *different* tables, and folding that to `true` would be wrong.
+ * literals (`5 > 3`). Anything else — a column against a literal, or two
+ * columns — depends on the data and cannot be folded.
+ *
+ * That includes a column against *itself*. `age = age` looks like a
+ * tautology, but under three-valued logic it is UNKNOWN, not TRUE, on a row
+ * where `age` is NULL — and only TRUE passes a filter. Folding it away
+ * returned (and, in a `DELETE`, destroyed) exactly the rows the predicate
+ * excludes. The SQLite oracle found this (plan.md §25.4 A1). The correct
+ * rewrite is `age IS NOT NULL`, which needs an `IS NULL` predicate the
+ * engine did not have; until it does, the comparison is simply left alone.
  */
 function foldComparison(expr: Extract<Expr, { kind: 'compare' }>): 'true' | 'false' | null {
   const { op, left, right } = expr;
@@ -126,11 +129,6 @@ function foldComparison(expr: Extract<Expr, { kind: 'compare' }>): 'true' | 'fal
   if (left.kind === 'literal' && right.kind === 'literal') {
     const result = foldLiteralCompare(op, left.value, right.value);
     return result === null ? null : result ? 'true' : 'false';
-  }
-
-  if (left.kind === 'column' && right.kind === 'column' && left.name === right.name && left.table === right.table) {
-    // Reflexive ops (=, <=, >=) always hold against oneself; the strict ones (<, >) never do.
-    return op === '=' || op === '<=' || op === '>=' ? 'true' : 'false';
   }
 
   return null;

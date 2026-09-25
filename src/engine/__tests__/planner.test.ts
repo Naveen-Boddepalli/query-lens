@@ -193,10 +193,10 @@ describe('optimize — constant folding', () => {
     expect(filterNode && exprToSql(filterNode.predicate)).toBe('id = 5');
   });
 
-  it('drops an always-true self-comparison (col = col)', () => {
+  it('does NOT fold a self-comparison (col = col): it is UNKNOWN, not TRUE, where the column is NULL', () => {
     const p = final('SELECT * FROM users WHERE age = age');
     expect(shape(p)).toEqual(['Project', 'SeqScan']);
-    expect(scanPredicate(p)).toBeUndefined();
+    expect(exprToSql(scanPredicate(p)!)).toBe('age = age');
   });
 
   it('removes the Filter entirely when nothing else is left', () => {

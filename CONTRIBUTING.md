@@ -13,7 +13,7 @@ pnpm dev          # http://localhost:5173
 
 ### Prerequisites
 
-- **Node.js** — `>=22.13.0` (pinned in `.node-version`)
+- **Node.js** — `>=22.13.0` (pinned in `.node-version`); `>=22.16` to run the `oracle/` suites, which use `node:sqlite`
 - **pnpm** — `11.1.2` (pinned in `package.json`)
 
 ### Verify your setup
@@ -21,7 +21,7 @@ pnpm dev          # http://localhost:5173
 ```bash
 pnpm typecheck    # TypeScript
 pnpm lint         # ESLint + jsx-a11y
-pnpm test         # 326 unit tests (vitest)
+pnpm test         # unit tests + the seeded SQLite oracle (vitest)
 pnpm build        # production build
 pnpm budget       # gzip bundle budget
 pnpm test:e2e     # Playwright (needs: pnpm exec playwright install chromium)
@@ -41,6 +41,13 @@ CI runs exactly this sequence. If it passes locally, it will pass in CI.
    - `src/ui/` — a renderer of engine state, nothing more.
 
 3. **Write tests.** Engine changes need unit tests. UI changes need UI tests (Testing Library) and, for visual or interactive changes, an end-to-end test (Playwright).
+
+   Engine changes are also checked against SQLite by the **oracle** (`oracle/`, run by `pnpm test`): generated
+   statements must return the same rows in both. If you add SQL the engine understands, teach the generators in
+   `oracle/generate.ts` (and `oracle/model.ts`) about it in the same commit — the coverage suite fails if a rule
+   or algorithm goes unreached. Where QueryLens *should* differ from SQLite, add an entry to `oracle/ledger.ts`
+   rather than skipping a test. To hunt harder: `ORACLE_RUNS=20000 ORACLE_SEED=42 pnpm exec vitest run oracle`.
+   See [How we know the answers are right](https://query-lens.1234naveenboddepalli.workers.dev/docs/reference/answers).
 
 4. **Commit.** Use [Conventional Commits](https://www.conventionalcommits.org/):
    - `feat:` — a new feature

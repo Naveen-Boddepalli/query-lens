@@ -157,6 +157,7 @@ const DocsSql = lazy(() => import('./pages/DocsContent/reference/sql.mdx'));
 const DocsUrlParameters = lazy(() => import('./pages/DocsContent/reference/url-parameters.mdx'));
 const DocsShortcuts = lazy(() => import('./pages/DocsContent/reference/shortcuts.mdx'));
 const DocsLimits = lazy(() => import('./pages/DocsContent/reference/limits.mdx'));
+const DocsAnswers = lazy(() => import('./pages/DocsContent/reference/answers.mdx'));
 
 export default function App() {
   return (
@@ -215,6 +216,7 @@ export default function App() {
               <Route path="reference/url-parameters" element={<DocsUrlParameters />} />
               <Route path="reference/shortcuts" element={<DocsShortcuts />} />
               <Route path="reference/limits" element={<DocsLimits />} />
+              <Route path="reference/answers" element={<DocsAnswers />} />
               <Route path="architecture" element={<DocsArchitecture />} />
             </Route>
 

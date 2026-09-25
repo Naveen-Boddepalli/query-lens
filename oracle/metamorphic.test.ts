@@ -1,0 +1,173 @@
+// @vitest-environment node
+/**
+ * Metamorphic tests inside QueryLens (plan.md §25.4 A1a). No external oracle:
+ * each property is a *relation* between two runs of the engine that must hold
+ * whatever the answer is.
+ *
+ *   physical invariance   buffer size, page size, policy, join algorithm,
+ *                         aggregate strategy and whether an index exists change
+ *                         the trace, never the rows
+ *   NoREC-shaped          the optimized plan returns what an unoptimized
+ *                         evaluation of the same predicate over the raw rows does
+ *   index ↔ heap          after any writes, an indexed lookup finds exactly the
+ *                         rows a scan does
+ *   determinism           the same input yields the same trace, event for event
+ *
+ * The SQLite suite (`differential.test.ts`) says the answers are *right*; this
+ * one says they are *stable* — and it still works on a build where SQLite is
+ * not available or the two dialects would disagree.
+ */
+
+import fc from 'fast-check';
+import { describe, expect, it, vi } from 'vitest';
+import { passes } from '../src/engine/exec/evaluate.ts';
+import { parse } from '../src/engine/parser/index.ts';
+import { runQuery } from '../src/engine/runQuery.ts';
+import { DEFAULT_ENGINE_OPTIONS } from '../src/engine/types.ts';
+import type { EngineOptions } from '../src/engine/types.ts';
+import { multisetDiff, sequenceDiff } from './compare.ts';
+import type { Tuple } from './compare.ts';
+import { ORACLE_TIMEOUT, oracleParams } from './config.ts';
+import { optionsArb, sessionArb } from './generate.ts';
+import { applyWrite, qlTuples, toDatabase } from './harness.ts';
+import { isWrite, outputKeys, renderQuery } from './model.ts';
+import type { ReadQuery, TableSpec, WriteQuery } from './model.ts';
+import { tupleOf } from './sqlite.ts';
+
+vi.setConfig({ testTimeout: ORACLE_TIMEOUT });
+
+/** Applies the session's writes, then returns the tables and the final read. */
+function settle(tables: readonly TableSpec[], steps: readonly (ReadQuery | WriteQuery)[], options: EngineOptions) {
+  let current = [...tables];
+  for (const q of steps.slice(0, -1)) {
+    if (!isWrite(q)) continue;
+    const result = runQuery(renderQuery(q), toDatabase(current), options);
+    expect(result.error).toBeUndefined();
+    current = applyWrite(current, q, result);
+  }
+  return { tables: current, read: steps[steps.length - 1] as ReadQuery };
+}
+
+function answer(tables: readonly TableSpec[], q: ReadQuery, options: EngineOptions, indexed: boolean): Tuple[] {
+  const result = runQuery(renderQuery(q), toDatabase(tables, indexed), options);
+  expect(result.error, renderQuery(q)).toBeUndefined();
+  return qlTuples(q, tables, result.rows);
+}
+
+/** The order-defining column's position in the output, when there is an ORDER BY and it is projected. */
+function keyAt(q: ReadQuery, tables: readonly TableSpec[]): number {
+  return q.kind === 'select' && q.order ? outputKeys(q, tables).indexOf(q.order.ref.name) : -1;
+}
+
+function same(q: ReadQuery, tables: readonly TableSpec[], a: Tuple[], b: Tuple[]): string | null {
+  // A LIMIT without ORDER BY picks *some* rows, and which depends on scan order — only the count is defined.
+  if (q.limit !== undefined && !(q.kind === 'select' && q.order)) return a.length === b.length ? null : `LIMIT count ${a.length} vs ${b.length}`;
+  if (q.limit !== undefined) {
+    // ORDER BY + LIMIT: ties make the *rows* undefined; the keys of the first n rows are not.
+    const at = keyAt(q, tables);
+    if (a.length !== b.length) return `LIMIT count ${a.length} vs ${b.length}`;
+    return at < 0 ? null : sequenceDiff(a.map((t) => t[at]!), b.map((t) => t[at]!));
+  }
+  const bag = multisetDiff(a, b);
+  if (bag) return bag;
+  const at = keyAt(q, tables);
+  return at < 0 ? null : sequenceDiff(a.map((t) => t[at]!), b.map((t) => t[at]!));
+}
+
+describe('metamorphic — physical choices never change the rows', () => {
+  it('buffer size, page size, policy, join algorithm, aggregate strategy and index presence', () => {
+    fc.assert(
+      fc.property(sessionArb('any'), optionsArb, optionsArb, ({ tables, steps }, a, b) => {
+        const { tables: settled, read } = settle(tables, steps, DEFAULT_ENGINE_OPTIONS);
+        const base = answer(settled, read, a, true);
+        const other = answer(settled, read, b, true);
+        const noIndex = answer(settled, read, a, false);
+        const sql = renderQuery(read);
+        expect(same(read, settled, base, other), `${sql} — options ${JSON.stringify(a)} vs ${JSON.stringify(b)}`).toBeNull();
+        expect(same(read, settled, base, noIndex), `${sql} — with and without indexes`).toBeNull();
+      }),
+      oracleParams(),
+    );
+  });
+});
+
+describe('metamorphic — NoREC-shaped: the optimized plan agrees with evaluating the predicate directly', () => {
+  it('SELECT … WHERE returns exactly the rows the predicate keeps', () => {
+    fc.assert(
+      fc.property(sessionArb('select'), optionsArb, ({ tables, steps }, options) => {
+        const { tables: settled, read } = settle(tables, steps, options);
+        if (read.kind !== 'select' || read.limit !== undefined) return;
+
+        const parsed = parse(renderQuery(read));
+        if (!parsed.ok) throw new Error(parsed.error.message);
+        const table = settled.find((t) => t.name === read.table)!;
+        const keys = outputKeys(read, settled);
+        // The reference never plans, never touches a page or an index — it is the predicate and a loop.
+        const expected = table.rows.filter((row) => passes(parsed.ast.where, row)).map((row) => tupleOf(row, keys));
+
+        const actual = answer(settled, read, options, true);
+        expect(multisetDiff(actual, expected), renderQuery(read)).toBeNull();
+      }),
+      oracleParams(),
+    );
+  });
+
+  it('COUNT(*) WHERE agrees with the size of that same reference', () => {
+    fc.assert(
+      fc.property(sessionArb('select'), ({ tables, steps }) => {
+        const { tables: settled, read } = settle(tables, steps, DEFAULT_ENGINE_OPTIONS);
+        if (read.kind !== 'select') return;
+        const count = renderQuery({
+          kind: 'aggregate',
+          table: read.table,
+          group: [],
+          shownGroup: [],
+          aggs: [{ fn: 'COUNT', arg: '*' }],
+          where: read.where,
+        });
+        const parsed = parse(count);
+        if (!parsed.ok) throw new Error(parsed.error.message);
+        const kept = settled.find((t) => t.name === read.table)!.rows.filter((row) => passes(parsed.ast.where, row)).length;
+        const result = runQuery(count, toDatabase(settled), DEFAULT_ENGINE_OPTIONS);
+        expect(result.rows, count).toEqual([{ 'COUNT(*)': kept }]);
+      }),
+      oracleParams(),
+    );
+  });
+});
+
+describe('metamorphic — index and heap agree after writes', () => {
+  it('every id a table holds is found by an indexed lookup, and no absent id is', () => {
+    fc.assert(
+      fc.property(sessionArb('select'), optionsArb, ({ tables, steps }, options) => {
+        const { tables: settled } = settle(tables, steps, options);
+        const t = settled.find((x) => x.name === 't')!;
+        // An INSERT that names no `id` leaves it NULL, and `id = NULL` matches nothing — by design.
+        const present = new Set(t.rows.map((r) => r.id).filter((id): id is number => typeof id === 'number'));
+        for (const id of [...present, 0, 41, 999]) {
+          const sql = `SELECT * FROM t WHERE id = ${String(id)}`;
+          const viaIndex = runQuery(sql, toDatabase(settled, true), options).rows;
+          const viaScan = runQuery(sql, toDatabase(settled, false), options).rows;
+          expect(viaIndex, sql).toEqual(viaScan);
+          expect(viaIndex.length, sql).toBe(t.rows.filter((r) => r.id === id).length);
+        }
+      }),
+      oracleParams(0.5),
+    );
+  });
+});
+
+describe('metamorphic — the engine is deterministic', () => {
+  it('the same statement over the same data yields the same trace, event for event', () => {
+    fc.assert(
+      fc.property(sessionArb('any'), optionsArb, ({ tables, steps }, options) => {
+        const { tables: settled, read } = settle(tables, steps, options);
+        const sql = renderQuery(read);
+        const a = runQuery(sql, toDatabase(settled), options);
+        const b = runQuery(sql, toDatabase(settled), options);
+        expect(JSON.stringify(a)).toBe(JSON.stringify(b));
+      }),
+      oracleParams(0.5),
+    );
+  });
+});

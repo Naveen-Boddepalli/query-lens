@@ -29,6 +29,7 @@
     "playwright.config.ts",
     "bin/**/*.ts",
     "scripts/**/*.ts",
+    "oracle/**/*.ts",
     "e2e/**/*.ts"
   ]
 }

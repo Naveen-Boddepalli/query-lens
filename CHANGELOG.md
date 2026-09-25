@@ -8,6 +8,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **A SQLite oracle and a divergence ledger** (plan.md §25.4 A1) — the engine's *rows* are now checked
+  against an outside authority on every build. `oracle/` drives `node:sqlite` (Node's built-in; no new
+  dependency, nothing in the bundle) with `fast-check`: generated typed tables and grammar-derived statements
+  — `SELECT` with `WHERE` / `ORDER BY` / `LIMIT`, aggregates and `GROUP BY`, `JOIN`, and short sessions of
+  `INSERT` / `UPDATE` / `DELETE` followed by a read — run in both engines and must agree, with buffer size,
+  page size, policy, join algorithm and aggregate strategy drawn at random so every physical strategy is
+  checked. Beside it, metamorphic properties inside QueryLens (physical choices never change the rows; the
+  optimized plan agrees with a direct evaluation of the predicate; index and heap agree after writes; the
+  trace is deterministic), and a coverage suite that **fails the build if the generators stop reaching**
+  every optimizer rule, join algorithm, aggregate strategy, empty table, NULL and row-changing write. Seven
+  documented differences from SQLite live in `oracle/ledger.ts` as *executable* entries that assert both
+  answers and that they still differ, so a closed gap expires its own entry. CI runs it seeded and bounded
+  as part of `pnpm test`; a weekly read-only workflow (`.github/workflows/oracle.yml`) runs 20,000 cases per
+  property with a fresh, printed seed. A new docs page, **How we know the answers are right**, explains what
+  it proves and — as importantly — what it does not.
 - **The §9 study kit** (plan.md §25.4 A2) — the validation study can now be run end to end without a
   server. `/study` is an unlisted, `noindex`, kiosk-mode runner (no nav, footer or docs links, so a
   control-arm participant is not one click from the app's own explanation of the material): consent →
@@ -32,7 +47,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   five unrelated products (RESEARCH.md §45); the decision is to keep it and always pair it with the
   descriptor, which the site's `<title>` and `og:title` already did.
 - The README's CI badge pointed at the old `QueryLens` repository name; it now points at `query-lens`.
-- Vitest also runs tests under `scripts/`.
+- Vitest also runs tests under `scripts/` and `oracle/`; `oracle/` joins `tsconfig.node.json`.
+
+### Fixed
+- **`WHERE id > NULL` (and `>=`, `<`, `<=`, `BETWEEN … NULL …`, `= NULL`) on an indexed column returned
+  rows.** A comparison with `NULL` is UNKNOWN and matches nothing, but the index rules read a `NULL` literal
+  as "no bound" and walked the whole index. A `NULL` literal is now never an index key or bound; the
+  comparison stays in the filter, where it is UNKNOWN. Found by the oracle.
+- **`DELETE FROM t WHERE k = k` deleted the rows where `k` is `NULL`.** `constant-folding` folded a column
+  compared with itself to "always true" and dropped it; under three-valued logic it is UNKNOWN on a `NULL`
+  row, and only TRUE passes a filter — so `SELECT`s returned, and `DELETE`s destroyed, rows the predicate
+  excludes. Only two-literal comparisons fold now. Found by the oracle; an existing unit test that asserted
+  the old behaviour was rewritten.
 
 ## [1.0.0] - 2026-09-23
 
