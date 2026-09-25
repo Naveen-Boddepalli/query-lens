@@ -25,6 +25,52 @@ export interface RowPointer {
   slot: number;
 }
 
+/**
+ * What a tree orders by (plan.md §25.4 B3). The sandbox trees (`/tools/btree`,
+ * the docs demo) use plain **scalars**. An index over a *table* uses
+ * **entries**: the column's value(s) plus the row's own address as a
+ * tie-breaker — `(30, page 4, slot 2)` — so the tree never holds two equal
+ * keys even when a hundred rows share a value. That is how InnoDB and
+ * PostgreSQL make a non-unique index (their "row id" / TID is the last key
+ * column), and why splits, merges and the leaf chain need no special case: the
+ * tree is *always* unique; only the lookup changes, from "find this key" to
+ * "find every entry whose value is this".
+ *
+ * A **probe** is a bound to search *for*, never stored: `{ values: [30], bound:
+ * 'low' }` sorts before every entry with value 30 and `'high'` after every one,
+ * so `lowerBound` finds the first duplicate (or the first entry past them all)
+ * with no special case either.
+ */
+export interface EntryKey {
+  /** The indexed column's value — or values, for a composite index — in column order. */
+  values: readonly SqlValue[];
+  page: number;
+  slot: number;
+}
+export interface ProbeKey {
+  values: readonly SqlValue[];
+  bound: 'low' | 'high';
+}
+export type IndexKey = SqlValue | EntryKey | ProbeKey;
+
+export const isProbe = (key: IndexKey): key is ProbeKey => typeof key === 'object' && key !== null && 'bound' in key;
+export const isEntry = (key: IndexKey): key is EntryKey => typeof key === 'object' && key !== null && 'page' in key;
+
+/** The entry an index over `values` holds for the row at `pointer`. */
+export function entryKey(values: readonly SqlValue[], pointer: RowPointer): EntryKey {
+  return { values, page: pointer.pageId, slot: pointer.slot };
+}
+
+/** The bound just before every entry with these leading values (`'low'`) or just after them all (`'high'`). */
+export function probe(values: readonly SqlValue[], bound: 'low' | 'high'): ProbeKey {
+  return { values, bound };
+}
+
+/** The column values of a key: a scalar is its own one value, an entry or probe carries its list. */
+export function valuesOf(key: IndexKey): readonly SqlValue[] {
+  return typeof key === 'object' && key !== null ? key.values : [key];
+}
+
 interface NodeBase {
   id: string;
   /** Index nodes live on pages too, so traversal costs real buffer reads. */
@@ -33,7 +79,7 @@ interface NodeBase {
 
 export interface LeafNode extends NodeBase {
   kind: 'leaf';
-  keys: SqlValue[];
+  keys: IndexKey[];
   pointers: RowPointer[];
   /** Right sibling, for range scans. */
   next: string | null;
@@ -41,7 +87,7 @@ export interface LeafNode extends NodeBase {
 
 export interface InternalNode extends NodeBase {
   kind: 'internal';
-  keys: SqlValue[];
+  keys: IndexKey[];
   /** Always `keys.length + 1` entries. */
   children: string[];
 }
@@ -49,6 +95,8 @@ export interface InternalNode extends NodeBase {
 export type BTreeNode = LeafNode | InternalNode;
 
 export interface BPlusTree {
+  /** True for an index over a table: its keys are `EntryKey`s, displayed by their values only. */
+  tiebreak?: boolean;
   rootId: string;
   nodes: Record<string, BTreeNode>;
   maxKeys: number;
@@ -58,12 +106,49 @@ export interface BPlusTree {
 
 export const DEFAULT_MAX_KEYS = 4;
 
-/** Orders numbers numerically, strings lexicographically. Booleans as 0/1. */
-export function compareKeys(a: SqlValue, b: SqlValue): number {
+function compareScalar(a: SqlValue, b: SqlValue): number {
   if (typeof a === 'number' && typeof b === 'number') return a - b;
   const sa = a === null ? '' : typeof a === 'boolean' ? String(Number(a)) : String(a);
   const sb = b === null ? '' : typeof b === 'boolean' ? String(Number(b)) : String(b);
   return sa < sb ? -1 : sa > sb ? 1 : 0;
+}
+
+/**
+ * Orders numbers numerically, strings lexicographically, booleans as 0/1 — and,
+ * for a table's index, entries by their values (column by column) and then by
+ * the row's address. A probe sorts before (`'low'`) or after (`'high'`) every
+ * entry that shares its leading values; a shorter list of values is a prefix.
+ */
+export function compareKeys(a: IndexKey, b: IndexKey): number {
+  const aObj = typeof a === 'object' && a !== null;
+  const bObj = typeof b === 'object' && b !== null;
+  if (!aObj && !bObj) return compareScalar(a, b);
+
+  const av = valuesOf(a);
+  const bv = valuesOf(b);
+  const shared = Math.min(av.length, bv.length);
+  for (let i = 0; i < shared; i++) {
+    const c = compareScalar(av[i]!, bv[i]!);
+    if (c !== 0) return c;
+  }
+
+  // Equal on every shared value: a probe decides by its bound, otherwise the shorter list is smaller.
+  const rank = (key: IndexKey): number => (isProbe(key) ? (key.bound === 'low' ? -1 : 1) : 0);
+  if (isProbe(a) || isProbe(b)) {
+    if (isProbe(a) && isProbe(b)) return rank(a) - rank(b);
+    return isProbe(a) ? rank(a) : -rank(b);
+  }
+  if (av.length !== bv.length) return av.length - bv.length;
+  const ea = a as EntryKey;
+  const eb = b as EntryKey;
+  return ea.page - eb.page || ea.slot - eb.slot;
+}
+
+/** A key as text for a step's detail: the value for a scalar, `value @page.slot` for an entry. */
+function describeKey(key: IndexKey): string {
+  if (isEntry(key)) return `${key.values.map(String).join(', ')} @${String(key.page)}.${String(key.slot)}`;
+  if (isProbe(key)) return key.values.map(String).join(', ');
+  return String(key);
 }
 
 export function node(tree: BPlusTree, id: string): BTreeNode {
@@ -72,7 +157,7 @@ export function node(tree: BPlusTree, id: string): BTreeNode {
   return n;
 }
 
-export function createTree(maxKeys = DEFAULT_MAX_KEYS, firstPageId = 0): BPlusTree {
+export function createTree(maxKeys = DEFAULT_MAX_KEYS, firstPageId = 0, tiebreak = false): BPlusTree {
   const root: LeafNode = {
     kind: 'leaf',
     id: 'n0',
@@ -82,6 +167,7 @@ export function createTree(maxKeys = DEFAULT_MAX_KEYS, firstPageId = 0): BPlusTr
     next: null,
   };
   return {
+    ...(tiebreak ? { tiebreak } : {}),
     rootId: root.id,
     nodes: { [root.id]: root },
     maxKeys,
@@ -99,7 +185,7 @@ function allocate<T extends BTreeNode>(tree: BPlusTree, make: (id: string, pageI
 }
 
 /** Index of the first key >= `key`. Exported for `index/rangeLookup.ts` — a range scan's own starting position within its first leaf. */
-export function lowerBound(keys: SqlValue[], key: SqlValue): number {
+export function lowerBound(keys: readonly IndexKey[], key: IndexKey): number {
   let lo = 0;
   let hi = keys.length;
   while (lo < hi) {
@@ -111,14 +197,14 @@ export function lowerBound(keys: SqlValue[], key: SqlValue): number {
 }
 
 /** Which child of an internal node covers `key`. */
-export function childIndexFor(internal: InternalNode, key: SqlValue): number {
+export function childIndexFor(internal: InternalNode, key: IndexKey): number {
   let i = 0;
   while (i < internal.keys.length && compareKeys(key, internal.keys[i]!) >= 0) i += 1;
   return i;
 }
 
 /** Root-to-leaf node ids for `key`. The last entry is always the leaf. */
-export function descend(tree: BPlusTree, key: SqlValue): string[] {
+export function descend(tree: BPlusTree, key: IndexKey): string[] {
   const path: string[] = [tree.rootId];
   let current = node(tree, tree.rootId);
 
@@ -129,6 +215,24 @@ export function descend(tree: BPlusTree, key: SqlValue): string[] {
   }
 
   return path;
+}
+
+/**
+ * The lowest key of the leaf to the right of `leaf` — what its parent's separator says, and what a real engine keeps on the
+ * page itself as its "high key" (PostgreSQL does) so a scan can tell the run of equal values has ended *without reading the
+ * next page*. `null` for the rightmost leaf, and for an empty one. Pure bookkeeping: it touches no buffer-pool page.
+ */
+export function highKey(tree: BPlusTree, leaf: LeafNode): IndexKey | null {
+  const first = leaf.keys[0];
+  if (first === undefined) return null;
+  let bound: IndexKey | null = null;
+  let current = node(tree, tree.rootId);
+  while (current.kind === 'internal') {
+    const at = childIndexFor(current, first);
+    if (at < current.keys.length) bound = current.keys[at]!;
+    current = node(tree, current.children[at]!);
+  }
+  return bound;
 }
 
 /**
@@ -158,11 +262,24 @@ export interface SearchResult {
   pointer: RowPointer | null;
 }
 
-export function search(tree: BPlusTree, key: SqlValue): SearchResult {
-  const path = descend(tree, key);
-  const leaf = node(tree, path[path.length - 1]!) as LeafNode;
-  const at = lowerBound(leaf.keys, key);
-  const found = at < leaf.keys.length && compareKeys(leaf.keys[at]!, key) === 0;
+/**
+ * Finds `key`. Given a plain value on a table's index — which holds entries, not bare values — it finds the *first*
+ * entry for that value (the one lowest in row-address order); `emitIndexLookup` is the narrated version that also
+ * returns the rest of the run.
+ */
+export function search(tree: BPlusTree, key: IndexKey): SearchResult {
+  const target = tree.tiebreak && !isEntry(key) && !isProbe(key) ? probe([key], 'low') : key;
+  const path = descend(tree, target);
+  let leaf = node(tree, path[path.length - 1]!) as LeafNode;
+  let at = lowerBound(leaf.keys, target);
+  // The first entry for a value can start the *next* leaf (the probe routed left of a separator that equals it).
+  if (at >= leaf.keys.length && leaf.next !== null && tree.tiebreak) {
+    leaf = node(tree, leaf.next) as LeafNode;
+    at = 0;
+  }
+  const matches = (candidate: IndexKey): boolean =>
+    target === key ? compareKeys(candidate, key) === 0 : compareKeys(valuesOf(candidate)[0]!, key) === 0;
+  const found = at < leaf.keys.length && matches(leaf.keys[at]!);
 
   return {
     path,
@@ -176,13 +293,14 @@ export function search(tree: BPlusTree, key: SqlValue): SearchResult {
 /* Insert                                                                      */
 /* -------------------------------------------------------------------------- */
 
-export function insert(tree: BPlusTree, key: SqlValue, pointer: RowPointer): void {
+export function insert(tree: BPlusTree, key: IndexKey, pointer: RowPointer): void {
   const path = descend(tree, key);
   const leaf = node(tree, path[path.length - 1]!) as LeafNode;
 
   const at = lowerBound(leaf.keys, key);
   if (at < leaf.keys.length && compareKeys(leaf.keys[at]!, key) === 0) {
-    // Duplicate key: last writer wins. v0 indexes a unique column.
+    // The same key again — for a table's index that is the same *row* (the address is part of the key), so
+    // there is nothing new to hold; for a scalar sandbox tree, last writer wins.
     leaf.pointers[at] = pointer;
     return;
   }
@@ -219,7 +337,7 @@ function insertIntoParent(
   tree: BPlusTree,
   ancestors: string[],
   leftId: string,
-  separator: SqlValue,
+  separator: IndexKey,
   rightId: string,
 ): void {
   if (ancestors.length === 0) {
@@ -312,7 +430,7 @@ export interface DeleteResult {
   steps: DeleteStep[];
 }
 
-export function deleteKey(tree: BPlusTree, key: SqlValue): DeleteResult {
+export function deleteKey(tree: BPlusTree, key: IndexKey): DeleteResult {
   const steps: DeleteStep[] = [];
   const path = descend(tree, key);
   const leaf = node(tree, path[path.length - 1]!) as LeafNode;
@@ -324,7 +442,7 @@ export function deleteKey(tree: BPlusTree, key: SqlValue): DeleteResult {
 
   leaf.keys.splice(at, 1);
   leaf.pointers.splice(at, 1);
-  steps.push({ kind: 'remove', node: leaf.id, detail: String(key) });
+  steps.push({ kind: 'remove', node: leaf.id, detail: describeKey(key) });
 
   // The deleted key can only be a separator if it was this leaf's minimum.
   // Rewrite it wherever an ancestor routes right into this leaf's subtree.
@@ -344,8 +462,8 @@ export function deleteKey(tree: BPlusTree, key: SqlValue): DeleteResult {
 function updateSeparators(
   tree: BPlusTree,
   path: string[],
-  oldKey: SqlValue,
-  newKey: SqlValue,
+  oldKey: IndexKey,
+  newKey: IndexKey,
   steps: DeleteStep[],
 ): void {
   for (let i = 0; i < path.length - 1; i++) {
@@ -356,7 +474,7 @@ function updateSeparators(
       steps.push({
         kind: 'update-separator',
         node: parent.id,
-        detail: `${String(oldKey)} → ${String(newKey)}`,
+        detail: `${describeKey(oldKey)} → ${describeKey(newKey)}`,
       });
     }
   }
@@ -491,7 +609,7 @@ export function leafChain(tree: BPlusTree): string[] {
   return ids;
 }
 
-export function allKeys(tree: BPlusTree): SqlValue[] {
+export function allKeys(tree: BPlusTree): IndexKey[] {
   return leafChain(tree).flatMap((id) => (node(tree, id) as LeafNode).keys);
 }
 

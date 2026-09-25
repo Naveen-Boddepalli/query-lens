@@ -324,9 +324,13 @@ function estimateNode(
         basis += ` + recheck ${residual.basis}`;
       }
       const levels = estimateIndexLevels(rowCount);
+      // A repeated value is one entry per row: the lookup may read a few more leaves along the run, and each match
+      // costs its own heap page. For a unique value that is zero extra leaves and one page — the +1 it always was.
+      const matches = Math.max(clampRows(rowCount / distinct), 1);
+      const extraLeaves = Math.max(0, Math.ceil(matches / FANOUT) - 1);
       estimate = {
         estRows: Math.max(clampRows(rowCount * fraction), plan.residual ? 0 : 1),
-        estPages: levels + 1,
+        estPages: levels + extraLeaves + matches,
         basis,
       };
       break;
@@ -364,13 +368,14 @@ function estimateNode(
       break;
     }
     case 'IndexOnlyScan': {
-      // Same unique-column assumption as IndexScan (v0 indexes are unique),
-      // but the page cost is the honest difference: the tree levels alone,
-      // no +1 for a heap page this scan never fetches.
+      // The tree levels alone — no heap page, the honest difference from IndexScan — plus any further leaves a
+      // repeated value's run spans.
       const distinct = ndistinct(table.rows, plan.column);
+      const matches = Math.max(clampRows(rowCount / distinct), 1);
+      const extraLeaves = Math.max(0, Math.ceil(matches / FANOUT) - 1);
       estimate = {
-        estRows: 1,
-        estPages: estimateIndexLevels(rowCount),
+        estRows: matches,
+        estPages: estimateIndexLevels(rowCount) + extraLeaves,
         basis: `1/${String(distinct)} on ${plan.column} — index-only, no heap page`,
       };
       break;

@@ -20,8 +20,9 @@ import type { Row, SqlValue } from '../types.ts';
 import type { Expr, UpdateAssignment } from '../parser/index.ts';
 import type { Plan } from '../planner/index.ts';
 import type { ExecContext } from './operators.ts';
+import { fetchHeapPage, rowAt } from './operators.ts';
 import { evaluateValue, passes } from './evaluate.ts';
-import { deleteKey, emitIndexLookup, height, insert } from '../index/index.ts';
+import { deleteKey, emitIndexLookup, entryKey, height, insert } from '../index/index.ts';
 import type { RowPointer } from '../index/index.ts';
 import { summarizeSteps } from './delete.ts';
 import { summarizeInsert } from './insert.ts';
@@ -70,7 +71,7 @@ function reindexRow(ctx: ExecContext, before: Row, after: Row, pointer: RowPoint
     const parts: string[] = [];
 
     if (beforeKey !== null) {
-      const removed = deleteKey(tree, beforeKey);
+      const removed = deleteKey(tree, entryKey([beforeKey], pointer));
       if (removed.found) {
         parts.push(`drops key ${JSON.stringify(beforeKey)} — ${summarizeSteps(removed.steps)}`);
       }
@@ -79,7 +80,7 @@ function reindexRow(ctx: ExecContext, before: Row, after: Row, pointer: RowPoint
     if (afterKey !== null) {
       const nodesBefore = Object.keys(tree.nodes).length;
       const heightBefore = height(tree);
-      insert(tree, afterKey, pointer);
+      insert(tree, entryKey([afterKey], pointer), pointer);
       const nodesAfter = Object.keys(tree.nodes).length;
       const heightAfter = height(tree);
       parts.push(
@@ -129,42 +130,47 @@ function scanForMatches(ctx: ExecContext, filter: Expr | undefined): Match[] {
   return matched;
 }
 
-/** Finds the one row an equality lookup points at, if it passes any residual predicate. */
+/** Finds every row an equality lookup points at that passes any residual predicate — one, or one per index entry. */
 function indexScanForMatch(ctx: ExecContext, plan: Extract<Plan, { op: 'IndexScan' }>): Match[] {
   const emit = ctx.emit;
   const tree = ctx.trees[plan.column];
   if (!tree) return [];
 
-  const { pointer } = emitIndexLookup(emit, tree, plan.key, ctx.pool, plan.column, ctx.locks);
-  if (!pointer) return [];
+  const { pointers } = emitIndexLookup(emit, tree, plan.key, ctx.pool, plan.column, ctx.locks);
+  const matched: Match[] = [];
 
-  const page = ctx.heap.pages.find((p) => p.pageId === pointer.pageId);
-  const row = page?.rows[pointer.slot];
-  if (!row) return [];
+  pointers.forEach((pointer, at) => {
+    // The lookup already fetched the first match's page; the rest are read now, as their rows are examined.
+    if (at > 0) fetchHeapPage(ctx, pointer);
+    const row = rowAt(ctx, pointer);
+    if (!row) return;
 
-  if (!passes(plan.residual, row)) {
-    emit('The row the index found fails the rest of the predicate, so UPDATE leaves it alone.', {
-      stage: 'execute',
-      op: 'IndexScan',
-      rowsProduced: 0,
-    });
-    return [];
-  }
+    if (!passes(plan.residual, row)) {
+      emit('The row the index found fails the rest of the predicate, so UPDATE leaves it alone.', {
+        stage: 'execute',
+        op: 'IndexScan',
+        rowsProduced: matched.length,
+      });
+      return;
+    }
 
-  ctx.locks.acquire(
-    pointer.pageId,
-    'exclusive',
-    `Upgrade to an exclusive lock on heap page ${String(pointer.pageId)} — UPDATE is about to modify the row it holds.`,
-  );
-  ctx.pool.markDirty(pointer.pageId);
-  emit('IndexScan finds the one row UPDATE will modify.', {
-    stage: 'execute',
-    op: 'IndexScan',
-    rowsProduced: 1,
+    ctx.locks.acquire(
+      pointer.pageId,
+      'exclusive',
+      `Upgrade to an exclusive lock on heap page ${String(pointer.pageId)} — UPDATE is about to modify the row it holds.`,
+    );
+    ctx.pool.markDirty(pointer.pageId);
+    matched.push({ row, pointer });
+    emit(
+      pointers.length === 1
+        ? 'IndexScan finds the one row UPDATE will modify.'
+        : `IndexScan finds a row UPDATE will modify — ${String(matched.length)} so far, of ${String(pointers.length)} entries for this value.`,
+      { stage: 'execute', op: 'IndexScan', rowsProduced: matched.length },
+    );
+    ctx.locks.release(pointer.pageId, 'exclusive');
   });
-  ctx.locks.release(pointer.pageId, 'exclusive');
 
-  return [{ row, pointer }];
+  return matched;
 }
 
 export function executeUpdate(plan: Plan, assignments: UpdateAssignment[], ctx: ExecContext): UpdateOutcome {

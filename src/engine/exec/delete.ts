@@ -18,13 +18,19 @@ import type { Row, SqlValue } from '../types.ts';
 import type { Expr } from '../parser/index.ts';
 import type { Plan } from '../planner/index.ts';
 import type { ExecContext } from './operators.ts';
+import { fetchHeapPage, rowAt } from './operators.ts';
 import { passes } from './evaluate.ts';
-import { deleteKey, emitIndexLookup } from '../index/index.ts';
-import type { DeleteStep } from '../index/index.ts';
+import { deleteKey, emitIndexLookup, entryKey } from '../index/index.ts';
+import type { DeleteStep, RowPointer } from '../index/index.ts';
 
 export interface DeleteOutcome {
   /** The rows removed — value-identical to their entry in `table.rows`. */
   deleted: Row[];
+}
+
+interface Match {
+  row: Row;
+  pointer: RowPointer;
 }
 
 /**
@@ -38,8 +44,12 @@ export function summarizeSteps(steps: DeleteStep[]): string {
   return `the tree also had to ${rest.map((s) => s.kind.replace('-', ' ')).join(', then ')}`;
 }
 
-/** Removes `row`'s key from every index the table declares, skipping a column whose key is NULL. */
-function deleteFromIndex(ctx: ExecContext, row: Row): string[] {
+/**
+ * Removes the entry for the row at `pointer` from every index the table declares, skipping a column whose key is
+ * NULL. An entry is the value *and* the row's address, so this drops exactly this row's entry even when other rows
+ * share its value.
+ */
+function deleteFromIndex(ctx: ExecContext, row: Row, pointer: RowPointer): string[] {
   const details: string[] = [];
   for (const column of ctx.table.indexedColumns ?? []) {
     const tree = ctx.trees[column];
@@ -47,7 +57,7 @@ function deleteFromIndex(ctx: ExecContext, row: Row): string[] {
     const key: SqlValue = row[column] ?? null;
     if (key === null) continue; // NULLs were never indexed — nothing to remove
 
-    const result = deleteKey(tree, key);
+    const result = deleteKey(tree, entryKey([key], pointer));
     if (!result.found) continue; // defensive: every row here came from the heap this tree indexes
     details.push(
       `The \`${column}\` B+Tree drops key ${JSON.stringify(key)} from leaf ${
@@ -59,8 +69,8 @@ function deleteFromIndex(ctx: ExecContext, row: Row): string[] {
 }
 
 /** Every heap page, filtered by `filter` if present — the SeqScan half of a delete. */
-function scanForMatches(ctx: ExecContext, filter: Expr | undefined): Row[] {
-  const matched: Row[] = [];
+function scanForMatches(ctx: ExecContext, filter: Expr | undefined): Match[] {
+  const matched: Match[] = [];
   let produced = 0;
 
   for (const page of ctx.heap.pages) {
@@ -73,9 +83,9 @@ function scanForMatches(ctx: ExecContext, filter: Expr | undefined): Row[] {
     if (fetched) ctx.pool.unpin(fetched.frameId);
 
     let touchedPage = false;
-    for (const row of page.rows) {
-      if (!passes(filter, row)) continue;
-      matched.push(row);
+    page.rows.forEach((row, slot) => {
+      if (!passes(filter, row)) return;
+      matched.push({ row, pointer: { pageId: page.pageId, slot } });
       touchedPage = true;
       produced += 1;
       ctx.emit(`SeqScan finds a matching row on page ${page.pageId} — DELETE will remove it.`, {
@@ -83,7 +93,7 @@ function scanForMatches(ctx: ExecContext, filter: Expr | undefined): Row[] {
         op: 'SeqScan',
         rowsProduced: produced,
       });
-    }
+    });
     if (touchedPage) ctx.pool.markDirty(page.pageId);
 
     ctx.locks.release(page.pageId, 'exclusive');
@@ -92,42 +102,47 @@ function scanForMatches(ctx: ExecContext, filter: Expr | undefined): Row[] {
   return matched;
 }
 
-/** Finds the one row an equality lookup points at, if it passes any residual predicate. */
-function indexScanForMatch(ctx: ExecContext, plan: Extract<Plan, { op: 'IndexScan' }>): Row[] {
+/** Finds every row an equality lookup points at that passes any residual predicate — one, or one per index entry. */
+function indexScanForMatch(ctx: ExecContext, plan: Extract<Plan, { op: 'IndexScan' }>): Match[] {
   const emit = ctx.emit;
   const tree = ctx.trees[plan.column];
   if (!tree) return [];
 
-  const { pointer } = emitIndexLookup(emit, tree, plan.key, ctx.pool, plan.column, ctx.locks);
-  if (!pointer) return [];
+  const { pointers } = emitIndexLookup(emit, tree, plan.key, ctx.pool, plan.column, ctx.locks);
+  const matched: Match[] = [];
 
-  const page = ctx.heap.pages.find((p) => p.pageId === pointer.pageId);
-  const row = page?.rows[pointer.slot];
-  if (!row) return [];
+  pointers.forEach((pointer, at) => {
+    // The lookup already fetched the first match's page; the rest are read now, as their rows are examined.
+    if (at > 0) fetchHeapPage(ctx, pointer);
+    const row = rowAt(ctx, pointer);
+    if (!row) return;
 
-  if (!passes(plan.residual, row)) {
-    emit('The row the index found fails the rest of the predicate, so DELETE leaves it alone.', {
-      stage: 'execute',
-      op: 'IndexScan',
-      rowsProduced: 0,
-    });
-    return [];
-  }
+    if (!passes(plan.residual, row)) {
+      emit('The row the index found fails the rest of the predicate, so DELETE leaves it alone.', {
+        stage: 'execute',
+        op: 'IndexScan',
+        rowsProduced: matched.length,
+      });
+      return;
+    }
 
-  ctx.locks.acquire(
-    pointer.pageId,
-    'exclusive',
-    `Upgrade to an exclusive lock on heap page ${String(pointer.pageId)} — DELETE is about to remove the row it holds.`,
-  );
-  ctx.pool.markDirty(pointer.pageId);
-  emit('IndexScan finds the one row DELETE will remove.', {
-    stage: 'execute',
-    op: 'IndexScan',
-    rowsProduced: 1,
+    ctx.locks.acquire(
+      pointer.pageId,
+      'exclusive',
+      `Upgrade to an exclusive lock on heap page ${String(pointer.pageId)} — DELETE is about to remove the row it holds.`,
+    );
+    ctx.pool.markDirty(pointer.pageId);
+    matched.push({ row, pointer });
+    emit(
+      pointers.length === 1
+        ? 'IndexScan finds the one row DELETE will remove.'
+        : `IndexScan finds a row DELETE will remove — ${String(matched.length)} so far, of ${String(pointers.length)} entries for this value.`,
+      { stage: 'execute', op: 'IndexScan', rowsProduced: matched.length },
+    );
+    ctx.locks.release(pointer.pageId, 'exclusive');
   });
-  ctx.locks.release(pointer.pageId, 'exclusive');
 
-  return [row];
+  return matched;
 }
 
 export function executeDelete(plan: Plan, ctx: ExecContext): DeleteOutcome {
@@ -137,8 +152,8 @@ export function executeDelete(plan: Plan, ctx: ExecContext): DeleteOutcome {
       : scanForMatches(ctx, plan.op === 'SeqScan' ? plan.filter : undefined);
 
   let produced = 0;
-  for (const row of matched) {
-    const indexDetails = deleteFromIndex(ctx, row);
+  for (const { row, pointer } of matched) {
+    const indexDetails = deleteFromIndex(ctx, row, pointer);
     produced += 1;
     ctx.emit(
       `Delete removes row ${JSON.stringify(row)}.${indexDetails.length > 0 ? ` ${indexDetails.join(' ')}` : ''}`,
@@ -146,5 +161,5 @@ export function executeDelete(plan: Plan, ctx: ExecContext): DeleteOutcome {
     );
   }
 
-  return { deleted: matched };
+  return { deleted: matched.map((m) => m.row) };
 }

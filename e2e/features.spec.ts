@@ -648,6 +648,33 @@ test('INSERT adds a row for real — the Playground persists it across the next 
   await expect(page.getByText('zeta@example.com')).toBeVisible();
 });
 
+test('an index on a column that repeats returns every matching row, one entry each (plan.md §25.4 B3)', async ({ page }) => {
+  // Predictions off, so stepping is not gated on answering one.
+  await page.goto('/playground?x=0');
+  // The starter database's `posts` is indexed on `authorId`, which repeats: four authors, ten posts.
+  await page.getByRole('button', { name: 'Custom', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Manage tables (2)' })).toBeVisible();
+
+  const editor = page.locator('.cm-content');
+  await editor.click();
+  await page.keyboard.press('ControlOrMeta+A');
+  await page.keyboard.type('SELECT * FROM posts WHERE authorId = 1;');
+  await page.getByRole('button', { name: /^Run/ }).click();
+  await page.getByLabel('Scrub to step').press('End');
+
+  // All three of author 1's posts — not the one an overwriting unique index would have kept.
+  await expect(page.getByText(/3 rows returned/)).toBeVisible();
+
+  // The lookup says why: three entries for one value, and an IndexScan that returns them one by one.
+  await page.getByLabel('Scrub to step').press('Home');
+  let sawRepeat = false;
+  for (let i = 0; i < 60 && !sawRepeat; i++) {
+    await page.getByRole('button', { name: 'Step forward' }).click();
+    sawRepeat = (await page.getByText(/2 more entries for the same value follow it/).count()) > 0;
+  }
+  expect(sawRepeat).toBe(true);
+});
+
 test('UPDATE changes a row for real, rekeying the index when the indexed column changes', async ({
   page,
 }) => {

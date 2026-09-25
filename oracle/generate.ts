@@ -40,7 +40,11 @@ const quarter = fc.integer({ min: -8, max: 16 }).map((x) => x / 4);
 
 const columnArray = <T>(arb: fc.Arbitrary<T>, n: number) => fc.array(arb, { minLength: n, maxLength: n });
 
-/** `t(id, k, n, s, r)` — `id` and `k` are unique (so they may be indexed), `k` is sometimes NULL. */
+/**
+ * `t(id, k, n, s, r)` — `id` and `k` start out unique and `k` is sometimes NULL; `n`, `s` and `r` repeat freely.
+ * Any of them may be indexed: an index over a column that repeats (plan.md §25.4 B3) is a case the oracle checks
+ * like any other, since SQLite answers the same lookups from an index of its own.
+ */
 export const tableT: fc.Arbitrary<TableSpec> = fc.integer({ min: 0, max: 24 }).chain((count) =>
   fc
     .record({
@@ -50,7 +54,16 @@ export const tableT: fc.Arbitrary<TableSpec> = fc.integer({ min: 0, max: 24 }).c
       ns: columnArray(nullable(fc.integer({ min: -5, max: 9 })), count),
       ss: columnArray(nullable(fc.constantFrom(...TEXT_POOL)), count),
       rs: columnArray(nullable(quarter), count),
-      indexed: fc.oneof(fc.subarray(['id', 'k']), fc.constant(['id']), fc.constant(['id', 'k'])).map((cols) => [...cols]),
+      indexed: fc
+        .oneof(
+          { weight: 2, arbitrary: fc.subarray(['id', 'k']) },
+          { weight: 1, arbitrary: fc.constant(['id']) },
+          { weight: 1, arbitrary: fc.constant(['id', 'k']) },
+          // A column that repeats: `n` (small ints, some NULL), `s` (a text pool), `r` (quarter-steps).
+          { weight: 4, arbitrary: fc.subarray(['id', 'k', 'n', 's', 'r'], { minLength: 1 }) },
+          { weight: 2, arbitrary: fc.constantFrom(['n'], ['s'], ['r'], ['n', 's']) },
+        )
+        .map((cols) => [...cols]),
     })
     .map(({ ids, ks, kNull, ns, ss, rs, indexed }): TableSpec => ({
       name: 't',
@@ -80,7 +93,8 @@ export const tableU = (t: TableSpec): fc.Arbitrary<TableSpec> => {
         tIds: columnArray(nullable(tId, 8), count),
         vs: columnArray(nullable(fc.constantFrom(...TEXT_POOL)), count),
         ws: columnArray(nullable(quarter), count),
-        indexed: fc.subarray(['id']),
+        // `t_id` is the foreign-key shape: it repeats, and is the column a join would want an index on.
+        indexed: fc.subarray(['id', 't_id', 'v']),
       })
       .map(({ ids, tIds, vs, ws, indexed }): TableSpec => ({
         name: 'u',
@@ -299,7 +313,14 @@ const uniqueRefs = (refs: readonly Ref[], min: number, max: number) =>
 function lookupArb(t: TableSpec, pool: Pool): fc.Arbitrary<Query> {
   const refs = refsOf(t, false);
   const ref = (name: string) => refs.find((r) => r.name === name)!;
-  const key = fc.constantFrom(ref('id'), ref('k'));
+  // The columns the table is actually indexed on — including ones that repeat (plan.md §25.4 B3) — else `id`/`k`.
+  const indexed = (t.indexed.length > 0 ? t.indexed : ['id', 'k']).map(ref);
+  const repeating = indexed.filter((r) => r.name !== 'id' && r.name !== 'k');
+  // A column that repeats is where an equality returns several rows, so lean toward it when the table has one indexed.
+  const key =
+    repeating.length > 0
+      ? fc.oneof({ weight: 3, arbitrary: fc.constantFrom(...repeating) }, { weight: 1, arbitrary: fc.constantFrom(...indexed) })
+      : fc.constantFrom(...indexed);
   const projection = fc.oneof(
     { weight: 5, arbitrary: key.map((k): Ref[] => [k]) },
     { weight: 2, arbitrary: fc.constant<Ref[] | '*'>('*') },
@@ -374,7 +395,7 @@ export function selectArb(t: TableSpec, pool: Pool): fc.Arbitrary<Query> {
       ...page,
       };
     });
-  return fc.oneof({ weight: 3, arbitrary: general }, { weight: 2, arbitrary: lookupArb(t, pool) });
+  return fc.oneof({ weight: 3, arbitrary: general }, { weight: 3, arbitrary: lookupArb(t, pool) });
 }
 
 export function aggregateArb(t: TableSpec, pool: Pool): fc.Arbitrary<Query> {
@@ -505,13 +526,28 @@ export function insertArb(t: TableSpec): fc.Arbitrary<WriteQuery> {
     });
 }
 
+/**
+ * A `WHERE` for a write: mostly any predicate, but often an equality on an *indexed* column, so the write finds its
+ * rows through the index — several of them when the column repeats — and has to maintain that index as it goes.
+ */
+function writeWhereArb(t: TableSpec, refs: readonly Ref[], pool: Pool): fc.Arbitrary<Pred[]> {
+  const general = whereArb(refs, pool, 2);
+  if (t.indexed.length === 0) return general;
+  const viaIndex = fc
+    .constantFrom(...t.indexed.map((name) => refs.find((r) => r.name === name)!))
+    .chain((ref) => literalFor(ref, pool).map((lit): Pred => ({ k: 'cmp', ref, op: '=', lit })))
+    .chain((eq) => fc.oneof(fc.constant<Pred[]>([eq]), whereArb(refs, pool, 1).map((rest): Pred[] => [eq, ...rest])));
+  return fc.oneof({ weight: 3, arbitrary: general }, { weight: 2, arbitrary: viaIndex });
+}
+
 export function updateArb(t: TableSpec, pool: Pool): fc.Arbitrary<WriteQuery> {
   const refs = refsOf(t, false);
-  const settable = t.columns.filter((c) => c.name === 'n' || c.name === 's' || c.name === 'r');
+  // Any column but the join key's partner: SET on an *indexed* column moves that row's index entry, which is the point.
+  const settable = t.columns.filter((c) => ['id', 'k', 'n', 's', 'r'].includes(c.name));
   return fc
     .record({
       set: fc.uniqueArray(fc.constantFrom(...settable), { minLength: 1, maxLength: 2, selector: (c) => c.name }),
-      where: whereArb(refs, pool, 2),
+      where: writeWhereArb(t, refs, pool),
     })
     .chain(({ set, where }) =>
       // Each assignment is a literal, or — a third of the time — arithmetic over the row's own columns
@@ -539,7 +575,7 @@ export function updateArb(t: TableSpec, pool: Pool): fc.Arbitrary<WriteQuery> {
 }
 
 export function deleteArb(t: TableSpec, pool: Pool): fc.Arbitrary<WriteQuery> {
-  return whereArb(refsOf(t, false), pool, 2).map((where): WriteQuery => ({ kind: 'delete', table: t.name, where }));
+  return writeWhereArb(t, refsOf(t, false), pool).map((where): WriteQuery => ({ kind: 'delete', table: t.name, where }));
 }
 
 /* -------------------------------------------------------------------------- */

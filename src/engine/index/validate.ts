@@ -6,9 +6,8 @@
  * Returns a list of violations — empty means the tree is sound.
  */
 
-import type { SqlValue } from '../types.ts';
 import { compareKeys, leafChain, node } from './btree.ts';
-import type { BPlusTree, LeafNode } from './btree.ts';
+import type { BPlusTree, IndexKey, LeafNode } from './btree.ts';
 
 export function validate(tree: BPlusTree): string[] {
   const problems: string[] = [];
@@ -19,7 +18,7 @@ export function validate(tree: BPlusTree): string[] {
   const depths: number[] = [];
   const visited = new Set<string>();
 
-  function walk(id: string, depth: number, low: SqlValue | null, high: SqlValue | null): void {
+  function walk(id: string, depth: number, low: IndexKey | null, high: IndexKey | null): void {
     if (visited.has(id)) {
       problems.push(`node ${id} is reachable by more than one path`);
       return;
@@ -123,7 +122,7 @@ export function validate(tree: BPlusTree): string[] {
     if (n.kind !== 'internal') continue;
     for (const key of n.keys) {
       if (!leafKeySet.has(JSON.stringify(key))) {
-        problems.push(`separator ${String(key)} in ${id} is not present in any leaf`);
+        problems.push(`separator ${JSON.stringify(key)} in ${id} is not present in any leaf`);
       }
     }
   }

@@ -1,6 +1,6 @@
 import type { Heap } from '../storage/index.ts';
 import type { SqlValue } from '../types.ts';
-import { createTree, insert } from './btree.ts';
+import { createTree, entryKey, insert } from './btree.ts';
 import type { BPlusTree } from './btree.ts';
 import { DEFAULT_MAX_KEYS } from './btree.ts';
 
@@ -22,14 +22,17 @@ export function buildIndex(
   maxKeys = DEFAULT_MAX_KEYS,
   firstPageId = heap.pages.length,
 ): BPlusTree {
-  const tree = createTree(maxKeys, firstPageId);
+  // Entry keys (value + row address), so the column may repeat: two rows with the same value are two
+  // distinct entries, adjacent in the leaves, and neither overwrites the other.
+  const tree = createTree(maxKeys, firstPageId, true);
 
   heap.pages.forEach((page) => {
     page.rows.forEach((row, slot) => {
       const key: SqlValue = row[column] ?? null;
       // NULLs are not indexed — a lookup for one must fall back to a scan.
       if (key === null) return;
-      insert(tree, key, { pageId: page.pageId, slot });
+      const pointer = { pageId: page.pageId, slot };
+      insert(tree, entryKey([key], pointer), pointer);
     });
   });
 

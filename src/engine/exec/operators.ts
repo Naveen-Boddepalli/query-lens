@@ -14,7 +14,7 @@ import type { Expr } from '../parser/index.ts';
 import type { AggregateSpec, Plan, ProjectList } from '../planner/index.ts';
 import type { BufferPool, Heap } from '../storage/index.ts';
 import type { LockManager } from '../locks/index.ts';
-import type { BPlusTree } from '../index/index.ts';
+import type { BPlusTree, RowPointer } from '../index/index.ts';
 import { emitIndexLookup, emitRangeStart, nextInRange, pageCountFor } from '../index/index.ts';
 import { compare, equalityKeyOf, evaluateValue, passes } from './evaluate.ts';
 import { externalMergeSort, sortTempPageCount } from './sort.ts';
@@ -138,9 +138,36 @@ function seqScan(plan: Extract<Plan, { op: 'SeqScan' }>, ctx: ExecContext): Oper
   };
 }
 
+/**
+ * Follows one index entry to its row's heap page: a shared lock, a pool fetch, a release — the real price of an
+ * index scan, paid once per match. Exported for the write paths, which read every page they may modify.
+ */
+export function fetchHeapPage(ctx: ExecContext, pointer: RowPointer): void {
+  ctx.locks.acquire(
+    pointer.pageId,
+    'shared',
+    `Lock heap page ${String(pointer.pageId)}, where the matching row lives.`,
+  );
+  const fetched = ctx.pool.fetch(pointer.pageId);
+  if (fetched) ctx.pool.unpin(fetched.frameId);
+  ctx.locks.release(pointer.pageId, 'shared');
+}
+
+/** The row an index entry points at, read out of the heap this query runs over. */
+export function rowAt(ctx: ExecContext, pointer: RowPointer): Row | null {
+  const page = ctx.heap.pages.find((p) => p.pageId === pointer.pageId);
+  return page?.rows[pointer.slot] ?? null;
+}
+
+/**
+ * An equality lookup. The index may hold several entries for the value (a
+ * non-unique column, plan.md §25.4 B3), so this pulls one row per entry: the
+ * lookup itself fetched the first match's heap page, and each later one is
+ * fetched here as its row is asked for.
+ */
 function indexScan(plan: Extract<Plan, { op: 'IndexScan' }>, ctx: ExecContext): Operator {
-  let row: Row | null = null;
-  let done = false;
+  let pointers: RowPointer[] = [];
+  let cursor = 0;
   const produced = counter(ctx, 'IndexScan');
 
   return {
@@ -148,36 +175,38 @@ function indexScan(plan: Extract<Plan, { op: 'IndexScan' }>, ctx: ExecContext): 
     open() {
       const tree = ctx.trees[plan.column];
       if (!tree) return;
-      const { pointer } = emitIndexLookup(
-        ctx.emit,
-        tree,
-        plan.key,
-        ctx.pool,
-        plan.column,
-        ctx.locks,
-      );
-      if (!pointer) return;
-
-      const page = ctx.heap.pages.find((p) => p.pageId === pointer.pageId);
-      row = page?.rows[pointer.slot] ?? null;
+      pointers = emitIndexLookup(ctx.emit, tree, plan.key, ctx.pool, plan.column, ctx.locks).pointers;
     },
     next() {
-      if (done || !row) return null;
-      done = true;
+      for (;;) {
+        const at = cursor;
+        cursor += 1;
+        const pointer = pointers[at];
+        if (!pointer) return null;
+        if (at > 0) fetchHeapPage(ctx, pointer);
 
-      if (!passes(plan.residual, row)) {
-        ctx.emit(
-          'The row the index found fails the rest of the predicate, so it is discarded. The index narrowed the search; it did not verify the whole condition.',
-          { stage: 'execute', op: 'IndexScan', rowsProduced: 0 },
+        const row = rowAt(ctx, pointer);
+        if (!row) continue;
+
+        if (!passes(plan.residual, row)) {
+          ctx.emit(
+            'The row the index found fails the rest of the predicate, so it is discarded. The index narrowed the search; it did not verify the whole condition.',
+            { stage: 'execute', op: 'IndexScan', rowsProduced: 0 },
+          );
+          continue;
+        }
+
+        produced(
+          pointers.length === 1
+            ? 'IndexScan returns the single row the lookup pointed at.'
+            : `IndexScan returns entry ${String(at + 1)} of the ${String(pointers.length)} the lookup found.`,
         );
-        return null;
+        return row;
       }
-
-      produced('IndexScan returns the single row the lookup pointed at.');
-      return row;
     },
     close() {
-      row = null;
+      pointers = [];
+      cursor = 0;
     },
   };
 }
@@ -187,11 +216,11 @@ function indexScan(plan: Extract<Plan, { op: 'IndexScan' }>, ctx: ExecContext): 
  * doesn't already hold — `column`'s own value, which is the key it was
  * found by. `emitIndexLookup`'s `touchHeap: false` skips the heap fetch and
  * lock entirely, so the row this returns is built from the key alone, never
- * from a page read (plan.md §22.2).
+ * from a page read (plan.md §22.2). One row per entry the index holds for the value.
  */
 function indexOnlyScan(plan: Extract<Plan, { op: 'IndexOnlyScan' }>, ctx: ExecContext): Operator {
-  let found = false;
-  let done = false;
+  let matches = 0;
+  let cursor = 0;
   const produced = counter(ctx, 'IndexOnlyScan');
 
   return {
@@ -199,25 +228,17 @@ function indexOnlyScan(plan: Extract<Plan, { op: 'IndexOnlyScan' }>, ctx: ExecCo
     open() {
       const tree = ctx.trees[plan.column];
       if (!tree) return;
-      const { pointer } = emitIndexLookup(
-        ctx.emit,
-        tree,
-        plan.key,
-        ctx.pool,
-        plan.column,
-        ctx.locks,
-        false,
-      );
-      found = pointer !== null;
+      matches = emitIndexLookup(ctx.emit, tree, plan.key, ctx.pool, plan.column, ctx.locks, false).pointers.length;
     },
     next() {
-      if (done || !found) return null;
-      done = true;
+      if (cursor >= matches) return null;
+      cursor += 1;
       produced('IndexOnlyScan returns the key itself — the heap is never touched.');
       return { [plan.column]: plan.key };
     },
     close() {
-      found = false;
+      matches = 0;
+      cursor = 0;
     },
   };
 }
@@ -255,7 +276,7 @@ function indexRangeScan(plan: Extract<Plan, { op: 'IndexRangeScan' }>, ctx: Exec
 
       for (;;) {
         if (leafId === null) return null;
-        const found = nextInRange(ctx.emit, tree, leafId, cursorIndex, plan.high);
+        const found = nextInRange(ctx.emit, tree, leafId, cursorIndex, plan.high, { pool: ctx.pool, locks: ctx.locks });
         if (!found) {
           leafId = null;
           return null;
@@ -263,17 +284,8 @@ function indexRangeScan(plan: Extract<Plan, { op: 'IndexRangeScan' }>, ctx: Exec
         leafId = found.leafId;
         cursorIndex = found.nextIndex;
 
-        ctx.locks.acquire(
-          found.pointer.pageId,
-          'shared',
-          `Lock heap page ${String(found.pointer.pageId)}, where the matching row lives.`,
-        );
-        const fetched = ctx.pool.fetch(found.pointer.pageId);
-        if (fetched) ctx.pool.unpin(fetched.frameId);
-        ctx.locks.release(found.pointer.pageId, 'shared');
-
-        const page = ctx.heap.pages.find((p) => p.pageId === found.pointer.pageId);
-        const row = page?.rows[found.pointer.slot];
+        fetchHeapPage(ctx, found.pointer);
+        const row = rowAt(ctx, found.pointer);
         if (!row) continue;
 
         if (!passes(plan.residual, row)) continue;

@@ -21,9 +21,9 @@ concept explanation.
 
 ## B+Tree index
 
-- **Up to two indexed columns per table**, each its own independent single-column B+Tree — not a
-  composite (multi-column) key over several columns at once. When two candidates each match an
-  equality conjunct, the planner picks the more selective one by distinct-value count.
+- **Any number of indexed columns per table**, each its own independent single-column B+Tree — not a
+  composite (multi-column) key over several columns at once. When several candidates each match an
+  equality conjunct, the planner picks the most selective one by distinct-value count.
 - **Fan-out**: each node holds at most **4 keys** (5 children) before splitting; adjustable 3–6 in
   the [standalone sandbox](/tools/btree).
 - Supported operations: **insert**, **delete** (borrow/merge/root-collapse), **point lookup**, and
@@ -34,10 +34,12 @@ concept explanation.
   but the indexed column itself — an index-only lookup that never touches the heap at all. An
   equality always wins over a range when both are available, by rule order, not a cost comparison.
   A predicate on an unindexed column always runs as a sequential scan.
-- Each B+Tree assumes a **unique key** — inserting a duplicate overwrites the previous row's
-  pointer rather than storing both. `DELETE`/`UPDATE` re-run the real `deleteKey`/`insert`
-  algorithms against it; `UPDATE` re-indexes a row only when its own indexed column actually
-  changed.
+- **An indexed column may repeat.** An entry is the value plus the row's own address, so two rows
+  with the same value are two entries, side by side in the leaves; an equality returns every match
+  (walking the leaf chain for as long as the value holds) and costs one heap page per row. There is
+  no `UNIQUE` — nothing stops a duplicate — and **NULLs are never indexed**, so `x IS NULL` scans.
+  `DELETE`/`UPDATE` re-run the real `deleteKey`/`insert` algorithms against the one entry that
+  belongs to each row; `UPDATE` re-indexes a row only when its own indexed column actually changed.
 
 ## JOIN
 

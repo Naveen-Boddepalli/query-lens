@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Indexes on columns that repeat** (plan.md §25.4 B3, first slice) — an index entry is now the value plus the
+  row's own address, so two rows with the same `authorId` are two entries side by side in the leaves instead of
+  one silently overwriting the other. An equality finds every match: it descends toward the *first* entry (going
+  left of a separator that equals the value, because a run can straddle one), reads along the leaf, and hops to the
+  sibling leaf only when the leaf's high key says the value continues. Each match costs its own heap page, pulled
+  as the row is asked for — a `LIMIT` stops the walk early. `DELETE` and `UPDATE` drop and re-add exactly the
+  entry that belongs to each row. `posts.authorId` is indexed in the join demo, the case v1 could not handle.
 - **Bundle budgets by route** (plan.md §25.4 H8) — `pnpm budget` now prices **each of 30 routes, every page and every
   tool, by what a visitor to it downloads**: the entry chunk, that route's own lazy chunk and every static
   dependency of either, read from Vite's manifest. A change that grows the Playground can only raise the
@@ -131,6 +138,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Vitest also runs tests under `scripts/` and `oracle/`; `oracle/` joins `tsconfig.node.json`.
 
 ### Fixed
+- **A range scan now reads the leaves it walks.** Each hop along the sibling chain fetches that leaf through the
+  buffer pool, as the cost model already assumed — so an `EXPLAIN ANALYZE` estimate and its actual agree on how
+  many leaves a range touched.
 - **The FAQ still asked "Why no joins, subqueries, or `GROUP BY`?"** — a question the product stopped deserving
   several releases ago. It is now "What SQL is missing?", and lists what really is.
 - **The crash report's "Open an issue" and the footer's "Report an issue" opened a blank form.** Both used

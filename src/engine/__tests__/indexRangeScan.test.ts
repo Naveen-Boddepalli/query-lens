@@ -74,6 +74,18 @@ describe('IndexRangeScan — the leaf-chaining walk itself', () => {
     }
   });
 
+  it('reads each sibling leaf through the buffer pool — a hop is a page read, not free bookkeeping', () => {
+    const { events } = run('SELECT * FROM users WHERE id > 5');
+    const hops = events.filter((e) => e.stage === 'index' && e.action === 'chain-next').length;
+    // Locks on the index's own pages (numbered past the heap) are one per node visited: the descent, then one per hop.
+    const heapPages = createSeedDatabase().tables.users!.rows.length / 4;
+    const indexLocks = events.filter((e) => e.stage === 'lock' && e.action === 'acquire' && e.pageId >= heapPages).length;
+    const height = events.find((e) => e.stage === 'index' && e.action === 'open');
+    expect(height?.stage === 'index' && height.action === 'open' ? indexLocks : -1).toBe(
+      (height?.stage === 'index' && height.action === 'open' ? height.height : 0) + hops,
+    );
+  });
+
   it('a narrow range that fits in one leaf takes no chain-next hop at all', () => {
     const { events } = run('SELECT * FROM users WHERE id BETWEEN 1 AND 2');
     const hops = events.filter((e) => e.stage === 'index' && e.action === 'chain-next');

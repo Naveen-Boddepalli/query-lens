@@ -6,6 +6,8 @@
 
 import type { DatabaseSync } from 'node:sqlite';
 import { runQuery } from '../src/engine/runQuery.ts';
+import { leafChain, node, validate, valuesOf } from '../src/engine/index/index.ts';
+import type { BPlusTree, LeafNode } from '../src/engine/index/index.ts';
 import { DEFAULT_ENGINE_OPTIONS } from '../src/engine/types.ts';
 import type { Database, EngineOptions, RunResult, Row } from '../src/engine/types.ts';
 import { multisetDiff, sequenceDiff, subMultisetDiff } from './compare.ts';
@@ -25,6 +27,38 @@ export function toDatabase(tables: readonly TableSpec[], indexed = true): Databa
     };
   }
   return db;
+}
+
+/**
+ * After a write, is every index it maintained still a sound B+Tree holding exactly the values of the rows the
+ * table has now? Each statement rebuilds its indexes from the rows, so a tree that was maintained *wrongly* by
+ * `INSERT`/`UPDATE`/`DELETE` would otherwise never be noticed — it is thrown away before the next query reads it.
+ * (Counts and values, not addresses: the executors leave a deleted row's slot in place rather than compacting.)
+ */
+export function checkIndexes(trees: Record<string, BPlusTree>, rows: readonly Row[]): string | null {
+  for (const [column, tree] of Object.entries(trees)) {
+    const problems = validate(tree);
+    if (problems.length > 0) return `the index on ${column} is not a sound B+Tree after the write: ${problems[0]}`;
+
+    const held = new Map<string, number>();
+    for (const id of leafChain(tree)) {
+      for (const key of (node(tree, id) as LeafNode).keys) {
+        const value = JSON.stringify(valuesOf(key)[0]);
+        held.set(value, (held.get(value) ?? 0) + 1);
+      }
+    }
+    const want = new Map<string, number>();
+    for (const row of rows) {
+      const v = row[column] ?? null;
+      if (v !== null) want.set(JSON.stringify(v), (want.get(JSON.stringify(v)) ?? 0) + 1);
+    }
+    for (const value of new Set([...held.keys(), ...want.keys()])) {
+      if ((held.get(value) ?? 0) !== (want.get(value) ?? 0)) {
+        return `the index on ${column} holds ${String(held.get(value) ?? 0)} entries for ${value}, but the table has ${String(want.get(value) ?? 0)} such rows`;
+      }
+    }
+  }
+  return null;
 }
 
 /** QueryLens's result rows as positional tuples, in the query's SELECT-list order. */
@@ -112,13 +146,16 @@ export function runSession(tablesIn: readonly TableSpec[], steps: readonly Query
   try {
     for (const q of steps) {
       const sql = renderQuery(q);
-      const result = runQuery(sql, toDatabase(tables), options);
+      let left: Record<string, BPlusTree> = {};
+      const result = runQuery(sql, toDatabase(tables), options, { afterWrite: (trees) => { left = trees; } });
       if (result.error) throw new Disagreement(sql, `QueryLens rejected a statement SQLite accepts: ${result.error.message}`);
 
       if (isWrite(q)) {
         const table = tables.find((t) => t.name === q.table)!;
         const why = checkWrite(q, table, result, lite);
         if (why) throw new Disagreement(sql, why);
+        const broken = checkIndexes(left, result.write!.rows);
+        if (broken) throw new Disagreement(sql, broken);
         tables = applyWrite(tables, q, result);
       } else {
         const why = checkRead(q, tables, qlTuples(q, tables, result.rows), lite);

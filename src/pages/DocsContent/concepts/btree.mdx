@@ -57,12 +57,35 @@ collapses into its only child. The [B+Tree sandbox](/tools/btree) lets you inser
 against a live tree and watch exactly that, with a fan-out slider and the structural invariants
 re-checked after every edit.
 
+## When a value repeats
+
+An index on `authorId` has a problem the one on `id` never did: **the same value belongs to several
+rows**. A tree that stores each key once has nowhere to put the second `authorId = 1`. The fix databases
+use (InnoDB and PostgreSQL both) is to make the *row's own address* the tie-breaker: an index entry is
+`(value, page, slot)`, so two rows with `authorId = 1` are two different entries — `1 @ page 0, slot 2`
+and `1 @ page 1, slot 0` — sitting next to each other in the leaves. The tree itself never holds a
+duplicate, so splits, borrows and merges work exactly as before.
+
+What changes is the *lookup*. There is no single "the" entry for `authorId = 1`, so the search descends
+toward the **first** one — and when a value equals a separator on the way down, it goes *left* of it,
+because a run of equal values can straddle a separator and the first of them may be on the far side. Then it
+reads along the leaf for as long as the value holds, and hops to the sibling leaf only if the leaf's
+**high key** (its parent's separator — real engines store it on the page) says the value continues. A
+unique value is the same walk that happens to stop after one entry.
+
+Every entry the lookup finds is a heap page to fetch, so a value that repeats a hundred times costs
+about a hundred page reads however shallow the tree is. That is exactly why an index on a column with
+few distinct values is often *worse* than a scan. Try
+[`SELECT * FROM posts WHERE authorId = 1`](/tools/planner?q=SELECT%20*%20FROM%20posts%20WHERE%20authorId%20%3D%201)
+in the Planner sandbox — `posts` is indexed on `authorId`, which repeats (four authors, ten posts) — and read
+the row estimate the cost model gives the `IndexScan`.
+
 ## Where this simplifies
 
 QueryLens's tree has a small, fixed fan-out (enough to demonstrate a split without needing thousands
-of rows). It supports point lookups, inserts and deletes — the last only in the standalone
-[sandbox](/tools/btree), since the pipeline itself runs `SELECT` and never removes a row. A
-production index also handles key updates and — critically — concurrent modification, which is where the
+of rows). It supports point lookups, range scans, inserts, deletes and key updates through the
+pipeline, and repeated values as above. A
+production index also handles — critically — concurrent modification, which is where the
 [locking the app's Locks panel visualises](/) actually earns its keep in a real engine: two
 descents that briefly hold two levels of the tree at once ("latch crabbing") are how a B+Tree stays
 correct while more than one query touches it at the same time. QueryLens runs exactly one query, so

@@ -22,7 +22,7 @@ import { applyWrite } from './harness.ts';
 import { isWrite, renderQuery, walkPred } from './model.ts';
 import type { TableSpec } from './model.ts';
 
-const N = 1500;
+const N = 3000;
 /** Its own seed, not `ORACLE_SEED`: this test asks whether the *generators* still reach everything, which must not vary with the seed a long run happens to pick. */
 const COVERAGE_SEED = 20260925;
 
@@ -42,6 +42,11 @@ describe('the generators reach what the oracle is meant to check', () => {
     nullsSeen: 0,
     distincts: new Map<string, number>(),
     preds: new Map<string, number>(),
+    /** An equality answered from an index that returned two or more rows — only a non-unique index can. */
+    repeatedIndexReads: 0,
+    repeatedIndexWrites: 0,
+    /** An UPDATE that sets an indexed column, so the write moves an index entry. */
+    reindexingUpdates: 0,
   };
 
   for (const [{ tables: initial, steps }, options] of sessions) {
@@ -68,6 +73,11 @@ describe('the generators reach what the oracle is meant to check', () => {
       for (const e of result.events) {
         if (e.stage === 'optimize') stats.rules.set(e.rule, (stats.rules.get(e.rule) ?? 0) + 1);
       }
+      const repeated = result.events.some(
+        (e) => e.stage === 'execute' && (e.op === 'IndexScan' || e.op === 'IndexOnlyScan') && e.rowsProduced >= 2,
+      );
+      if (repeated) stats[isWrite(q) ? 'repeatedIndexWrites' : 'repeatedIndexReads'] += 1;
+      if (q.kind === 'update' && q.set.some((a) => tables[0].indexed.includes(a.col))) stats.reindexingUpdates += 1;
       if (isWrite(q)) {
         stats.writes += 1;
         if ((result.write?.kind === 'insert' && result.write.insertedCount > 0) ||
@@ -114,6 +124,12 @@ describe('the generators reach what the oracle is meant to check', () => {
   it('runs every join algorithm and both aggregate strategies to a non-empty result', () => {
     for (const algorithm of ['nested-loop', 'hash', 'sort-merge']) expect(stats.joins.get(algorithm) ?? 0, algorithm).toBeGreaterThan(20);
     for (const strategy of ['hash', 'sort']) expect(stats.aggregates.get(strategy) ?? 0, strategy).toBeGreaterThan(20);
+  });
+
+  it('indexes columns that repeat, looks them up, and writes through them (plan.md §25.4 B3)', () => {
+    expect(stats.repeatedIndexReads, 'equality lookups returning several rows from an index').toBeGreaterThan(10);
+    expect(stats.repeatedIndexWrites, 'UPDATE/DELETE finding several rows through an index').toBeGreaterThan(5);
+    expect(stats.reindexingUpdates, 'UPDATEs that move an index entry').toBeGreaterThan(30);
   });
 
   it('includes empty tables, NULLs, and writes that really change rows', () => {

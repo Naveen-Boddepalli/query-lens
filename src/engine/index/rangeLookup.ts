@@ -14,8 +14,18 @@ import type { Emit } from '../trace.ts';
 import type { SqlValue } from '../types.ts';
 import type { BufferPool } from '../storage/index.ts';
 import type { LockManager } from '../locks/index.ts';
-import { childIndexFor, compareKeys, descend, height, leftmostPath, lowerBound, node } from './btree.ts';
-import type { BPlusTree, LeafNode, RowPointer } from './btree.ts';
+import {
+  childIndexFor,
+  compareKeys,
+  descend,
+  height,
+  isEntry,
+  leftmostPath,
+  lowerBound,
+  node,
+  probe,
+} from './btree.ts';
+import type { BPlusTree, IndexKey, LeafNode, RowPointer } from './btree.ts';
 import { keyList, toIndexDisplay } from './display.ts';
 
 export interface RangeBoundValue {
@@ -31,7 +41,7 @@ export interface RangeStart {
 }
 
 export interface RangeMatch {
-  key: SqlValue;
+  key: IndexKey;
   pointer: RowPointer;
   /** Cursor position for the *next* call: the leaf the match came from, and the index right after it. */
   leafId: string;
@@ -42,8 +52,11 @@ function describe(key: SqlValue): string {
   return typeof key === 'string' ? `'${key}'` : String(key);
 }
 
-function withinHigh(key: SqlValue, high: RangeBoundValue | undefined): boolean {
+function withinHigh(key: IndexKey, high: RangeBoundValue | undefined): boolean {
   if (!high) return true;
+  // An entry carries its row address as well as its value, so it is never *equal* to a bare bound. Instead the bound
+  // becomes a probe: just after every entry with this value (an inclusive `<=`) or just before them all (`<`).
+  if (isEntry(key)) return compareKeys(key, probe([high.value], high.inclusive ? 'high' : 'low')) < 0;
   const c = compareKeys(key, high.value);
   return high.inclusive ? c <= 0 : c < 0;
 }
@@ -72,7 +85,13 @@ export function emitRangeStart(
     { stage: 'index', action: 'open', tree: toIndexDisplay(tree), nodeId: tree.rootId, height: h },
   );
 
-  const path = low ? descend(tree, low.value) : leftmostPath(tree);
+  // On a table's index an inclusive `>= v` starts at the first entry *for* v; an exclusive `> v` starts just past the last.
+  const target: IndexKey | undefined = low
+    ? tree.tiebreak
+      ? probe([low.value], low.inclusive ? 'low' : 'high')
+      : low.value
+    : undefined;
+  const path = target !== undefined ? descend(tree, target) : leftmostPath(tree);
   let parentPage: number | null = null;
 
   for (const nodeId of path) {
@@ -99,7 +118,7 @@ export function emitRangeStart(
     parentPage = n.pageId;
 
     if (n.kind === 'internal') {
-      const childIndex = low ? childIndexFor(n, low.value) : 0;
+      const childIndex = target !== undefined ? childIndexFor(n, target) : 0;
       emit(
         `Node ${nodeId} separates on ${keyList(n.keys)}. ${
           low
@@ -122,16 +141,23 @@ export function emitRangeStart(
 
   const leafId = path[path.length - 1]!;
   const leaf = node(tree, leafId) as LeafNode;
-  const at = low ? lowerBound(leaf.keys, low.value) : 0;
-  // `lowerBound` finds the first key >= low.value — exactly right for an
-  // inclusive `>=` bound. An exclusive `>` on a key that happens to be
-  // present has to skip one further, past the exact match.
+  const at = target !== undefined ? lowerBound(leaf.keys, target) : 0;
+  // `lowerBound` finds the first key >= the target — exactly right for an
+  // inclusive `>=` bound. In a sandbox tree an exclusive `>` on a key that
+  // happens to be present has to skip one further, past the exact match; a
+  // table's index already aimed at a probe just past the whole run.
   const startIndex =
-    low && !low.inclusive && at < leaf.keys.length && compareKeys(leaf.keys[at]!, low.value) === 0
+    low && !low.inclusive && !tree.tiebreak && at < leaf.keys.length && compareKeys(leaf.keys[at]!, low.value) === 0
       ? at + 1
       : at;
 
   return { leafId, startIndex };
+}
+
+/** What a leaf hop reads through: the buffer pool and lock manager. Omitted only by tests that walk a bare tree. */
+export interface ChainIO {
+  pool: BufferPool;
+  locks: LockManager;
 }
 
 /**
@@ -140,6 +166,11 @@ export function emitRangeStart(
  * chain ends or a key exceeds `high` — a sorted leaf chain means every key
  * past that point is out of range too, so the walk can stop rather than
  * checking the rest.
+ *
+ * Each hop *reads the sibling leaf through the buffer pool* (`io`): a leaf is a
+ * page, and a range that spans ten of them costs ten reads — the same figure
+ * the cost model prices (`extraLeaves`), so an `EXPLAIN ANALYZE` estimate and
+ * its actual agree on how many leaves the walk touched.
  */
 export function nextInRange(
   emit: Emit,
@@ -147,6 +178,7 @@ export function nextInRange(
   leafId: string,
   index: number,
   high: RangeBoundValue | undefined,
+  io?: ChainIO,
 ): RangeMatch | null {
   let currentLeafId: string | null = leafId;
   let currentIndex = index;
@@ -163,6 +195,13 @@ export function nextInRange(
         fromNodeId: currentLeafId,
         toNodeId: leaf.next,
       });
+      if (io) {
+        const sibling = node(tree, leaf.next);
+        io.locks.acquire(sibling.pageId, 'shared', `Lock the sibling leaf, page ${String(sibling.pageId)}, to read it.`);
+        const fetched = io.pool.fetch(sibling.pageId);
+        if (fetched) io.pool.unpin(fetched.frameId);
+        io.locks.release(sibling.pageId, 'shared');
+      }
       currentLeafId = leaf.next;
       currentIndex = 0;
       continue;

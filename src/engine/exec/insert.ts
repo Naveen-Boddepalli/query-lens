@@ -11,7 +11,7 @@
 
 import type { Row, SqlValue } from '../types.ts';
 import type { ExecContext } from './operators.ts';
-import { height, insert, pageCountFor } from '../index/index.ts';
+import { entryKey, height, insert, pageCountFor } from '../index/index.ts';
 import type { RowPointer } from '../index/index.ts';
 
 export interface InsertOutcome {
@@ -50,7 +50,7 @@ function insertIntoIndex(ctx: ExecContext, row: Row, pointer: RowPointer): void 
 
     const nodesBefore = Object.keys(tree.nodes).length;
     const heightBefore = height(tree);
-    insert(tree, key, pointer);
+    insert(tree, entryKey([key], pointer), pointer);
     const nodesAfter = Object.keys(tree.nodes).length;
     const heightAfter = height(tree);
 

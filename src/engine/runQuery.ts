@@ -26,6 +26,7 @@ import {
 } from './planner/index.ts';
 import { buildHeap, createBufferPool } from './storage/index.ts';
 import { buildIndexes, pageCountFor } from './index/index.ts';
+import type { BPlusTree } from './index/index.ts';
 import type { Heap } from './storage/index.ts';
 import { walkExpr } from './parser/index.ts';
 import { execute } from './exec/index.ts';
@@ -39,10 +40,20 @@ import { createTracer } from './trace.ts';
 import { DEFAULT_ENGINE_OPTIONS } from './types.ts';
 import type { Database, EngineOptions, Row, RunResult, Table } from './types.ts';
 
+/**
+ * A look inside a run that the trace does not give. `afterWrite` receives the indexes a write left behind — the
+ * trees `INSERT`/`UPDATE`/`DELETE` just maintained — so a test can check them against the rows (plan.md §25.4 B3):
+ * every statement builds its indexes afresh, so nothing later would ever notice one that was maintained wrongly.
+ */
+export interface RunHooks {
+  afterWrite?: (indexes: Record<string, BPlusTree>) => void;
+}
+
 export function runQuery(
   sql: string,
   db: Database,
   options: EngineOptions = DEFAULT_ENGINE_OPTIONS,
+  hooks: RunHooks = {},
 ): RunResult {
   const { emit, drain } = createTracer();
 
@@ -53,7 +64,7 @@ export function runQuery(
   const ast = parsed.ast;
   // EXPLAIN [ANALYZE] SELECT (plan.md §25.4 B6): the inner query, run and then reported as a plan.
   if (ast.kind === 'explain') {
-    return explainResult(sql, ast, (inner) => runQuery(inner, db, options));
+    return explainResult(sql, ast, (inner) => runQuery(inner, db, options, hooks));
   }
   const tableRef = ast.kind === 'insert' ? ast.into : ast.kind === 'update' ? ast.table : ast.from;
 
@@ -136,6 +147,7 @@ export function runQuery(
     const pool = createBufferPool(pageCountFor(heap, trees) + (insertNeedsNewPage ? 1 : 0), options, emit);
 
     const { row: inserted } = executeInsert(row, { emit, pool, locks, heap, trees, table, options });
+    hooks.afterWrite?.(trees);
     const rows = [...table.rows, inserted];
 
     emit(
@@ -160,6 +172,7 @@ export function runQuery(
     const pool = createBufferPool(pageCountFor(heap, trees), options, emit);
 
     const { deleted } = executeDelete(plan, { emit, pool, locks, heap, trees, table, options });
+    hooks.afterWrite?.(trees);
     const removed = new Set(deleted);
     const rows = table.rows.filter((r) => !removed.has(r));
 
@@ -193,6 +206,7 @@ export function runQuery(
       table,
       options,
     });
+    hooks.afterWrite?.(trees);
     const replacements = new Map(before.map((row, i) => [row, after[i]!]));
     const rows = table.rows.map((r) => replacements.get(r) ?? r);
 

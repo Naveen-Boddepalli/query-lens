@@ -26,7 +26,7 @@ export interface TableSpec {
   name: string;
   columns: ColSpec[];
   rows: Row[];
-  /** Columns QueryLens builds a B+Tree on. Only ever *unique* columns until plan.md §25.4 B3. */
+  /** Columns QueryLens builds a B+Tree on — unique or not (plan.md §25.4 B3a). */
   indexed: string[];
 }
 
