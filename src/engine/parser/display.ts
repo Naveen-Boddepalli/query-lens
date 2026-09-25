@@ -25,11 +25,21 @@ import type {
   UpdateStatement,
 } from './ast.ts';
 import { selectItemKey } from './ast.ts';
+import { exprToSql } from './print.ts';
 
 function selectItemNode(item: SelectItem, id: string): ASTNode {
-  return item.kind === 'column'
-    ? { id, kind: 'Column', label: item.name, span: item.span }
-    : { id, kind: 'Aggregate', label: selectItemKey(item), span: item.span };
+  if (item.kind === 'column') return { id, kind: 'Column', label: item.name, span: item.span };
+  if (item.kind === 'expression') {
+    return {
+      id,
+      kind: 'Expression',
+      label: selectItemKey(item),
+      ...(item.alias === undefined ? {} : { detail: exprToSql(item.expr) }),
+      span: item.span,
+      children: [exprNode(item.expr, `${id}.e`)],
+    };
+  }
+  return { id, kind: 'Aggregate', label: selectItemKey(item), span: item.span };
 }
 
 function selectListNode(select: SelectList): ASTNode {
@@ -132,6 +142,16 @@ function exprNode(expr: Expr, id: string): ASTNode {
           ...expr.items.map((item, i) => exprNode(item, `${id}.i${i}`)),
         ],
       };
+    case 'arith':
+      return {
+        id,
+        kind: 'Arith',
+        label: expr.op,
+        span: expr.span,
+        children: [exprNode(expr.left, `${id}.l`), exprNode(expr.right, `${id}.r`)],
+      };
+    case 'neg':
+      return { id, kind: 'Arith', label: '−', detail: 'negate', span: expr.span, children: [exprNode(expr.operand, `${id}.o`)] };
     case 'like':
       return {
         id,
@@ -221,8 +241,10 @@ function assignmentNode(a: UpdateAssignment, id: string): ASTNode {
     id,
     kind: 'Assignment',
     label: a.column,
-    detail: `= ${a.value.raw}`,
+    detail: `= ${exprToSql(a.value)}`,
     span: { from: a.columnSpan.from, to: a.value.span.to },
+    // A literal is fully described by the detail; a computed value gets its own subtree.
+    ...(a.value.kind === 'literal' ? {} : { children: [exprNode(a.value, `${id}.v`)] }),
   };
 }
 
@@ -419,7 +441,7 @@ export function emitUpdateParseEvents(emit: Emit, ast: UpdateStatement): void {
 
   children.push(setNode(ast.set));
   emit(
-    `Read the SET clause: ${ast.set.assignments.map((a) => `\`${a.column}\` = ${a.value.raw}`).join(', ')}. Nothing has been written yet — this is still only structure.`,
+    `Read the SET clause: ${ast.set.assignments.map((a) => `\`${a.column}\` = ${exprToSql(a.value)}`).join(', ')}. Nothing has been written yet — this is still only structure.`,
     { stage: 'parse', ast: root([...children], ast.span, 'UPDATE'), span: ast.set.span },
   );
 

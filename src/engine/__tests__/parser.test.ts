@@ -450,7 +450,7 @@ describe('parseStatement — UPDATE', () => {
   it('parses multiple assignments, comma-separated', () => {
     const ast = okUpdate("UPDATE users SET name = 'ada', age = 30");
     expect(ast.set.assignments.map((a) => a.column)).toEqual(['name', 'age']);
-    expect(ast.set.assignments.map((a) => a.value.value)).toEqual(['ada', 30]);
+    expect(ast.set.assignments.map((a) => (a.value.kind === 'literal' ? a.value.value : undefined))).toEqual(['ada', 30]);
   });
 
   it('parses a WHERE after SET, same grammar as SELECT and DELETE', () => {
@@ -460,7 +460,7 @@ describe('parseStatement — UPDATE', () => {
 
   it('parses every literal kind an assignment can hold', () => {
     const ast = okUpdate('UPDATE t SET a = 1, b = NULL, c = TRUE, d = FALSE');
-    expect(ast.set.assignments.map((a) => a.value.value)).toEqual([1, null, true, false]);
+    expect(ast.set.assignments.map((a) => (a.value.kind === 'literal' ? a.value.value : undefined))).toEqual([1, null, true, false]);
   });
 
   it('is case-insensitive and tolerates a trailing semicolon', () => {
@@ -484,10 +484,12 @@ describe('parseStatement — UPDATE', () => {
     expect(errStatement('UPDATE users SET age 30').message).toMatch(/expected `=`/i);
   });
 
-  it('rejects a column name written where a value belongs, with a hint', () => {
-    const e = errStatement('UPDATE users SET age = name');
-    expect(e.message).toMatch(/expected a value/i);
-    expect(e.hint).toMatch(/literal values/);
+  it('accepts a column on the right of SET — it reads the row as it was (plan.md §25.4 B1b)', () => {
+    const ast = okUpdate('UPDATE users SET age = age + 1');
+    expect(ast.set.assignments[0]).toMatchObject({
+      column: 'age',
+      value: { kind: 'arith', op: '+', left: { kind: 'column', name: 'age' }, right: { kind: 'literal', value: 1 } },
+    });
   });
 
   it('rejects trailing junk, same as SELECT, DELETE and INSERT', () => {

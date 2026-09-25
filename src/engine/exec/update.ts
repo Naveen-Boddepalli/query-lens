@@ -20,7 +20,7 @@ import type { Row, SqlValue } from '../types.ts';
 import type { Expr, UpdateAssignment } from '../parser/index.ts';
 import type { Plan } from '../planner/index.ts';
 import type { ExecContext } from './operators.ts';
-import { passes } from './evaluate.ts';
+import { evaluateValue, passes } from './evaluate.ts';
 import { deleteKey, emitIndexLookup, height, insert } from '../index/index.ts';
 import type { RowPointer } from '../index/index.ts';
 import { summarizeSteps } from './delete.ts';
@@ -38,10 +38,15 @@ interface Match {
   pointer: RowPointer;
 }
 
-/** `row` with every SET assignment applied — a new object; `row` itself is untouched. */
+/**
+ * `row` with every SET assignment applied — a new object; `row` itself is
+ * untouched. Every value is evaluated against the row *as it was*, so
+ * `SET a = b, b = a` swaps the two rather than copying one over the other
+ * (standard SQL, and what plan.md §25.4 B1b's `SET n = n + 1` relies on).
+ */
 function applyAssignments(row: Row, assignments: UpdateAssignment[]): Row {
   const next: Row = { ...row };
-  for (const a of assignments) next[a.column] = a.value.value;
+  for (const a of assignments) next[a.column] = evaluateValue(a.value, row);
   return next;
 }
 

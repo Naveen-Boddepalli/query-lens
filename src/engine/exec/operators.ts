@@ -16,7 +16,7 @@ import type { BufferPool, Heap } from '../storage/index.ts';
 import type { LockManager } from '../locks/index.ts';
 import type { BPlusTree } from '../index/index.ts';
 import { emitIndexLookup, emitRangeStart, nextInRange, pageCountFor } from '../index/index.ts';
-import { compare, equalityKeyOf, passes } from './evaluate.ts';
+import { compare, equalityKeyOf, evaluateValue, passes } from './evaluate.ts';
 import { externalMergeSort, sortTempPageCount } from './sort.ts';
 
 export interface Operator {
@@ -321,6 +321,14 @@ function project(columns: ProjectList, child: Operator, ctx: ExecContext): Opera
       if (columns.kind === 'star') {
         produced('Project passes the row through unchanged — `*` keeps every column.');
         return row;
+      }
+
+      if (columns.kind === 'expressions') {
+        // Computed columns (plan.md §25.4 B1b): each item is evaluated against the row.
+        const computed: Row = {};
+        for (const { key, expr } of columns.items) computed[key] = evaluateValue(expr, row);
+        produced(`Project computes ${columns.items.map((i) => i.key).join(', ')} for this row.`);
+        return computed;
       }
 
       const narrowed: Row = {};

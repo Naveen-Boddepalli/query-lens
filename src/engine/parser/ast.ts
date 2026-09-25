@@ -1,4 +1,6 @@
 import type { SqlValue } from '../types.ts';
+import type { ArithOp } from '../value.ts';
+import { exprToSql } from './print.ts';
 
 export interface Span {
   from: number;
@@ -38,7 +40,15 @@ export type Expr =
   /** `x [NOT] IN (a, b, …)` — `items` are literals or columns, never a subquery (§25.10). */
   | { kind: 'in'; operand: Expr; items: Expr[]; negated: boolean; span: Span }
   /** `x [NOT] LIKE 'pattern'` — `%` any run, `_` one character, case-sensitive, no escape character. */
-  | { kind: 'like'; operand: Expr; pattern: Expr; negated: boolean; span: Span };
+  | { kind: 'like'; operand: Expr; pattern: Expr; negated: boolean; span: Span }
+  /**
+   * `a + b`, `a - b`, `a * b`, `a / b`, `a % b` (plan.md §25.4 B1b) — a *value*,
+   * not a truth value: NULL in, NULL out; `x / 0` is NULL; whole-number `/`
+   * truncates. See `value.ts`. A comparison, `SELECT` item or `SET` value can hold one.
+   */
+  | { kind: 'arith'; op: ArithOp; left: Expr; right: Expr; span: Span }
+  /** Unary minus on anything that is not a plain numeric literal (`-5` is folded to a literal at parse time). */
+  | { kind: 'neg'; operand: Expr; span: Span };
 
 /** The aggregate functions v0 supports (plan.md §22.2). */
 export type AggregateFn = 'COUNT' | 'SUM' | 'AVG' | 'MIN' | 'MAX';
@@ -46,6 +56,13 @@ export type AggregateFn = 'COUNT' | 'SUM' | 'AVG' | 'MIN' | 'MAX';
 /** One entry of a SELECT list: a plain column, or an aggregate call over one. */
 export type SelectItem =
   | { kind: 'column'; name: string; table?: string; span: Span }
+  /**
+   * A computed column (plan.md §25.4 B1b): `price * qty`, `age > 30`, or a
+   * plain column given an `AS` alias. Its result column is named by `alias`,
+   * or by the expression's own canonical SQL text. Not combinable with
+   * `GROUP BY` or an aggregate yet.
+   */
+  | { kind: 'expression'; expr: Expr; alias?: string; span: Span }
   | {
       kind: 'aggregate';
       fn: AggregateFn;
@@ -67,6 +84,7 @@ export function selectItemArgColumn(item: Extract<SelectItem, { kind: 'aggregate
 /** Canonical display key for a SELECT item — its own name, or e.g. `COUNT(*)`, `SUM(age)`. */
 export function selectItemKey(item: SelectItem): string {
   if (item.kind === 'column') return columnKey(item);
+  if (item.kind === 'expression') return item.alias ?? exprToSql(item.expr);
   return `${item.fn}(${item.arg.kind === 'star' ? '*' : columnKey(item.arg)})`;
 }
 
@@ -181,7 +199,11 @@ export interface InsertStatement {
 export interface UpdateAssignment {
   column: string;
   columnSpan: Span;
-  value: Extract<Expr, { kind: 'literal' }>;
+  /**
+   * Any expression (plan.md §25.4 B1b) — `SET n = n + 1` reads the row *as it
+   * was before this statement*, for every assignment in the list.
+   */
+  value: Expr;
 }
 
 export interface UpdateStatement {
@@ -204,9 +226,11 @@ export function childrenOf(expr: Expr): Expr[] {
     case 'compare':
     case 'and':
     case 'or':
+    case 'arith':
       return [expr.left, expr.right];
     case 'not':
     case 'isNull':
+    case 'neg':
       return [expr.operand];
     case 'in':
       return [expr.operand, ...expr.items];
@@ -224,9 +248,11 @@ export function mapChildren(expr: Expr, f: (child: Expr) => Expr): Expr {
     case 'compare':
     case 'and':
     case 'or':
+    case 'arith':
       return { ...expr, left: f(expr.left), right: f(expr.right) };
     case 'not':
     case 'isNull':
+    case 'neg':
       return { ...expr, operand: f(expr.operand) };
     case 'in':
       return { ...expr, operand: f(expr.operand), items: expr.items.map(f) };

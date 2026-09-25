@@ -13,6 +13,7 @@
 import type { PredictionPrompt, SqlValue, Table } from '../types.ts';
 import { indexSelectionPrompt } from '../predict.ts';
 import { mapChildren, walkExpr } from '../parser/index.ts';
+import { arithmetic, negate } from '../value.ts';
 import type { CompareOp, Expr } from '../parser/index.ts';
 import { conjoin, conjuncts, equalityOn, exprToSql, formatRangeBounds, rangeOn } from './plan.ts';
 import type { Plan, RangeBound } from './plan.ts';
@@ -137,8 +138,46 @@ function foldComparison(expr: Extract<Expr, { kind: 'compare' }>): 'true' | 'fal
   return null;
 }
 
+/** Arithmetic built only from literals — `2 + 3`, `-(4 * 5)` — which needs no row to evaluate. */
+function isConstantArithmetic(expr: Expr): boolean {
+  if (expr.kind === 'literal') return true;
+  if (expr.kind === 'arith') return isConstantArithmetic(expr.left) && isConstantArithmetic(expr.right);
+  if (expr.kind === 'neg') return isConstantArithmetic(expr.operand);
+  return false;
+}
+
+function literalFor(value: SqlValue, span: Expr['span']): Expr {
+  return { kind: 'literal', value, raw: value === null ? 'NULL' : String(value), span };
+}
+
+function evaluateConstant(expr: Expr): SqlValue {
+  if (expr.kind === 'literal') return expr.value;
+  if (expr.kind === 'neg') return negate(evaluateConstant(expr.operand));
+  if (expr.kind === 'arith') return arithmetic(expr.op, evaluateConstant(expr.left), evaluateConstant(expr.right));
+  return null;
+}
+
 /**
- * Drops any conjunct that folds to always-true — `X AND true` is just `X`.
+ * Replaces every *maximal* constant-arithmetic subtree with its value
+ * (plan.md §25.4 B1b), recording what it folded. `WHERE id = 2 + 3` becomes
+ * `WHERE id = 5` — which is also what lets `index-selection` see an equality
+ * on a literal at all. Outermost only: `2 + 3 * 4` is one fold to 14, not two.
+ */
+function foldArithmetic(expr: Expr, folds: { before: string; after: string }[]): Expr {
+  if ((expr.kind === 'arith' || expr.kind === 'neg') && isConstantArithmetic(expr)) {
+    const folded = literalFor(evaluateConstant(expr), expr.span);
+    folds.push({ before: exprToSql(expr), after: folded.kind === 'literal' ? folded.raw : '' });
+    return folded;
+  }
+  return mapChildren(expr, (child) => foldArithmetic(child, folds));
+}
+
+/**
+ * Two simplifications, both about work that does not depend on the row:
+ *
+ *   - constant arithmetic (`2 + 3`) is worked out once, here, instead of for
+ *     every row the scan reads (and so a literal can reach an index rule);
+ *   - a conjunct that is always true (`5 > 3`) is dropped — `X AND true` is `X`.
  *
  * Deliberately does not act on an always-false conjunct: `X AND false` is
  * `false`, but v0's plan shape has no node for "this scan produces no rows"
@@ -154,11 +193,12 @@ const constantFolding: Rule = (input) => {
   const { aggregate, rest: belowProject } = unwrapAggregate(belowSort);
   if (belowProject.op !== 'Filter') return null;
 
-  const parts = conjuncts(belowProject.predicate);
+  const folds: { before: string; after: string }[] = [];
+  const parts = conjuncts(belowProject.predicate).map((part) => foldArithmetic(part, folds));
   const alwaysTrue = parts
     .map((p, i) => ({ i, expr: p }))
     .filter(({ expr }) => expr.kind === 'compare' && foldComparison(expr) === 'true');
-  if (alwaysTrue.length === 0) return null;
+  if (alwaysTrue.length === 0 && folds.length === 0) return null;
 
   const dropped = new Set(alwaysTrue.map((f) => f.i));
   const residual = conjoin(parts.filter((_, i) => !dropped.has(i)));
@@ -175,13 +215,22 @@ const constantFolding: Rule = (input) => {
     },
   );
 
+  const foldSentence =
+    folds.length === 0
+      ? ''
+      : `${folds.map((f) => `\`${f.before}\` is just ${f.after}`).join(', ')} — worked out once here instead of for every row`;
   const clauses = alwaysTrue.map((f) => `\`${exprToSql(f.expr)}\``).join(', ');
   const verb = alwaysTrue.length === 1 ? 'is' : 'are';
+  const dropSentence =
+    alwaysTrue.length === 0
+      ? ''
+      : residual
+        ? `${clauses} ${verb} always true, whatever the row — it drops out of the predicate, leaving only the part that actually depends on data`
+        : `${clauses} ${verb} always true, whatever the row — with nothing else in the WHERE clause, the filter disappears entirely`;
+
   return {
     rule: 'constant-folding',
-    label: residual
-      ? `Constant folding: ${clauses} ${verb} always true, whatever the row — it drops out of the predicate, leaving only the part that actually depends on data.`
-      : `Constant folding: ${clauses} ${verb} always true, whatever the row — with nothing else in the WHERE clause, the filter disappears entirely.`,
+    label: `Constant folding: ${[foldSentence, dropSentence].filter(Boolean).join('; and ')}.`,
     plan: root,
     changed: new Set<Plan>([rewrittenFilter]),
   };

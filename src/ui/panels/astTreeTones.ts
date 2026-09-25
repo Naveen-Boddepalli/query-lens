@@ -57,6 +57,11 @@ export const TONES: Record<string, string> = {
   // Shares Limit's tone — a computed value, same family as a capped result.
   Aggregate:
     'border-hue-orange/60 bg-hue-orange/10 text-hue-orange-ink hover:border-hue-orange/90 hover:bg-hue-orange/20',
+  // Computed columns and arithmetic (plan.md §25.4 B1b) — a value the engine works out, like an aggregate.
+  Expression:
+    'border-hue-orange/60 bg-hue-orange/10 text-hue-orange-ink hover:border-hue-orange/90 hover:bg-hue-orange/20',
+  Arith:
+    'border-hue-orange/50 bg-hue-orange/5 text-hue-orange-ink hover:border-hue-orange/80 hover:bg-hue-orange/15',
   // Shares Column's tone — an ORDER BY or GROUP BY clause is fundamentally naming one.
   OrderBy:
     'border-hue-emerald/60 bg-hue-emerald/10 text-hue-emerald-ink hover:border-hue-emerald/90 hover:bg-hue-emerald/20',

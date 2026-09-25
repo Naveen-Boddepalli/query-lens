@@ -101,11 +101,13 @@ describe('metamorphic — NoREC-shaped: the optimized plan agrees with evaluatin
         const parsed = parse(renderQuery(read));
         if (!parsed.ok) throw new Error(parsed.error.message);
         const table = settled.find((t) => t.name === read.table)!;
-        const keys = outputKeys(read, settled);
+        // The reference projects plain columns only, so a computed column's *value* is left to the SQLite
+        // comparison — what NoREC checks here is which rows the optimized plan keeps.
+        const keys = outputKeys(read, settled).slice(0, outputKeys(read, settled).length - (read.computed?.length ?? 0));
         // The reference never plans, never touches a page or an index — it is the predicate and a loop.
         const expected = table.rows.filter((row) => passes(parsed.ast.where, row)).map((row) => tupleOf(row, keys));
 
-        const actual = answer(settled, read, options, true);
+        const actual = answer(settled, read, options, true).map((t) => t.slice(0, keys.length));
         expect(multisetDiff(actual, expected), renderQuery(read)).toBeNull();
       }),
       oracleParams(),

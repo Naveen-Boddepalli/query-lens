@@ -146,8 +146,8 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
   {
     name: 'docs',
     test: /^(docs|btree|buffer-pool)-.*\.js$/,
-    kb: 30,
-    note: 'integrated MDX docs (plan.md §17.1), lazy — the concepts/btree and concepts/buffer-pool pages are their own chunks, not folded into the shared docs-*.js, since they embed BTreePanel/BufferPoolPanel/FlowTree (§23.1\'s interactive-docs item) and forcing that into the group every other docs page shares would have made a simple FAQ visit pay for it too. Raised 20 → 27 for the new Architecture page and rewriting the Supported SQL / Engine limits reference pages, which had drifted to describing v0-era scope (no JOIN, no writes, one index) years after all three shipped. Raised 27 → 30 for the "How we know the answers are right" reference page (plan.md §25.4 A1) — prose and the divergence-ledger table, documentation weight and no code; v2\'s own SQL / limits page rewrites (B1–B4) draw on the same headroom',
+    kb: 33,
+    note: 'integrated MDX docs (plan.md §17.1), lazy — the concepts/btree and concepts/buffer-pool pages are their own chunks, not folded into the shared docs-*.js, since they embed BTreePanel/BufferPoolPanel/FlowTree (§23.1\'s interactive-docs item) and forcing that into the group every other docs page shares would have made a simple FAQ visit pay for it too. Raised 20 → 27 for the new Architecture page and rewriting the Supported SQL / Engine limits reference pages, which had drifted to describing v0-era scope (no JOIN, no writes, one index) years after all three shipped. Raised 27 → 30 for the "How we know the answers are right" reference page (plan.md §25.4 A1) — prose and the divergence-ledger table, documentation weight and no code; v2\'s own SQL / limits page rewrites (B1–B4) draw on the same headroom. Raised 30 → 33 for B1\'s Supported SQL page — the predicate truth tables and the arithmetic rules — plus the answers page\'s longer ledger table; still prose, no code',
   },
   // Raised 14 → 17: @tailwindcss/typography (the docs' `.prose` styling,
   // themed onto the app's own tokens rather than its default palette — see

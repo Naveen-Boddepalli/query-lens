@@ -39,6 +39,27 @@ export interface Ref {
 
 export type Op = '=' | '<>' | '<' | '>' | '<=' | '>=';
 
+/** Arithmetic (plan.md §25.4 B1b). Fully parenthesised when rendered, so no precedence is left to chance. */
+export type ArithOp = '+' | '-' | '*' | '/' | '%';
+export type Arith =
+  | { k: 'col'; ref: Ref }
+  | { k: 'lit'; v: number }
+  | { k: 'bin'; op: ArithOp; a: Arith; b: Arith }
+  | { k: 'neg'; a: Arith };
+
+export function renderArith(a: Arith): string {
+  switch (a.k) {
+    case 'col':
+      return renderRef(a.ref);
+    case 'lit':
+      return String(a.v);
+    case 'bin':
+      return `(${renderArith(a.a)} ${a.op} ${renderArith(a.b)})`;
+    case 'neg':
+      return `-(${renderArith(a.a)})`;
+  }
+}
+
 /**
  * A predicate. Leaves compare or test a column; `and` / `or` / `not` nest them
  * (plan.md §25.4 B1a). A query's `where` is a *list* of predicates joined by
@@ -46,6 +67,10 @@ export type Op = '=' | '<>' | '<' | '>' | '<=' | '>=';
  */
 export type Pred =
   | { k: 'cmp'; ref: Ref; op: Op; lit: SqlValue }
+  /** An arithmetic expression compared with a literal: `(n * 2) + 1 > 5`. */
+  | { k: 'acmp'; e: Arith; op: Op; lit: SqlValue }
+  /** A column against *constant* arithmetic: `id = 2 + 3` — folded once, then an index lookup. */
+  | { k: 'ccmp'; ref: Ref; op: Op; e: Arith }
   | { k: 'colcmp'; a: Ref; op: Op; b: Ref }
   /** Two literals — the optimizer's constant-folding rule exists for these. */
   | { k: 'litcmp'; a: SqlValue; op: Op; b: SqlValue }
@@ -73,6 +98,8 @@ export type Query =
       kind: 'select';
       table: string;
       proj: Ref[] | '*';
+      /** Computed columns appended after `proj`, each named by its alias (`AS x0`). */
+      computed?: { e: Arith; alias: string }[];
       where: Pred[];
       order?: OrderSpec;
       limit?: number;
@@ -93,11 +120,12 @@ export type Query =
       right: string;
       on: { l: Ref; r: Ref };
       proj: Ref[];
+      computed?: { e: Arith; alias: string }[];
       where: Pred[];
       limit?: number;
     }
   | { kind: 'insert'; table: string; columns?: string[]; values: SqlValue[] }
-  | { kind: 'update'; table: string; set: { col: string; value: SqlValue }[]; where: Pred[] }
+  | { kind: 'update'; table: string; set: { col: string; value: SqlValue; expr?: Arith }[]; where: Pred[] }
   | { kind: 'delete'; table: string; where: Pred[] };
 
 export type WriteQuery = Extract<Query, { kind: 'insert' | 'update' | 'delete' }>;
@@ -125,6 +153,10 @@ export function renderPred(p: Pred): string {
   switch (p.k) {
     case 'cmp':
       return `${renderRef(p.ref)} ${p.op} ${renderLiteral(p.lit)}`;
+    case 'acmp':
+      return `${renderArith(p.e)} ${p.op} ${renderLiteral(p.lit)}`;
+    case 'ccmp':
+      return `${renderRef(p.ref)} ${p.op} ${renderArith(p.e)}`;
     case 'colcmp':
       return `${renderRef(p.a)} ${p.op} ${renderRef(p.b)}`;
     case 'litcmp':
@@ -147,6 +179,9 @@ export function renderPred(p: Pred): string {
   }
 }
 
+const renderComputed = (computed: { e: Arith; alias: string }[] | undefined): string[] =>
+  (computed ?? []).map((c) => `${renderArith(c.e)} AS ${c.alias}`);
+
 /** Depth-first over a predicate tree. */
 export function walkPred(p: Pred, visit: (p: Pred) => void): void {
   visit(p);
@@ -164,15 +199,19 @@ const renderAgg = (a: AggItem): string => `${a.fn}(${a.arg === '*' ? '*' : rende
 
 /** The SELECT-list items of a read query, in output order — also the keys QueryLens names its result columns by. */
 export function outputKeys(q: ReadQuery, tables: readonly TableSpec[]): string[] {
+  const computed = (q.kind === 'select' || q.kind === 'join' ? q.computed : undefined)?.map((c) => c.alias) ?? [];
   switch (q.kind) {
     case 'select':
-      return q.proj === '*'
-        ? (tables.find((t) => t.name === q.table)?.columns.map((c) => c.name) ?? [])
-        : q.proj.map(renderRef);
+      return [
+        ...(q.proj === '*'
+          ? (tables.find((t) => t.name === q.table)?.columns.map((c) => c.name) ?? [])
+          : q.proj.map(renderRef)),
+        ...computed,
+      ];
     case 'aggregate':
       return [...q.shownGroup.map(renderRef), ...q.aggs.map(renderAgg)];
     case 'join':
-      return q.proj.map(renderRef);
+      return [...q.proj.map(renderRef), ...computed];
   }
 }
 
@@ -189,7 +228,9 @@ export function renderQuery(q: Query, dialect: Dialect = 'querylens'): string {
   const limit = (n: number | undefined) => (n === undefined ? '' : ` LIMIT ${n}`);
   switch (q.kind) {
     case 'select': {
-      const list = q.proj === '*' ? '*' : q.proj.map(renderRef).join(', ');
+      const list = [q.proj === '*' ? '*' : q.proj.map(renderRef).join(', '), ...renderComputed(q.computed)]
+        .filter((x) => x !== '')
+        .join(', ');
       const order = q.order
         ? ` ORDER BY ${renderRef(q.order.ref)} ${q.order.dir.toUpperCase()}${
             dialect === 'sqlite' ? (q.order.dir === 'asc' ? ' NULLS LAST' : ' NULLS FIRST') : ''
@@ -203,13 +244,13 @@ export function renderQuery(q: Query, dialect: Dialect = 'querylens'): string {
       return `SELECT ${items} FROM ${q.table}${renderWhere(q.where)}${group}${limit(q.limit)}`;
     }
     case 'join':
-      return `SELECT ${q.proj.map(renderRef).join(', ')} FROM ${q.left} JOIN ${q.right} ON ${renderRef(q.on.l)} = ${renderRef(q.on.r)}${renderWhere(q.where)}${limit(q.limit)}`;
+      return `SELECT ${[...q.proj.map(renderRef), ...renderComputed(q.computed)].join(', ')} FROM ${q.left} JOIN ${q.right} ON ${renderRef(q.on.l)} = ${renderRef(q.on.r)}${renderWhere(q.where)}${limit(q.limit)}`;
     case 'insert': {
       const cols = q.columns ? ` (${q.columns.join(', ')})` : '';
       return `INSERT INTO ${q.table}${cols} VALUES (${q.values.map(renderLiteral).join(', ')})`;
     }
     case 'update':
-      return `UPDATE ${q.table} SET ${q.set.map((s) => `${s.col} = ${renderLiteral(s.value)}`).join(', ')}${renderWhere(q.where)}`;
+      return `UPDATE ${q.table} SET ${q.set.map((s) => `${s.col} = ${s.expr ? renderArith(s.expr) : renderLiteral(s.value)}`).join(', ')}${renderWhere(q.where)}`;
     case 'delete':
       return `DELETE FROM ${q.table}${renderWhere(q.where)}`;
   }

@@ -9,12 +9,13 @@
  *   delete        := DELETE FROM identifier [WHERE expr] [';'] EOF
  *   insert        := INSERT INTO identifier [columnList] VALUES valueList [';'] EOF
  *   update        := UPDATE identifier SET assignment (',' assignment)* [WHERE expr] [';'] EOF
- *   assignment    := identifier '=' value
+ *   assignment    := identifier '=' expr
  *   columnList    := '(' identifier (',' identifier)* ')'
  *   valueList     := '(' value (',' value)* ')'
- *   value         := number | string | NULL | TRUE | FALSE
+ *   value         := an expr built from literals only — number | string | NULL | TRUE | FALSE,
+ *                    negated or combined with arithmetic, folded to one value at parse time
  *   selectList    := '*' | selectItem (',' selectItem)*
- *   selectItem    := qualifiedColumn | aggregateCall
+ *   selectItem    := aggregateCall | expr [AS identifier]
  *   aggregateCall := ('COUNT'|'SUM'|'AVG'|'MIN'|'MAX') '(' ('*' | qualifiedColumn) ')'
  *   expr          := orExpr
  *   orExpr        := andExpr (OR andExpr)*
@@ -26,7 +27,11 @@
  *                            | [NOT] IN '(' operand (',' operand)* ')'
  *                            | [NOT] LIKE operand )?
  *   compareOp     := '=' | '<>' | '!=' | '<' | '>' | '<=' | '>='
- *   operand       := qualifiedColumn | number | string | NULL | TRUE | FALSE | '(' expr ')'
+ *   operand       := additive
+ *   additive      := multiplicative (('+' | '-') multiplicative)*
+ *   multiplicative := unary (('*' | '/' | '%') unary)*
+ *   unary         := '-' unary | primary
+ *   primary       := qualifiedColumn | number | string | NULL | TRUE | FALSE | '(' expr ')'
  *   qualifiedColumn := identifier ['.' identifier]
  *
  * `GROUP BY` and `ORDER BY` are mutually exclusive — the parser rejects a
@@ -51,7 +56,7 @@
  * SELECT parsing changed.
  */
 
-import type { QueryError } from '../types.ts';
+import type { QueryError, SqlValue } from '../types.ts';
 import type {
   AggregateFn,
   CompareOp,
@@ -69,7 +74,9 @@ import type {
   UpdateAssignment,
   UpdateStatement,
 } from './ast.ts';
-import { walkExpr } from './ast.ts';
+import { selectItemKey, walkExpr } from './ast.ts';
+import { exprToSql } from './print.ts';
+import { arithmetic, negate } from '../value.ts';
 import { TokenizeError, tokenize } from './tokenizer.ts';
 import type { Token } from './tokenizer.ts';
 
@@ -181,22 +188,44 @@ function parseQualifiedColumnTail(
   return { table: first.value, name: col.value, from: first.from, to: col.to };
 }
 
-/** A plain column, or an aggregate call — `COUNT(*)`, `SUM(age)`, and so on. */
+/**
+ * One SELECT item: an aggregate call — `COUNT(*)`, `SUM(age)` — or any
+ * expression: a plain column, `price * qty`, `age > 30`. An expression may be
+ * named with `AS`; a bare column with no alias stays a plain `column` item.
+ */
 function parseSelectItem(c: Cursor): SelectItem {
-  const token = c.expectIdentifier('a column name or an aggregate like COUNT(*)');
+  const token = c.peek();
   const upper = token.value.toUpperCase();
 
-  if (!AGGREGATE_FNS.has(upper) || c.peek().type !== 'lparen') {
-    const ref = parseQualifiedColumnTail(c, token);
-    return {
-      kind: 'column',
-      name: ref.name,
-      ...(ref.table === undefined ? {} : { table: ref.table }),
-      span: { from: ref.from, to: ref.to },
-    };
+  if (token.type === 'identifier' && AGGREGATE_FNS.has(upper) && c.peekAt(1).type === 'lparen') {
+    c.next(); // the function name
+    c.next(); // '('
+    return parseAggregateCall(c, token, upper);
   }
 
-  c.next(); // '('
+  const expr = parseExpr(c, true);
+  let alias: string | undefined;
+  let end = expr.span.to;
+  if (isKeyword(c.peek(), 'AS')) {
+    c.next();
+    const name = c.expectIdentifier('a name for the column after AS');
+    alias = name.value;
+    end = name.to;
+  }
+
+  if (expr.kind === 'column' && alias === undefined) {
+    return {
+      kind: 'column',
+      name: expr.name,
+      ...(expr.table === undefined ? {} : { table: expr.table }),
+      span: expr.span,
+    };
+  }
+  return { kind: 'expression', expr, ...(alias === undefined ? {} : { alias }), span: { from: expr.span.from, to: end } };
+}
+
+/** The part of an aggregate call after `FN(`. */
+function parseAggregateCall(c: Cursor, token: Token, upper: string): SelectItem {
   const argToken = c.peek();
   let arg: Extract<SelectItem, { kind: 'aggregate' }>['arg'];
   if (argToken.type === 'star') {
@@ -226,6 +255,22 @@ function parseSelectItem(c: Cursor): SelectItem {
     throw new ParseError(`Expected \`)\` after the aggregate's argument, found ${describe(close)}.`, close);
   }
   c.next();
+
+  const after = c.peek();
+  if ((after.type === 'operator' && ['+', '-', '/', '%'].includes(after.value)) || after.type === 'star') {
+    throw new ParseError(
+      'Arithmetic on an aggregate is not supported yet.',
+      after,
+      `Compute \`${upper}(...)\` on its own; do the arithmetic on plain columns.`,
+    );
+  }
+  if (isKeyword(after, 'AS')) {
+    throw new ParseError(
+      '`AS` is not supported on an aggregate yet.',
+      after,
+      'An aggregate is named by its own text, like `COUNT(*)`. `AS` works on plain columns and computed ones.',
+    );
+  }
 
   return { kind: 'aggregate', fn: upper as AggregateFn, arg, span: { from: token.from, to: close.to } };
 }
@@ -286,6 +331,15 @@ function checkGroupingValidity(select: SelectList, groupBy: GroupByClause | unde
 
   const hasAggregate = select.items.some((item) => item.kind === 'aggregate');
   if (!hasAggregate && !groupBy) return;
+
+  const computed = select.items.find((item) => item.kind === 'expression');
+  if (computed) {
+    throw new ParseError(
+      `\`${selectItemKey(computed)}\` is a computed column, which cannot be combined with GROUP BY or an aggregate yet.`,
+      computed.span,
+      'Aggregate plain columns, or compute the expression in a query without GROUP BY.',
+    );
+  }
 
   const groupNames = new Set(groupBy?.columns.map((c) => c.name) ?? []);
   const ungrouped = select.items.find((item) => item.kind === 'column' && !groupNames.has(item.name));
@@ -349,6 +403,7 @@ function collectColumnRefs(select: SelectList, where: Expr | undefined): Extract
   if (select.kind === 'columns') {
     for (const item of select.items) {
       if (item.kind === 'column') refs.push(item);
+      else if (item.kind === 'expression') walkExpr(item.expr, (e) => { if (e.kind === 'column') refs.push(e); });
       else if (item.arg.kind === 'column') refs.push(item.arg);
     }
   }
@@ -413,8 +468,8 @@ function checkJoinValidity(
 
 const isKeyword = (t: Token, ...words: string[]): boolean => t.type === 'keyword' && words.includes(t.upper);
 
-/** A literal, a column, or a parenthesised expression — the leaves every predicate is built from. */
-function parseOperand(c: Cursor): Expr {
+/** A literal, a column, or a parenthesised expression — the leaves every expression is built from. */
+function parsePrimary(c: Cursor): Expr {
   const token = c.peek();
 
   if (token.type === 'identifier') {
@@ -457,7 +512,8 @@ function parseOperand(c: Cursor): Expr {
   }
   if (token.type === 'lparen') {
     c.next();
-    const inner = parseExpr(c);
+    // Inside parentheses a bare value is fine — `(a + 1) * 2`; the caller decides whether it is a valid predicate.
+    const inner = parseExpr(c, true);
     const close = c.peek();
     if (close.type !== 'rparen') {
       c.guardScope(close);
@@ -477,6 +533,52 @@ function parseOperand(c: Cursor): Expr {
   }
   c.guardScope(token);
   throw new ParseError(`Expected a column name or a value, found ${describe(token)}.`, token);
+}
+
+const numericLiteral = (e: Expr): e is Extract<Expr, { kind: 'literal' }> & { value: number } =>
+  e.kind === 'literal' && typeof e.value === 'number';
+
+/** `-x`. A minus in front of a numeric literal is folded into the literal, so `id = -5` is still an index equality. */
+function parseUnary(c: Cursor): Expr {
+  const token = c.peek();
+  if (token.type === 'operator' && token.value === '-') {
+    c.next();
+    const operand = parseUnary(c);
+    const span = { from: token.from, to: operand.span.to };
+    if (numericLiteral(operand)) {
+      return { kind: 'literal', value: negate(operand.value) ?? 0, raw: operand.raw.startsWith('-') ? operand.raw.slice(1) : `-${operand.raw}`, span };
+    }
+    return { kind: 'neg', operand, span };
+  }
+  if (token.type === 'operator' && token.value === '+') {
+    c.next(); // unary plus changes nothing
+    return parseUnary(c);
+  }
+  return parsePrimary(c);
+}
+
+function parseMultiplicative(c: Cursor): Expr {
+  let left = parseUnary(c);
+  for (;;) {
+    const t = c.peek();
+    const isMul = t.type === 'star' || (t.type === 'operator' && (t.value === '/' || t.value === '%'));
+    if (!isMul) return left;
+    c.next();
+    const right = parseUnary(c);
+    left = { kind: 'arith', op: t.value as '*' | '/' | '%', left, right, span: { from: left.span.from, to: right.span.to } };
+  }
+}
+
+/** The operand of a comparison or a test: `+ -` over `* / %` over unary minus over a primary. */
+function parseOperand(c: Cursor): Expr {
+  let left = parseMultiplicative(c);
+  for (;;) {
+    const t = c.peek();
+    if (!(t.type === 'operator' && (t.value === '+' || t.value === '-'))) return left;
+    c.next();
+    const right = parseMultiplicative(c);
+    left = { kind: 'arith', op: t.value, left, right, span: { from: left.span.from, to: right.span.to } };
+  }
 }
 
 const COMPARE_OPS = ['=', '<>', '!=', '<', '>', '<=', '>='];
@@ -526,7 +628,8 @@ function parseComparison(c: Cursor): Extract<Expr, { kind: 'compare' }> {
 }
 
 /** True for a node that is a truth value on its own, so `WHERE (a = 1 OR b = 2)` needs no operator after it. */
-const isBooleanNode = (e: Expr): boolean => e.kind !== 'column' && e.kind !== 'literal';
+const isBooleanNode = (e: Expr): boolean =>
+  e.kind !== 'column' && e.kind !== 'literal' && e.kind !== 'arith' && e.kind !== 'neg';
 
 /**
  * One predicate: an operand followed by whatever it is being tested against.
@@ -538,12 +641,13 @@ const isBooleanNode = (e: Expr): boolean => e.kind !== 'column' && e.kind !== 'l
  * conjunct-walking piece of the engine all handle a `BETWEEN` for free.
  * `NOT BETWEEN` is that, wrapped in `not`.
  */
-function parsePredicate(c: Cursor): Expr {
+function parsePredicate(c: Cursor, bare = false): Expr {
   const left = parseOperand(c);
   const first = c.peek();
 
-  // A parenthesised predicate is already a truth value: `(a = 1 OR b = 2)`.
-  if (isBooleanNode(left) && !(first.type === 'operator' || isKeyword(first, 'IS', 'NOT', 'IN', 'LIKE', 'BETWEEN'))) {
+  // No test follows. A parenthesised predicate is already a truth value — `(a = 1 OR b = 2)` — and where a
+  // *value* is wanted (a SELECT item, a SET value, inside parentheses) a bare column or sum is one too.
+  if ((isBooleanNode(left) || bare) && !(first.type === 'operator' || isKeyword(first, 'IS', 'NOT', 'IN', 'LIKE', 'BETWEEN'))) {
     return left;
   }
 
@@ -592,18 +696,18 @@ function parsePredicate(c: Cursor): Expr {
   return finishComparison(c, left);
 }
 
-function parseNotExpr(c: Cursor): Expr {
+function parseNotExpr(c: Cursor, bare = false): Expr {
   const token = c.peek();
   if (isKeyword(token, 'NOT')) {
     c.next();
     const operand = parseNotExpr(c);
     return { kind: 'not', operand, span: { from: token.from, to: operand.span.to } };
   }
-  return parsePredicate(c);
+  return parsePredicate(c, bare);
 }
 
-function parseAndExpr(c: Cursor): Expr {
-  let left = parseNotExpr(c);
+function parseAndExpr(c: Cursor, bare = false): Expr {
+  let left = parseNotExpr(c, bare);
   while (isKeyword(c.peek(), 'AND')) {
     c.next();
     const right = parseNotExpr(c);
@@ -612,9 +716,14 @@ function parseAndExpr(c: Cursor): Expr {
   return left;
 }
 
-/** `OR` binds loosest, then `AND`, then `NOT` — so `a OR b AND c` is `a OR (b AND c)`. */
-function parseExpr(c: Cursor): Expr {
-  let left = parseAndExpr(c);
+/**
+ * `OR` binds loosest, then `AND`, then `NOT` — so `a OR b AND c` is `a OR (b AND c)`.
+ * `bare` says a lone value (a column, `a + 1`) is acceptable as the whole
+ * expression — true for SELECT items, `SET` values and inside parentheses,
+ * false for a `WHERE`, where a bare column is not a predicate.
+ */
+function parseExpr(c: Cursor, bare = false): Expr {
+  let left = parseAndExpr(c, bare);
   while (isKeyword(c.peek(), 'OR')) {
     c.next();
     const right = parseAndExpr(c);
@@ -632,45 +741,49 @@ function parseOptionalWhere(c: Cursor): Expr | undefined {
   return undefined;
 }
 
+/** The value of an expression built only from literals, or `undefined` if it depends on anything else. */
+function constantValue(expr: Expr): { value: SqlValue } | undefined {
+  if (expr.kind === 'literal') return { value: expr.value };
+  if (expr.kind === 'neg') {
+    const inner = constantValue(expr.operand);
+    return inner && { value: negate(inner.value) };
+  }
+  if (expr.kind === 'arith') {
+    const left = constantValue(expr.left);
+    const right = constantValue(expr.right);
+    return left && right && { value: arithmetic(expr.op, left.value, right.value) };
+  }
+  return undefined;
+}
+
 /**
- * A literal value — the only kind an INSERT's VALUES list or an UPDATE's SET
- * assignment can hold; v0 has no expressions, subqueries or column
- * references on the right of either.
+ * A value for an INSERT's VALUES list: a literal, or arithmetic over literals
+ * (`-5`, `2 * 3`), folded to one literal here — the row a statement writes is
+ * known before it runs, so there is nothing to compute later. A column
+ * reference is rejected: an INSERT has no row to read it from.
  */
 function parseLiteralValue(c: Cursor): Extract<Expr, { kind: 'literal' }> {
   const token = c.peek();
+  if (token.type === 'rparen' || token.type === 'comma' || token.type === 'eof') {
+    throw new ParseError(`Expected a value, found ${describe(token)}.`, token);
+  }
+  const expr = parseExpr(c, true);
+  const folded = constantValue(expr);
+  if (folded) {
+    // A lone literal keeps its source text; a folded expression is shown as what it computes.
+    const raw = expr.kind === 'literal' ? expr.raw : exprToSql(expr);
+    return { kind: 'literal', value: folded.value, raw, span: expr.span };
+  }
 
-  if (token.type === 'number') {
-    c.next();
-    return {
-      kind: 'literal',
-      value: Number(token.value),
-      raw: token.value,
-      span: { from: token.from, to: token.to },
-    };
-  }
-  if (token.type === 'string') {
-    c.next();
-    return {
-      kind: 'literal',
-      value: token.value,
-      raw: `'${token.value}'`,
-      span: { from: token.from, to: token.to },
-    };
-  }
-  if (token.type === 'keyword' && ['NULL', 'TRUE', 'FALSE'].includes(token.upper)) {
-    c.next();
-    const value = token.upper === 'NULL' ? null : token.upper === 'TRUE';
-    return { kind: 'literal', value, raw: token.upper, span: { from: token.from, to: token.to } };
-  }
-  if (token.type === 'identifier') {
+  let column: Extract<Expr, { kind: 'column' }> | undefined;
+  walkExpr(expr, (e) => { if (!column && e.kind === 'column') column = e; });
+  if (column) {
     throw new ParseError(
-      `Expected a value, found \`${token.value}\`.`,
-      token,
-      'v0 takes only literal values here — no column references or expressions.',
+      `Expected a value, found \`${column.name}\`.`,
+      column.span,
+      'INSERT takes literal values, or arithmetic on them (`-5`, `2 * 3`) — no column references.',
     );
   }
-
   c.guardScope(token);
   throw new ParseError(`Expected a value, found ${describe(token)}.`, token);
 }
@@ -880,7 +993,7 @@ function parseAssignment(c: Cursor): UpdateAssignment {
     throw new ParseError(`Expected \`=\` after the column name, found ${describe(eq)}.`, eq);
   }
   c.next();
-  const value = parseLiteralValue(c);
+  const value = parseExpr(c, true);
   return { column: column.value, columnSpan: { from: column.from, to: column.to }, value };
 }
 

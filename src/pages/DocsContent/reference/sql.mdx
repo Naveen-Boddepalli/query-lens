@@ -16,14 +16,16 @@ SELECT id, name FROM users WHERE age > 30 AND name = 'Ada';
 SELECT * FROM users WHERE id BETWEEN 10 AND 20;
 SELECT * FROM users WHERE (age < 30 OR age > 60) AND name LIKE 'a%' AND email IS NOT NULL;
 SELECT * FROM users WHERE id IN (1, 5, 9) OR NOT age >= 18;
+SELECT id, age * 12 AS months, age + 1 FROM users WHERE age % 2 = 0;
 SELECT authors.name, posts.title FROM authors JOIN posts ON authors.id = posts.authorId;
 SELECT status, COUNT(*), AVG(attempts) FROM logins GROUP BY status;
 SELECT * FROM users ORDER BY age DESC LIMIT 5;
 ```
 
-- **Column list**: `*`, a comma-separated list of columns, or aggregate calls (below). Not both at
-  once — a plain column and an aggregate can only sit together when every plain column is also
-  named in `GROUP BY`.
+- **Column list**: `*` on its own; or a comma-separated list of columns, [computed columns](#expressions),
+  and aggregate calls (below). `*` cannot be listed alongside anything else (`SELECT *, age * 2` is not
+  accepted). A plain column and an aggregate can only sit together when every plain column is also named
+  in `GROUP BY`, and a computed column cannot be combined with `GROUP BY` or an aggregate yet.
 - **`FROM`**: exactly one table, plus an optional single `JOIN`.
 - **`JOIN`**: a bare, implicit inner join — `JOIN table ON a.col = b.col`, always an equality
   between one qualified column on each side. No `LEFT`/`RIGHT`/`FULL`/`CROSS`/`USING`, and no more
@@ -77,22 +79,57 @@ the parse stage: the WHERE tree shows every node of the predicate.
 range on an indexed column does. `WHERE id = 5 AND (age < 30 OR age IS NULL)` still uses the index for
 `id = 5` and rechecks the parenthesised part on the one row it finds.
 
+## Expressions
+
+An **operand** — in a comparison, a `SELECT` item, an `UPDATE … SET` value — can be arithmetic:
+`+`, `-`, `*`, `/`, `%`, unary minus, and parentheses. `*`, `/` and `%` bind tighter than `+` and `-`,
+and both groups associate left to right, so `10 - 4 - 3` is 3.
+
+```sql
+SELECT id, price * qty AS total, price / qty FROM items WHERE price * qty > 100;
+UPDATE items SET qty = qty + 1, price = -price WHERE id = 5;
+```
+
+- **`AS name`** names a computed column. Without it the column is called by the expression's own text,
+  normalised (`SELECT price*qty` is a column named `price * qty`). A plain column can be renamed the
+  same way: `SELECT note AS label`. `AS` is not accepted on an aggregate yet.
+- **NULL in, NULL out.** Any arithmetic with a NULL is NULL — so `price * qty > 10` is UNKNOWN, and the
+  row is left out, wherever `qty` is NULL.
+- **Division.** `/` between two whole numbers is **integer division**, truncating toward zero:
+  `7 / 2` is 3 and `-7 / 2` is −3 (as in SQLite and PostgreSQL). If either side has a fraction it
+  divides exactly. **`x / 0` and `x % 0` are NULL** — SQLite's rule; PostgreSQL raises an error.
+  `%` takes the sign of the left side.
+- **Text.** Text that is a number (`'5'`) is used as that number; text that is not (`'abc'`) makes the
+  result NULL. `TRUE` is 1 and `FALSE` is 0.
+- **Numbers carry no integer/real distinction here.** A column of decimals that happens to hold `3.0`
+  holds the number 3, so `3.0 / 2` is integer division — see
+  [`division-of-whole-reals`](/docs/reference/answers) in the answers ledger.
+- **`UPDATE … SET`** may read columns. Every value is worked out from the row *as it was*, so
+  `SET a = b, b = a` swaps the two.
+- **A function of a column cannot use its index.** `WHERE id = 5` is an index lookup; `WHERE id + 1 = 6`
+  reads the whole table, because the index is ordered by `id`, not by `id + 1`. Arithmetic on
+  *constants* is different: the optimizer works `id = 2 + 3` out once (`constant-folding`), and the
+  index can then answer `id = 5`.
+- **Not yet:** arithmetic on an aggregate (`COUNT(*) + 1`), a computed column beside `GROUP BY`, and
+  arithmetic in `ORDER BY` or `GROUP BY`.
+
 ## DELETE, INSERT, UPDATE
 
 ```sql
 DELETE FROM users WHERE id = 5;
 INSERT INTO users (id, name, email, age) VALUES (49, 'Ada', 'ada@example.com', 30);
 INSERT INTO users VALUES (50, 'Alan', 'alan@example.com', 41);
-UPDATE users SET name = 'Renamed', age = 31 WHERE id = 5;
+UPDATE users SET name = 'Renamed', age = age + 1 WHERE id = 5;
 ```
 
 - **`DELETE`**/**`UPDATE`** take the same `WHERE` grammar as `SELECT`, found the same way — an
   equality on an indexed column becomes an `IndexScan`, everything else a full scan.
 - **`INSERT`** takes an explicit column list (any order) or none at all, meaning every column in
-  table order; either way there is exactly one row per statement and every value is a literal — no
-  expressions, no `SELECT` as a source.
-- **`UPDATE`**'s `SET` values are literals only, same as `INSERT`'s `VALUES` — no reading one
-  column to set another.
+  table order; either way there is exactly one row per statement. Each value is a literal, or
+  arithmetic on literals (`-5`, `2 * 3`), which is worked out before the row is written — no column
+  references and no `SELECT` as a source.
+- **`UPDATE`**'s `SET` values are [expressions](#expressions): they may read the row's own columns
+  (`SET age = age + 1`).
 - All three persist for real: a write's changed rows become the table's new contents for every
   query that follows, in the Playground and in a challenge.
 

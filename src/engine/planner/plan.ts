@@ -5,10 +5,19 @@
  */
 
 import type { PlanNode, SqlValue } from '../types.ts';
+import { exprToSql } from '../parser/print.ts';
 import type { AggregateFn, CompareOp, Expr } from '../parser/index.ts';
 import type { PlanCost } from './cost.ts';
 
-export type ProjectList = { kind: 'star' } | { kind: 'columns'; names: string[] };
+/**
+ * What a `Project` keeps. `columns` reads named values straight off the row;
+ * `expressions` (plan.md §25.4 B1b) *computes* each — `key` names the result
+ * column, `sql` is how it is shown on the plan node (`n * 2 AS double`).
+ */
+export type ProjectList =
+  | { kind: 'star' }
+  | { kind: 'columns'; names: string[] }
+  | { kind: 'expressions'; items: { key: string; expr: Expr; sql: string }[] };
 
 /** One side of an `IndexRangeScan`'s bound — `inclusive` is `<=`/`>=` vs `<`/`>`. */
 export interface RangeBound {
@@ -263,51 +272,8 @@ export function formatRangeBounds(column: string, low?: RangeBound, high?: Range
   return `\`${column}\``;
 }
 
-/** How tightly a node binds, for parenthesising: OR < AND < NOT < a predicate < an atom. */
-function precedence(expr: Expr): number {
-  switch (expr.kind) {
-    case 'or':
-      return 1;
-    case 'and':
-      return 2;
-    case 'not':
-      return 3;
-    case 'compare':
-    case 'isNull':
-    case 'in':
-    case 'like':
-      return 4;
-    case 'column':
-    case 'literal':
-      return 5;
-  }
-}
-
-/** SQL text for `expr`, parenthesised exactly where the tree's shape needs it, so it re-parses to the same tree. */
-export function exprToSql(expr: Expr): string {
-  const at = (child: Expr, min: number): string =>
-    precedence(child) < min ? `(${exprToSql(child)})` : exprToSql(child);
-  switch (expr.kind) {
-    case 'column':
-      return expr.name;
-    case 'literal':
-      return expr.raw;
-    case 'compare':
-      return `${at(expr.left, 5)} ${expr.op} ${at(expr.right, 5)}`;
-    case 'and':
-      return `${at(expr.left, 2)} AND ${at(expr.right, 3)}`;
-    case 'or':
-      return `${at(expr.left, 1)} OR ${at(expr.right, 2)}`;
-    case 'not':
-      return `NOT ${at(expr.operand, 3)}`;
-    case 'isNull':
-      return `${at(expr.operand, 5)} IS ${expr.negated ? 'NOT ' : ''}NULL`;
-    case 'in':
-      return `${at(expr.operand, 5)} ${expr.negated ? 'NOT ' : ''}IN (${expr.items.map((i) => at(i, 5)).join(', ')})`;
-    case 'like':
-      return `${at(expr.operand, 5)} ${expr.negated ? 'NOT ' : ''}LIKE ${at(expr.pattern, 5)}`;
-  }
-}
+/** Re-exported: the printer lives beside the AST (`parser/print.ts`) so `selectItemKey` can use it. */
+export { exprToSql } from '../parser/print.ts';
 
 /* -------------------------------------------------------------------------- */
 /* Display conversion                                                          */
@@ -438,7 +404,12 @@ function convert(
         id,
         op: 'Project',
         label: 'Project',
-        detail: plan.columns.kind === 'star' ? '*' : plan.columns.names.join(', '),
+        detail:
+          plan.columns.kind === 'star'
+            ? '*'
+            : plan.columns.kind === 'columns'
+              ? plan.columns.names.join(', ')
+              : plan.columns.items.map((i) => i.sql).join(', '),
         ...(highlight ? { highlight } : {}),
         ...cost,
         children: kid(plan.child),

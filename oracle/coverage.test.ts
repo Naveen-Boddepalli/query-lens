@@ -88,7 +88,7 @@ describe('the generators reach what the oracle is meant to check', () => {
   });
 
   it('generates every predicate form, including the negated ones and the NULL-in-list trap', () => {
-    for (const form of ['cmp', 'colcmp', 'litcmp', 'between', 'not-between', 'isnull', 'is-not-null', 'in', 'not-in', 'like', 'not-like', 'not', 'and', 'or', '<>']) {
+    for (const form of ['cmp', 'colcmp', 'litcmp', 'between', 'not-between', 'isnull', 'is-not-null', 'in', 'not-in', 'like', 'not-like', 'not', 'and', 'or', '<>', 'acmp', 'ccmp']) {
       expect(stats.preds.get(form) ?? 0, `predicate form ${form}`).toBeGreaterThan(N / 30);
     }
   });

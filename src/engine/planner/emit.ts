@@ -1,8 +1,7 @@
 import type { Emit } from '../trace.ts';
 import type { Table } from '../types.ts';
 import type { SelectStatement } from '../parser/index.ts';
-import { selectItemKey } from '../parser/index.ts';
-import { buildAggregatePlan, buildJoinPlan, buildPlan, isAggregateQuery } from './buildPlan.ts';
+import { buildAggregatePlan, buildJoinPlan, buildPlan, isAggregateQuery, projectListFor } from './buildPlan.ts';
 import { estimatePlan, rootEstimate } from './cost.ts';
 import { optimize } from './optimize.ts';
 import { exprToSql, toPlanDisplay } from './plan.ts';
@@ -102,16 +101,17 @@ export function emitPlanEvents(
     );
   }
 
-  const columns: ProjectList =
-    ast.select.kind === 'star'
-      ? { kind: 'star' }
-      : { kind: 'columns', names: ast.select.items.map(selectItemKey) };
+  const columns: ProjectList = projectListFor(ast.select);
 
   current = { op: 'Project', columns, child: current };
   emit(
     columns.kind === 'star'
       ? 'The SELECT list becomes a Project on top. `*` keeps every column, so it passes rows through unchanged.'
-      : `The SELECT list becomes a Project on top, keeping ${columns.names.join(', ')}.`,
+      : columns.kind === 'columns'
+        ? `The SELECT list becomes a Project on top, keeping ${columns.names.join(', ')}.`
+        : `The SELECT list becomes a Project on top that *computes* each item for every row: ${columns.items
+            .map((i) => `\`${i.sql}\``)
+            .join(', ')}. Arithmetic on a NULL is NULL, and dividing by zero gives NULL.`,
     { stage: 'plan', planTree: display(current) },
   );
 

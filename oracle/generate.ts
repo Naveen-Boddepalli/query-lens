@@ -10,7 +10,7 @@
 
 import fc from 'fast-check';
 import type { EngineOptions, ReplacementPolicyName, Row, SqlValue } from '../src/engine/types.ts';
-import type { AggItem, ColSpec, ColType, Op, Pred, Query, ReadQuery, Ref, TableSpec, WriteQuery } from './model.ts';
+import type { AggItem, Arith, ArithOp, ColSpec, ColType, Op, Pred, Query, ReadQuery, Ref, TableSpec, WriteQuery } from './model.ts';
 
 /* -------------------------------------------------------------------------- */
 /* Tables                                                                      */
@@ -35,7 +35,8 @@ const U_COLUMNS: ColSpec[] = [
   { name: 'w', type: 'real' },
 ];
 
-const quarter = fc.integer({ min: 0, max: 16 }).map((x) => x / 4);
+/** Quarter-steps from -2 to 4: exact in binary, so sums and products agree bit for bit in both engines. */
+const quarter = fc.integer({ min: -8, max: 16 }).map((x) => x / 4);
 
 const columnArray = <T>(arb: fc.Arbitrary<T>, n: number) => fc.array(arb, { minLength: n, maxLength: n });
 
@@ -46,7 +47,7 @@ export const tableT: fc.Arbitrary<TableSpec> = fc.integer({ min: 0, max: 24 }).c
       ids: fc.uniqueArray(fc.integer({ min: 1, max: 40 }), { minLength: count, maxLength: count }),
       ks: fc.uniqueArray(fc.integer({ min: 0, max: 80 }), { minLength: count, maxLength: count }),
       kNull: columnArray(fc.integer({ min: 0, max: 4 }).map((x) => x === 0), count),
-      ns: columnArray(nullable(fc.integer({ min: 0, max: 9 })), count),
+      ns: columnArray(nullable(fc.integer({ min: -5, max: 9 })), count),
       ss: columnArray(nullable(fc.constantFrom(...TEXT_POOL)), count),
       rs: columnArray(nullable(quarter), count),
       indexed: fc.oneof(fc.subarray(['id', 'k']), fc.constant(['id']), fc.constant(['id', 'k'])).map((cols) => [...cols]),
@@ -116,7 +117,7 @@ function typedLiteral(type: ColType): fc.Arbitrary<SqlValue> {
     ? fc.constantFrom(...TEXT_POOL)
     : type === 'real'
       ? quarter
-      : fc.oneof({ weight: 3, arbitrary: fc.integer({ min: 0, max: 9 }) }, { weight: 2, arbitrary: fc.integer({ min: 0, max: 60 }) });
+      : fc.oneof({ weight: 3, arbitrary: fc.integer({ min: -3, max: 9 }) }, { weight: 2, arbitrary: fc.integer({ min: 0, max: 60 }) });
 }
 
 /** A literal for comparing against `ref`: usually a value the column holds, sometimes a random one, occasionally NULL. */
@@ -132,6 +133,40 @@ function literalFor(ref: Ref, pool: Pool): fc.Arbitrary<SqlValue> {
 /** A literal to *assign* (UPDATE … SET): no pool, only the type. */
 const literalArb = (type: ColType): fc.Arbitrary<SqlValue> =>
   fc.oneof({ weight: 12, arbitrary: typedLiteral(type) }, { weight: 1, arbitrary: fc.constant(null) });
+
+/**
+ * An arithmetic tree over `refs`. With `divide` it is built from *integers only*
+ * and may use `/` and `%`: that is where the two engines define the same thing
+ * (whole-number division truncates toward zero; `x / 0` and `x % 0` are NULL).
+ * Without it, reals may mix in but only `+ - *` are used — QueryLens's numbers
+ * carry no int/real distinction, so `real / int` is a ledger entry
+ * (`division-of-whole-reals`), not a generated case.
+ */
+export function arithArb(refs: readonly Ref[], { divide }: { divide: boolean }, depth = 2): fc.Arbitrary<Arith> {
+  const usable = refs.filter((r) => (divide ? r.type === 'int' : numeric(r.type)));
+  // Zero and negatives are where arithmetic differs between implementations (`x / 0`, `-7 % 3`), so they are over-drawn.
+  const smallInt = fc.oneof({ weight: 1, arbitrary: fc.constant(0) }, { weight: 1, arbitrary: fc.integer({ min: -5, max: -1 }) }, { weight: 4, arbitrary: fc.integer({ min: 1, max: 9 }) });
+  const leaf: fc.Arbitrary<Arith> = fc.oneof(
+    ...(usable.length > 0
+      ? [{ weight: 3, arbitrary: fc.constantFrom(...usable).map((ref): Arith => ({ k: 'col', ref })) }]
+      : []),
+    { weight: 2, arbitrary: smallInt.map((v): Arith => ({ k: 'lit', v })) },
+    ...(divide ? [] : [{ weight: 1, arbitrary: quarter.map((v): Arith => ({ k: 'lit', v })) }]),
+  );
+  if (depth <= 0) return leaf;
+  const sub = arithArb(refs, { divide }, depth - 1);
+  const ops: ArithOp[] = divide ? ['+', '-', '*', '/', '%', '/', '%'] : ['+', '-', '*'];
+  return fc.oneof(
+    { weight: 3, arbitrary: leaf },
+    { weight: 4, arbitrary: fc.tuple(fc.constantFrom(...ops), sub, sub).map(([op, a, b]): Arith => ({ k: 'bin', op, a, b })) },
+    { weight: 1, arbitrary: sub.map((a): Arith => ({ k: 'neg', a })) },
+  );
+}
+
+const computedArb = (refs: readonly Ref[]): fc.Arbitrary<{ e: Arith; alias: string }[]> =>
+  fc
+    .array(fc.boolean().chain((divide) => arithArb(refs, { divide })), { minLength: 0, maxLength: 2 })
+    .map((es) => es.map((e, i) => ({ e, alias: `x${i}` })));
 
 const LIKE_PATTERNS = ['a%', '%a', '_b', 'a_c', '%b%', '%', 'ab', '', 'z%', 'Z%', '_', '__', '%_', "it%", "i_'s", 'b_', '%z'] as const;
 
@@ -162,6 +197,21 @@ function leafArb(refs: readonly Ref[], pool: Pool): fc.Arbitrary<Pred> {
   const litcmp = fc
     .tuple(fc.constantFrom<ColType>('int', 'text'), opArb)
     .chain(([type, op]) => fc.tuple(literalArb(type), literalArb(type)).map(([a, b]): Pred => ({ k: 'litcmp', a, op, b })));
+  const acmp = fc
+    .tuple(fc.boolean().chain((divide) => arithArb(refs, { divide }, 2)), opArb, literalArb('int'))
+    .map(([e, op, lit]): Pred => ({ k: 'acmp', e, op, lit }));
+  const numericRefs = refs.filter((r) => numeric(r.type));
+  const ccmp =
+    numericRefs.length === 0
+      ? []
+      : [
+          {
+            weight: 2,
+            arbitrary: fc
+              .tuple(fc.constantFrom(...numericRefs), opArb, fc.boolean().chain((divide) => arithArb([], { divide }, 2)))
+              .map(([ref, op, e]): Pred => ({ k: 'ccmp', ref, op, e })),
+          },
+        ];
   const isnull = fc.tuple(refArb, fc.boolean()).map(([ref, neg]): Pred => ({ k: 'isnull', ref, neg }));
   // IN's list may hold a NULL (literalFor allows one) — `x NOT IN (1, NULL)` is the classic trap.
   const inList = fc
@@ -186,6 +236,8 @@ function leafArb(refs: readonly Ref[], pool: Pool): fc.Arbitrary<Pred> {
     { weight: 2, arbitrary: between },
     { weight: 1, arbitrary: litcmp },
     { weight: 2, arbitrary: isnull },
+    { weight: 2, arbitrary: acmp },
+    ...ccmp,
     { weight: 2, arbitrary: inList },
     ...like,
     ...colcmp,
@@ -270,12 +322,16 @@ export function selectArb(t: TableSpec, pool: Pool): fc.Arbitrary<Query> {
         nil: undefined,
         freq: 2,
       }),
+      computed: fc.oneof({ weight: 3, arbitrary: fc.constant<{ e: Arith; alias: string }[]>([]) }, { weight: 1, arbitrary: computedArb(refs) }),
       limit: limitArb,
     })
-    .map(({ proj, where, order, limit }): Query => ({
+    .map(({ proj, where, order, computed, limit }): Query => ({
       kind: 'select',
       table: t.name,
-      proj,
+      // `*` cannot share a SELECT list with anything else in QueryLens (SQLite allows `*, x`; a documented
+      // limit, plan.md §25.4 B1b) — so computed columns ride on an explicit list of every column instead.
+      proj: proj === '*' && computed.length > 0 ? refs : proj,
+      ...(computed.length > 0 ? { computed } : {}),
       where,
       ...(order ? { order } : {}),
       ...(limit === undefined ? {} : { limit }),
@@ -325,15 +381,17 @@ export function joinArb(t: TableSpec, u: TableSpec, pool: Pool): fc.Arbitrary<Qu
     .record({
       on: fc.constantFrom(...pairs),
       proj: uniqueRefs(all, 1, 5),
+      computed: fc.oneof({ weight: 3, arbitrary: fc.constant<{ e: Arith; alias: string }[]>([]) }, { weight: 1, arbitrary: computedArb(all) }),
       where: whereArb(all, pool, 2),
       limit: limitArb,
     })
-    .map(({ on, proj, where, limit }): Query => ({
+    .map(({ on, proj, computed, where, limit }): Query => ({
       kind: 'join',
       left: t.name,
       right: u.name,
       on,
       proj,
+      ...(computed.length > 0 ? { computed } : {}),
       where,
       ...(limit === undefined ? {} : { limit }),
     }));
@@ -356,7 +414,7 @@ export function insertArb(t: TableSpec): fc.Arbitrary<WriteQuery> {
     .tuple(
       fc.option(fc.subarray([...INSERT_COLUMNS], { minLength: 1 }), { nil: undefined, freq: 2 }),
       fc.record({
-        n: nullable(fc.integer({ min: 0, max: 9 })),
+        n: nullable(fc.integer({ min: -5, max: 9 })),
         s: nullable(fc.constantFrom(...TEXT_POOL)),
         r: nullable(quarter),
       }),
@@ -382,9 +440,27 @@ export function updateArb(t: TableSpec, pool: Pool): fc.Arbitrary<WriteQuery> {
       where: whereArb(refs, pool, 2),
     })
     .chain(({ set, where }) =>
-      fc.tuple(...set.map((c) => literalArb(c.type))).map(
-        (values): WriteQuery => ({ kind: 'update', table: t.name, set: set.map((c, i) => ({ col: c.name, value: values[i]! })), where }),
-      ),
+      // Each assignment is a literal, or — a third of the time — arithmetic over the row's own columns
+      // (`SET n = n + 1`). `n` only ever takes integer arithmetic; `r` may take `+ - *` over reals too.
+      fc
+        .tuple(
+          ...set.map((c) =>
+            fc.oneof(
+              { weight: 2, arbitrary: literalArb(c.type).map((value) => ({ value, expr: undefined as Arith | undefined })) },
+              ...(c.type === 'text'
+                ? []
+                : [{ weight: 3, arbitrary: arithArb(refs, { divide: c.type === 'int' }, 1).map((expr) => ({ value: null as SqlValue, expr: expr })) }]),
+            ),
+          ),
+        )
+        .map(
+          (values): WriteQuery => ({
+            kind: 'update',
+            table: t.name,
+            set: set.map((c, i) => ({ col: c.name, value: values[i].value, ...(values[i].expr ? { expr: values[i].expr } : {}) })),
+            where,
+          }),
+        ),
     );
 }
 

@@ -175,12 +175,12 @@ test('the grammar sandbox diagrams every rule, and a rule reference jumps to its
   await expect(page.getByRole('heading', { name: 'Grammar sandbox' })).toBeVisible();
 
   // Every rule the grammar data names gets its own row.
-  for (const rule of ['statement', 'select', 'join', 'delete', 'insert', 'update', 'aggregateCall', 'qualifiedColumn']) {
+  for (const rule of ['statement', 'select', 'join', 'delete', 'insert', 'update', 'aggregateCall', 'qualifiedColumn', 'orExpr', 'predicate', 'operand', 'primary']) {
     await expect(page.locator(`#rule-${rule}`)).toBeAttached();
   }
 
   // Clicking a rule reference (not the heading of the same name) jumps to that rule's own row.
-  await page.locator('#rule-operand a', { hasText: 'qualifiedColumn' }).click();
+  await page.locator('#rule-primary a', { hasText: 'qualifiedColumn' }).click();
   await expect(page.locator('#rule-qualifiedColumn')).toBeInViewport();
 });
 

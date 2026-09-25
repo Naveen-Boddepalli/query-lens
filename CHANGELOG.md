@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Arithmetic and computed columns** (plan.md §25.4 B1, second slice) — `+ - * / %`, unary minus and
+  parentheses in `SELECT`, `WHERE` and `UPDATE … SET`, and `AS` to name a computed column
+  (`SELECT price * qty AS total`). NULL in, NULL out; `x / 0` is NULL; whole-number `/` truncates toward zero.
+  `UPDATE … SET n = n + 1` reads the row as it was, so `SET a = b, b = a` swaps the two. `INSERT` accepts
+  `-5` and arithmetic on literals. The optimizer works constant arithmetic out once (`id = 2 + 3` becomes
+  `id = 5`, and *then* uses the index), while `id + 1 = 6` correctly cannot — the index is ordered by `id`.
+  Not yet: arithmetic on an aggregate, beside `GROUP BY` or in `ORDER BY`; `SELECT *, x` (found by the
+  oracle — SQLite accepts it, QueryLens needs `*` alone). Two ledger entries record the deliberate
+  differences from SQLite: arithmetic on text, and dividing a REAL that holds a whole number.
 - **Richer `WHERE`: `OR`, `NOT`, parentheses, `<>`, `IS [NOT] NULL`, `IN`, `LIKE`** (plan.md §25.4 B1, first slice) —
   the ceiling a sceptical student hit in ten minutes. A predicate is now a tree (`OR` binds loosest, then `AND`,
   then `NOT`, then one test on an operand) with real three-valued logic: `NOT` of UNKNOWN stays UNKNOWN, so

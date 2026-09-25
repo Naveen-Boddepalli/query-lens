@@ -19,6 +19,7 @@
 
 import { columnKey } from '../parser/index.ts';
 import type { CompareOp, Expr } from '../parser/index.ts';
+import { arithmetic, negate as negateValue } from '../value.ts';
 import type { Row, SqlValue } from '../types.ts';
 
 /** null means UNKNOWN. */
@@ -30,6 +31,11 @@ export function evaluateValue(expr: Expr, row: Row): SqlValue {
       return expr.value;
     case 'column':
       return row[columnKey(expr)] ?? null;
+    // Arithmetic is a value (plan.md §25.4 B1b): NULL in, NULL out; `x / 0` is NULL; whole-number `/` truncates.
+    case 'arith':
+      return arithmetic(expr.op, evaluateValue(expr.left, row), evaluateValue(expr.right, row));
+    case 'neg':
+      return negateValue(evaluateValue(expr.operand, row));
     default:
       return evaluatePredicate(expr, row);
   }
@@ -155,6 +161,13 @@ export function evaluatePredicate(expr: Expr, row: Row): Truth {
       const pattern = evaluateValue(expr.pattern, row);
       if (value === null || pattern === null) return null;
       return negate(likeMatches(textOf(value), textOf(pattern)), expr.negated);
+    }
+
+    case 'arith':
+    case 'neg': {
+      // A number used where a truth value is wanted: non-zero is TRUE, NULL is UNKNOWN.
+      const value = evaluateValue(expr, row);
+      return value === null ? null : Boolean(value);
     }
 
     case 'literal':

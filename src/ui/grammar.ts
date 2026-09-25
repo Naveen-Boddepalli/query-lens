@@ -98,18 +98,23 @@ export const GRAMMAR: GrammarRule[] = [
       opt(lit(';')),
     ],
   },
-  { name: 'assignment', parts: [rule('identifier'), lit('='), rule('value')] },
+  { name: 'assignment', parts: [rule('identifier'), lit('='), rule('expr')] },
   { name: 'columnList', parts: [lit('('), rule('identifier'), repeat(lit(','), rule('identifier')), lit(')')] },
   { name: 'valueList', parts: [lit('('), rule('value'), repeat(lit(','), rule('value')), lit(')')] },
+  // An INSERT value: a literal, optionally negated. (Arithmetic on literals is accepted too and folded to
+  // one value at parse time; a column is rejected — there is no row to read it from.)
   {
     name: 'value',
-    parts: [choice([rule('number')], [rule('string')], [lit('NULL')], [lit('TRUE')], [lit('FALSE')])],
+    parts: [choice([opt(lit('-')), rule('number')], [rule('string')], [lit('NULL')], [lit('TRUE')], [lit('FALSE')])],
   },
   {
     name: 'selectList',
     parts: [choice([lit('*')], [rule('selectItem'), repeat(lit(','), rule('selectItem'))])],
   },
-  { name: 'selectItem', parts: [choice([rule('qualifiedColumn')], [rule('aggregateCall')])] },
+  {
+    name: 'selectItem',
+    parts: [choice([rule('aggregateCall')], [rule('expr'), opt(lit('AS'), rule('identifier'))])],
+  },
   {
     name: 'aggregateCall',
     parts: [
@@ -143,8 +148,18 @@ export const GRAMMAR: GrammarRule[] = [
     name: 'compareOp',
     parts: [choice([lit('=')], [lit('<>')], [lit('!=')], [lit('<')], [lit('>')], [lit('<=')], [lit('>=')])],
   },
+  // Arithmetic (plan.md §25.4 B1b): `+ -` over `* / %` over unary minus over a primary.
   {
     name: 'operand',
+    parts: [rule('multiplicative'), repeat(choice([lit('+')], [lit('-')]), rule('multiplicative'))],
+  },
+  {
+    name: 'multiplicative',
+    parts: [rule('unary'), repeat(choice([lit('*')], [lit('/')], [lit('%')]), rule('unary'))],
+  },
+  { name: 'unary', parts: [choice([lit('-'), rule('unary')], [rule('primary')])] },
+  {
+    name: 'primary',
     parts: [
       choice(
         [rule('qualifiedColumn')],

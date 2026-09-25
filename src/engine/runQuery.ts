@@ -272,6 +272,7 @@ function referencedColumns(ast: Statement): ColumnRef[] {
   if (ast.kind === 'select' && ast.select.kind === 'columns') {
     for (const item of ast.select.items) {
       if (item.kind === 'column') push(item);
+      else if (item.kind === 'expression') walkExpr(item.expr, (e) => { if (e.kind === 'column') push(e); });
       else if (item.arg.kind === 'column') push(item.arg);
     }
   }
@@ -289,6 +290,8 @@ function referencedColumns(ast: Statement): ColumnRef[] {
   if (ast.kind === 'insert' && ast.columns) refs.push(...ast.columns.names);
   if (ast.kind === 'update') {
     refs.push(...ast.set.assignments.map((a) => ({ name: a.column, span: a.columnSpan })));
+    // A SET value can read columns (`SET n = n + 1`), and each must exist.
+    for (const a of ast.set.assignments) walkExpr(a.value, (e) => { if (e.kind === 'column') push(e); });
   }
   return refs;
 }

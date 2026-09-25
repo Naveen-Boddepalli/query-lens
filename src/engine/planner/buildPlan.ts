@@ -12,7 +12,8 @@
  * legible when the two are shown side by side.
  */
 
-import type { DeleteStatement, JoinClause, SelectItem, SelectStatement, UpdateStatement } from '../parser/index.ts';
+import type { DeleteStatement, Expr, JoinClause, SelectItem, SelectStatement, UpdateStatement } from '../parser/index.ts';
+import { exprToSql } from '../parser/print.ts';
 import { selectItemArgColumn, selectItemKey } from '../parser/index.ts';
 import type { AggregateSpec, Plan, ProjectList } from './plan.ts';
 
@@ -104,6 +105,31 @@ export function buildJoinPlan(
   };
 }
 
+/**
+ * The `Project` list for a SELECT list. Plain columns and aggregates are read
+ * off the row by name; as soon as any item is *computed* (plan.md §25.4 B1b) the
+ * whole list becomes expressions — each item is then evaluated, a plain column
+ * just being the simplest expression. Shared with `emit.ts`'s narration so the
+ * two never disagree.
+ */
+export function projectListFor(select: SelectStatement['select']): ProjectList {
+  if (select.kind === 'star') return { kind: 'star' };
+  if (!select.items.some((item) => item.kind === 'expression')) {
+    return { kind: 'columns', names: select.items.map(selectItemKey) };
+  }
+  return {
+    kind: 'expressions',
+    items: select.items.map((item) => {
+      const expr: Expr =
+        item.kind === 'expression'
+          ? item.expr
+          : { kind: 'column', name: item.kind === 'column' ? item.name : selectItemKey(item), ...(item.kind === 'column' && item.table ? { table: item.table } : {}), span: item.span };
+      const key = selectItemKey(item);
+      return { key, expr, sql: item.kind === 'expression' && item.alias ? `${exprToSql(item.expr)} AS ${item.alias}` : key };
+    }),
+  };
+}
+
 export function buildPlan(
   ast: SelectStatement,
   aggregateStrategy: 'hash' | 'sort' = 'hash',
@@ -127,10 +153,7 @@ export function buildPlan(
     ? { op: 'Sort', column: ast.orderBy.column, direction: ast.orderBy.direction, child: aggregated }
     : aggregated;
 
-  const columns: ProjectList =
-    ast.select.kind === 'star'
-      ? { kind: 'star' }
-      : { kind: 'columns', names: ast.select.items.map(selectItemKey) };
+  const columns = projectListFor(ast.select);
 
   const projected: Plan = { op: 'Project', columns, child: sorted };
 
