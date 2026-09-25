@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Opt-in field performance in the study kit** (plan.md §25.4 A6) — §14.2's open question, *does it feel fast
+  on a lecture-hall laptop?*, cannot be answered by telemetry the project refuses to have, so it can only be
+  *volunteered*. The study's consent screen gains a separate, unticked box: record this device's **INP**
+  (Interaction to Next Paint) while the session runs and add it to the result code, with cores, screen width and
+  touch as context. It measures in the lesson tabs (not on `/study`), in the participant's own browser, lapses
+  after three hours by itself and is deleted when the session ends; the code page says so when it is included.
+  A lazy 1.1 kB chunk that nobody else downloads. `pnpm study collate` writes it to the private map (never the
+  blind scoring sheet) and `report` adds a responsiveness table — median, worst, good / needs-work / poor —
+  with the caveat that a handful of devices is an anecdote. Verified end to end in Chromium (a deliberately slow
+  click in the lesson tab arrives in the result code).
 - **Release discipline** (plan.md §25.4 A4). `RELEASING.md` writes down how a release is cut — one commit, the
   tag on that commit (1.0.0's tag sits on the deployed commit and its `package.json` still says `0.0.0`) — and
   what to check after a deploy. `pnpm release-notes [version]` derives the GitHub release body from

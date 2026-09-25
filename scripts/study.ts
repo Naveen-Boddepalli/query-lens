@@ -265,9 +265,22 @@ export async function collate(
     });
   });
 
+  // `perf` is '' for someone who did not opt in (plan.md §25.4 A6), `none` for one who did but has no INP to
+  // report (a browser without the Event Timing API, or nothing measurable happened), `ok` otherwise. It lives in
+  // the map, never the blind sheet.
+  const perfCells = (r: StudyResult): string[] => {
+    if (!r.perf) return ['', '', '', '', '', ''];
+    return [
+      r.perf.inp === null ? 'none' : 'ok',
+      r.perf.inp === null ? '' : String(Math.round(r.perf.inp)),
+      String(r.perf.interactions), String(r.perf.cores), String(r.perf.viewportPx), String(r.perf.touch),
+    ];
+  };
   const map = toCsv(
-    ['code', 'pid', 'arm', 'materialSeconds', 'testUsedSeconds', 'timedOut'],
-    order.map((r, i) => [codes[i] ?? '', r.pid, r.arm, String(r.materialSeconds), String(r.testUsedSeconds), String(r.timedOut)]),
+    ['code', 'pid', 'arm', 'materialSeconds', 'testUsedSeconds', 'timedOut', 'perf', 'inpMs', 'interactions', 'cores', 'viewportPx', 'touch'],
+    order.map((r, i) => [
+      codes[i] ?? '', r.pid, r.arm, String(r.materialSeconds), String(r.testUsedSeconds), String(r.timedOut), ...perfCells(r),
+    ]),
   );
   const scoresTemplate = toCsv(['code', ...qids], codes.map((c) => [c, ...qids.map(() => '')]));
 
@@ -327,6 +340,70 @@ export function summarise(mapCsv: string, scoresCsv: string, points: number[]): 
   return { arms, problems };
 }
 
+/* ----- responsiveness (opt-in INP, plan.md §25.4 A6) ------------------------- */
+
+export interface PerfSummaryRow {
+  arm: StudyArm;
+  /** Participants who opted in, and how many of those had a browser that could measure. */
+  optedIn: number;
+  measured: number;
+  median: number;
+  worst: number;
+  good: number;
+  needsImprovement: number;
+  poor: number;
+}
+
+/** Reads the `perf` columns of `map.csv`. Independent of scoring: timing is reported for everyone who opted in. */
+export function summarisePerf(mapCsv: string): PerfSummaryRow[] {
+  const byArm = new Map<StudyArm, { optedIn: number; inp: number[] }>();
+  for (const m of parseCsv(mapCsv)) {
+    const arm = m.arm === 'app' || m.arm === 'text' ? m.arm : null;
+    if (!arm || !m.perf) continue;
+    const bucket = byArm.get(arm) ?? { optedIn: 0, inp: [] };
+    bucket.optedIn += 1;
+    const ms = Number(m.inpMs);
+    if (m.perf === 'ok' && m.inpMs !== '' && Number.isFinite(ms)) bucket.inp.push(ms);
+    byArm.set(arm, bucket);
+  }
+  const rows: PerfSummaryRow[] = [];
+  for (const [arm, { optedIn, inp }] of byArm) {
+    const sorted = [...inp].sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    const median = sorted.length === 0 ? 0 : sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+    rows.push({
+      arm, optedIn, measured: sorted.length, median, worst: sorted.length === 0 ? 0 : sorted[sorted.length - 1],
+      good: sorted.filter((v) => v <= 200).length,
+      needsImprovement: sorted.filter((v) => v > 200 && v <= 500).length,
+      poor: sorted.filter((v) => v > 500).length,
+    });
+  }
+  return rows.sort((a, b) => a.arm.localeCompare(b.arm));
+}
+
+export function renderPerf(rows: PerfSummaryRow[]): string {
+  if (rows.length === 0) return '';
+  const lines = [
+    '',
+    'Responsiveness — INP, opt-in participants only',
+    'arm    opted-in  measured  median  worst  good  needs-work  poor',
+    '-----  --------  --------  ------  -----  ----  ----------  ----',
+  ];
+  for (const r of rows) {
+    lines.push(
+      `${r.arm.padEnd(5)}  ${String(r.optedIn).padStart(8)}  ${String(r.measured).padStart(8)}  ${String(Math.round(r.median)).padStart(6)}  ${String(Math.round(r.worst)).padStart(5)}  ${String(r.good).padStart(4)}  ${String(r.needsImprovement).padStart(10)}  ${String(r.poor).padStart(4)}`,
+    );
+  }
+  lines.push(
+    '',
+    'INP in milliseconds: ≤ 200 good, ≤ 500 needs improvement, above that poor (web.dev). It measures the app,',
+    'so it is only meaningful for participants who used it — the text arm mostly did not. A handful of',
+    'devices is an anecdote about those devices, not a distribution; §14.2 asks "does it feel fast on a',
+    'lecture-hall laptop?", and this answers it for exactly the laptops that took part.',
+  );
+  return lines.join('\n') + '\n';
+}
+
 /** The smallest standardised difference detectable at 80% power, α = .05, two-sided, equal groups. */
 export function minDetectableD(nPerArm: number): number {
   return Math.sqrt(15.68 / nPerArm);
@@ -372,7 +449,8 @@ const HELP = `pnpm study — the researcher's side of the §9 study kit
            blind.md (score this), map.csv (keep closed) and scores-template.csv.
 
   report   --map <map.csv> --scores <scores.csv>
-           Per-arm n, mean, SD, min, max — descriptive only.
+           Per-arm n, mean, SD, min, max — descriptive only. If any participant opted in to the
+           optional responsiveness timing, also their INP (median, worst, good / needs-work / poor).
 
 The instrument (control text, questions, rubric) is read from STUDY.md.
 `;
@@ -442,7 +520,7 @@ export async function main(argv: string[], io: Io, studyMd: () => string): Promi
       const { arms, problems } = summarise(io.read(f.map), io.read(f.scores), instrument.points);
       for (const p of problems) io.err(`! ${p}\n`);
       if (arms.length === 0) throw new Error('nothing to report yet');
-      io.out(renderReport(arms, instrument.points.reduce((a, b) => a + b, 0)));
+      io.out(renderReport(arms, instrument.points.reduce((a, b) => a + b, 0)) + renderPerf(summarisePerf(io.read(f.map))));
       return problems.length > 0 ? 1 : 0;
     }
 

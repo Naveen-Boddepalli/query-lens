@@ -131,6 +131,11 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
   // its own lazy chunk with its own ceiling, never a slice of a group that is
   // already at its limit. It carries no study content: the questions and the
   // control-arm reading arrive in each participant's link (`src/study/pack.ts`).
+  // plan.md §25.4 A6: the opt-in INP recorder. Its own lazy chunk, fetched by
+  // `main.tsx` only for someone who ticked the study's optional box, so nobody
+  // else downloads a byte of it (the study page imports its storage helpers too,
+  // which is why it is a shared chunk and not folded into `StudyPage-*`).
+  { name: 'inp', test: /^inp-/, kb: 2, note: 'opt-in INP recorder for the §9 study (plan.md §25.4 A6) — lazy, fetched only after a participant opts in' },
   { name: 'study', test: /^StudyPage-/, kb: 7, note: '/study — the §9 study runner (unlisted); the instrument travels in the link, not the bundle (plan.md §25.4 A2)' },
   // `html-to-image`, behind the panel "Download PNG" button (§20.3). `import()`ed
   // on the first export, never at route load — the one runtime dependency the

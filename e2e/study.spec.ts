@@ -210,3 +210,80 @@ test('a damaged link, or one pointing off-site, is refused with a reason', async
   await expect(page.getByRole('heading', { name: 'This link did not work' })).toBeVisible();
   await expect(page.getByText(/must be a path on this site/)).toBeVisible();
 });
+
+/**
+ * plan.md §25.4 A6 — field performance without telemetry. A participant may
+ * opt in, separately from consenting to the study, to have their own device's
+ * interaction timing (INP) recorded and included in the result code they hand
+ * back by hand. Nothing is transmitted; the measurement runs in the *app's*
+ * tabs (the lessons open in a new one), reads through localStorage, and is
+ * switched off and forgotten when the session ends.
+ */
+test('opting in records INP in the lesson tab, adds it to the result code, and forgets it afterwards', async ({ page, context }) => {
+  await open(page, pack({ materialSeconds: 5 }));
+
+  // The optional box is separate from consent, unticked, and Begin does not depend on it.
+  const optional = page.getByRole('checkbox', { name: /Optional: also record how responsive/ });
+  await expect(optional).not.toBeChecked();
+  await axeClean(page);
+  await page.getByRole('checkbox', { name: /I have read this/ }).check();
+  await optional.check();
+  await page.getByRole('button', { name: 'Begin' }).click();
+
+  const deadline = () => page.evaluate(() => Number(localStorage.getItem('querylens:perf-optin')));
+  expect(await deadline()).toBeGreaterThan(Date.now());
+
+  // The lesson tab: a click that blocks for 80 ms is an interaction slow enough for the Event Timing API to report.
+  const app = await context.newPage();
+  await app.goto('/playground');
+  await app.evaluate(() => {
+    document.addEventListener('click', () => {
+      const t = performance.now();
+      while (performance.now() - t < 80) { /* an 80 ms handler */ }
+    });
+  });
+  await expect
+    .poll(async () => {
+      await app.locator('body').click({ position: { x: 5, y: 5 } });
+      await app.evaluate(() => { window.dispatchEvent(new Event('pagehide')); }); // the recorder's flush
+      return app.evaluate(() => (JSON.parse(localStorage.getItem('querylens:perf') ?? '{"count":0}') as { count: number }).count);
+    }, { timeout: 15_000 })
+    .toBeGreaterThan(0);
+  await app.close();
+
+  // Finish the session and read the result code — decoded with Node's zlib, not the app's codec.
+  await expect(page.getByRole('button', { name: 'Continue to the questions' })).toBeEnabled({ timeout: 10_000 });
+  await page.getByRole('button', { name: 'Continue to the questions' }).click();
+  await page.getByRole('button', { name: 'Finish' }).click();
+  const code = await page.getByRole('textbox', { name: 'Your result code' }).inputValue();
+  const result = fromB64(code.replace(/^QLS1\./, ''));
+  const perf = result.perf as { inp: number | null; interactions: number; cores: number; viewportPx: number; touch: boolean };
+  expect(perf.inp).toBeGreaterThanOrEqual(60);
+  expect(perf.interactions).toBeGreaterThan(0);
+  expect(perf.cores).toBeGreaterThan(0);
+  expect(Object.keys(perf).sort()).toEqual(['cores', 'inp', 'interactions', 'touch', 'viewportPx']);
+  await expect(page.getByText(/plus the responsiveness timing and device description you opted in to/)).toBeVisible();
+
+  // Ended: measurement off, samples gone.
+  expect(await page.evaluate(() => [localStorage.getItem('querylens:perf-optin'), localStorage.getItem('querylens:perf')])).toEqual([null, null]);
+});
+
+test('without opting in, nothing is measured and the result code has no perf block', async ({ page, context }) => {
+  await open(page, pack({ materialSeconds: 5 }));
+  await throughConsent(page);
+  expect(await page.evaluate(() => localStorage.getItem('querylens:perf-optin'))).toBeNull();
+
+  const app = await context.newPage();
+  await app.goto('/playground');
+  await app.locator('body').click({ position: { x: 5, y: 5 } });
+  await app.evaluate(() => { window.dispatchEvent(new Event('pagehide')); });
+  expect(await app.evaluate(() => localStorage.getItem('querylens:perf'))).toBeNull();
+  await app.close();
+
+  await expect(page.getByRole('button', { name: 'Continue to the questions' })).toBeEnabled({ timeout: 10_000 });
+  await page.getByRole('button', { name: 'Continue to the questions' }).click();
+  await page.getByRole('button', { name: 'Finish' }).click();
+  const code = await page.getByRole('textbox', { name: 'Your result code' }).inputValue();
+  expect(fromB64(code.replace(/^QLS1\./, ''))).not.toHaveProperty('perf');
+  await expect(page.getByText(/and nothing else\. This page has not sent it anywhere/)).toBeVisible();
+});

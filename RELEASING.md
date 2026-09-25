@@ -69,3 +69,13 @@ Against the live (or preview) origin:
       then `curl -sI` each URL).
 - [ ] `/robots.txt` and `/favicon.svg` respond; the fonts load (no CSP violations in the console).
 - [ ] The build stamp in the served HTML (`meta[name="querylens:build"]`) matches the commit you meant to ship.
+
+## After launch: field performance
+
+There is no telemetry (plan.md §14.4), so real-user performance comes from two places, neither of which the site
+sends anything for:
+
+- **CrUX** — Chrome's public field data — once the origin has enough traffic to appear: PageSpeed Insights or
+  the CrUX API for the origin. INP, LCP and CLS on real visitors' devices, at no cost to anyone's privacy.
+- **The study's opt-in INP** (`pnpm study report` prints it): a participant's own device, volunteered in the
+  result code. Small n, but it is the only number from a *lecture-hall* laptop or a phone in a lap.

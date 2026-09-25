@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
-  assignArms, buildPack, collate, extractInstrument, main, makeLinks, minDetectableD, parseCsv, summarise,
+  assignArms, buildPack, collate, extractInstrument, main, makeLinks, minDetectableD, parseCsv, renderPerf, summarise, summarisePerf,
 } from '../study.ts';
 import type { Instrument, Io } from '../study.ts';
 import { decodePack } from '../../src/study/pack.ts';
@@ -165,6 +165,58 @@ describe('collate', () => {
     expect(c.problems.join('\n')).toMatch(/P99 is not in the key/);
     expect(c.problems.join('\n')).toMatch(/P02's arm disagrees/);
     expect(c.problems.filter((p) => /damaged|does not start/.test(p))).toHaveLength(2);
+  });
+});
+
+describe('opt-in responsiveness in collate and report (plan.md §25.4 A6)', () => {
+  const perf = (inp: number | null) => ({ inp, interactions: 70, cores: 8, viewportPx: 1280, touch: false });
+
+  it('puts INP in the private map — never the blind sheet — and leaves it empty for anyone who did not opt in', async () => {
+    const lines = [
+      await code('P01', 'app', { q1: 'a' }, { perf: perf(240) }),
+      await code('P02', 'text', { q2: 'b' }),
+      await code('P03', 'app', { q3: 'c' }, { perf: perf(null) }),
+      await code('P04', 'text', {}),
+    ];
+    const c = await collate(KEY, lines, 'seed', instrument);
+    expect(c.problems).toEqual([]);
+    const map = parseCsv(c.map);
+    const row = (pid: string) => map.find((r) => r.pid === pid)!;
+    expect(row('P01')).toMatchObject({ perf: 'ok', inpMs: '240', interactions: '70', cores: '8', viewportPx: '1280', touch: 'false' });
+    expect(row('P02')).toMatchObject({ perf: '', inpMs: '' });
+    expect(row('P03')).toMatchObject({ perf: 'none', inpMs: '' });
+    // The scorer must learn nothing about arm, participant or device.
+    expect(c.blind).not.toMatch(/\b(240|inp|cores|viewportPx|touch)\b/i);
+  });
+
+  const MAP = [
+    'code,pid,arm,materialSeconds,testUsedSeconds,timedOut,perf,inpMs,interactions,cores,viewportPx,touch',
+    'R01,P01,app,720,240,false,ok,120,60,8,1280,false',
+    'R02,P03,app,720,240,false,ok,350,40,4,390,true',
+    'R03,P05,app,720,240,false,ok,900,20,4,390,true',
+    'R04,P07,app,720,240,false,none,,0,4,390,true',
+    'R05,P02,text,720,240,false,,,,,,',
+  ].join('\n');
+
+  it('summarises INP per arm for those who opted in, independent of scoring', () => {
+    const rows = summarisePerf(MAP);
+    expect(rows).toHaveLength(1); // the text arm has nobody who opted in
+    expect(rows[0]).toMatchObject({ arm: 'app', optedIn: 4, measured: 3, median: 350, worst: 900, good: 1, needsImprovement: 1, poor: 1 });
+  });
+
+  it('renders a table with the honest caveat, and nothing at all when nobody opted in', () => {
+    const text = renderPerf(summarisePerf(MAP));
+    expect(text).toMatch(/Responsiveness/);
+    expect(text).toMatch(/app\s+4\s+3\s+350\s+900\s+1\s+1\s+1/);
+    expect(text).toMatch(/anecdote/);
+    expect(renderPerf(summarisePerf('code,pid,arm,perf\nR01,P01,app,\n'))).toBe('');
+  });
+
+  it('the report command appends it after the scores', async () => {
+    const scores = 'code,q1,q2,q3,q4,q5\nR01,1,1,1,1,1\nR02,1,1,1,1,1\nR03,1,1,1,1,1\nR04,1,1,1,1,1\nR05,1,1,1,1,1\n';
+    const m = memoryIo({ 'map.csv': MAP, 'scores.csv': scores });
+    expect(await run(['report', '--map', 'map.csv', '--scores', 'scores.csv'], m)).toBe(0);
+    expect(m.out()).toMatch(/Responsiveness — INP, opt-in participants only/);
   });
 });
 

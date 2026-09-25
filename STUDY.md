@@ -219,6 +219,17 @@ sent to a server. The page is a kiosk (no nav, footer or docs links) so the cont
 the app's own explanations. A reload mid-session resumes it; the clock runs on timestamps, so it cannot be
 stretched. Close-and-abandon records nothing anywhere.
 
+**Optional: responsiveness on the participant's own device (plan.md §25.4 A6).** Beneath the consent box is a
+*separate*, unticked box — "also record how responsive QueryLens feels on this device". It is not part of the
+instrument and declining changes nothing else. If ticked, the participant's browser measures **INP**
+(Interaction to Next Paint — how long the app takes to respond to a tap or click) *in the app's own tabs*
+(the lessons), keeps it in that browser's `localStorage`, and adds it to the result code they send you, with a
+coarse device description (processor cores, screen width, touch or not) so a number can be read in context. It
+never runs on `/study` itself, lapses on its own after three hours, and is deleted the moment the session ends.
+It answers §14.2's open question — *does it feel fast on the hardware people actually use?* — for exactly the
+devices that took part, which is an anecdote and not a distribution. Check that your consent text does not
+promise "nothing else is recorded" if you use it; the result-code page already says so for opted-in participants.
+
 **4. Collect the codes** — one per line in a text file (`codes.txt`). Then:
 
 ```bash
@@ -239,7 +250,10 @@ in case a participant typed something identifying.
 pnpm study report --map scoring/map.csv --scores scoring/scores.csv
 ```
 
-which prints each arm's n, mean, SD, min, max and how many hit the clock. **There is deliberately no p-value.**
+which prints each arm's n, mean, SD, min, max and how many hit the clock — and, if anyone opted in to the
+timing above, a second table of INP (median, worst, and how many were good ≤ 200 ms, needs-work ≤ 500 ms or
+poor). The timing lives in `map.csv` (`perf`, `inpMs`, `interactions`, `cores`, `viewportPx`, `touch`), never
+in `blind.md`. **There is deliberately no p-value.**
 With 5–10 per arm the study can only detect a very large effect (n ≈ 15.7 / d² per arm: about 11 for d = 1.2,
 about 63 for d = 0.5); the report says so. Present it as an exploratory signal, and include a result where the
 text arm matches or beats the app (plan.md §25.6 has the decision table for each outcome).

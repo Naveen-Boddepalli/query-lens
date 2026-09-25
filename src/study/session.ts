@@ -1,3 +1,4 @@
+import type { PerfSummary } from '../perf/inp.ts';
 import type { StudyArm, StudyPack } from './pack.ts';
 import { MAX_ANSWER, RESULT_VERSION } from './result.ts';
 import type { StudyResult } from './result.ts';
@@ -42,6 +43,12 @@ export interface Session {
   finishedAt: number | null;
   timedOut: boolean;
   answers: Record<string, string>;
+  /**
+   * plan.md §25.4 A6 — the participant ticked the *optional* box to have this
+   * device's interaction timing (INP) recorded and included in the result code.
+   * Separate from consent to the study itself: declining changes nothing else.
+   */
+  perfOptIn: boolean;
   /** Filled in asynchronously once the session is done (compression is async). */
   resultCode: string | null;
 }
@@ -63,6 +70,7 @@ export function newSession(code: string, pack: StudyPack): Session {
     finishedAt: null,
     timedOut: false,
     answers: {},
+    perfOptIn: false,
     resultCode: null,
   };
 }
@@ -86,10 +94,10 @@ export function testLeft(s: Session, now: number): number {
   return s.testStartedAt === null ? s.testSeconds : secondsLeft(now, s.testStartedAt, s.testSeconds);
 }
 
-/** The participant agreed: the material clock starts now. */
-export function agree(s: Session, now: number): Session {
+/** The participant agreed: the material clock starts now. `perfOptIn` is the separate, optional box. */
+export function agree(s: Session, now: number, perfOptIn = false): Session {
   if (s.phase !== 'consent') return s;
-  return { ...s, phase: 'material', consentAt: now, materialStartedAt: now };
+  return { ...s, phase: 'material', consentAt: now, materialStartedAt: now, perfOptIn };
 }
 
 /** Both arms get the same fixed time with the material — the point of a control. */
@@ -124,7 +132,12 @@ export function tick(s: Session, now: number): Session {
   return s;
 }
 
-export function toResult(s: Session, build: string): StudyResult | null {
+/**
+ * `perf` is the timing captured when the session ended (plan.md §25.4 A6); it is
+ * used only for a participant who opted in, so a summary passed for someone who
+ * did not can never leak into their code.
+ */
+export function toResult(s: Session, build: string, perf?: PerfSummary | null): StudyResult | null {
   if (s.phase !== 'done' || s.consentAt === null || s.testStartedAt === null || s.finishedAt === null) return null;
   return {
     v: RESULT_VERSION,
@@ -139,6 +152,7 @@ export function toResult(s: Session, build: string): StudyResult | null {
     timedOut: s.timedOut,
     answers: s.questionIds.map((id) => ({ id, text: s.answers[id] ?? '' })),
     build,
+    ...(s.perfOptIn && perf ? { perf } : {}),
   };
 }
 
@@ -179,7 +193,10 @@ export function parseSession(raw: unknown): Session | null {
     phase: phase as Phase,
     consentAt: raw.consentAt, materialStartedAt: raw.materialStartedAt,
     testStartedAt: raw.testStartedAt, finishedAt: raw.finishedAt,
-    timedOut: raw.timedOut, answers, resultCode: raw.resultCode,
+    timedOut: raw.timedOut, answers,
+    // Sessions saved before A6 have no such field: they did not opt in.
+    perfOptIn: raw.perfOptIn === true,
+    resultCode: raw.resultCode,
   };
 }
 
