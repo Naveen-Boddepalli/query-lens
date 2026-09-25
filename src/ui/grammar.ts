@@ -48,6 +48,7 @@ export const GRAMMAR: GrammarRule[] = [
     name: 'select',
     parts: [
       lit('SELECT'),
+      opt(lit('DISTINCT')),
       rule('selectList'),
       lit('FROM'),
       rule('identifier'),

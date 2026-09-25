@@ -347,6 +347,14 @@ test('compare forces a hash aggregate and a sort aggregate onto the same GROUP B
   await expect(writes('Hash aggregate')).toHaveText('0');
   await expect(writes('Sort aggregate')).not.toHaveText('0');
 
+  // SELECT DISTINCT rides on the same setting (plan.md §25.4 B2): a HashDistinct streams and writes nothing,
+  // a SortDistinct spills through the buffer pool — same rows either way.
+  await page.getByLabel('Query').selectOption({ label: 'SELECT DISTINCT a high-cardinality column' });
+  await page.getByRole('button', { name: 'Run' }).click();
+  await expect(page.getByText(/Same \d+ rows? either way/)).toBeVisible();
+  await expect(writes('Hash distinct')).toHaveText('0');
+  await expect(writes('Sort distinct')).not.toHaveText('0');
+
   // A plain SELECT has no aggregate at all — the strategy makes no difference.
   await page.getByLabel('SQL').fill('SELECT * FROM orders');
   await page.getByRole('button', { name: 'Run' }).click();

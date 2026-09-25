@@ -150,6 +150,23 @@ export function projectListFor(select: SelectStatement['select']): ProjectList {
   };
 }
 
+/**
+ * The `DISTINCT` node above the projection (plan.md §25.4 B2): a `HashDistinct` by
+ * default, a `SortDistinct` when `aggregateStrategy` says `'sort'` — the same
+ * option `GROUP BY` reads, so `/compare` can force each side. A sort-based one
+ * also needs the query's `ORDER BY` column (the parser has checked it is in the
+ * select list): it sorts on that first, so the order the caller asked for survives.
+ * Shared with `emit.ts`'s narration.
+ */
+export function distinctNodeFor(ast: SelectStatement, child: Plan, strategy: 'hash' | 'sort'): Plan {
+  if (strategy !== 'sort') return { op: 'HashDistinct', child };
+  return {
+    op: 'SortDistinct',
+    ...(ast.orderBy ? { sortKey: { column: ast.orderBy.column, direction: ast.orderBy.direction } } : {}),
+    child,
+  };
+}
+
 export function buildPlan(
   ast: SelectStatement,
   aggregateStrategy: 'hash' | 'sort' = 'hash',
@@ -179,8 +196,9 @@ export function buildPlan(
   const columns = projectListFor(ast.select);
 
   const projected: Plan = { op: 'Project', columns, child: sorted };
+  const distinct = ast.distinct ? distinctNodeFor(ast, projected, aggregateStrategy) : projected;
 
   return ast.limit === undefined
-    ? projected
-    : { op: 'Limit', count: ast.limit.value, ...(ast.limit.offset ? { offset: ast.limit.offset } : {}), child: projected };
+    ? distinct
+    : { op: 'Limit', count: ast.limit.value, ...(ast.limit.offset ? { offset: ast.limit.offset } : {}), child: distinct };
 }

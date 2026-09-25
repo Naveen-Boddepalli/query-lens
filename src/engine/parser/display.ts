@@ -42,13 +42,15 @@ function selectItemNode(item: SelectItem, id: string): ASTNode {
   return { id, kind: 'Aggregate', label: selectItemKey(item), span: item.span };
 }
 
-function selectListNode(select: SelectList): ASTNode {
+function selectListNode(select: SelectList, distinct = false): ASTNode {
+  // `SELECT DISTINCT` (plan.md §25.4 B2) is a property of the whole list, so it is shown on the list's own node.
+  const prefix = distinct ? 'DISTINCT · ' : '';
   if (select.kind === 'star') {
     return {
       id: 'select',
       kind: 'SelectList',
-      label: 'columns',
-      detail: 'every column',
+      label: distinct ? 'DISTINCT columns' : 'columns',
+      detail: `${prefix}every column`,
       span: select.span,
       children: [{ id: 'select.star', kind: 'Star', label: '*', span: select.span }],
     };
@@ -56,8 +58,8 @@ function selectListNode(select: SelectList): ASTNode {
   return {
     id: 'select',
     kind: 'SelectList',
-    label: 'columns',
-    detail: `${select.items.length} named`,
+    label: distinct ? 'DISTINCT columns' : 'columns',
+    detail: `${prefix}${select.items.length} named`,
     span: select.span,
     children: select.items.map((item, i) => selectItemNode(item, `select.col${i}`)),
   };
@@ -288,7 +290,7 @@ function root(
 
 /** The complete display tree for a parsed statement. */
 export function toDisplayTree(ast: SelectStatement): ASTNode {
-  const children = [selectListNode(ast.select), fromNode(ast.from)];
+  const children = [selectListNode(ast.select, ast.distinct), fromNode(ast.from)];
   if (ast.where) children.push(whereNode(ast.where));
   if (ast.groupBy) children.push(groupByNode(ast.groupBy));
   if (ast.having) children.push(havingNode(ast.having));
@@ -305,12 +307,12 @@ function countNodes(node: ASTNode): number {
 export function emitParseEvents(emit: Emit, ast: SelectStatement): void {
   const children: ASTNode[] = [];
 
-  const selectList = selectListNode(ast.select);
+  const selectList = selectListNode(ast.select, ast.distinct);
   children.push(selectList);
   emit(
     ast.select.kind === 'star'
-      ? 'Read the SELECT list: `*`, meaning every column of the table.'
-      : `Read the SELECT list: ${ast.select.items.map((item) => `\`${selectItemKey(item)}\``).join(', ')}.`,
+      ? `Read the SELECT list: ${ast.distinct ? 'DISTINCT ' : ''}\`*\`, meaning every column of the table${ast.distinct ? ' — and each whole row is returned only once' : ''}.`
+      : `Read the SELECT list: ${ast.distinct ? 'DISTINCT ' : ''}${ast.select.items.map((item) => `\`${selectItemKey(item)}\``).join(', ')}${ast.distinct ? ' — each distinct combination is returned only once' : ''}.`,
     { stage: 'parse', ast: root([...children], ast.span), span: ast.select.span },
   );
 

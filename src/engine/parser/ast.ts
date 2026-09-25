@@ -136,6 +136,8 @@ export interface GroupByClause {
 export interface SelectStatement {
   kind: 'select';
   select: SelectList;
+  /** `SELECT DISTINCT` (plan.md §25.4 B2): drop repeated rows from the result. NULLs count as equal. */
+  distinct?: boolean;
   from: TableRef;
   join?: JoinClause;
   where?: Expr;

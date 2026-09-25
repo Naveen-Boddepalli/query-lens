@@ -96,7 +96,8 @@ describe('metamorphic — NoREC-shaped: the optimized plan agrees with evaluatin
     fc.assert(
       fc.property(sessionArb('select'), optionsArb, ({ tables, steps }, options) => {
         const { tables: settled, read } = settle(tables, steps, options);
-        if (read.kind !== 'select' || read.limit !== undefined) return;
+        // The reference is the predicate and a loop: it has no DISTINCT, so those queries are the differential's.
+        if (read.kind !== 'select' || read.limit !== undefined || read.distinct) return;
 
         const parsed = parse(renderQuery(read));
         if (!parsed.ok) throw new Error(parsed.error.message);

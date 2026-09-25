@@ -476,6 +476,9 @@ const AGGREGATE_PRESETS = [
   { label: 'GROUP BY a low-cardinality column', sql: 'SELECT status, COUNT(*) FROM orders GROUP BY status' },
   { label: 'GROUP BY a high-cardinality column', sql: 'SELECT customer, COUNT(*) FROM orders GROUP BY customer' },
   { label: 'No GROUP BY — one group over everything', sql: 'SELECT COUNT(*), AVG(total) FROM orders' },
+  // plan.md §25.4 B2: SELECT DISTINCT rides on the same strategy setting as GROUP BY.
+  { label: 'SELECT DISTINCT a low-cardinality column', sql: 'SELECT DISTINCT status FROM orders' },
+  { label: 'SELECT DISTINCT a high-cardinality column', sql: 'SELECT DISTINCT customer FROM orders' },
 ] as const;
 
 interface AggregateScorecard {
@@ -502,7 +505,7 @@ const AGGREGATE_STAT_ROWS: { key: keyof AggregateScorecard; label: string }[] = 
   { key: 'diskReads', label: 'disk reads' },
   { key: 'writes', label: 'pages written' },
   { key: 'evictions', label: 'evictions' },
-  { key: 'groups', label: 'groups produced' },
+  { key: 'groups', label: 'rows produced' },
 ];
 
 function AggregateScoreColumn({
@@ -526,7 +529,7 @@ function AggregateScoreColumn({
         {AGGREGATE_STAT_ROWS.map(({ key, label: rowLabel }) => {
           const mine = score[key];
           const theirs = compareTo[key];
-          const worse = rowLabel !== 'groups produced' && mine > theirs;
+          const worse = rowLabel !== 'rows produced' && mine > theirs;
           return (
             <div key={key} className="contents">
               <dt className="text-ink-dim">{rowLabel}</dt>
@@ -555,6 +558,11 @@ function AggregateCompare() {
   const sortScore = useMemo(() => aggregateScoreOf(sortRun), [sortRun]);
 
   const isAggregateQuery = hashRun.events.some((e) => e.stage === 'execute' && e.op === 'HashAggregate');
+  // A `SELECT DISTINCT` is the other query the setting changes (plan.md §25.4 B2): a HashDistinct streams and
+  // does no I/O; a SortDistinct sorts everything, spilling through the buffer pool.
+  const isDistinctQuery = hashRun.events.some((e) => e.stage === 'execute' && e.op === 'HashDistinct');
+  const strategyMatters = isAggregateQuery || isDistinctQuery;
+  const noun = isDistinctQuery ? 'distinct' : 'aggregate';
 
   return (
     <>
@@ -563,7 +571,10 @@ function AggregateCompare() {
         <code className="font-mono text-ink">HashAggregate</code> builds an in-memory hash table — no
         I/O of its own. A <code className="font-mono text-ink">SortAggregate</code> sorts on the GROUP
         BY columns first, spilling through the real buffer pool exactly as ORDER BY&rsquo;s Sort does,
-        then collapses the runs. Same groups out either way; the difference is entirely in the I/O.
+        then collapses the runs. Same groups out either way; the difference is entirely in the I/O.{' '}
+        <code className="font-mono text-ink">SELECT DISTINCT</code> takes the same setting: a{' '}
+        <code className="font-mono text-ink">HashDistinct</code> remembers the rows it has passed, and
+        streams; a <code className="font-mono text-ink">SortDistinct</code> sorts everything first.
       </p>
 
       <div className="mt-2 flex flex-col gap-3 rounded-xl border border-edge bg-surface-2 p-3 shadow-e1">
@@ -603,18 +614,18 @@ function AggregateCompare() {
         <p className="rounded-lg border border-evict/40 bg-evict/10 p-3 text-label text-ink">
           {hashRun.error.message}
         </p>
-      ) : !isAggregateQuery ? (
+      ) : !strategyMatters ? (
         <p className="rounded-xl border border-edge bg-surface-2 px-3 py-2 text-label text-ink-dim shadow-e1">
-          This query has no GROUP BY or aggregate function, so the strategy makes no difference — both
-          runs are the same plan ({hashScore.groups} row{hashScore.groups === 1 ? '' : 's'}). Try one of
-          the GROUP BY presets to see the contrast.
+          This query has no GROUP BY, aggregate function or DISTINCT, so the strategy makes no difference —
+          both runs are the same plan ({hashScore.groups} row{hashScore.groups === 1 ? '' : 's'}). Try one of
+          the GROUP BY or DISTINCT presets to see the contrast.
         </p>
       ) : (
         <>
           <p className="rounded-xl border border-accent/40 bg-accent-soft px-3 py-2 text-label text-ink shadow-e1">
-            Same <span className="font-mono">{hashScore.groups}</span> group
-            {hashScore.groups === 1 ? '' : 's'} either way. The hash aggregate wrote nothing to disk; the
-            sort aggregate wrote <span className="font-mono">{sortScore.writes}</span> page
+            Same <span className="font-mono">{hashScore.groups}</span> {isDistinctQuery ? 'row' : 'group'}
+            {hashScore.groups === 1 ? '' : 's'} either way. The hash {noun} wrote nothing to disk; the
+            sort {noun} wrote <span className="font-mono">{sortScore.writes}</span> page
             {sortScore.writes === 1 ? '' : 's'} and read {sortScore.diskReads} back
             {sortScore.evictions > 0 && (
               <>, evicting {sortScore.evictions} page{sortScore.evictions === 1 ? '' : 's'} on the way</>
@@ -624,14 +635,14 @@ function AggregateCompare() {
 
           <div className="flex flex-col gap-4 lg:flex-row">
             <AggregateScoreColumn
-              label="Hash aggregate"
-              sub="one hash table, no I/O of its own"
+              label={isDistinctQuery ? 'Hash distinct' : 'Hash aggregate'}
+              sub={isDistinctQuery ? 'a hash set of rows seen, streaming, no I/O of its own' : 'one hash table, no I/O of its own'}
               score={hashScore}
               compareTo={sortScore}
             />
             <AggregateScoreColumn
-              label="Sort aggregate"
-              sub="sorts the GROUP BY columns first, spilling through the buffer pool"
+              label={isDistinctQuery ? 'Sort distinct' : 'Sort aggregate'}
+              sub={isDistinctQuery ? 'sorts every row first, spilling through the buffer pool' : 'sorts the GROUP BY columns first, spilling through the buffer pool'}
               score={sortScore}
               compareTo={hashScore}
             />

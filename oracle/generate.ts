@@ -325,6 +325,23 @@ function lookupArb(t: TableSpec, pool: Pool): fc.Arbitrary<Query> {
   );
 }
 
+/**
+ * The projection actually rendered. Two adjustments, each a dialect gap rather than a bug:
+ * `*` cannot share a list with computed columns (SQLite allows `*, x`; a documented QueryLens limit), and a
+ * `SELECT DISTINCT … ORDER BY c` must select `c` (PostgreSQL's rule, which QueryLens enforces; SQLite is lenient).
+ */
+function fixedProj(
+  proj: Ref[] | '*',
+  refs: readonly Ref[],
+  computed: number,
+  order: { ref: Ref } | undefined,
+  distinct: boolean,
+): Ref[] | '*' {
+  if (proj === '*') return computed === 0 ? '*' : [...refs];
+  if (distinct && order && !proj.some((r) => r.name === order.ref.name && r.table === order.ref.table)) return [...proj, order.ref];
+  return proj;
+}
+
 export function selectArb(t: TableSpec, pool: Pool): fc.Arbitrary<Query> {
   const refs = refsOf(t, false);
   const general = fc
@@ -336,19 +353,27 @@ export function selectArb(t: TableSpec, pool: Pool): fc.Arbitrary<Query> {
         freq: 2,
       }),
       computed: fc.oneof({ weight: 3, arbitrary: fc.constant<{ e: Arith; alias: string }[]>([]) }, { weight: 1, arbitrary: computedArb(refs) }),
+      distinct: fc.integer({ min: 0, max: 3 }).map((x) => x === 0),
+      // A projection with a unique column (`id`, `k`) can never repeat a row, so DISTINCT on it proves nothing:
+      // most DISTINCT queries project only the columns that do repeat.
+      dupProj: uniqueRefs(refs.filter((r) => r.name !== 'id' && r.name !== 'k'), 1, 2),
       page: pageArb,
     })
-    .map(({ proj, where, order, computed, page }): Query => ({
+    .map(({ proj: anyProj, dupProj, where, order, computed, distinct, page }): Query => {
+      const proj = distinct && dupProj.length > 0 && order === undefined ? dupProj : anyProj;
+      return {
       kind: 'select',
       table: t.name,
       // `*` cannot share a SELECT list with anything else in QueryLens (SQLite allows `*, x`; a documented
       // limit, plan.md §25.4 B1b) — so computed columns ride on an explicit list of every column instead.
-      proj: proj === '*' && computed.length > 0 ? refs : proj,
+      proj: fixedProj(proj, refs, computed.length, order, distinct),
+      ...(distinct ? { distinct } : {}),
       ...(computed.length > 0 ? { computed } : {}),
       where,
       ...(order ? { order } : {}),
       ...page,
-    }));
+      };
+    });
   return fc.oneof({ weight: 3, arbitrary: general }, { weight: 2, arbitrary: lookupArb(t, pool) });
 }
 
@@ -397,15 +422,17 @@ export function aggregateArb(t: TableSpec, pool: Pool): fc.Arbitrary<Query> {
       group: uniqueRefs(groupCandidates, 0, 2),
       aggs: fc.uniqueArray(agg, { minLength: 0, maxLength: 3, selector: (a) => `${a.fn}(${a.arg === '*' ? '*' : a.arg.name})` }),
       showAll: fc.boolean(),
+      distinct: fc.integer({ min: 0, max: 5 }).map((x) => x === 0),
       where: whereArb(refs, pool, 2),
       page: pageArb,
     })
     .chain((base) => havingArb(base.group).map((having) => ({ ...base, having })))
-    .map(({ group, aggs, showAll, where, having, page }): Query => {
+    .map(({ group, aggs, showAll, distinct, where, having, page }): Query => {
       // A query with no aggregate and no GROUP BY is a plain SELECT — force at least one aggregate then.
       const items = group.length === 0 && aggs.length === 0 ? ([{ fn: 'COUNT', arg: '*' }] as AggItem[]) : aggs;
       return {
         kind: 'aggregate',
+        ...(distinct ? { distinct } : {}),
         table: t.name,
         group,
         shownGroup: showAll ? group : group.slice(0, 1),
@@ -427,11 +454,13 @@ export function joinArb(t: TableSpec, u: TableSpec, pool: Pool): fc.Arbitrary<Qu
       on: fc.constantFrom(...pairs),
       proj: uniqueRefs(all, 1, 5),
       computed: fc.oneof({ weight: 3, arbitrary: fc.constant<{ e: Arith; alias: string }[]>([]) }, { weight: 1, arbitrary: computedArb(all) }),
+      distinct: fc.integer({ min: 0, max: 3 }).map((x) => x === 0),
       where: whereArb(all, pool, 2),
       page: pageArb,
     })
-    .map(({ on, proj, computed, where, page }): Query => ({
+    .map(({ on, proj, computed, distinct, where, page }): Query => ({
       kind: 'join',
+      ...(distinct ? { distinct } : {}),
       left: t.name,
       right: u.name,
       on,

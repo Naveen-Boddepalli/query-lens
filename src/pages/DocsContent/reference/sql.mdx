@@ -19,6 +19,7 @@ SELECT * FROM users WHERE id IN (1, 5, 9) OR NOT age >= 18;
 SELECT id, age * 12 AS months, age + 1 FROM users WHERE age % 2 = 0;
 SELECT authors.name, posts.title FROM authors JOIN posts ON authors.id = posts.authorId;
 SELECT status, COUNT(*), AVG(attempts) FROM logins GROUP BY status;
+SELECT DISTINCT status FROM logins ORDER BY status;
 SELECT * FROM users ORDER BY age DESC LIMIT 5;
 SELECT * FROM users ORDER BY id LIMIT 10 OFFSET 20;
 ```
@@ -35,6 +36,8 @@ SELECT * FROM users ORDER BY id LIMIT 10 OFFSET 20;
   `ORDER BY`, or an aggregate in the SELECT list.
 - **`WHERE`**: a predicate built from comparisons and tests, combined with `AND`, `OR` and `NOT`
   and grouped with parentheses — see [Predicates](#predicates) below.
+- **`DISTINCT`**: `SELECT DISTINCT a, b …` returns each distinct combination once — see
+  [DISTINCT](#distinct) below.
 - **`GROUP BY`**: one or more columns. Aggregates: `COUNT(*)`, `COUNT`/`SUM`/`AVG`/`MIN`/`MAX` over
   a column. Every plain column in the SELECT list must be grouped or wrapped in an aggregate.
   Mutually exclusive with `ORDER BY`.
@@ -108,6 +111,30 @@ SELECT COUNT(*) FROM emp HAVING COUNT(*) > 3;
 - In the plan it is its own `Having` node above the aggregate. The optimizer still moves your `WHERE`
   *below* the aggregate (an index lookup, a pushdown) and never touches the `HAVING`.
 
+## DISTINCT
+
+`SELECT DISTINCT` drops repeated rows from the result. Two rows are the same when every column is
+equal, and **NULLs count as equal** (as in `GROUP BY`): `SELECT DISTINCT a` returns one NULL however
+many there are.
+
+```sql
+SELECT DISTINCT status FROM logins;
+SELECT DISTINCT customer, status FROM orders ORDER BY customer LIMIT 5;
+```
+
+- It applies after `WHERE`, `GROUP BY`/`HAVING` and the select list, and before `LIMIT`/`OFFSET` — so
+  `LIMIT 5` returns five *distinct* rows.
+- With `ORDER BY`, the sort column must be **in the select list** (PostgreSQL's rule): each distinct row
+  stands for many source rows, so a column that isn't selected has no one value to sort it by.
+- **Two strategies, one setting.** By default a `HashDistinct` remembers the rows it has passed in a hash set
+  and drops repeats — it *streams* (the first new row leaves immediately, so a `LIMIT` above it can stop the
+  scan early) and does no I/O of its own. A `SortDistinct` sorts everything first, spilling through the buffer
+  pool exactly as `ORDER BY` does, then keeps one row of each run — it cannot produce a row until it has seen
+  them all. [Compare](/compare)'s aggregate mode forces each side on the same query.
+- Values that are equal under `=` are one value: `1`, `'1'` and `TRUE` collapse together. (SQLite keeps `1`
+  and `'1'` apart — a column that mixes types is the corner where they differ.)
+- Not yet: `COUNT(DISTINCT x)` — `DISTINCT` inside an aggregate.
+
 ## Expressions
 
 An **operand** — in a comparison, a `SELECT` item, an `UPDATE … SET` value — can be arithmetic:
@@ -174,7 +201,7 @@ with a generic syntax error:
 | `CROSS JOIN` | *CROSS JOIN is not in the v0 subset — JOIN ... ON needs an equality.* |
 | `JOIN ... USING (...)` | *USING is not in the v0 subset — write the equality out.* |
 | A second `JOIN` | *Only one JOIN per query.* |
-| `DISTINCT` | *DISTINCT is not in the v0 subset.* |
+| `SELECT a, DISTINCT b`, `COUNT(DISTINCT x)` | *DISTINCT applies to the whole SELECT list — write `SELECT DISTINCT a, b …`. Inside an aggregate it is not supported yet.* |
 | `UNION` | *UNION is not in the v0 subset.* |
 | A subquery, `x IN (SELECT …)` | *A subquery is not supported here — write the values out, or join the two tables.* |
 | `CREATE` / `DROP` | *QueryLens only runs SELECT, DELETE, INSERT and UPDATE. Edit the seed data to change the table.* |

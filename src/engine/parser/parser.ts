@@ -2,7 +2,7 @@
  * Recursive-descent parser for the v0 SQL subset (plan.md §4):
  *
  *   statement     := select | delete | insert | update
- *   select        := SELECT selectList FROM identifier [join] [WHERE expr]
+ *   select        := SELECT [DISTINCT] selectList FROM identifier [join] [WHERE expr]
  *                     [GROUP BY identifier (',' identifier)*] [HAVING expr]
  *                     [ORDER BY identifier [ASC|DESC]] [LIMIT number [OFFSET number]] [';'] EOF
  *   join          := JOIN identifier ON qualifiedColumn '=' qualifiedColumn
@@ -105,7 +105,7 @@ const OUT_OF_SCOPE: Record<string, string> = {
   FULL: 'Outer joins are not in the v0 subset — only an inner JOIN.',
   CROSS: 'CROSS JOIN is not in the v0 subset — JOIN ... ON needs an equality.',
   USING: 'USING is not in the v0 subset — write the equality out: JOIN t ON a.x = t.y.',
-  DISTINCT: 'DISTINCT is not in the v0 subset.',
+  DISTINCT: 'DISTINCT applies to the whole SELECT list — write `SELECT DISTINCT a, b …`. Inside an aggregate, `COUNT(DISTINCT x)` is not supported yet.',
   UNION: 'UNION is not in the v0 subset.',
   CREATE: 'QueryLens only runs SELECT, DELETE, INSERT and UPDATE. Edit the seed data to change the table.',
   DROP: 'QueryLens only runs SELECT, DELETE, INSERT and UPDATE. Edit the seed data to change the table.',
@@ -906,6 +906,7 @@ function expectStatementEnd(c: Cursor): void {
 
 function parseSelectBody(c: Cursor): SelectStatement {
   const selectToken = c.expectKeyword('SELECT', 'to begin the query');
+  const distinct = isKeyword(c.peek(), 'DISTINCT') ? (c.next(), true) : false;
   const select = parseSelectList(c);
   c.expectKeyword('FROM', 'after the column list');
   const from = parseTableRef(c);
@@ -960,6 +961,15 @@ function parseSelectBody(c: Cursor): SelectStatement {
     const orderToken = c.next();
     c.expectKeyword('BY', 'after ORDER');
     const col = c.expectIdentifier('a column name to sort by');
+    // SELECT DISTINCT returns each row once, so a row has no single value of a column that is not in the list
+    // to sort it by — PostgreSQL's rule, and the only one that keeps DISTINCT's answer well defined.
+    if (distinct && select.kind === 'columns' && !select.items.some((item) => selectItemKey(item) === col.value)) {
+      throw new ParseError(
+        `For SELECT DISTINCT, ORDER BY \`${col.value}\` must appear in the select list.`,
+        col,
+        'Add it to the list, or drop DISTINCT: each distinct row stands for many source rows, so a column that is not selected has no one value to sort it by.',
+      );
+    }
     let direction: 'asc' | 'desc' = 'asc';
     let end = col.to;
     if (c.peek().type === 'keyword' && (c.peek().upper === 'ASC' || c.peek().upper === 'DESC')) {
@@ -1016,6 +1026,7 @@ function parseSelectBody(c: Cursor): SelectStatement {
   return {
     kind: 'select',
     select,
+    ...(distinct ? { distinct } : {}),
     from,
     ...(join === undefined ? {} : { join }),
     ...(where === undefined ? {} : { where }),

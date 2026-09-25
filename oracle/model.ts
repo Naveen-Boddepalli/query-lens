@@ -98,6 +98,8 @@ export interface OrderSpec {
 export type Query =
   | {
       kind: 'select';
+      /** `SELECT DISTINCT` (plan.md §25.4 B2). */
+      distinct?: boolean;
       table: string;
       proj: Ref[] | '*';
       /** Computed columns appended after `proj`, each named by its alias (`AS x0`). */
@@ -110,6 +112,7 @@ export type Query =
     }
   | {
       kind: 'aggregate';
+      distinct?: boolean;
       table: string;
       group: Ref[];
       /** Which group columns appear in the SELECT list (all of them, or a subset). */
@@ -123,6 +126,7 @@ export type Query =
     }
   | {
       kind: 'join';
+      distinct?: boolean;
       left: string;
       right: string;
       on: { l: Ref; r: Ref };
@@ -247,16 +251,16 @@ export function renderQuery(q: Query, dialect: Dialect = 'querylens'): string {
             dialect === 'sqlite' ? (q.order.dir === 'asc' ? ' NULLS LAST' : ' NULLS FIRST') : ''
           }`
         : '';
-      return `SELECT ${list} FROM ${q.table}${renderWhere(q.where)}${order}${page(q.limit, q.offset)}`;
+      return `SELECT ${q.distinct ? 'DISTINCT ' : ''}${list} FROM ${q.table}${renderWhere(q.where)}${order}${page(q.limit, q.offset)}`;
     }
     case 'aggregate': {
       const items = [...q.shownGroup.map(renderRef), ...q.aggs.map(renderAgg)].join(', ');
       const group = q.group.length > 0 ? ` GROUP BY ${q.group.map(renderRef).join(', ')}` : '';
       const having = q.having ? ` HAVING ${renderPred(q.having)}` : '';
-      return `SELECT ${items} FROM ${q.table}${renderWhere(q.where)}${group}${having}${page(q.limit, q.offset)}`;
+      return `SELECT ${q.distinct ? 'DISTINCT ' : ''}${items} FROM ${q.table}${renderWhere(q.where)}${group}${having}${page(q.limit, q.offset)}`;
     }
     case 'join':
-      return `SELECT ${[...q.proj.map(renderRef), ...renderComputed(q.computed)].join(', ')} FROM ${q.left} JOIN ${q.right} ON ${renderRef(q.on.l)} = ${renderRef(q.on.r)}${renderWhere(q.where)}${page(q.limit, q.offset)}`;
+      return `SELECT ${q.distinct ? 'DISTINCT ' : ''}${[...q.proj.map(renderRef), ...renderComputed(q.computed)].join(', ')} FROM ${q.left} JOIN ${q.right} ON ${renderRef(q.on.l)} = ${renderRef(q.on.r)}${renderWhere(q.where)}${page(q.limit, q.offset)}`;
     case 'insert': {
       const cols = q.columns ? ` (${q.columns.join(', ')})` : '';
       return `INSERT INTO ${q.table}${cols} VALUES (${q.values.map(renderLiteral).join(', ')})`;

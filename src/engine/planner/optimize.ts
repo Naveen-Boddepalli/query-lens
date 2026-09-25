@@ -39,15 +39,35 @@ type Rule = (plan: Plan, table: Table) => Rewrite | null;
  * `Project → … → scan`, whether or not a `LIMIT` sits above it.
  */
 type LimitSpec = { count: number; offset: number };
-function unwrapLimit(plan: Plan): { limit: LimitSpec | null; rest: Plan } {
-  return plan.op === 'Limit'
-    ? { limit: { count: plan.count, offset: plan.offset ?? 0 }, rest: plan.child }
-    : { limit: null, rest: plan };
+type DistinctNode = Extract<Plan, { op: 'HashDistinct' }> | Extract<Plan, { op: 'SortDistinct' }>;
+/** Everything wrapped *around* the `Project`: an optional `Limit` above an optional `DISTINCT` (plan.md §25.4 B2). */
+type TopSpec = { limit: LimitSpec | null; distinct: DistinctNode | null };
+function unwrapLimit(plan: Plan): { limit: TopSpec | null; rest: Plan } {
+  let rest = plan;
+  let limit: LimitSpec | null = null;
+  let distinct: DistinctNode | null = null;
+  if (rest.op === 'Limit') {
+    limit = { count: rest.count, offset: rest.offset ?? 0 };
+    rest = rest.child;
+  }
+  if (rest.op === 'HashDistinct' || rest.op === 'SortDistinct') {
+    distinct = rest;
+    rest = rest.child;
+  }
+  return { limit: limit === null && distinct === null ? null : { limit, distinct }, rest };
 }
-function rewrapLimit(limit: LimitSpec | null, plan: Plan): Plan {
-  return limit === null
-    ? plan
-    : { op: 'Limit', count: limit.count, ...(limit.offset > 0 ? { offset: limit.offset } : {}), child: plan };
+function rewrapLimit(top: TopSpec | null, plan: Plan): Plan {
+  if (top === null) return plan;
+  let out = plan;
+  if (top.distinct) {
+    out = top.distinct.op === 'HashDistinct'
+      ? { op: 'HashDistinct', child: out }
+      : { op: 'SortDistinct', ...(top.distinct.sortKey ? { sortKey: top.distinct.sortKey } : {}), child: out };
+  }
+  if (top.limit) {
+    out = { op: 'Limit', count: top.limit.count, ...(top.limit.offset > 0 ? { offset: top.limit.offset } : {}), child: out };
+  }
+  return out;
 }
 
 /**
@@ -644,6 +664,8 @@ export function scanPredicate(plan: Plan): Expr | undefined {
   if (plan.op === 'IndexScan' || plan.op === 'IndexRangeScan') return plan.residual;
   return plan.op === 'Filter' ||
     plan.op === 'Having' ||
+    plan.op === 'HashDistinct' ||
+    plan.op === 'SortDistinct' ||
     plan.op === 'HashAggregate' ||
     plan.op === 'SortAggregate' ||
     plan.op === 'Sort' ||

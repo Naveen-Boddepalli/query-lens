@@ -40,6 +40,7 @@ describe('the generators reach what the oracle is meant to check', () => {
     joins: new Map<string, number>(),
     aggregates: new Map<string, number>(),
     nullsSeen: 0,
+    distincts: new Map<string, number>(),
     preds: new Map<string, number>(),
   };
 
@@ -50,6 +51,10 @@ describe('the generators reach what the oracle is meant to check', () => {
 
     for (const q of steps) {
       stats.kinds.set(q.kind, (stats.kinds.get(q.kind) ?? 0) + 1);
+      if ('distinct' in q && q.distinct) {
+        const key = `${q.kind}:${options.aggregateStrategy ?? 'hash'}`;
+        stats.distincts.set(key, (stats.distincts.get(key) ?? 0) + 1);
+      }
       if ('where' in q) {
         for (const w of [...q.where, ...(q.kind === 'aggregate' && q.having ? [q.having] : [])]) {
           walkPred(w, (p) => {
@@ -91,6 +96,12 @@ describe('the generators reach what the oracle is meant to check', () => {
   it('generates every predicate form, including the negated ones and the NULL-in-list trap', () => {
     for (const form of ['cmp', 'colcmp', 'litcmp', 'between', 'not-between', 'isnull', 'is-not-null', 'in', 'not-in', 'like', 'not-like', 'not', 'and', 'or', '<>', 'acmp', 'ccmp', 'hagg']) {
       expect(stats.preds.get(form) ?? 0, `predicate form ${form}`).toBeGreaterThan(N / 30);
+    }
+  });
+
+  it('generates DISTINCT for every kind of read, under both strategies', () => {
+    for (const key of ['select:hash', 'select:sort', 'aggregate:hash', 'aggregate:sort', 'join:hash', 'join:sort']) {
+      expect(stats.distincts.get(key) ?? 0, `DISTINCT ${key}`).toBeGreaterThan(5);
     }
   });
 

@@ -136,12 +136,26 @@ export type Plan =
   /** `ORDER BY column [ASC|DESC]`, between Filter and Project: `Project → Sort → Filter → …`. */
   | { op: 'Sort'; column: string; direction: 'asc' | 'desc'; child: Plan }
   | { op: 'Project'; columns: ProjectList; child: Plan }
+  /**
+   * `SELECT DISTINCT` (plan.md §25.4 B2), above the `Project`, below any `Limit`.
+   * `HashDistinct` streams: it remembers every row it has passed in a hash set and
+   * drops a repeat — so a `LIMIT` above it can stop early. `SortDistinct` cannot: it
+   * sorts every row (spilling through the buffer pool, exactly as `ORDER BY` does)
+   * so equal rows are neighbours, then keeps one of each run. `sortKey` is the
+   * `ORDER BY` column it must sort *by first*, so the result comes out in that order.
+   * Which one runs follows `EngineOptions.aggregateStrategy` — the same seam
+   * `GROUP BY` uses, which is what lets `/compare` set them side by side.
+   */
+  | { op: 'HashDistinct'; child: Plan }
+  | { op: 'SortDistinct'; sortKey?: { column: string; direction: 'asc' | 'desc' }; child: Plan }
   /** `LIMIT n`, always the outermost node when present: `Limit → Project → …`. */
   | { op: 'Limit'; count: number; /** Rows skipped first (`OFFSET m`); absent means none. */ offset?: number; child: Plan };
 
 export function childOf(plan: Plan): Plan | undefined {
   return plan.op === 'Filter' ||
     plan.op === 'Having' ||
+    plan.op === 'HashDistinct' ||
+    plan.op === 'SortDistinct' ||
     plan.op === 'HashAggregate' ||
     plan.op === 'SortAggregate' ||
     plan.op === 'Sort' ||
@@ -174,6 +188,16 @@ export function findSort(plan: Plan): Extract<Plan, { op: 'Sort' }> | null {
  * `Sort` and `SortAggregate` never both appear in one plan (`ORDER BY` and
  * `GROUP BY` are mutually exclusive), but the check does not depend on that.
  */
+/** Whether the plan has a `SortDistinct` — which reserves a spill block of its own, after every other sort's. */
+export function findSortDistinct(plan: Plan): Extract<Plan, { op: 'SortDistinct' }> | null {
+  let node: Plan | undefined = plan;
+  while (node) {
+    if (node.op === 'SortDistinct') return node;
+    node = childOf(node);
+  }
+  return null;
+}
+
 export function needsSortSpill(plan: Plan): boolean {
   let node: Plan | undefined = plan;
   while (node) {
@@ -429,6 +453,17 @@ function convert(
             : plan.columns.kind === 'columns'
               ? plan.columns.names.join(', ')
               : plan.columns.items.map((i) => i.sql).join(', '),
+        ...(highlight ? { highlight } : {}),
+        ...cost,
+        children: kid(plan.child),
+      };
+    case 'HashDistinct':
+    case 'SortDistinct':
+      return {
+        id,
+        op: plan.op,
+        label: plan.op,
+        detail: plan.op === 'SortDistinct' && plan.sortKey ? `DISTINCT, sorted by ${plan.sortKey.column} ${plan.sortKey.direction.toUpperCase()}` : 'DISTINCT',
         ...(highlight ? { highlight } : {}),
         ...cost,
         children: kid(plan.child),

@@ -20,6 +20,7 @@ import {
   emitDeletePlanEvents,
   emitPlanEvents,
   emitUpdatePlanEvents,
+  findSortDistinct,
   findSortMergeJoin,
   needsSortSpill,
 } from './planner/index.ts';
@@ -237,11 +238,15 @@ export function runQuery(
       ? sortTempPageCount(table.rows.length, options.rowsPerPage, options.bufferFrames) +
         sortTempPageCount(joinTable!.rows.length, options.rowsPerPage, options.bufferFrames)
       : 0;
-  const pool = createBufferPool(
-    pageCountFor(heap, trees) + (rightHeap ? rightHeap.pages.length : 0) + sortTemp,
-    options,
-    emit,
-  );
+  // A sort-based DISTINCT (plan.md §25.4 B2) sorts what the projection produced, which after a JOIN can be
+  // as many rows as the two tables' product (capped — these are teaching-sized tables) — and it gets its own
+  // block of scratch pages *after* whichever other sort the plan has, so no two sorts share a page id.
+  const distinctRows = joinTable ? Math.min(table.rows.length * joinTable.rows.length, 20_000) : table.rows.length;
+  const distinctSpill = findSortDistinct(plan)
+    ? sortTempPageCount(distinctRows, options.rowsPerPage, options.bufferFrames)
+    : 0;
+  const distinctBase = pageCountFor(heap, trees) + (rightHeap ? rightHeap.pages.length : 0) + sortTemp;
+  const pool = createBufferPool(distinctBase + distinctSpill, options, emit);
 
   const rows = execute(plan, {
     emit,
@@ -251,6 +256,7 @@ export function runQuery(
     trees,
     table,
     options,
+    distinctBase,
     ...(joinTable && rightHeap ? { joinRight: { table: joinTable, heap: rightHeap, trees: {} } } : {}),
   });
 

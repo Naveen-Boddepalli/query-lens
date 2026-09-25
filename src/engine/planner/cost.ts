@@ -381,6 +381,29 @@ function estimateNode(
       estimate = { estRows: clampRows(child.estRows * fraction), estPages: child.estPages, basis };
       break;
     }
+    case 'HashDistinct':
+    case 'SortDistinct': {
+      const child = estimateNode(plan.child, table, rowsPerPage, into, otherTables);
+      // How many distinct rows: bounded by the input, and — when the projection is plain columns — by the product
+      // of their distinct-value counts (the same independence assumption an AND makes). An expression, `*` or a
+      // column the table does not know has no statistic, so the input size stands.
+      const project = plan.child.op === 'Project' ? plan.child.columns : null;
+      let bound = child.estRows;
+      let basis = 'no distinct-value statistic for this list';
+      if (project?.kind === 'columns' && project.names.every((n) => table.columns.includes(n))) {
+        const distinct = project.names.reduce((product, n) => product * ndistinct(table.rows, n), 1);
+        bound = Math.min(child.estRows, distinct);
+        basis = `min(${String(child.estRows)}, ${project.names.map((n) => `${String(ndistinct(table.rows, n))} distinct ${n}`).join(' × ')})`;
+      }
+      // A sort-based DISTINCT spills exactly like `Sort`: every row written once and read back once.
+      const spill = plan.op === 'SortDistinct' ? 2 * Math.max(1, Math.ceil(child.estRows / rowsPerPage)) : 0;
+      estimate = {
+        estRows: clampRows(bound),
+        estPages: child.estPages + spill,
+        basis: plan.op === 'SortDistinct' ? `${basis}; sorted first (${String(spill)} spill pages)` : basis,
+      };
+      break;
+    }
     case 'Having': {
       const child = estimateNode(plan.child, table, rowsPerPage, into, otherTables);
       // Aggregate values have no column statistics to consult, so every comparison against one falls to the

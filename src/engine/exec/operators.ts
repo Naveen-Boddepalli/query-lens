@@ -46,6 +46,12 @@ export interface ExecContext {
    * here except `join()` itself.
    */
   joinRight?: { table: Table; heap: Heap; trees: Record<string, BPlusTree> };
+  /**
+   * First page id of a `SortDistinct`'s own spill block (plan.md §25.4 B2) — placed after
+   * every page any other sort in the plan uses, so two sorts never share scratch pages.
+   * Set by `runQuery.ts`, which sized the buffer pool for it.
+   */
+  distinctBase?: number;
 }
 
 /** Counts rows an operator has produced, so `execute` events stay cumulative. */
@@ -679,6 +685,136 @@ function limit(count: number, offset: number, child: Operator, ctx: ExecContext)
   };
 }
 
+/**
+ * A stable text key for a whole row: two rows collide exactly when every column is
+ * *equal* — NULL equal to NULL (as DISTINCT and GROUP BY define it), and any other
+ * pair equal under `=`'s own coercion (`equalityKeyOf`, the same one the hash and
+ * sort-merge joins use). The coercion matters for consistency: the sort orders `1`,
+ * `'1'` and `true` as equal, so a hash key that told them apart would let the two
+ * DISTINCT strategies disagree on a column that mixes types.
+ */
+function rowKey(row: Row): string {
+  return JSON.stringify(
+    Object.keys(row).sort().map((k) => {
+      const v = row[k] ?? null;
+      return [k, v === null ? null : equalityKeyOf(v)];
+    }),
+  );
+}
+
+/**
+ * `SELECT DISTINCT` by hashing (plan.md §25.4 B2). A row is passed on the first
+ * time it is seen and dropped every time after — one hash-set lookup per row,
+ * no I/O of its own, and *streaming*: the first new row leaves immediately, so
+ * a `Limit` above it can stop the whole scan early. The price is memory
+ * proportional to the number of distinct rows.
+ */
+function hashDistinct(child: Operator, ctx: ExecContext): Operator {
+  const produced = counter(ctx, 'HashDistinct');
+  let seen = new Set<string>();
+  let dropped = 0;
+
+  return {
+    name: 'HashDistinct',
+    open() {
+      child.open();
+      seen = new Set();
+      dropped = 0;
+    },
+    next() {
+      for (;;) {
+        const row = child.next();
+        if (!row) return null;
+        const key = rowKey(row);
+        if (seen.has(key)) {
+          dropped += 1;
+          continue;
+        }
+        seen.add(key);
+        produced(
+          `HashDistinct passes a row it has not seen before (${String(seen.size)} distinct so far${
+            dropped > 0 ? `, ${String(dropped)} repeat${dropped === 1 ? '' : 's'} dropped` : ''
+          }).`,
+        );
+        return row;
+      }
+    },
+    close: child.close,
+  };
+}
+
+/**
+ * `SELECT DISTINCT` by sorting (plan.md §25.4 B2) — the other half of the hash-vs-
+ * sort contrast `GROUP BY` already has. It cannot stream: it pulls *every* row,
+ * runs them through `externalMergeSort` (real spill I/O through the buffer pool,
+ * in its own reserved block of pages), and only then keeps one row of each run
+ * of equals. The sort key is the `ORDER BY` column first (so the caller's order
+ * survives) and then every column, which is what makes equal rows adjacent.
+ */
+function sortDistinct(plan: Extract<Plan, { op: 'SortDistinct' }>, child: Operator, ctx: ExecContext): Operator {
+  const produced = counter(ctx, 'SortDistinct');
+  let rows: Row[] | null = null;
+  let index = 0;
+
+  return {
+    name: 'SortDistinct',
+    open() {
+      child.open();
+      rows = null;
+      index = 0;
+    },
+    next() {
+      if (rows === null) {
+        const materialised: Row[] = [];
+        for (;;) {
+          const row = child.next();
+          if (!row) break;
+          materialised.push(row);
+        }
+        child.close();
+
+        const keyOf = (r: Row): SqlValue[] => {
+          const columns = Object.keys(r).sort();
+          const first = plan.sortKey ? [plan.sortKey.column] : [];
+          return [...first, ...columns].map((c) => r[c] ?? null);
+        };
+        const sorted = externalMergeSort(
+          materialised,
+          keyOf,
+          plan.sortKey?.direction ?? 'asc',
+          {
+            pool: ctx.pool,
+            emit: ctx.emit,
+            base: ctx.distinctBase ?? pageCountFor(ctx.heap, ctx.trees),
+            memPages: ctx.options.bufferFrames,
+            rowsPerPage: ctx.options.rowsPerPage,
+          },
+          'SortDistinct',
+          'SortDistinct',
+        );
+
+        const kept: Row[] = [];
+        let last: string | null = null;
+        for (const row of sorted) {
+          const key = rowKey(row);
+          if (key !== last) kept.push(row);
+          last = key;
+        }
+        rows = kept;
+      }
+
+      const row = rows[index];
+      if (!row) return null;
+      index += 1;
+      produced(`SortDistinct returns distinct row ${String(index)} of ${String(rows.length)}.`);
+      return row;
+    },
+    close() {
+      if (rows === null) child.close();
+    },
+  };
+}
+
 /** Merges a left and right row into one, qualifying every key `table.column` so the two can never collide. */
 function mergeJoinedRow(leftTable: string, leftRow: Row, rightTable: string, rightRow: Row): Row {
   const merged: Row = {};
@@ -1060,6 +1196,10 @@ export function buildOperator(plan: Plan, ctx: ExecContext): Operator {
       return sort(plan, buildOperator(plan.child, ctx), ctx);
     case 'Project':
       return project(plan.columns, buildOperator(plan.child, ctx), ctx);
+    case 'HashDistinct':
+      return hashDistinct(buildOperator(plan.child, ctx), ctx);
+    case 'SortDistinct':
+      return sortDistinct(plan, buildOperator(plan.child, ctx), ctx);
     case 'Limit':
       return limit(plan.count, plan.offset ?? 0, buildOperator(plan.child, ctx), ctx);
   }

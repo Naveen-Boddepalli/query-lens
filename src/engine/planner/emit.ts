@@ -1,7 +1,7 @@
 import type { Emit } from '../trace.ts';
 import type { Table } from '../types.ts';
 import type { SelectStatement } from '../parser/index.ts';
-import { buildAggregatePlan, buildJoinPlan, buildPlan, isAggregateQuery, projectListFor } from './buildPlan.ts';
+import { buildAggregatePlan, buildJoinPlan, buildPlan, distinctNodeFor, isAggregateQuery, projectListFor } from './buildPlan.ts';
 import { estimatePlan, rootEstimate } from './cost.ts';
 import { optimize } from './optimize.ts';
 import { exprToSql, toPlanDisplay } from './plan.ts';
@@ -122,6 +122,16 @@ export function emitPlanEvents(
             .join(', ')}. Arithmetic on a NULL is NULL, and dividing by zero gives NULL.`,
     { stage: 'plan', planTree: display(current) },
   );
+
+  if (ast.distinct) {
+    current = distinctNodeFor(ast, current, aggregateStrategy);
+    emit(
+      aggregateStrategy === 'sort'
+        ? `DISTINCT becomes a SortDistinct above the Project: it sorts every projected row${ast.orderBy ? ` (by \`${ast.orderBy.column}\` first, so your ORDER BY survives)` : ''} — spilling through the buffer pool exactly as ORDER BY's Sort does — so equal rows sit next to each other, then keeps one of each run. Like Sort it cannot produce a row until it has seen all of them.`
+        : 'DISTINCT becomes a HashDistinct above the Project: it remembers every row it has passed in an in-memory hash set and drops a repeat the moment it sees one. It streams — the first new row comes out immediately, and a LIMIT above it can stop the scan early.',
+      { stage: 'plan', planTree: display(current) },
+    );
+  }
 
   if (ast.limit !== undefined) {
     const count = ast.limit.value;

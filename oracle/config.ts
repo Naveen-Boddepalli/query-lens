@@ -4,7 +4,10 @@
  * scheduled workflow (`.github/workflows/oracle.yml`) turns the same suites up
  * with a fresh seed each run and prints the seed it used.
  *
- *   ORACLE_RUNS  cases per property   (default 200)
+ * 1,000 is not arbitrary: injected bugs in rare query shapes (a rewrite that drops a `DISTINCT` under a
+ * `WHERE`) survived 200 and 400 cases and die at 800, at about two seconds of CI time.
+ *
+ *   ORACLE_RUNS  cases per property   (default 1000)
  *   ORACLE_SEED  fast-check seed      (default: a fixed number)
  */
 
@@ -15,7 +18,7 @@ const int = (name: string, fallback: number): number => {
 };
 
 export const ORACLE_SEED = int('ORACLE_SEED', 20260925);
-export const ORACLE_RUNS = int('ORACLE_RUNS', 200);
+export const ORACLE_RUNS = int('ORACLE_RUNS', 1000);
 
 /** Parameters for `fc.assert`. On failure `fast-check` prints the shrunk counterexample and the `seed`/`path` that replays it. */
 export const oracleParams = (scale = 1): { seed: number; numRuns: number } => ({

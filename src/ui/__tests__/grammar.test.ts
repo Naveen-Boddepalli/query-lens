@@ -60,6 +60,7 @@ describe('grammar data — every rule is demonstrated by a query the real parser
     ['select — every optional clause at once', 'SELECT age, COUNT(*) FROM users WHERE age > 30 GROUP BY age HAVING COUNT(*) > 1 LIMIT 5'],
     ['primary — an aggregateCall (inside HAVING)', 'SELECT age FROM users GROUP BY age HAVING SUM(id) > 10 AND COUNT(*) < 5'],
     ['select — ORDER BY with ASC/DESC', 'SELECT * FROM users ORDER BY age DESC'],
+    ['select — DISTINCT', 'SELECT DISTINCT age, name FROM users ORDER BY age'],
     ['select — LIMIT with OFFSET', 'SELECT * FROM users ORDER BY id LIMIT 5 OFFSET 10'],
     ['select — with a join', 'SELECT * FROM authors JOIN posts ON authors.id = posts.authorId'],
     ['join', 'SELECT * FROM authors JOIN posts ON authors.id = posts.authorId'],
