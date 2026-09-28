@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Clustered (index-organized) tables** (plan.md §25.4 B3, fifth and final slice) — a table may be stored *in* one
+  of its own `UNIQUE` indexes' key order rather than insertion order, so a range on that key reads pages in
+  sequence: measured, **6 disk reads clustered vs 8 for the same rows unclustered** on a small, scrambled table.
+  Every *other* index on a clustered table then carries the row's clustering key instead of its physical address —
+  a clustered leaf moves rows between pages the way any leaf does, and a stored address would go stale — so an
+  equality lookup through one costs a second, real descent, through the clustered index itself; a covering query
+  still costs only one, and a range scan or an index-nested-loop join never chooses a clustered table's secondary
+  index at all. Checked by a standalone oracle that runs the same random session of writes and reads against two
+  databases differing only in whether they are clustered, asserting every result and every write's index soundness
+  agree — clustering is a purely physical fact, so identical answers are the only correct outcome. Not yet exposed
+  in the Custom database editor.
 - **Course map and interview roadmap** (plan.md §25.4 G1) — two pages under a new *Study* section of the docs.
   The **course map** lines a typical database course up against QueryLens topic by topic, marking each *covered*,
   *partly* or *not covered* in words, with where to practise it and what is missing — including the large part

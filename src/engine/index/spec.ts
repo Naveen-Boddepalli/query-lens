@@ -35,11 +35,23 @@ export function findIndexSpec(table: Pick<Table, 'indexedColumns' | 'indexes'>, 
 }
 
 /**
+ * Is `columns` a table's own CLUSTERING key (plan.md §25.4 B3e)? Only that index's own tree holds real row
+ * addresses; every other index on a clustered table indirects through it instead, one extra descent at a time.
+ */
+export function isClusteringIndex(clusteredKey: readonly string[] | undefined, columns: readonly string[]): boolean {
+  return !!clusteredKey && clusteredKey.length === columns.length && clusteredKey.every((c, i) => c === columns[i]);
+}
+
+/**
  * The index a `JOIN` can probe for its inner side's join column: one whose *leading* column is that column — a plain
  * index on it, or a composite one that starts with it (a leftmost prefix of one column is enough to enter it).
- * A plain index wins over a composite one, since its entries are narrower.
+ * A plain index wins over a composite one, since its entries are narrower. A clustered table's SECONDARY index is
+ * never offered (plan.md §25.4 B3e): the extra descent it costs is only built for an equality lookup, not a probe
+ * run once per outer row — the clustering key's own index is still offered, since it needs no second descent at all.
  */
-export function joinIndexFor(table: Pick<Table, 'indexedColumns' | 'indexes'>, column: string): IndexSpec | undefined {
-  const specs = indexSpecsOf(table).filter((spec) => spec.columns[0] === column);
+export function joinIndexFor(table: Pick<Table, 'indexedColumns' | 'indexes' | 'clusteredKey'>, column: string): IndexSpec | undefined {
+  const specs = indexSpecsOf(table).filter(
+    (spec) => spec.columns[0] === column && (!table.clusteredKey || isClusteringIndex(table.clusteredKey, spec.columns)),
+  );
   return specs.find((spec) => spec.columns.length === 1) ?? specs[0];
 }

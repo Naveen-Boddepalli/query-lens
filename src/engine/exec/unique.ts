@@ -10,7 +10,7 @@
 import type { IndexSpec, Row, SqlValue } from '../types.ts';
 import type { ExecContext } from './operators.ts';
 import { rowAt } from './operators.ts';
-import { describeUniqueKey, emitIndexLookup, indexNameOf, indexSpecsOf, keyValuesOf } from '../index/index.ts';
+import { describeUniqueKey, emitIndexLookup, indexNameOf, indexSpecsOf, keyValuesOf, resolveClustered } from '../index/index.ts';
 import type { RowPointer } from '../index/index.ts';
 
 /** A statement tried to put a key into a unique index that already holds it. */
@@ -50,7 +50,7 @@ function checkKey(ctx: ExecContext, spec: IndexSpec, values: readonly SqlValue[]
     op: statement === 'INSERT' ? 'Insert' : 'Update',
     rowsProduced: 0,
   });
-  const { pointer } = emitIndexLookup(
+  const outcome = emitIndexLookup(
     ctx.emit,
     tree,
     values,
@@ -60,7 +60,18 @@ function checkKey(ctx: ExecContext, spec: IndexSpec, values: readonly SqlValue[]
     false,
     `Found ${key} — the key is already taken, so ${statement} will be rejected.`,
   );
-  if (pointer) throw new UniqueViolation(name, spec.columns, values, pointer);
+  if (outcome.pointer) {
+    // On a clustered table's secondary UNIQUE index, `pointer` is a sentinel — the row that has the key needs the
+    // same second descent any other match through this index would (plan.md §25.4 B3e), so the error can still say
+    // which row holds it, not just that one does.
+    const clusterKey = outcome.clusterKeys?.[0];
+    const clusteredTree = tree.clusteredVia !== undefined ? ctx.trees[tree.clusteredVia] : undefined;
+    const holder =
+      clusterKey && clusteredTree
+        ? (resolveClustered(ctx.emit, clusteredTree, tree.clusteredVia!, clusterKey, ctx.pool, ctx.locks) ?? outcome.pointer)
+        : outcome.pointer;
+    throw new UniqueViolation(name, spec.columns, values, holder);
+  }
   ctx.emit(`No entry for ${key}, so the key is free and ${statement} goes on.`, {
     stage: 'execute',
     op: statement === 'INSERT' ? 'Insert' : 'Update',

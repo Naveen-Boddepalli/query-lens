@@ -139,6 +139,11 @@ const T = (name: string): string => `src/pages/tools/${name}.tsx`;
  *  - 2026-09-25, the course map and interview roadmap (§25.4 G1): two prose pages, ~7 kB gzip, into the one shared docs
  *    chunk, so /docs moves from 141 to 149. (The entry chunk grew by two lazy routes, which is why /stages and
  *    /stages/:id moved by a hair as well.)
+ *  - 2026-09-28, clustered (index-organized) tables (§25.4 B3e, closing B3): `EntryKey.clusterKey`, the
+ *    clustered-secondary resolve path in `index/lookup.ts` and `exec/`, and the range/join fallback checks add
+ *    ~1 kB gzip to the engine chunk. Four routes that were already sitting within a kB of their ceiling went over:
+ *    /learn/:id, /gallery, /challenges, /tools/parser — each moved to its measured size + 3, the same slack every
+ *    other engine-carrying route already has.
  */
 export const ROUTES: readonly RouteBudget[] = [
   { route: '/', roots: [P('LandingPage')], kb: 157, note: 'the landing page' },
@@ -146,20 +151,20 @@ export const ROUTES: readonly RouteBudget[] = [
   { route: '/stages', roots: ['src/ui/StagesLayout.tsx', P('StagesIndex')], kb: 157, note: 'the stage explainers, index' },
   { route: '/stages/:id', roots: ['src/ui/StagesLayout.tsx', P('StagePage')], kb: 173, note: 'one stage explainer' },
   { route: '/learn', roots: [P('LearnPage')], kb: 162, note: 'the lesson track' },
-  { route: '/learn/:id', roots: [P('LessonPage')], kb: 159, note: 'one lesson' },
+  { route: '/learn/:id', roots: [P('LessonPage')], kb: 163, note: 'one lesson' },
   { route: '/examples', roots: [P('ExamplesPage')], kb: 115, note: 'preset queries' },
-  { route: '/gallery', roots: [P('GalleryPage')], kb: 154, note: 'named moments' },
+  { route: '/gallery', roots: [P('GalleryPage')], kb: 158, note: 'named moments' },
   { route: '/compare', roots: [P('ComparePage')], kb: 165, note: 'index vs scan, policy vs policy, hash vs sort, join algorithms' },
   { route: '/trace', roots: [P('TracePage')], kb: 160, note: 'the trace inspector' },
   { route: '/progress', roots: [P('ProgressPage')], kb: 164, note: 'the progress dashboard' },
-  { route: '/challenges', roots: [P('ChallengesPage')], kb: 156, note: 'challenge index' },
+  { route: '/challenges', roots: [P('ChallengesPage')], kb: 160, note: 'challenge index' },
   { route: '/challenges/:id', roots: [P('ChallengePage')], kb: 279, note: 'one challenge' },
   { route: '/settings', roots: [P('SettingsPage')], kb: 116, note: 'preferences' },
   { route: '/study', roots: [P('StudyPage')], kb: 122, note: 'the §9 study runner (unlisted); the instrument travels in the link, not the bundle (§25.4 A2)' },
   { route: '/assignments/new', roots: [P('AssignmentsNewPage')], kb: 159, note: 'assignment-link builder' },
   { route: '/tools', roots: [P('ToolsIndexPage')], kb: 116, note: 'the tools index' },
   { route: '/tools/buffer-pool', roots: [T('BufferPoolToolPage')], kb: 161, note: 'buffer-pool sandbox' },
-  { route: '/tools/parser', roots: [T('ParserToolPage')], kb: 156, note: 'tokenizer + parser sandbox' },
+  { route: '/tools/parser', roots: [T('ParserToolPage')], kb: 160, note: 'tokenizer + parser sandbox' },
   { route: '/tools/btree', roots: [T('BTreeToolPage')], kb: 161, note: 'B+Tree sandbox' },
   { route: '/tools/page', roots: [T('PageToolPage')], kb: 158, note: 'slotted-page inspector' },
   { route: '/tools/sort', roots: [T('SortToolPage')], kb: 118, note: 'external merge sort' },

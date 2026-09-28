@@ -46,6 +46,12 @@ export interface EntryKey {
   values: readonly SqlValue[];
   page: number;
   slot: number;
+  /**
+   * A SECONDARY index on a CLUSTERED table (plan.md §25.4 B3e): `page`/`slot` are unused (`-1`) — a clustered leaf
+   * can split and move rows between pages, so a physical address would go stale, and this entry carries the row's
+   * CLUSTERING KEY instead. Finding the row costs a second, real descent through the clustered index itself.
+   */
+  clusterKey?: readonly SqlValue[];
 }
 export interface ProbeKey {
   values: readonly SqlValue[];
@@ -56,9 +62,9 @@ export type IndexKey = SqlValue | EntryKey | ProbeKey;
 export const isProbe = (key: IndexKey): key is ProbeKey => typeof key === 'object' && key !== null && 'bound' in key;
 export const isEntry = (key: IndexKey): key is EntryKey => typeof key === 'object' && key !== null && 'page' in key;
 
-/** The entry an index over `values` holds for the row at `pointer`. */
-export function entryKey(values: readonly SqlValue[], pointer: RowPointer): EntryKey {
-  return { values, page: pointer.pageId, slot: pointer.slot };
+/** The entry an index over `values` holds for the row at `pointer` — or, on a clustered table's secondary index, for `clusterKey` instead (plan.md §25.4 B3e). */
+export function entryKey(values: readonly SqlValue[], pointer: RowPointer, clusterKey?: readonly SqlValue[]): EntryKey {
+  return { values, page: pointer.pageId, slot: pointer.slot, ...(clusterKey ? { clusterKey } : {}) };
 }
 
 /** The bound just before every entry with these leading values (`'low'`) or just after them all (`'high'`). */
@@ -99,6 +105,12 @@ export interface BPlusTree {
   tiebreak?: boolean;
   /** A `UNIQUE` index: a lookup of a whole key can stop at the first entry it finds (plan.md §25.4 B3c). */
   unique?: boolean;
+  /**
+   * A SECONDARY index on a CLUSTERED table (plan.md §25.4 B3e): its entries carry a `clusterKey`, not an address,
+   * named here as this tree's row in `ExecContext.trees` — the clustered index a lookup must descend a second time
+   * to reach the row. Unset for the clustering key's own tree, and for every index of an unclustered table.
+   */
+  clusteredVia?: string;
   rootId: string;
   nodes: Record<string, BTreeNode>;
   maxKeys: number;
@@ -146,12 +158,29 @@ export function compareKeys(a: IndexKey, b: IndexKey): number {
   if (av.length !== bv.length) return av.length - bv.length;
   const ea = a as EntryKey;
   const eb = b as EntryKey;
+  // A clustered table's secondary entry has no address to break the tie with (plan.md §25.4 B3e) — its clustering
+  // key does the job instead, exactly the way the row address does everywhere else: it is unique per row.
+  if (ea.clusterKey || eb.clusterKey) {
+    const ak = ea.clusterKey ?? [];
+    const bk = eb.clusterKey ?? [];
+    const shared2 = Math.min(ak.length, bk.length);
+    for (let i = 0; i < shared2; i++) {
+      const c = compareScalar(ak[i]!, bk[i]!);
+      if (c !== 0) return c;
+    }
+    return ak.length - bk.length;
+  }
   return ea.page - eb.page || ea.slot - eb.slot;
 }
 
-/** A key as text for a step's detail: the value for a scalar, `value @page.slot` for an entry. */
+/** A key as text for a step's detail: the value for a scalar, `value @page.slot` for an entry — or, on a clustered
+ *  table's secondary index, `value → clustering key` (plan.md §25.4 B3e), since it holds no address at all. */
 function describeKey(key: IndexKey): string {
-  if (isEntry(key)) return `${key.values.map(String).join(', ')} @${String(key.page)}.${String(key.slot)}`;
+  if (isEntry(key)) {
+    return key.clusterKey
+      ? `${key.values.map(String).join(', ')} → (${key.clusterKey.map(String).join(', ')})`
+      : `${key.values.map(String).join(', ')} @${String(key.page)}.${String(key.slot)}`;
+  }
   if (isProbe(key)) return key.values.map(String).join(', ');
   return String(key);
 }

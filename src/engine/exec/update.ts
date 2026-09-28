@@ -24,7 +24,7 @@ import { enforceUniqueOnUpdate } from './unique.ts';
 import { indexLookupMatches, indexRangeMatches } from './writeScan.ts';
 import type { Match, WriteVerb } from './writeScan.ts';
 import { evaluateValue, passes } from './evaluate.ts';
-import { deleteKey, entryKey, height, indexNameOf, indexSpecsOf, insert, keyText, keyValuesOf } from '../index/index.ts';
+import { deleteKey, entryFor, height, indexNameOf, indexSpecsOf, insert, keyText, keyValuesOf } from '../index/index.ts';
 import type { RowPointer } from '../index/index.ts';
 import { summarizeSteps } from './delete.ts';
 import { summarizeInsert } from './insert.ts';
@@ -70,7 +70,8 @@ function reindexRow(ctx: ExecContext, before: Row, after: Row, pointer: RowPoint
     const parts: string[] = [];
 
     if (beforeValues[0] !== null) {
-      const removed = deleteKey(tree, entryKey(beforeValues, pointer));
+      const { key } = entryFor(spec.columns, before, pointer, ctx.table.clusteredKey);
+      const removed = deleteKey(tree, key);
       if (removed.found) {
         parts.push(`drops key ${keyText(beforeValues)} — ${summarizeSteps(removed.steps)}`);
       }
@@ -81,7 +82,8 @@ function reindexRow(ctx: ExecContext, before: Row, after: Row, pointer: RowPoint
       enforceUniqueOnUpdate(ctx, spec, afterValues);
       const nodesBefore = Object.keys(tree.nodes).length;
       const heightBefore = height(tree);
-      insert(tree, entryKey(afterValues, pointer), pointer);
+      const { key, pointer: stored } = entryFor(spec.columns, after, pointer, ctx.table.clusteredKey);
+      insert(tree, key, stored);
       const nodesAfter = Object.keys(tree.nodes).length;
       const heightAfter = height(tree);
       parts.push(

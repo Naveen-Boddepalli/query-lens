@@ -21,7 +21,7 @@ import type { ExecContext } from './operators.ts';
 import { indexLookupMatches, indexRangeMatches } from './writeScan.ts';
 import type { Match, WriteVerb } from './writeScan.ts';
 import { passes } from './evaluate.ts';
-import { deleteKey, entryKey, indexNameOf, indexSpecsOf, keyText, keyValuesOf } from '../index/index.ts';
+import { deleteKey, entryFor, indexNameOf, indexSpecsOf, keyText, keyValuesOf } from '../index/index.ts';
 import type { DeleteStep, RowPointer } from '../index/index.ts';
 
 const DELETE: WriteVerb = { name: 'DELETE', does: 'remove' };
@@ -57,7 +57,8 @@ function deleteFromIndex(ctx: ExecContext, row: Row, pointer: RowPointer): strin
     const values = keyValuesOf(row, spec.columns);
     if (values[0] === null) continue; // a NULL leading column was never indexed — nothing to remove
 
-    const result = deleteKey(tree, entryKey(values, pointer));
+    const { key } = entryFor(spec.columns, row, pointer, ctx.table.clusteredKey);
+    const result = deleteKey(tree, key);
     if (!result.found) continue; // defensive: every row here came from the heap this tree indexes
     details.push(
       `The \`${name}\` B+Tree drops key ${keyText(values)} from leaf ${

@@ -35,10 +35,10 @@ export type {
 } from './btree.ts';
 export { bulkLoad, DEFAULT_FILL_FACTOR, MIN_FILL_FACTOR } from './bulk.ts';
 export type { BulkEntry } from './bulk.ts';
-export { buildIndex, buildIndexes, keyValuesOf, pageCountFor } from './build.ts';
-export { columnsOfIndex, findIndexSpec, indexNameOf, indexSpecsOf, joinIndexFor } from './spec.ts';
+export { buildIndex, buildIndexes, entryFor, keyValuesOf, pageCountFor } from './build.ts';
+export { columnsOfIndex, findIndexSpec, indexNameOf, indexSpecsOf, isClusteringIndex, joinIndexFor } from './spec.ts';
 export { keyList, keyText, toIndexDisplay } from './display.ts';
-export { describeKeys, emitIndexLookup } from './lookup.ts';
+export { describeKeys, emitIndexLookup, resolveClustered } from './lookup.ts';
 export type { LookupOutcome } from './lookup.ts';
 export { emitRangeStart, nextInRange } from './rangeLookup.ts';
 export type { ChainIO, RangeBoundValue, RangeMatch, RangeStart } from './rangeLookup.ts';

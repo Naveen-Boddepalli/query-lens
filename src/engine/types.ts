@@ -227,6 +227,18 @@ export interface Table {
    * Declared alongside `indexedColumns` (the one-column shorthand), and `indexSpecsOf` merges the two.
    */
   indexes?: IndexSpec[];
+  /**
+   * A CLUSTERED (index-organized) table (plan.md §25.4 B3e): its own UNIQUE index's columns, in key order — must
+   * match one of `indexes` exactly. Rows are stored in that key's order rather than insertion order (`buildHeap`
+   * sorts them), so the clustering key's own lookups need no separate structure to find a row by it, and a range on
+   * it reads pages in sequence instead of wherever insertion happened to leave them. Every OTHER index then carries
+   * the clustering key instead of the row's address, because a clustered leaf can split and move rows between pages
+   * while the clustering key never does — finding a row through one costs a second real descent, through the
+   * clustered index itself. That second hop is built only for an equality lookup (`IndexScan`/`IndexOnlyScan`); a
+   * range scan or an index-nested-loop join never chooses a clustered table's secondary index, and falls back to a
+   * plan that does not need one.
+   */
+  clusteredKey?: string[];
 }
 
 /** One index a table declares — its columns in key order. More than one column makes it composite. */

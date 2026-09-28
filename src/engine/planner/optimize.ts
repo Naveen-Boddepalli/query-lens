@@ -10,10 +10,10 @@
  * `optimize` event carrying the before and after trees.
  */
 
-import type { PredictionPrompt, SqlValue, Table } from '../types.ts';
+import type { IndexSpec, PredictionPrompt, SqlValue, Table } from '../types.ts';
 import { indexSelectionPrompt, leftmostPrefixPrompt } from '../predict.ts';
 import { describeKeys as describeKeysText } from '../index/lookup.ts';
-import { columnsOfIndex, indexNameOf, indexSpecsOf } from '../index/spec.ts';
+import { columnsOfIndex, indexNameOf, indexSpecsOf, isClusteringIndex } from '../index/spec.ts';
 import { mapChildren, walkExpr } from '../parser/index.ts';
 import { arithmetic, negate } from '../value.ts';
 import type { CompareOp, Expr } from '../parser/index.ts';
@@ -514,7 +514,11 @@ const indexSelection: Rule = (input, table) => {
     }
     if (matched.length === 0) return [];
     const nextColumn = spec.columns[matched.length];
-    const next = nextColumn === undefined ? undefined : rangeBoundsOn(parts, nextColumn, used);
+    // A range *within* the prefix needs the entries' own row addresses to walk the leaf chain (`index/rangeLookup.ts`)
+    // — a clustered table's secondary index carries a clustering key instead (plan.md §25.4 B3e), so this narrowing
+    // is only offered for the clustering key's own index, or when the table isn't clustered at all.
+    const clusterSafe = !table.clusteredKey || isClusteringIndex(table.clusteredKey, spec.columns);
+    const next = nextColumn === undefined || !clusterSafe ? undefined : rangeBoundsOn(parts, nextColumn, used);
     return [
       {
         name: indexNameOf(spec.columns),
@@ -597,6 +601,15 @@ const indexSelection: Rule = (input, table) => {
   const rangeClause = chosen.next
     ? ` The next column, \`${chosen.next.column}\`, has a range (${formatRangeBounds(chosen.next.column, chosen.next.low, chosen.next.high)}), so the index narrows it within that run: one descent to where the range begins inside ${describeKeysText(keys)}, then along the leaf chain until the run ends.`
     : '';
+  // Whether this costs a second descent (plan.md §25.4 B3e) depends on whether `index-only-scan` covers the query
+  // next — this rule runs before it and cannot know yet, so that fact is left to the execution-stage narration
+  // (`index/lookup.ts`'s `emitIndexLookup`), which always gets to see the real answer.
+  const clusteredClause =
+    table.clusteredKey && !isClusteringIndex(table.clusteredKey, chosen.columns)
+      ? ` This table is clustered on \`${indexNameOf(table.clusteredKey)}\`, and ${
+          composite ? `(${chosen.columns.join(', ')})` : `\`${chosen.name}\``
+        } is a secondary index — it holds the clustering key, not the row's address.`
+      : '';
 
   return {
     rule: 'index-selection',
@@ -606,7 +619,7 @@ const indexSelection: Rule = (input, table) => {
         : residual
           ? `\`${chosen.name}\` is indexed${choiceClause}, so the equality becomes an index lookup. The rest of the predicate cannot be answered by the index and is rechecked on each row the index returns.`
           : `\`${chosen.name}\` is indexed${choiceClause} and the predicate is an equality on it, so the scan becomes a B+Tree lookup — a handful of pages instead of the whole table.`
-    }${uniqueClause}${rangeClause}${unusable ? ` ${unusable}` : ''}`,
+    }${uniqueClause}${rangeClause}${clusteredClause}${unusable ? ` ${unusable}` : ''}`,
     plan: root,
     changed: new Set<Plan>([indexScan]),
     prompt:
@@ -647,28 +660,34 @@ const rangeIndexSelection: Rule = (input, table) => {
 
   const parts = conjuncts(scan.filter);
   // A range enters an index through its *leading* column, plain or composite — the entries are ordered by it first.
-  const candidates = indexSpecsOf(table).flatMap((spec) => {
-    const column = spec.columns[0]!;
-    const name = indexNameOf(spec.columns);
-    const matches = parts
-      .map((p, i) => ({ i, match: rangeOn(p, column) }))
-      .filter((m): m is { i: number; match: NonNullable<ReturnType<typeof rangeOn>> } => m.match !== undefined);
-    if (matches.length === 0) return [];
+  // A range walk reads the leaf chain by row address, which a clustered table's secondary index does not carry
+  // (plan.md §25.4 B3e) — so a range only ever chooses the clustering key's own index there, or any index at all
+  // when the table isn't clustered.
+  const clusterSafe = (spec: IndexSpec) => !table.clusteredKey || isClusteringIndex(table.clusteredKey, spec.columns);
+  const candidates = indexSpecsOf(table)
+    .filter(clusterSafe)
+    .flatMap((spec) => {
+      const column = spec.columns[0]!;
+      const name = indexNameOf(spec.columns);
+      const matches = parts
+        .map((p, i) => ({ i, match: rangeOn(p, column) }))
+        .filter((m): m is { i: number; match: NonNullable<ReturnType<typeof rangeOn>> } => m.match !== undefined);
+      if (matches.length === 0) return [];
 
-    const lower = matches.find((m) => m.match.op === '>' || m.match.op === '>=');
-    const upper = matches.find((m) => m.match.op === '<' || m.match.op === '<=');
-    const consumed = new Set([lower?.i, upper?.i].filter((i): i is number => i !== undefined));
-    const low: RangeBound | undefined = lower
-      ? { value: lower.match.value, inclusive: lower.match.op === '>=' }
-      : undefined;
-    const high: RangeBound | undefined = upper
-      ? { value: upper.match.value, inclusive: upper.match.op === '<=' }
-      : undefined;
-    const numericLow = low && typeof low.value === 'number' ? low.value : null;
-    const numericHigh = high && typeof high.value === 'number' ? high.value : null;
-    const selectivity = boundedRangeSelectivity(column, numericLow, numericHigh, table);
-    return [{ column, name, consumed, low, high, selectivity }];
-  });
+      const lower = matches.find((m) => m.match.op === '>' || m.match.op === '>=');
+      const upper = matches.find((m) => m.match.op === '<' || m.match.op === '<=');
+      const consumed = new Set([lower?.i, upper?.i].filter((i): i is number => i !== undefined));
+      const low: RangeBound | undefined = lower
+        ? { value: lower.match.value, inclusive: lower.match.op === '>=' }
+        : undefined;
+      const high: RangeBound | undefined = upper
+        ? { value: upper.match.value, inclusive: upper.match.op === '<=' }
+        : undefined;
+      const numericLow = low && typeof low.value === 'number' ? low.value : null;
+      const numericHigh = high && typeof high.value === 'number' ? high.value : null;
+      const selectivity = boundedRangeSelectivity(column, numericLow, numericHigh, table);
+      return [{ column, name, consumed, low, high, selectivity }];
+    });
   if (candidates.length === 0) return null;
 
   const chosen = candidates.reduce((best, c) =>

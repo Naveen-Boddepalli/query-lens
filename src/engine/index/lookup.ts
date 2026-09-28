@@ -30,7 +30,7 @@ import {
   probe,
   valuesOf,
 } from './btree.ts';
-import type { BPlusTree, IndexKey, LeafNode, RowPointer } from './btree.ts';
+import type { BPlusTree, EntryKey, IndexKey, LeafNode, RowPointer } from './btree.ts';
 import { keyList, toIndexDisplay } from './display.ts';
 import { traversalPrompt } from '../predict.ts';
 
@@ -43,6 +43,12 @@ export interface LookupOutcome {
   entries: SqlValue[][];
   /** Pages the traversal touched, root first. */
   pagesRead: number[];
+  /**
+   * Set only on a clustered table's secondary index (plan.md §25.4 B3e), parallel to `pointers`: each match's
+   * CLUSTERING key, since `pointers` here are unused sentinels — finding the row needs a second descent, through
+   * the clustered index itself (`resolveClustered`), which the caller must do.
+   */
+  clusterKeys?: (readonly SqlValue[])[];
 }
 
 function describe(key: SqlValue): string {
@@ -179,6 +185,8 @@ export function emitIndexLookup(
   let leaf = node(tree, path[path.length - 1]!) as LeafNode;
   const pointers: RowPointer[] = [];
   const entries: SqlValue[][] = [];
+  // Only a clustered table's secondary index ever fills this in (plan.md §25.4 B3e) — parallel to `pointers`.
+  const clusterKeys: (readonly SqlValue[])[] = [];
   let foundLeaf = leaf.id;
 
   if (tree.tiebreak) {
@@ -193,6 +201,7 @@ export function emitIndexLookup(
         if (pointers.length === 0) foundLeaf = leaf.id;
         pointers.push(leaf.pointers[at]!);
         entries.push([...valuesOf(leaf.keys[at]!)]);
+        if (tree.clusteredVia !== undefined) clusterKeys.push((leaf.keys[at] as EntryKey).clusterKey ?? []);
         at += 1;
       }
       if (single && pointers.length > 0) break;
@@ -228,6 +237,7 @@ export function emitIndexLookup(
     }
   }
 
+  const clustered = tree.clusteredVia !== undefined;
   const pointer = pointers[0];
   if (pointer === undefined) {
     emit(`${label} is not in this leaf, so it is not in the table at all — the search stops here.`, {
@@ -237,7 +247,7 @@ export function emitIndexLookup(
       key: keys[0]!,
     });
     if (parentPage !== null) locks.release(parentPage, 'shared');
-    return { pointer: null, pointers, entries, pagesRead };
+    return { pointer: null, pointers, entries, pagesRead, ...(clustered ? { clusterKeys } : {}) };
   }
 
   const also =
@@ -247,13 +257,17 @@ export function emitIndexLookup(
   const partial = wide && keys.length < entryWidth(tree) ? ` (a leftmost prefix of the ${String(entryWidth(tree))}-column key)` : '';
   emit(
     foundNote ??
-      (touchHeap
-        ? `Found ${label}${partial}. The leaf stores a pointer to the row, not the row itself: heap page ${pointer.pageId}, slot ${pointer.slot}.${also}`
-        : `Found ${label}${partial}. This query only needs \`${column}\` itself, which the leaf already holds — the heap page the pointer names is never read.${also}`),
+      (clustered && touchHeap
+        ? `Found ${label}${partial}. This table is clustered on \`${tree.clusteredVia}\`, so the leaf holds that key, not the row's address — finding the row costs a second descent, through the clustered index itself.${also}`
+        : touchHeap
+          ? `Found ${label}${partial}. The leaf stores a pointer to the row, not the row itself: heap page ${pointer.pageId}, slot ${pointer.slot}.${also}`
+          : `Found ${label}${partial}. This query only needs \`${column}\` itself, which the leaf already holds — the heap page the pointer names is never read.${also}`),
     { stage: 'index', action: 'found', nodeId: foundLeaf, key: keys[0]! },
   );
 
-  if (touchHeap) {
+  // A clustered table's secondary entry has no address to fetch — `resolveClustered` does the real work, as a
+  // second, honest descent, and only the caller knows which of `pointers` it still needs (a `LIMIT` may not need them all).
+  if (touchHeap && !clustered) {
     locks.acquire(
       pointer.pageId,
       'shared',
@@ -271,5 +285,21 @@ export function emitIndexLookup(
 
   if (parentPage !== null) locks.release(parentPage, 'shared');
 
-  return { pointer, pointers, entries, pagesRead };
+  return { pointer, pointers, entries, pagesRead, ...(clustered ? { clusterKeys } : {}) };
+}
+
+/**
+ * The real row address for one of a clustered table's secondary-index matches (plan.md §25.4 B3e): a second, real
+ * descent through the clustered index itself, narrated and costed exactly like any other lookup — because that is
+ * exactly what it is. `null` only if the row genuinely is not there, which a correctly maintained index never shows.
+ */
+export function resolveClustered(
+  emit: Emit,
+  clusteredTree: BPlusTree,
+  clusteringColumn: string,
+  clusterKey: readonly SqlValue[],
+  pool: BufferPool,
+  locks: LockManager,
+): RowPointer | null {
+  return emitIndexLookup(emit, clusteredTree, clusterKey, pool, clusteringColumn, locks).pointer;
 }

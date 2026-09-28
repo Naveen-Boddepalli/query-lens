@@ -14,7 +14,7 @@ import { lookupKeysOf } from '../planner/index.ts';
 import type { ExecContext } from './operators.ts';
 import { fetchHeapPage, rangeHolds, rowAt } from './operators.ts';
 import { passes } from './evaluate.ts';
-import { emitIndexLookup, emitRangeStart, nextInRange } from '../index/index.ts';
+import { emitIndexLookup, emitRangeStart, nextInRange, resolveClustered } from '../index/index.ts';
 import type { RowPointer } from '../index/index.ts';
 
 export interface Match {
@@ -53,22 +53,29 @@ export function indexLookupMatches(ctx: ExecContext, plan: Extract<Plan, { op: '
   const tree = ctx.trees[plan.column];
   if (!tree) return [];
 
-  const { pointers } = emitIndexLookup(ctx.emit, tree, lookupKeysOf(plan), ctx.pool, plan.column, ctx.locks);
+  const outcome = emitIndexLookup(ctx.emit, tree, lookupKeysOf(plan), ctx.pool, plan.column, ctx.locks);
+  const { pointers, clusterKeys } = outcome;
+  const clusteredTree = tree.clusteredVia !== undefined ? ctx.trees[tree.clusteredVia] : undefined;
   const matched: Match[] = [];
 
   pointers.forEach((pointer, at) => {
-    // The lookup already fetched the first match's page; the rest are read now, as their rows are examined.
-    if (at > 0) fetchHeapPage(ctx, pointer);
-    const row = rowAt(ctx, pointer);
+    // A clustered table's secondary entry has no address (plan.md §25.4 B3e): every match costs a real second
+    // descent, through the clustered index. Otherwise the lookup already fetched the first match's page, and the
+    // rest are read now, as their rows are examined.
+    const clusterKey = clusterKeys?.[at];
+    const real = clusterKey && clusteredTree ? resolveClustered(ctx.emit, clusteredTree, tree.clusteredVia!, clusterKey, ctx.pool, ctx.locks) : pointer;
+    if (!real) return;
+    if (!clusterKey && at > 0) fetchHeapPage(ctx, pointer);
+    const row = rowAt(ctx, real);
     if (!row) return;
     if (!passes(plan.residual, row)) {
       rejected(ctx, verb, 'IndexScan', matched.length);
       return;
     }
-    matched.push({ row, pointer });
+    matched.push({ row, pointer: real });
     claim(
       ctx,
-      { row, pointer },
+      { row, pointer: real },
       verb,
       'IndexScan',
       matched.length,

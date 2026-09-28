@@ -124,6 +124,37 @@ is the same saving as an index-only scan, for more than one column.
 Try it in the Playground's **Custom** data: add a table, and declare `city+age` under *Composite
 indexes*.
 
+## Clustered (index-organized) tables
+
+Everything above assumes a table's rows live in a **heap** — pages in whatever order they were inserted
+— and every index, including a `UNIQUE` one, points *into* that heap: an entry's `(page, slot)` names
+where the row actually is. A **clustered** table drops that assumption for one index, its own: the table
+is stored **in that key's order**, not insertion order, so a range on it reads pages in sequence instead
+of wherever insertion happened to leave them.
+
+Declare the pages of eight rows inserted in a scrambled order (`3, 1, 4, 2, 5, 7, 6, 8`) and ask for
+`id > 2 AND id < 7`. Left as a heap, `3`, `4`, `5` and `6` each land on a different original page, paired
+with an unrelated neighbour — the range touches every page in the table. Clustered on `id`, the same four
+rows sit on two adjacent pages. Measured on the real engine: **8 disk reads unclustered, 6 clustered** —
+a quarter fewer, on a table this small; the gap only widens as a table grows and its insertion order
+drifts further from any one column's order.
+
+The catch is that only **one** index can be the table's layout. Every *other* index still needs to find
+the row, and it cannot carry a physical address the way a heap table's index does — a clustered leaf
+splits and moves rows between pages exactly like any other leaf, and a stored `(page, slot)` would go
+stale the moment that happened. So a secondary index on a clustered table stores the **clustering key**
+instead — `email` → `id`, not `email` → page 5, slot 2 — and finding the row costs a second, real descent:
+one through `email`'s tree to read off the `id`, then one through `id`'s own tree to reach the row. That
+second descent is the whole trade-off condensed to one sentence: cluster the column your heaviest range
+queries use, and every other index quietly gets slower by one tree's height.
+
+QueryLens builds that second descent for an equality lookup — `WHERE email = 'ada@x.org'` on a table
+clustered on `id` opens two B+Trees, narrated as two separate descents — and for a covering query that
+needs nothing but the secondary column itself, which still costs only one, since the row is never fetched
+either way. A range scan or an index-nested-loop join never chooses a clustered table's secondary index,
+falling back to a plan that does not need the extra hop — the leaf-chain walk both of those algorithms
+run wants a row address the entries do not carry, and building that too is a larger step than this one.
+
 ## Where this simplifies
 
 QueryLens's tree has a small, fixed fan-out (enough to demonstrate a split without needing thousands
@@ -133,4 +164,6 @@ production index also handles — critically — concurrent modification, which 
 [locking the app's Locks panel visualises](/) actually earns its keep in a real engine: two
 descents that briefly hold two levels of the tree at once ("latch crabbing") are how a B+Tree stays
 correct while more than one query touches it at the same time. QueryLens runs exactly one query, so
-that layer is drawn but never actually contested.
+that layer is drawn but never actually contested. Declaring a clustering key is not yet exposed in the
+Custom database editor — it is built and tested on the engine, reachable through the query API a seeded
+database can set `clusteredKey` on, but there is no form field for it yet.

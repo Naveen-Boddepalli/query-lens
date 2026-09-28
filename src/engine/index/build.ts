@@ -3,9 +3,33 @@ import type { IndexBuildOptions, IndexSpec, Row, SqlValue } from '../types.ts';
 import { createTree, entryKey, insert } from './btree.ts';
 import { bulkLoad, DEFAULT_FILL_FACTOR } from './bulk.ts';
 import type { BulkEntry } from './bulk.ts';
-import type { BPlusTree } from './btree.ts';
+import type { BPlusTree, EntryKey, RowPointer } from './btree.ts';
 import { DEFAULT_MAX_KEYS } from './btree.ts';
-import { indexNameOf } from './spec.ts';
+import { indexNameOf, isClusteringIndex } from './spec.ts';
+
+/** A sentinel — never dereferenced — for a clustered table's secondary entries (plan.md §25.4 B3e): they carry a
+ *  `clusterKey` instead of an address, so `page`/`slot` are meaningless and must never be fetched as a heap page. */
+const NO_ADDRESS: RowPointer = { pageId: -1, slot: -1 };
+
+/**
+ * The entry `columns`'s index holds for `row`, and the pointer to store alongside it. Ordinarily that pointer *is*
+ * the row's real heap address — `pointer`, unchanged. On a CLUSTERED table (plan.md §25.4 B3e), the clustering key's
+ * own index still gets that real address (its whole point: no second structure is needed to find a row by it), but
+ * every OTHER index gets the row's clustering key instead, behind the sentinel `NO_ADDRESS` — a clustered leaf can
+ * split and move rows between pages, and the clustering key never goes stale the way a physical pointer would.
+ */
+export function entryFor(
+  columns: readonly string[],
+  row: Row,
+  pointer: RowPointer,
+  clusteredKey: readonly string[] | undefined,
+): { key: EntryKey; pointer: RowPointer } {
+  if (!clusteredKey || isClusteringIndex(clusteredKey, columns)) {
+    return { key: entryKey(keyValuesOf(row, columns), pointer), pointer };
+  }
+  const clusterKey = keyValuesOf(row, clusteredKey);
+  return { key: entryKey(keyValuesOf(row, columns), NO_ADDRESS, clusterKey), pointer: NO_ADDRESS };
+}
 
 /**
  * Builds one index over the heap. Index nodes are numbered starting at
@@ -27,6 +51,8 @@ export function buildIndex(
   firstPageId = heap.pages.length,
   /** How to build it — one entry at a time (the default), or bulk-loaded and packed to a fill factor (plan.md §25.4 B3d). */
   build: IndexBuildOptions = { method: 'incremental' },
+  /** The table's clustering key (plan.md §25.4 B3e), if it has one. */
+  clusteredKey?: readonly string[],
 ): BPlusTree {
   const columns = typeof index === 'string' ? [index] : index.columns;
 
@@ -38,13 +64,12 @@ export function buildIndex(
       // find and NULL-keyed rows fall back to a scan. A NULL further along (`(1, NULL)`) is an ordinary entry:
       // the row must still be found by an equality on the columns before it.
       if (values[0] === null) return;
-      const pointer = { pageId: page.pageId, slot };
-      entries.push({ key: entryKey(values, pointer), pointer });
+      entries.push(entryFor(columns, row, { pageId: page.pageId, slot }, clusteredKey));
     });
   });
 
-  // Entry keys (values + row address), so the key may repeat: two rows with the same values are two
-  // distinct entries, adjacent in the leaves, and neither overwrites the other.
+  // Entry keys (values + row address, or a clustered secondary's clustering key), so the key may repeat: two rows
+  // with the same values are two distinct entries, adjacent in the leaves, and neither overwrites the other.
   let tree: BPlusTree;
   if (build.method === 'bulk') {
     tree = bulkLoad(entries, maxKeys, firstPageId, build.fillFactor ?? DEFAULT_FILL_FACTOR, true);
@@ -53,6 +78,7 @@ export function buildIndex(
     for (const { key, pointer } of entries) insert(tree, key, pointer);
   }
   if (typeof index !== 'string' && index.unique) tree.unique = true;
+  if (clusteredKey && !isClusteringIndex(clusteredKey, columns)) tree.clusteredVia = indexNameOf(clusteredKey);
   return tree;
 }
 
@@ -74,11 +100,13 @@ export function buildIndexes(
   /** Where the first tree's pages begin — the heap's end by default; a join's *inner* table starts past the outer's. */
   firstPageId = heap.pages.length,
   build?: IndexBuildOptions,
+  /** The table's clustering key (plan.md §25.4 B3e), if it has one. */
+  clusteredKey?: readonly string[],
 ): Record<string, BPlusTree> {
   const trees: Record<string, BPlusTree> = {};
   for (const index of indexes) {
     const name = indexNameOf(typeof index === 'string' ? [index] : index.columns);
-    const tree = buildIndex(heap, index, maxKeys, firstPageId, build);
+    const tree = buildIndex(heap, index, maxKeys, firstPageId, build, clusteredKey);
     trees[name] = tree;
     firstPageId = tree.nextPageId;
   }

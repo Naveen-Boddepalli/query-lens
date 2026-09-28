@@ -47,6 +47,14 @@ concept explanation.
   `UPDATE` that repeats a key part-way through (`SET id = id + 1`) is rejected, as PostgreSQL's
   immediate constraints reject it. There is no `CREATE UNIQUE INDEX`; a table whose rows already
   repeat a key cannot be given one (the editor refuses to apply it).
+- **A table may be *clustered*** on one of its own `UNIQUE` indexes (`clusteredKey: ['id']`): its rows
+  are stored in that key's order rather than insertion order, so a range on it reads pages in sequence.
+  Every other index then carries the clustering key instead of the row's address — a clustered leaf can
+  split and move rows between pages, the clustering key never does — so an equality lookup through one
+  costs a second, real descent, through the clustered index itself; a covering query still costs only
+  one. A range scan and an index-nested-loop join never choose a clustered table's secondary index, and
+  fall back to a plan that does not need one. Not yet exposed in the Custom database editor — a seeded
+  database can set it, the engine and its tests do not otherwise distinguish it from any other table.
 - **Fan-out**: each node holds at most **4 keys** (5 children) before splitting; adjustable 3–6 in
   the [standalone sandbox](/tools/btree).
 - Supported operations: **insert**, **delete** (borrow/merge/root-collapse), **point lookup**, and
@@ -107,7 +115,7 @@ See [Supported SQL](/docs/reference/sql) for the complete accepted grammar.
 ## What's out of scope entirely
 
 No subqueries, no more than one `JOIN` per query (so no join-order
-choice), no outer joins, no `UNIQUE` or clustered indexes, no transactions, no real
+choice), no outer joins, no transactions, no real
 concurrency (the Locks panel is visual only), and no cost-based query optimization — every
 rewrite rule fires on a structural match, never a cost comparison, and the cost *estimates* shown
 alongside a plan exist to justify a rewrite's narration, not to decide whether it happens. `UNION` and `COUNT(DISTINCT …)` are also not accepted. These are deliberate exclusions for this

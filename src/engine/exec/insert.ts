@@ -12,7 +12,7 @@
 import type { Row } from '../types.ts';
 import { enforceUniqueOnInsert } from './unique.ts';
 import type { ExecContext } from './operators.ts';
-import { entryKey, height, indexNameOf, indexSpecsOf, insert, keyText, keyValuesOf, pageCountFor } from '../index/index.ts';
+import { entryFor, height, indexNameOf, indexSpecsOf, insert, keyText, keyValuesOf, pageCountFor } from '../index/index.ts';
 import type { RowPointer } from '../index/index.ts';
 
 export interface InsertOutcome {
@@ -52,7 +52,8 @@ function insertIntoIndex(ctx: ExecContext, row: Row, pointer: RowPointer): void 
 
     const nodesBefore = Object.keys(tree.nodes).length;
     const heightBefore = height(tree);
-    insert(tree, entryKey(values, pointer), pointer);
+    const { key, pointer: stored } = entryFor(spec.columns, row, pointer, ctx.table.clusteredKey);
+    insert(tree, key, stored);
     const nodesAfter = Object.keys(tree.nodes).length;
     const heightAfter = height(tree);
 

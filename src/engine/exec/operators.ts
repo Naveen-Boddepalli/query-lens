@@ -16,7 +16,7 @@ import type { AggregateSpec, Plan, ProjectList, RangeBound } from '../planner/in
 import type { BufferPool, Heap } from '../storage/index.ts';
 import type { LockManager } from '../locks/index.ts';
 import type { BPlusTree, RowPointer } from '../index/index.ts';
-import { columnsOfIndex, emitIndexLookup, emitRangeStart, nextInRange, pageCountFor } from '../index/index.ts';
+import { columnsOfIndex, emitIndexLookup, emitRangeStart, nextInRange, pageCountFor, resolveClustered } from '../index/index.ts';
 import { compare, equalityKeyOf, evaluateValue, passes } from './evaluate.ts';
 import { externalMergeSort, sortTempPageCount } from './sort.ts';
 
@@ -183,6 +183,9 @@ export function rowAt(ctx: ExecContext, pointer: RowPointer, heap: Heap = ctx.he
  */
 function indexScan(plan: Extract<Plan, { op: 'IndexScan' }>, ctx: ExecContext): Operator {
   let pointers: RowPointer[] = [];
+  let clusterKeys: (readonly SqlValue[])[] | undefined;
+  let clusteredTree: BPlusTree | undefined;
+  let clusteringColumn = '';
   let cursor = 0;
   const produced = counter(ctx, 'IndexScan');
 
@@ -191,7 +194,13 @@ function indexScan(plan: Extract<Plan, { op: 'IndexScan' }>, ctx: ExecContext): 
     open() {
       const tree = ctx.trees[plan.column];
       if (!tree) return;
-      pointers = emitIndexLookup(ctx.emit, tree, lookupKeysOf(plan), ctx.pool, plan.column, ctx.locks).pointers;
+      const outcome = emitIndexLookup(ctx.emit, tree, lookupKeysOf(plan), ctx.pool, plan.column, ctx.locks);
+      pointers = outcome.pointers;
+      clusterKeys = outcome.clusterKeys;
+      if (tree.clusteredVia !== undefined) {
+        clusteringColumn = tree.clusteredVia;
+        clusteredTree = ctx.trees[tree.clusteredVia];
+      }
     },
     next() {
       for (;;) {
@@ -199,9 +208,20 @@ function indexScan(plan: Extract<Plan, { op: 'IndexScan' }>, ctx: ExecContext): 
         cursor += 1;
         const pointer = pointers[at];
         if (!pointer) return null;
-        if (at > 0) fetchHeapPage(ctx, pointer);
 
-        const row = rowAt(ctx, pointer);
+        // A clustered table's secondary entry has no address (plan.md §25.4 B3e): every match, the first included,
+        // costs a real second descent through the clustered index. Otherwise the lookup already fetched the first
+        // match's own heap page, and each later one is fetched here, lazily, as it is pulled.
+        let resolved: RowPointer | null = pointer;
+        const clusterKey = clusterKeys?.[at];
+        if (clusterKey && clusteredTree) {
+          resolved = resolveClustered(ctx.emit, clusteredTree, clusteringColumn, clusterKey, ctx.pool, ctx.locks);
+        } else if (at > 0) {
+          fetchHeapPage(ctx, pointer);
+        }
+        if (!resolved) continue;
+
+        const row = rowAt(ctx, resolved);
         if (!row) continue;
 
         if (!passes(plan.residual, row)) {
@@ -222,6 +242,8 @@ function indexScan(plan: Extract<Plan, { op: 'IndexScan' }>, ctx: ExecContext): 
     },
     close() {
       pointers = [];
+      clusterKeys = undefined;
+      clusteredTree = undefined;
       cursor = 0;
     },
   };
