@@ -3,10 +3,10 @@ title: Supported SQL
 description: The exact SQL subset QueryLens's parser accepts, and what it says when you write something outside it.
 ---
 
-QueryLens implements four statements — `SELECT`, `DELETE`, `INSERT` and `UPDATE` — plus `EXPLAIN` for a `SELECT`, over one table
-at a time (two, for a `JOIN`). This page is the complete subset: if it isn't listed here, the
-parser does not accept it yet, and it will tell you so by name rather than failing with a generic
-syntax error.
+QueryLens implements four statements — `SELECT`, `DELETE`, `INSERT` and `UPDATE` — plus `EXPLAIN` for a `SELECT`
+and `ANALYZE` for a table, over one table at a time (two, for a `JOIN`). This page is the complete subset: if it
+isn't listed here, the parser does not accept it yet, and it will tell you so by name rather than failing with a
+generic syntax error.
 
 ## SELECT
 
@@ -189,6 +189,19 @@ cost model's **estimate** (`est ~37 rows`):
   reason.
 
 The Planner panel's **Copy as EXPLAIN** button gives the same text for a query you have already run.
+
+## ANALYZE
+
+```sql
+ANALYZE users;
+```
+
+A real scan of the named table, producing its statistics — distinct count, null fraction,
+most-common values, a histogram, correlation — one column per result row, in the same Result
+panel any other query's answer would be. Every later query against that table then reads them,
+in place of scanning the live rows itself, until `ANALYZE` runs again — see
+[Statistics](/docs/reference/limits#statistics) for what they hold and how the cost model uses
+them. No `WHERE`, no `JOIN`: `ANALYZE` names exactly one table.
 
 ## DELETE, INSERT, UPDATE
 

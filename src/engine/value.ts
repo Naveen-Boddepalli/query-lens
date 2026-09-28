@@ -65,3 +65,19 @@ export function negate(value: SqlValue): number | null {
   const n = toNumber(value);
   return n === null ? null : clean(-n);
 }
+
+/**
+ * A total order over `SqlValue`, `-1`/`0`/`1`: NULL sorts before everything and equals only NULL, two numbers
+ * compare numerically, anything else compares as text (a boolean as `'0'`/`'1'`) — an **index's** order, not SQL's
+ * `ORDER BY` (`exec/sort.ts`'s own `compareAsc` sorts NULLs *last*, Postgres's default there, deliberately the
+ * opposite rule). Shared by a table's own B+Tree indexes (`index/btree.ts`'s `compareScalar`), a clustered table's
+ * physical layout (`storage/page.ts`), and `ANALYZE`'s histogram and correlation statistics (plan.md §25.4 C1) —
+ * kept here once so none of the three can quietly drift from another.
+ */
+export function compareValues(a: SqlValue, b: SqlValue): number {
+  if (a === null || b === null) return a === b ? 0 : a === null ? -1 : 1;
+  if (typeof a === 'number' && typeof b === 'number') return a - b;
+  const sa = typeof a === 'boolean' ? String(Number(a)) : String(a);
+  const sb = typeof b === 'boolean' ? String(Number(b)) : String(b);
+  return sa < sb ? -1 : sa > sb ? 1 : 0;
+}

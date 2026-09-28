@@ -4,21 +4,12 @@
  * realistic one you cannot. The disclaimer banner covers the difference.
  */
 
-import type { Row, SqlValue, Table } from '../types.ts';
-
-/** NULL-first, numeric-or-lexicographic compare — the same rule `index/btree.ts`'s `compareScalar` applies to a
- *  table's own entries, kept as its own tiny copy here so `storage/` need not depend on `index/`. */
-function compareValue(a: SqlValue, b: SqlValue): number {
-  if (a === null || b === null) return a === b ? 0 : a === null ? -1 : 1;
-  if (typeof a === 'number' && typeof b === 'number') return a - b;
-  const sa = typeof a === 'boolean' ? String(Number(a)) : String(a);
-  const sb = typeof b === 'boolean' ? String(Number(b)) : String(b);
-  return sa < sb ? -1 : sa > sb ? 1 : 0;
-}
+import type { Row, Table } from '../types.ts';
+import { compareValues } from '../value.ts';
 
 function compareRows(a: Row, b: Row, columns: readonly string[]): number {
   for (const column of columns) {
-    const cmp = compareValue(a[column] ?? null, b[column] ?? null);
+    const cmp = compareValues(a[column] ?? null, b[column] ?? null);
     if (cmp !== 0) return cmp;
   }
   return 0;

@@ -56,6 +56,8 @@ describe('grammar data — every rule is demonstrated by a query the real parser
     ['statement (select)', 'SELECT * FROM users'],
     ['statement (explain)', 'EXPLAIN SELECT * FROM users'],
     ['explain — with ANALYZE', 'EXPLAIN ANALYZE SELECT * FROM users WHERE id = 5'],
+    ['statement (analyze)', 'ANALYZE users'],
+    ['analyze — with a trailing semicolon', 'ANALYZE users;'],
     ['statement (delete)', 'DELETE FROM users'],
     ['statement (insert)', "INSERT INTO users VALUES (1, 'a')"],
     ['statement (update)', 'UPDATE users SET age = 1'],

@@ -99,6 +99,30 @@ way a `SELECT`'s `WHERE` would (an index lookup or a range walk of the index whe
 otherwise), takes an exclusive lock on every page it will change, and drops and re-adds exactly the
 index entries of the rows it touches.
 
+## Statistics
+
+- **`ANALYZE table`** is a real statement: a real scan of the real table, producing — per column —
+  a distinct count, a null fraction, the most-common values with their real frequencies, an
+  equi-depth histogram over what is left, and how much the column's own order tracks the table's
+  physical row order (correlation, `-1` to `1`; a [clustered table](/docs/concepts/btree) achieves
+  exactly `1` on its clustering key). Shaped after PostgreSQL's own `pg_stats`.
+- **The result *is* the statistics** — one row per column — shown in the same Result panel any
+  other query's answer would be. There is no separate stats panel to open; opening the result is
+  opening the statistics.
+- **A snapshot, not a live fact.** Once run, a table's statistics sit on it exactly as they were the
+  moment `ANALYZE` ran — even after later writes change the table underneath them — until `ANALYZE`
+  runs again. A table that has never been `ANALYZE`d keeps the older, always-accurate-because-always-
+  live behaviour every other v2.0 estimate already had: the planner scans the real rows itself.
+  Nothing is `ANALYZE`d by default.
+- **The cost model reads them when they exist.** An equality on a most-common value gets its real
+  frequency instead of assuming every distinct value is equally likely; any other value gets the
+  average of what the most-common list does not already cover, which is closer to `1/ndistinct` the
+  less skewed the column is and further from it the more skewed; a range reads the histogram's real
+  bucket boundaries instead of interpolating linearly between the column's min and max.
+- **A statement, not a button.** Its answer travels through the trace, the URL, a saved moment and
+  an assignment link the same way any other statement's does — there is nothing about `ANALYZE`
+  itself that the rest of the app treats specially.
+
 ## Locks
 
 - **Page-level**, coarse-grained: one shared read lock per page, taken and released as a scan or

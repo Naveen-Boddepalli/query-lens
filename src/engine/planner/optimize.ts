@@ -525,7 +525,7 @@ const indexSelection: Rule = (input, table) => {
         columns: spec.columns,
         unique: spec.unique === true,
         matched,
-        fraction: matched.reduce((product, m) => product / ndistinct(table.rows, m.column), 1),
+        fraction: matched.reduce((product, m) => product / ndistinct(table, m.column), 1),
         ...(next ? { next } : {}),
       },
     ];

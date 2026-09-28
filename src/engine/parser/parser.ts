@@ -1,8 +1,9 @@
 /**
  * Recursive-descent parser for the v0 SQL subset (plan.md §4):
  *
- *   statement     := explain | select | delete | insert | update
+ *   statement     := explain | analyze | select | delete | insert | update
  *   explain       := EXPLAIN [ANALYZE] select
+ *   analyze       := ANALYZE identifier [';'] EOF
  *   select        := SELECT [DISTINCT] selectList FROM identifier [join] [WHERE expr]
  *                     [GROUP BY identifier (',' identifier)*] [HAVING expr]
  *                     [ORDER BY identifier [ASC|DESC]] [LIMIT number [OFFSET number]] [';'] EOF
@@ -62,6 +63,7 @@ import type { QueryError, SqlValue } from '../types.ts';
 import type {
   AggregateArg,
   AggregateFn,
+  AnalyzeStatement,
   CompareOp,
   DeleteStatement,
   ExplainStatement,
@@ -1188,6 +1190,17 @@ function parseExplainBody(c: Cursor): ExplainStatement {
   return { kind: 'explain', analyze, select, span: { from: explainToken.from, to: select.span.to } };
 }
 
+/* -------------------------------------------------------------------------- */
+/* ANALYZE                                                                     */
+/* -------------------------------------------------------------------------- */
+
+function parseAnalyzeBody(c: Cursor): AnalyzeStatement {
+  const analyzeToken = c.expectKeyword('ANALYZE', 'to begin an analyze');
+  const table = parseTableRef(c);
+  expectStatementEnd(c);
+  return { kind: 'analyze', table, span: { from: analyzeToken.from, to: table.span.to } };
+}
+
 export type StatementOutcome = { ok: true; ast: Statement } | { ok: false; error: QueryError };
 
 /**
@@ -1200,6 +1213,7 @@ export function parseStatement(sql: string): StatementOutcome {
     if (c.atEnd()) throw new ParseError('Nothing to run — the query is empty.', c.peek());
     const first = c.peek();
     if (first.type === 'keyword' && first.upper === 'EXPLAIN') return parseExplainBody(c);
+    if (first.type === 'keyword' && first.upper === 'ANALYZE') return parseAnalyzeBody(c);
     if (first.type === 'keyword' && first.upper === 'DELETE') return parseDeleteBody(c);
     if (first.type === 'keyword' && first.upper === 'INSERT') return parseInsertBody(c);
     if (first.type === 'keyword' && first.upper === 'UPDATE') return parseUpdateBody(c);

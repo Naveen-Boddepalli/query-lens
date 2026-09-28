@@ -78,11 +78,21 @@ server.registerTool(
       `Run a SQL query against a QueryLens preset table and return the real rows and the engine's own step-by-step ` +
       `narration (parse → plan → optimize → execute → buffer pool → B+Tree → result) — grounded in an actual pure, ` +
       `synchronous engine run, not a description of one. Datasets: ${DATASET_LINE}. Supported SQL is a deliberate ` +
-      `subset (one table, one optional JOIN, no subqueries) — an unsupported statement returns a parse error, not a guess.`,
+      `subset (one table, one optional JOIN, no subqueries) — an unsupported statement returns a parse error, not a ` +
+      `guess. \`ANALYZE table\` is itself a supported statement: it returns the table's real statistics (distinct ` +
+      `counts, null fraction, most-common values, a histogram, correlation) and — within this server session — ` +
+      `every later call against that dataset reads them, exactly the way explain_trace's estimates would for a ` +
+      `real optimizer.`,
     inputSchema: { sql: z.string().describe('The SQL statement to run.'), dataset: datasetSchema, policy: policySchema },
   },
   ({ sql, dataset, policy }) => {
     const result = runQuery(sql, DATASET_DB[dataset], { ...DEFAULT_ENGINE_OPTIONS, policy });
+    // `ANALYZE` (plan.md §25.4 C1) hands back statistics to persist, the same way a write hands back new rows —
+    // this server holds one Database per dataset for its whole session, so a later call gets to read them.
+    if (result.analyze) {
+      const table = DATASET_DB[dataset].tables[result.analyze.table];
+      if (table) table.stats = result.analyze.stats;
+    }
     return { content: [{ type: 'text', text: JSON.stringify(summarize(result), null, 2) }] };
   },
 );

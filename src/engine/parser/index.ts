@@ -3,7 +3,9 @@ export type { ParseOutcome, StatementOutcome } from './parser.ts';
 export { tokenize, KEYWORDS, TokenizeError } from './tokenizer.ts';
 export type { Token, TokenType } from './tokenizer.ts';
 export {
+  analyzeDisplayTree,
   deleteDisplayTree,
+  emitAnalyzeParseEvents,
   emitDeleteParseEvents,
   emitInsertParseEvents,
   emitParseEvents,
@@ -16,6 +18,7 @@ export { aggregateKeyOf, childrenOf, columnKey, columnsIn, mapChildren, selectIt
 export type {
   AggregateArg,
   AggregateFn,
+  AnalyzeStatement,
   CompareOp,
   DeleteStatement,
   ExplainStatement,

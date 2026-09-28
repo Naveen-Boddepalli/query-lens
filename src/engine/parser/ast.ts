@@ -252,13 +252,26 @@ export interface ExplainStatement {
   span: Span;
 }
 
+/**
+ * `ANALYZE table` (plan.md §25.4 C1): scan `table` for real and store what it finds as its statistics — distinct
+ * counts, null fractions, most-common values, a histogram, correlation — for the cost model to read on every
+ * later query, in place of scanning the live rows itself. Not `EXPLAIN ANALYZE`, which runs a query for real and
+ * shows actual beside estimate; this *is* what makes an estimate possible in the first place.
+ */
+export interface AnalyzeStatement {
+  kind: 'analyze';
+  table: TableRef;
+  span: Span;
+}
+
 /** Every statement form `parseStatement` can produce. `parse` stays SELECT-only. */
 export type Statement =
   | SelectStatement
   | DeleteStatement
   | InsertStatement
   | UpdateStatement
-  | ExplainStatement;
+  | ExplainStatement
+  | AnalyzeStatement;
 
 /** The direct sub-expressions of a node, in source order. */
 export function childrenOf(expr: Expr): Expr[] {

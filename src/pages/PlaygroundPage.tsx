@@ -324,6 +324,18 @@ export function PlaygroundPage() {
           setRowsEdited(true);
         }
       }
+
+      // ANALYZE (plan.md §25.4 C1) is the same story for statistics: the engine never holds state between calls,
+      // so persisting them here is what lets the *next* query actually read them instead of scanning the live
+      // rows. Unlike a write, the rows themselves have not changed — no `rowsEdited`.
+      if (next.analyze) {
+        const target = database.tables[next.analyze.table];
+        if (target) {
+          setDb({
+            tables: { ...database.tables, [next.analyze.table]: { ...target, stats: next.analyze.stats } },
+          });
+        }
+      }
     },
     [sql, db, options, playback, predictOn],
   );

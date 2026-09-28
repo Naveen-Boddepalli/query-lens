@@ -76,8 +76,10 @@ export {
 } from './viewState.ts';
 export type { BufferFrame, LockHeld, TraceProjector, ViewState } from './viewState.ts';
 export { DEFAULT_ENGINE_OPTIONS, IMPLEMENTED_STAGES, STAGES } from './types.ts';
+export { analyzeTable, statsToRows } from './stats.ts';
 export type {
   ASTNode,
+  ColumnStats,
   Database,
   EngineOptions,
   EventOf,
@@ -93,6 +95,7 @@ export type {
   ReplacementPolicyName,
   Row,
   RunResult,
+  TableStats,
   Span,
   SqlValue,
   Stage,

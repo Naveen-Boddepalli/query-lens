@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`ANALYZE` and real statistics** (plan.md §25.4 C1) — `ANALYZE table` is a real statement: a real scan of the
+  real table, producing per-column statistics shaped after PostgreSQL's own `pg_stats` (distinct count, null
+  fraction, most-common values with their real frequencies, an equi-depth histogram, and correlation between a
+  column's own order and the table's physical row order). Its own answer is one row per column, shown in the
+  same Result panel any other query's is — there is no separate stats panel to build. The cost model reads a
+  table's statistics when `ANALYZE` has set them, in place of scanning the live rows: an equality on a most-common
+  value gets its real frequency, a range reads the histogram's real bucket overlaps. They are a **snapshot**, not
+  a live fact — a table's writes never touch them, so a table that grows a new common value without a fresh
+  `ANALYZE` gets a stale, sometimes wildly wrong, estimate (a real q-error over 20× is one `INSERT` away). A table
+  that has never been `ANALYZE`d keeps exactly today's behaviour, unconditionally accurate and unconditionally
+  unrealistic — the entire existing test suite passed unmodified.
 - **An MCP server, and `llms.txt`** (plan.md §25.4 H4) — `mcp/server.ts` exposes three tools to the user's own
   coding assistant, each grounded in a real run of the actual engine rather than a description of one: `run_query`
   (rows, disk-read/hit/eviction counts, and the full step-by-step narration), `explain_trace` (a PostgreSQL-shaped

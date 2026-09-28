@@ -239,6 +239,51 @@ export interface Table {
    * plan that does not need one.
    */
   clusteredKey?: string[];
+  /**
+   * What `ANALYZE` last found (plan.md §25.4 C1) — a snapshot, not a live fact: it is whatever the table looked
+   * like at the moment `ANALYZE <table>` ran, and stays exactly that until it is run again, even if the table
+   * has since been written to. `planner/cost.ts` reads it in place of scanning the live rows when it is present,
+   * falling back to a live scan (today's behaviour, unconditionally accurate but not how a real optimizer works)
+   * when it is absent.
+   */
+  stats?: TableStats;
+}
+
+/**
+ * One column's statistics, the way `ANALYZE` (plan.md §25.4 C1) computes them and PostgreSQL's own `pg_stats`
+ * names them: how many distinct values, what fraction are NULL, which values come up most, roughly how the rest
+ * are distributed, and whether the column's own order tracks the table's physical row order at all.
+ */
+export interface ColumnStats {
+  /** Distinct non-NULL values. */
+  nDistinct: number;
+  /** Fraction of rows whose value is NULL, 0–1. */
+  nullFraction: number;
+  /** The most frequent values, most frequent first — an equality on one of these reads its real frequency instead
+   *  of assuming every distinct value is equally likely. */
+  mostCommonValues: { value: SqlValue; frequency: number }[];
+  /**
+   * Equi-depth histogram boundaries over every value `mostCommonValues` does not already account for — `n + 1`
+   * values bounding `n` buckets, each holding (as close as an integer row count allows) the same number of rows,
+   * the way PostgreSQL's own `histogram_bounds` does. A range's selectivity is then the width of the buckets it
+   * overlaps, not a linear guess between the column's min and max. Empty when there is nothing left to bucket
+   * (every distinct value already made `mostCommonValues`) or too few rows to make bucketing worthwhile.
+   */
+  histogramBounds: SqlValue[];
+  /**
+   * -1 to 1: how much this column's value order tracks the table's own physical row order (a Pearson correlation
+   * between each row's position and its value's rank among all of them) — PostgreSQL's own `pg_stats.correlation`.
+   * 1 means the table is effectively clustered on this column already (plan.md §25.4 B3e achieves exactly that,
+   * deliberately); near 0 means the column's values are scattered through the table with no relation to where the
+   * rows physically sit.
+   */
+  correlation: number;
+}
+
+/** What `ANALYZE <table>` computed — one `ColumnStats` per column, and how many rows it saw. */
+export interface TableStats {
+  rowCount: number;
+  columns: Record<string, ColumnStats>;
 }
 
 /** One index a table declares — its columns in key order. More than one column makes it composite. */
@@ -343,7 +388,9 @@ export interface RunResult {
   events: StepEvent[];
   /**
    * `SELECT`'s result rows; the rows a `DELETE` removed, an `INSERT` added,
-   * or an `UPDATE` changed (after values), for `write`.
+   * or an `UPDATE` changed (after values), for `write`. `ANALYZE`'s own
+   * statistics, one row per column, formatted to read — see `analyze`
+   * for the structured version a caller actually persists.
    */
   rows: Row[];
   error?: QueryError;
@@ -354,6 +401,12 @@ export interface RunResult {
    * a write has any effect beyond its own trace.
    */
   write?: WriteOutcome;
+  /**
+   * Present only for a successful `ANALYZE` (plan.md §25.4 C1). The caller persists `stats` onto the table the
+   * same way `write.rows` replaces its rows — nothing in the engine holds state between calls, so an `ANALYZE`
+   * a caller never re-attaches has no effect beyond its own trace and `rows`' one-time printout.
+   */
+  analyze?: { table: string; stats: TableStats };
 }
 
 export type WriteOutcome =

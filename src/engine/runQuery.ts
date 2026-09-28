@@ -9,6 +9,7 @@
  */
 
 import {
+  emitAnalyzeParseEvents,
   emitDeleteParseEvents,
   emitInsertParseEvents,
   emitParseEvents,
@@ -16,6 +17,7 @@ import {
   parseStatement,
 } from './parser/index.ts';
 import type { InsertStatement, Statement } from './parser/index.ts';
+import { analyzeTable, statsToRows } from './stats.ts';
 import {
   emitDeletePlanEvents,
   emitPlanEvents,
@@ -81,7 +83,7 @@ export function runQuery(
   if (ast.kind === 'explain') {
     return explainResult(sql, ast, (inner) => runQuery(inner, db, options, hooks));
   }
-  const tableRef = ast.kind === 'insert' ? ast.into : ast.kind === 'update' ? ast.table : ast.from;
+  const tableRef = ast.kind === 'insert' ? ast.into : ast.kind === 'update' || ast.kind === 'analyze' ? ast.table : ast.from;
 
   const table = db.tables[tableRef.name];
   if (!table) {
@@ -96,6 +98,18 @@ export function runQuery(
         to: tableRef.span.to,
       },
     };
+  }
+
+  // ANALYZE (plan.md §25.4 C1): a real scan, nothing to plan or optimize, and no join/column checks below apply.
+  if (ast.kind === 'analyze') {
+    emitAnalyzeParseEvents(emit, ast);
+    const stats = analyzeTable(table);
+    const rows = statsToRows(stats);
+    emit(
+      `ANALYZE scanned all ${String(table.rows.length)} row${table.rows.length === 1 ? '' : 's'} of \`${table.name}\` and built statistics for ${String(table.columns.length)} column${table.columns.length === 1 ? '' : 's'}. The next query against \`${table.name}\` reads these instead of scanning the live rows to estimate a plan.`,
+      { stage: 'result', rows },
+    );
+    return { events: drain(), rows, analyze: { table: table.name, stats } };
   }
 
   // A JOIN's second table — resolved here, alongside the FROM/INTO table
@@ -344,7 +358,7 @@ function referencedColumns(ast: Exclude<Statement, { kind: 'explain' }>): Column
       else if (item.arg.kind === 'column') push(item.arg);
     }
   }
-  if (ast.kind !== 'insert' && ast.where) {
+  if (ast.kind !== 'insert' && ast.kind !== 'analyze' && ast.where) {
     walkExpr(ast.where, (e) => {
       if (e.kind === 'column') push(e);
     });

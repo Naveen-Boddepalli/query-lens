@@ -73,6 +73,18 @@ describe('the MCP server', () => {
     }
   });
 
+  it('ANALYZE persists within the session — a later query reads the statistics it left behind', async () => {
+    // A dataset no other test in this file touches, so this cannot leak into or depend on another test's order.
+    const client = await connectedClient();
+    const analyzed = await client.callTool({ name: 'run_query', arguments: { sql: 'ANALYZE orders', dataset: 'orders' } });
+    const analyzedBody = JSON.parse(textOf(analyzed)) as RunQueryResult;
+    expect(analyzedBody.rows?.some((r) => r.column === 'status')).toBe(true);
+
+    const after = await client.callTool({ name: 'run_query', arguments: { sql: "SELECT * FROM orders WHERE status = 'paid'", dataset: 'orders' } });
+    const afterBody = JSON.parse(textOf(after)) as RunQueryResult;
+    expect(afterBody.narration?.some((line) => line.includes('ANALYZE'))).toBe(true);
+  });
+
   it('explain_trace with analyze shows the real row count beside the estimate', async () => {
     const client = await connectedClient();
     const result = await client.callTool({ name: 'explain_trace', arguments: { sql: 'SELECT * FROM users WHERE id = 3' } });

@@ -18,6 +18,7 @@
  */
 
 import type { SqlValue } from '../types.ts';
+import { compareValues } from '../value.ts';
 
 export interface RowPointer {
   pageId: number;
@@ -120,15 +121,10 @@ export interface BPlusTree {
 
 export const DEFAULT_MAX_KEYS = 4;
 
-function compareScalar(a: SqlValue, b: SqlValue): number {
-  // NULL sorts before everything and equals only NULL. A NULL never reaches a plain index's leading column (it is
-  // not indexed), but a composite index's *later* columns can hold one — and `(0, NULL)` must not read as `(0, '')`.
-  if (a === null || b === null) return a === b ? 0 : a === null ? -1 : 1;
-  if (typeof a === 'number' && typeof b === 'number') return a - b;
-  const sa = typeof a === 'boolean' ? String(Number(a)) : String(a);
-  const sb = typeof b === 'boolean' ? String(Number(b)) : String(b);
-  return sa < sb ? -1 : sa > sb ? 1 : 0;
-}
+// NULL sorts before everything and equals only NULL. A NULL never reaches a plain index's leading column (it is
+// not indexed), but a composite index's *later* columns can hold one — and `(0, NULL)` must not read as `(0, '')`.
+// The shared order every index-shaped structure in this engine uses (`value.ts`'s own doc comment names the rest).
+const compareScalar = compareValues;
 
 /**
  * Orders numbers numerically, strings lexicographically, booleans as 0/1 — and,

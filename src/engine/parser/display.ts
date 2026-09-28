@@ -9,6 +9,7 @@
 import type { ASTNode, Span } from '../types.ts';
 import type { Emit } from '../trace.ts';
 import type {
+  AnalyzeStatement,
   DeleteStatement,
   Expr,
   GroupByClause,
@@ -278,6 +279,7 @@ const ROOT_KIND = {
   DELETE: 'DeleteStatement',
   INSERT: 'InsertStatement',
   UPDATE: 'UpdateStatement',
+  ANALYZE: 'AnalyzeStatement',
 } as const;
 
 function root(
@@ -480,6 +482,25 @@ export function emitUpdateParseEvents(emit: Emit, ast: UpdateStatement): void {
   const tree = root([...children], ast.span, 'UPDATE');
   emit(
     `Parsing is done: ${countNodes(tree)} AST nodes and no data touched. The planner turns the WHERE clause into a plan next — the SET clause has nothing to plan, it only takes effect once a row is found.`,
+    { stage: 'parse', ast: tree, span: ast.span },
+  );
+}
+
+/** The complete display tree for a parsed `ANALYZE`. */
+export function analyzeDisplayTree(ast: AnalyzeStatement): ASTNode {
+  return root([updateTableNode(ast.table)], ast.span, 'ANALYZE');
+}
+
+/** Emit the parse stage for an `ANALYZE` — one clause, so one step: mirrors `emitParseEvents`'s shape all the same. */
+export function emitAnalyzeParseEvents(emit: Emit, ast: AnalyzeStatement): void {
+  const tree = root([updateTableNode(ast.table)], ast.span, 'ANALYZE');
+  emit(`Read the table name: ANALYZE scans \`${ast.table.name}\` to build its statistics.`, {
+    stage: 'parse',
+    ast: tree,
+    span: ast.table.span,
+  });
+  emit(
+    `Parsing is done: ${countNodes(tree)} AST node${countNodes(tree) === 1 ? '' : 's'} and no data touched. There is nothing to plan or optimize — ANALYZE goes straight to a real scan.`,
     { stage: 'parse', ast: tree, span: ast.span },
   );
 }

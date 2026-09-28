@@ -795,6 +795,30 @@ test('a UNIQUE index rejects a repeated key, with the lookup that found it (plan
   await expect(page.getByText(/1 row inserted/)).toBeVisible();
 });
 
+test('ANALYZE builds real statistics, shown in the Result panel, and a later query reads them (plan.md §25.4 C1)', async ({ page }) => {
+  await page.goto('/playground?x=0');
+  const editor = page.locator('.cm-content');
+
+  await editor.click();
+  await page.keyboard.press('ControlOrMeta+A');
+  await page.keyboard.type('ANALYZE users');
+  await page.getByRole('button', { name: /^Run/ }).click();
+  await page.getByLabel('Scrub to step').press('End');
+
+  // The result *is* the statistics — the same Result panel any other query's answer would be.
+  await expect(page.getByText(/scanned all 48 rows of `users`/)).toBeVisible();
+  await expect(page.getByRole('columnheader', { name: 'N_DISTINCT' })).toBeVisible();
+  await expect(page.getByRole('cell', { name: /\d+ \(2\)/ }).first()).toBeVisible(); // a most-common value with its real count
+
+  // A later query against the same table reads what ANALYZE left behind.
+  await editor.click();
+  await page.keyboard.press('ControlOrMeta+A');
+  await page.keyboard.type('SELECT * FROM users WHERE age = 34');
+  await page.getByRole('button', { name: /^Run/ }).click();
+  await page.getByLabel('Scrub to step').press('End');
+  await expect(page.getByText(/most common value, ANALYZE/)).toBeVisible();
+});
+
 test('every link on the course map and the interview roadmap goes somewhere real (plan.md §25.4 G1)', async ({ page }) => {
   const targets = new Set<string>();
   for (const [path, marker] of [
