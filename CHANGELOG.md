@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **An MCP server, and `llms.txt`** (plan.md §25.4 H4) — `mcp/server.ts` exposes three tools to the user's own
+  coding assistant, each grounded in a real run of the actual engine rather than a description of one: `run_query`
+  (rows, disk-read/hit/eviction counts, and the full step-by-step narration), `explain_trace` (a PostgreSQL-shaped
+  plan, optionally `ANALYZE`d against a real run), and `compare_policies` (the same query under LRU and clock
+  eviction, side by side). Runs locally over stdio (`pnpm mcp`) against three preset datasets; no hosted service.
+  `public/llms.txt` is a machine-readable docs index generated from the docs' own navigation and frontmatter
+  (`pnpm llms-txt`), checked for staleness on every test run. Publishing `@querylens/mcp` to npm still needs the
+  organisation plan.md §25.4 H3 does.
 - **Clustered (index-organized) tables** (plan.md §25.4 B3, fifth and final slice) — a table may be stored *in* one
   of its own `UNIQUE` indexes' key order rather than insertion order, so a range on that key reads pages in
   sequence: measured, **6 disk reads clustered vs 8 for the same rows unclustered** on a small, scrambled table.

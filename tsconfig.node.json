@@ -28,6 +28,7 @@
     "eslint.config.js",
     "playwright.config.ts",
     "bin/**/*.ts",
+    "mcp/**/*.ts",
     "scripts/**/*.ts",
     "oracle/**/*.ts",
     "e2e/**/*.ts"

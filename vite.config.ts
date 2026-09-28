@@ -153,14 +153,16 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
     // `src/`, the `bin/` CLI and `scripts/` (the study kit's researcher CLI,
-    // plan.md §25.4 A2), and `oracle/` (the SQLite differential + metamorphic
-    // suites, §25.4 A1 — Node-only, since it drives `node:sqlite`); `e2e/` is
-    // Playwright's and Vitest cannot run it.
+    // plan.md §25.4 A2), `oracle/` (the SQLite differential + metamorphic
+    // suites, §25.4 A1 — Node-only, since it drives `node:sqlite`), and
+    // `mcp/` (the MCP server, §25.4 H4 — also Node-only: stdio, no DOM);
+    // `e2e/` is Playwright's and Vitest cannot run it.
     include: [
       'src/**/*.{test,spec}.{ts,tsx}',
       'bin/**/*.{test,spec}.ts',
       'scripts/**/*.{test,spec}.ts',
       'oracle/**/*.{test,spec}.ts',
+      'mcp/**/*.{test,spec}.ts',
     ],
   },
 });

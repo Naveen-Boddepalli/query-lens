@@ -38,9 +38,11 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "querylens": "node --experimental-strip-types bin/querylens.ts",
+    "mcp": "node --experimental-strip-types mcp/server.ts",
     "trace": "node --experimental-strip-types bin/querylens.ts",
     "budget": "node --experimental-strip-types scripts/bundle-budget.ts",
     "og": "node --experimental-strip-types scripts/build-og.ts",
+    "llms-txt": "node --experimental-strip-types scripts/build-llms-txt.ts",
     "record": "node --experimental-strip-types scripts/record.ts",
     "study": "node --experimental-strip-types scripts/study.ts",
     "release-notes": "node --experimental-strip-types scripts/release-notes.ts",
@@ -57,12 +59,14 @@
     "@lezer/highlight": "1.2.3",
     "@mdx-js/react": "^3.1.1",
     "@mdx-js/rollup": "^3.1.1",
+    "@modelcontextprotocol/sdk": "1.30.0",
     "d3-hierarchy": "3.1.2",
     "flowinger": "0.3.0",
     "html-to-image": "1.11.13",
     "react": "19.2.8",
     "react-dom": "19.2.8",
-    "react-router-dom": "7.18.3"
+    "react-router-dom": "7.18.3",
+    "zod": "4.5.4"
   },
   "devDependencies": {
     "@axe-core/playwright": "4.13.0",
