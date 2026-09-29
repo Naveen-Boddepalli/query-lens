@@ -109,17 +109,18 @@ export interface TableRef {
 }
 
 /**
- * `JOIN table ON t1.col = t2.col` (plan.md §22.2). Exactly one join, an
- * implicit inner join (bare `JOIN`, no `LEFT`/`RIGHT`/`FULL` yet), and `on`
- * is always a single equality between one qualified column from each side —
- * checked at parse time (`checkJoinOn`), so the planner never has to. v1 of
- * JOIN does not combine with `GROUP BY`, `ORDER BY` or an aggregate SELECT
- * item — each checked at parse time too, the same way `GROUP BY`/`ORDER BY`
- * already exclude each other.
+ * `[INNER | LEFT [OUTER]] JOIN table ON t1.col = t2.col` (plan.md §22.2, `LEFT` since §25.4 C3). Exactly one join
+ * (`RIGHT`/`FULL`/`CROSS` stay out of scope), and `on` is always a single equality between one qualified column
+ * from each side — checked at parse time (`checkJoinOn`), so the planner never has to. JOIN does not combine with
+ * `GROUP BY`, `ORDER BY` or an aggregate SELECT item — each checked at parse time too, the same way
+ * `GROUP BY`/`ORDER BY` already exclude each other.
  */
 export interface JoinClause {
   table: TableRef;
   on: Extract<Expr, { kind: 'compare' }>;
+  /** `LEFT [OUTER] JOIN`: every row of the `FROM` table survives, NULL-padded when nothing on `table` matched it.
+   *  Absent for a bare `JOIN` or an explicit `INNER JOIN` — the original, still-default inner-join shape. */
+  joinType?: 'left';
   span: Span;
 }
 

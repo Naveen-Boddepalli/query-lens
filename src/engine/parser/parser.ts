@@ -7,7 +7,7 @@
  *   select        := SELECT [DISTINCT] selectList FROM identifier [join] [WHERE expr]
  *                     [GROUP BY identifier (',' identifier)*] [HAVING expr]
  *                     [ORDER BY identifier [ASC|DESC]] [LIMIT number [OFFSET number]] [';'] EOF
- *   join          := JOIN identifier ON qualifiedColumn '=' qualifiedColumn
+ *   join          := [INNER | LEFT [OUTER]] JOIN identifier ON qualifiedColumn '=' qualifiedColumn
  *   delete        := DELETE FROM identifier [WHERE expr] [';'] EOF
  *   insert        := INSERT INTO identifier [columnList] VALUES valueList [';'] EOF
  *   update        := UPDATE identifier SET assignment (',' assignment)* [WHERE expr] [';'] EOF
@@ -41,9 +41,9 @@
  * query with both, so despite both appearing under `select` above, no query
  * this grammar accepts ever has both clauses at once (see `checkGroupingValidity`).
  *
- * A `join` is exactly one, an implicit inner join (bare `JOIN`, no
- * `LEFT`/`RIGHT`/`FULL` yet — `INNER`/`OUTER`/`CROSS` stay out of scope), and
- * never combines with `GROUP BY`, `ORDER BY`, or an aggregate `selectItem` —
+ * A `join` is exactly one: a bare or `INNER JOIN` (an implicit inner join),
+ * or `LEFT [OUTER] JOIN` (plan.md §25.4 C3) — `RIGHT`/`FULL`/`CROSS` stay out
+ * of scope. Never combines with `GROUP BY`, `ORDER BY`, or an aggregate `selectItem` —
  * each rejected at parse time (`checkJoinValidity`). A `qualifiedColumn`'s
  * `table` half is required on every column reference once a `join` is
  * present (there is no ambiguity resolution — v0 asks the query to say which
@@ -102,11 +102,8 @@ class ParseError extends Error {
 
 /** Keywords that tokenise cleanly but land outside the v0 subset. */
 const OUT_OF_SCOPE: Record<string, string> = {
-  INNER: 'v0 supports a bare JOIN only — write JOIN without INNER.',
-  LEFT: 'Outer joins are not in the v0 subset — only an inner JOIN.',
-  RIGHT: 'Outer joins are not in the v0 subset — only an inner JOIN.',
-  OUTER: 'Outer joins are not in the v0 subset — only an inner JOIN.',
-  FULL: 'Outer joins are not in the v0 subset — only an inner JOIN.',
+  RIGHT: 'RIGHT JOIN is not in the v0 subset — write it the other way round: swap the two tables and use a LEFT JOIN.',
+  FULL: 'FULL (OUTER) JOIN is not in the v0 subset — an inner or a LEFT JOIN only.',
   CROSS: 'CROSS JOIN is not in the v0 subset — JOIN ... ON needs an equality.',
   USING: 'USING is not in the v0 subset — write the equality out: JOIN t ON a.x = t.y.',
   DISTINCT: 'DISTINCT applies to the whole SELECT list — write `SELECT DISTINCT a, b …`. Inside an aggregate, `COUNT(DISTINCT x)` is not supported yet.',
@@ -424,15 +421,27 @@ function parseTableRef(c: Cursor): TableRef {
   return { name: token.value, span: { from: token.from, to: token.to } };
 }
 
-/** `JOIN identifier ON qualifiedColumn '=' qualifiedColumn`, if present. */
+/** `[INNER | LEFT [OUTER]] JOIN identifier ON qualifiedColumn '=' qualifiedColumn`, if present (plan.md §25.4 C3). */
 function parseJoin(c: Cursor): JoinClause | undefined {
-  if (!(c.peek().type === 'keyword' && c.peek().upper === 'JOIN')) return undefined;
-  const joinToken = c.next();
+  const first = c.peek();
+  const isLeft = isKeyword(first, 'LEFT');
+  const isInner = isKeyword(first, 'INNER');
+  if (!isLeft && !isInner && !isKeyword(first, 'JOIN')) return undefined;
+
+  let joinType: JoinClause['joinType'];
+  if (isLeft) {
+    c.next();
+    if (isKeyword(c.peek(), 'OUTER')) c.next();
+    joinType = 'left';
+  } else if (isInner) {
+    c.next();
+  }
+  c.expectKeyword('JOIN', isLeft || isInner ? 'after LEFT/INNER' : 'to begin a join');
   const table = parseTableRef(c);
   c.expectKeyword('ON', 'after the joined table name');
   const on = parseComparison(c);
   checkJoinOn(on);
-  return { table, on, span: { from: joinToken.from, to: on.span.to } };
+  return { table, on, ...(joinType ? { joinType } : {}), span: { from: first.from, to: on.span.to } };
 }
 
 /** `ON` is always a single equality between one qualified column from each side — an equi-join. */

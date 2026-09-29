@@ -74,14 +74,26 @@ concept explanation.
 
 ## JOIN
 
-- **One `JOIN` per query**, an implicit inner join: `JOIN table ON a.col = b.col`, always an
-  equality between one qualified column from each side.
+- **One `JOIN` per query**: `[INNER | LEFT [OUTER]] JOIN table ON a.col = b.col`, always an equality
+  between one qualified column from each side. A bare `JOIN`/`INNER JOIN` drops an unmatched row on
+  either side; `LEFT [OUTER] JOIN` (plan.md §25.4 C3) keeps every row of the `FROM` table, NULL-padding
+  the joined table's columns when nothing on it matches — including when the join column itself is
+  NULL, since NULL never matches NULL there either. No `RIGHT`/`FULL`/`CROSS`.
 - **Four algorithms** — nested-loop (the default), hash, sort-merge, and **index nested-loop** —
   chosen by whichever [Compare](/compare) forces; the engine never picks between them on its own.
   The index join probes the *inner* (`JOIN`ed) table's own B+Tree once per outer row, so it needs an
   index on that table's join column; without one it quietly runs as a plain nested-loop, and the plan
   says so. The other three never consult an index, and no `JOIN` side ever becomes an `IndexScan` —
-  a `WHERE` conjunct on the outer table is pushed into its scan, but that scan stays sequential.
+  a `WHERE` conjunct on the outer table is pushed into its scan, but that scan stays sequential. All
+  four agree on a `LEFT JOIN`'s NULL-padded rows the same way they already had to agree on everything
+  else.
+- **A `WHERE` on the joined (inner) table is never pushed below a `LEFT JOIN`.** Doing so would filter
+  rows out of the join's own input before it can find out they would not have matched — turning a
+  `LEFT JOIN` back into an ordinary one with no trace of it. It stays a residual `Filter` above the
+  `Join` instead, which is also where SQL itself puts it: `… LEFT JOIN posts ON … WHERE posts.title IS
+  NULL` is the standard way to ask "which rows had nothing on the other side," and it only works if the
+  filter runs *after* the padding. A `WHERE` on the outer (left) table is still pushed — filtering it
+  first is always safe, `LEFT JOIN` or not.
 - Cannot combine with `GROUP BY`, `ORDER BY`, or an aggregate in the SELECT list.
 
 ## GROUP BY and aggregates
@@ -148,7 +160,7 @@ See [Supported SQL](/docs/reference/sql) for the complete accepted grammar.
 ## What's out of scope entirely
 
 No subqueries, no more than one `JOIN` per query (so no join-order
-choice), no outer joins, no transactions, no real
+choice), no `RIGHT`/`FULL`/`CROSS` join, no transactions, no real
 concurrency (the Locks panel is visual only), and no cost-based query optimization — every
 rewrite rule fires on a structural match, never a cost comparison, and the cost *estimates* shown
 alongside a plan exist to justify a rewrite's narration, not to decide whether it happens. `UNION` and `COUNT(DISTINCT …)` are also not accepted. These are deliberate exclusions for this

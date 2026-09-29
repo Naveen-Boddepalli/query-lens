@@ -98,8 +98,16 @@ describe('JOIN — parsing', () => {
     if (!parsed.ok) expect(parsed.error.message).toMatch(/ORDER BY is not supported yet in a query with JOIN/);
   });
 
-  it.each(['INNER', 'LEFT', 'RIGHT', 'OUTER', 'FULL', 'CROSS'])(
-    '%s JOIN stays out of scope — only a bare, implicit inner JOIN parses',
+  it.each(['INNER JOIN', 'LEFT JOIN', 'LEFT OUTER JOIN'])(
+    '%s parses (plan.md §25.4 C3)',
+    (words) => {
+      const parsed = parse(`SELECT * FROM authors ${words} posts ON authors.id = posts.authorId`);
+      expect(parsed.ok, !parsed.ok ? parsed.error.message : undefined).toBe(true);
+    },
+  );
+
+  it.each(['RIGHT', 'FULL', 'CROSS'])(
+    '%s JOIN stays out of scope',
     (word) => {
       const parsed = parse(`SELECT * FROM authors ${word} JOIN posts ON authors.id = posts.authorId`);
       expect(parsed.ok).toBe(false);
@@ -609,5 +617,94 @@ describe('JOIN — sort-merge join (the third algorithm)', () => {
     const a = run('SELECT * FROM authors JOIN posts ON authors.id = posts.authorId', db(), SORT_MERGE);
     const b = run('SELECT * FROM authors JOIN posts ON authors.id = posts.authorId', db(), SORT_MERGE);
     expect(JSON.stringify(a.events)).toEqual(JSON.stringify(b.events));
+  });
+});
+
+describe('LEFT JOIN (plan.md §25.4 C3)', () => {
+  // `barbara` (id 5) has no posts at all — seed.ts's own foreign-key shape, built for exactly this.
+  const LEFT_SQL = 'SELECT authors.name, posts.title FROM authors LEFT JOIN posts ON authors.id = posts.authorId';
+  const INDEX_NESTED_LOOP = { ...DEFAULT_ENGINE_OPTIONS, joinStrategy: 'index-nested-loop' } as const;
+
+  it('parses joinType onto the JoinClause, and a plain JOIN carries none', () => {
+    const left = parse('SELECT * FROM authors LEFT JOIN posts ON authors.id = posts.authorId');
+    if (!left.ok) throw new Error(left.error.message);
+    expect(left.ast.join?.joinType).toBe('left');
+
+    const inner = parse('SELECT * FROM authors JOIN posts ON authors.id = posts.authorId');
+    if (!inner.ok) throw new Error(inner.error.message);
+    expect(inner.ast.join?.joinType).toBeUndefined();
+  });
+
+  it('keeps every author, NULL-padding the one with no posts — an inner JOIN would drop her', () => {
+    const left = run(LEFT_SQL).rows;
+    expect(left).toHaveLength(11); // 10 posts + barbara's one padded row
+    expect(left.filter((r) => r['authors.name'] === 'barbara')).toEqual([{ 'authors.name': 'barbara', 'posts.title': null }]);
+
+    const inner = run(LEFT_SQL.replace('LEFT JOIN', 'JOIN')).rows;
+    expect(inner).toHaveLength(10);
+    expect(inner.some((r) => r['authors.name'] === 'barbara')).toBe(false);
+  });
+
+  it('every matched author still shows her real posts, not NULLs', () => {
+    const rows = run(LEFT_SQL).rows;
+    const adas = rows.filter((r) => r['authors.name'] === 'ada');
+    expect(adas).toHaveLength(3);
+    expect(adas.every((r) => typeof r['posts.title'] === 'string')).toBe(true);
+  });
+
+  it('agrees across all four join algorithms — nested-loop, hash, sort-merge and index-nested-loop', () => {
+    const asBag = (rows: readonly Record<string, unknown>[]) => sortRows(rows).map((r) => JSON.stringify(r));
+    const nested = asBag(run(LEFT_SQL).rows);
+    expect(asBag(run(LEFT_SQL, db(), HASH).rows)).toEqual(nested);
+    expect(asBag(run(LEFT_SQL, db(), SORT_MERGE).rows)).toEqual(nested);
+    expect(asBag(run(LEFT_SQL, db(), INDEX_NESTED_LOOP).rows)).toEqual(nested);
+  });
+
+  it('a NULL join key on the left is also kept, padded, by every algorithm — not silently dropped', () => {
+    // NULL never matches NULL, so an author whose own join column is NULL could not match a post even if one
+    // existed for it — an inner join drops the row entirely; a LEFT JOIN must still keep it, NULL-padded.
+    const database = db();
+    database.tables.authors!.rows.push({ id: null, name: 'null-key-author' });
+    const sql = "SELECT authors.name, posts.title FROM authors LEFT JOIN posts ON authors.id = posts.authorId WHERE authors.name = 'null-key-author'";
+    for (const options of [DEFAULT_ENGINE_OPTIONS, HASH, SORT_MERGE, INDEX_NESTED_LOOP] as const) {
+      const rows = run(sql, database, options).rows;
+      expect(rows, JSON.stringify(options)).toEqual([{ 'authors.name': 'null-key-author', 'posts.title': null }]);
+    }
+  });
+
+  it("a WHERE on the joined table is never pushed below the LEFT JOIN — it would silently turn it into an inner join", () => {
+    // The classic pitfall: filtering `posts` down to nothing with a null title *before* the join would make every
+    // author look unmatched. Pushed correctly, the join runs first and the residual Filter sees the real rows.
+    const rows = run(`${LEFT_SQL} WHERE posts.title IS NULL`).rows;
+    expect(rows).toEqual([{ 'authors.name': 'barbara', 'posts.title': null }]);
+  });
+
+  it('a WHERE on the outer (left) table is still pushed — filtering it first is always safe', () => {
+    const { events, rows } = run(`${LEFT_SQL} WHERE authors.name = 'barbara'`);
+    expect(rows).toEqual([{ 'authors.name': 'barbara', 'posts.title': null }]);
+    const pushdown = events.find((e) => e.stage === 'optimize' && e.rule === 'join-predicate-pushdown');
+    expect(pushdown?.label).toMatch(/moves into that scan/);
+    expect(pushdown?.label).not.toMatch(/residual/); // nothing left to recheck once the whole predicate is pushed
+  });
+
+  it('the plan and the narration both say LEFT JOIN, not an ordinary join', () => {
+    const { events } = run(LEFT_SQL);
+    const planStep = events.find((e) => e.stage === 'plan' && /JOIN adds/.test(e.label));
+    expect(planStep?.label).toMatch(/This is a LEFT JOIN/);
+  });
+
+  it("the cost model's estimate is at least the outer table's own row count — an inner-join guess would undercount it", () => {
+    const { events } = run(LEFT_SQL);
+    const planStep = events.filter((e) => e.stage === 'plan').at(-1)!;
+    if (planStep.stage !== 'plan') throw new Error('unreachable');
+    const joinNode = planStep.planTree.children?.find((n) => n.op === 'Join') ?? planStep.planTree;
+    expect(joinNode.estRows).toBeGreaterThanOrEqual(5); // 5 authors, every one of them kept
+  });
+
+  it('RIGHT and FULL stay out of scope, with a hint pointing at LEFT JOIN or an inner one', () => {
+    const right = parseStatement('SELECT * FROM authors RIGHT JOIN posts ON authors.id = posts.authorId');
+    expect(right.ok).toBe(false);
+    const full = parseStatement('SELECT * FROM authors FULL JOIN posts ON authors.id = posts.authorId');
+    expect(full.ok).toBe(false);
   });
 });

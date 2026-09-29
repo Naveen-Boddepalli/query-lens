@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`LEFT JOIN`** (plan.md §25.4 C3, first slice) — `[INNER | LEFT [OUTER]] JOIN table ON a.col = b.col`. A bare
+  `JOIN`/`INNER JOIN` behaves exactly as before; `LEFT [OUTER] JOIN` keeps every row of the `FROM` table, even one
+  that matches nothing (or whose join column is itself NULL), NULL-padding the joined table's columns instead of
+  dropping the row. Built for **all four join algorithms** — nested-loop, hash, sort-merge and index-nested-loop —
+  which must all agree on the padded rows the same way they already had to agree on matched ones. The classic
+  pitfall is closed: a `WHERE` on the joined table is never pushed below a `LEFT JOIN` (that would filter rows out
+  before the join can find out they would not have matched, silently turning it back into an inner join), so
+  `… LEFT JOIN posts ON … WHERE posts.title IS NULL` correctly finds only the rows that got NULL-padded. `RIGHT`,
+  `FULL` and `CROSS` stay out of scope.
 - **A correlated dataset, and q-error** (plan.md §25.4 C2) — a fourth preset dataset, `employees`: `department`
   and `office` are perfectly correlated (every department occupies exactly one office), which is exactly the
   independence assumption every `AND` in a `WHERE` clause makes and exactly where it can badly fail.

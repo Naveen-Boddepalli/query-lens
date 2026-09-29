@@ -348,6 +348,12 @@ function stripTableQualifiers(expr: Expr): Expr {
  * (`Project → … → SeqScan`), not inside a `Join`'s own children, so a pushed
  * conjunct that happens to match an index still runs as a full scan. Reaching
  * `index-selection` into a `Join`'s children is its own, larger step.
+ *
+ * A conjunct on the *inner* side of a `LEFT JOIN` (plan.md §25.4 C3) is never pushed, on purpose: filtering it into
+ * the inner scan removes rows *before* the join can even find out they would not have matched, so a left row that
+ * *would* have been NULL-padded instead vanishes with no trace of it — an inner join wearing a LEFT JOIN's syntax.
+ * Left as a residual `Filter` above the `Join` instead, it runs after the padding, exactly where SQL puts it. The
+ * outer (left) side has no such trap — filtering it first only ever removes rows the join would keep anyway.
  */
 const joinPredicatePushdown: Rule = (input) => {
   const { limit, rest: plan } = unwrapLimit(input);
@@ -376,7 +382,7 @@ const joinPredicatePushdown: Rule = (input) => {
   for (const part of parts) {
     const tables = tablesReferencedBy(part);
     if (tables.size === 1 && tables.has(join.leftTable)) leftParts.push(part);
-    else if (tables.size === 1 && tables.has(join.rightTable) && !probesInner) rightParts.push(part);
+    else if (tables.size === 1 && tables.has(join.rightTable) && !probesInner && join.joinType !== 'left') rightParts.push(part);
     else residualParts.push(part);
   }
   if (leftParts.length === 0 && rightParts.length === 0) return null;

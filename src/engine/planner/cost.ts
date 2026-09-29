@@ -366,8 +366,14 @@ function estimateNode(
       const rightDistinct = ndistinct(tableNamed(plan.rightTable), plan.rightColumn);
       // An `IndexProbe`'s own estimate is *per outer row*, so the full inner size comes from the table itself.
       const rightRows = plan.algorithm === 'index-nested-loop' ? tableNamed(plan.rightTable).rows.length : right.estRows;
-      const estRows = clampRows((left.estRows * rightRows) / rightDistinct);
-      const rowsBasis = `${String(left.estRows)} × ${String(rightRows)} / ndistinct(${plan.rightTable}.${plan.rightColumn})`;
+      const innerEstimate = clampRows((left.estRows * rightRows) / rightDistinct);
+      // A LEFT JOIN (plan.md §25.4 C3) never drops a left row — the equi-join estimate is a floor, not the answer,
+      // whenever it would otherwise guess fewer rows than the outer side alone already has.
+      const estRows = plan.joinType === 'left' ? Math.max(left.estRows, innerEstimate) : innerEstimate;
+      const rowsBasis =
+        plan.joinType === 'left' && estRows === left.estRows && left.estRows > innerEstimate
+          ? `${String(left.estRows)} (every ${plan.leftTable} row survives a LEFT JOIN; the equi-join estimate alone was only ${String(innerEstimate)})`
+          : `${String(left.estRows)} × ${String(rightRows)} / ndistinct(${plan.rightTable}.${plan.rightColumn})`;
       switch (plan.algorithm) {
         case 'index-nested-loop':
           estimate = {

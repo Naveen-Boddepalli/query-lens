@@ -68,6 +68,7 @@ export const GRAMMAR: GrammarRule[] = [
   {
     name: 'join',
     parts: [
+      opt(choice([lit('INNER')], [lit('LEFT'), opt(lit('OUTER'))])),
       lit('JOIN'),
       rule('identifier'),
       lit('ON'),

@@ -882,6 +882,16 @@ function mergeJoinedRow(leftTable: string, leftRow: Row, rightTable: string, rig
   return merged;
 }
 
+/** A `LEFT JOIN`'s own row for a `left` row that matched nothing on `right` (plan.md §25.4 C3): every one of
+ *  `right`'s declared columns comes back NULL, qualified the same way `mergeJoinedRow` qualifies a real match —
+ *  the row is still there, it just has nothing real to report on that side. */
+function nullPaddedRow(leftTable: string, leftRow: Row, rightTable: string, rightColumns: readonly string[]): Row {
+  const merged: Row = {};
+  for (const [key, value] of Object.entries(leftRow)) merged[`${leftTable}.${key}`] = value;
+  for (const column of rightColumns) merged[`${rightTable}.${column}`] = null;
+  return merged;
+}
+
 /**
  * Nested-loop join — the simplest algorithm, and the first one v1 had
  * (plan.md §22.2; `hashJoin` below is the second). For every row the left
@@ -897,6 +907,7 @@ function mergeJoinedRow(leftTable: string, leftRow: Row, rightTable: string, rig
 function join(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): Operator {
   const joinRight = ctx.joinRight;
   if (!joinRight) throw new Error('unreachable: a Join plan implies ExecContext.joinRight is set');
+  const isLeft = plan.joinType === 'left';
 
   const left = buildOperator(plan.left, ctx);
   const right = buildOperator(plan.right, {
@@ -910,6 +921,8 @@ function join(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): Operator {
   let leftRow: Row | null = null;
   let rightOpen = false;
   let checked = 0;
+  // LEFT JOIN only (plan.md §25.4 C3): whether the current left row has matched anything yet.
+  let matched = false;
 
   return {
     name: 'Join',
@@ -918,12 +931,14 @@ function join(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): Operator {
       leftRow = null;
       rightOpen = false;
       checked = 0;
+      matched = false;
     },
     next() {
       for (;;) {
         if (!rightOpen) {
           leftRow = left.next();
           if (!leftRow) return null;
+          matched = false;
           right.open();
           rightOpen = true;
         }
@@ -931,6 +946,11 @@ function join(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): Operator {
         const rightRow = right.next();
         if (!rightRow) {
           rightOpen = false;
+          // The whole inner table was rescanned and nothing matched this left row — a LEFT JOIN keeps it anyway.
+          if (isLeft && !matched) {
+            produced(`Join finds no match in ${plan.rightTable} for a row from ${plan.leftTable} — LEFT JOIN keeps it, with ${plan.rightTable}'s columns NULL.`);
+            return nullPaddedRow(plan.leftTable, leftRow!, plan.rightTable, joinRight.table.columns);
+          }
           continue;
         }
         checked += 1;
@@ -941,6 +961,7 @@ function join(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): Operator {
           continue;
         }
 
+        matched = true;
         produced(
           `Join matches a row from ${plan.leftTable} with one from ${plan.rightTable} (${checked} candidate${
             checked === 1 ? '' : 's'
@@ -975,6 +996,7 @@ function join(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): Operator {
 function hashJoin(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): Operator {
   const joinRight = ctx.joinRight;
   if (!joinRight) throw new Error('unreachable: a Join plan implies ExecContext.joinRight is set');
+  const isLeft = plan.joinType === 'left';
 
   const left = buildOperator(plan.left, ctx);
   const right = buildOperator(plan.right, {
@@ -1030,6 +1052,11 @@ function hashJoin(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): Operat
           const value = leftRow[plan.leftColumn] ?? null;
           bucket = value === null ? [] : (built.get(equalityKeyOf(value)) ?? []);
           bucketIndex = 0;
+          // Empty bucket, or a NULL key that was never even looked up — nothing matched this left row at all.
+          if (isLeft && bucket.length === 0) {
+            produced(`Join probes the hash table with a row from ${plan.leftTable} and finds nothing in ${plan.rightTable} — LEFT JOIN keeps it, with ${plan.rightTable}'s columns NULL.`);
+            return nullPaddedRow(plan.leftTable, leftRow, plan.rightTable, joinRight.table.columns);
+          }
           continue;
         }
 
@@ -1074,6 +1101,7 @@ function indexNestedLoopJoin(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecConte
   if (inner.op !== 'IndexProbe') throw new Error('unreachable: an index nested-loop Join has an IndexProbe as its inner side');
   const tree = joinRight.trees[inner.column];
   if (!tree) throw new Error('unreachable: an index nested-loop Join implies its inner index was built');
+  const isLeft = plan.joinType === 'left';
 
   const left = buildOperator(plan.left, ctx);
   const produced = counter(ctx, 'Join');
@@ -1082,6 +1110,8 @@ function indexNestedLoopJoin(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecConte
   let cursor = 0;
   let probes = 0;
   let matched = 0;
+  // LEFT JOIN only (plan.md §25.4 C3): whether the current left row has matched anything yet.
+  let matchedThisRow = false;
 
   return {
     name: 'Join',
@@ -1092,15 +1122,26 @@ function indexNestedLoopJoin(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecConte
       cursor = 0;
       probes = 0;
       matched = 0;
+      matchedThisRow = false;
     },
     next() {
       for (;;) {
         const pointer = pointers[cursor];
         if (pointer === undefined) {
+          // Every candidate the probe found (a NULL key never even probed counts too) has been checked and rejected
+          // — LEFT JOIN keeps this left row anyway, before moving on to the next one.
+          if (leftRow && isLeft && !matchedThisRow) {
+            const unmatched = leftRow;
+            leftRow = null;
+            produced(`Join's probe of ${plan.rightTable} finds nothing for a row from ${plan.leftTable} — LEFT JOIN keeps it, with ${plan.rightTable}'s columns NULL.`);
+            return nullPaddedRow(plan.leftTable, unmatched, plan.rightTable, joinRight.table.columns);
+          }
+
           leftRow = left.next();
           if (!leftRow) return null;
           pointers = [];
           cursor = 0;
+          matchedThisRow = false;
 
           const key = leftRow[plan.leftColumn] ?? null;
           if (key === null) continue; // NULL joins nothing, so there is nothing to look up
@@ -1121,6 +1162,7 @@ function indexNestedLoopJoin(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecConte
         if (!rightRow) continue;
         if (compare('=', leftRow![plan.leftColumn] ?? null, rightRow[plan.rightColumn] ?? null) !== true) continue;
 
+        matchedThisRow = true;
         matched += 1;
         produced(
           `Join pairs a row from ${plan.leftTable} with entry ${String(at + 1)} of ${String(pointers.length)} its probe found in ${plan.rightTable} (${String(matched)} match${matched === 1 ? '' : 'es'} so far).`,
@@ -1158,22 +1200,44 @@ function joinKeyOf(row: Row, column: string): string | null {
  * *entire* run on both sides — every left row in the run paired with every
  * right row in it — before either pointer moves past the run, the textbook
  * refinement a plain two-pointer merge misses.
+ *
+ * `isLeft` (plan.md §25.4 C3): a plain merge only ever needs to look as far as
+ * whichever side runs out first — once one is exhausted, nothing further can
+ * match. A `LEFT JOIN` cannot stop there: every remaining `left` row, and any
+ * `left` row the walk passes with no run of equal keys on `right` at all, must
+ * still be yielded — paired with `null` rather than dropped — so the loop
+ * keeps going until `left` itself is exhausted, not `right`.
  */
 function* sortMergeMatches(
   left: readonly Row[],
   right: readonly Row[],
   leftColumn: string,
   rightColumn: string,
-): Generator<readonly [Row, Row]> {
+  isLeft: boolean,
+): Generator<readonly [Row, Row | null]> {
   let i = 0;
   let j = 0;
-  while (i < left.length && j < right.length) {
+  while (i < left.length) {
     const leftKey = joinKeyOf(left[i]!, leftColumn);
-    const rightKey = joinKeyOf(right[j]!, rightColumn);
-    if (leftKey === null) { i += 1; continue; }
-    if (rightKey === null) { j += 1; continue; }
-    if (leftKey < rightKey) { i += 1; continue; }
-    if (leftKey > rightKey) { j += 1; continue; }
+    if (leftKey === null) {
+      if (isLeft) yield [left[i]!, null];
+      i += 1;
+      continue;
+    }
+
+    // Advance past whatever this key can never match: a NULL key, or one sorted strictly behind it.
+    while (j < right.length) {
+      const aheadKey = joinKeyOf(right[j]!, rightColumn);
+      if (aheadKey !== null && aheadKey >= leftKey) break;
+      j += 1;
+    }
+    const rightKey = j < right.length ? joinKeyOf(right[j]!, rightColumn) : null;
+    if (rightKey !== leftKey) {
+      // Either the right side is exhausted, or its next key is already past this one — nothing here matches.
+      if (isLeft) yield [left[i]!, null];
+      i += 1;
+      continue;
+    }
 
     const runStart = j;
     while (i < left.length && joinKeyOf(left[i]!, leftColumn) === leftKey) {
@@ -1207,6 +1271,7 @@ function* sortMergeMatches(
 function sortMergeJoin(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): Operator {
   const joinRight = ctx.joinRight;
   if (!joinRight) throw new Error('unreachable: a Join plan implies ExecContext.joinRight is set');
+  const isLeft = plan.joinType === 'left';
 
   const left = buildOperator(plan.left, ctx);
   const right = buildOperator(plan.right, {
@@ -1217,7 +1282,7 @@ function sortMergeJoin(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): O
   });
 
   const produced = counter(ctx, 'Join');
-  let matches: Generator<readonly [Row, Row]> | null = null;
+  let matches: Generator<readonly [Row, Row | null]> | null = null;
   let matched = 0;
 
   return {
@@ -1283,12 +1348,16 @@ function sortMergeJoin(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): O
           { stage: 'execute', op: 'Join', rowsProduced: 0 },
         );
 
-        matches = sortMergeMatches(leftSorted, rightSorted, plan.leftColumn, plan.rightColumn);
+        matches = sortMergeMatches(leftSorted, rightSorted, plan.leftColumn, plan.rightColumn, isLeft);
       }
 
       const step = matches.next();
       if (step.done) return null;
       const [leftRow, rightRow] = step.value;
+      if (rightRow === null) {
+        produced(`Join's merge passes a row from ${plan.leftTable} with no run of matching keys on ${plan.rightTable} — LEFT JOIN keeps it, with ${plan.rightTable}'s columns NULL.`);
+        return nullPaddedRow(plan.leftTable, leftRow, plan.rightTable, joinRight.table.columns);
+      }
       matched += 1;
       produced(
         `Join merges a row from ${plan.leftTable} with one from ${plan.rightTable} — both sides already sorted on the join key (${matched} match${matched === 1 ? '' : 'es'} so far).`,

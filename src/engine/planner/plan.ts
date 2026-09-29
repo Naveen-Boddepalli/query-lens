@@ -59,6 +59,10 @@ export type Plan =
   | {
       op: 'Join';
       algorithm: JoinAlgorithm;
+      /** `LEFT JOIN` (plan.md §25.4 C3): every row of `left` appears at least once, NULL-padded on `right`'s side
+       *  when nothing matched it. Absent means the join's original, still-default shape: an inner join, where an
+       *  unmatched `left` row simply does not appear. */
+      joinType?: 'left';
       left: Plan;
       right: Plan;
       leftTable: string;

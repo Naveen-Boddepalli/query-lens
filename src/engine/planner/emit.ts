@@ -84,8 +84,11 @@ export function emitPlanEvents(
         : algorithm === 'sort-merge'
           ? `it sorts both \`${ast.from.name}\` and \`${ast.join.table.name}\` on the join key, then merges the two sorted lists in a single pass — no per-row rescan and no table held in memory, at the cost of sorting both sides first`
           : `for every row \`${ast.from.name}\` produces, it rescans all of \`${ast.join.table.name}\` looking for a match on \`${join?.leftColumn}\` = \`${join?.rightColumn}\` — nested-loop, the simplest join algorithm, and the most expensive once neither side has an index to speed the inner scan up`;
+    const outer = ast.join.joinType === 'left'
+      ? ` This is a LEFT JOIN: every row from \`${ast.from.name}\` survives even when nothing on \`${ast.join.table.name}\` matches it, with \`${ast.join.table.name}\`'s columns NULL.`
+      : '';
     emit(
-      `${fallback}JOIN adds ${algorithm === 'index-nested-loop' ? 'an index probe on' : 'a second scan of'} \`${ast.join.table.name}\` and a Join above both: ${mechanism}.`,
+      `${fallback}JOIN adds ${algorithm === 'index-nested-loop' ? 'an index probe on' : 'a second scan of'} \`${ast.join.table.name}\` and a Join above both: ${mechanism}.${outer}`,
       { stage: 'plan', planTree: display(current) },
     );
   }

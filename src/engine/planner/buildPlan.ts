@@ -137,6 +137,7 @@ export function buildJoinPlan(
   return {
     op: 'Join',
     algorithm: effective,
+    ...(join.joinType ? { joinType: join.joinType } : {}),
     left: { op: 'SeqScan', table: fromTable },
     right:
       effective === 'index-nested-loop'

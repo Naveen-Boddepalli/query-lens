@@ -531,7 +531,7 @@ describe('parse — errors point at the right text', () => {
   });
 
   it.each([
-    ['SELECT * FROM a LEFT JOIN b ON a.id = b.id', /LEFT.*not supported/, /inner JOIN/],
+    ['SELECT * FROM a RIGHT JOIN b ON a.id = b.id', /RIGHT.*not supported/, /LEFT JOIN/],
   ])('explains out-of-scope SQL: %s', (sql, message, hint) => {
     const e = err(sql);
     expect(e.message).toMatch(message);
