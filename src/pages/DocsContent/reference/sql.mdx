@@ -4,9 +4,9 @@ description: The exact SQL subset QueryLens's parser accepts, and what it says w
 ---
 
 QueryLens implements four statements — `SELECT`, `DELETE`, `INSERT` and `UPDATE` — plus `EXPLAIN` for a `SELECT`
-and `ANALYZE` for a table, over one table at a time (two, for a `JOIN`). This page is the complete subset: if it
-isn't listed here, the parser does not accept it yet, and it will tell you so by name rather than failing with a
-generic syntax error.
+and `ANALYZE` for a table, over one table at a time (more, for a chain of `JOIN`s). This page is the complete
+subset: if it isn't listed here, the parser does not accept it yet, and it will tell you so by name rather than
+failing with a generic syntax error.
 
 ## SELECT
 
@@ -19,6 +19,9 @@ SELECT * FROM users WHERE id IN (1, 5, 9) OR NOT age >= 18;
 SELECT id, age * 12 AS months, age + 1 FROM users WHERE age % 2 = 0;
 SELECT authors.name, posts.title FROM authors JOIN posts ON authors.id = posts.authorId;
 SELECT authors.name, posts.title FROM authors LEFT JOIN posts ON authors.id = posts.authorId;
+SELECT authors.name, posts.title, comments.body FROM authors
+  JOIN posts ON authors.id = posts.authorId
+  JOIN comments ON posts.id = comments.postId;
 SELECT status, COUNT(*), AVG(attempts) FROM logins GROUP BY status;
 SELECT DISTINCT status FROM logins ORDER BY status;
 SELECT * FROM users ORDER BY age DESC LIMIT 5;
@@ -29,18 +32,25 @@ SELECT * FROM users ORDER BY id LIMIT 10 OFFSET 20;
   and aggregate calls (below). `*` cannot be listed alongside anything else (`SELECT *, age * 2` is not
   accepted). A plain column and an aggregate can only sit together when every plain column is also named
   in `GROUP BY`, and a computed column cannot be combined with `GROUP BY` or an aggregate yet.
-- **`FROM`**: exactly one table, plus an optional single `JOIN`.
+- **`FROM`**: exactly one table, plus zero or more `JOIN`s, chained left-deep (plan.md §25.4 C3 slice b):
+  `FROM a JOIN b ON … JOIN c ON …` joins `c` to whatever `a ⋈ b` already produced, not to `a` and `b`
+  independently.
 - **`JOIN`**: `[INNER | LEFT [OUTER]] JOIN table ON a.col = b.col`, always an equality between one
   qualified column on each side. A bare `JOIN` and `INNER JOIN` are the same thing: a row from either
   side with no match on the other simply does not appear. `LEFT [OUTER] JOIN` (plan.md §25.4 C3) keeps
-  every row of the table named in `FROM`, even one with no match — its columns from the *joined* table
-  come back `NULL` instead. No `RIGHT`/`FULL`/`CROSS`/`USING` (write a `RIGHT JOIN` the other way round,
-  as a `LEFT JOIN` with the two tables swapped), and no more than one `JOIN` per query. Every column
-  reference is qualified (`authors.id`, not `id`) once a query has a `JOIN` — there is no ambiguity
-  resolution. A `JOIN` cannot combine with `GROUP BY`, `ORDER BY`, or an aggregate in the SELECT list.
-  A `WHERE` on the joined table is never pushed below a `LEFT JOIN` — the classic pitfall that would
-  quietly turn it back into an inner join — so `… LEFT JOIN posts ON … WHERE posts.title IS NULL`
-  correctly finds only the rows a `LEFT JOIN` NULL-padded, not zero rows.
+  every row on the other side of *this* join, even one with no match — its columns from the table this
+  `JOIN` introduces come back `NULL` instead; a chain may mix `LEFT` and inner freely, step by step. No
+  `RIGHT`/`FULL`/`CROSS`/`USING` (write a `RIGHT JOIN` the other way round, as a `LEFT JOIN` with the two
+  tables swapped), and no aliasing — so the same table can never be named twice in one query's chain, and
+  each `JOIN`'s `ON` must name the table it introduces on one side and some table already in the query
+  (`FROM`'s, or an earlier `JOIN`'s — not necessarily the one written just before it) on the other. Every
+  column reference is qualified (`authors.id`, not `id`) once a query has any `JOIN` — there is no
+  ambiguity resolution. A `JOIN` cannot combine with `GROUP BY`, `ORDER BY`, or an aggregate in the SELECT
+  list. A `WHERE` on the table a `LEFT JOIN` introduces is never pushed below it — the classic pitfall
+  that would quietly turn it back into an inner join — so `… LEFT JOIN posts ON … WHERE posts.title IS
+  NULL` correctly finds only the rows a `LEFT JOIN` NULL-padded, not zero rows; this pushdown itself is
+  only reached for a query's *first* `JOIN` so far — a chain's `WHERE` clause stays a residual filter
+  above the whole thing, correct either way, just not narrowed into a scan yet.
 - **`WHERE`**: a predicate built from comparisons and tests, combined with `AND`, `OR` and `NOT`
   and grouped with parentheses — see [Predicates](#predicates) below.
 - **`DISTINCT`**: `SELECT DISTINCT a, b …` returns each distinct combination once — see
@@ -239,11 +249,11 @@ with a generic syntax error:
 
 | You write | The parser says |
 |---|---|
-| `INNER JOIN` | *v0 supports a bare JOIN only — write JOIN without INNER.* |
-| `LEFT`/`RIGHT`/`FULL` JOIN | *Outer joins are not in the v0 subset — only an inner JOIN.* |
+| `RIGHT`/`FULL` JOIN | *Not in the v0 subset — write a RIGHT JOIN the other way round, as a LEFT JOIN with the two tables swapped; FULL isn't an inner or a LEFT JOIN either.* |
 | `CROSS JOIN` | *CROSS JOIN is not in the v0 subset — JOIN ... ON needs an equality.* |
 | `JOIN ... USING (...)` | *USING is not in the v0 subset — write the equality out.* |
-| A second `JOIN` | *Only one JOIN per query.* |
+| Joining the same table twice | *Already in this query — joining it again needs an alias, which v0 does not have.* |
+| A `JOIN`'s `ON` naming a table not yet in the query | *There is no table called that yet in this query — it has to be named in FROM or an earlier JOIN first.* |
 | `SELECT a, DISTINCT b`, `COUNT(DISTINCT x)` | *DISTINCT applies to the whole SELECT list — write `SELECT DISTINCT a, b …`. Inside an aggregate it is not supported yet.* |
 | `UNION` | *UNION is not in the v0 subset.* |
 | A subquery, `x IN (SELECT …)` | *A subquery is not supported here — write the values out, or join the two tables.* |

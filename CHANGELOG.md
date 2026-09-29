@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Multi-join** (plan.md §25.4 C3, second slice) — zero or more `JOIN`s chained left-deep:
+  `FROM a JOIN b ON … JOIN c ON …` joins `c` against whatever `a ⋈ b` already produced, not against `a` and `b`
+  independently. Each `JOIN`'s `ON` must name the table it introduces on one side and some table already in the
+  query — `FROM`'s, or an earlier `JOIN`'s, not necessarily the one written just before it — on the other; the
+  same table can never appear twice (no aliasing to tell two copies apart). All four join algorithms chain
+  correctly, and `index-nested-loop`'s per-table fallback now applies **per step**, so one step in a chain can run
+  as an index join while another, on an unindexed table, quietly runs as nested-loop instead. `LEFT` and inner
+  joins mix freely within one chain, NULL-padding independently at each step.
 - **`LEFT JOIN`** (plan.md §25.4 C3, first slice) — `[INNER | LEFT [OUTER]] JOIN table ON a.col = b.col`. A bare
   `JOIN`/`INNER JOIN` behaves exactly as before; `LEFT [OUTER] JOIN` keeps every row of the `FROM` table, even one
   that matches nothing (or whose join column is itself NULL), NULL-padding the joined table's columns instead of

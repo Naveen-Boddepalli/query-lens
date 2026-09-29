@@ -22,11 +22,12 @@ import {
   emitDeletePlanEvents,
   emitPlanEvents,
   emitUpdatePlanEvents,
-  findIndexNestedLoopJoin,
+  findIndexNestedLoopJoins,
   findSortDistinct,
-  findSortMergeJoin,
+  joinsIn,
   needsSortSpill,
 } from './planner/index.ts';
+import type { Plan } from './planner/index.ts';
 import { buildHeap, createBufferPool } from './storage/index.ts';
 import { buildIndexes, describeUniqueKey, findIndexSpec, indexSpecsOf, pageCountFor } from './index/index.ts';
 import type { BPlusTree } from './index/index.ts';
@@ -112,22 +113,26 @@ export function runQuery(
     return { events: drain(), rows, analyze: { table: table.name, stats } };
   }
 
-  // A JOIN's second table — resolved here, alongside the FROM/INTO table
-  // above, so both go through the same "no table called X" shape.
-  const joinTableRef = ast.kind === 'select' ? ast.join?.table : undefined;
-  const joinTable = joinTableRef ? db.tables[joinTableRef.name] : undefined;
-  if (joinTableRef && !joinTable) {
-    const known = Object.keys(db.tables);
-    return {
-      events: drain(),
-      rows: [],
-      error: {
-        message: `There is no table called \`${joinTableRef.name}\`.`,
-        hint: known.length === 1 ? `The only table is \`${known[0]}\`.` : `Tables: ${known.join(', ')}.`,
-        from: joinTableRef.span.from,
-        to: joinTableRef.span.to,
-      },
-    };
+  // Every JOIN's own table (plan.md §25.4 C3 slice b: 0 or more, left-deep) — resolved here, alongside the
+  // FROM/INTO table above, so all of them go through the same "no table called X" shape.
+  const joins = ast.kind === 'select' ? (ast.joins ?? []) : [];
+  const joinTables: Record<string, Table> = {};
+  for (const j of joins) {
+    const t = db.tables[j.table.name];
+    if (!t) {
+      const known = Object.keys(db.tables);
+      return {
+        events: drain(),
+        rows: [],
+        error: {
+          message: `There is no table called \`${j.table.name}\`.`,
+          hint: known.length === 1 ? `The only table is \`${known[0]}\`.` : `Tables: ${known.join(', ')}.`,
+          from: j.table.span.from,
+          to: j.table.span.to,
+        },
+      };
+    }
+    joinTables[j.table.name] = t;
   }
 
   const unknownColumn = referencedColumns(ast).find((c) => {
@@ -273,55 +278,74 @@ export function runQuery(
     table,
     options.rowsPerPage,
     options.aggregateStrategy ?? 'hash',
-    joinTable,
+    joinTables,
     options.joinStrategy ?? 'nested-loop',
   );
 
-  // A JOIN's second table gets its own heap, its pages numbered right after
-  // the FROM table's — so both compete for the same buffer frames, the same
-  // way a Sort's spill pages do. Nested-loop, hash and sort-merge never
-  // consult either side's index, so there is no B+Tree to build for the right
-  // side; an index nested-loop join (plan.md §25.4 B4) does, and the inner
-  // table's tree gets page ids past every heap page so nothing collides.
-  const rightHeap: Heap | undefined = joinTable
-    ? buildHeap(joinTable, options.rowsPerPage, heap.pages.length)
-    : undefined;
-  const indexJoin = findIndexNestedLoopJoin(plan);
-  const probeIndex = indexJoin?.right.op === 'IndexProbe' && joinTable ? findIndexSpec(joinTable, indexJoin.right.column) : undefined;
-  const rightTrees =
-    probeIndex && rightHeap
-      ? buildIndexes(
-          rightHeap,
-          [probeIndex],
-          undefined,
-          Math.max(pageCountFor(heap, trees), heap.pages.length + rightHeap.pages.length),
-          options.indexBuild,
-          joinTable?.clusteredKey,
-        )
-      : {};
+  // Every joined table gets its own heap, its pages numbered right after whatever came before it — so all of them
+  // compete for the same buffer frames, the same way a Sort's spill pages do (plan.md §25.4 C3 slice b generalizes
+  // this from one join partner to a whole left-deep chain). Nested-loop, hash and sort-merge never consult any
+  // side's own index, so there is no B+Tree to build for a join partner unless that particular step runs
+  // index-nested-loop (plan.md §25.4 B4) — each one that does gets its one needed index built next, past every
+  // heap and every earlier probe index, so nothing collides.
+  const joinHeaps: Record<string, Heap> = {};
+  let pageBase = pageCountFor(heap, trees);
+  for (const j of joins) {
+    const jHeap = buildHeap(joinTables[j.table.name]!, options.rowsPerPage, pageBase);
+    joinHeaps[j.table.name] = jHeap;
+    pageBase += jHeap.pages.length;
+  }
+  const joinTrees: Record<string, Record<string, BPlusTree>> = {};
+  for (const ij of findIndexNestedLoopJoins(plan)) {
+    if (ij.right.op !== 'IndexProbe') continue; // unreachable: an index-nested-loop Join's own inner side is always a probe
+    const jTable = joinTables[ij.rightTable]!;
+    const probeIndex = findIndexSpec(jTable, ij.right.column);
+    if (!probeIndex) continue; // unreachable: effectiveJoinAlgorithm already confirmed this index exists
+    const jTrees = buildIndexes(joinHeaps[ij.rightTable]!, [probeIndex], undefined, pageBase, options.indexBuild, jTable.clusteredKey);
+    joinTrees[ij.rightTable] = jTrees;
+    pageBase = pageCountFor(joinHeaps[ij.rightTable]!, jTrees);
+  }
+  const heapsEnd = pageBase;
 
-  // A Sort's (or a SortAggregate's own internal sort's) spill needs its own
-  // page ids, reserved up front — sized against the whole table (the worst
-  // case; a WHERE clause can only shrink what actually reaches it) so the
-  // reservation is never too small to discover only at runtime. A sort-merge
-  // Join needs the same reservation *twice* — one block per side, since each
-  // sorts independently — never both at once: ORDER BY/GROUP BY still can't
-  // combine with JOIN at all.
+  // Every `sort-merge` Join in the chain needs its own two-block reservation — one per side, since each sorts
+  // independently — placed in chain order (the innermost join's scratch first, mirroring the order joins actually
+  // execute in) right after every table's heap and any probe index. A single join's worst-case left input is just
+  // the FROM table itself (`table.rows.length`, unchanged from before chains existed); a later step's worst case is
+  // the product of every earlier table's row count, since no join can ever produce more rows than that.
+  const sortMergeBases = new Map<Plan, { leftBase: number; rightBase: number }>();
+  let worstCaseLeftRows = table.rows.length;
+  for (const j of joinsIn(plan)) {
+    const jTable = joinTables[j.rightTable]!;
+    if (j.algorithm === 'sort-merge') {
+      const leftSize = sortTempPageCount(worstCaseLeftRows, options.rowsPerPage, options.bufferFrames);
+      const leftBase = pageBase;
+      pageBase += leftSize;
+      const rightSize = sortTempPageCount(jTable.rows.length, options.rowsPerPage, options.bufferFrames);
+      const rightBase = pageBase;
+      pageBase += rightSize;
+      sortMergeBases.set(j, { leftBase, rightBase });
+    }
+    worstCaseLeftRows *= jTable.rows.length;
+  }
+
+  // A Sort's (or a SortAggregate's own internal sort's) spill needs its own page ids, reserved up front — sized
+  // against the whole table (the worst case; a WHERE clause can only shrink what actually reaches it) so the
+  // reservation is never too small to discover only at runtime. This and the sort-merge reservation above never
+  // both apply: ORDER BY/GROUP BY still can't combine with JOIN at all.
   const sortTemp = needsSortSpill(plan)
     ? sortTempPageCount(table.rows.length, options.rowsPerPage, options.bufferFrames)
-    : findSortMergeJoin(plan)
-      ? sortTempPageCount(table.rows.length, options.rowsPerPage, options.bufferFrames) +
-        sortTempPageCount(joinTable!.rows.length, options.rowsPerPage, options.bufferFrames)
-      : 0;
-  // A sort-based DISTINCT (plan.md §25.4 B2) sorts what the projection produced, which after a JOIN can be
-  // as many rows as the two tables' product (capped — these are teaching-sized tables) — and it gets its own
-  // block of scratch pages *after* whichever other sort the plan has, so no two sorts share a page id.
-  const distinctRows = joinTable ? Math.min(table.rows.length * joinTable.rows.length, 20_000) : table.rows.length;
+    : pageBase - heapsEnd;
+  // A sort-based DISTINCT (plan.md §25.4 B2) sorts what the projection produced, which after a JOIN can be as many
+  // rows as every joined table's product (capped — these are teaching-sized tables) — and it gets its own block of
+  // scratch pages *after* whichever other sort the plan has, so no two sorts share a page id.
+  const distinctRows =
+    joins.length > 0
+      ? Math.min(joins.reduce((product, j) => product * joinTables[j.table.name]!.rows.length, table.rows.length), 20_000)
+      : table.rows.length;
   const distinctSpill = findSortDistinct(plan)
     ? sortTempPageCount(distinctRows, options.rowsPerPage, options.bufferFrames)
     : 0;
-  const heapsEnd = pageCountFor(heap, trees) + (rightHeap ? rightHeap.pages.length : 0);
-  const distinctBase = (rightHeap && probeIndex ? Math.max(heapsEnd, pageCountFor(rightHeap, rightTrees)) : heapsEnd) + sortTemp;
+  const distinctBase = heapsEnd + sortTemp;
   const pool = createBufferPool(distinctBase + distinctSpill, options, emit);
 
   const rows = execute(plan, {
@@ -333,7 +357,17 @@ export function runQuery(
     table,
     options,
     distinctBase,
-    ...(joinTable && rightHeap ? { joinRight: { table: joinTable, heap: rightHeap, trees: rightTrees } } : {}),
+    ...(joins.length > 0
+      ? {
+          joinPartners: Object.fromEntries(
+            joins.map((j) => [
+              j.table.name,
+              { table: joinTables[j.table.name]!, heap: joinHeaps[j.table.name]!, trees: joinTrees[j.table.name] ?? {} },
+            ]),
+          ),
+        }
+      : {}),
+    ...(sortMergeBases.size > 0 ? { sortMergeBases } : {}),
   });
 
   return { events: drain(), rows };
@@ -363,9 +397,11 @@ function referencedColumns(ast: Exclude<Statement, { kind: 'explain' }>): Column
       if (e.kind === 'column') push(e);
     });
   }
-  if (ast.kind === 'select' && ast.join) {
-    if (ast.join.on.left.kind === 'column') push(ast.join.on.left);
-    if (ast.join.on.right.kind === 'column') push(ast.join.on.right);
+  if (ast.kind === 'select') {
+    for (const join of ast.joins ?? []) {
+      if (join.on.left.kind === 'column') push(join.on.left);
+      if (join.on.right.kind === 'column') push(join.on.right);
+    }
   }
   if (ast.kind === 'select' && ast.groupBy) refs.push(...ast.groupBy.columns);
   if (ast.kind === 'select' && ast.having) {

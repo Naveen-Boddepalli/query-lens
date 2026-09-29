@@ -349,6 +349,13 @@ function stripTableQualifiers(expr: Expr): Expr {
  * conjunct that happens to match an index still runs as a full scan. Reaching
  * `index-selection` into a `Join`'s children is its own, larger step.
  *
+ * Also deliberately narrow about *which* `Join`: `join.left.op !== 'SeqScan'` bails on a chain of two or more
+ * `JOIN`s (plan.md §25.4 C3 slice b) just as it would on any other shape this rule does not recognise — a chain's
+ * outermost `Join` has another `Join` as its `left`, never a bare scan. A 3-or-more-table query's `WHERE` clause
+ * therefore always stays a residual `Filter` above the whole chain for now, exactly like a predicate this rule
+ * already declines to reach *into* a single `Join`'s own children (the paragraph above) — a missed optimization,
+ * not a correctness gap; extending pushdown down a chain is left for later, alongside reaching it past a `Join` at all.
+ *
  * A conjunct on the *inner* side of a `LEFT JOIN` (plan.md §25.4 C3) is never pushed, on purpose: filtering it into
  * the inner scan removes rows *before* the join can even find out they would not have matched, so a left row that
  * *would* have been NULL-padded instead vanishes with no trace of it — an inner join wearing a LEFT JOIN's syntax.

@@ -108,53 +108,61 @@ export function effectiveJoinAlgorithm(
 }
 
 /**
- * Builds the `Join` node for a `FROM t1 JOIN t2 ON ...` — a bare `SeqScan` on
- * each side (v1 never pushes a predicate into either, plan.md §22.2) and the
- * ON equality's two columns resolved to `left`'s side and `right`'s side,
- * whichever order they were written in. The parser's `checkJoinOn` already
- * guarantees both `on` operands are qualified columns; the `kind` check
- * below is just how the type system is told what that check already ensures.
- * Shared with `emit.ts`'s progressive plan-tree narration, like
- * `buildAggregatePlan` already is, so the two never drift. `algorithm`
- * defaults to `'nested-loop'` (the shipped behaviour); only `/compare`'s
- * join mode ever passes another, via `EngineOptions.joinStrategy`. The
- * `index-nested-loop` algorithm replaces the inner scan with an `IndexProbe`,
- * and needs `joinTable` to know the index exists (see `effectiveJoinAlgorithm`).
+ * Builds the whole `Join` chain for `FROM t1 JOIN t2 ON … [JOIN t3 ON …]…` (plan.md §25.4 C3 slice b) — left-deep,
+ * one `Join` node per clause, each nesting the previous one as its `left`. A bare `SeqScan` starts the fold, and
+ * each step adds a bare `SeqScan` (or, for `index-nested-loop`, an `IndexProbe`) on the one table its own clause
+ * introduces — v1 never pushes a predicate into any scan here, plan.md §22.2 — with the ON equality's two columns
+ * resolved to whichever side is the new table and whichever is a table already in the chain, whichever order they
+ * were written in. `checkJoinOn`/`checkJoinChain` already guarantee this at parse time; the `kind` check below is
+ * just how the type system is told what that already ensures. Shared with `emit.ts`'s progressive plan-tree
+ * narration, like `buildAggregatePlan` already is, so the two never drift. `algorithm` defaults to `'nested-loop'`
+ * (the shipped behaviour); only `/compare`'s join mode ever passes another, via `EngineOptions.joinStrategy` — the
+ * same one for every step, though `index-nested-loop` still falls back per step (see `effectiveJoinAlgorithm`)
+ * whenever that step's own table has no usable index. For a single join this is exactly the old two-table shape.
  */
 export function buildJoinPlan(
-  join: JoinClause,
+  joins: readonly JoinClause[],
   fromTable: string,
   algorithm: JoinAlgorithm = 'nested-loop',
-  joinTable?: Table,
+  joinTables?: Record<string, Table>,
 ): Plan {
-  const { left, right } = join.on;
-  if (left.kind !== 'column' || right.kind !== 'column') {
-    throw new Error('unreachable: checkJoinOn guarantees a JOIN ON is column = column');
+  let plan: Plan = { op: 'SeqScan', table: fromTable };
+  for (const join of joins) {
+    const { left, right } = join.on;
+    if (left.kind !== 'column' || right.kind !== 'column') {
+      throw new Error('unreachable: checkJoinOn guarantees a JOIN ON is column = column');
+    }
+    const newTable = join.table.name;
+    // checkJoinChain already guarantees exactly one side names newTable and the other a table already in scope.
+    const newTableIsLeftOperand = left.table === newTable;
+    const rightColumn = newTableIsLeftOperand ? left.name : right.name;
+    const leftColumn = newTableIsLeftOperand ? right.name : left.name;
+    const leftTable = (newTableIsLeftOperand ? right.table : left.table)!;
+    const joinTable = joinTables?.[newTable];
+    const effective = effectiveJoinAlgorithm(algorithm, joinTable, rightColumn);
+    plan = {
+      op: 'Join',
+      algorithm: effective,
+      ...(join.joinType ? { joinType: join.joinType } : {}),
+      left: plan,
+      right:
+        effective === 'index-nested-loop'
+          ? {
+              op: 'IndexProbe',
+              table: newTable,
+              // The index's name: the join column itself for a plain index, the composite's columns joined for one that leads with it.
+              column: indexNameOf(joinIndexFor(joinTable!, rightColumn)!.columns),
+              outerTable: leftTable,
+              outerColumn: leftColumn,
+            }
+          : { op: 'SeqScan', table: newTable },
+      leftTable,
+      rightTable: newTable,
+      leftColumn,
+      rightColumn,
+    };
   }
-  const leftColumn = left.table === fromTable ? left.name : right.name;
-  const rightColumn = left.table === join.table.name ? left.name : right.name;
-  const effective = effectiveJoinAlgorithm(algorithm, joinTable, rightColumn);
-  return {
-    op: 'Join',
-    algorithm: effective,
-    ...(join.joinType ? { joinType: join.joinType } : {}),
-    left: { op: 'SeqScan', table: fromTable },
-    right:
-      effective === 'index-nested-loop'
-        ? {
-            op: 'IndexProbe',
-            table: join.table.name,
-            // The index's name: the join column itself for a plain index, the composite's columns joined for one that leads with it.
-            column: indexNameOf(joinIndexFor(joinTable!, rightColumn)!.columns),
-            outerTable: fromTable,
-            outerColumn: leftColumn,
-          }
-        : { op: 'SeqScan', table: join.table.name },
-    leftTable: fromTable,
-    rightTable: join.table.name,
-    leftColumn,
-    rightColumn,
-  };
+  return plan;
 }
 
 /**
@@ -203,11 +211,12 @@ export function buildPlan(
   ast: SelectStatement,
   aggregateStrategy: 'hash' | 'sort' = 'hash',
   joinStrategy: JoinAlgorithm = 'nested-loop',
-  joinTable?: Table,
+  joinTables?: Record<string, Table>,
 ): Plan {
-  const scan: Plan = ast.join
-    ? buildJoinPlan(ast.join, ast.from.name, joinStrategy, joinTable)
-    : { op: 'SeqScan', table: ast.from.name };
+  const scan: Plan =
+    ast.joins && ast.joins.length > 0
+      ? buildJoinPlan(ast.joins, ast.from.name, joinStrategy, joinTables)
+      : { op: 'SeqScan', table: ast.from.name };
 
   const filtered: Plan = ast.where
     ? { op: 'Filter', predicate: ast.where, child: scan }

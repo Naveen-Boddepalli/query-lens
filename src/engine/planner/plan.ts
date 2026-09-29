@@ -37,15 +37,17 @@ export interface AggregateSpec {
 export type Plan =
   | { op: 'SeqScan'; table: string; filter?: Expr }
   /**
-   * `FROM t1 JOIN t2 ON t1.a = t2.b` (plan.md §22.2), always the bottom of
-   * the tree — `left`/`right` are always a bare `SeqScan` in v1 (no
-   * predicate pushdown into either side yet, so both are always full scans).
-   * `leftColumn`/`rightColumn` are the ON equality's two columns, resolved
-   * once at build time to `left`'s side and `right`'s side respectively —
-   * the parser's `checkJoinOn` already guarantees the ON clause is exactly
-   * one equality between a qualified column on each side, whichever order
-   * it was written in, so no consumer here has to re-figure out which
-   * column belongs to which table. Three algorithms now, the same pair
+   * `FROM t1 JOIN t2 ON t1.a = t2.b`, always at the bottom of the tree (plan.md §22.2) — `right` is always a bare
+   * `SeqScan` (or, for `index-nested-loop`, an `IndexProbe`) on the one table this `JOIN` clause introduces: no
+   * predicate pushdown into it yet, so it is always a full scan or probe, never itself a `Join`. `left` is the same,
+   * for a query's only `JOIN` — but a chain of them (plan.md §25.4 C3 slice b, `FROM a JOIN b ON … JOIN c ON …`)
+   * nests left-deep, so a later `JOIN`'s `left` is the *previous* `Join` node, not a bare scan; `joinsIn` walks the
+   * whole chain. `leftColumn`/`rightColumn` are the ON equality's two columns, resolved once at build time to
+   * `left`'s side and `right`'s side respectively — the parser's `checkJoinOn`/`checkJoinChain` already guarantee
+   * the ON clause is exactly one equality between a qualified column naming this table and one naming a table
+   * already in the chain, whichever order it was written in, so no consumer here has to re-figure out which column
+   * belongs to which table (`leftTable`, similarly, need not be `left`'s *only* table once a chain nests — just the
+   * one the ON clause's left-hand column actually names). Three algorithms now, the same pair
    * `HashAggregate`/`SortAggregate` already are for `GROUP BY`, plus a third:
    * `nested-loop` rescans `right` whole per row of `left`; `hash` builds an
    * in-memory hash table over `right` once and probes it with `left`
@@ -243,34 +245,36 @@ export function needsSortSpill(plan: Plan): boolean {
 }
 
 /**
- * The `Join` node, when it runs the `sort-merge` algorithm — `runQuery.ts`
- * needs this before the buffer pool exists too, to reserve scratch page ids
- * for *both* sides' own internal sort (each is its own `externalMergeSort`
- * call, plan.md §22.2). `childOf` stops at a `Join` (its own two children are
- * always a bare `SeqScan`, never a `Sort`), so this and `needsSortSpill`
- * never both fire on the same plan — `ORDER BY`/`GROUP BY` still can't
- * combine with `JOIN` at all.
+ * Every `Join` node in `plan`, in source order — the first `JOIN` clause first, the last (outermost in the tree,
+ * plan.md §25.4 C3 slice b) last. `childOf` stops at a `Join` (it has `left`/`right`, not `child`), so finding more
+ * than the outermost one means recursing into `left` on purpose: a left-deep chain's `right` side is always a base
+ * table's own scan or probe, never itself a `Join`, so only `left` is ever worth walking further into. `ORDER
+ * BY`/`GROUP BY` still can't combine with `JOIN` at all, so this and `needsSortSpill` never both find something on
+ * the same plan.
  */
-export function findSortMergeJoin(plan: Plan): Extract<Plan, { op: 'Join' }> | null {
+export function joinsIn(plan: Plan): Extract<Plan, { op: 'Join' }>[] {
   let node: Plan | undefined = plan;
-  while (node) {
-    if (node.op === 'Join' && node.algorithm === 'sort-merge') return node;
-    node = childOf(node);
-  }
-  return null;
+  while (node && node.op !== 'Join') node = childOf(node);
+  if (!node) return [];
+  return [...joinsIn(node.left), node];
 }
 
 /**
- * The `Join` node, when it runs the `index-nested-loop` algorithm — `runQuery.ts` needs it before the buffer pool
- * exists, to build the inner table's B+Tree (plan.md §25.4 B4) and give its pages ids of their own.
+ * Every `Join` in the chain that runs the `sort-merge` algorithm — `runQuery.ts` needs these before the buffer pool
+ * exists, to reserve scratch page ids for each one's own two internal sorts (each side its own `externalMergeSort`
+ * call, plan.md §22.2).
  */
-export function findIndexNestedLoopJoin(plan: Plan): Extract<Plan, { op: 'Join' }> | null {
-  let node: Plan | undefined = plan;
-  while (node) {
-    if (node.op === 'Join' && node.algorithm === 'index-nested-loop') return node;
-    node = childOf(node);
-  }
-  return null;
+export function findSortMergeJoins(plan: Plan): Extract<Plan, { op: 'Join' }>[] {
+  return joinsIn(plan).filter((j) => j.algorithm === 'sort-merge');
+}
+
+/**
+ * Every `Join` in the chain that runs the `index-nested-loop` algorithm — `runQuery.ts` needs these before the
+ * buffer pool exists, to build each one's own inner table's B+Tree (plan.md §25.4 B4) and give its pages ids of
+ * their own.
+ */
+export function findIndexNestedLoopJoins(plan: Plan): Extract<Plan, { op: 'Join' }>[] {
+  return joinsIn(plan).filter((j) => j.algorithm === 'index-nested-loop');
 }
 
 /* -------------------------------------------------------------------------- */

@@ -4,7 +4,7 @@
  *   statement     := explain | analyze | select | delete | insert | update
  *   explain       := EXPLAIN [ANALYZE] select
  *   analyze       := ANALYZE identifier [';'] EOF
- *   select        := SELECT [DISTINCT] selectList FROM identifier [join] [WHERE expr]
+ *   select        := SELECT [DISTINCT] selectList FROM identifier [join]* [WHERE expr]
  *                     [GROUP BY identifier (',' identifier)*] [HAVING expr]
  *                     [ORDER BY identifier [ASC|DESC]] [LIMIT number [OFFSET number]] [';'] EOF
  *   join          := [INNER | LEFT [OUTER]] JOIN identifier ON qualifiedColumn '=' qualifiedColumn
@@ -41,13 +41,14 @@
  * query with both, so despite both appearing under `select` above, no query
  * this grammar accepts ever has both clauses at once (see `checkGroupingValidity`).
  *
- * A `join` is exactly one: a bare or `INNER JOIN` (an implicit inner join),
- * or `LEFT [OUTER] JOIN` (plan.md §25.4 C3) — `RIGHT`/`FULL`/`CROSS` stay out
- * of scope. Never combines with `GROUP BY`, `ORDER BY`, or an aggregate `selectItem` —
- * each rejected at parse time (`checkJoinValidity`). A `qualifiedColumn`'s
- * `table` half is required on every column reference once a `join` is
- * present (there is no ambiguity resolution — v0 asks the query to say which
- * table), and validated against the tables the query actually names.
+ * `[join]` is a bare or `INNER JOIN` (an implicit inner join), or `LEFT [OUTER] JOIN` (plan.md §25.4 C3) —
+ * `RIGHT`/`FULL`/`CROSS` stay out of scope. Zero or more may chain (plan.md §25.4 C3 slice b), left-deep: each
+ * one's `ON` names the table it introduces plus *some* table the query already knows — `FROM`'s, or an earlier
+ * `JOIN`'s — never a fresh third table on both sides, and never repeats a table name (no aliasing, so two same-named
+ * tables could never be told apart). None of this combines with `GROUP BY`, `ORDER BY`, or an aggregate
+ * `selectItem` — each rejected at parse time (`checkJoinValidity`). A `qualifiedColumn`'s `table` half is required
+ * on every column reference once any `join` is present (there is no ambiguity resolution — v0 asks the query to say
+ * which table), and validated against the tables the query actually names.
  *
  * Hand-written rather than generated: the error messages are half the teaching
  * value, and they need to name the v0 scope explicitly.
@@ -469,6 +470,49 @@ function checkJoinOn(on: Extract<Expr, { kind: 'compare' }>): void {
   }
 }
 
+/**
+ * Where a `JOIN` sits in the chain (plan.md §25.4 C3 slice b): `checkJoinOn` already guarantees `on`'s two operands
+ * are qualified columns, but not *which* tables they name. This checks the one thing that actually depends on the
+ * chain built so far — one side must be the table this `JOIN` introduces, and the other must already be in scope
+ * (`FROM`, or an earlier `JOIN`) — closing a gap the single-join grammar never had to close itself (a single join's
+ * `ON` was never actually checked against `FROM`'s and its own table name; `buildJoinPlan` just assumed it).
+ */
+function checkJoinChain(join: JoinClause, known: ReadonlySet<string>): void {
+  const { left, right } = join.on;
+  if (left.kind !== 'column' || right.kind !== 'column') return; // unreachable: checkJoinOn already guarantees this
+  const newTable = join.table.name;
+  if (known.has(newTable)) {
+    throw new ParseError(
+      `\`${newTable}\` is already in this query.`,
+      join.table.span,
+      'Joining the same table twice needs an alias, which v0 does not have — give the table a different name in a copy of the data instead.',
+    );
+  }
+  const leftIsNew = left.table === newTable;
+  const rightIsNew = right.table === newTable;
+  if (!leftIsNew && !rightIsNew) {
+    throw new ParseError(
+      `Neither side of ON names \`${newTable}\` — the table this JOIN introduces.`,
+      join.on.span,
+      `One side of ON must be a column on \`${newTable}\`; the other, on a table already in the query (${[...known].join(', ')}).`,
+    );
+  }
+  if (leftIsNew && rightIsNew) {
+    throw new ParseError(
+      `Both sides of ON name \`${newTable}\` — a JOIN needs one column from the table it introduces and one from a table already in the query.`,
+      join.on.span,
+    );
+  }
+  const otherTable = (leftIsNew ? right.table : left.table)!;
+  if (!known.has(otherTable)) {
+    throw new ParseError(
+      `There is no table called \`${otherTable}\` yet in this query.`,
+      join.on.span,
+      `\`${otherTable}\` has to be named in FROM or an earlier JOIN before this ON clause can reference it. Known so far: ${[...known].join(', ')}.`,
+    );
+  }
+}
+
 /** Every column reference anywhere in the SELECT list or WHERE, in source order. */
 function collectColumnRefs(select: SelectList, where: Expr | undefined): Extract<Expr, { kind: 'column' }>[] {
   const refs: Extract<Expr, { kind: 'column' }>[] = [];
@@ -487,16 +531,17 @@ function collectColumnRefs(select: SelectList, where: Expr | undefined): Extract
  * Two checks, both about column qualifiers: a `join` combined with an
  * aggregate SELECT item is not supported yet (v1 restriction), and every
  * column reference's `table` — required at all once a `join` is present, so
- * no reference can ever be ambiguous between the two tables — must actually
- * name a table this query knows about (`FROM` or `JOIN`).
+ * no reference can ever be ambiguous between the tables — must actually
+ * name a table this query knows about (`FROM` or any `JOIN`).
  */
 function checkJoinValidity(
   select: SelectList,
-  join: JoinClause | undefined,
+  joins: JoinClause[],
   where: Expr | undefined,
   from: TableRef,
 ): void {
-  if (join && select.kind === 'columns') {
+  const hasJoin = joins.length > 0;
+  if (hasJoin && select.kind === 'columns') {
     const aggregate = select.items.find((item): item is Extract<SelectItem, { kind: 'aggregate' }> =>
       item.kind === 'aggregate',
     );
@@ -509,15 +554,17 @@ function checkJoinValidity(
     }
   }
 
+  const known = [from.name, ...joins.map((j) => j.table.name)];
+  const knownSet = new Set(known);
   for (const ref of collectColumnRefs(select, where)) {
-    if (join && ref.table === undefined) {
+    if (hasJoin && ref.table === undefined) {
       throw new ParseError(
-        `\`${ref.name}\` needs a table name now that this query joins two tables.`,
+        `\`${ref.name}\` needs a table name now that this query joins ${String(known.length)} tables.`,
         ref.span,
-        `Write \`${from.name}.${ref.name}\` or \`${join.table.name}.${ref.name}\`, whichever table it is actually on.`,
+        `Write ${known.map((t) => `\`${t}.${ref.name}\``).join(' or ')}, whichever table it is actually on.`,
       );
     }
-    if (!join && ref.table !== undefined) {
+    if (!hasJoin && ref.table !== undefined) {
       // A single-table query's rows are never qualified — `authors.id` would
       // look up a key that does not exist, since the row is just `{id, ...}`.
       // Rather than special-case a self-qualification that happens to name
@@ -528,11 +575,11 @@ function checkJoinValidity(
         `Write \`${ref.name}\` on its own.`,
       );
     }
-    if (join && ref.table !== undefined && ref.table !== from.name && ref.table !== join.table.name) {
+    if (hasJoin && ref.table !== undefined && !knownSet.has(ref.table)) {
       throw new ParseError(
         `There is no table called \`${ref.table}\` in this query.`,
         ref.span,
-        `This query only knows about \`${from.name}\` and \`${join.table.name}\`.`,
+        `This query only knows about ${known.map((t) => `\`${t}\``).join(', ')}.`,
       );
     }
   }
@@ -923,10 +970,19 @@ function parseSelectBody(c: Cursor): SelectStatement {
   const select = parseSelectList(c);
   c.expectKeyword('FROM', 'after the column list');
   const from = parseTableRef(c);
-  const join = parseJoin(c);
+  const joins: JoinClause[] = [];
+  const known = new Set([from.name]);
+  for (;;) {
+    const join = parseJoin(c);
+    if (!join) break;
+    checkJoinChain(join, known);
+    known.add(join.table.name);
+    joins.push(join);
+  }
+  const hasJoin = joins.length > 0;
   const where = parseOptionalWhere(c);
   const groupBy = parseGroupBy(c);
-  if (join && groupBy) {
+  if (hasJoin && groupBy) {
     throw new ParseError(
       'GROUP BY is not supported yet in a query with JOIN.',
       groupBy.span,
@@ -934,12 +990,12 @@ function parseSelectBody(c: Cursor): SelectStatement {
     );
   }
   checkGroupingValidity(select, groupBy);
-  checkJoinValidity(select, join, where, from);
+  checkJoinValidity(select, joins, where, from);
 
   let having: Expr | undefined;
   if (isKeyword(c.peek(), 'HAVING')) {
     const havingToken = c.next();
-    if (join) {
+    if (hasJoin) {
       throw new ParseError(
         'HAVING is not supported yet in a query with JOIN.',
         havingToken,
@@ -964,7 +1020,7 @@ function parseSelectBody(c: Cursor): SelectStatement {
         'GROUP BY on its own still works — sort the grouped results yourself for now.',
       );
     }
-    if (join) {
+    if (hasJoin) {
       throw new ParseError(
         'ORDER BY is not supported yet in a query with JOIN.',
         c.peek(),
@@ -1034,14 +1090,14 @@ function parseSelectBody(c: Cursor): SelectStatement {
     having?.span.to ??
     groupBy?.span.to ??
     where?.span.to ??
-    join?.span.to ??
+    joins.at(-1)?.span.to ??
     from.span.to;
   return {
     kind: 'select',
     select,
     ...(distinct ? { distinct } : {}),
     from,
-    ...(join === undefined ? {} : { join }),
+    ...(hasJoin ? { joins } : {}),
     ...(where === undefined ? {} : { where }),
     ...(groupBy === undefined ? {} : { groupBy }),
     ...(having === undefined ? {} : { having }),

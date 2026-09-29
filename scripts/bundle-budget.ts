@@ -148,28 +148,33 @@ const T = (name: string): string => `src/pages/tools/${name}.tsx`;
  *    "Statistics" section in limits.mdx and the ANALYZE section in sql.mdx grow the shared docs chunk enough to
  *    push /docs/concepts/btree from 163 to 166 (163 kB measured + 3) — the one route that was already sitting
  *    exactly at its ceiling with no slack left.
+ *  - 2026-09-29, multi-join (§25.4 C3, slice b): `JoinClause[]`, the chain-position parse check, `joinsIn`, the
+ *    chain-aware cost-model/narration/execution changes across `buildPlan.ts`/`emit.ts`/`operators.ts`/`runQuery.ts`
+ *    grow the engine chunk enough to push nine already-tight routes over: /playground, /stages/:id, /learn,
+ *    /compare, /trace, /progress, /challenges/:id, /assignments/new, /tools/btree — each now its measured size + 3,
+ *    the same slack every other engine-carrying route already has.
  */
 export const ROUTES: readonly RouteBudget[] = [
   { route: '/', roots: [P('LandingPage')], kb: 157, note: 'the landing page' },
-  { route: '/playground', roots: [P('PlaygroundPage')], kb: 307, note: 'the Playground: the editor, every stage panel, the engine — the heaviest route, and the one most people land on' },
+  { route: '/playground', roots: [P('PlaygroundPage')], kb: 311, note: 'the Playground: the editor, every stage panel, the engine — the heaviest route, and the one most people land on' },
   { route: '/stages', roots: ['src/ui/StagesLayout.tsx', P('StagesIndex')], kb: 157, note: 'the stage explainers, index' },
-  { route: '/stages/:id', roots: ['src/ui/StagesLayout.tsx', P('StagePage')], kb: 173, note: 'one stage explainer' },
-  { route: '/learn', roots: [P('LearnPage')], kb: 162, note: 'the lesson track' },
+  { route: '/stages/:id', roots: ['src/ui/StagesLayout.tsx', P('StagePage')], kb: 177, note: 'one stage explainer' },
+  { route: '/learn', roots: [P('LearnPage')], kb: 166, note: 'the lesson track' },
   { route: '/learn/:id', roots: [P('LessonPage')], kb: 163, note: 'one lesson' },
   { route: '/examples', roots: [P('ExamplesPage')], kb: 115, note: 'preset queries' },
   { route: '/gallery', roots: [P('GalleryPage')], kb: 158, note: 'named moments' },
-  { route: '/compare', roots: [P('ComparePage')], kb: 165, note: 'index vs scan, policy vs policy, hash vs sort, join algorithms' },
-  { route: '/trace', roots: [P('TracePage')], kb: 160, note: 'the trace inspector' },
-  { route: '/progress', roots: [P('ProgressPage')], kb: 164, note: 'the progress dashboard' },
+  { route: '/compare', roots: [P('ComparePage')], kb: 168, note: 'index vs scan, policy vs policy, hash vs sort, join algorithms' },
+  { route: '/trace', roots: [P('TracePage')], kb: 164, note: 'the trace inspector' },
+  { route: '/progress', roots: [P('ProgressPage')], kb: 168, note: 'the progress dashboard' },
   { route: '/challenges', roots: [P('ChallengesPage')], kb: 160, note: 'challenge index' },
-  { route: '/challenges/:id', roots: [P('ChallengePage')], kb: 279, note: 'one challenge' },
+  { route: '/challenges/:id', roots: [P('ChallengePage')], kb: 283, note: 'one challenge' },
   { route: '/settings', roots: [P('SettingsPage')], kb: 116, note: 'preferences' },
   { route: '/study', roots: [P('StudyPage')], kb: 122, note: 'the §9 study runner (unlisted); the instrument travels in the link, not the bundle (§25.4 A2)' },
-  { route: '/assignments/new', roots: [P('AssignmentsNewPage')], kb: 159, note: 'assignment-link builder' },
+  { route: '/assignments/new', roots: [P('AssignmentsNewPage')], kb: 163, note: 'assignment-link builder' },
   { route: '/tools', roots: [P('ToolsIndexPage')], kb: 116, note: 'the tools index' },
   { route: '/tools/buffer-pool', roots: [T('BufferPoolToolPage')], kb: 161, note: 'buffer-pool sandbox' },
   { route: '/tools/parser', roots: [T('ParserToolPage')], kb: 160, note: 'tokenizer + parser sandbox' },
-  { route: '/tools/btree', roots: [T('BTreeToolPage')], kb: 161, note: 'B+Tree sandbox' },
+  { route: '/tools/btree', roots: [T('BTreeToolPage')], kb: 164, note: 'B+Tree sandbox' },
   { route: '/tools/page', roots: [T('PageToolPage')], kb: 158, note: 'slotted-page inspector' },
   { route: '/tools/sort', roots: [T('SortToolPage')], kb: 118, note: 'external merge sort' },
   { route: '/tools/planner', roots: [T('PlannerToolPage')], kb: 161, note: 'planner sandbox' },

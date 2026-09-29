@@ -74,26 +74,36 @@ concept explanation.
 
 ## JOIN
 
-- **One `JOIN` per query**: `[INNER | LEFT [OUTER]] JOIN table ON a.col = b.col`, always an equality
-  between one qualified column from each side. A bare `JOIN`/`INNER JOIN` drops an unmatched row on
-  either side; `LEFT [OUTER] JOIN` (plan.md §25.4 C3) keeps every row of the `FROM` table, NULL-padding
-  the joined table's columns when nothing on it matches — including when the join column itself is
-  NULL, since NULL never matches NULL there either. No `RIGHT`/`FULL`/`CROSS`.
+- **Zero or more `JOIN`s, chained left-deep** (plan.md §25.4 C3 slice b): `[INNER | LEFT [OUTER]] JOIN
+  table ON a.col = b.col`, always an equality between one qualified column from each side, one of which
+  must name the table this `JOIN` introduces and the other some table already in the query — `FROM`'s,
+  or an earlier `JOIN`'s, not necessarily the one written just before it. `FROM a JOIN b ON … JOIN c ON
+  …` joins `c` against whatever `a ⋈ b` already produced, never against `a` and `b` independently. No
+  aliasing, so the same table can never appear twice in one chain. A bare `JOIN`/`INNER JOIN` drops an
+  unmatched row on either side; `LEFT [OUTER] JOIN` (plan.md §25.4 C3) keeps every row on the *other*
+  side of that one join, NULL-padding the introduced table's columns when nothing on it matches —
+  including when the join column itself is NULL, since NULL never matches NULL there either. A chain may
+  mix `LEFT` and inner freely, step by step — a row a `LEFT` step padded is itself a real row, so a later
+  inner step in the same chain can still drop it if nothing matches its own NULLs. No `RIGHT`/`FULL`/`CROSS`.
 - **Four algorithms** — nested-loop (the default), hash, sort-merge, and **index nested-loop** —
-  chosen by whichever [Compare](/compare) forces; the engine never picks between them on its own.
-  The index join probes the *inner* (`JOIN`ed) table's own B+Tree once per outer row, so it needs an
-  index on that table's join column; without one it quietly runs as a plain nested-loop, and the plan
-  says so. The other three never consult an index, and no `JOIN` side ever becomes an `IndexScan` —
-  a `WHERE` conjunct on the outer table is pushed into its scan, but that scan stays sequential. All
-  four agree on a `LEFT JOIN`'s NULL-padded rows the same way they already had to agree on everything
-  else.
-- **A `WHERE` on the joined (inner) table is never pushed below a `LEFT JOIN`.** Doing so would filter
+  chosen by whichever [Compare](/compare) forces; the engine never picks between them on its own. Every
+  step of a chain runs the same one, except index nested-loop: it applies **per step**, independently —
+  each step probes that step's own inner table's B+Tree once per outer row, so it needs an index on that
+  table's join column; a step without one quietly runs as a plain nested-loop instead, and the plan says
+  so for exactly that step. The other three never consult an index, and no `JOIN` side ever becomes an
+  `IndexScan` — a `WHERE` conjunct on the outer table of a query's first (and, so far, only) `JOIN` is
+  pushed into its scan, but that scan stays sequential. All four agree on every step's `LEFT JOIN`
+  NULL-padded rows the same way they already had to agree on everything else.
+- **A `WHERE` on the table a `LEFT JOIN` introduces is never pushed below it.** Doing so would filter
   rows out of the join's own input before it can find out they would not have matched — turning a
   `LEFT JOIN` back into an ordinary one with no trace of it. It stays a residual `Filter` above the
   `Join` instead, which is also where SQL itself puts it: `… LEFT JOIN posts ON … WHERE posts.title IS
   NULL` is the standard way to ask "which rows had nothing on the other side," and it only works if the
-  filter runs *after* the padding. A `WHERE` on the outer (left) table is still pushed — filtering it
-  first is always safe, `LEFT JOIN` or not.
+  filter runs *after* the padding. A `WHERE` on the *outer* side of that one join is still pushed —
+  filtering it first is always safe, `LEFT JOIN` or not — but only for a query's first `JOIN`: this rule
+  only recognises `Project → … → Filter → Join → two bare scans`, so a chain of two or more `JOIN`s
+  leaves the whole `WHERE` clause as a residual filter above the chain for now, correct either way, just
+  not yet narrowed into any one step's own scan.
 - Cannot combine with `GROUP BY`, `ORDER BY`, or an aggregate in the SELECT list.
 
 ## GROUP BY and aggregates
@@ -159,8 +169,8 @@ See [Supported SQL](/docs/reference/sql) for the complete accepted grammar.
 
 ## What's out of scope entirely
 
-No subqueries, no more than one `JOIN` per query (so no join-order
-choice), no `RIGHT`/`FULL`/`CROSS` join, no transactions, no real
+No subqueries, no choosing a `JOIN` chain's *order* (plan.md §25.4 C4 — a chain always joins in the order
+it's written), no `RIGHT`/`FULL`/`CROSS` join, no transactions, no real
 concurrency (the Locks panel is visual only), and no cost-based query optimization — every
 rewrite rule fires on a structural match, never a cost comparison, and the cost *estimates* shown
 alongside a plan exist to justify a rewrite's narration, not to decide whether it happens. `UNION` and `COUNT(DISTINCT …)` are also not accepted. These are deliberate exclusions for this

@@ -71,6 +71,10 @@ describe('grammar data — every rule is demonstrated by a query the real parser
     ['join — LEFT', 'SELECT * FROM authors LEFT JOIN posts ON authors.id = posts.authorId'],
     ['join — LEFT OUTER', 'SELECT * FROM authors LEFT OUTER JOIN posts ON authors.id = posts.authorId'],
     ['join', 'SELECT * FROM authors JOIN posts ON authors.id = posts.authorId'],
+    [
+      'join — chained, left-deep (plan.md §25.4 C3 slice b)',
+      'SELECT * FROM authors JOIN posts ON authors.id = posts.authorId JOIN comments ON posts.id = comments.postId',
+    ],
     ['delete — with WHERE', 'DELETE FROM users WHERE id = 5'],
     ['insert — with an explicit columnList', "INSERT INTO users (id, name) VALUES (1, 'a')"],
     ['insert — valueList with more than one value', 'INSERT INTO users VALUES (1, 2, 3)'],

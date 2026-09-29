@@ -109,17 +109,22 @@ export interface TableRef {
 }
 
 /**
- * `[INNER | LEFT [OUTER]] JOIN table ON t1.col = t2.col` (plan.md §22.2, `LEFT` since §25.4 C3). Exactly one join
- * (`RIGHT`/`FULL`/`CROSS` stay out of scope), and `on` is always a single equality between one qualified column
- * from each side — checked at parse time (`checkJoinOn`), so the planner never has to. JOIN does not combine with
- * `GROUP BY`, `ORDER BY` or an aggregate SELECT item — each checked at parse time too, the same way
- * `GROUP BY`/`ORDER BY` already exclude each other.
+ * `[INNER | LEFT [OUTER]] JOIN table ON t1.col = t2.col` (plan.md §22.2, `LEFT` since §25.4 C3). `on` is always a
+ * single equality between one qualified column from each side — checked at parse time (`checkJoinOn`), so the
+ * planner never has to. `RIGHT`/`FULL`/`CROSS` stay out of scope. JOIN does not combine with `GROUP BY`, `ORDER BY`
+ * or an aggregate SELECT item — each checked at parse time too, the same way `GROUP BY`/`ORDER BY` already exclude
+ * each other.
+ *
+ * A `SelectStatement` may chain several of these (plan.md §25.4 C3 slice b), left-deep: `FROM a JOIN b ON … JOIN c
+ * ON …` joins `c` to whatever `a ⋈ b` produced, never to `a` and `b` independently. Each one's `on` names the table
+ * it introduces on one side and *some* table already in the query — `from`, or an earlier `JOIN` — on the other;
+ * `parseSelectBody`'s loop checks this as each is parsed, since only it knows the running set of table names so far.
  */
 export interface JoinClause {
   table: TableRef;
   on: Extract<Expr, { kind: 'compare' }>;
-  /** `LEFT [OUTER] JOIN`: every row of the `FROM` table survives, NULL-padded when nothing on `table` matched it.
-   *  Absent for a bare `JOIN` or an explicit `INNER JOIN` — the original, still-default inner-join shape. */
+  /** `LEFT [OUTER] JOIN`: every row on the other side of this join survives, NULL-padded when nothing on `table`
+   *  matched it. Absent for a bare `JOIN` or an explicit `INNER JOIN` — the original, still-default inner-join shape. */
   joinType?: 'left';
   span: Span;
 }
@@ -140,7 +145,9 @@ export interface SelectStatement {
   /** `SELECT DISTINCT` (plan.md §25.4 B2): drop repeated rows from the result. NULLs count as equal. */
   distinct?: boolean;
   from: TableRef;
-  join?: JoinClause;
+  /** Chained left-deep (plan.md §25.4 C3 slice b): absent for no `JOIN`, otherwise one entry per `JOIN` clause, in
+   *  source order — never an empty array. */
+  joins?: JoinClause[];
   where?: Expr;
   groupBy?: GroupByClause;
   /**

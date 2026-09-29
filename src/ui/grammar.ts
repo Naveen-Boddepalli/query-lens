@@ -56,7 +56,9 @@ export const GRAMMAR: GrammarRule[] = [
       rule('selectList'),
       lit('FROM'),
       rule('identifier'),
-      opt(rule('join')),
+      // Zero or more, left-deep (plan.md §25.4 C3 slice b) — concatenated directly, with no separator token
+      // between one JOIN clause and the next, unlike every other `repeat` here.
+      repeat(opt(), rule('join')),
       opt(lit('WHERE'), rule('expr')),
       opt(lit('GROUP'), lit('BY'), rule('identifier'), repeat(lit(','), rule('identifier'))),
       opt(lit('HAVING'), rule('expr')),

@@ -4,7 +4,7 @@ import type { SelectStatement } from '../parser/index.ts';
 import { buildAggregatePlan, buildJoinPlan, buildPlan, distinctNodeFor, isAggregateQuery, projectListFor } from './buildPlan.ts';
 import { estimatePlan, rootEstimate } from './cost.ts';
 import { leftmostPrefixNote, optimize } from './optimize.ts';
-import { exprToSql, toPlanDisplay } from './plan.ts';
+import { exprToSql, joinsIn, toPlanDisplay } from './plan.ts';
 import type { Plan, ProjectList } from './plan.ts';
 
 /**
@@ -14,17 +14,10 @@ import type { Plan, ProjectList } from './plan.ts';
  *
  * Every emitted tree carries the cost model's per-node estimates (plan.md
  * §22.2), which is also why `rowsPerPage` is threaded down: a scan's estimated
- * page count depends on it. `joinTable` is the `JOIN`'d table's own data,
- * needed only so the cost model can estimate that side of a `Join` too —
- * `undefined` for every query without one.
+ * page count depends on it. `joinTables` is every `JOIN`'d table's own data,
+ * keyed by name, needed only so the cost model can estimate that side of each
+ * `Join` too — `undefined` for every query without one.
  */
-/** The `Join` node inside a plan, wherever the wrappers above it put it. */
-function findJoinIn(plan: Plan): Extract<Plan, { op: 'Join' }> | undefined {
-  if (plan.op === 'Join') return plan;
-  if ('child' in plan) return findJoinIn(plan.child);
-  return undefined;
-}
-
 /** Does any node of `plan` read through an index? */
 function usesIndex(plan: Plan): boolean {
   if (plan.op === 'IndexScan' || plan.op === 'IndexRangeScan' || plan.op === 'IndexOnlyScan' || plan.op === 'IndexProbe') return true;
@@ -52,10 +45,15 @@ export function emitPlanEvents(
   table: Table,
   rowsPerPage: number,
   aggregateStrategy: 'hash' | 'sort' = 'hash',
-  joinTable?: Table,
+  joinTables?: Record<string, Table>,
   joinStrategy: JoinAlgorithm = 'nested-loop',
 ): Plan {
-  const otherTables = joinTable ? { [joinTable.name]: joinTable } : undefined;
+  // Every table this query names, keyed by name — including `table` itself. A single join only ever needed the
+  // *other* one (the recursion's own `table` param always being the right one to check first), but a chain
+  // (plan.md §25.4 C3 slice b) re-derives that check at every nesting level against whatever table THAT level's
+  // own `Join` node concerns — which is `table` (the original FROM table) again once the recursion reaches the
+  // bottom of the chain — so `table.name` has to resolve through this same map at every depth, not just the top.
+  const otherTables = joinTables && Object.keys(joinTables).length > 0 ? { ...joinTables, [table.name]: table } : undefined;
   const display = (plan: Plan, changed?: ReadonlySet<Plan>) =>
     toPlanDisplay(plan, changed, estimatePlan(plan, table, rowsPerPage, otherTables));
 
@@ -67,28 +65,32 @@ export function emitPlanEvents(
 
   let current: Plan = leftScan;
 
-  if (ast.join) {
-    current = buildJoinPlan(ast.join, ast.from.name, joinStrategy, joinTable);
-    const join = current.op === 'Join' ? current : undefined;
-    const algorithm = join?.algorithm ?? joinStrategy;
-    // Asked for an index join, but the inner table has no index on the join column: say so, and run the plain one.
+  const allJoins = ast.joins ?? [];
+  for (let i = 0; i < allJoins.length; i++) {
+    const join = allJoins[i]!;
+    // Rebuilt from scratch each step (cheap — a handful of tables at most) rather than grown incrementally, so this
+    // stays the one place that knows how to fold a JOIN chain and never drifts from `buildJoinPlan` itself.
+    current = buildJoinPlan(allJoins.slice(0, i + 1), ast.from.name, joinStrategy, joinTables);
+    const j = current as Extract<Plan, { op: 'Join' }>;
+    const algorithm = j.algorithm;
+    // Asked for an index join, but this step's inner table has no index on the join column: say so, and run the plain one.
     const fallback =
       joinStrategy === 'index-nested-loop' && algorithm !== 'index-nested-loop'
-        ? `You asked for an index nested-loop join, but \`${ast.join.table.name}\` has no index on \`${join?.rightColumn}\` for it to probe — so this runs as an ordinary nested-loop. `
+        ? `You asked for an index nested-loop join, but \`${join.table.name}\` has no index on \`${j.rightColumn}\` for it to probe — so this runs as an ordinary nested-loop. `
         : '';
     const mechanism =
       algorithm === 'index-nested-loop'
-        ? `for every row \`${ast.from.name}\` produces, it descends \`${ast.join.table.name}\`'s B+Tree on \`${join?.rightColumn}\` with that row's \`${join?.leftColumn}\` — a few page reads per outer row instead of a rescan of the whole inner table, which is why a small outer over a big indexed inner is where this algorithm wins`
+        ? `for every row \`${j.leftTable}\` produces, it descends \`${j.rightTable}\`'s B+Tree on \`${j.rightColumn}\` with that row's \`${j.leftColumn}\` — a few page reads per outer row instead of a rescan of the whole inner table, which is why a small outer over a big indexed inner is where this algorithm wins`
         : algorithm === 'hash'
-        ? `it builds an in-memory hash table over all of \`${ast.join.table.name}\`, keyed on \`${join?.rightColumn}\`, once — then probes it with each \`${ast.from.name}\` row's \`${join?.leftColumn}\`, reading \`${ast.join.table.name}\` exactly once regardless of how many rows \`${ast.from.name}\` has`
+        ? `it builds an in-memory hash table over all of \`${j.rightTable}\`, keyed on \`${j.rightColumn}\`, once — then probes it with each \`${j.leftTable}\` row's \`${j.leftColumn}\`, reading \`${j.rightTable}\` exactly once regardless of how many rows \`${j.leftTable}\` has`
         : algorithm === 'sort-merge'
-          ? `it sorts both \`${ast.from.name}\` and \`${ast.join.table.name}\` on the join key, then merges the two sorted lists in a single pass — no per-row rescan and no table held in memory, at the cost of sorting both sides first`
-          : `for every row \`${ast.from.name}\` produces, it rescans all of \`${ast.join.table.name}\` looking for a match on \`${join?.leftColumn}\` = \`${join?.rightColumn}\` — nested-loop, the simplest join algorithm, and the most expensive once neither side has an index to speed the inner scan up`;
-    const outer = ast.join.joinType === 'left'
-      ? ` This is a LEFT JOIN: every row from \`${ast.from.name}\` survives even when nothing on \`${ast.join.table.name}\` matches it, with \`${ast.join.table.name}\`'s columns NULL.`
+          ? `it sorts both \`${j.leftTable}\` and \`${j.rightTable}\` on the join key, then merges the two sorted lists in a single pass — no per-row rescan and no table held in memory, at the cost of sorting both sides first`
+          : `for every row \`${j.leftTable}\` produces, it rescans all of \`${j.rightTable}\` looking for a match on \`${j.leftColumn}\` = \`${j.rightColumn}\` — nested-loop, the simplest join algorithm, and the most expensive once neither side has an index to speed the inner scan up`;
+    const outer = join.joinType === 'left'
+      ? ` This is a LEFT JOIN: every row from \`${j.leftTable}\` survives even when nothing on \`${j.rightTable}\` matches it, with \`${j.rightTable}\`'s columns NULL.`
       : '';
     emit(
-      `${fallback}JOIN adds ${algorithm === 'index-nested-loop' ? 'an index probe on' : 'a second scan of'} \`${ast.join.table.name}\` and a Join above both: ${mechanism}.${outer}`,
+      `${fallback}JOIN adds ${algorithm === 'index-nested-loop' ? 'an index probe on' : 'a second scan of'} \`${j.rightTable}\` and a Join above ${i === 0 ? 'that' : 'the chain so far'}: ${mechanism}.${outer}`,
       { stage: 'plan', planTree: display(current) },
     );
   }
@@ -188,7 +190,7 @@ export function emitPlanEvents(
 
   // The canonical plan is a direct translation of the query text. Everything
   // below is the optimizer earning its keep.
-  const canonical = buildPlan(ast, aggregateStrategy, joinStrategy, joinTable);
+  const canonical = buildPlan(ast, aggregateStrategy, joinStrategy, joinTables);
   let optimised = canonical;
   let before = canonical;
 
@@ -213,14 +215,19 @@ export function emitPlanEvents(
 
   if (optimised === canonical) {
     const rows = rootEstimate(canonical, table, rowsPerPage, otherTables).estRows;
-    const joined = findJoinIn(canonical);
-    const note = ast.join
-      ? `No rewrite rule applies to this JOIN — ${describeJoin(joined?.algorithm ?? joinStrategy, ast.from.name, ast.join.table.name)} is what runs.`
-      : ast.where
-        ? `The cost model estimates about ${plural(rows, 'row')} out of ${String(table.rows.length)}, and no access path beats reading the table.${
-            leftmostPrefixNote(table, ast.where) ? ` ${leftmostPrefixNote(table, ast.where)!}` : ''
-          }`
-        : 'With no WHERE there is nothing to narrow the scan — every row is returned.';
+    const chainJoins = joinsIn(canonical);
+    const note =
+      chainJoins.length === 1
+        ? `No rewrite rule applies to this JOIN — ${describeJoin(chainJoins[0]!.algorithm, chainJoins[0]!.leftTable, chainJoins[0]!.rightTable)} is what runs.`
+        : chainJoins.length > 1
+          ? `No rewrite rule applies to this chain of ${String(chainJoins.length)} JOINs — ${chainJoins
+              .map((j) => `\`${j.leftTable}\` × \`${j.rightTable}\` runs as ${describeJoin(j.algorithm, j.leftTable, j.rightTable)}`)
+              .join('; ')}.`
+          : ast.where
+            ? `The cost model estimates about ${plural(rows, 'row')} out of ${String(table.rows.length)}, and no access path beats reading the table.${
+                leftmostPrefixNote(table, ast.where) ? ` ${leftmostPrefixNote(table, ast.where)!}` : ''
+              }`
+            : 'With no WHERE there is nothing to narrow the scan — every row is returned.';
     emit(
       `No rewrite rule fires on this plan — the optimizer leaves it exactly as written. ${note}`,
       {
@@ -234,7 +241,7 @@ export function emitPlanEvents(
 
   // Rules fired, but none of them could use an index the table has: if that is because a composite index cannot be
   // entered, say so here — the "nothing fired" note above never runs once, say, predicate pushdown has.
-  if (optimised !== canonical && !ast.join && !usesIndex(optimised)) {
+  if (optimised !== canonical && allJoins.length === 0 && !usesIndex(optimised)) {
     const unusable = leftmostPrefixNote(table, ast.where);
     if (unusable) {
       emit(`No index is used. ${unusable}`, {
