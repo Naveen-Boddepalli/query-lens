@@ -147,11 +147,24 @@ export const GRAMMAR: GrammarRule[] = [
           [rule('compareOp'), rule('operand')],
           [opt(lit('NOT')), lit('BETWEEN'), rule('operand'), lit('AND'), rule('operand')],
           [lit('IS'), opt(lit('NOT')), lit('NULL')],
-          [opt(lit('NOT')), lit('IN'), lit('('), rule('operand'), repeat(lit(','), rule('operand')), lit(')')],
+          [
+            opt(lit('NOT')),
+            lit('IN'),
+            lit('('),
+            choice([rule('operand'), repeat(lit(','), rule('operand'))], [rule('inSubquery')]),
+            lit(')'),
+          ],
           [opt(lit('NOT')), lit('LIKE'), rule('operand')],
         ),
       ),
     ],
+  },
+  // The one shape IN accepts besides a literal list (plan.md §25.4 C3 slice c, closing C3) — always exactly one
+  // plain column, uncorrelated, and much smaller than `select` itself: no JOIN/GROUP BY/HAVING/ORDER BY/LIMIT/
+  // DISTINCT/aggregate, none of which could change *which* values end up in the set IN tests against.
+  {
+    name: 'inSubquery',
+    parts: [lit('SELECT'), rule('identifier'), lit('FROM'), rule('identifier'), opt(lit('WHERE'), rule('expr'))],
   },
   {
     name: 'compareOp',

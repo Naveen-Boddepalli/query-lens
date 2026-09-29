@@ -4,7 +4,7 @@ import type { SelectStatement } from '../parser/index.ts';
 import { buildAggregatePlan, buildJoinPlan, buildPlan, distinctNodeFor, isAggregateQuery, projectListFor } from './buildPlan.ts';
 import { estimatePlan, rootEstimate } from './cost.ts';
 import { leftmostPrefixNote, optimize } from './optimize.ts';
-import { exprToSql, joinsIn, toPlanDisplay } from './plan.ts';
+import { exprToSql, joinsIn, subqueryResolutionNotes, toPlanDisplay } from './plan.ts';
 import type { Plan, ProjectList } from './plan.ts';
 
 /**
@@ -97,8 +97,11 @@ export function emitPlanEvents(
 
   if (ast.where) {
     current = { op: 'Filter', predicate: ast.where, child: current };
+    const subqueryNotes = subqueryResolutionNotes(ast.where);
     emit(
-      `The WHERE clause becomes a Filter sitting above the scan: \`${exprToSql(ast.where)}\`.`,
+      `The WHERE clause becomes a Filter sitting above the scan: \`${exprToSql(ast.where)}\`.${
+        subqueryNotes.length > 0 ? ` ${subqueryNotes.map((n) => `${n[0]!.toUpperCase()}${n.slice(1)}.`).join(' ')}` : ''
+      }`,
       { stage: 'plan', planTree: display(current) },
     );
   }

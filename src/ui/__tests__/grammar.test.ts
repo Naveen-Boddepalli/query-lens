@@ -93,6 +93,10 @@ describe('grammar data — every rule is demonstrated by a query the real parser
     ['predicate — BETWEEN and NOT BETWEEN', 'SELECT * FROM users WHERE id BETWEEN 1 AND 5 AND age NOT BETWEEN 30 AND 40'],
     ['predicate — IS NULL and IS NOT NULL', 'SELECT * FROM users WHERE age IS NULL OR name IS NOT NULL'],
     ['predicate — IN and NOT IN, several values', 'SELECT * FROM users WHERE id IN (1, 2, 3) AND age NOT IN (30)'],
+    [
+      'inSubquery — IN and NOT IN, with a WHERE',
+      "SELECT * FROM users WHERE id IN (SELECT id FROM logins WHERE status = 'ok') AND age NOT IN (SELECT attempts FROM logins)",
+    ],
     ['predicate — LIKE and NOT LIKE', "SELECT * FROM users WHERE name LIKE 'a%' AND name NOT LIKE '%z'"],
     ['compareOp — every operator', 'SELECT * FROM users WHERE id = 1 OR id <> 2 OR id != 3 OR id < 4 OR id > 5 OR id <= 6 OR id >= 7'],
     ['primary — a parenthesised expr', 'SELECT * FROM users WHERE (id = 1 OR id = 2) AND age > 3'],

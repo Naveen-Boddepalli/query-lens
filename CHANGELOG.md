@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`IN (subquery)`** (plan.md §25.4 C3, third slice, closing C3) — `x [NOT] IN (SELECT column FROM table
+  [WHERE …])`, the one place a `SELECT` may appear inside another query. Always uncorrelated (the subquery's
+  own `WHERE` can only name a column on its own table) and always exactly one plain column — no `JOIN`,
+  `GROUP BY`, `HAVING`, `ORDER BY`, `LIMIT`, `DISTINCT` or aggregate, since none of those could change which
+  values end up in the set `IN` tests membership against. Resolved exactly once, as its own real sub-run of the
+  engine (its own buffer pool, its own disk reads), before the outer query — in `SELECT`, `DELETE` or
+  `UPDATE`'s `WHERE` — is planned; from that point on it is an ordinary value list, so the cost model, the
+  executor and every optimizer rule need no new cases at all, and the classic `NOT IN` NULL trap applies to a
+  subquery-sourced list exactly as sharply as a hand-written one.
 - **Multi-join** (plan.md §25.4 C3, second slice) — zero or more `JOIN`s chained left-deep:
   `FROM a JOIN b ON … JOIN c ON …` joins `c` against whatever `a ⋈ b` already produced, not against `a` and `b`
   independently. Each `JOIN`'s `ON` must name the table it introduces on one side and some table already in the

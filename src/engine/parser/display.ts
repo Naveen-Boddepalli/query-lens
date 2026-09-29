@@ -134,17 +134,26 @@ function exprNode(expr: Expr, id: string): ASTNode {
         children: [exprNode(expr.operand, `${id}.o`)],
       };
     case 'in':
-      return {
-        id,
-        kind: 'In',
-        label: expr.negated ? 'NOT IN' : 'IN',
-        detail: `${expr.items.length} value${expr.items.length === 1 ? '' : 's'}`,
-        span: expr.span,
-        children: [
-          exprNode(expr.operand, `${id}.o`),
-          ...expr.items.map((item, i) => exprNode(item, `${id}.i${i}`)),
-        ],
-      };
+      return expr.subquery
+        ? {
+            id,
+            kind: 'In',
+            label: expr.negated ? 'NOT IN' : 'IN',
+            detail: `subquery — SELECT ${expr.subquery.column.name} FROM ${expr.subquery.from.name}`,
+            span: expr.span,
+            children: [exprNode(expr.operand, `${id}.o`)],
+          }
+        : {
+            id,
+            kind: 'In',
+            label: expr.negated ? 'NOT IN' : 'IN',
+            detail: `${expr.items.length} value${expr.items.length === 1 ? '' : 's'}`,
+            span: expr.span,
+            children: [
+              exprNode(expr.operand, `${id}.o`),
+              ...expr.items.map((item, i) => exprNode(item, `${id}.i${i}`)),
+            ],
+          };
     case 'aggregate':
       return { id, kind: 'Aggregate', label: aggregateKeyOf(expr.fn, expr.arg), span: expr.span };
     case 'arith':

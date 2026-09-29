@@ -4,7 +4,7 @@ import type { DeleteStatement } from '../parser/index.ts';
 import { buildDeletePlan } from './buildPlan.ts';
 import { estimatePlan } from './cost.ts';
 import { optimize, WRITE_PATH_RULES } from './optimize.ts';
-import { exprToSql, toPlanDisplay } from './plan.ts';
+import { exprToSql, subqueryResolutionNotes, toPlanDisplay } from './plan.ts';
 import type { Plan } from './plan.ts';
 
 /** Strips the throwaway `Project *` wrapper `emitDeletePlanEvents` builds around a delete's scan. */
@@ -44,8 +44,11 @@ export function emitDeletePlanEvents(
   let current: Plan = scan;
   if (ast.where) {
     current = { op: 'Filter', predicate: ast.where, child: current };
+    const subqueryNotes = subqueryResolutionNotes(ast.where);
     emit(
-      `The WHERE clause becomes a Filter sitting above the scan: \`${exprToSql(ast.where)}\` — the rows it passes are the rows DELETE removes.`,
+      `The WHERE clause becomes a Filter sitting above the scan: \`${exprToSql(ast.where)}\` — the rows it passes are the rows DELETE removes.${
+        subqueryNotes.length > 0 ? ` ${subqueryNotes.map((n) => `${n[0]!.toUpperCase()}${n.slice(1)}.`).join(' ')}` : ''
+      }`,
       { stage: 'plan', planTree: display(current) },
     );
   }

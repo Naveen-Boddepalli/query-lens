@@ -59,7 +59,9 @@ export function exprToSql(expr: Expr): string {
     case 'isNull':
       return `${at(expr.operand, 5)} IS ${expr.negated ? 'NOT ' : ''}NULL`;
     case 'in':
-      return `${at(expr.operand, 5)} ${expr.negated ? 'NOT ' : ''}IN (${expr.items.map((i) => at(i, 5)).join(', ')})`;
+      return expr.subquery
+        ? `${at(expr.operand, 5)} ${expr.negated ? 'NOT ' : ''}IN (SELECT ${expr.subquery.column.name} FROM ${expr.subquery.from.name}${expr.subquery.where ? ` WHERE ${exprToSql(expr.subquery.where)}` : ''})`
+        : `${at(expr.operand, 5)} ${expr.negated ? 'NOT ' : ''}IN (${expr.items.map((i) => at(i, 5)).join(', ')})`;
     case 'like':
       return `${at(expr.operand, 5)} ${expr.negated ? 'NOT ' : ''}LIKE ${at(expr.pattern, 5)}`;
     case 'arith': {

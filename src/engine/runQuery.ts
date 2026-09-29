@@ -41,6 +41,7 @@ import { UniqueViolation } from './exec/unique.ts';
 import { sortTempPageCount } from './exec/sort.ts';
 import { createLockManager } from './locks/index.ts';
 import { explainResult } from './explain.ts';
+import { resolveWhereSubqueries } from './subquery.ts';
 import { createTracer } from './trace.ts';
 import { DEFAULT_ENGINE_OPTIONS } from './types.ts';
 import type { Database, EngineOptions, QueryError, Row, RunResult, Table } from './types.ts';
@@ -212,7 +213,12 @@ export function runQuery(
 
   if (ast.kind === 'delete') {
     emitDeleteParseEvents(emit, ast);
-    const plan = emitDeletePlanEvents(emit, ast, table, options.rowsPerPage);
+    // Any `IN (subquery)` in the WHERE clause (plan.md §25.4 C3 slice c) runs exactly once here, before planning —
+    // the parse-stage narration above already showed the query exactly as written.
+    const resolved = resolveWhereSubqueries(ast.where, sql, (s) => runQuery(s, db, options));
+    if (!resolved.ok) return { events: drain(), rows: [], error: resolved.error };
+    const deleteAst = { ...ast, ...(resolved.where ? { where: resolved.where } : {}) };
+    const plan = emitDeletePlanEvents(emit, deleteAst, table, options.rowsPerPage);
     const pool = createBufferPool(pageCountFor(heap, trees), options, emit);
 
     const { deleted } = executeDelete(plan, { emit, pool, locks, heap, trees, table, options });
@@ -238,7 +244,12 @@ export function runQuery(
 
   if (ast.kind === 'update') {
     emitUpdateParseEvents(emit, ast);
-    const plan = emitUpdatePlanEvents(emit, ast, table, options.rowsPerPage);
+    // Any `IN (subquery)` in the WHERE clause (plan.md §25.4 C3 slice c) runs exactly once here, before planning —
+    // the parse-stage narration above already showed the query exactly as written.
+    const resolved = resolveWhereSubqueries(ast.where, sql, (s) => runQuery(s, db, options));
+    if (!resolved.ok) return { events: drain(), rows: [], error: resolved.error };
+    const updateAst = { ...ast, ...(resolved.where ? { where: resolved.where } : {}) };
+    const plan = emitUpdatePlanEvents(emit, updateAst, table, options.rowsPerPage);
     const pool = createBufferPool(pageCountFor(heap, trees), options, emit);
 
     let changed: ReturnType<typeof executeUpdate>;
@@ -272,9 +283,14 @@ export function runQuery(
   }
 
   emitParseEvents(emit, ast);
+  // Any `IN (subquery)` in the WHERE clause (plan.md §25.4 C3 slice c) runs exactly once here, before planning —
+  // the parse-stage narration above already showed the query exactly as written.
+  const resolvedWhere = resolveWhereSubqueries(ast.where, sql, (s) => runQuery(s, db, options));
+  if (!resolvedWhere.ok) return { events: drain(), rows: [], error: resolvedWhere.error };
+  const selectAst = { ...ast, ...(resolvedWhere.where ? { where: resolvedWhere.where } : {}) };
   const plan = emitPlanEvents(
     emit,
-    ast,
+    selectAst,
     table,
     options.rowsPerPage,
     options.aggregateStrategy ?? 'hash',

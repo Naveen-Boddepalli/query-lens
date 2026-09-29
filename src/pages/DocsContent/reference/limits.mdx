@@ -106,6 +106,28 @@ concept explanation.
   not yet narrowed into any one step's own scan.
 - Cannot combine with `GROUP BY`, `ORDER BY`, or an aggregate in the SELECT list.
 
+## IN subquery
+
+- **`x [NOT] IN (SELECT column FROM table [WHERE …])`** (plan.md §25.4 C3, closing C3) — the one place a
+  `SELECT` may appear inside another query. Always exactly one plain column, and never combined with
+  `JOIN`/`GROUP BY`/`HAVING`/`ORDER BY`/`LIMIT`/`DISTINCT`/an aggregate — none of those could change
+  *which* values end up in the set `IN` tests membership against, since the result always collapses to
+  one column's distinct values.
+- **Always uncorrelated.** The subquery's own `WHERE`, if it has one, can only name a column on its own
+  `FROM` table — the same "no table name needed" rule a bare single-table query already enforces — so
+  there is no path for it to read a value from the outer query's own row. `EXISTS` and a scalar subquery
+  (`x = (SELECT …)`) both stay unsupported; `IN`'s subquery form is the only one.
+- **Runs exactly once, as its own complete sub-run of the engine** — its own buffer pool, its own real
+  disk reads — before the outer query is planned at all, the same way `EXPLAIN`'s own inner query does.
+  Its result becomes an ordinary literal list from that point on: the cost model, the executor, and every
+  rewrite rule in the optimizer see exactly the same shape a hand-written `IN (1, 2, 3)` always produced,
+  never a subquery. The WHERE clause's own narration says how many distinct values it found.
+- **Works in `SELECT`, `DELETE` and `UPDATE`'s `WHERE`** — resolved the same way regardless of which
+  statement names it.
+- **The NULL trap applies exactly as sharply.** `x NOT IN (SELECT …)` is never TRUE for any row once
+  that subquery's result contains even one NULL — the identical three-valued-logic trap a literal
+  `NOT IN (1, 2, NULL)` already has, since resolution produces the exact same shape.
+
 ## GROUP BY and aggregates
 
 - `COUNT(*)`, and `COUNT`/`SUM`/`AVG`/`MIN`/`MAX` over a column.
@@ -169,8 +191,9 @@ See [Supported SQL](/docs/reference/sql) for the complete accepted grammar.
 
 ## What's out of scope entirely
 
-No subqueries, no choosing a `JOIN` chain's *order* (plan.md §25.4 C4 — a chain always joins in the order
-it's written), no `RIGHT`/`FULL`/`CROSS` join, no transactions, no real
+No subqueries anywhere but an uncorrelated `IN (SELECT …)` (plan.md §25.4 C3, closing C3 — no `EXISTS`, no
+scalar subquery like `x = (SELECT …)`, no correlated subquery), no choosing a `JOIN` chain's *order*
+(plan.md §25.4 C4 — a chain always joins in the order it's written), no `RIGHT`/`FULL`/`CROSS` join, no transactions, no real
 concurrency (the Locks panel is visual only), and no cost-based query optimization — every
 rewrite rule fires on a structural match, never a cost comparison, and the cost *estimates* shown
 alongside a plan exist to justify a rewrite's narration, not to decide whether it happens. `UNION` and `COUNT(DISTINCT …)` are also not accepted. These are deliberate exclusions for this

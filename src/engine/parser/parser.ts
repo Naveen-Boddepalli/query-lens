@@ -26,8 +26,9 @@
  *   predicate     := operand ( compareOp operand
  *                            | [NOT] BETWEEN operand AND operand
  *                            | IS [NOT] NULL
- *                            | [NOT] IN '(' operand (',' operand)* ')'
+ *                            | [NOT] IN '(' (operand (',' operand)* | inSubquery) ')'
  *                            | [NOT] LIKE operand )?
+ *   inSubquery    := SELECT identifier FROM identifier [WHERE expr]
  *   compareOp     := '=' | '<>' | '!=' | '<' | '>' | '<=' | '>='
  *   operand       := additive
  *   additive      := multiplicative (('+' | '-') multiplicative)*
@@ -50,6 +51,12 @@
  * on every column reference once any `join` is present (there is no ambiguity resolution — v0 asks the query to say
  * which table), and validated against the tables the query actually names.
  *
+ * `inSubquery` (plan.md §25.4 C3 slice c, closing C3) is the one shape `IN` accepts besides a literal list —
+ * always exactly one plain column, no `JOIN`/`GROUP BY`/`HAVING`/`ORDER BY`/`LIMIT`/`DISTINCT`/aggregate, and
+ * always uncorrelated (its own `WHERE`, if any, can only name a column on its own `FROM` table — the same rule
+ * that already applies to a bare non-`JOIN` query). `runQuery.ts`'s `resolveWhereSubqueries` runs it exactly once,
+ * before the outer query is planned, replacing it with the literal-list shape everything downstream already knew.
+ *
  * Hand-written rather than generated: the error messages are half the teaching
  * value, and they need to name the v0 scope explicitly.
  *
@@ -70,6 +77,7 @@ import type {
   ExplainStatement,
   Expr,
   GroupByClause,
+  InSubquery,
   InsertStatement,
   JoinClause,
   SelectItem,
@@ -816,6 +824,13 @@ function parsePredicate(c: Cursor, bare = false): Expr {
       c.guardScope(open);
       throw new ParseError(`Expected \`(\` after IN, found ${describe(open)}.`, open, 'IN takes a list of values: `x IN (1, 2, 3)`.');
     }
+    // `IN (SELECT …)` (plan.md §25.4 C3 slice c) vs. `IN (1, 2, 3)` — both start with `(`, so the token right after
+    // it is the only thing that tells them apart.
+    if (isKeyword(c.peekAt(1), 'SELECT')) {
+      c.next(); // '('
+      const { subquery, close } = parseInSubquery(c);
+      return { kind: 'in', operand: left, items: [], subquery, negated, span: { from: left.span.from, to: close.to } };
+    }
     const list = parseParenList(c, 'IN list', parseOperand);
     return { kind: 'in', operand: left, items: list.items, negated, span: { from: left.span.from, to: list.to } };
   }
@@ -827,6 +842,108 @@ function parsePredicate(c: Cursor, bare = false): Expr {
   }
 
   return finishComparison(c, left);
+}
+
+/**
+ * `SELECT column FROM table [WHERE expr]` — the whole grammar `IN`'s subquery form accepts (plan.md §25.4 C3
+ * slice c), starting right after the `(` `parsePredicate`'s IN branch already consumed. Deliberately much smaller
+ * than `parseSelectBody`: a subquery here is always uncorrelated and collapses to a set of one column's values,
+ * so `*`/an aggregate/a computed column, `JOIN`, `GROUP BY`, `HAVING`, `ORDER BY`, `LIMIT` and `DISTINCT` are all
+ * rejected outright rather than parsed and later restricted — none of them could change *which* values end up in
+ * that set. `checkJoinValidity` (with no `JOIN`) does the same "no table name needed" check on `where`'s columns
+ * that any other single-table query already gets, which is also what makes this uncorrelated: there is no path
+ * for a column here to name a table the outer query knows about.
+ */
+function parseInSubquery(c: Cursor): { subquery: InSubquery; close: Token } {
+  const selectToken = c.expectKeyword('SELECT', 'to begin the subquery');
+  if (isKeyword(c.peek(), 'DISTINCT')) {
+    throw new ParseError(
+      'DISTINCT is not needed inside an IN subquery.',
+      c.peek(),
+      "IN already treats the subquery's rows as a set of values — a repeat makes no difference either way.",
+    );
+  }
+  const first = c.peek();
+  if (first.type === 'star') {
+    throw new ParseError(
+      '`SELECT *` is not supported inside an IN subquery.',
+      first,
+      'Name the one column IN needs to compare against.',
+    );
+  }
+  if (first.type === 'identifier' && AGGREGATE_FNS.has(first.value.toUpperCase()) && c.peekAt(1).type === 'lparen') {
+    throw new ParseError(
+      'An aggregate is not supported yet inside an IN subquery.',
+      first,
+      'Select the plain column IN needs to compare against instead.',
+    );
+  }
+  const colToken = c.expectIdentifier('the one column IN needs to compare against');
+  const tail = parseQualifiedColumnTail(c, colToken);
+  const columnItem: SelectItem = {
+    kind: 'column',
+    name: tail.name,
+    ...(tail.table === undefined ? {} : { table: tail.table }),
+    span: { from: tail.from, to: tail.to },
+  };
+  if (c.peek().type === 'comma') {
+    throw new ParseError(
+      'An IN subquery can only select one column.',
+      c.peek(),
+      'IN compares against a single value per row — select just the column you need.',
+    );
+  }
+  c.expectKeyword('FROM', "after the subquery's column");
+  const from = parseTableRef(c);
+  const afterFrom = c.peek();
+  if (isKeyword(afterFrom, 'JOIN') || isKeyword(afterFrom, 'LEFT') || isKeyword(afterFrom, 'INNER')) {
+    throw new ParseError(
+      'JOIN is not supported yet inside an IN subquery.',
+      afterFrom,
+      'Query the one table IN needs, or join the tables outside the subquery instead.',
+    );
+  }
+  const where = parseOptionalWhere(c);
+  const after = c.peek();
+  if (isKeyword(after, 'GROUP')) {
+    throw new ParseError(
+      'GROUP BY is not supported inside an IN subquery.',
+      after,
+      'Select the plain column IN needs to compare against instead.',
+    );
+  }
+  if (isKeyword(after, 'ORDER')) {
+    throw new ParseError(
+      'ORDER BY makes no difference inside an IN subquery.',
+      after,
+      'IN treats the result as a set of values — order never matters here. Drop it.',
+    );
+  }
+  if (isKeyword(after, 'LIMIT')) {
+    throw new ParseError(
+      'LIMIT is not supported yet inside an IN subquery.',
+      after,
+      'IN needs every matching value, not just some of them.',
+    );
+  }
+  checkJoinValidity({ kind: 'columns', items: [columnItem], span: columnItem.span }, [], where, from);
+
+  const close = c.peek();
+  if (close.type !== 'rparen') {
+    c.guardScope(close);
+    throw new ParseError(`Expected \`)\` to close the subquery, found ${describe(close)}.`, close);
+  }
+  c.next();
+
+  return {
+    subquery: {
+      column: { name: tail.name, span: { from: tail.from, to: tail.to } },
+      from,
+      ...(where ? { where } : {}),
+      span: { from: selectToken.from, to: close.from },
+    },
+    close,
+  };
 }
 
 function parseNotExpr(c: Cursor, bare = false): Expr {

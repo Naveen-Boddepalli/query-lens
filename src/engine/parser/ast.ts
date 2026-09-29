@@ -38,8 +38,16 @@ export type Expr =
   | { kind: 'not'; operand: Expr; span: Span }
   /** `x IS NULL` / `x IS NOT NULL` (`negated`). TRUE or FALSE, never UNKNOWN. */
   | { kind: 'isNull'; operand: Expr; negated: boolean; span: Span }
-  /** `x [NOT] IN (a, b, …)` — `items` are literals or columns, never a subquery (§25.10). */
-  | { kind: 'in'; operand: Expr; items: Expr[]; negated: boolean; span: Span }
+  /**
+   * `x [NOT] IN (a, b, …)` — `items` are literals or columns; or `x [NOT] IN (SELECT …)` (plan.md §25.4 C3 slice
+   * c), which `subquery` names instead. `items` starts empty when `subquery` is present: `resolveWhereSubqueries`
+   * (`src/engine/subquery.ts`) runs the subquery exactly once, before the outer query is planned, and replaces
+   * `items` with the resolved values as ordinary literals — so the cost model, the executor, and every rewrite
+   * rule in `optimize.ts` never have to know a subquery was ever involved; they only ever see a plain literal
+   * list, exactly as they always have. `subquery` itself survives that rewrite too, so the parse-stage narration —
+   * which runs *before* the rewrite — can still show the query exactly as written.
+   */
+  | { kind: 'in'; operand: Expr; items: Expr[]; subquery?: InSubquery; negated: boolean; span: Span }
   /** `x [NOT] LIKE 'pattern'` — `%` any run, `_` one character, case-sensitive, no escape character. */
   | { kind: 'like'; operand: Expr; pattern: Expr; negated: boolean; span: Span }
   /**
@@ -105,6 +113,22 @@ export type SelectList =
 
 export interface TableRef {
   name: string;
+  span: Span;
+}
+
+/**
+ * `SELECT column FROM table [WHERE expr]` — the only shape `IN`'s subquery form accepts (plan.md §25.4 C3 slice
+ * c, closing C3): exactly one plain column, no `JOIN`/`GROUP BY`/`HAVING`/`ORDER BY`/`LIMIT`/`DISTINCT`/aggregate
+ * — none of those would change *which* values end up in the set `IN` tests membership against, since the result
+ * is always collapsed to a set of one column's values. Always uncorrelated, not by a special check but by
+ * construction: `where`'s own columns are validated the same "no table name needed" way a bare non-join query's
+ * always are (`checkJoinValidity`, called with `from` as the only known table) — there is no shared scope with
+ * the outer query at all for a column here to name.
+ */
+export interface InSubquery {
+  column: { name: string; span: Span };
+  from: TableRef;
+  where?: Expr;
   span: Span;
 }
 
