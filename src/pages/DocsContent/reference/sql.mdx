@@ -184,7 +184,9 @@ cost model's **estimate** (`est ~37 rows`):
 - **`EXPLAIN ANALYZE`** runs the query for real (the trace you step through *is* that run) and puts the
   executor's **actual** row count beside every estimate (`est ~37 rows; actual 40 rows`), then the result size and
   what the buffer pool did (hits, misses, evictions). It reports **no timings** — QueryLens makes no claim
-  about latency — where a real engine would print milliseconds.
+  about latency — where a real engine would print milliseconds. When the two disagree by 2× or more it also
+  names the **q-error** (`est ~0 rows; actual 10 rows; q-error 11.0×`) — see
+  [Statistics](/docs/reference/limits#statistics) for a dataset built to produce one.
 - **`SELECT` only.** `EXPLAIN ANALYZE DELETE …` would perform the delete, so writes are refused with that
   reason.
 

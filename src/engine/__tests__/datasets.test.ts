@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { DATASETS, DATASET_IDS, DEFAULT_DATASET, isDatasetId } from '../datasets.ts';
 import { runQuery } from '../runQuery.ts';
+import type { SqlValue } from '../types.ts';
 
 describe('preset datasets', () => {
   it('the default is a member of the id list', () => {
@@ -33,6 +34,19 @@ describe('preset datasets', () => {
     const blocked = rows.filter((r) => r.status === 'blocked').length;
     expect(blocked).toBeGreaterThan(0);
     expect(blocked * 4).toBeLessThan(rows.length); // < 25% — a clear minority
+  });
+
+  it('the employees correlation is real: department determines office, with no exceptions', () => {
+    const rows = DATASETS.employees.make().tables.employees!.rows;
+    const officeOf = new Map<SqlValue, SqlValue>();
+    for (const row of rows) {
+      const department = row.department ?? null;
+      const office = row.office ?? null;
+      const seen = officeOf.get(department);
+      if (seen === undefined) officeOf.set(department, office);
+      else expect(office, `department ${String(department)} has both ${String(seen)} and ${String(office)}`).toBe(seen);
+    }
+    expect(officeOf.size).toBeGreaterThan(20); // enough distinct departments for `department`×`office` to badly underestimate
   });
 
   it('orders is large enough to force real buffer eviction on a scan', () => {

@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **A correlated dataset, and q-error** (plan.md §25.4 C2) — a fourth preset dataset, `employees`: `department`
+  and `office` are perfectly correlated (every department occupies exactly one office), which is exactly the
+  independence assumption every `AND` in a `WHERE` clause makes and exactly where it can badly fail.
+  `WHERE department = 'x' AND office = 'y'` is no narrower than `department = 'x'` alone, but the optimizer
+  estimates it as if the two columns were unrelated. `EXPLAIN ANALYZE` now names the gap as **q-error**
+  (`max(est/actual, actual/est)`, the metric Leis et al.'s cardinality-estimation paper uses) beside any operator
+  whose estimate is off by 2× or more; the `employees` headline query measures **11.0×**, produced by ordinary
+  correlated data, not a contrived worst case. An ordinary, well-estimated query shows nothing extra.
 - **`ANALYZE` and real statistics** (plan.md §25.4 C1) — `ANALYZE table` is a real statement: a real scan of the
   real table, producing per-column statistics shaped after PostgreSQL's own `pg_stats` (distinct count, null
   fraction, most-common values with their real frequencies, an equi-depth histogram, and correlation between a

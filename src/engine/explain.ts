@@ -35,6 +35,16 @@ function finalPlan(events: readonly StepEvent[]): PlanNode | null {
   return null;
 }
 
+/**
+ * `max(est/act, act/est)`, Leis et al.'s own metric for cardinality-estimation error (plan.md §25.4 C2;
+ * RESEARCH.md §41) — `1` is a perfect guess, `10` an estimate ten times too high or too low, whichever direction
+ * it missed. Both sides get the literature's own `+1` smoothing, so a `0` estimate or a `0` actual row count is
+ * still a real, finite number rather than a division by zero.
+ */
+function qError(estRows: number, actualRows: number): number {
+  return Math.max((estRows + 1) / (actualRows + 1), (actualRows + 1) / (estRows + 1));
+}
+
 /** One line per operator, PostgreSQL-shaped: the root, then `->` for each level beneath it. */
 function planLines(root: PlanNode, actual: ReadonlyMap<string, number> | null): string[] {
   const lines: string[] = [];
@@ -42,7 +52,14 @@ function planLines(root: PlanNode, actual: ReadonlyMap<string, number> | null): 
     const parts: string[] = [];
     if (node.estRows !== undefined) parts.push(`est ~${String(node.estRows)} rows`);
     const rows = actual?.get(node.op);
-    if (rows !== undefined) parts.push(`actual ${String(rows)} rows`);
+    if (rows !== undefined) {
+      parts.push(`actual ${String(rows)} rows`);
+      // Below 2× is well within the noise a real optimizer lives with every day — naming it would just be clutter.
+      if (node.estRows !== undefined) {
+        const q = qError(node.estRows, rows);
+        if (q >= 2) parts.push(`q-error ${q.toFixed(1)}×`);
+      }
+    }
     const indent = depth === 0 ? '' : `${'      '.repeat(depth - 1)}  ->  `;
     const text = node.detail ? `${node.label}  ${node.detail}` : node.label;
     lines.push(`${indent}${text}${parts.length > 0 ? `  (${parts.join('; ')})` : ''}`);

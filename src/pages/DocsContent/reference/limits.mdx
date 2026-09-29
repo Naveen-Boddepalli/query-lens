@@ -122,6 +122,15 @@ index entries of the rows it touches.
 - **A statement, not a button.** Its answer travels through the trace, the URL, a saved moment and
   an assignment link the same way any other statement's does — there is nothing about `ANALYZE`
   itself that the rest of the app treats specially.
+- **Single-column only — nothing records how two columns co-occur**, which is the independence
+  assumption every `AND` in `WHERE` makes (`fraction × fraction`) and exactly where it can badly
+  fail. The `employees` preset dataset is built to show it: `department` and `office` are perfectly
+  correlated, so `WHERE department = 'x' AND office = 'y'` is no narrower than `department = 'x'`
+  alone, but the optimizer estimates it as if the two were independent. `EXPLAIN ANALYZE` reports
+  the gap as **q-error** (`max(est/actual, actual/est)`, the metric Leis et al.'s *How Good Are
+  Query Optimizers, Really?* uses) beside any operator whose estimate is off by 2× or more — the
+  `employees` headline query measures **11×**. Nothing here *corrects* for the correlation; naming
+  it honestly is the whole feature.
 
 ## Locks
 

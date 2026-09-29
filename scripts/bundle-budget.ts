@@ -144,6 +144,10 @@ const T = (name: string): string => `src/pages/tools/${name}.tsx`;
  *    ~1 kB gzip to the engine chunk. Four routes that were already sitting within a kB of their ceiling went over:
  *    /learn/:id, /gallery, /challenges, /tools/parser — each moved to its measured size + 3, the same slack every
  *    other engine-carrying route already has.
+ *  - 2026-09-29, `ANALYZE` + statistics (§25.4 C1) and a correlated dataset + q-error (§25.4 C2): the new
+ *    "Statistics" section in limits.mdx and the ANALYZE section in sql.mdx grow the shared docs chunk enough to
+ *    push /docs/concepts/btree from 163 to 166 (163 kB measured + 3) — the one route that was already sitting
+ *    exactly at its ceiling with no slack left.
  */
 export const ROUTES: readonly RouteBudget[] = [
   { route: '/', roots: [P('LandingPage')], kb: 157, note: 'the landing page' },
@@ -173,7 +177,7 @@ export const ROUTES: readonly RouteBudget[] = [
   { route: '/tools/grammar', roots: [T('GrammarToolPage')], kb: 116, note: 'the SQL grammar diagram' },
   { route: '/tools/hash-join', roots: [T('HashJoinToolPage')], kb: 118, note: 'Grace hash join' },
   { route: '/docs', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 149, note: 'the docs shell and every prose page (one shared chunk)' },
-  { route: '/docs/concepts/btree', roots: ['src/ui/DocsLayout.tsx', 'src/pages/DocsContent/concepts/btree.mdx'], kb: 163, note: 'a concept page with a live B+Tree widget' },
+  { route: '/docs/concepts/btree', roots: ['src/ui/DocsLayout.tsx', 'src/pages/DocsContent/concepts/btree.mdx'], kb: 166, note: 'a concept page with a live B+Tree widget' },
   { route: '/docs/concepts/buffer-pool', roots: ['src/ui/DocsLayout.tsx', 'src/pages/DocsContent/concepts/buffer-pool.mdx'], kb: 163, note: 'a concept page with a live buffer-pool widget' },
   { route: '/* (404)', roots: [P('NotFoundPage')], kb: 114, note: 'the not-found page' },
 ];

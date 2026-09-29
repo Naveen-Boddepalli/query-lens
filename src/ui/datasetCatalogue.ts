@@ -47,4 +47,17 @@ export const DATASET_CATALOGUE: Record<DatasetId, DatasetCatalogueEntry> = {
       { label: 'Point lookup', sql: 'SELECT *\nFROM logins\nWHERE id = 20;' },
     ],
   },
+  employees: {
+    label: 'employees',
+    blurb: '200 rows — department and office are perfectly correlated, so an AND of both badly underestimates.',
+    starterSql: "EXPLAIN ANALYZE\nSELECT *\nFROM employees\nWHERE department = 'engineering' AND office = 'building-1';",
+    presets: [
+      {
+        label: 'Correlated AND',
+        sql: "EXPLAIN ANALYZE\nSELECT *\nFROM employees\nWHERE department = 'engineering' AND office = 'building-1';",
+      },
+      { label: 'Department alone', sql: "SELECT *\nFROM employees\nWHERE department = 'engineering';" },
+      { label: 'Point lookup', sql: 'SELECT *\nFROM employees\nWHERE id = 42;' },
+    ],
+  },
 };

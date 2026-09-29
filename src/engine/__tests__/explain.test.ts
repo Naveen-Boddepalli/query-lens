@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { EXPLAIN_COLUMN } from '../explain.ts';
 import { parseStatement } from '../parser/parser.ts';
 import { createSeedDatabase } from '../seed.ts';
+import { DATASETS } from '../datasets.ts';
 import { runQuery } from '../runQuery.ts';
 import type { Database } from '../types.ts';
 
@@ -124,6 +125,40 @@ describe('EXPLAIN ANALYZE — the run, reported', () => {
     const out = runQuery(`EXPLAIN ANALYZE ${sql}`, db()).rows.map((r) => r[EXPLAIN_COLUMN] as string);
     const groups = runQuery(sql, db()).rows.length;
     expect(out.find((l) => l.startsWith('Project'))).toContain(`actual ${String(groups)} rows`);
+  });
+});
+
+describe('q-error (plan.md §25.4 C2)', () => {
+  // `employees`: department and office are perfectly correlated (every department occupies exactly one office),
+  // which is exactly the independence assumption `AND` selectivity makes and exactly what it gets wrong.
+  const correlated = () => DATASETS.employees.make();
+  const correlatedQuery = "SELECT * FROM employees WHERE department = 'engineering' AND office = 'building-1';";
+
+  it('names a real q-error, at least 10×, on the correlated dataset\'s own headline query', () => {
+    const out = runQuery(`EXPLAIN ANALYZE ${correlatedQuery}`, correlated()).rows.map((r) => r[EXPLAIN_COLUMN] as string);
+    const scan = out.find((l) => l.includes('SeqScan employees'))!;
+    expect(scan).toMatch(/q-error (\d+(\.\d+)?)×/);
+    const q = Number(/q-error (\d+(?:\.\d+)?)×/.exec(scan)![1]);
+    expect(q).toBeGreaterThanOrEqual(10);
+  });
+
+  it('is the real ratio between the estimate and the actual, with the literature\'s own +1 smoothing', () => {
+    const out = runQuery(`EXPLAIN ANALYZE ${correlatedQuery}`, correlated()).rows.map((r) => r[EXPLAIN_COLUMN] as string);
+    const scan = out.find((l) => l.includes('SeqScan employees'))!;
+    const est = Number(/est ~(\d+) rows/.exec(scan)![1]);
+    const actual = Number(/actual (\d+) rows/.exec(scan)![1]);
+    const q = Number(/q-error (\d+(?:\.\d+)?)×/.exec(scan)![1]);
+    expect(q).toBeCloseTo(Math.max((est + 1) / (actual + 1), (actual + 1) / (est + 1)), 5);
+  });
+
+  it('says nothing when the estimate is close — no clutter for an ordinary query', () => {
+    const out = lines('EXPLAIN ANALYZE SELECT * FROM users WHERE id = 5');
+    expect(out.some((l) => l.includes('q-error'))).toBe(false);
+  });
+
+  it('never appears on a plain EXPLAIN — there is no actual to compare against', () => {
+    const out = runQuery(`EXPLAIN ${correlatedQuery}`, correlated()).rows.map((r) => r[EXPLAIN_COLUMN] as string);
+    expect(out.some((l) => l.includes('q-error'))).toBe(false);
   });
 });
 

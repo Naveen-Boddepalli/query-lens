@@ -819,6 +819,22 @@ test('ANALYZE builds real statistics, shown in the Result panel, and a later que
   await expect(page.getByText(/most common value, ANALYZE/)).toBeVisible();
 });
 
+test('the correlated dataset names a real q-error, at least 10× (plan.md §25.4 C2)', async ({ page }) => {
+  await page.goto('/playground?x=0');
+  await page.getByRole('button', { name: 'employees', exact: true }).click();
+  await page.getByRole('button', { name: 'Correlated AND' }).click();
+  await page.getByRole('button', { name: /^Run/ }).click();
+  await page.getByLabel('Scrub to step').press('End');
+
+  // department alone already tells you the office — an AND of both is no narrower, but the optimizer's
+  // independence assumption multiplies their fractions as if it were, badly underestimating.
+  const line = page.getByText(/SeqScan employees.*q-error/);
+  await expect(line).toBeVisible();
+  const text = (await line.textContent())!;
+  const q = Number(/q-error (\d+(?:\.\d+)?)×/.exec(text)?.[1]);
+  expect(q).toBeGreaterThanOrEqual(10);
+});
+
 test('every link on the course map and the interview roadmap goes somewhere real (plan.md §25.4 G1)', async ({ page }) => {
   const targets = new Set<string>();
   for (const [path, marker] of [

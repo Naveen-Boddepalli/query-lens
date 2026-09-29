@@ -28,4 +28,13 @@ describe('dataset catalogue', () => {
     expect(few).toBeGreaterThan(0);
     expect(many).toBeGreaterThan(few * 3);
   });
+
+  it('the employees "Correlated AND" preset names a real q-error, at least 10× (plan.md §25.4 C2)', () => {
+    const [correlated] = DATASET_CATALOGUE.employees.presets;
+    const out = runQuery(correlated!.sql, DATASETS.employees.make()).rows.map((r) => r['QUERY PLAN'] as string);
+    const scan = out.find((l) => l.includes('q-error'))!;
+    expect(scan, out.join('\n')).toBeDefined();
+    const q = Number(/q-error (\d+(?:\.\d+)?)×/.exec(scan)![1]);
+    expect(q).toBeGreaterThanOrEqual(10);
+  });
 });
