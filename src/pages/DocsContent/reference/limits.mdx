@@ -105,6 +105,12 @@ concept explanation.
   leaves the whole `WHERE` clause as a residual filter above the chain for now, correct either way, just
   not yet narrowed into any one step's own scan.
 - Cannot combine with `GROUP BY`, `ORDER BY`, or an aggregate in the SELECT list.
+- **A chain of two or more always executes in the order it was written** — there is no cost-based
+  reordering. A query with two or more `JOIN`s gets a second opinion in its own plan-stage narration
+  instead: what a Selinger-style dynamic-programming search over the *subset lattice* (plan.md §25.4 C4)
+  would have joined them as, and its own estimated page cost next to the written order's — purely
+  informational, never a rewrite. [`/tools/join-order`](/tools/join-order) is the same search, with every
+  subset it considered visible, not just the winner.
 
 ## IN subquery
 
@@ -192,8 +198,10 @@ See [Supported SQL](/docs/reference/sql) for the complete accepted grammar.
 ## What's out of scope entirely
 
 No subqueries anywhere but an uncorrelated `IN (SELECT …)` (plan.md §25.4 C3, closing C3 — no `EXISTS`, no
-scalar subquery like `x = (SELECT …)`, no correlated subquery), no choosing a `JOIN` chain's *order*
-(plan.md §25.4 C4 — a chain always joins in the order it's written), no `RIGHT`/`FULL`/`CROSS` join, no transactions, no real
+scalar subquery like `x = (SELECT …)`, no correlated subquery), no *choosing* a `JOIN` chain's order — a chain
+still always joins in the order it's written; [`/tools/join-order`](/tools/join-order) (plan.md §25.4 C4) computes
+what a cost-based search would pick instead, and a multi-join query's own Planner panel names it too, but neither
+one changes what actually runs — no `RIGHT`/`FULL`/`CROSS` join, no transactions, no real
 concurrency (the Locks panel is visual only), and no cost-based query optimization — every
 rewrite rule fires on a structural match, never a cost comparison, and the cost *estimates* shown
 alongside a plan exist to justify a rewrite's narration, not to decide whether it happens. `UNION` and `COUNT(DISTINCT …)` are also not accepted. These are deliberate exclusions for this

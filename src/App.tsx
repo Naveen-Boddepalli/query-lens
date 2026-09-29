@@ -103,6 +103,9 @@ const GrammarToolPage = lazy(() =>
 const HashJoinToolPage = lazy(() =>
   import('./pages/tools/HashJoinToolPage.tsx').then((m) => ({ default: m.HashJoinToolPage })),
 );
+const JoinOrderToolPage = lazy(() =>
+  import('./pages/tools/JoinOrderToolPage.tsx').then((m) => ({ default: m.JoinOrderToolPage })),
+);
 const ComparePage = lazy(() =>
   import('./pages/ComparePage.tsx').then((m) => ({ default: m.ComparePage })),
 );
@@ -204,6 +207,7 @@ export default function App() {
               <Route path="locks" element={suspended(LocksToolPage)} />
               <Route path="grammar" element={suspended(GrammarToolPage)} />
               <Route path="hash-join" element={suspended(HashJoinToolPage)} />
+              <Route path="join-order" element={suspended(JoinOrderToolPage)} />
             </Route>
 
             <Route path="docs" element={suspended(DocsLayout)}>

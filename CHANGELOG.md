@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Join ordering by dynamic programming** (plan.md §25.4 C4) — a new standalone, `/tools/join-order`,
+  teaches Selinger's System R algorithm over the *subset lattice*: for `n` tables in a `JOIN` chain, the
+  cheapest left-deep way to join every table in each of the `2^n - 1` subsets, built up bottom-up from
+  smaller subsets, with every candidate the search tried for each subset visible, not just the winner. A
+  new demo dataset (`departments`/`employees`/`projects`/`timesheets`, a tree rather than a chain) shows a
+  natural-looking "hub, then each branch" order costing 5.2× the DP-optimal one. A multi-join query in the
+  Playground gets the same search as an informational note on its own plan-stage narration — what a
+  cost-based search would have joined the tables as, and its estimated cost next to the written order's.
+  Deliberately visualization-only: a query still always executes in the order it was written; nothing here
+  changes what runs, only what gets said about it.
 - **`IN (subquery)`** (plan.md §25.4 C3, third slice, closing C3) — `x [NOT] IN (SELECT column FROM table
   [WHERE …])`, the one place a `SELECT` may appear inside another query. Always uncorrelated (the subquery's
   own `WHERE` can only name a column on its own table) and always exactly one plain column — no `JOIN`,

@@ -3,6 +3,7 @@ import type { JoinAlgorithm, Table } from '../types.ts';
 import type { SelectStatement } from '../parser/index.ts';
 import { buildAggregatePlan, buildJoinPlan, buildPlan, distinctNodeFor, isAggregateQuery, projectListFor } from './buildPlan.ts';
 import { estimatePlan, rootEstimate } from './cost.ts';
+import { costOfOrder, joinGraphFromAst, runJoinOrderDP, writtenOrderFromAst } from './joinOrder.ts';
 import { leftmostPrefixNote, optimize } from './optimize.ts';
 import { exprToSql, joinsIn, subqueryResolutionNotes, toPlanDisplay } from './plan.ts';
 import type { Plan, ProjectList } from './plan.ts';
@@ -91,6 +92,25 @@ export function emitPlanEvents(
       : '';
     emit(
       `${fallback}JOIN adds ${algorithm === 'index-nested-loop' ? 'an index probe on' : 'a second scan of'} \`${j.rightTable}\` and a Join above ${i === 0 ? 'that' : 'the chain so far'}: ${mechanism}.${outer}`,
+      { stage: 'plan', planTree: display(current) },
+    );
+  }
+
+  // A second opinion on join *order* (plan.md §25.4 C4), for two or more JOINs only — a single one has no other
+  // order to consider. Deliberately informational: this never changes `current` or what actually executes, only
+  // what gets said about it — the same "estimate beside the real plan, never a decision" stance C1's stats and
+  // C2's q-error already take. `/tools/join-order` is the same search, with the whole subset lattice visible.
+  if (allJoins.length >= 2 && joinTables) {
+    const allTables: Record<string, Table> = { ...joinTables, [table.name]: table };
+    const { nodes, edges } = joinGraphFromAst(ast, allTables, rowsPerPage);
+    const dp = runJoinOrderDP(nodes, edges);
+    const written = writtenOrderFromAst(ast);
+    const writtenCost = costOfOrder(nodes, edges, written);
+    const ratio = writtenCost.pages / dp.winner.pages;
+    emit(
+      ratio >= 1.05
+        ? `A cost-based join-order search (a second opinion, not a rewrite — plan.md §25.4 C4) would instead join these ${String(nodes.length)} tables as ${dp.winner.tables.join(' → ')}: an estimated ${String(dp.winner.pages)} pages, against the ${String(writtenCost.pages)} the order actually written above costs — about ${ratio.toFixed(1)}× cheaper. This query still runs in the order it was written; nothing here changes that.`
+        : `A cost-based join-order search (plan.md §25.4 C4) agrees with the order written above — among left-deep orderings of these ${String(nodes.length)} tables, this is already about as cheap as it gets.`,
       { stage: 'plan', planTree: display(current) },
     );
   }

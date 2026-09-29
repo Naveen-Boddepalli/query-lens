@@ -857,4 +857,23 @@ describe('multi-join (plan.md §25.4 C3 slice b)', () => {
     expect(sortRows(hash)).toEqual(sortRows([{ 'authors.name': 'ada' }, { 'authors.name': 'alan' }]));
     expect(sortRows(sorted)).toEqual(sortRows(hash));
   });
+
+  it("a chain of two or more JOINs gets a join-order second opinion (plan.md §25.4 C4) — informational only, never changing what runs", () => {
+    const { events, rows } = run(CHAIN_SQL, threeTableDb());
+    const note = events.find((e) => e.stage === 'plan' && e.label.includes('cost-based join-order search'));
+    expect(note?.label).toMatch(/would instead join these 3 tables as .+: an estimated \d+ pages, against the \d+/);
+    // The query itself still ran in the order written — the note is commentary, not a rewrite.
+    expect(sortRows(rows)).toEqual(
+      sortRows([
+        { 'authors.name': 'ada', 'posts.title': "ada's post 1", 'comments.body': 'nice' },
+        { 'authors.name': 'ada', 'posts.title': "ada's post 1", 'comments.body': 'great' },
+        { 'authors.name': 'alan', 'posts.title': "alan's post 4", 'comments.body': 'cool' },
+      ]),
+    );
+  });
+
+  it('a single JOIN gets no join-order note at all — there is only one order to have', () => {
+    const { events } = run('SELECT authors.name, posts.title FROM authors JOIN posts ON authors.id = posts.authorId');
+    expect(events.some((e) => e.stage === 'plan' && e.label.includes('cost-based join-order search'))).toBe(false);
+  });
 });

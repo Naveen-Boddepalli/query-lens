@@ -160,6 +160,10 @@ const T = (name: string): string => `src/pages/tools/${name}.tsx`;
  *    over: /, /stages, /learn/:id, /gallery, /challenges, /tools/buffer-pool, /tools/parser, /tools/page,
  *    /tools/planner, /docs, /docs/concepts/buffer-pool — each now its measured size + 3, the same slack every
  *    other route at its ceiling already has.
+ *  - 2026-09-29, join ordering by dynamic programming (§25.4 C4): a new route, /tools/join-order (159.9 kB
+ *    measured + 3), and the "second opinion" narration in emit.ts pulls `joinOrder.ts` into the engine chunk for
+ *    every route that already carries it, pushing /docs/concepts/btree over by a hair (163 kB measured + 3, was
+ *    already at its own ceiling from the C1/C2 docs growth).
  */
 export const ROUTES: readonly RouteBudget[] = [
   { route: '/', roots: [P('LandingPage')], kb: 161, note: 'the landing page' },
@@ -188,8 +192,9 @@ export const ROUTES: readonly RouteBudget[] = [
   { route: '/tools/locks', roots: [T('LocksToolPage')], kb: 117, note: 'lock simulator' },
   { route: '/tools/grammar', roots: [T('GrammarToolPage')], kb: 116, note: 'the SQL grammar diagram' },
   { route: '/tools/hash-join', roots: [T('HashJoinToolPage')], kb: 118, note: 'Grace hash join' },
+  { route: '/tools/join-order', roots: [T('JoinOrderToolPage')], kb: 163, note: 'Selinger join-order search over the subset lattice' },
   { route: '/docs', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 153, note: 'the docs shell and every prose page (one shared chunk)' },
-  { route: '/docs/concepts/btree', roots: ['src/ui/DocsLayout.tsx', 'src/pages/DocsContent/concepts/btree.mdx'], kb: 166, note: 'a concept page with a live B+Tree widget' },
+  { route: '/docs/concepts/btree', roots: ['src/ui/DocsLayout.tsx', 'src/pages/DocsContent/concepts/btree.mdx'], kb: 170, note: 'a concept page with a live B+Tree widget' },
   { route: '/docs/concepts/buffer-pool', roots: ['src/ui/DocsLayout.tsx', 'src/pages/DocsContent/concepts/buffer-pool.mdx'], kb: 167, note: 'a concept page with a live buffer-pool widget' },
   { route: '/* (404)', roots: [P('NotFoundPage')], kb: 114, note: 'the not-found page' },
 ];

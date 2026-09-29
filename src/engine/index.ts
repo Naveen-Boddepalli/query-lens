@@ -6,7 +6,12 @@ export {
   runBufferTrace,
 } from './bufferTrace.ts';
 export type { BufferTraceResult } from './bufferTrace.ts';
-export { createJoinCompareDatabase, createJoinDemoDatabase, createSeedDatabase } from './seed.ts';
+export {
+  createJoinCompareDatabase,
+  createJoinDemoDatabase,
+  createJoinOrderDemoDatabase,
+  createSeedDatabase,
+} from './seed.ts';
 export {
   DATASETS,
   DATASET_IDS,
@@ -28,6 +33,8 @@ export {
   toPlanDisplay,
 } from './planner/index.ts';
 export type { CostEstimate, PlanCost } from './planner/index.ts';
+export { costOfOrder, joinGraphFromAst, runJoinOrderDP, writtenOrderFromAst } from './planner/joinOrder.ts';
+export type { JoinOrderCandidate, JoinOrderEdge, JoinOrderNode, JoinOrderResult, SubsetPlan } from './planner/joinOrder.ts';
 export {
   buildHeap,
   createBufferPool,

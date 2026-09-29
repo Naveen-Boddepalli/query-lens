@@ -87,6 +87,70 @@ export function createJoinDemoDatabase(): Database {
 }
 
 /**
+ * Four tables, shaped as a tree rather than a chain — `departments` is the hub, connecting to both `employees`
+ * and `projects`; `timesheets` hangs off `employees` alone (plan.md §25.4 C4, `/tools/join-order` + the
+ * Playground's own join-order note). Sized so join *order* has a real, measured answer rather than an obvious
+ * one: `timesheets` is the one genuinely large table (5,000 rows against the other three's tens or hundreds), so
+ * whichever join brings it in pays a real cost — but *when* that happens (how large the accumulated join is by
+ * the time it does) is what actually separates a good order from a bad one, not simply "big table first" or
+ * "big table last." Tuned empirically (the project's own "measure, don't guess" convention) rather than derived:
+ * `FROM departments JOIN projects ON departments.id = projects.deptId JOIN employees ON departments.id =
+ * employees.deptId JOIN timesheets ON employees.id = timesheets.employeeId` — a natural-looking "hub, then each
+ * branch" order — costs 5× the DP-optimal `departments → employees → timesheets → projects`, because visiting
+ * `projects` before drilling into `employees` → `timesheets` lets the *other* branch's join happen against an
+ * already-larger intermediate. Every foreign key is uniform (rows divide evenly across parents), so the only
+ * lever is order, not skew.
+ */
+export function createJoinOrderDemoDatabase(): Database {
+  const DEPARTMENT_COUNT = 5;
+  const EMPLOYEES_PER_DEPARTMENT = 40;
+  const PROJECTS_PER_DEPARTMENT = 6;
+  const TIMESHEETS_PER_EMPLOYEE = 25;
+  const employeeCount = DEPARTMENT_COUNT * EMPLOYEES_PER_DEPARTMENT;
+
+  return {
+    tables: {
+      departments: {
+        name: 'departments',
+        columns: ['id', 'name'],
+        rows: Array.from({ length: DEPARTMENT_COUNT }, (_, i) => ({ id: i + 1, name: `dept-${String(i + 1)}` })),
+        indexedColumns: ['id'],
+      },
+      employees: {
+        name: 'employees',
+        columns: ['id', 'deptId', 'name'],
+        rows: Array.from({ length: employeeCount }, (_, i) => ({
+          id: i + 1,
+          deptId: Math.floor(i / EMPLOYEES_PER_DEPARTMENT) + 1,
+          name: `employee-${String(i + 1)}`,
+        })),
+        indexedColumns: ['id', 'deptId'],
+      },
+      projects: {
+        name: 'projects',
+        columns: ['id', 'deptId', 'name'],
+        rows: Array.from({ length: DEPARTMENT_COUNT * PROJECTS_PER_DEPARTMENT }, (_, i) => ({
+          id: i + 1,
+          deptId: Math.floor(i / PROJECTS_PER_DEPARTMENT) + 1,
+          name: `project-${String(i + 1)}`,
+        })),
+        indexedColumns: ['id', 'deptId'],
+      },
+      timesheets: {
+        name: 'timesheets',
+        columns: ['id', 'employeeId', 'hours'],
+        rows: Array.from({ length: employeeCount * TIMESHEETS_PER_EMPLOYEE }, (_, i) => ({
+          id: i + 1,
+          employeeId: Math.floor(i / TIMESHEETS_PER_EMPLOYEE) + 1,
+          hours: 1 + (i % 8),
+        })),
+        indexedColumns: ['id', 'employeeId'],
+      },
+    },
+  };
+}
+
+/**
  * `createJoinDemoDatabase`'s pair plus a larger third table, for `/compare`'s JOIN mode (plan.md §25.4 B4). Ten
  * posts on three pages cannot show what an index join is *for* — a probe of `posts` costs more than one scan
  * of it. `comments` is the inner table that can: 120 rows on 30 pages, twelve per post and scattered across them

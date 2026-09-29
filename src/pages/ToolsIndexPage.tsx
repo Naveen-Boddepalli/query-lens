@@ -71,6 +71,13 @@ const TOOLS = [
       'Grace hash join: partition a build side and a probe side by hashing the join key, split further whatever still doesn\'t fit in memory, then build an in-memory hash table over each partition and probe it — hash collisions and partition spill both on display.',
     available: true,
   },
+  {
+    title: 'Join order',
+    href: '/tools/join-order',
+    description:
+      'Selinger\'s dynamic-programming join-order search over the subset lattice: the cheapest way to join every subset of a query\'s tables, built up smallest first, with every candidate the DP considered for each one — not just the winner. A written query still runs in the order it names; this only ever shows what a cost-based search would have picked instead.',
+    available: true,
+  },
 ] as const;
 
 export function ToolsIndexPage() {
