@@ -1,19 +1,21 @@
 /**
- * Rule-based rewrites. Deterministic, and the rules themselves consult no cost
- * model: index selection fires whenever an equality on the indexed column is
- * present, not when a cheaper plan is costed. The cost *estimates* live in
- * `cost.ts` and are annotated onto the trees by `emit.ts` — they justify the
- * rewrite in the narration without the rule depending on a number §12 would
- * call plausible-but-false.
+ * Rule-based rewrites. Most rules still consult no cost model at all: constant folding and predicate pushdown
+ * fire on a structural match alone, and never lose to a scan or another shape. Two kinds of rule are the
+ * exception, both plan.md §25.4 C5. `index-selection`/`range-index-selection` (C5 slice 1) pick a candidate by
+ * shape first, then decline it if its own estimated cost turns out not to beat the scan it would replace — a
+ * candidate that matches the predicate can still lose. `join-algorithm-selection` (C5 slice 2) has no shape step
+ * at all: every applicable algorithm is costed and the cheapest wins outright, the same as a real optimizer's
+ * plan enumeration. The cost *estimates* behind every one of these live in `cost.ts` (`rootEstimate`, the same
+ * formula `EXPLAIN` shows) — never a number invented for the comparison alone (§12).
  *
  * Rules run in order, each on the output of the last, and each produces one
  * `optimize` event carrying the before and after trees.
  */
 
-import type { IndexSpec, PredictionPrompt, SqlValue, Table } from '../types.ts';
+import type { IndexSpec, JoinAlgorithm, PredictionPrompt, SqlValue, Table } from '../types.ts';
 import { indexSelectionPrompt, leftmostPrefixPrompt } from '../predict.ts';
 import { describeKeys as describeKeysText } from '../index/lookup.ts';
-import { columnsOfIndex, indexNameOf, indexSpecsOf, isClusteringIndex } from '../index/spec.ts';
+import { columnsOfIndex, indexNameOf, indexSpecsOf, isClusteringIndex, joinIndexFor } from '../index/spec.ts';
 import { mapChildren, walkExpr } from '../parser/index.ts';
 import { arithmetic, negate } from '../value.ts';
 import type { CompareOp, Expr } from '../parser/index.ts';
@@ -32,7 +34,13 @@ export interface Rewrite {
   prompt?: PredictionPrompt;
 }
 
-type Rule = (plan: Plan, table: Table, rowsPerPage: number) => Rewrite | null;
+/**
+ * `otherTables` is every table a `JOIN` in the query names, keyed by name, *excluding* `table` itself — the same
+ * shape `cost.ts`'s own `estimateNode` already takes, needed only by `join-algorithm-selection` (plan.md §25.4
+ * C5 slice 2), which is the first rule that has to estimate a *second* table's own cost. Every other rule ignores
+ * it — a query with no `JOIN` passes `{}`.
+ */
+type Rule = (plan: Plan, table: Table, rowsPerPage: number, otherTables: Record<string, Table>) => Rewrite | null;
 
 /**
  * `LIMIT` wraps the whole plan (`buildPlan.ts`), outside `Project` — but
@@ -424,6 +432,130 @@ const joinPredicatePushdown: Rule = (input) => {
       : `Predicate pushdown: every part of the WHERE clause names only one side, so the whole thing moves into ${pushedSides.length === 1 ? 'that scan' : 'the two scans'} — nothing is left to recheck after the Join.`,
     plan: root,
     changed,
+  };
+};
+
+/** A join algorithm's name for narration — `emit.ts`'s own `describeJoin` is phrase-shaped for a different sentence, so this stays a small local copy rather than an import that would need reshaping either way. */
+function joinAlgorithmName(algorithm: JoinAlgorithm): string {
+  switch (algorithm) {
+    case 'nested-loop':
+      return 'nested-loop';
+    case 'hash':
+      return 'hash join';
+    case 'sort-merge':
+      return 'sort-merge';
+    case 'index-nested-loop':
+      return 'index nested-loop';
+  }
+}
+
+interface JoinCandidate {
+  algorithm: JoinAlgorithm;
+  plan: Extract<Plan, { op: 'Join' }>;
+  estPages: number;
+}
+
+interface ChosenChain {
+  plan: Extract<Plan, { op: 'Join' }>;
+  /** One entry per step (chain order) whose algorithm actually changed from what `buildJoinPlan` structurally assigned. */
+  changes: { leftTable: string; rightTable: string; chosen: JoinCandidate; runnersUp: JoinCandidate[] }[];
+  changedNodes: Plan[];
+}
+
+/**
+ * Recomputes one `Join` node's own algorithm by cost, after first doing the same for whatever `Join` sits beneath
+ * it in a chain (plan.md §25.4 C3 slice b) — an earlier step's own chosen algorithm changes its own estimated page
+ * cost, which a later step's comparison then has to use, the same way a real cost-based join enumerator prices a
+ * whole left-deep chain bottom-up. `right`'s shape changes with the candidate: a bare `SeqScan` for nested-loop,
+ * hash and sort-merge, an `IndexProbe` only for index-nested-loop — the same swap `buildJoinPlan` itself makes.
+ */
+function chooseJoinAlgorithms(
+  join: Extract<Plan, { op: 'Join' }>,
+  table: Table,
+  rowsPerPage: number,
+  otherTables: Record<string, Table>,
+): ChosenChain {
+  const tableNamed = (name: string): Table => (name === table.name ? table : otherTables[name]!);
+  const below = join.left.op === 'Join' ? chooseJoinAlgorithms(join.left, table, rowsPerPage, otherTables) : null;
+  const newLeft: Plan = below ? below.plan : join.left;
+
+  const rightTableData = tableNamed(join.rightTable);
+  // Reused as-is, not rebuilt bare: `join-predicate-pushdown` (which already ran, earlier in `RULES`) may have
+  // already pushed a WHERE conjunct into this exact scan — losing that filter here would silently widen the
+  // join's own results, not just its cost estimate.
+  const plainRight: Plan = join.right.op === 'SeqScan' ? join.right : { op: 'SeqScan', table: join.rightTable };
+  const rightHasPushedFilter = plainRight.op === 'SeqScan' && plainRight.filter !== undefined;
+  // `IndexProbe` has nowhere to carry a residual filter, so a pushed-down conjunct on this side rules index
+  // nested-loop out entirely rather than risk silently dropping it — the same reason `join-predicate-pushdown`
+  // itself never pushes a conjunct into a side that already probes an index (its own `probesInner` check).
+  const idxSpec = rightHasPushedFilter ? undefined : joinIndexFor(rightTableData, join.rightColumn);
+  const algorithms: JoinAlgorithm[] = idxSpec
+    ? ['nested-loop', 'hash', 'sort-merge', 'index-nested-loop']
+    : ['nested-loop', 'hash', 'sort-merge'];
+
+  const candidates: JoinCandidate[] = algorithms.map((algorithm) => {
+    const right: Plan =
+      algorithm === 'index-nested-loop'
+        ? { op: 'IndexProbe', table: join.rightTable, column: indexNameOf(idxSpec!.columns), outerTable: join.leftTable, outerColumn: join.leftColumn }
+        : plainRight;
+    const plan: Extract<Plan, { op: 'Join' }> = { ...join, left: newLeft, right, algorithm };
+    return { algorithm, plan, estPages: rootEstimate(plan, table, rowsPerPage, otherTables).estPages };
+  });
+  // Ties favour whatever is already there (nested-loop, first in `algorithms`) — never rewrite just because two
+  // candidates happen to cost the same.
+  const chosen = candidates.reduce((best, c) => (c.estPages < best.estPages ? c : best));
+  const runnersUp = candidates.filter((c) => c !== chosen);
+  const changedHere = chosen.algorithm !== join.algorithm;
+
+  return {
+    plan: chosen.plan,
+    changes: [...(below?.changes ?? []), ...(changedHere ? [{ leftTable: join.leftTable, rightTable: join.rightTable, chosen, runnersUp }] : [])],
+    changedNodes: [...(below?.changedNodes ?? []), ...(changedHere ? [chosen.plan as Plan] : [])],
+  };
+}
+
+/**
+ * Chooses each `JOIN`'s physical algorithm by cost (plan.md §25.4 C5 slice 2) — the first rule with no shape step
+ * at all. `buildPlan.ts` always starts a chain out as `nested-loop`, its own cost-oblivious default, the same way
+ * it always starts a predicate out as a bare `SeqScan`; this rule prices every algorithm that could actually run
+ * each step — nested-loop, hash, sort-merge, and index-nested-loop whenever the inner table has a usable index —
+ * with `cost.ts`'s own per-algorithm formulas (the same ones `EXPLAIN` already shows), and keeps whichever is
+ * cheapest. Unlike `index-selection` there is no "matches the shape but costs more, so decline" outcome: every
+ * applicable algorithm is a real, working candidate, so the rule always ends up choosing one — it may just be the
+ * one already there, in which case nothing changed and this reports no rewrite, like any other rule that finds
+ * nothing worth doing.
+ *
+ * A chain (plan.md §25.4 C3 slice b) is priced bottom-up, one `Join` at a time — see `chooseJoinAlgorithms`.
+ *
+ * Only runs when the caller never forced a specific algorithm: `emit.ts` leaves this rule out of `enabled`
+ * whenever `EngineOptions.joinStrategy` was set explicitly — `/compare`'s and `/tools/planner`'s whole point is
+ * forcing one algorithm to see its own effect, which a cost comparison would otherwise silently override.
+ */
+const joinAlgorithmSelection: Rule = (input, table, rowsPerPage, otherTables) => {
+  const { limit, rest: plan } = unwrapLimit(input);
+  if (plan.op !== 'Project') return null;
+  const belowProject = plan.child;
+  const outerJoin = belowProject.op === 'Filter' ? belowProject.child : belowProject;
+  if (outerJoin.op !== 'Join') return null;
+
+  const result = chooseJoinAlgorithms(outerJoin, table, rowsPerPage, otherTables);
+  if (result.changes.length === 0) return null;
+
+  const newBelowProject: Plan = belowProject.op === 'Filter' ? { ...belowProject, child: result.plan } : result.plan;
+  const root = rewrapLimit(limit, { op: 'Project', columns: plan.columns, child: newBelowProject });
+
+  const label = result.changes
+    .map(({ leftTable, rightTable, chosen, runnersUp }) => {
+      const others = runnersUp.map((c) => `${joinAlgorithmName(c.algorithm)}'s ${String(c.estPages)}`).join(', ');
+      return `\`${leftTable}\` × \`${rightTable}\`: ${joinAlgorithmName(chosen.algorithm)} chosen by cost — an estimated ${String(chosen.estPages)} pages against ${others}.`;
+    })
+    .join(' ');
+
+  return {
+    rule: 'join-algorithm-selection',
+    label,
+    plan: root,
+    changed: new Set<Plan>(result.changedNodes),
   };
 };
 
@@ -840,6 +972,7 @@ const RULES: { name: string; apply: Rule }[] = [
   { name: 'constant-folding', apply: constantFolding },
   { name: 'predicate-pushdown', apply: predicatePushdown },
   { name: 'join-predicate-pushdown', apply: joinPredicatePushdown },
+  { name: 'join-algorithm-selection', apply: joinAlgorithmSelection },
   { name: 'index-selection', apply: indexSelection },
   { name: 'range-index-selection', apply: rangeIndexSelection },
   { name: 'index-only-scan', apply: indexOnlyScan },
@@ -862,18 +995,19 @@ export const WRITE_PATH_RULES: ReadonlySet<string> = new Set(OPTIMIZER_RULES);
  * Applies every enabled rule that fires, in order. Returns each step for
  * animation.
  *
- * `enabled` defaults to all rules — the pipeline (`emit.ts`) never passes it.
- * `/tools/planner` (plan.md §22.3) passes a subset so a rule can be toggled
- * off and its effect on the plan watched. `rowsPerPage` is threaded through to
- * every rule (plan.md §25.4 C5): `index-selection`/`range-index-selection` are
- * the first rules that actually need it, to compare an index lookup's own
- * estimated page cost against the scan it would replace — see their own doc
- * comments for what changed once a rule could ask that question at all.
+ * `rowsPerPage` is threaded through to every rule (plan.md §25.4 C5): `index-selection`/`range-index-selection`
+ * need it to compare an index lookup's own estimated page cost against the scan it would replace, and
+ * `join-algorithm-selection` needs it (and `otherTables`) for the same reason, one table further out — see each
+ * rule's own doc comment. `otherTables` defaults to `{}` — every caller without a `JOIN` in the query omits it.
+ * `enabled` defaults to all rules — the pipeline (`emit.ts`) leaves it out except to keep
+ * `join-algorithm-selection` from overriding a `joinStrategy` explicitly requested. `/tools/planner` (plan.md
+ * §22.3) passes its own subset so any rule can be toggled off and its effect on the plan watched.
  */
 export function optimize(
   plan: Plan,
   table: Table,
   rowsPerPage: number,
+  otherTables: Record<string, Table> = {},
   enabled: ReadonlySet<string> = new Set(OPTIMIZER_RULES),
 ): Rewrite[] {
   const steps: Rewrite[] = [];
@@ -881,7 +1015,7 @@ export function optimize(
 
   for (const { name, apply } of RULES) {
     if (!enabled.has(name)) continue;
-    const rewrite = apply(current, table, rowsPerPage);
+    const rewrite = apply(current, table, rowsPerPage, otherTables);
     if (!rewrite) continue;
     steps.push(rewrite);
     current = rewrite.plan;

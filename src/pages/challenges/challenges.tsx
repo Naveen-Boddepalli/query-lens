@@ -285,8 +285,12 @@ export const CHALLENGES: Challenge[] = [
     // Forced small on purpose, same reason `/compare`'s own JOIN mode does:
     // the demo's 5 heap pages fit entirely inside the default 8 frames, which
     // would let nested-loop's rescans hit cache and hide the very difference
-    // this challenge exists to show.
-    engineOptions: { bufferFrames: 2 },
+    // this challenge exists to show. `joinStrategy` is pinned to nested-loop too
+    // (plan.md §25.4 C5 slice 2 would otherwise cost-choose hash for the player's
+    // own run too, same as it would for anyone else's) — the whole point here is
+    // naming two specific algorithms and comparing them head to head, not
+    // whichever one the optimizer would have picked on its own.
+    engineOptions: { bufferFrames: 2, joinStrategy: 'nested-loop' },
     brief: (
       <>
         This engine has three join algorithms. Nested-loop rescans all of the right-hand table once

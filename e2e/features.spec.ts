@@ -267,7 +267,7 @@ test('the planner sandbox runs the rewrite rules one at a time', async ({ page }
   await expect(page.getByText('optimized · unchanged')).toBeVisible();
   await expect(page.getByText(/predicate-pushdown — turned off/)).toBeVisible();
   await expect.poll(() => page.url()).toMatch(
-    /rules=constant-folding%2Cjoin-predicate-pushdown%2Cindex-selection%2Crange-index-selection%2Cindex-only-scan/,
+    /rules=constant-folding%2Cjoin-predicate-pushdown%2Cjoin-algorithm-selection%2Cindex-selection%2Crange-index-selection%2Cindex-only-scan/,
   );
 });
 
@@ -285,8 +285,11 @@ test('the planner sandbox plans a real JOIN against its authors/posts demo table
   await expect(canonical.getByText(/Join \(nested-loop\)/)).toBeVisible();
   await expect(canonical.getByText(/SeqScan authors/)).toBeVisible();
   await expect(canonical.getByText(/SeqScan posts/)).toBeVisible();
-  // No rule reaches into a JOIN yet — the optimized tree is identical.
-  await expect(page.getByText('optimized · unchanged')).toBeVisible();
+  // join-algorithm-selection (plan.md §25.4 C5 slice 2) prices every algorithm and picks the cheapest — hash,
+  // on this small demo pair — so the optimized tree now differs from the canonical, naive nested-loop one.
+  const optimized = page.getByRole('figure').filter({ hasText: 'optimized' });
+  await expect(optimized.getByText(/Join \(hash\)/)).toBeVisible();
+  await expect(page.getByText(/^join-algorithm-selection — /)).toContainText(/hash join chosen by cost/);
 
   // An unqualified column once the query joins two tables is a real parse error.
   await page.getByLabel('SQL query').fill('SELECT name FROM authors JOIN posts ON authors.id = posts.authorId');

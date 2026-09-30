@@ -4,7 +4,7 @@ import type { SelectStatement } from '../parser/index.ts';
 import { buildAggregatePlan, buildJoinPlan, buildPlan, distinctNodeFor, isAggregateQuery, projectListFor } from './buildPlan.ts';
 import { estimatePlan, rootEstimate } from './cost.ts';
 import { costOfOrder, joinGraphFromAst, runJoinOrderDP, writtenOrderFromAst } from './joinOrder.ts';
-import { leftmostPrefixNote, optimize } from './optimize.ts';
+import { OPTIMIZER_RULES, leftmostPrefixNote, optimize } from './optimize.ts';
 import { exprToSql, joinsIn, subqueryResolutionNotes, toPlanDisplay } from './plan.ts';
 import type { Plan, ProjectList } from './plan.ts';
 
@@ -47,8 +47,17 @@ export function emitPlanEvents(
   rowsPerPage: number,
   aggregateStrategy: 'hash' | 'sort' = 'hash',
   joinTables?: Record<string, Table>,
-  joinStrategy: JoinAlgorithm = 'nested-loop',
+  /**
+   * `undefined` (the shipped default, plan.md §25.4 C5 slice 2) means every `JOIN`'s algorithm is chosen by
+   * cost — `join-algorithm-selection` runs in the optimize stage below. An explicit value means the caller is
+   * forcing one, `/compare`'s and `/tools/planner`'s whole reason for setting this at all, and that rule is left
+   * out of `enabled` entirely so it can never override the forced choice. Either way the plan stage below still
+   * builds every step structurally as `nested-loop` first, the same cost-oblivious starting point a bare `SeqScan`
+   * already is for `index-selection` — only `structuralJoinStrategy` (the resolved, concrete value) drives it.
+   */
+  joinStrategy?: JoinAlgorithm,
 ): Plan {
+  const structuralJoinStrategy = joinStrategy ?? 'nested-loop';
   // Every table this query names, keyed by name — including `table` itself. A single join only ever needed the
   // *other* one (the recursion's own `table` param always being the right one to check first), but a chain
   // (plan.md §25.4 C3 slice b) re-derives that check at every nesting level against whatever table THAT level's
@@ -71,12 +80,12 @@ export function emitPlanEvents(
     const join = allJoins[i]!;
     // Rebuilt from scratch each step (cheap — a handful of tables at most) rather than grown incrementally, so this
     // stays the one place that knows how to fold a JOIN chain and never drifts from `buildJoinPlan` itself.
-    current = buildJoinPlan(allJoins.slice(0, i + 1), ast.from.name, joinStrategy, joinTables);
+    current = buildJoinPlan(allJoins.slice(0, i + 1), ast.from.name, structuralJoinStrategy, joinTables);
     const j = current as Extract<Plan, { op: 'Join' }>;
     const algorithm = j.algorithm;
     // Asked for an index join, but this step's inner table has no index on the join column: say so, and run the plain one.
     const fallback =
-      joinStrategy === 'index-nested-loop' && algorithm !== 'index-nested-loop'
+      structuralJoinStrategy === 'index-nested-loop' && algorithm !== 'index-nested-loop'
         ? `You asked for an index nested-loop join, but \`${join.table.name}\` has no index on \`${j.rightColumn}\` for it to probe — so this runs as an ordinary nested-loop. `
         : '';
     const mechanism =
@@ -213,11 +222,16 @@ export function emitPlanEvents(
 
   // The canonical plan is a direct translation of the query text. Everything
   // below is the optimizer earning its keep.
-  const canonical = buildPlan(ast, aggregateStrategy, joinStrategy, joinTables);
+  const canonical = buildPlan(ast, aggregateStrategy, structuralJoinStrategy, joinTables);
   let optimised = canonical;
   let before = canonical;
 
-  for (const step of optimize(canonical, table, rowsPerPage)) {
+  // `join-algorithm-selection` is the one rule left out when the caller forced a specific `joinStrategy` — see
+  // this function's own parameter doc above.
+  const enabledRules =
+    joinStrategy === undefined ? new Set(OPTIMIZER_RULES) : new Set(OPTIMIZER_RULES.filter((r) => r !== 'join-algorithm-selection'));
+
+  for (const step of optimize(canonical, table, rowsPerPage, otherTables ?? {}, enabledRules)) {
     emit(
       (step.rule === 'index-selection' ||
         step.rule === 'range-index-selection' ||

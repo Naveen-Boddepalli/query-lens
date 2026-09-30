@@ -52,7 +52,7 @@ export function emitUpdatePlanEvents(
   let optimisedWrapped: Plan = wrapped;
   let before: Plan = wrapped;
 
-  for (const step of optimize(wrapped, table, rowsPerPage, WRITE_PATH_RULES)) {
+  for (const step of optimize(wrapped, table, rowsPerPage, {}, WRITE_PATH_RULES)) {
     emit(
       step.label,
       {

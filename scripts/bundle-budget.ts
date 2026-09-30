@@ -164,6 +164,9 @@ const T = (name: string): string => `src/pages/tools/${name}.tsx`;
  *    measured + 3), and the "second opinion" narration in emit.ts pulls `joinOrder.ts` into the engine chunk for
  *    every route that already carries it, pushing /docs/concepts/btree over by a hair (163 kB measured + 3, was
  *    already at its own ceiling from the C1/C2 docs growth).
+ *  - 2026-09-30, join algorithm chosen by cost (§25.4 C5, second slice): `join-algorithm-selection` and its
+ *    per-candidate cost comparison grew the engine chunk a little, pushing /compare a hair over its ceiling
+ *    (168.1 kB measured + 3).
  */
 export const ROUTES: readonly RouteBudget[] = [
   { route: '/', roots: [P('LandingPage')], kb: 161, note: 'the landing page' },
@@ -174,7 +177,7 @@ export const ROUTES: readonly RouteBudget[] = [
   { route: '/learn/:id', roots: [P('LessonPage')], kb: 167, note: 'one lesson' },
   { route: '/examples', roots: [P('ExamplesPage')], kb: 115, note: 'preset queries' },
   { route: '/gallery', roots: [P('GalleryPage')], kb: 162, note: 'named moments' },
-  { route: '/compare', roots: [P('ComparePage')], kb: 168, note: 'index vs scan, policy vs policy, hash vs sort, join algorithms' },
+  { route: '/compare', roots: [P('ComparePage')], kb: 171, note: 'index vs scan, policy vs policy, hash vs sort, join algorithms' },
   { route: '/trace', roots: [P('TracePage')], kb: 164, note: 'the trace inspector' },
   { route: '/progress', roots: [P('ProgressPage')], kb: 168, note: 'the progress dashboard' },
   { route: '/challenges', roots: [P('ChallengesPage')], kb: 164, note: 'challenge index' },

@@ -295,7 +295,7 @@ export function runQuery(
     options.rowsPerPage,
     options.aggregateStrategy ?? 'hash',
     joinTables,
-    options.joinStrategy ?? 'nested-loop',
+    options.joinStrategy,
   );
 
   // Every joined table gets its own heap, its pages numbered right after whatever came before it — so all of them

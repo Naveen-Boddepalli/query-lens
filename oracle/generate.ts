@@ -9,7 +9,7 @@
  */
 
 import fc from 'fast-check';
-import type { EngineOptions, IndexBuildOptions, ReplacementPolicyName, Row, SqlValue } from '../src/engine/types.ts';
+import type { EngineOptions, IndexBuildOptions, JoinAlgorithm, ReplacementPolicyName, Row, SqlValue } from '../src/engine/types.ts';
 import type { AggItem, Arith, ArithOp, ColSpec, ColType, Op, Pred, Query, ReadQuery, Ref, TableSpec, WriteQuery } from './model.ts';
 
 /* -------------------------------------------------------------------------- */
@@ -730,7 +730,10 @@ export const optionsArb: fc.Arbitrary<EngineOptions> = fc
     bufferFrames: fc.integer({ min: 3, max: 12 }),
     rowsPerPage: fc.integer({ min: 1, max: 6 }),
     policy: fc.constantFrom<ReplacementPolicyName>('lru', 'clock'),
-    joinStrategy: fc.constantFrom('nested-loop', 'hash', 'sort-merge', 'index-nested-loop'),
+    // `undefined` (plan.md §25.4 C5 slice 2) means the join algorithm is chosen by cost instead of forced — a
+    // fifth physical strategy alongside the four explicit ones, and just as much in scope for "must never
+    // change what a query returns" as any of them.
+    joinStrategy: fc.constantFrom<JoinAlgorithm | undefined>('nested-loop', 'hash', 'sort-merge', 'index-nested-loop', undefined),
     aggregateStrategy: fc.constantFrom('hash', 'sort'),
     // How the indexes are built (plan.md §25.4 B3d): one entry at a time, or bulk-loaded and packed to a fill
     // factor. The trees differ in shape and never in what a query returns.

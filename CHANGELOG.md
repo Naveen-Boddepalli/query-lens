@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Join algorithm chosen by cost** (plan.md §25.4 C5, second slice) — a `JOIN`'s physical algorithm is no
+  longer always nested-loop by default. `EngineOptions.joinStrategy` left unset now means every algorithm
+  that could run each step — nested-loop, hash, sort-merge, and index nested-loop when the inner table has a
+  usable index — is priced with the same per-algorithm formulas `EXPLAIN` already showed, and the cheapest
+  one runs, chain-aware and bottom-up for a multi-join query. `/compare` and `/tools/planner` are unaffected:
+  both already force a specific algorithm explicitly for every run, which this never overrides. Unlike
+  index-vs-scan (C5's first slice), there is no "declines but stays" outcome here — every candidate is a
+  real, working plan, so the rule always ends up choosing one.
 - **Index vs. scan chosen by cost** (plan.md §25.4 C5, first slice) — `index-selection` and
   `range-index-selection` no longer take an index just because it matches the predicate's shape: once the
   most-selective candidate is picked, its own estimated page cost is compared against the scan it would

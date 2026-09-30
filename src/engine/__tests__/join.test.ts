@@ -204,6 +204,26 @@ describe('JOIN — plan and cost', () => {
     // authors: 2 heap pages + 2*ceil(5/4)=2*2 spill; posts: 3 heap pages + 2*ceil(10/4)=2*3 spill.
     expect(est.estPages).toBe(2 + 3 + 2 * 2 + 2 * 3);
   });
+
+  it('with no joinStrategy requested, the default run chooses hash by cost (plan.md §25.4 C5 slice 2)', () => {
+    const { events } = run('SELECT * FROM authors JOIN posts ON authors.id = posts.authorId');
+    const rules = events.flatMap((e) => (e.stage === 'optimize' ? [e.rule] : []));
+    expect(rules).toContain('join-algorithm-selection');
+    const optimizeEvents = events.filter((e): e is Extract<typeof events[number], { stage: 'optimize' }> => e.stage === 'optimize');
+    expect(optimizeEvents.at(-1)!.after.children![0]!.label).toContain('Join (hash)');
+  });
+
+  it('an explicit joinStrategy is never overridden by cost, even though hash would be cheaper here', () => {
+    const { events } = run(
+      'SELECT * FROM authors JOIN posts ON authors.id = posts.authorId',
+      db(),
+      { ...DEFAULT_ENGINE_OPTIONS, joinStrategy: 'nested-loop' },
+    );
+    const rules = events.flatMap((e) => (e.stage === 'optimize' ? [e.rule] : []));
+    expect(rules).not.toContain('join-algorithm-selection');
+    const optimizeEvents = events.filter((e): e is Extract<typeof events[number], { stage: 'optimize' }> => e.stage === 'optimize');
+    expect(optimizeEvents.at(-1)!.after.children![0]!.label).toContain('Join (nested-loop)');
+  });
 });
 
 describe('JOIN — pipeline correctness', () => {
@@ -262,11 +282,19 @@ describe('JOIN — pipeline correctness', () => {
     );
     expect(restated.rows.length).toBe(all.rows.length);
     const rules = restated.events.flatMap((e) => (e.stage === 'optimize' ? [e.rule] : []));
-    expect(rules).toEqual(['none']);
+    // Nothing to push down — `join-algorithm-selection` (plan.md §25.4 C5 slice 2) still runs independently and
+    // may well fire (hash beats nested-loop on this data), which is correct and orthogonal to this test's point.
+    expect(rules).not.toContain('join-predicate-pushdown');
   });
 
   it('LIMIT caps the joined result and short-circuits the nested loop', () => {
-    const { rows, events } = run('SELECT * FROM authors JOIN posts ON authors.id = posts.authorId LIMIT 1');
+    // Forced (plan.md §25.4 C5 slice 2 would otherwise pick hash on this data) — the mechanic under test is
+    // specifically nested-loop's own short-circuiting, not whichever algorithm cost happens to prefer here.
+    const { rows, events } = run(
+      'SELECT * FROM authors JOIN posts ON authors.id = posts.authorId LIMIT 1',
+      db(),
+      { ...DEFAULT_ENGINE_OPTIONS, joinStrategy: 'nested-loop' },
+    );
     expect(rows).toHaveLength(1);
     const joinEvents = events.filter((e) => e.stage === 'execute' && e.op === 'Join');
     expect(joinEvents).toHaveLength(1);
@@ -346,7 +374,7 @@ describe('JOIN — predicate pushdown into a Join\'s own children', () => {
     expect(rows.length).toBeGreaterThan(0);
 
     const rules = events.flatMap((e) => (e.stage === 'optimize' ? [e.rule] : []));
-    expect(rules).toEqual(['join-predicate-pushdown']);
+    expect(rules).toContain('join-predicate-pushdown');
     const tree = events.find((e) => e.stage === 'optimize')!.after;
     const rightScan = tree.children![0]!.children![1]!;
     expect(rightScan.label).toBe('SeqScan posts');
@@ -372,7 +400,7 @@ describe('JOIN — predicate pushdown into a Join\'s own children', () => {
     const sql = 'SELECT * FROM authors JOIN posts ON authors.id = posts.authorId WHERE authors.id = posts.authorId';
     const { events } = run(sql);
     const rules = events.flatMap((e) => (e.stage === 'optimize' ? [e.rule] : []));
-    expect(rules).toEqual(['none']);
+    expect(rules).not.toContain('join-predicate-pushdown');
   });
 
   it('cost estimates the Join against the filtered left side\'s row count, not the whole table', () => {
@@ -429,10 +457,13 @@ describe('JOIN — the pipeline narrates it', () => {
     expect(structuredClone(events)).toEqual(events);
   });
 
-  it('no optimizer rule fires on an unfiltered JOIN — nothing to push down with no WHERE clause', () => {
+  it('no predicate-pushdown rule fires on an unfiltered JOIN — nothing to push down with no WHERE clause', () => {
     const { events } = run('SELECT * FROM authors JOIN posts ON authors.id = posts.authorId');
     const rules = events.flatMap((e) => (e.stage === 'optimize' ? [e.rule] : []));
-    expect(rules).toEqual(['none']);
+    // `join-algorithm-selection` (plan.md §25.4 C5 slice 2) is independent of the WHERE clause and does fire —
+    // hash beats nested-loop on this data — which is correct and orthogonal to this test's point about pushdown.
+    expect(rules).not.toContain('join-predicate-pushdown');
+    expect(rules).not.toContain('none');
   });
 });
 

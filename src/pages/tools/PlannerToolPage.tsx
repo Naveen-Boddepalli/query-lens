@@ -95,7 +95,7 @@ export function PlannerToolPage() {
     const fromTable = db.tables[parsed.ast.from.name] ?? table;
     const canonical = buildPlan(parsed.ast);
     const rpp = DEFAULT_ENGINE_OPTIONS.rowsPerPage;
-    const steps = optimize(canonical, fromTable, rpp, rules);
+    const steps = optimize(canonical, fromTable, rpp, db.tables, rules);
     const last = steps.at(-1);
     const optimised = last ? last.plan : canonical;
     const lastChanged: ReadonlySet<Plan> = last ? last.changed : new Set<Plan>();

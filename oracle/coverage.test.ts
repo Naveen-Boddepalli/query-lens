@@ -168,8 +168,11 @@ describe('the generators reach what the oracle is meant to check', () => {
   });
 
   it('runs an index nested-loop join to a non-empty answer, repeats included, and exercises the fallback (plan.md §25.4 B4)', () => {
-    expect(stats.indexJoins, 'index joins with rows').toBeGreaterThan(20);
-    expect(stats.indexJoinsWithRepeats, 'index joins whose probe found several entries').toBeGreaterThan(5);
+    // Lower than before `joinStrategy` gained a fifth, `undefined` value (plan.md §25.4 C5 slice 2, cost-chosen):
+    // each explicit algorithm, this one included, is now requested by only a fifth of sessions instead of a
+    // quarter — measured at 14 with the fixed seed above, still comfortably enough to prove the fallback works.
+    expect(stats.indexJoins, 'index joins with rows').toBeGreaterThan(10);
+    expect(stats.indexJoinsWithRepeats, 'index joins whose probe found several entries').toBeGreaterThan(2);
     expect(stats.indexJoinFallbacks, 'index joins with no index to probe').toBeGreaterThan(20);
   });
 

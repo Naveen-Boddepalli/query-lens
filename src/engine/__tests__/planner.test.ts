@@ -4,7 +4,7 @@ import { buildPlan } from '../planner/buildPlan.ts';
 import { optimize, OPTIMIZER_RULES, scanPredicate } from '../planner/optimize.ts';
 import { conjoin, conjuncts, equalityOn, exprToSql } from '../planner/plan.ts';
 import type { Plan } from '../planner/plan.ts';
-import { createSeedDatabase } from '../seed.ts';
+import { createJoinDemoDatabase, createSeedDatabase } from '../seed.ts';
 import { DEFAULT_ENGINE_OPTIONS } from '../types.ts';
 import type { Table } from '../types.ts';
 
@@ -491,6 +491,77 @@ describe('optimize — chosen by cost, not just by shape (plan.md §25.4 C5)', (
   });
 });
 
+describe('optimize — join algorithm chosen by cost (plan.md §25.4 C5 slice 2)', () => {
+  const joinDb = createJoinDemoDatabase();
+  const authors = joinDb.tables.authors!;
+  const joinPlan = (sql: string) => buildPlan(ast(sql), 'hash', 'nested-loop', joinDb.tables);
+  const joinSteps = (sql: string) => optimize(joinPlan(sql), authors, ROWS_PER_PAGE, joinDb.tables);
+
+  it('hash is chosen over nested-loop by cost on the authors/posts demo', () => {
+    const steps = joinSteps('SELECT * FROM authors JOIN posts ON authors.id = posts.authorId');
+    const step = steps.find((s) => s.rule === 'join-algorithm-selection')!;
+    expect(step).toBeDefined();
+    expect(step.changed.size).toBeGreaterThan(0);
+    const outerJoin = step.plan.op === 'Project' ? step.plan.child : null;
+    expect(outerJoin).toMatchObject({ op: 'Join', algorithm: 'hash' });
+    expect(step.label).toMatch(/`authors` × `posts`: hash join chosen by cost/);
+    expect(step.label).toMatch(/against nested-loop's \d+/);
+  });
+
+  it('never touches a query with no JOIN at all', () => {
+    const steps = optimize(plan('SELECT * FROM users WHERE id = 5'), users, ROWS_PER_PAGE);
+    expect(steps.some((s) => s.rule === 'join-algorithm-selection')).toBe(false);
+  });
+
+  it('a predicate already pushed into the right side survives an algorithm change — index nested-loop would have nowhere to keep it', () => {
+    // `posts.id = 3` gets pushed into the right SeqScan first (join-predicate-pushdown); index-nested-loop on
+    // `authorId` would otherwise look cheap in isolation, but choosing it would silently drop that filter, since
+    // an IndexProbe carries no residual — this must never happen.
+    const sql = 'SELECT * FROM authors JOIN posts ON authors.id = posts.authorId WHERE posts.id = 3';
+    const steps = joinSteps(sql);
+    const last = steps.at(-1)!.plan;
+    const outerJoin = last.op === 'Project' ? last.child : null;
+    expect(outerJoin).toMatchObject({ op: 'Join' });
+    const j = outerJoin as Extract<Plan, { op: 'Join' }>;
+    expect(j.algorithm).not.toBe('index-nested-loop');
+    expect(j.right.op).toBe('SeqScan');
+    expect(j.right.op === 'SeqScan' ? j.right.filter : undefined).toBeDefined();
+  });
+
+  // A tiny outer over a large, well-indexed inner — the one shape where index-nested-loop's own cost (per-outer-row,
+  // independent of any filter on the inner) can undercut hash even though hash's page cost stays unchanged by a
+  // pushed-down filter (a SeqScan always reads every heap page, filtered or not). This isolates the guard above: it
+  // is not enough that the pushed filter survives on *some* winning candidate — index-nested-loop specifically has
+  // to lose the comparison outright once a filter exists, or it would win here and silently drop it.
+  const few: Table = { name: 'few', columns: ['id', 'fk'], rows: [{ id: 1, fk: 0 }, { id: 2, fk: 1 }], indexedColumns: ['id'] };
+  const many: Table = {
+    name: 'many',
+    columns: ['id', 'fk', 'tag'],
+    rows: Array.from({ length: 200 }, (_, i) => ({ id: i + 1, fk: i % 50, tag: i % 2 === 0 ? 'x' : 'y' })),
+    indexedColumns: ['id', 'fk'],
+  };
+  const manyDb = { few, many };
+  const manySteps = (sql: string) => optimize(buildPlan(ast(sql), 'hash', 'nested-loop', manyDb), few, ROWS_PER_PAGE, manyDb);
+
+  it('index nested-loop genuinely is cheapest here, absent any pushed filter — the premise the guard test below depends on', () => {
+    const steps = manySteps('SELECT * FROM few JOIN many ON few.fk = many.fk');
+    const step = steps.find((s) => s.rule === 'join-algorithm-selection')!;
+    const outerJoin = step.plan.op === 'Project' ? step.plan.child : null;
+    expect(outerJoin).toMatchObject({ op: 'Join', algorithm: 'index-nested-loop' });
+  });
+
+  it('a pushed filter on the large inner rules index nested-loop out, even though it would otherwise win on cost', () => {
+    const steps = manySteps("SELECT * FROM few JOIN many ON few.fk = many.fk WHERE many.tag = 'x'");
+    const last = steps.at(-1)!.plan;
+    const outerJoin = last.op === 'Project' ? last.child : null;
+    const j = outerJoin as Extract<Plan, { op: 'Join' }>;
+    expect(j.op).toBe('Join');
+    expect(j.algorithm).not.toBe('index-nested-loop');
+    expect(j.right.op).toBe('SeqScan');
+    expect(j.right.op === 'SeqScan' ? j.right.filter : undefined).toBeDefined();
+  });
+});
+
 describe('optimize — index-only scan', () => {
   it('rewrites an IndexScan to IndexOnlyScan when the SELECT list is only the indexed column', () => {
     const p = final('SELECT id FROM users WHERE id = 5');
@@ -533,6 +604,7 @@ describe('optimize — index-only scan', () => {
       plan('SELECT id FROM users WHERE id = 5'),
       users,
       ROWS_PER_PAGE,
+      {},
       new Set(['predicate-pushdown', 'index-selection']),
     );
     expect(steps.map((s) => s.rule)).toEqual(['predicate-pushdown', 'index-selection']);
@@ -661,6 +733,7 @@ describe('optimize — rule filter (plan.md §22.3 /tools/planner)', () => {
       'constant-folding',
       'predicate-pushdown',
       'join-predicate-pushdown',
+      'join-algorithm-selection',
       'index-selection',
       'range-index-selection',
       'index-only-scan',
@@ -668,11 +741,11 @@ describe('optimize — rule filter (plan.md §22.3 /tools/planner)', () => {
   });
 
   it('an empty set runs no rules — the canonical plan is untouched', () => {
-    expect(optimize(plan(sql), users, ROWS_PER_PAGE, new Set())).toHaveLength(0);
+    expect(optimize(plan(sql), users, ROWS_PER_PAGE, {}, new Set())).toHaveLength(0);
   });
 
   it('with only predicate-pushdown, the scan stays a SeqScan (no index step)', () => {
-    const steps = optimize(plan(sql), users, ROWS_PER_PAGE, new Set(['predicate-pushdown']));
+    const steps = optimize(plan(sql), users, ROWS_PER_PAGE, {}, new Set(['predicate-pushdown']));
     expect(steps.map((s) => s.rule)).toEqual(['predicate-pushdown']);
     expect(shape(steps.at(-1)!.plan)).toEqual(['Project', 'SeqScan']);
   });
@@ -680,12 +753,12 @@ describe('optimize — rule filter (plan.md §22.3 /tools/planner)', () => {
   it('index-selection cannot fire without pushdown — it needs the filter in the scan first', () => {
     // A real ordering lesson for the sandbox: turning pushdown off strands
     // index-selection with nothing to match (canonical is Project→Filter→SeqScan).
-    expect(optimize(plan(sql), users, ROWS_PER_PAGE, new Set(['index-selection']))).toHaveLength(0);
+    expect(optimize(plan(sql), users, ROWS_PER_PAGE, {}, new Set(['index-selection']))).toHaveLength(0);
   });
 
   it('omitting the argument runs every rule, unchanged from before', () => {
     const withDefault = optimize(plan(sql), users, ROWS_PER_PAGE);
-    const withAll = optimize(plan(sql), users, ROWS_PER_PAGE, new Set(OPTIMIZER_RULES));
+    const withAll = optimize(plan(sql), users, ROWS_PER_PAGE, {}, new Set(OPTIMIZER_RULES));
     expect(withDefault.map((s) => s.rule)).toEqual(withAll.map((s) => s.rule));
   });
 });
