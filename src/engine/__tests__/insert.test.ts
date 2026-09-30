@@ -101,7 +101,13 @@ describe('INSERT — correctness', () => {
         things: {
           name: 'things',
           columns: ['id', 'category'],
-          rows: [{ id: 1, category: 'a' }],
+          // Filler rows so the honest cost gate (plan.md §25.4 C5) actually favors each index — 1–2 real rows is
+          // too small for a B+Tree's own overhead to pay for itself, and this test's whole point is watching a real
+          // lookup use one. Unique `category` values keep `category = 'b'` as selective an estimate as `id = 2`.
+          rows: [
+            { id: 1, category: 'a' },
+            ...Array.from({ length: 30 }, (_, i) => ({ id: 1000 + i, category: `f${String(i)}` })),
+          ],
           indexedColumns: ['id', 'category'],
         },
       },

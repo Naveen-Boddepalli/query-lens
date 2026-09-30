@@ -94,11 +94,11 @@ export function PlannerToolPage() {
     // typed query names one of those instead (plan.md §22.2's JOIN).
     const fromTable = db.tables[parsed.ast.from.name] ?? table;
     const canonical = buildPlan(parsed.ast);
-    const steps = optimize(canonical, fromTable, rules);
+    const rpp = DEFAULT_ENGINE_OPTIONS.rowsPerPage;
+    const steps = optimize(canonical, fromTable, rpp, rules);
     const last = steps.at(-1);
     const optimised = last ? last.plan : canonical;
     const lastChanged: ReadonlySet<Plan> = last ? last.changed : new Set<Plan>();
-    const rpp = DEFAULT_ENGINE_OPTIONS.rowsPerPage;
     return {
       canonical: toPlanDisplay(canonical, new Set<Plan>(), estimatePlan(canonical, fromTable, rpp, db.tables)),
       optimised: toPlanDisplay(optimised, lastChanged, estimatePlan(optimised, fromTable, rpp, db.tables)),

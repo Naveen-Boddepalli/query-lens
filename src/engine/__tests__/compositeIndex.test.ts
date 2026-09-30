@@ -10,9 +10,15 @@ import type { Database, PlanNode, Row, StepEvent, Table } from '../types.ts';
  * them, and covering any query that reads only the columns it holds.
  */
 
-/** 60 rows: `a` cycles 0..3, `b` cycles 0..4, `c` cycles three strings — so (a, b) repeats every 20 rows. */
+/**
+ * 120 rows: `a` cycles 0..7, `b` cycles 0..4, `c` cycles three strings — coprime cycle lengths, so every (a, b)
+ * combination occurs exactly 3 times. `a` alone is 8-valued rather than 4 (plan.md §25.4 C5): a leading-column
+ * equality needs to be honestly selective enough for the B+Tree's own overhead to pay for itself against a scan,
+ * which 1-in-4 on a fixture this small never was, once a rule actually compares the two costs instead of firing on
+ * shape alone.
+ */
 function people(extra: Partial<Table> = {}): Database {
-  const rows: Row[] = Array.from({ length: 60 }, (_, i) => ({ id: i + 1, a: i % 4, b: i % 5, c: `v${String(i % 3)}` }));
+  const rows: Row[] = Array.from({ length: 120 }, (_, i) => ({ id: i + 1, a: i % 8, b: i % 5, c: `v${String(i % 3)}` }));
   return { tables: { t: { name: 't', columns: ['id', 'a', 'b', 'c'], rows, indexes: [{ columns: ['a', 'b'] }], ...extra } } };
 }
 
@@ -86,8 +92,8 @@ describe('the leftmost-prefix rule', () => {
   });
 
   it('a range on the leading column enters it as well', () => {
-    const { rows, events } = run('SELECT * FROM t WHERE a >= 2');
-    expect(byId(rows)).toEqual(all(people()).filter((r) => (r.a as number) >= 2));
+    const { rows, events } = run('SELECT * FROM t WHERE a >= 7');
+    expect(byId(rows)).toEqual(all(people()).filter((r) => (r.a as number) >= 7));
     expect(ops(events, 'IndexRangeScan').length).toBeGreaterThan(0);
   });
 
@@ -113,10 +119,10 @@ describe('covering', () => {
     expect(rows.map((r) => [r.a, r.b])).toEqual(all(db).filter((r) => r.a === 1).map((r) => [r.a, r.b]).sort((x, y) => (x[1] as number) - (y[1] as number)));
     expect(ops(events, 'IndexOnlyScan').length).toBeGreaterThan(0);
     expect(scanOf(events).label).toBe('IndexOnlyScan t.(a, b)');
-    // The heap has 15 pages (0–14); an index-only scan reads none of them.
+    // The heap has 30 pages (0–29); an index-only scan reads none of them.
     const fetched = events.flatMap((e) => (e.stage === 'buffer' && (e.action === 'hit' || e.action === 'load' || e.action === 'miss') ? [e.pageId] : []));
     expect(fetched.length).toBeGreaterThan(0);
-    for (const page of fetched) expect(page).toBeGreaterThanOrEqual(15);
+    for (const page of fetched) expect(page).toBeGreaterThanOrEqual(30);
   });
 
   it('a query that reads a column the index does not hold is not covered', () => {
@@ -190,7 +196,7 @@ describe('a range on the column after an equality prefix', () => {
     const range = flatten(finalPlan(run('SELECT * FROM t WHERE a = 1 AND b > 2').events)).find((n) => n.op === 'IndexRangeScan')!;
     const prefix = flatten(finalPlan(run('SELECT * FROM t WHERE a = 1').events)).find((n) => n.op === 'IndexScan')!;
     expect(range.estRows!).toBeLessThan(prefix.estRows!);
-    expect(range.estBasis).toContain('1/4 on a');
+    expect(range.estBasis).toContain('1/8 on a');
   });
 });
 
@@ -203,21 +209,21 @@ describe('writes that find their rows by a range', () => {
 
   it('DELETE with a range on an indexed column walks the leaf chain, and leaves every tree sound', () => {
     const db: Database = { tables: { t: { ...people().tables.t!, indexedColumns: ['id'] } } };
-    const { write, events, captured } = written('DELETE FROM t WHERE id > 50', db);
-    expect(write?.rows).toHaveLength(50);
+    const { write, events, captured } = written('DELETE FROM t WHERE id > 110', db);
+    expect(write?.rows).toHaveLength(110);
     expect(ops(events, 'IndexRangeScan').length).toBeGreaterThan(0);
     expect(ops(events, 'SeqScan')).toHaveLength(0);
     for (const tree of Object.values(captured)) expect(validate(tree)).toEqual([]);
     const ids = leafChain(captured['id']!).flatMap((id) => (node(captured['id']!, id) as LeafNode).keys.map((k) => valuesOf(k)[0]));
-    expect(ids.sort((x, y) => (x as number) - (y as number))).toEqual(Array.from({ length: 50 }, (_, i) => i + 1));
+    expect(ids.sort((x, y) => (x as number) - (y as number))).toEqual(Array.from({ length: 110 }, (_, i) => i + 1));
   });
 
   it('UPDATE that moves the very column it scans still touches each row once', () => {
     // Setting `id` beyond the scanned range: an update that found its own output again would loop or double-apply.
     const db: Database = { tables: { t: { ...people().tables.t!, indexedColumns: ['id'] } } };
-    const { rows, write } = written('UPDATE t SET id = id + 100 WHERE id > 55', db);
+    const { rows, write } = written('UPDATE t SET id = id + 100 WHERE id > 115', db);
     expect(rows).toHaveLength(5);
-    expect(write?.rows.filter((r) => (r.id as number) > 100).map((r) => r.id).sort()).toEqual([156, 157, 158, 159, 160]);
+    expect(write?.rows.filter((r) => (r.id as number) > 200).map((r) => r.id).sort()).toEqual([216, 217, 218, 219, 220]);
   });
 
   it('DELETE by an equality prefix and a range keeps the composite index sound', () => {
@@ -278,7 +284,7 @@ describe('writes through a composite index', () => {
   const want = (rows: Row[]): string[] => rows.map((r) => JSON.stringify([r.a, r.b])).sort();
 
   it('INSERT adds an entry valued by both columns', () => {
-    const { write, events, captured } = run2("INSERT INTO t (id, a, b, c) VALUES (61, 9, 9, 'z')");
+    const { write, events, captured } = run2("INSERT INTO t (id, a, b, c) VALUES (121, 9, 9, 'z')");
     expect(events.map((e) => e.label).join('\n')).toContain('The `a, b` B+Tree gets key (9, 9)');
     expect(validate(captured['a, b']!)).toEqual([]);
     expect(held(captured['a, b']!)).toEqual(want(write!.rows));
@@ -286,7 +292,7 @@ describe('writes through a composite index', () => {
 
   it('DELETE drops exactly the entries of the rows it removes', () => {
     const { write, events, captured } = run2('DELETE FROM t WHERE a = 2 AND b = 3');
-    expect(write?.rows).toHaveLength(57);
+    expect(write?.rows).toHaveLength(117);
     expect(events.filter((e) => e.label.startsWith('Delete removes')).every((e) => e.label.includes('The `a, b` B+Tree drops key (2, 3)'))).toBe(true);
     expect(validate(captured['a, b']!)).toEqual([]);
     expect(held(captured['a, b']!)).toEqual(want(write!.rows));
@@ -311,9 +317,9 @@ describe('what it costs', () => {
   it('prices a prefix by the columns it pins, multiplied — the same independence an AND assumes', () => {
     const one = flatten(finalPlan(run('SELECT * FROM t WHERE a = 1').events)).find((n) => n.op === 'IndexScan')!;
     const two = flatten(finalPlan(run('SELECT * FROM t WHERE a = 1 AND b = 2').events)).find((n) => n.op === 'IndexScan')!;
-    expect(one.estBasis).toContain('1/4 on a');
-    expect(two.estBasis).toContain('1/4 × 1/5 on a, b');
-    // 60 rows / (4 × 5) = 3 — and the data has exactly 3 rows per (a, b).
+    expect(one.estBasis).toContain('1/8 on a');
+    expect(two.estBasis).toContain('1/8 × 1/5 on a, b');
+    // 120 rows / (8 × 5) = 3 — and the data has exactly 3 rows per (a, b).
     expect(two.estRows).toBe(3);
     expect(one.estRows).toBe(15);
   });

@@ -201,9 +201,12 @@ No subqueries anywhere but an uncorrelated `IN (SELECT …)` (plan.md §25.4 C3,
 scalar subquery like `x = (SELECT …)`, no correlated subquery), no *choosing* a `JOIN` chain's order — a chain
 still always joins in the order it's written; [`/tools/join-order`](/tools/join-order) (plan.md §25.4 C4) computes
 what a cost-based search would pick instead, and a multi-join query's own Planner panel names it too, but neither
-one changes what actually runs — no `RIGHT`/`FULL`/`CROSS` join, no transactions, no real
-concurrency (the Locks panel is visual only), and no cost-based query optimization — every
-rewrite rule fires on a structural match, never a cost comparison, and the cost *estimates* shown
-alongside a plan exist to justify a rewrite's narration, not to decide whether it happens. `UNION` and `COUNT(DISTINCT …)` are also not accepted. These are deliberate exclusions for this
-release, not bugs — see the parser's own error messages in [Supported SQL](/docs/reference/sql)
-for exactly which keywords are recognised and rejected.
+one changes what actually runs — and no choosing a `JOIN`'s *algorithm* by cost either, that stays whatever
+`joinStrategy` is set to. No `RIGHT`/`FULL`/`CROSS` join, no transactions, no real concurrency (the Locks panel
+is visual only). `index-selection` and `range-index-selection` *are* decided by cost (plan.md §25.4 C5): a
+candidate that matches the predicate's shape can still lose to the scan it would replace, and does, whenever
+its own estimated page cost is not actually lower — the two rules this release changed. Every other rewrite
+rule still fires on a structural match alone, and the cost *estimates* shown alongside their plans exist only
+to justify the narration, not to decide whether the rewrite happens. `UNION` and `COUNT(DISTINCT …)` are also
+not accepted. These are deliberate exclusions for this release, not bugs — see the parser's own error messages
+in [Supported SQL](/docs/reference/sql) for exactly which keywords are recognised and rejected.

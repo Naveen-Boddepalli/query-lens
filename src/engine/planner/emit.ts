@@ -217,11 +217,12 @@ export function emitPlanEvents(
   let optimised = canonical;
   let before = canonical;
 
-  for (const step of optimize(canonical, table)) {
+  for (const step of optimize(canonical, table, rowsPerPage)) {
     emit(
-      step.rule === 'index-selection' ||
+      (step.rule === 'index-selection' ||
         step.rule === 'range-index-selection' ||
-        step.rule === 'index-only-scan'
+        step.rule === 'index-only-scan') &&
+        step.changed.size > 0
         ? withCostJustification(step.label, step.plan)
         : step.label,
       {
@@ -278,17 +279,20 @@ export function emitPlanEvents(
 
   return optimised;
 
-  /** Appends the scan-vs-index page estimate that makes the rewrite a decision, not a reflex. */
+  /**
+   * Appends the scan-vs-index page estimate that makes an accepted rewrite's cost visible, not just asserted. Only
+   * ever called for a step that actually changed the plan: `index-selection` and `range-index-selection` already
+   * decline anything that would not be cheaper (plan.md §25.4 C5 — see their own doc comments in `optimize.ts`), and
+   * `index-only-scan` only ever narrows an `IndexScan` the gate already accepted, never chosen on its own, so it can
+   * only be cheaper still. The comparison below is therefore always a confirmation, never a surprise — a second,
+   * independent read of the same numbers `optimize.ts`'s own gate already compared, not a competing judgment.
+   */
   function withCostJustification(label: string, chosen: Plan): string {
     const scanPages = Math.max(1, Math.ceil(table.rows.length / rowsPerPage));
     const rows = rootEstimate(canonical, table, rowsPerPage, otherTables).estRows;
     const indexPages = rootEstimate(chosen, table, rowsPerPage, otherTables).estPages;
     const facts = `the sequential scan reads all ${String(scanPages)} pages to return about ${plural(rows, 'row')}; the index lookup reads about ${String(indexPages)}`;
-    // The rules fire on the *shape* of the predicate, never on cost — so an index can be chosen and still lose. A
-    // repeated value or a leftmost prefix that matches much of the table costs a heap page per match (plan.md §25.4 B3).
-    return indexPages < scanPages
-      ? `${label} Estimated cost agrees: ${facts}.`
-      : `${label} Estimated cost disagrees: ${facts} — no cheaper than the scan. The rules fire on the predicate's shape, not on cost, so the index is taken anyway; choosing by cost is what plan.md §25.4 C adds.`;
+    return `${label} Estimated cost agrees: ${facts}.`;
   }
 }
 

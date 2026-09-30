@@ -337,16 +337,19 @@ export const CHALLENGES: Challenge[] = [
     title: 'The range leap',
     brief: (
       <>
-        A range predicate on an <em>indexed</em> column descends the B+Tree once and
-        walks the leaf chain sideways, instead of reading the whole table. Write a range query — not
-        an equality — that touches fewer pages than a full sequential scan does.
+        A range predicate on an <em>indexed</em> column can descend the B+Tree once and walk the
+        leaf chain sideways, instead of reading the whole table — but only when the slice it asks
+        for is narrow enough to actually cost less than the scan it replaces. Write a range query
+        — not an equality — that touches fewer pages than a full sequential scan does.
       </>
     ),
     hint: (
       <>
         <code className="font-mono">age</code> is not indexed, so any range on it is a full 12-page
-        scan. <code className="font-mono">id</code> is — try <code className="font-mono">id &gt;</code>,{' '}
-        <code className="font-mono">id &lt;</code>, or a <code className="font-mono">BETWEEN</code>.
+        scan. <code className="font-mono">id</code> is — but a wide range on it still loses to the
+        scan, one heap page per matching row with no credit for sharing a page. Narrow it down: try{' '}
+        <code className="font-mono">id &gt; 44</code>, <code className="font-mono">id &lt; 5</code>,
+        or a narrow <code className="font-mono">BETWEEN</code>.
       </>
     ),
     starter: 'SELECT * FROM users WHERE age > 30;',

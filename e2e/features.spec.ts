@@ -599,9 +599,10 @@ test('an index-only scan answers the query without ever fetching the heap page',
 test('a range predicate on the indexed column becomes an IndexRangeScan and walks the leaf chain (plan.md §23.1)', async ({
   page,
 }) => {
-  await page.goto('/playground?q=SELECT+*+FROM+users+WHERE+id+%3E+40&p=lru&x=0&s=9999');
-  // 8 of the 48 seed rows have id > 40.
-  await expect(page.getByText('8 rows returned', { exact: false })).toBeVisible();
+  await page.goto('/playground?q=SELECT+*+FROM+users+WHERE+id+%3E+43&p=lru&x=0&s=9999');
+  // 5 of the 48 seed rows have id > 43 — narrow enough that the index actually costs less than the scan
+  // (plan.md §25.4 C5); id > 40 (17%) no longer does.
+  await expect(page.getByText('5 rows returned', { exact: false })).toBeVisible();
 
   await page.getByRole('button', { name: 'Optimizer' }).click();
   await expect(page.getByText('IndexRangeScan', { exact: true }).first()).toBeVisible();
@@ -688,11 +689,24 @@ test('INSERT adds a row for real — the Playground persists it across the next 
 });
 
 test('an index on a column that repeats returns every matching row, one entry each (plan.md §25.4 B3)', async ({ page }) => {
+  // A custom `posts`, indexed on `authorId`, which repeats: ten authors, one with three posts, the rest with
+  // four — big enough that the honest cost gate (plan.md §25.4 C5) actually favors the index; the shared starter
+  // database's four-author, ten-post `posts` (30% selectivity) never did.
+  await page.addInitScript(() => {
+    const authorIds: number[] = [];
+    for (let author = 1; author <= 10; author++) {
+      for (let k = 0; k < (author === 1 ? 3 : 4); k++) authorIds.push(author);
+    }
+    const rows = authorIds.map((authorId, i) => ({ id: i + 1, authorId, title: `author ${String(authorId)}'s post ${String(i + 1)}` }));
+    localStorage.setItem(
+      'querylens.customDatabase.v1',
+      JSON.stringify({ tables: { posts: { name: 'posts', columns: ['id', 'authorId', 'title'], rows, indexes: [{ columns: ['authorId'] }] } } }),
+    );
+  });
   // Predictions off, so stepping is not gated on answering one.
   await page.goto('/playground?x=0');
-  // The starter database's `posts` is indexed on `authorId`, which repeats: four authors, ten posts.
   await page.getByRole('button', { name: 'Custom', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Manage tables (2)' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Manage tables (1)' })).toBeVisible();
 
   const editor = page.locator('.cm-content');
   await editor.click();
@@ -715,10 +729,11 @@ test('an index on a column that repeats returns every matching row, one entry ea
 });
 
 test('a composite index is entered by its leftmost column and declined without it (plan.md §25.4 B3b)', async ({ page }) => {
-  // A custom database with one table indexed on (city, age): 24 people, three cities.
+  // A custom database with one table indexed on (city, age): 72 people, eight cities — enough that the honest
+  // cost gate (plan.md §25.4 C5) actually favors the composite index; three cities (33% selectivity each) never did.
   await page.addInitScript(() => {
-    const cities = ['oslo', 'rome', 'kyiv'];
-    const rows = Array.from({ length: 24 }, (_, i) => ({ id: i + 1, city: cities[i % 3], age: 20 + (i % 8) }));
+    const cities = ['oslo', 'rome', 'kyiv', 'lima', 'cairo', 'accra', 'seoul', 'dhaka'];
+    const rows = Array.from({ length: 72 }, (_, i) => ({ id: i + 1, city: cities[i % 8], age: 20 + (i % 9) }));
     localStorage.setItem(
       'querylens.customDatabase.v1',
       JSON.stringify({ tables: { people: { name: 'people', columns: ['id', 'city', 'age'], rows, indexes: [{ columns: ['city', 'age'] }] } } }),
@@ -745,17 +760,17 @@ test('a composite index is entered by its leftmost column and declined without i
   // The leading column alone is enough to enter the index…
   expect(await narrationContains("SELECT * FROM people WHERE city = 'oslo'", /leftmost column of the composite index \(city, age\)/)).toBe(true);
   await page.getByLabel('Scrub to step').press('End');
-  await expect(page.getByText(/8 rows returned/)).toBeVisible();
+  await expect(page.getByText(/9 rows returned/)).toBeVisible();
 
   // A range on the next column narrows *within* that city's run.
   expect(await narrationContains("SELECT * FROM people WHERE city = 'oslo' AND age > 25", /narrows it within that run/)).toBe(true);
   await page.getByLabel('Scrub to step').press('End');
-  await expect(page.getByText(/2 rows returned/)).toBeVisible();
+  await expect(page.getByText(/3 rows returned/)).toBeVisible();
 
   // …but the second column alone cannot: the plan says why, and the rows still come back.
   expect(await narrationContains('SELECT * FROM people WHERE age = 22', /The index on \(city, age\) cannot help/)).toBe(true);
   await page.getByLabel('Scrub to step').press('End');
-  await expect(page.getByText(/3 rows returned/)).toBeVisible();
+  await expect(page.getByText(/8 rows returned/)).toBeVisible();
 });
 
 test('a UNIQUE index rejects a repeated key, with the lookup that found it (plan.md §25.4 B3c)', async ({ page }) => {
@@ -1172,7 +1187,7 @@ test('the range-leap challenge is solved by an IndexRangeScan (plan.md §23.1/§
   const editor = page.locator('.cm-content');
   await editor.click();
   await page.keyboard.press('ControlOrMeta+A');
-  await page.keyboard.type('SELECT * FROM users WHERE id > 40;');
+  await page.keyboard.type('SELECT * FROM users WHERE id > 44;');
   await page.getByRole('button', { name: 'Run & check' }).click();
   await expect(page.getByText('✓ Solved.')).toBeVisible();
 });

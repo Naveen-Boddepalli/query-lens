@@ -46,6 +46,23 @@ function accounts(extra: Partial<Table> = {}): Database {
   };
 }
 
+/**
+ * A larger `accounts`, for the specific tests below whose predicate needs the honest cost gate (plan.md §25.4 C5)
+ * to actually favor the index: 5 rows is too small for a B+Tree's own overhead to ever pay for itself against a
+ * 2-page scan. The filler carries values (`id`/`email` far outside the real rows', `team`/`score` never matching
+ * any test's own predicate) that no assertion in this file ever touches.
+ */
+function bigAccounts(): Database {
+  const real = accounts().tables.accounts!.rows;
+  const filler: Row[] = Array.from({ length: 30 }, (_, i) => ({
+    id: 1000 + i,
+    email: `filler${String(i)}@x.org`,
+    team: 'z',
+    score: 1,
+  }));
+  return accounts({ rows: [...real, ...filler] });
+}
+
 const run = (sql: string, db: Database = accounts()) => runQuery(sql, db);
 const text = (events: StepEvent[]) => events.map((e) => e.label).join('\n');
 const opens = (events: StepEvent[]) => events.filter((e) => e.stage === 'index' && e.action === 'open').length;
@@ -69,12 +86,17 @@ describe('a range on the clustering key reads fewer pages once it is clustered',
     // 3, 4, 5 and 6 each land in their own original heap page, paired with an unrelated id — a heap-organized
     // table's worst case for this range; a clustered one puts them on two adjacent pages instead.
     const order = [3, 1, 4, 2, 5, 7, 6, 8];
+    // Far-negative filler (plan.md §25.4 C5): 8 rows is too small for the honest cost gate to ever prefer a range
+    // scan over a 4-page table. These ids sit nowhere near `id > 2 AND id < 7`, so the range itself is untouched —
+    // they only widen the column's own min–max span enough that the estimate reads the query's actual range as
+    // narrow, which it genuinely is once the table is not four pages long.
+    const filler = Array.from({ length: 50 }, (_, i) => -1000 - i);
     return {
       tables: {
         t: {
           name: 't',
           columns: ['id'],
-          rows: order.map((id) => ({ id })),
+          rows: [...order, ...filler].map((id) => ({ id })),
           indexes: [{ columns: ['id'], unique: true }],
           ...(clustered ? { clusteredKey: ['id'] } : {}),
         },
@@ -91,15 +113,15 @@ describe('a range on the clustering key reads fewer pages once it is clustered',
     return events.filter((e) => e.stage === 'buffer' && e.action === 'miss').length;
   };
 
-  it('measured: 6 disk reads clustered vs 8 for the same rows unclustered', () => {
-    expect(missCount(scrambled(true))).toBe(6);
-    expect(missCount(scrambled(false))).toBe(8);
+  it('measured: 7 disk reads clustered vs 10 for the same rows unclustered', () => {
+    expect(missCount(scrambled(true))).toBe(7);
+    expect(missCount(scrambled(false))).toBe(10);
   });
 });
 
 describe("the clustering key's own index", () => {
   it('an equality lookup behaves exactly like any other unique index — one descent, one heap fetch', () => {
-    const { rows, events } = run('SELECT * FROM accounts WHERE id = 3');
+    const { rows, events } = run('SELECT * FROM accounts WHERE id = 3', bigAccounts());
     expect(rows).toEqual([{ id: 3, email: 'cy@x.org', team: 'a', score: 30 }]);
     expect(text(events)).not.toContain('clustered');
     expect(opens(events)).toBe(1);
@@ -114,7 +136,7 @@ describe("the clustering key's own index", () => {
 
 describe('a secondary index', () => {
   it('an equality lookup finds the right row through a second, real descent', () => {
-    const { rows, events } = run("SELECT * FROM accounts WHERE email = 'dee@x.org'");
+    const { rows, events } = run("SELECT * FROM accounts WHERE email = 'dee@x.org'", bigAccounts());
     expect(rows).toEqual([{ id: 4, email: 'dee@x.org', team: 'b', score: 40 }]);
     expect(text(events)).toContain('This table is clustered on `id`, and `email` is a secondary index');
     expect(text(events)).toContain('finding the row costs a second descent, through the clustered index itself');
@@ -127,7 +149,7 @@ describe('a secondary index', () => {
   });
 
   it('a covering query needs no second descent — the entry alone answers it', () => {
-    const { rows, events } = run("SELECT email FROM accounts WHERE email = 'dee@x.org'");
+    const { rows, events } = run("SELECT email FROM accounts WHERE email = 'dee@x.org'", bigAccounts());
     expect(rows).toEqual([{ email: 'dee@x.org' }]);
     expect(opens(events)).toBe(1);
     expect(text(events)).not.toContain('second descent');
@@ -204,8 +226,8 @@ describe('writes keep every index sound', () => {
   });
 
   it('DELETE found through the secondary index itself removes the right row', () => {
-    const { write, events } = run("DELETE FROM accounts WHERE email = 'dee@x.org'");
-    expect(ids(write!.rows)).toEqual([1, 2, 3, 5]);
+    const { write, events } = run("DELETE FROM accounts WHERE email = 'dee@x.org'", bigAccounts());
+    expect(ids(write!.rows.filter((r) => (r.id as number) < 1000))).toEqual([1, 2, 3, 5]);
     expect(text(events)).toContain('IndexScan finds the one row DELETE will remove.');
   });
 

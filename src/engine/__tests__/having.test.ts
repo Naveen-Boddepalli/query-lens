@@ -138,7 +138,18 @@ describe('results', () => {
 
 describe('the plan and the optimizer', () => {
   it('HAVING sits above the aggregate, and the WHERE still becomes an index/scan rewrite below it', () => {
-    const r = runQuery('SELECT dept, COUNT(*) FROM emp WHERE id = 2 GROUP BY dept HAVING COUNT(*) >= 1', db());
+    // `db()`'s usual 8 rows are too few for the honest cost gate (plan.md §25.4 C5) to ever prefer the index —
+    // padded locally, since `db()` itself is shared by every other test in this file and its row count matters to
+    // them. The filler never matches `id = 2` or has a `dept`, so it never reaches this query's own HAVING clause.
+    const padded: Database = {
+      tables: {
+        emp: {
+          ...db().tables.emp!,
+          rows: [...db().tables.emp!.rows, ...Array.from({ length: 30 }, (_, i) => ({ id: 1000 + i, dept: null, pay: 0, boss: null }))],
+        },
+      },
+    };
+    const r = runQuery('SELECT dept, COUNT(*) FROM emp WHERE id = 2 GROUP BY dept HAVING COUNT(*) >= 1', padded);
     expect(r.rows).toEqual([{ dept: 'eng', 'COUNT(*)': 1 }]);
     expect(rules(r.events)).toContain('index-selection'); // the rules see through the Having
     const last = [...r.events].reverse().find((e) => e.stage === 'optimize' && e.rule === 'index-selection');

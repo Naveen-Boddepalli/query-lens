@@ -39,7 +39,7 @@ describe('challenges', () => {
     'sort-spill': 'SELECT * FROM users ORDER BY age;',
     'hash-beats-loop': 'SELECT * FROM authors JOIN posts ON authors.id = posts.authorId;',
     'dirty-eviction': "UPDATE users SET name = 'edited' WHERE age > 30;",
-    'range-leap': 'SELECT * FROM users WHERE id > 40;',
+    'range-leap': 'SELECT * FROM users WHERE id > 44;',
   };
 
   it('has a solution wired for every challenge', () => {

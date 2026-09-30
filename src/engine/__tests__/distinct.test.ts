@@ -188,7 +188,19 @@ describe('the two strategies are different operators with different costs', () =
 
 describe('the optimizer sees through DISTINCT', () => {
   it('still turns an equality into an index lookup, and keeps the DISTINCT and LIMIT above it', () => {
-    const r = run('SELECT DISTINCT a FROM t WHERE id = 2 LIMIT 5');
+    // `db()`'s usual 8 rows are too few for the honest cost gate (plan.md §25.4 C5) to ever prefer the index —
+    // padded locally, since `db()` itself is shared by every other test in this file and its row count matters
+    // to them. The filler never matches `id = 2`, so it never reaches the DISTINCT this test is about.
+    const padded: Database = {
+      tables: {
+        t: {
+          ...db().tables.t!,
+          rows: [...db().tables.t!.rows, ...Array.from({ length: 30 }, (_, i) => ({ id: 1000 + i, a: 'z', b: 9 }))],
+        },
+      },
+    };
+    const r = runQuery('SELECT DISTINCT a FROM t WHERE id = 2 LIMIT 5', padded, HASH);
+    if (r.error) throw new Error(r.error.message);
     expect(r.rows).toEqual([{ a: 'y' }]);
     const rewrite = r.events.find((e) => e.stage === 'optimize' && e.rule === 'index-selection');
     expect(rewrite).toBeDefined();

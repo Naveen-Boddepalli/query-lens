@@ -33,7 +33,14 @@ function tableOf(rows: Row[], indexedColumns: string[] = ['id', 'grp']): Table {
 /** 40 rows, ids 1..40, `grp` cycling 0..4 — every group value repeats 8 times, spread across many pages. */
 function cycling(): Database {
   const rows: Row[] = Array.from({ length: 40 }, (_, i) => ({ id: i + 1, grp: i % GROUPS, label: `r${String(i + 1)}` }));
-  return { tables: { items: tableOf(rows) } };
+  // Padding so the honest cost gate (plan.md §25.4 C5) still favors the index: with only 40 rows and 5 distinct
+  // values, a B+Tree's own overhead (levels + one heap page per match) can honestly cost more than just scanning
+  // 40 rows outright — too small a table for any index to pay for itself. Far-away filler (ids and `grp`s no other
+  // test ever names) pushes `ndistinct(grp)` up enough that a uniform 1/ndistinct estimate reads any of the five
+  // real groups as highly selective — the documented blind spot of an ndistinct-only estimator facing skewed
+  // cardinality, not a number invented for this test alone.
+  const filler: Row[] = Array.from({ length: 150 }, (_, i) => ({ id: 100000 + i, grp: 90000 + i, label: 'filler' }));
+  return { tables: { items: tableOf([...rows, ...filler]) } };
 }
 
 const run = (sql: string, db: Database = cycling()) => runQuery(sql, db);
@@ -77,7 +84,7 @@ describe('an index on a column that repeats', () => {
     const { rows } = run('SELECT id FROM items WHERE grp >= 3 ORDER BY id');
     expect(rows).toEqual(inRange.map((r) => ({ id: r.id })));
     const exclusive = run('SELECT id FROM items WHERE grp > 3 ORDER BY id').rows;
-    expect(exclusive).toEqual(cycling().tables.items!.rows.filter((r) => r.grp === 4).map((r) => ({ id: r.id })));
+    expect(exclusive).toEqual(cycling().tables.items!.rows.filter((r) => (r.grp as number) > 3).map((r) => ({ id: r.id })));
     const below = run('SELECT id FROM items WHERE grp < 1 ORDER BY id').rows;
     expect(below).toEqual(cycling().tables.items!.rows.filter((r) => r.grp === 0).map((r) => ({ id: r.id })));
     const upTo = run('SELECT id FROM items WHERE grp <= 1 ORDER BY id').rows;
@@ -95,7 +102,14 @@ describe('a run of equal values that spans leaves', () => {
   /** Forty rows all holding the same value: the entries fill about ten 4-key leaves. */
   const same = (): Database => ({
     tables: {
-      items: tableOf(Array.from({ length: 40 }, (_, i) => ({ id: i + 1, grp: 7, label: 'x' })), ['grp']),
+      items: tableOf(
+        [
+          ...Array.from({ length: 40 }, (_, i) => ({ id: i + 1, grp: 7, label: 'x' })),
+          // Padding for the same reason `cycling()`'s does (plan.md §25.4 C5) — see its own comment above.
+          ...Array.from({ length: 100 }, (_, i) => ({ id: 1000 + i, grp: 9000 + i, label: 'filler' })),
+        ],
+        ['grp'],
+      ),
     },
   });
 
@@ -109,6 +123,8 @@ describe('a run of equal values that spans leaves', () => {
     const rows: Row[] = [
       ...Array.from({ length: 8 }, (_, i) => ({ id: i + 1, grp: 1, label: 'a' })),
       ...Array.from({ length: 8 }, (_, i) => ({ id: i + 9, grp: 2, label: 'b' })),
+      // Padding for the same reason `cycling()`'s does (plan.md §25.4 C5) — see its own comment above.
+      ...Array.from({ length: 100 }, (_, i) => ({ id: 1000 + i, grp: 9000 + i, label: 'filler' })),
     ];
     const table = tableOf(rows, ['grp']);
     const tree = buildIndex(buildHeap(table, 4), 'grp');
@@ -131,7 +147,7 @@ describe('writes on an index with repeated values', () => {
   it('DELETE by a repeated value removes every such row and drops each one’s own entry', () => {
     const { rows, write, events } = run('DELETE FROM items WHERE grp = 2');
     expect(rows).toHaveLength(8);
-    expect(write?.rows).toHaveLength(32);
+    expect(write?.rows).toHaveLength(182);
     expect(write?.rows.some((r) => r.grp === 2)).toBe(false);
     // Each of the eight rows dropped an entry from *both* trees — the grp tree (8 entries for one value) and the id tree.
     const drops = events.filter((e) => e.label.startsWith('Delete removes'));
@@ -160,7 +176,7 @@ describe('writes on an index with repeated values', () => {
 
   it('INSERT of a value already present adds an entry beside the others', () => {
     const { events, write } = run("INSERT INTO items (id, grp, label) VALUES (41, 3, 'new')");
-    expect(write?.rows).toHaveLength(41);
+    expect(write?.rows).toHaveLength(191);
     const text = events.map((e) => e.label).join('\n');
     expect(text).toContain('The `grp` B+Tree gets key 3');
   });

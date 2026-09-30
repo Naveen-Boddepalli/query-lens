@@ -19,7 +19,7 @@ import { arithmetic, negate } from '../value.ts';
 import type { CompareOp, Expr } from '../parser/index.ts';
 import { conjoin, conjuncts, equalityOn, exprToSql, formatRangeBounds, lookupText, rangeOn } from './plan.ts';
 import type { Plan, RangeBound } from './plan.ts';
-import { boundedRangeSelectivity, ndistinct } from './cost.ts';
+import { boundedRangeSelectivity, ndistinct, rootEstimate } from './cost.ts';
 
 export interface Rewrite {
   rule: string;
@@ -32,7 +32,7 @@ export interface Rewrite {
   prompt?: PredictionPrompt;
 }
 
-type Rule = (plan: Plan, table: Table) => Rewrite | null;
+type Rule = (plan: Plan, table: Table, rowsPerPage: number) => Rewrite | null;
 
 /**
  * `LIMIT` wraps the whole plan (`buildPlan.ts`), outside `Project` — but
@@ -495,19 +495,31 @@ export function leftmostPrefixNote(table: Table, where: Expr | undefined): strin
  * index"). When two or more each have a matching equality conjunct, this
  * picks the more selective one — higher `ndistinct`, so an equality on it
  * matches fewer rows on average — the same fact the cost model's own
- * equality-selectivity estimate already rests on, not a new page-cost
- * comparison inside the rule (§12's "plausible but false" line: a rule still
- * consults no cost estimate here, only the data itself). The conjunct that
- * lost stays in the recheck, exactly like every other conjunct the chosen
- * index can't answer — v0 has no way to intersect two index lookups.
+ * equality-selectivity estimate already rests on, not a second, independent
+ * comparison. The conjunct that lost stays in the recheck, exactly like every
+ * other conjunct the chosen index can't answer — v0 has no way to intersect
+ * two index lookups.
  *
  * A **composite** index (plan.md §25.4 B3) is entered through a *leftmost
  * prefix*: the run of its leading columns that each have an equality. An
  * equality on `a` enters an index on `(a, b)`; one on `b` alone cannot, and the
  * rule leaves that index unused — and says why. The more columns a candidate's
  * prefix pins, the fewer rows it selects, so that is what the choice compares.
+ *
+ * **Chosen by cost, not just by shape (plan.md §25.4 C5)**: once the most
+ * selective *candidate* is picked, its own estimated page cost is compared
+ * against the scan it would replace — `rootEstimate` on each, the same
+ * formula `EXPLAIN` already shows. A candidate that matches the predicate's
+ * shape but would not actually be cheaper (a low-selectivity index — most of
+ * `logins.status`'s rows are `'ok'`, say — costs more one random heap fetch
+ * at a time than one sequential scan already would) is *declined*: the rule
+ * still reports what it considered and why it said no, but the plan stays a
+ * `SeqScan`. This is the one thing plan.md §12 always drew a line at (*"an
+ * invented figure with a decimal point is worse than an honest guess"*) —
+ * not that a rule could never consult a cost, only that doing so had to be
+ * real, not a rule of thumb pretending to be one. `rootEstimate` already is.
  */
-const indexSelection: Rule = (input, table) => {
+const indexSelection: Rule = (input, table, rowsPerPage) => {
   const { limit, rest: plan } = unwrapLimit(input);
   if (plan.op !== 'Project') return null;
   const { sort, rest: belowSort } = unwrapSort(plan.child);
@@ -580,6 +592,23 @@ const indexSelection: Rule = (input, table) => {
         ...(composite ? { keys } : {}),
         ...(residual ? { residual } : {}),
       };
+  const nameOf = (c: EqualityCandidate) => (c.columns.length > 1 ? `(${c.columns.join(', ')})` : `\`${c.name}\``);
+
+  // Chosen by cost, not just by shape (plan.md §25.4 C5): a candidate that matches the predicate can still lose to
+  // the scan it would replace — a low-selectivity index costs one random heap fetch per match, which adds up past
+  // whatever one sequential scan already costs. `rootEstimate` on each side is the same formula `EXPLAIN` shows,
+  // not a new heuristic invented for this comparison alone.
+  const scanPages = rootEstimate(scan, table, rowsPerPage).estPages;
+  const indexPages = rootEstimate(indexScan, table, rowsPerPage).estPages;
+  if (indexPages >= scanPages) {
+    return {
+      rule: 'index-selection',
+      label: `${nameOf(chosen)} matches the predicate, but the estimated cost disagrees: the lookup would read about ${String(indexPages)} page${indexPages === 1 ? '' : 's'} against the scan's ${String(scanPages)} — no cheaper, so the scan stays and the whole predicate is rechecked there instead.`,
+      plan: input,
+      changed: new Set(),
+    };
+  }
+
   const root = rewrapLimit(
     limit,
     {
@@ -590,7 +619,6 @@ const indexSelection: Rule = (input, table) => {
   );
 
   const chosenDistinct = distinctOf(chosen);
-  const nameOf = (c: EqualityCandidate) => (c.columns.length > 1 ? `(${c.columns.join(', ')})` : `\`${c.name}\``);
   const runnerUpNames = runnersUp.map(nameOf).join(', ');
   const runnerUpDistinct = runnersUp.map(distinctOf);
   const choiceClause =
@@ -653,18 +681,22 @@ const indexSelection: Rule = (input, table) => {
  * rather than rescanning the table (plan.md §23.1).
  *
  * Deliberately narrower than `index-selection`: it only ever sees a plan
- * `index-selection` left untouched as a `SeqScan` — i.e. no equality conjunct
- * matched any indexed column at all — because an equality is always at least
- * as selective a starting point as a range, and choosing between an
+ * `index-selection` left untouched as a `SeqScan` — no equality conjunct
+ * matched any indexed column at all, *or* `index-selection` found one but
+ * declined it on cost (plan.md §25.4 C5) — because an equality is always at
+ * least as selective a starting point as a range, and choosing between an
  * equality's `1/ndistinct` and a range's interval fraction by comparing the
- * two numbers would be exactly the kind of cost-model call inside a rule
- * §12 rules out. At most one lower bound and one upper bound per column are
- * consumed; a second bound in the same direction (`age > 10 AND age > 20`)
- * is left as a residual recheck rather than merged — correctness never
- * depends on catching it, only how tightly the index narrows the search
- * does.
+ * two numbers directly would still be exactly the kind of made-up comparison
+ * §12 rules out; the real cost model, below, is a different thing. At most
+ * one lower bound and one upper bound per column are consumed; a second
+ * bound in the same direction (`age > 10 AND age > 20`) is left as a
+ * residual recheck rather than merged — correctness never depends on
+ * catching it, only how tightly the index narrows the search does.
+ *
+ * **Chosen by cost too**: the same gate `index-selection` applies against the scan it would replace — see its own
+ * doc comment for why.
  */
-const rangeIndexSelection: Rule = (input, table) => {
+const rangeIndexSelection: Rule = (input, table, rowsPerPage) => {
   const { limit, rest: plan } = unwrapLimit(input);
   if (plan.op !== 'Project') return null;
   const { sort, rest: belowSort } = unwrapSort(plan.child);
@@ -718,6 +750,21 @@ const rangeIndexSelection: Rule = (input, table) => {
     ...(chosen.high ? { high: chosen.high } : {}),
     ...(residual ? { residual } : {}),
   };
+
+  // Chosen by cost, not just by shape (plan.md §25.4 C5) — the same gate `index-selection` applies, see its own
+  // doc comment: a range that matches the predicate can still cost more than the scan it would replace once it
+  // spans enough of the table.
+  const scanPages = rootEstimate(scan, table, rowsPerPage).estPages;
+  const rangePages = rootEstimate(rangeScan, table, rowsPerPage).estPages;
+  if (rangePages >= scanPages) {
+    return {
+      rule: 'range-index-selection',
+      label: `\`${chosen.column}\` matches the predicate's range, but the estimated cost disagrees: the range walk would read about ${String(rangePages)} page${rangePages === 1 ? '' : 's'} against the scan's ${String(scanPages)} — no cheaper, so the scan stays and the whole predicate is rechecked there instead.`,
+      plan: input,
+      changed: new Set(),
+    };
+  }
+
   const root = rewrapLimit(
     limit,
     { op: 'Project', columns: plan.columns, child: rewrapSort(sort, rewrapAggregate(aggregate, rangeScan)) },
@@ -817,11 +864,16 @@ export const WRITE_PATH_RULES: ReadonlySet<string> = new Set(OPTIMIZER_RULES);
  *
  * `enabled` defaults to all rules — the pipeline (`emit.ts`) never passes it.
  * `/tools/planner` (plan.md §22.3) passes a subset so a rule can be toggled
- * off and its effect on the plan watched.
+ * off and its effect on the plan watched. `rowsPerPage` is threaded through to
+ * every rule (plan.md §25.4 C5): `index-selection`/`range-index-selection` are
+ * the first rules that actually need it, to compare an index lookup's own
+ * estimated page cost against the scan it would replace — see their own doc
+ * comments for what changed once a rule could ask that question at all.
  */
 export function optimize(
   plan: Plan,
   table: Table,
+  rowsPerPage: number,
   enabled: ReadonlySet<string> = new Set(OPTIMIZER_RULES),
 ): Rewrite[] {
   const steps: Rewrite[] = [];
@@ -829,7 +881,7 @@ export function optimize(
 
   for (const { name, apply } of RULES) {
     if (!enabled.has(name)) continue;
-    const rewrite = apply(current, table);
+    const rewrite = apply(current, table, rowsPerPage);
     if (!rewrite) continue;
     steps.push(rewrite);
     current = rewrite.plan;

@@ -5,11 +5,13 @@ import { optimize, OPTIMIZER_RULES, scanPredicate } from '../planner/optimize.ts
 import { conjoin, conjuncts, equalityOn, exprToSql } from '../planner/plan.ts';
 import type { Plan } from '../planner/plan.ts';
 import { createSeedDatabase } from '../seed.ts';
+import { DEFAULT_ENGINE_OPTIONS } from '../types.ts';
 import type { Table } from '../types.ts';
 
 const db = createSeedDatabase();
 const users = db.tables.users!;
 const noIndex: Table = { ...users, indexedColumns: [] };
+const ROWS_PER_PAGE = DEFAULT_ENGINE_OPTIONS.rowsPerPage;
 
 function ast(sql: string) {
   const out = parse(sql);
@@ -38,7 +40,7 @@ function shape(p: Plan): string[] {
 
 function final(sql: string, table: Table = users): Plan {
   const canonical = plan(sql);
-  const steps = optimize(canonical, table);
+  const steps = optimize(canonical, table, ROWS_PER_PAGE);
   return steps.length === 0 ? canonical : steps[steps.length - 1]!.plan;
 }
 
@@ -183,7 +185,7 @@ describe('buildPlan — HashAggregate', () => {
 
 describe('optimize — constant folding', () => {
   it('drops an always-true literal comparison, keeping the rest of the predicate', () => {
-    const steps = optimize(plan('SELECT * FROM users WHERE 1 = 1 AND id = 5'), users);
+    const steps = optimize(plan('SELECT * FROM users WHERE 1 = 1 AND id = 5'), users, ROWS_PER_PAGE);
     const folded = steps.find((s) => s.rule === 'constant-folding');
     expect(folded).toBeDefined();
     // constant-folding runs before predicate-pushdown, so the predicate still
@@ -218,21 +220,21 @@ describe('optimize — constant folding', () => {
 
   it('does not fold a column against a literal, or two different columns', () => {
     expect(
-      optimize(plan('SELECT * FROM users WHERE age > 30'), users).some((s) => s.rule === 'constant-folding'),
+      optimize(plan('SELECT * FROM users WHERE age > 30'), users, ROWS_PER_PAGE).some((s) => s.rule === 'constant-folding'),
     ).toBe(false);
     expect(
-      optimize(plan('SELECT * FROM users WHERE id = age'), users).some((s) => s.rule === 'constant-folding'),
+      optimize(plan('SELECT * FROM users WHERE id = age'), users, ROWS_PER_PAGE).some((s) => s.rule === 'constant-folding'),
     ).toBe(false);
   });
 
   it('does not fold a comparison against NULL — UNKNOWN, not foldable', () => {
-    const steps = optimize(plan('SELECT * FROM users WHERE NULL = NULL AND id = 5'), users);
+    const steps = optimize(plan('SELECT * FROM users WHERE NULL = NULL AND id = 5'), users, ROWS_PER_PAGE);
     expect(steps.some((s) => s.rule === 'constant-folding')).toBe(false);
   });
 
   it('does not fire when there is no WHERE, or nothing foldable', () => {
-    expect(optimize(plan('SELECT * FROM users'), users)).toHaveLength(0);
-    expect(optimize(plan('SELECT * FROM users WHERE age > 30'), users).map((s) => s.rule)).toEqual([
+    expect(optimize(plan('SELECT * FROM users'), users, ROWS_PER_PAGE)).toHaveLength(0);
+    expect(optimize(plan('SELECT * FROM users WHERE age > 30'), users, ROWS_PER_PAGE).map((s) => s.rule)).toEqual([
       'predicate-pushdown',
     ]);
   });
@@ -240,7 +242,7 @@ describe('optimize — constant folding', () => {
 
 describe('optimize — predicate pushdown', () => {
   it('folds the Filter into the scan', () => {
-    const steps = optimize(plan('SELECT * FROM users WHERE age > 30'), users);
+    const steps = optimize(plan('SELECT * FROM users WHERE age > 30'), users, ROWS_PER_PAGE);
     const pushdown = steps.find((s) => s.rule === 'predicate-pushdown');
     expect(pushdown).toBeDefined();
     expect(shape(pushdown!.plan)).toEqual(['Project', 'SeqScan']);
@@ -248,7 +250,7 @@ describe('optimize — predicate pushdown', () => {
   });
 
   it('does not fire when there is no WHERE', () => {
-    expect(optimize(plan('SELECT * FROM users'), users)).toHaveLength(0);
+    expect(optimize(plan('SELECT * FROM users'), users, ROWS_PER_PAGE)).toHaveLength(0);
   });
 
   it('preserves the predicate exactly', () => {
@@ -279,7 +281,7 @@ describe('optimize — index selection', () => {
   });
 
   it('a range predicate on the indexed column becomes an IndexRangeScan instead (range-index-selection, plan.md §23.1)', () => {
-    expect(shape(final('SELECT * FROM users WHERE id > 5'))).toEqual(['Project', 'IndexRangeScan']);
+    expect(shape(final('SELECT * FROM users WHERE id > 44'))).toEqual(['Project', 'IndexRangeScan']);
   });
 
   it('stays a SeqScan when the equality is on an unindexed column', () => {
@@ -298,18 +300,14 @@ describe('optimize — index selection', () => {
 });
 
 describe('optimize — index selection with two candidate indexes (plan.md §22.2)', () => {
-  // `id` is unique (4 distinct of 4 rows); `category` is not (2 distinct).
-  // `id` is declared *second* — the choice has to be about selectivity, not
+  // `id` is unique (100 distinct of 100 rows); `category` is not (10 distinct, 10 rows each — plan.md §25.4 C5
+  // needs enough rows for a B+Tree's own overhead to honestly pay for itself, which the original 4-row table never
+  // gave either index a chance to prove). `id` is declared *second* — the choice has to be about selectivity, not
   // declaration order, or this table would prove nothing.
   const things: Table = {
     name: 'things',
     columns: ['id', 'category'],
-    rows: [
-      { id: 1, category: 'a' },
-      { id: 2, category: 'a' },
-      { id: 3, category: 'b' },
-      { id: 4, category: 'b' },
-    ],
+    rows: Array.from({ length: 100 }, (_, i) => ({ id: i + 1, category: String.fromCharCode(97 + Math.floor(i / 10)) })),
     indexedColumns: ['category', 'id'],
   };
 
@@ -321,20 +319,20 @@ describe('optimize — index selection with two candidate indexes (plan.md §22.
   it('with two matching conjuncts, picks the more selective index and rechecks the other', () => {
     const p = final("SELECT * FROM things WHERE category = 'a' AND id = 2", things);
     const scan = p.op === 'Project' ? p.child : null;
-    // id (4 distinct) beats category (2 distinct) — chosen even though it
+    // id (100 distinct) beats category (10 distinct) — chosen even though it
     // was declared second in indexedColumns.
     expect(scan).toMatchObject({ op: 'IndexScan', column: 'id', key: 2 });
     expect(scan && scan.op === 'IndexScan' && exprToSql(scan.residual!)).toBe("category = 'a'");
   });
 
   it('names the runner-up and the selectivity numbers in the narration', () => {
-    const steps = optimize(plan("SELECT * FROM things WHERE category = 'a' AND id = 2"), things);
+    const steps = optimize(plan("SELECT * FROM things WHERE category = 'a' AND id = 2"), things, ROWS_PER_PAGE);
     const step = steps.find((s) => s.rule === 'index-selection')!;
-    expect(step.label).toMatch(/`id` is indexed \(chosen over `category` — 4 distinct values beats 2/);
+    expect(step.label).toMatch(/`id` is indexed \(chosen over `category` — 100 distinct values beats 10/);
   });
 
   it('a table with two indexes but only one matching conjunct needs no choice, and says nothing about one', () => {
-    const steps = optimize(plan("SELECT * FROM things WHERE category = 'a'"), things);
+    const steps = optimize(plan("SELECT * FROM things WHERE category = 'a'"), things, ROWS_PER_PAGE);
     const step = steps.find((s) => s.rule === 'index-selection')!;
     expect(step.label).not.toMatch(/chosen over/);
   });
@@ -343,61 +341,58 @@ describe('optimize — index selection with two candidate indexes (plan.md §22.
   // table's `id` and its `title`, say), and the narration must not claim one
   // "beats" the other when the true fact is a tie broken by declaration
   // order. Caught live in `/tools/planner` against the shipped `posts`
-  // fixture (`id`/`title`, plan.md §22.2) before this test existed.
+  // fixture (`id`/`title`, plan.md §22.2) before this test existed. 30 rows,
+  // not 3 (plan.md §25.4 C5) — see `things`'s own comment above for why.
   const tied: Table = {
     name: 'tied',
     columns: ['id', 'slug'],
-    rows: [
-      { id: 1, slug: 'a' },
-      { id: 2, slug: 'b' },
-      { id: 3, slug: 'c' },
-    ],
+    rows: Array.from({ length: 30 }, (_, i) => ({ id: i + 1, slug: `s${String(i)}` })),
     indexedColumns: ['id', 'slug'],
   };
 
   it('never claims one index "beats" another when both are equally selective', () => {
-    const steps = optimize(plan("SELECT * FROM tied WHERE id = 2 AND slug = 'b'"), tied);
+    const steps = optimize(plan("SELECT * FROM tied WHERE id = 2 AND slug = 's1'"), tied, ROWS_PER_PAGE);
     const step = steps.find((s) => s.rule === 'index-selection')!;
     expect(step.label).not.toMatch(/beats/);
-    expect(step.label).toMatch(/`id` is indexed \(tied with `slug` at 3 distinct values each/);
+    expect(step.label).toMatch(/`id` is indexed \(tied with `slug` at 30 distinct values each/);
     expect(step.label).toMatch(/declared first/);
   });
 
   it('still picks a real IndexScan on a tie — declaration order, not an error', () => {
-    const p = final("SELECT * FROM tied WHERE id = 2 AND slug = 'b'", tied);
+    const p = final("SELECT * FROM tied WHERE id = 2 AND slug = 's1'", tied);
     expect(p).toMatchObject({ op: 'Project', child: { op: 'IndexScan', column: 'id', key: 2 } });
   });
 });
 
 describe('optimize — range-index-selection (leaf-chaining range scans, plan.md §23.1)', () => {
   it('a single lower bound becomes an IndexRangeScan with only a low bound', () => {
-    const p = final('SELECT * FROM users WHERE id > 30', users);
+    const p = final('SELECT * FROM users WHERE id > 44', users);
     const scan = p.op === 'Project' ? p.child : null;
-    expect(scan).toMatchObject({ op: 'IndexRangeScan', column: 'id', low: { value: 30, inclusive: false } });
+    expect(scan).toMatchObject({ op: 'IndexRangeScan', column: 'id', low: { value: 44, inclusive: false } });
     expect(scan).not.toHaveProperty('high');
   });
 
   it('>= sets inclusive: true on the low bound', () => {
-    const p = final('SELECT * FROM users WHERE id >= 30', users);
+    const p = final('SELECT * FROM users WHERE id >= 44', users);
     const scan = p.op === 'Project' ? p.child : null;
-    expect(scan).toMatchObject({ op: 'IndexRangeScan', low: { value: 30, inclusive: true } });
+    expect(scan).toMatchObject({ op: 'IndexRangeScan', low: { value: 44, inclusive: true } });
   });
 
   it('a single upper bound becomes an IndexRangeScan with only a high bound', () => {
-    const p = final('SELECT * FROM users WHERE id < 10', users);
+    const p = final('SELECT * FROM users WHERE id < 6', users);
     const scan = p.op === 'Project' ? p.child : null;
-    expect(scan).toMatchObject({ op: 'IndexRangeScan', column: 'id', high: { value: 10, inclusive: false } });
+    expect(scan).toMatchObject({ op: 'IndexRangeScan', column: 'id', high: { value: 6, inclusive: false } });
     expect(scan).not.toHaveProperty('low');
   });
 
   it('a BETWEEN (desugared to two conjuncts) sets both bounds, inclusive on each end', () => {
-    const p = final('SELECT * FROM users WHERE id BETWEEN 10 AND 20', users);
+    const p = final('SELECT * FROM users WHERE id BETWEEN 40 AND 44', users);
     const scan = p.op === 'Project' ? p.child : null;
     expect(scan).toMatchObject({
       op: 'IndexRangeScan',
       column: 'id',
-      low: { value: 10, inclusive: true },
-      high: { value: 20, inclusive: true },
+      low: { value: 40, inclusive: true },
+      high: { value: 44, inclusive: true },
     });
   });
 
@@ -419,55 +414,80 @@ describe('optimize — range-index-selection (leaf-chaining range scans, plan.md
     expect(shape(p)).toEqual(['Project', 'IndexScan']);
   });
 
+  // 40 rows, not 4 (plan.md §25.4 C5) — see `things`'s own comment above for why.
   const spans: Table = {
     name: 'spans',
     columns: ['id', 'ord'],
-    rows: [
-      { id: 1, ord: 10 },
-      { id: 2, ord: 20 },
-      { id: 3, ord: 30 },
-      { id: 4, ord: 40 },
-    ],
+    rows: Array.from({ length: 40 }, (_, i) => ({ id: i + 1, ord: (i + 1) * 10 })),
     indexedColumns: ['id', 'ord'],
   };
 
   it('with two range-indexable columns, picks the narrower estimated range and rechecks the other', () => {
-    // `id`'s own min/max is 1..4, so `id > 3` is 1/3 of its span; `ord`'s
-    // min/max is 10..40, and its own bound (10) sits exactly at that min, so
+    // `id`'s own min/max is 1..40, so `id > 37` is a narrow slice of its span; `ord`'s
+    // min/max is 10..400, and its own bound (10) sits exactly at that min, so
     // `ord > 10` spans the column's *entire* range — id is the narrower
     // fraction, and should win on that basis.
-    const p = final('SELECT * FROM spans WHERE id > 3 AND ord > 10', spans);
+    const p = final('SELECT * FROM spans WHERE id > 37 AND ord > 10', spans);
     const scan = p.op === 'Project' ? p.child : null;
     expect(scan).toMatchObject({ op: 'IndexRangeScan', column: 'id' });
     expect(scan && scan.op === 'IndexRangeScan' && exprToSql(scan.residual!)).toBe('ord > 10');
   });
 
   it('names the runner-up in the narration when there is a choice to make', () => {
-    const steps = optimize(plan('SELECT * FROM spans WHERE id > 3 AND ord > 10'), spans);
+    const steps = optimize(plan('SELECT * FROM spans WHERE id > 37 AND ord > 10'), spans, ROWS_PER_PAGE);
     const step = steps.find((s) => s.rule === 'range-index-selection')!;
     expect(step.label).toMatch(/`id` is indexed and.*chosen over `ord`/);
   });
 
+  // 40 rows, not 4 (plan.md §25.4 C5) — see `things`'s own comment above for why.
   const tiedSpans: Table = {
     name: 'tiedSpans',
     columns: ['id', 'ord'],
-    rows: [
-      { id: 1, ord: 1 },
-      { id: 2, ord: 2 },
-      { id: 3, ord: 3 },
-      { id: 4, ord: 4 },
-    ],
+    rows: Array.from({ length: 40 }, (_, i) => ({ id: i + 1, ord: i + 1 })),
     indexedColumns: ['id', 'ord'],
   };
 
   it('never claims one range "beats" another when both are equally selective', () => {
-    // id and ord run over the exact same 1..4 values, so `> 2` on either is
+    // id and ord run over the exact same 1..40 values, so `> 36` on either is
     // an identical fraction — an honest tie, not a false "narrower" claim.
-    const steps = optimize(plan('SELECT * FROM tiedSpans WHERE id > 2 AND ord > 2'), tiedSpans);
+    const steps = optimize(plan('SELECT * FROM tiedSpans WHERE id > 36 AND ord > 36'), tiedSpans, ROWS_PER_PAGE);
     const step = steps.find((s) => s.rule === 'range-index-selection')!;
     expect(step.label).not.toMatch(/chosen over/);
     expect(step.label).toMatch(/tied with `ord`/);
     expect(step.label).toMatch(/declared first/);
+  });
+});
+
+describe('optimize — chosen by cost, not just by shape (plan.md §25.4 C5)', () => {
+  // Only two distinct values, so even the uniform 1/ndistinct estimate reads either one as matching about half the
+  // table — a low-selectivity index in the shape of `logins.status`, plan.md §25.4 C5's own worked example.
+  const logins: Table = {
+    name: 'logins',
+    columns: ['id', 'status'],
+    rows: Array.from({ length: 50 }, (_, i) => ({ id: i + 1, status: i < 45 ? 'ok' : 'error' })),
+    indexedColumns: ['id', 'status'],
+  };
+
+  it('an equality that matches the predicate is declined once the index would cost more than the scan', () => {
+    expect(shape(final("SELECT * FROM logins WHERE status = 'ok'", logins))).toEqual(['Project', 'SeqScan']);
+    const steps = optimize(plan("SELECT * FROM logins WHERE status = 'ok'"), logins, ROWS_PER_PAGE);
+    const step = steps.find((s) => s.rule === 'index-selection')!;
+    expect(step.changed.size).toBe(0);
+    expect(step.label).toMatch(/estimated cost disagrees/);
+    expect(step.label).toMatch(/no cheaper/);
+  });
+
+  it('a selective equality on the same table is still accepted — the gate compares cost, it does not just refuse', () => {
+    // `id` is unique on the same 50-row table `status` just lost on: the difference is the cost, not the table.
+    expect(shape(final('SELECT * FROM logins WHERE id = 5', logins))).toEqual(['Project', 'IndexScan']);
+  });
+
+  it('a wide range that matches the predicate is declined the same way', () => {
+    const steps = optimize(plan('SELECT * FROM users WHERE id > 20'), users, ROWS_PER_PAGE);
+    const step = steps.find((s) => s.rule === 'range-index-selection')!;
+    expect(step.changed.size).toBe(0);
+    expect(step.label).toMatch(/estimated cost disagrees/);
+    expect(shape(final('SELECT * FROM users WHERE id > 20'))).toEqual(['Project', 'SeqScan']);
   });
 });
 
@@ -512,6 +532,7 @@ describe('optimize — index-only scan', () => {
     const steps = optimize(
       plan('SELECT id FROM users WHERE id = 5'),
       users,
+      ROWS_PER_PAGE,
       new Set(['predicate-pushdown', 'index-selection']),
     );
     expect(steps.map((s) => s.rule)).toEqual(['predicate-pushdown', 'index-selection']);
@@ -533,7 +554,7 @@ describe('optimize — LIMIT stays transparent to the rewrites', () => {
   });
 
   it('a bare LIMIT with no WHERE fires no rule, and the count is preserved', () => {
-    expect(optimize(plan('SELECT * FROM users LIMIT 3'), users)).toHaveLength(0);
+    expect(optimize(plan('SELECT * FROM users LIMIT 3'), users, ROWS_PER_PAGE)).toHaveLength(0);
     expect(plan('SELECT * FROM users LIMIT 3')).toMatchObject({ op: 'Limit', count: 3 });
   });
 });
@@ -558,7 +579,7 @@ describe('optimize — Sort stays transparent to the rewrites', () => {
   });
 
   it('a bare ORDER BY with no WHERE fires no rule, and the Sort is preserved', () => {
-    expect(optimize(plan('SELECT * FROM users ORDER BY age'), users)).toHaveLength(0);
+    expect(optimize(plan('SELECT * FROM users ORDER BY age'), users, ROWS_PER_PAGE)).toHaveLength(0);
     expect(plan('SELECT * FROM users ORDER BY age')).toMatchObject({
       op: 'Project',
       child: { op: 'Sort', column: 'age' },
@@ -585,7 +606,7 @@ describe('optimize — HashAggregate stays transparent to the rewrites', () => {
   });
 
   it('a bare GROUP BY with no WHERE fires no rule, and the HashAggregate is preserved', () => {
-    expect(optimize(plan('SELECT age, COUNT(*) FROM users GROUP BY age'), users)).toHaveLength(0);
+    expect(optimize(plan('SELECT age, COUNT(*) FROM users GROUP BY age'), users, ROWS_PER_PAGE)).toHaveLength(0);
     expect(plan('SELECT age, COUNT(*) FROM users GROUP BY age')).toMatchObject({
       op: 'Project',
       child: { op: 'HashAggregate', groupBy: ['age'] },
@@ -615,7 +636,7 @@ describe('optimize — general properties', () => {
   });
 
   it('marks exactly the node each rule produced', () => {
-    const steps = optimize(plan('SELECT * FROM users WHERE id = 5'), users);
+    const steps = optimize(plan('SELECT * FROM users WHERE id = 5'), users, ROWS_PER_PAGE);
     expect(steps.map((s) => s.rule)).toEqual(['predicate-pushdown', 'index-selection']);
     for (const step of steps) {
       expect(step.changed.size).toBe(1);
@@ -628,7 +649,7 @@ describe('optimize — general properties', () => {
 
   it('is idempotent — re-running the rules changes nothing further', () => {
     const once = final('SELECT * FROM users WHERE id = 5');
-    expect(optimize(once, users)).toHaveLength(0);
+    expect(optimize(once, users, ROWS_PER_PAGE)).toHaveLength(0);
   });
 });
 
@@ -647,11 +668,11 @@ describe('optimize — rule filter (plan.md §22.3 /tools/planner)', () => {
   });
 
   it('an empty set runs no rules — the canonical plan is untouched', () => {
-    expect(optimize(plan(sql), users, new Set())).toHaveLength(0);
+    expect(optimize(plan(sql), users, ROWS_PER_PAGE, new Set())).toHaveLength(0);
   });
 
   it('with only predicate-pushdown, the scan stays a SeqScan (no index step)', () => {
-    const steps = optimize(plan(sql), users, new Set(['predicate-pushdown']));
+    const steps = optimize(plan(sql), users, ROWS_PER_PAGE, new Set(['predicate-pushdown']));
     expect(steps.map((s) => s.rule)).toEqual(['predicate-pushdown']);
     expect(shape(steps.at(-1)!.plan)).toEqual(['Project', 'SeqScan']);
   });
@@ -659,12 +680,12 @@ describe('optimize — rule filter (plan.md §22.3 /tools/planner)', () => {
   it('index-selection cannot fire without pushdown — it needs the filter in the scan first', () => {
     // A real ordering lesson for the sandbox: turning pushdown off strands
     // index-selection with nothing to match (canonical is Project→Filter→SeqScan).
-    expect(optimize(plan(sql), users, new Set(['index-selection']))).toHaveLength(0);
+    expect(optimize(plan(sql), users, ROWS_PER_PAGE, new Set(['index-selection']))).toHaveLength(0);
   });
 
   it('omitting the argument runs every rule, unchanged from before', () => {
-    const withDefault = optimize(plan(sql), users);
-    const withAll = optimize(plan(sql), users, new Set(OPTIMIZER_RULES));
+    const withDefault = optimize(plan(sql), users, ROWS_PER_PAGE);
+    const withAll = optimize(plan(sql), users, ROWS_PER_PAGE, new Set(OPTIMIZER_RULES));
     expect(withDefault.map((s) => s.rule)).toEqual(withAll.map((s) => s.rule));
   });
 });

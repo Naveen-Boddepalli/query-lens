@@ -135,8 +135,20 @@ describe('a composite UNIQUE index', () => {
 });
 
 describe('the plan and the lookup', () => {
+  // Large enough that a unique lookup's own B+Tree overhead (levels + 1 heap page) is honestly cheaper than
+  // scanning it (plan.md §25.4 C5) — `accounts`'s usual 5 rows fit in a page or two on their own, too few for any
+  // index to pay for itself once the optimizer actually compares the two.
+  const big = accounts({
+    rows: Array.from({ length: 20 }, (_, i) => ({
+      id: i + 1,
+      email: i === 2 ? 'grace@x.org' : `user${String(i + 1)}@x.org`,
+      team: 'x',
+      role: 'dev',
+    })),
+  });
+
   it('an equality on the whole key says the index is unique, and returns one row', () => {
-    const { rows, events } = run("SELECT * FROM accounts WHERE email = 'grace@x.org'");
+    const { rows, events } = run("SELECT * FROM accounts WHERE email = 'grace@x.org'", big);
     expect(rows.map((r) => r.id)).toEqual([3]);
     expect(text(events.filter((e) => e.stage === 'optimize'))).toContain('The index is UNIQUE');
   });
@@ -150,7 +162,7 @@ describe('the plan and the lookup', () => {
 
   it('is an index like any other for the optimizer to choose between', () => {
     const nodes = flatten(
-      (run("SELECT * FROM accounts WHERE id = 3 AND email = 'grace@x.org'").events.filter((e): e is Extract<StepEvent, { stage: 'optimize' }> => e.stage === 'optimize').at(-1))!.after,
+      (run("SELECT * FROM accounts WHERE id = 3 AND email = 'grace@x.org'", big).events.filter((e): e is Extract<StepEvent, { stage: 'optimize' }> => e.stage === 'optimize').at(-1))!.after,
     );
     expect(nodes.some((n) => n.op === 'IndexScan')).toBe(true);
   });

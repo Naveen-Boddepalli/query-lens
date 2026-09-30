@@ -8,6 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Index vs. scan chosen by cost** (plan.md §25.4 C5, first slice) — `index-selection` and
+  `range-index-selection` no longer take an index just because it matches the predicate's shape: once the
+  most-selective candidate is picked, its own estimated page cost is compared against the scan it would
+  replace, the same formula `EXPLAIN` already shows. A candidate that would not actually be cheaper — a
+  low-selectivity index, or any index at all on a table too small for a B+Tree's own overhead to pay for
+  itself — is declined, and the step says what it considered and why: "matches the predicate, but the
+  estimated cost disagrees … no cheaper, so the scan stays." This retires `limits.mdx`'s "no cost-based
+  query optimization" line for these two rules; every other rewrite still fires on structural match alone,
+  and the join algorithm and join order (`/tools/join-order`) are still never chosen by cost. Twelve test
+  files needed their fixture tables sized up to stay meaningful under honest cost accounting, since this
+  engine's deliberately tiny constants meant most existing tables were too small for any index to ever win —
+  a real, if unglamorous, consequence of a cost comparison finally having teeth.
 - **Join ordering by dynamic programming** (plan.md §25.4 C4) — a new standalone, `/tools/join-order`,
   teaches Selinger's System R algorithm over the *subset lattice*: for `n` tables in a `JOIN` chain, the
   cheapest left-deep way to join every table in each of the `2^n - 1` subsets, built up bottom-up from

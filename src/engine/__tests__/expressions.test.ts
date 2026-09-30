@@ -11,6 +11,7 @@ import { parse } from '../parser/parser.ts';
 import type { Expr } from '../parser/ast.ts';
 import { exprToSql, optimize, buildPlan } from '../planner/index.ts';
 import { runQuery } from '../runQuery.ts';
+import { DEFAULT_ENGINE_OPTIONS } from '../types.ts';
 import type { Database, Row } from '../types.ts';
 
 function where(sql: string): Expr {
@@ -229,7 +230,7 @@ describe('queries with the new predicates, end to end', () => {
   it('a NOT (id = 5) is not mistaken for an index equality', () => {
     const parsed = parse('SELECT * FROM users WHERE NOT (id = 5)');
     if (!parsed.ok) throw new Error(parsed.error.message);
-    const steps = optimize(buildPlan(parsed.ast), db().tables.users!);
+    const steps = optimize(buildPlan(parsed.ast), db().tables.users!, DEFAULT_ENGINE_OPTIONS.rowsPerPage);
     expect(steps.map((s) => s.rule)).not.toContain('index-selection');
   });
 

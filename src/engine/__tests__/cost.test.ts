@@ -29,7 +29,7 @@ function ast(sql: string) {
 }
 const canonical = (sql: string) => buildPlan(ast(sql));
 const optimised = (sql: string, table: Table = users): Plan => {
-  const steps = optimize(canonical(sql), table);
+  const steps = optimize(canonical(sql), table, RPP);
   return steps.at(-1)?.plan ?? canonical(sql);
 };
 
@@ -253,8 +253,10 @@ describe('estimatePlan — IndexRangeScan', () => {
     // legitimately look pricier than reading every heap page once. A
     // genuine finding about the model, not a bug — matching how a real
     // optimizer sometimes prefers a table scan over a non-clustered index
-    // range.
-    const wideRange = rootEstimate(optimised('SELECT * FROM users WHERE id > 5'), users, RPP);
+    // range. `range-index-selection` now acts on exactly this finding
+    // (plan.md §25.4 C5), so `id > 5` no longer optimises *into* this
+    // plan — it is built directly here, the same shape the rule declined.
+    const wideRange = rootEstimate({ op: 'IndexRangeScan', table: 'users', column: 'id', low: { value: 5, inclusive: false } }, users, RPP);
     const fullScan = rootEstimate(canonical('SELECT * FROM users WHERE age > 30'), users, RPP);
     expect(wideRange.estPages).toBeGreaterThan(fullScan.estPages);
   });
