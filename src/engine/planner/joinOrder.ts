@@ -21,13 +21,20 @@
  * is kept consistent with. Ordering is deliberately scored on **page cost**, not row count: row count alone
  * cannot tell two orders with the same output size but very different rescan cost apart.
  *
- * Deliberately visualization-only (plan.md §25.4 C4's own scoping decision): this module never changes what a
- * real query actually executes as — `runQuery.ts`'s multi-join chain still always runs in the order it was
- * written. `/tools/join-order` and the Playground's own informational note both only ever *show* what this
- * function would have chosen, alongside the real, unchanged plan.
+ * Visualization-only when it was built (plan.md §25.4 C4's own scoping decision) — `/tools/join-order` and the
+ * Playground's informational note only ever *showed* what this function would have chosen. **Plan.md §25.4 C5
+ * slice 3 changes that for one well-scoped case**: `runQuery.ts` now actually reorders a chain of 2+ `JOIN`s
+ * before running it, *when every one is a plain inner join* — `reorderJoinsIfCheaper` below, and
+ * `rebuildJoinsForOrder`, which it's built on. A chain with any `LEFT JOIN` is never reordered: `LEFT JOIN` is
+ * not commutative or associative in general (`A LEFT JOIN B` keeps every `A` row regardless of `B`; flipping it,
+ * or moving another join between them, can change which rows get NULL-padded and when), and generalizing this
+ * DP to respect that would mean tracking a partial order among the steps, not just their cost — a materially
+ * different, harder problem this module does not attempt. For an eligible chain, this is the real, final order,
+ * not a second opinion — `/tools/join-order` and the note both still exist, but only ever have something to
+ * *show* (rather than something that already ran) when a `LEFT JOIN` keeps a chain out of scope.
  */
 
-import type { SelectStatement } from '../parser/index.ts';
+import type { JoinClause, SelectStatement, TableRef } from '../parser/index.ts';
 import type { Table } from '../types.ts';
 import { ndistinct } from './cost.ts';
 
@@ -245,4 +252,73 @@ export function joinGraphFromAst(
 /** The table order a multi-join query was actually *written* in — `FROM`'s table, then each `JOIN` in source order. */
 export function writtenOrderFromAst(ast: SelectStatement): string[] {
   return [ast.from.name, ...(ast.joins ?? []).map((j) => j.table.name)];
+}
+
+/** A chain real execution may reorder (plan.md §25.4 C5 slice 3): 2+ `JOIN`s, none of them `LEFT`. */
+export function isReorderableChain(ast: SelectStatement): boolean {
+  const joins = ast.joins ?? [];
+  return joins.length >= 2 && joins.every((j) => j.joinType !== 'left');
+}
+
+/**
+ * Rebuilds a valid left-deep `{from, joins}` pair for `order` — normally the DP's own winning order — reusing
+ * every original `JoinClause` exactly as parsed (same `on` expression, same span), just reassigning which table
+ * each one is considered to *introduce*. Sound because the graph `joinGraphFromAst` builds is always a spanning
+ * tree, one edge per non-`FROM` table, drawn straight from that table's own `ON` clause: `buildJoinPlan` only
+ * ever needs, for each step, *some* earlier-known table on the other side of a real equality — never that it be
+ * the immediately preceding one (`leftJoinValue`/`leftJoinKeyOf` already resolve a qualified reference against
+ * the whole chain so far, plan.md §25.4 C3 slice b) — so swapping which side of an unchanged predicate counts as
+ * "newly introduced" is all a reordering ever needs to do. `edges[i]` is `(ast.joins ?? [])[i]`'s own edge,
+ * the exact parallel `joinGraphFromAst` builds them in.
+ *
+ * Returns `null` if some step in `order` has no real edge back to anything earlier in it — this engine's grammar
+ * has no way to express a `JOIN` with no `ON` clause, so an order that would need a cross join can never be built
+ * here. The DP's own cost-minimizing search should never actually choose one on a connected graph (routing
+ * through the real tree is always cheaper), so this is a defensive check, not an expected outcome.
+ */
+export function rebuildJoinsForOrder(
+  ast: SelectStatement,
+  edges: readonly JoinOrderEdge[],
+  order: readonly string[],
+): { from: TableRef; joins: JoinClause[] } | null {
+  const joinList = ast.joins ?? [];
+  const edgeClause = new Map<JoinOrderEdge, JoinClause>(edges.map((e, i) => [e, joinList[i]!]));
+  const edgesByTable = new Map<string, JoinOrderEdge[]>();
+  for (const e of edges) {
+    edgesByTable.set(e.a, [...(edgesByTable.get(e.a) ?? []), e]);
+    edgesByTable.set(e.b, [...(edgesByTable.get(e.b) ?? []), e]);
+  }
+  const refFor = (name: string): TableRef => (name === ast.from.name ? ast.from : edgeClause.get(edgesByTable.get(name)![0]!)!.table);
+  // ^ any of `name`'s own edges names it the same way (every original clause's `table` is that same table's own
+  //   ref, regardless of which edge produced it), so the first is as good as any for recovering its `TableRef`.
+
+  const visited = new Set<string>([order[0]!]);
+  const joins: JoinClause[] = [];
+  for (let k = 1; k < order.length; k++) {
+    const name = order[k]!;
+    const edge = (edgesByTable.get(name) ?? []).find((e) => visited.has(e.a === name ? e.b : e.a));
+    if (!edge) return null;
+    joins.push({ ...edgeClause.get(edge)!, table: refFor(name) });
+    visited.add(name);
+  }
+  return { from: refFor(order[0]!), joins };
+}
+
+/**
+ * The one entry point `runQuery.ts` needs: for an eligible chain (`isReorderableChain`) whose cost-optimal order
+ * differs from how it was written, an `{from, joins}` pair to run instead — `null` when reordering does not apply
+ * (a `LEFT JOIN` somewhere, fewer than two `JOIN`s) or would not actually change anything (the written order is
+ * already the DP's own answer, or — defensively — `rebuildJoinsForOrder` found no real edge for it).
+ */
+export function reorderJoinsIfCheaper(
+  ast: SelectStatement,
+  tables: Record<string, Table>,
+  rowsPerPage: number,
+): { from: TableRef; joins: JoinClause[] } | null {
+  if (!isReorderableChain(ast)) return null;
+  const { nodes, edges } = joinGraphFromAst(ast, tables, rowsPerPage);
+  const winner = runJoinOrderDP(nodes, edges).winner;
+  const written = writtenOrderFromAst(ast);
+  if (winner.tables.join('\u0000') === written.join('\u0000')) return null;
+  return rebuildJoinsForOrder(ast, edges, winner.tables);
 }

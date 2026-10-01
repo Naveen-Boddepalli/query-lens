@@ -56,6 +56,12 @@ export function emitPlanEvents(
    * already is for `index-selection` — only `structuralJoinStrategy` (the resolved, concrete value) drives it.
    */
   joinStrategy?: JoinAlgorithm,
+  /**
+   * The table order this query was actually *typed* in — passed only when real execution (plan.md §25.4 C5
+   * slice 3) chose a different one, in which case `ast.from`/`ast.joins` below already reflect the chosen order,
+   * not the written one; `runQuery.ts`'s `applyCostOrder` is the only caller that ever sets this.
+   */
+  writtenJoinOrder?: readonly string[],
 ): Plan {
   const structuralJoinStrategy = joinStrategy ?? 'nested-loop';
   // Every table this query names, keyed by name — including `table` itself. A single join only ever needed the
@@ -68,6 +74,22 @@ export function emitPlanEvents(
     toPlanDisplay(plan, changed, estimatePlan(plan, table, rowsPerPage, otherTables));
 
   const leftScan: Plan = { op: 'SeqScan', table: ast.from.name };
+
+  // Said up front, before the trace below starts naming a different FROM table than the one typed (plan.md
+  // §25.4 C5 slice 3): real execution reordered this chain because it was honestly cheaper to.
+  if (writtenJoinOrder && writtenJoinOrder.length >= 2 && joinTables) {
+    const allTables: Record<string, Table> = { ...joinTables, [table.name]: table };
+    const { nodes, edges } = joinGraphFromAst(ast, allTables, rowsPerPage);
+    const chosenOrder = [ast.from.name, ...(ast.joins ?? []).map((j) => j.table.name)];
+    const writtenCost = costOfOrder(nodes, edges, writtenJoinOrder);
+    const chosenCost = costOfOrder(nodes, edges, chosenOrder);
+    const ratio = writtenCost.pages / Math.max(1, chosenCost.pages);
+    emit(
+      `This query's JOINs run in a different order than written (plan.md §25.4 C5 slice 3): a cost-based join-order search chose \`${chosenOrder.join(' → ')}\` over the written \`${writtenJoinOrder.join(' → ')}\` — an estimated ${String(chosenCost.pages)} pages against ${String(writtenCost.pages)}, about ${ratio.toFixed(1)}× cheaper. Unlike the algorithm each step runs (plan.md §25.4 C5 slice 2), there is no "declines but stays" version of this: every left-deep order of the same tables returns the same rows, so the cheaper one always wins.`,
+      { stage: 'plan', planTree: display(leftScan) },
+    );
+  }
+
   emit(
     `Start at the bottom: every plan begins by reading a table, so the base of the tree is a sequential scan of \`${ast.from.name}\`.`,
     { stage: 'plan', planTree: display(leftScan) },
@@ -106,19 +128,27 @@ export function emitPlanEvents(
   }
 
   // A second opinion on join *order* (plan.md §25.4 C4), for two or more JOINs only — a single one has no other
-  // order to consider. Deliberately informational: this never changes `current` or what actually executes, only
-  // what gets said about it — the same "estimate beside the real plan, never a decision" stance C1's stats and
-  // C2's q-error already take. `/tools/join-order` is the same search, with the whole subset lattice visible.
-  if (allJoins.length >= 2 && joinTables) {
+  // order to consider, and a chain `writtenJoinOrder` already reordered for real has nothing left to say here
+  // (the note above already said it). Otherwise informational: this never changes `current` or what actually
+  // executes, only what gets said about it — the same "estimate beside the real plan, never a decision" stance
+  // C1's stats and C2's q-error already take, and (plan.md §25.4 C5 slice 3) still the only stance a chain with a
+  // `LEFT JOIN` in it ever gets, since that is never reordered for real. `/tools/join-order` is the same search,
+  // with the whole subset lattice visible.
+  if (allJoins.length >= 2 && joinTables && !writtenJoinOrder) {
     const allTables: Record<string, Table> = { ...joinTables, [table.name]: table };
     const { nodes, edges } = joinGraphFromAst(ast, allTables, rowsPerPage);
     const dp = runJoinOrderDP(nodes, edges);
     const written = writtenOrderFromAst(ast);
     const writtenCost = costOfOrder(nodes, edges, written);
     const ratio = writtenCost.pages / dp.winner.pages;
+    const hasLeftJoin = allJoins.some((j) => j.joinType === 'left');
     emit(
       ratio >= 1.05
-        ? `A cost-based join-order search (a second opinion, not a rewrite — plan.md §25.4 C4) would instead join these ${String(nodes.length)} tables as ${dp.winner.tables.join(' → ')}: an estimated ${String(dp.winner.pages)} pages, against the ${String(writtenCost.pages)} the order actually written above costs — about ${ratio.toFixed(1)}× cheaper. This query still runs in the order it was written; nothing here changes that.`
+        ? `A cost-based join-order search (plan.md §25.4 C4) would instead join these ${String(nodes.length)} tables as ${dp.winner.tables.join(' → ')}: an estimated ${String(dp.winner.pages)} pages, against the ${String(writtenCost.pages)} the order actually written above costs — about ${ratio.toFixed(1)}× cheaper.${
+            hasLeftJoin
+              ? ' This chain is never reordered for real (plan.md §25.4 C5 slice 3): a LEFT JOIN is not commutative or associative in general, so the order above is what actually runs.'
+              : ' This query still runs in the order it was written; nothing here changes that.'
+          }`
         : `A cost-based join-order search (plan.md §25.4 C4) agrees with the order written above — among left-deep orderings of these ${String(nodes.length)} tables, this is already about as cheap as it gets.`,
       { stage: 'plan', planTree: display(current) },
     );

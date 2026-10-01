@@ -33,7 +33,15 @@ export {
   toPlanDisplay,
 } from './planner/index.ts';
 export type { CostEstimate, PlanCost } from './planner/index.ts';
-export { costOfOrder, joinGraphFromAst, runJoinOrderDP, writtenOrderFromAst } from './planner/joinOrder.ts';
+export {
+  costOfOrder,
+  isReorderableChain,
+  joinGraphFromAst,
+  rebuildJoinsForOrder,
+  reorderJoinsIfCheaper,
+  runJoinOrderDP,
+  writtenOrderFromAst,
+} from './planner/joinOrder.ts';
 export type { JoinOrderCandidate, JoinOrderEdge, JoinOrderNode, JoinOrderResult, SubsetPlan } from './planner/joinOrder.ts';
 export {
   buildHeap,

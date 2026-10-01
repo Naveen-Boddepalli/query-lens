@@ -1,8 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { costOfOrder, joinGraphFromAst, runJoinOrderDP, writtenOrderFromAst } from '../planner/joinOrder.ts';
+import {
+  costOfOrder,
+  isReorderableChain,
+  joinGraphFromAst,
+  rebuildJoinsForOrder,
+  reorderJoinsIfCheaper,
+  runJoinOrderDP,
+  writtenOrderFromAst,
+} from '../planner/joinOrder.ts';
 import type { JoinOrderEdge, JoinOrderNode } from '../planner/joinOrder.ts';
-import { createJoinOrderDemoDatabase } from '../seed.ts';
+import { createJoinDemoDatabase, createJoinOrderDemoDatabase } from '../seed.ts';
 import { parse } from '../parser/index.ts';
+import { exprToSql } from '../planner/plan.ts';
 import { DEFAULT_ENGINE_OPTIONS } from '../types.ts';
 
 describe('runJoinOrderDP (plan.md §25.4 C4)', () => {
@@ -135,5 +144,96 @@ describe('joinGraphFromAst / writtenOrderFromAst', () => {
     const { edges } = joinGraphFromAst(parsed.ast, db.tables, 4);
     // The second edge connects departments (not the immediately preceding `employees`) to projects.
     expect(edges[1]).toMatchObject({ a: 'departments', b: 'projects' });
+  });
+});
+
+describe('isReorderableChain (plan.md §25.4 C5 slice 3)', () => {
+  it('a single JOIN has nothing to reorder', () => {
+    const parsed = parse('SELECT * FROM authors JOIN posts ON authors.id = posts.authorId');
+    if (!parsed.ok) throw new Error(parsed.error.message);
+    expect(isReorderableChain(parsed.ast)).toBe(false);
+  });
+
+  it('2+ plain JOINs are eligible', () => {
+    const parsed = parse('SELECT * FROM departments JOIN employees ON departments.id = employees.deptId JOIN timesheets ON employees.id = timesheets.employeeId');
+    if (!parsed.ok) throw new Error(parsed.error.message);
+    expect(isReorderableChain(parsed.ast)).toBe(true);
+  });
+
+  it('any LEFT JOIN in the chain rules it out, even one step of several', () => {
+    const parsed = parse('SELECT * FROM departments JOIN employees ON departments.id = employees.deptId LEFT JOIN timesheets ON employees.id = timesheets.employeeId');
+    if (!parsed.ok) throw new Error(parsed.error.message);
+    expect(isReorderableChain(parsed.ast)).toBe(false);
+  });
+});
+
+describe('rebuildJoinsForOrder / reorderJoinsIfCheaper (plan.md §25.4 C5 slice 3)', () => {
+  it('reorders a hub-shaped tree, reusing every original ON predicate unchanged', () => {
+    // departments is a hub (edges to both employees and projects); the DP-optimal order moves `projects` from
+    // position 2 (written) to last — exercising the "a table's own edge search among several" path, not just a
+    // plain chain's one-edge-per-table case.
+    const db = createJoinOrderDemoDatabase();
+    const sql =
+      'SELECT * FROM departments JOIN projects ON departments.id = projects.deptId JOIN employees ON departments.id = employees.deptId JOIN timesheets ON employees.id = timesheets.employeeId';
+    const parsed = parse(sql);
+    if (!parsed.ok) throw new Error(parsed.error.message);
+
+    const result = reorderJoinsIfCheaper(parsed.ast, db.tables, DEFAULT_ENGINE_OPTIONS.rowsPerPage);
+    expect(result).not.toBeNull();
+    expect(result!.from.name).toBe('departments');
+    expect(result!.joins.map((j) => j.table.name)).toEqual(['employees', 'timesheets', 'projects']);
+    // Every predicate is exactly the one originally written for that table — nothing invented.
+    expect(result!.joins.map((j) => exprToSql(j.on))).toEqual([
+      'departments.id = employees.deptId',
+      'employees.id = timesheets.employeeId',
+      'departments.id = projects.deptId',
+    ]);
+  });
+
+  it('can move the FROM table itself — a leaf-shaped chain where the tiniest table wins the starting slot', () => {
+    // authors/posts: only one edge (authors.id = posts.authorId); padding `posts` to dwarf `authors` should make
+    // starting from `authors` (the written FROM) cheaper than from `posts` still, so this instead checks the
+    // *mechanism* directly — building a reorder to a chosen winner whose first table differs from what was written.
+    const db = createJoinDemoDatabase();
+    const sql = 'SELECT * FROM authors JOIN posts ON authors.id = posts.authorId';
+    const parsed = parse(sql);
+    if (!parsed.ok) throw new Error(parsed.error.message);
+    const { nodes, edges } = joinGraphFromAst(parsed.ast, db.tables, DEFAULT_ENGINE_OPTIONS.rowsPerPage);
+    const rebuilt = rebuildJoinsForOrder(parsed.ast, edges, ['posts', 'authors']);
+    expect(rebuilt).not.toBeNull();
+    expect(rebuilt!.from.name).toBe('posts');
+    expect(rebuilt!.joins).toHaveLength(1);
+    expect(rebuilt!.joins[0]!.table.name).toBe('authors');
+    // The same predicate, unchanged — just now introducing `authors` instead of `posts`.
+    expect(exprToSql(rebuilt!.joins[0]!.on)).toBe('authors.id = posts.authorId');
+    expect(nodes.map((n) => n.name)).toContain('authors');
+  });
+
+  it('returns null for an order that would need a cross join — this grammar has no way to express one', () => {
+    const db = createJoinOrderDemoDatabase();
+    const sql =
+      'SELECT * FROM departments JOIN employees ON departments.id = employees.deptId JOIN projects ON departments.id = projects.deptId';
+    const parsed = parse(sql);
+    if (!parsed.ok) throw new Error(parsed.error.message);
+    const { edges } = joinGraphFromAst(parsed.ast, db.tables, 4);
+    // employees and projects share no edge with each other — only with departments — so an order that visits
+    // one of them before departments has no real predicate to build a JoinClause from.
+    expect(rebuildJoinsForOrder(parsed.ast, edges, ['employees', 'projects', 'departments'])).toBeNull();
+  });
+
+  it('reorderJoinsIfCheaper returns null when the written order is already the cheapest', () => {
+    const db = createJoinOrderDemoDatabase();
+    // A plain chain, written in the order the DP would pick anyway (hub first, then its one child, one level deep).
+    const sql = 'SELECT * FROM departments JOIN employees ON departments.id = employees.deptId JOIN timesheets ON employees.id = timesheets.employeeId';
+    const parsed = parse(sql);
+    if (!parsed.ok) throw new Error(parsed.error.message);
+    expect(reorderJoinsIfCheaper(parsed.ast, db.tables, DEFAULT_ENGINE_OPTIONS.rowsPerPage)).toBeNull();
+  });
+
+  it('reorderJoinsIfCheaper returns null outright for an ineligible (single-JOIN) query', () => {
+    const db = createJoinDemoDatabase();
+    const parsed = parse('SELECT * FROM authors JOIN posts ON authors.id = posts.authorId');
+    if (!parsed.ok) throw new Error(parsed.error.message);
+    expect(reorderJoinsIfCheaper(parsed.ast, db.tables, 4)).toBeNull();
   });
 });

@@ -167,18 +167,22 @@ const T = (name: string): string => `src/pages/tools/${name}.tsx`;
  *  - 2026-09-30, join algorithm chosen by cost (§25.4 C5, second slice): `join-algorithm-selection` and its
  *    per-candidate cost comparison grew the engine chunk a little, pushing /compare a hair over its ceiling
  *    (168.1 kB measured + 3).
+ *  - 2026-10-01, join order chosen by cost (§25.4 C5, third slice): `reorderJoinsIfCheaper`/`rebuildJoinsForOrder`
+ *    pull `joinOrder.ts` into the engine chunk for every route that already carries it (not just /tools/join-order
+ *    and emit.ts's own narration anymore), pushing four routes over by a hair: /playground (311.3 kB measured + 3,
+ *    rounded to 315), /stages/:id, /trace and /tools/btree (each its own measured size + 3).
  */
 export const ROUTES: readonly RouteBudget[] = [
   { route: '/', roots: [P('LandingPage')], kb: 161, note: 'the landing page' },
-  { route: '/playground', roots: [P('PlaygroundPage')], kb: 311, note: 'the Playground: the editor, every stage panel, the engine — the heaviest route, and the one most people land on' },
+  { route: '/playground', roots: [P('PlaygroundPage')], kb: 315, note: 'the Playground: the editor, every stage panel, the engine — the heaviest route, and the one most people land on' },
   { route: '/stages', roots: ['src/ui/StagesLayout.tsx', P('StagesIndex')], kb: 161, note: 'the stage explainers, index' },
-  { route: '/stages/:id', roots: ['src/ui/StagesLayout.tsx', P('StagePage')], kb: 177, note: 'one stage explainer' },
+  { route: '/stages/:id', roots: ['src/ui/StagesLayout.tsx', P('StagePage')], kb: 180, note: 'one stage explainer' },
   { route: '/learn', roots: [P('LearnPage')], kb: 166, note: 'the lesson track' },
   { route: '/learn/:id', roots: [P('LessonPage')], kb: 167, note: 'one lesson' },
   { route: '/examples', roots: [P('ExamplesPage')], kb: 115, note: 'preset queries' },
   { route: '/gallery', roots: [P('GalleryPage')], kb: 162, note: 'named moments' },
   { route: '/compare', roots: [P('ComparePage')], kb: 171, note: 'index vs scan, policy vs policy, hash vs sort, join algorithms' },
-  { route: '/trace', roots: [P('TracePage')], kb: 164, note: 'the trace inspector' },
+  { route: '/trace', roots: [P('TracePage')], kb: 167, note: 'the trace inspector' },
   { route: '/progress', roots: [P('ProgressPage')], kb: 168, note: 'the progress dashboard' },
   { route: '/challenges', roots: [P('ChallengesPage')], kb: 164, note: 'challenge index' },
   { route: '/challenges/:id', roots: [P('ChallengePage')], kb: 283, note: 'one challenge' },
@@ -188,7 +192,7 @@ export const ROUTES: readonly RouteBudget[] = [
   { route: '/tools', roots: [P('ToolsIndexPage')], kb: 116, note: 'the tools index' },
   { route: '/tools/buffer-pool', roots: [T('BufferPoolToolPage')], kb: 165, note: 'buffer-pool sandbox' },
   { route: '/tools/parser', roots: [T('ParserToolPage')], kb: 164, note: 'tokenizer + parser sandbox' },
-  { route: '/tools/btree', roots: [T('BTreeToolPage')], kb: 164, note: 'B+Tree sandbox' },
+  { route: '/tools/btree', roots: [T('BTreeToolPage')], kb: 167, note: 'B+Tree sandbox' },
   { route: '/tools/page', roots: [T('PageToolPage')], kb: 162, note: 'slotted-page inspector' },
   { route: '/tools/sort', roots: [T('SortToolPage')], kb: 118, note: 'external merge sort' },
   { route: '/tools/planner', roots: [T('PlannerToolPage')], kb: 165, note: 'planner sandbox' },

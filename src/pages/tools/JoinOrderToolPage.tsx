@@ -19,12 +19,14 @@ import { btnSecondary, panelSurface, pill } from '../../ui/primitives.ts';
  * is built up from the cheapest way to join every smaller subset one table down. `src/engine/planner/joinOrder.ts`
  * is the real algorithm this page just renders — nothing here recomputes a cost of its own.
  *
- * Deliberately visualization-only, a scoping decision plan.md's own C4 entry leaves open and this page's build
- * settled explicitly: the query below still executes (in the Playground, or anywhere else) in the order it was
- * *written* — `FROM departments JOIN projects JOIN employees JOIN timesheets`, left to right. This tool, and the
- * matching note on a multi-join query's own Planner panel, only ever show what the DP would have chosen instead,
- * next to the real, unchanged plan — the same "estimate beside actual, never a decision" stance the cost model
- * already takes everywhere else (limits.mdx's own "no cost-based query optimization" line).
+ * Built visualization-only (plan.md §25.4 C4's own scoping decision), and still exactly that for a chain with a
+ * `LEFT JOIN` anywhere in it: `LEFT JOIN` is not commutative or associative in general, so real execution never
+ * reorders one, and this page only ever shows what the DP *would* have chosen, beside the real, unchanged plan.
+ * **The demo query below is a plain chain of inner `JOIN`s, though** (plan.md §25.4 C5 slice 3) — for exactly
+ * that shape, the Playground (and everywhere else) now actually *runs* the DP's own answer: `FROM departments
+ * JOIN employees JOIN timesheets JOIN projects`, not the "hub, then each branch" order written below. This page
+ * still exists because the DP's *reasoning* — the whole subset lattice, every candidate it weighed for each one,
+ * not just the winner — is worth seeing regardless of whether a given query gets to use it for real.
  *
  * The demo data (`createJoinOrderDemoDatabase`) is a tree, not a chain: `departments` is the hub, connecting to
  * both `employees` and `projects`; `timesheets` hangs off `employees` alone. Written the "natural" way — hub
@@ -124,12 +126,13 @@ export function JoinOrderToolPage() {
 
       <p className="text-label leading-relaxed text-ink-dim">
         Both are estimates from the same cost model the rest of the app uses — this page never runs a query, it
-        only costs hypothetical ones. Nothing here changes what the query above actually executes as: it still
-        runs in the order written, in the{' '}
+        only costs hypothetical ones. The demo query above is a plain chain of inner JOINs, though (plan.md §25.4
+        C5 slice 3), so unlike a chain with a LEFT JOIN in it, this <em>is</em> what actually runs — in the{' '}
         <Link to="/playground" className="underline underline-offset-2 hover:text-ink">
           Playground
         </Link>{' '}
-        and everywhere else. This is only ever a second opinion, shown beside the real plan.
+        and everywhere else. A LEFT JOIN is not commutative, so a chain with one in it is never reordered for
+        real, and stays exactly this: a second opinion, shown beside the plan that actually runs.
       </p>
 
       <div className={`${panelSurface} p-4`}>

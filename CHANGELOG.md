@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Join order chosen by cost** (plan.md §25.4 C5, third slice) — a chain of 2+ plain inner `JOIN`s now
+  actually runs in whichever left-deep order C4's own Selinger-style search finds cheapest, not necessarily
+  the order it was written in. Every original `JOIN` predicate is reused unchanged — reordering only ever
+  decides *which table joins when*, never invents a new condition. A chain with a `LEFT JOIN` anywhere in
+  it is never reordered, on purpose: `LEFT JOIN` is not commutative or associative in general, so doing so
+  could silently change which rows get NULL-padded, not just the cost. The plan-stage narration says up
+  front when a query's `JOIN`s run in a different order than typed, and why; `/tools/join-order` and the
+  Playground's "second opinion" note still exist for the one case that keeps needing them — a chain with a
+  `LEFT JOIN` in it.
 - **Join algorithm chosen by cost** (plan.md §25.4 C5, second slice) — a `JOIN`'s physical algorithm is no
   longer always nested-loop by default. `EngineOptions.joinStrategy` left unset now means every algorithm
   that could run each step — nested-loop, hash, sort-merge, and index nested-loop when the inner table has a

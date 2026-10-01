@@ -5,7 +5,7 @@ import { parse, parseStatement } from '../parser/index.ts';
 import { buildPlan } from '../planner/buildPlan.ts';
 import { rootEstimate } from '../planner/cost.ts';
 import { DEFAULT_ENGINE_OPTIONS } from '../types.ts';
-import type { Database, EngineOptions, PlanNode } from '../types.ts';
+import type { Database, EngineOptions, PlanNode, Row } from '../types.ts';
 
 const db = () => createJoinDemoDatabase();
 const run = (sql: string, database: Database = db(), options: EngineOptions = DEFAULT_ENGINE_OPTIONS) =>
@@ -746,17 +746,18 @@ describe('multi-join (plan.md §25.4 C3 slice b)', () => {
   // *not* indexed — every existing index lives on `posts` (`id`, `title`, `authorId`) — so a chain that asks for
   // `index-nested-loop` has to fall back to nested-loop at exactly this one step, proving the fallback is decided
   // per join step, not once for the whole query.
-  const threeTableDb = (): Database => {
+  const threeTableDb = (commentsCount = 3): Database => {
     const database = db();
-    database.tables.comments = {
-      name: 'comments',
-      columns: ['id', 'postId', 'body'],
-      rows: [
-        { id: 1, postId: 1, body: 'nice' }, // ada's post 1
-        { id: 2, postId: 1, body: 'great' }, // ada's post 1, a second comment
-        { id: 3, postId: 4, body: 'cool' }, // donald's post 10 (POST_AUTHORS[3]=2 → post id 4 is alan's post 4)
-      ],
-    };
+    const rows: Row[] = [
+      { id: 1, postId: 1, body: 'nice' }, // ada's post 1
+      { id: 2, postId: 1, body: 'great' }, // ada's post 1, a second comment
+      { id: 3, postId: 4, body: 'cool' }, // donald's post 10 (POST_AUTHORS[3]=2 → post id 4 is alan's post 4)
+    ];
+    // Padding beyond the real 3 (plan.md §25.4 C5 slice 3, for the specific test below that needs it): a
+    // `postId` far outside any real post's `id` never matches anything, so every other test's own correctness
+    // assertions are untouched — it only weighs in on whether cost-based reordering finds it worth starting from.
+    for (let i = rows.length; i < commentsCount; i++) rows.push({ id: i + 1, postId: 9999 + i, body: 'filler' });
+    database.tables.comments = { name: 'comments', columns: ['id', 'postId', 'body'], rows };
     return database;
   };
   const CHAIN_SQL =
@@ -827,7 +828,10 @@ describe('multi-join (plan.md §25.4 C3 slice b)', () => {
   });
 
   it('falls back per join step — the indexed step runs index-nested-loop, the unindexed one runs nested-loop', () => {
-    const { events } = run(CHAIN_SQL, threeTableDb(), INDEX_NESTED_LOOP);
+    // Padded so cost-based reordering (plan.md §25.4 C5 slice 3) keeps `comments` from simply moving first to
+    // dodge the unindexed probe it would otherwise need — with a real fallback still unavoidable somewhere, the
+    // reordered chain actually run is `posts → comments → authors`, not the written `authors → posts → comments`.
+    const { events } = run(CHAIN_SQL, threeTableDb(30), INDEX_NESTED_LOOP);
     const planStep = events.filter((e) => e.stage === 'plan').at(-1)!;
     if (planStep.stage !== 'plan') throw new Error('unreachable');
     const joinsInTree = (node: PlanNode): PlanNode[] => [
@@ -836,8 +840,8 @@ describe('multi-join (plan.md §25.4 C3 slice b)', () => {
     ];
     const joins = joinsInTree(planStep.planTree);
     expect(joins).toHaveLength(2);
-    expect(joins.find((j) => j.label.includes('authors'))?.label).toMatch(/index-nested-loop/);
     expect(joins.find((j) => j.label.includes('comments'))?.label).toMatch(/\(nested-loop\)/);
+    expect(joins.find((j) => j.label.includes('authors'))?.label).toMatch(/index-nested-loop/);
   });
 
   it('a chain of LEFT JOINs NULL-pads at every level independently', () => {
@@ -889,11 +893,13 @@ describe('multi-join (plan.md §25.4 C3 slice b)', () => {
     expect(sortRows(sorted)).toEqual(sortRows(hash));
   });
 
-  it("a chain of two or more JOINs gets a join-order second opinion (plan.md §25.4 C4) — informational only, never changing what runs", () => {
+  it('a chain of two or more plain JOINs is genuinely reordered when cost says so (plan.md §25.4 C5 slice 3)', () => {
     const { events, rows } = run(CHAIN_SQL, threeTableDb());
-    const note = events.find((e) => e.stage === 'plan' && e.label.includes('cost-based join-order search'));
-    expect(note?.label).toMatch(/would instead join these 3 tables as .+: an estimated \d+ pages, against the \d+/);
-    // The query itself still ran in the order written — the note is commentary, not a rewrite.
+    const note = events.find((e) => e.stage === 'plan' && e.label.includes("JOINs run in a different order than written"));
+    expect(note?.label).toMatch(/chose `comments → posts → authors` over the written `authors → posts → comments`/);
+    // The parse stage still narrates the query exactly as typed — only the plan/execution changed.
+    expect(events.find((e) => e.stage === 'parse' && /Read the FROM clause/.test(e.label))?.label).toContain('`authors`');
+    // The rows are unaffected either way — the point of associativity is that this is the same answer, cheaper.
     expect(sortRows(rows)).toEqual(
       sortRows([
         { 'authors.name': 'ada', 'posts.title': "ada's post 1", 'comments.body': 'nice' },
@@ -903,8 +909,21 @@ describe('multi-join (plan.md §25.4 C3 slice b)', () => {
     );
   });
 
+  it('a chain with a LEFT JOIN in it still only gets an informational second opinion (plan.md §25.4 C4) — never reordered for real', () => {
+    const sql = CHAIN_SQL.replace('JOIN comments', 'LEFT JOIN comments');
+    const { events, rows } = run(sql, threeTableDb());
+    const note = events.find((e) => e.stage === 'plan' && e.label.includes('cost-based join-order search'));
+    expect(note?.label).toMatch(/would instead join these 3 tables as comments → posts → authors: an estimated \d+ pages, against the \d+/);
+    expect(note?.label).toMatch(/never reordered for real.*LEFT JOIN is not commutative/);
+    // The query really did still run in the written order — the note is commentary, not a rewrite.
+    expect(events[0]).toBeDefined();
+    expect(events.find((e) => e.stage === 'plan' && /Start at the bottom/.test(e.label))?.label).toContain('`authors`');
+    expect(rows.length).toBeGreaterThan(0);
+  });
+
   it('a single JOIN gets no join-order note at all — there is only one order to have', () => {
     const { events } = run('SELECT authors.name, posts.title FROM authors JOIN posts ON authors.id = posts.authorId');
     expect(events.some((e) => e.stage === 'plan' && e.label.includes('cost-based join-order search'))).toBe(false);
+    expect(events.some((e) => e.stage === 'plan' && e.label.includes("JOINs run in a different order than written"))).toBe(false);
   });
 });

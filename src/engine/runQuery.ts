@@ -16,7 +16,7 @@ import {
   emitUpdateParseEvents,
   parseStatement,
 } from './parser/index.ts';
-import type { InsertStatement, Statement } from './parser/index.ts';
+import type { InsertStatement, SelectStatement, Statement } from './parser/index.ts';
 import { analyzeTable, statsToRows } from './stats.ts';
 import {
   emitDeletePlanEvents,
@@ -24,8 +24,10 @@ import {
   emitUpdatePlanEvents,
   findIndexNestedLoopJoins,
   findSortDistinct,
+  isReorderableChain,
   joinsIn,
   needsSortSpill,
+  reorderJoinsIfCheaper,
 } from './planner/index.ts';
 import type { Plan } from './planner/index.ts';
 import { buildHeap, createBufferPool } from './storage/index.ts';
@@ -68,6 +70,31 @@ export interface RunHooks {
   afterWrite?: (indexes: Record<string, BPlusTree>) => void;
 }
 
+/**
+ * `ast`, with its `JOIN`s reordered to the cheapest sequence `reorderJoinsIfCheaper` finds, alongside the order it
+ * was actually *typed* in (`writtenOrder`) — present only when reordering genuinely changed something, which is
+ * also the signal `emitPlanEvents` uses to narrate it. Otherwise `ast` comes back completely unchanged. Tolerant
+ * of a table that turns out not to exist: resolving `db.tables` here is a *look*, not the real validation (that
+ * happens right after, against whichever `ast` this returns), so a missing name just means "nothing to reorder,"
+ * never a different error than the query would have gotten anyway.
+ */
+function applyCostOrder(
+  ast: SelectStatement,
+  db: Database,
+  rowsPerPage: number,
+): { ast: SelectStatement; writtenOrder?: readonly string[] } {
+  if (!isReorderableChain(ast)) return { ast };
+  const names = [ast.from.name, ...(ast.joins ?? []).map((j) => j.table.name)];
+  const tables: Record<string, Table> = {};
+  for (const name of names) {
+    const t = db.tables[name];
+    if (!t) return { ast };
+    tables[name] = t;
+  }
+  const reordered = reorderJoinsIfCheaper(ast, tables, rowsPerPage);
+  return reordered ? { ast: { ...ast, from: reordered.from, joins: reordered.joins }, writtenOrder: names } : { ast };
+}
+
 export function runQuery(
   sql: string,
   db: Database,
@@ -80,11 +107,21 @@ export function runQuery(
   if (!parsed.ok) {
     return { events: drain(), rows: [], error: parsed.error };
   }
-  const ast = parsed.ast;
+  const parsedAst = parsed.ast;
   // EXPLAIN [ANALYZE] SELECT (plan.md §25.4 B6): the inner query, run and then reported as a plan.
-  if (ast.kind === 'explain') {
-    return explainResult(sql, ast, (inner) => runQuery(inner, db, options, hooks));
+  if (parsedAst.kind === 'explain') {
+    return explainResult(sql, parsedAst, (inner) => runQuery(inner, db, options, hooks));
   }
+  // A chain of 2+ plain inner JOINs may cost less in a different order (plan.md §25.4 C5 slice 3) — resolved here,
+  // before any table is looked up for real, so every later step (table/column validation, the heap, the plan
+  // itself) already sees whichever order will actually run. Left exactly as written when it is not eligible (a
+  // LEFT JOIN anywhere, fewer than two JOINs), already optimal, or names a table that turns out not to exist —
+  // the ordinary "no table called X" error just below is exactly as useful either way. `writtenJoinOrder` is only
+  // ever set alongside a real change, and is threaded through to `emitPlanEvents` so the trace can say so.
+  const { ast, writtenOrder: writtenJoinOrder } =
+    parsedAst.kind === 'select'
+      ? applyCostOrder(parsedAst, db, options.rowsPerPage)
+      : { ast: parsedAst, writtenOrder: undefined };
   const tableRef = ast.kind === 'insert' ? ast.into : ast.kind === 'update' || ast.kind === 'analyze' ? ast.table : ast.from;
 
   const table = db.tables[tableRef.name];
@@ -282,7 +319,9 @@ export function runQuery(
     };
   }
 
-  emitParseEvents(emit, ast);
+  // Always the query exactly as typed — `ast` may already be the cost-reordered version by this point (plan.md
+  // §25.4 C5 slice 3), but the parse stage narrates source text, never a planning decision; `parsedAst` never was.
+  emitParseEvents(emit, parsedAst.kind === 'select' ? parsedAst : ast);
   // Any `IN (subquery)` in the WHERE clause (plan.md §25.4 C3 slice c) runs exactly once here, before planning —
   // the parse-stage narration above already showed the query exactly as written.
   const resolvedWhere = resolveWhereSubqueries(ast.where, sql, (s) => runQuery(s, db, options));
@@ -296,6 +335,7 @@ export function runQuery(
     options.aggregateStrategy ?? 'hash',
     joinTables,
     options.joinStrategy,
+    writtenJoinOrder,
   );
 
   // Every joined table gets its own heap, its pages numbered right after whatever came before it — so all of them

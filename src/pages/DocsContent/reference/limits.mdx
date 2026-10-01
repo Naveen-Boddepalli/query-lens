@@ -85,15 +85,19 @@ concept explanation.
   including when the join column itself is NULL, since NULL never matches NULL there either. A chain may
   mix `LEFT` and inner freely, step by step — a row a `LEFT` step padded is itself a real row, so a later
   inner step in the same chain can still drop it if nothing matches its own NULLs. No `RIGHT`/`FULL`/`CROSS`.
-- **Four algorithms** — nested-loop (the default), hash, sort-merge, and **index nested-loop** —
-  chosen by whichever [Compare](/compare) forces; the engine never picks between them on its own. Every
-  step of a chain runs the same one, except index nested-loop: it applies **per step**, independently —
-  each step probes that step's own inner table's B+Tree once per outer row, so it needs an index on that
-  table's join column; a step without one quietly runs as a plain nested-loop instead, and the plan says
-  so for exactly that step. The other three never consult an index, and no `JOIN` side ever becomes an
-  `IndexScan` — a `WHERE` conjunct on the outer table of a query's first (and, so far, only) `JOIN` is
-  pushed into its scan, but that scan stays sequential. All four agree on every step's `LEFT JOIN`
-  NULL-padded rows the same way they already had to agree on everything else.
+- **Four algorithms** — nested-loop, hash, sort-merge, and **index nested-loop** — **chosen by cost**
+  (plan.md §25.4 C5 slice 2) whenever the caller does not force one: every algorithm that could run each
+  step is priced with the same formula [EXPLAIN](/docs/reference/sql) shows, and the cheapest wins, with
+  no "matches but costs more, stays anyway" outcome the way an index's own choice has — every algorithm is
+  a real, working plan, so one is always chosen, possibly the one already there. [Compare](/compare) and
+  the Planner sandbox still force one explicitly to see its own effect, which this never overrides. Index
+  nested-loop applies **per step**, independently, whichever way it was chosen — each step probes that
+  step's own inner table's B+Tree once per outer row, so it needs an index on that table's join column; a
+  step without one quietly runs as a plain nested-loop instead (never chosen by cost either, since it is
+  not actually available), and the plan says so for exactly that step. The other three never consult an
+  index, and no `JOIN` side ever becomes an `IndexScan` — a `WHERE` conjunct on the outer table of a
+  query's first `JOIN` is pushed into its scan, but that scan stays sequential. All four agree on every
+  step's `LEFT JOIN` NULL-padded rows the same way they already had to agree on everything else.
 - **A `WHERE` on the table a `LEFT JOIN` introduces is never pushed below it.** Doing so would filter
   rows out of the join's own input before it can find out they would not have matched — turning a
   `LEFT JOIN` back into an ordinary one with no trace of it. It stays a residual `Filter` above the
@@ -105,12 +109,16 @@ concept explanation.
   leaves the whole `WHERE` clause as a residual filter above the chain for now, correct either way, just
   not yet narrowed into any one step's own scan.
 - Cannot combine with `GROUP BY`, `ORDER BY`, or an aggregate in the SELECT list.
-- **A chain of two or more always executes in the order it was written** — there is no cost-based
-  reordering. A query with two or more `JOIN`s gets a second opinion in its own plan-stage narration
-  instead: what a Selinger-style dynamic-programming search over the *subset lattice* (plan.md §25.4 C4)
-  would have joined them as, and its own estimated page cost next to the written order's — purely
-  informational, never a rewrite. [`/tools/join-order`](/tools/join-order) is the same search, with every
-  subset it considered visible, not just the winner.
+- **A chain of two or more plain inner `JOIN`s actually runs in whichever left-deep order costs least**
+  (plan.md §25.4 C5 slice 3), not necessarily the order it was written in — a Selinger-style dynamic-
+  programming search over the *subset lattice* (plan.md §25.4 C4) finds it, the plan-stage narration says
+  what changed and why, and [`/tools/join-order`](/tools/join-order) is the same search with every subset
+  it considered visible, not just the winner. **A chain with a `LEFT JOIN` anywhere in it is never
+  reordered**, on purpose: `LEFT JOIN` is not commutative or associative in general (flipping one, or
+  moving another join between its two sides, can change which rows end up NULL-padded, not just the cost),
+  and this DP does not attempt the harder problem of reordering *around* that constraint. For a chain like
+  that, the plan-stage narration and `/tools/join-order` still show what the search would have picked —
+  purely informational there, never a rewrite, exactly as every chain's order used to be before this.
 
 ## IN subquery
 
@@ -198,18 +206,21 @@ See [Supported SQL](/docs/reference/sql) for the complete accepted grammar.
 ## What's out of scope entirely
 
 No subqueries anywhere but an uncorrelated `IN (SELECT …)` (plan.md §25.4 C3, closing C3 — no `EXISTS`, no
-scalar subquery like `x = (SELECT …)`, no correlated subquery), no *choosing* a `JOIN` chain's order — a chain
-still always joins in the order it's written; [`/tools/join-order`](/tools/join-order) (plan.md §25.4 C4) computes
-what a cost-based search would pick instead, and a multi-join query's own Planner panel names it too, but neither
-one changes what actually runs. No `RIGHT`/`FULL`/`CROSS` join, no transactions, no real concurrency (the Locks
-panel is visual only). `index-selection`, `range-index-selection` and `join-algorithm-selection` *are* decided
-by cost (plan.md §25.4 C5): a candidate index that matches the predicate's shape can still lose to the scan it
-would replace, and does, whenever its own estimated page cost is not actually lower (slice 1); a `JOIN`'s
-algorithm — nested-loop, hash, sort-merge, or index nested-loop when the inner table has a usable index — is
-chosen by comparing all of them and keeping the cheapest, with no shape step at all (slice 2, the new default
-whenever `EngineOptions.joinStrategy` is left unset; `/compare` and `/tools/planner` still force one explicitly
-to compare them directly, which this never overrides). Every other rewrite rule still fires on a structural
-match alone, and the cost *estimates* shown alongside their plans exist only to justify the narration, not to
-decide whether the rewrite happens. `UNION` and `COUNT(DISTINCT …)` are also not accepted. These are deliberate
-exclusions for this release, not bugs — see the parser's own error messages in
+scalar subquery like `x = (SELECT …)`, no correlated subquery). No `RIGHT`/`FULL`/`CROSS` join, no transactions,
+no real concurrency (the Locks panel is visual only). `index-selection`, `range-index-selection`,
+`join-algorithm-selection` and join *order* itself *are* all decided by cost (plan.md §25.4 C5): a candidate
+index that matches the predicate's shape can still lose to the scan it would replace, and does, whenever its own
+estimated page cost is not actually lower (slice 1); a `JOIN`'s algorithm — nested-loop, hash, sort-merge, or
+index nested-loop when the inner table has a usable index — is chosen by comparing all of them and keeping the
+cheapest, with no shape step at all (slice 2); a chain of 2+ plain inner `JOIN`s actually runs in whatever
+left-deep order [`/tools/join-order`](/tools/join-order)'s own Selinger search finds cheapest, not necessarily
+the order it was written in (slice 3). All three are the new default whenever the caller does not force something
+explicit — `/compare` and `/tools/planner` still force a specific `joinStrategy` to compare algorithms directly,
+which is never overridden, and a `LEFT JOIN` anywhere in a chain keeps its whole order exactly as written, since
+`LEFT JOIN` is not commutative or associative in general and reordering one can silently change which rows get
+NULL-padded, not just the cost — `/tools/join-order` and a multi-join query's own Planner panel still show what
+the search *would* pick for a chain like that, purely informational there. Every other rewrite rule still fires
+on a structural match alone, and the cost *estimates* shown alongside their plans exist only to justify the
+narration, not to decide whether the rewrite happens. `UNION` and `COUNT(DISTINCT …)` are also not accepted.
+These are deliberate exclusions for this release, not bugs — see the parser's own error messages in
 [Supported SQL](/docs/reference/sql) for exactly which keywords are recognised and rejected.
