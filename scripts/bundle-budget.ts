@@ -171,13 +171,18 @@ const T = (name: string): string => `src/pages/tools/${name}.tsx`;
  *    pull `joinOrder.ts` into the engine chunk for every route that already carries it (not just /tools/join-order
  *    and emit.ts's own narration anymore), pushing four routes over by a hair: /playground (311.3 kB measured + 3,
  *    rounded to 315), /stages/:id, /trace and /tools/btree (each its own measured size + 3).
+ *  - 2026-10-01, EXPLAIN ANALYZE's actual-row mislabeling fix: `StepEventBody`'s `execute` variant and `PlanNode`
+ *    both gained an optional `table`, so a plan's several `SeqScan`/`Join` nodes stop sharing one `op`-keyed
+ *    lookup slot in `explain.ts`. A small, fixed-cost addition to the engine chunk, but two routes were already
+ *    sitting exactly at their ceiling with no slack: /learn (166.1 kB measured + 3) and /challenges/:id (283.0 kB
+ *    measured + 3).
  */
 export const ROUTES: readonly RouteBudget[] = [
   { route: '/', roots: [P('LandingPage')], kb: 161, note: 'the landing page' },
   { route: '/playground', roots: [P('PlaygroundPage')], kb: 315, note: 'the Playground: the editor, every stage panel, the engine — the heaviest route, and the one most people land on' },
   { route: '/stages', roots: ['src/ui/StagesLayout.tsx', P('StagesIndex')], kb: 161, note: 'the stage explainers, index' },
   { route: '/stages/:id', roots: ['src/ui/StagesLayout.tsx', P('StagePage')], kb: 180, note: 'one stage explainer' },
-  { route: '/learn', roots: [P('LearnPage')], kb: 166, note: 'the lesson track' },
+  { route: '/learn', roots: [P('LearnPage')], kb: 169, note: 'the lesson track' },
   { route: '/learn/:id', roots: [P('LessonPage')], kb: 167, note: 'one lesson' },
   { route: '/examples', roots: [P('ExamplesPage')], kb: 115, note: 'preset queries' },
   { route: '/gallery', roots: [P('GalleryPage')], kb: 162, note: 'named moments' },
@@ -185,7 +190,7 @@ export const ROUTES: readonly RouteBudget[] = [
   { route: '/trace', roots: [P('TracePage')], kb: 167, note: 'the trace inspector' },
   { route: '/progress', roots: [P('ProgressPage')], kb: 168, note: 'the progress dashboard' },
   { route: '/challenges', roots: [P('ChallengesPage')], kb: 164, note: 'challenge index' },
-  { route: '/challenges/:id', roots: [P('ChallengePage')], kb: 283, note: 'one challenge' },
+  { route: '/challenges/:id', roots: [P('ChallengePage')], kb: 286, note: 'one challenge' },
   { route: '/settings', roots: [P('SettingsPage')], kb: 116, note: 'preferences' },
   { route: '/study', roots: [P('StudyPage')], kb: 122, note: 'the §9 study runner (unlisted); the instrument travels in the link, not the bundle (§25.4 A2)' },
   { route: '/assignments/new', roots: [P('AssignmentsNewPage')], kb: 163, note: 'assignment-link builder' },

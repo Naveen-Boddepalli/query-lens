@@ -153,6 +153,10 @@ function mergeRuns(
  * `subject` and `op` name the caller in the narration and in the emitted
  * `execute` events (`'Sort'` by default; `SortAggregate` passes its own name
  * so its internal sort phase is not mistaken for a top-level `Sort` node).
+ * `table` is `sortMergeJoin`'s own disambiguator (its `Join`'s `rightTable`) passed through so these internal,
+ * zero-row progress pings carry the same `table` as that `Join`'s real `execute` events — otherwise one of these
+ * could land in `explain.ts`'s per-node lookup without the table that identifies which `Join`, in a chain with
+ * more than one, it belongs to. `undefined` for `Sort`/`SortAggregate`/`SortDistinct`, which never repeat.
  */
 export function externalMergeSort(
   rows: readonly Row[],
@@ -161,6 +165,7 @@ export function externalMergeSort(
   io: SortIO,
   subject = 'Sort',
   op = 'Sort',
+  table?: string,
 ): Row[] {
   const cmp = (a: Row, b: Row): number => {
     const ka = keyOf(a);
@@ -180,7 +185,7 @@ export function externalMergeSort(
 
   io.emit(
     `${subject} has to see every row before it can produce one — the one operator here that cannot stream. ${plural(rows.length, 'row')} to sort, ${plural(io.memPages, 'page')} of memory at a time.`,
-    { stage: 'execute', op, rowsProduced: 0 },
+    { stage: 'execute', op, rowsProduced: 0, ...(table === undefined ? {} : { table }) },
   );
 
   let runs: Run[] = [];
@@ -194,7 +199,7 @@ export function externalMergeSort(
   const pagesWritten = runs.reduce((n, r) => n + r.pages.length, 0);
   io.emit(
     `Run generation: ${plural(runs.length, 'sorted run')} written, ${plural(pagesWritten, 'page')} total.`,
-    { stage: 'execute', op, rowsProduced: 0 },
+    { stage: 'execute', op, rowsProduced: 0, ...(table === undefined ? {} : { table }) },
   );
 
   let passIndex = 1;
@@ -206,7 +211,7 @@ export function externalMergeSort(
     }
     io.emit(
       `Merge pass ${String(passIndex)}: ${plural(runs.length, 'run')} become ${plural(next.length, 'run')}.`,
-      { stage: 'execute', op, rowsProduced: 0 },
+      { stage: 'execute', op, rowsProduced: 0, ...(table === undefined ? {} : { table }) },
     );
     runs = next;
     passIndex += 1;

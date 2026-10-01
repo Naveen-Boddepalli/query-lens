@@ -60,12 +60,17 @@ export interface ExecContext {
   distinctBase?: number;
 }
 
-/** Counts rows an operator has produced, so `execute` events stay cumulative. */
-function counter(ctx: ExecContext, name: string) {
+/**
+ * Counts rows an operator has produced, so `execute` events stay cumulative. `table` disambiguates this specific
+ * node from another one with the same `name` elsewhere in the plan — a multi-join chain's several `SeqScan`s or
+ * `Join`s — so EXPLAIN ANALYZE's actual-row lookup (`explain.ts`) does not mix up two nodes that share an `op`;
+ * see `StepEventBody`'s own doc comment. Omitted for operators that can only appear once per query.
+ */
+function counter(ctx: ExecContext, name: string, table?: string) {
   let produced = 0;
   return (label: string) => {
     produced += 1;
-    ctx.emit(label, { stage: 'execute', op: name, rowsProduced: produced });
+    ctx.emit(label, { stage: 'execute', op: name, rowsProduced: produced, ...(table === undefined ? {} : { table }) });
   };
 }
 
@@ -77,7 +82,7 @@ function seqScan(plan: Extract<Plan, { op: 'SeqScan' }>, ctx: ExecContext): Oper
   let pinnedFrame: number | null = null;
   let lockedPage: number | null = null;
   let skipped = 0;
-  const produced = counter(ctx, 'SeqScan');
+  const produced = counter(ctx, 'SeqScan', plan.table);
 
   function releasePage(): void {
     if (pinnedFrame !== null) {
@@ -192,7 +197,7 @@ function indexScan(plan: Extract<Plan, { op: 'IndexScan' }>, ctx: ExecContext): 
   let clusteredTree: BPlusTree | undefined;
   let clusteringColumn = '';
   let cursor = 0;
-  const produced = counter(ctx, 'IndexScan');
+  const produced = counter(ctx, 'IndexScan', plan.table);
 
   return {
     name: 'IndexScan',
@@ -232,7 +237,7 @@ function indexScan(plan: Extract<Plan, { op: 'IndexScan' }>, ctx: ExecContext): 
         if (!passes(plan.residual, row)) {
           ctx.emit(
             'The row the index found fails the rest of the predicate, so it is discarded. The index narrowed the search; it did not verify the whole condition.',
-            { stage: 'execute', op: 'IndexScan', rowsProduced: 0 },
+            { stage: 'execute', op: 'IndexScan', rowsProduced: 0, table: plan.table },
           );
           continue;
         }
@@ -264,7 +269,7 @@ function indexScan(plan: Extract<Plan, { op: 'IndexScan' }>, ctx: ExecContext): 
 function indexOnlyScan(plan: Extract<Plan, { op: 'IndexOnlyScan' }>, ctx: ExecContext): Operator {
   let entries: SqlValue[][] = [];
   let cursor = 0;
-  const produced = counter(ctx, 'IndexOnlyScan');
+  const produced = counter(ctx, 'IndexOnlyScan', plan.table);
   const columns = columnsOfIndex(plan.column);
 
   return {
@@ -309,7 +314,7 @@ function indexRangeScan(plan: Extract<Plan, { op: 'IndexRangeScan' }>, ctx: Exec
   let leafId: string | null = null;
   let cursorIndex = 0;
   let started = false;
-  const produced = counter(ctx, 'IndexRangeScan');
+  const produced = counter(ctx, 'IndexRangeScan', plan.table);
 
   return {
     name: 'IndexRangeScan',
@@ -950,7 +955,7 @@ function join(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): Operator {
     trees: joinRight.trees,
   });
 
-  const produced = counter(ctx, 'Join');
+  const produced = counter(ctx, 'Join', plan.rightTable);
   let leftRow: Row | null = null;
   let rightOpen = false;
   let checked = 0;
@@ -1039,7 +1044,7 @@ function hashJoin(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): Operat
     trees: joinRight.trees,
   });
 
-  const produced = counter(ctx, 'Join');
+  const produced = counter(ctx, 'Join', plan.rightTable);
   let built: Map<string, Row[]> | null = null;
   let leftRow: Row | null = null;
   let bucket: Row[] = [];
@@ -1074,7 +1079,7 @@ function hashJoin(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): Operat
         built = table;
         ctx.emit(
           `Join builds an in-memory hash table over ${plan.rightTable}, keyed on ${plan.rightColumn} (${String(table.size)} distinct key${table.size === 1 ? '' : 's'}).`,
-          { stage: 'execute', op: 'Join', rowsProduced: 0 },
+          { stage: 'execute', op: 'Join', rowsProduced: 0, table: plan.rightTable },
         );
       }
 
@@ -1137,7 +1142,7 @@ function indexNestedLoopJoin(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecConte
   const isLeft = plan.joinType === 'left';
 
   const left = buildOperator(plan.left, ctx);
-  const produced = counter(ctx, 'Join');
+  const produced = counter(ctx, 'Join', plan.rightTable);
   let leftRow: Row | null = null;
   let pointers: RowPointer[] = [];
   let cursor = 0;
@@ -1181,7 +1186,7 @@ function indexNestedLoopJoin(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecConte
           probes += 1;
           ctx.emit(
             `Join takes a row from ${plan.leftTable} whose ${plan.leftColumn} is ${typeof key === 'string' ? `'${key}'` : String(key)} and probes ${plan.rightTable}'s B+Tree on ${plan.rightColumn} for it (probe ${String(probes)}).`,
-            { stage: 'execute', op: 'Join', rowsProduced: matched },
+            { stage: 'execute', op: 'Join', rowsProduced: matched, table: plan.rightTable },
           );
           pointers = emitIndexLookup(ctx.emit, tree, [key], ctx.pool, inner.column, ctx.locks).pointers;
           continue;
@@ -1323,7 +1328,7 @@ function sortMergeJoin(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): O
     trees: joinRight.trees,
   });
 
-  const produced = counter(ctx, 'Join');
+  const produced = counter(ctx, 'Join', plan.rightTable);
   let matches: Generator<readonly [Row, Row | null]> | null = null;
   let matched = 0;
 
@@ -1366,6 +1371,7 @@ function sortMergeJoin(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): O
           },
           plan.leftTable,
           'Join',
+          plan.rightTable,
         );
         const rightSorted = externalMergeSort(
           rightRows,
@@ -1380,11 +1386,12 @@ function sortMergeJoin(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): O
           },
           plan.rightTable,
           'Join',
+          plan.rightTable,
         );
 
         ctx.emit(
           `Join sorts ${plan.leftTable} and ${plan.rightTable} on the join key, then merges the two sorted lists in one pass.`,
-          { stage: 'execute', op: 'Join', rowsProduced: 0 },
+          { stage: 'execute', op: 'Join', rowsProduced: 0, table: plan.rightTable },
         );
 
         matches = sortMergeMatches(leftSorted, rightSorted, plan.leftTable, plan.leftColumn, plan.rightColumn, isLeft);

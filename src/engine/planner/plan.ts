@@ -509,6 +509,7 @@ function convertBody(
         op: 'SeqScan',
         label: `SeqScan ${plan.table}`,
         ...(plan.filter ? { detail: `filter: ${exprToSql(plan.filter)}` } : {}),
+        table: plan.table,
         ...(highlight ? { highlight } : {}),
         ...cost,
       };
@@ -518,6 +519,11 @@ function convertBody(
         op: 'Join',
         label: `Join (${plan.algorithm}) ${plan.leftTable} × ${plan.rightTable}`,
         detail: `on: ${plan.leftTable}.${plan.leftColumn} = ${plan.rightTable}.${plan.rightColumn}`,
+        // `rightTable` is the table this specific `Join` step introduces — unique across a chain, since the parser
+        // never allows a query to name the same table twice (plan.md §25.4 C3 slice b) — so it is what disambiguates
+        // this node from another `Join` in the same chain for EXPLAIN ANALYZE's actual-row lookup (see `table`'s
+        // own doc comment on `PlanNode`), the same way `plan.table` does for a scan below.
+        table: plan.rightTable,
         ...(highlight ? { highlight } : {}),
         ...cost,
         children: [
@@ -542,6 +548,7 @@ function convertBody(
         detail: plan.residual
           ? `key: ${lookupText(plan.column, lookupKeysOf(plan))} · recheck: ${exprToSql(plan.residual)}`
           : `key: ${lookupText(plan.column, lookupKeysOf(plan))}`,
+        table: plan.table,
         ...(highlight ? { highlight } : {}),
         ...cost,
       };
@@ -551,6 +558,7 @@ function convertBody(
         op: 'IndexOnlyScan',
         label: `IndexOnlyScan ${plan.table}.${indexLabel(plan.column)}`,
         detail: `key: ${lookupText(plan.column, lookupKeysOf(plan))} · never touches the heap`,
+        table: plan.table,
         ...(highlight ? { highlight } : {}),
         ...cost,
       };
@@ -565,6 +573,7 @@ function convertBody(
           const range = `range: ${within}${formatRangeBounds(rangeColumn, plan.low, plan.high)}`;
           return plan.residual ? `${range} · recheck: ${exprToSql(plan.residual)}` : range;
         })(),
+        table: plan.table,
         ...(highlight ? { highlight } : {}),
         ...cost,
       };

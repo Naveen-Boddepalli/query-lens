@@ -277,6 +277,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Vitest also runs tests under `scripts/` and `oracle/`; `oracle/` joins `tsconfig.node.json`.
 
 ### Fixed
+- **`EXPLAIN ANALYZE`'s actual row count mixed up two nodes that shared an operator.** Its lookup kept one
+  count per operator *name* (`SeqScan`, `Join`, …), so a multi-join chain's several `SeqScan`s or `Join`s all
+  reported whichever one's count happened to be recorded last — an `authors` scan that really produced 5 rows
+  could show `posts`'s 50 instead. Flagged, but deliberately left unfixed, while building multi-join (plan.md
+  §25.4 C3 slice b); fixed now. `execute` events and the plan node they annotate both gained an optional
+  `table` (a scan's own table, or a `Join`'s `rightTable`) that tells one node of the same kind apart from
+  another in the same plan — always enough, since the parser never lets a query name the same table twice.
 - **The optimizer claimed "estimated cost decides it" when it does not.** Its rules fire on the shape of the
   predicate, so an index over a repeated value could be chosen and cost more than the scan it replaced. The note
   now says whether the estimate agrees or disagrees and, when it disagrees, that the index was taken anyway.

@@ -95,6 +95,8 @@ export interface PlanNode {
   estRows?: number;
   /** The heuristic behind `estRows`, in a few words. */
   estBasis?: string;
+  /** The same disambiguator a matching `execute` event's own `table` carries — see its doc comment. */
+  table?: string;
   children?: PlanNode[];
 }
 
@@ -142,7 +144,14 @@ export type StepEventBody =
   | { stage: 'parse'; ast: ASTNode; span?: Span }
   | { stage: 'plan'; planTree: PlanNode }
   | { stage: 'optimize'; rule: string; before: PlanNode; after: PlanNode }
-  | { stage: 'execute'; op: string; rowsProduced: number }
+  /**
+   * `table` disambiguates two nodes of the same `op` in one plan — a multi-join chain's several `SeqScan`s, or
+   * its several `Join`s — so `explain.ts`'s EXPLAIN ANALYZE can key its "actual rows" lookup by more than `op`
+   * alone (plan.md §25.4 C3 slice b flagged this; every table name in a query is unique, parser-enforced, so
+   * `table` — the scan's own table, or a `Join`'s `rightTable` — is always enough). Absent for the operators
+   * that can only ever appear once per query (`Filter`, `Project`, `Sort`, …), which never needed it.
+   */
+  | { stage: 'execute'; op: string; rowsProduced: number; table?: string }
   | { stage: 'buffer'; action: 'hit' | 'load'; pageId: number; frameId: number }
   /** A miss names no frame: nothing has been chosen to hold the page yet. */
   | { stage: 'buffer'; action: 'miss'; pageId: number }

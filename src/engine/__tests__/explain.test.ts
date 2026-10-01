@@ -5,14 +5,16 @@
 import { describe, expect, it } from 'vitest';
 import { EXPLAIN_COLUMN } from '../explain.ts';
 import { parseStatement } from '../parser/parser.ts';
-import { createSeedDatabase } from '../seed.ts';
+import { createJoinDemoDatabase, createJoinOrderDemoDatabase, createSeedDatabase } from '../seed.ts';
 import { DATASETS } from '../datasets.ts';
 import { runQuery } from '../runQuery.ts';
-import type { Database } from '../types.ts';
+import type { Database, EngineOptions } from '../types.ts';
+import { DEFAULT_ENGINE_OPTIONS } from '../types.ts';
 
 const db = (): Database => createSeedDatabase();
 const lines = (sql: string) => runQuery(sql, db()).rows.map((r) => r[EXPLAIN_COLUMN] as string);
 const stages = (sql: string) => new Set(runQuery(sql, db()).events.map((e) => e.stage));
+const NESTED_LOOP: EngineOptions = { ...DEFAULT_ENGINE_OPTIONS, joinStrategy: 'nested-loop' };
 
 describe('parsing', () => {
   it('reads EXPLAIN and EXPLAIN ANALYZE before a SELECT, case-insensitively', () => {
@@ -125,6 +127,34 @@ describe('EXPLAIN ANALYZE — the run, reported', () => {
     const out = runQuery(`EXPLAIN ANALYZE ${sql}`, db()).rows.map((r) => r[EXPLAIN_COLUMN] as string);
     const groups = runQuery(sql, db()).rows.length;
     expect(out.find((l) => l.startsWith('Project'))).toContain(`actual ${String(groups)} rows`);
+  });
+
+  it('gives a JOIN’s two SeqScan children their own actual row count, not each other’s', () => {
+    // Nested-loop rescans `posts` once per `authors` row, so its own true cumulative count (50 = 5 × 10) is
+    // nothing like `authors`'s own (5) — before this fix both lines showed whichever scan's count came last.
+    const out = runQuery(
+      'EXPLAIN ANALYZE SELECT * FROM authors JOIN posts ON authors.id = posts.authorId',
+      createJoinDemoDatabase(),
+      NESTED_LOOP,
+    ).rows.map((r) => r[EXPLAIN_COLUMN] as string);
+    const authorsScan = out.find((l) => l.includes('SeqScan authors'))!;
+    const postsScan = out.find((l) => l.includes('SeqScan posts'))!;
+    expect(authorsScan).toMatch(/actual 5 rows/);
+    expect(postsScan).toMatch(/actual 50 rows/);
+  });
+
+  it('gives a multi-join chain’s several Join nodes their own actual row count', () => {
+    // `departments × employees` really matches 200 rows; the outer `employees × timesheets` produces the whole
+    // query's 5000 — before this fix, sharing the generic `op: 'Join'` key meant one of these two numbers was
+    // silently overwritten by the other, whichever ran last.
+    const sql =
+      'EXPLAIN ANALYZE SELECT * FROM departments JOIN employees ON departments.id = employees.deptId ' +
+      'JOIN timesheets ON employees.id = timesheets.employeeId';
+    const out = runQuery(sql, createJoinOrderDemoDatabase(), NESTED_LOOP).rows.map((r) => r[EXPLAIN_COLUMN] as string);
+    const inner = out.find((l) => l.includes('departments × employees'))!;
+    const outer = out.find((l) => l.includes('employees × timesheets'))!;
+    expect(inner).toMatch(/actual 200 rows/);
+    expect(outer).toMatch(/actual 5000 rows/);
   });
 });
 

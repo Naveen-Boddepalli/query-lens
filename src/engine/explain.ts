@@ -45,13 +45,24 @@ function qError(estRows: number, actualRows: number): number {
   return Math.max((estRows + 1) / (actualRows + 1), (actualRows + 1) / (estRows + 1));
 }
 
+/**
+ * The key `actual` (below) is built and read by: `op` alone collides whenever a plan has two nodes of the same
+ * kind — a multi-join chain's several `SeqScan`s or several `Join`s (plan.md §25.4 C3 slice b flagged this as a
+ * real, pre-existing bug) — so every row this engine ever produces for one of them would be misreported onto
+ * all the others sharing that `op`. `table` (a scan's own table, or a `Join`'s `rightTable`) is always enough to
+ * tell them apart, since the parser never lets a query name the same table twice.
+ */
+function nodeKey(op: string, table: string | undefined): string {
+  return table === undefined ? op : `${op}:${table}`;
+}
+
 /** One line per operator, PostgreSQL-shaped: the root, then `->` for each level beneath it. */
 function planLines(root: PlanNode, actual: ReadonlyMap<string, number> | null): string[] {
   const lines: string[] = [];
   const walk = (node: PlanNode, depth: number): void => {
     const parts: string[] = [];
     if (node.estRows !== undefined) parts.push(`est ~${String(node.estRows)} rows`);
-    const rows = actual?.get(node.op);
+    const rows = actual?.get(nodeKey(node.op, node.table));
     if (rows !== undefined) {
       parts.push(`actual ${String(rows)} rows`);
       // Below 2× is well within the noise a real optimizer lives with every day — naming it would just be clutter.
@@ -78,7 +89,7 @@ export function explainResult(sql: string, ast: ExplainStatement, run: (sql: str
 
   // What ran, per operator: the executor's own last cumulative count.
   const actual = new Map<string, number>();
-  for (const e of inner.events) if (e.stage === 'execute') actual.set(e.op, e.rowsProduced);
+  for (const e of inner.events) if (e.stage === 'execute') actual.set(nodeKey(e.op, e.table), e.rowsProduced);
 
   const lines = planLines(plan, ast.analyze ? actual : null);
   if (ast.analyze) {
