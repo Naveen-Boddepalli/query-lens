@@ -1,6 +1,6 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
-import { demoWrites, LSM_LIMITS, planLsm } from '../lsm.ts';
+import { demoWrites, LSM_LIMITS, lookupKey, planLsm } from '../lsm.ts';
 import type { LsmWrite } from '../lsm.ts';
 
 /** The newest value for every key, replaying the write sequence directly — the ground truth a correct LSM must match. */
@@ -64,20 +64,20 @@ describe('demoWrites', () => {
 describe('planLsm — correctness: the newest value for every key survives', () => {
   it('matches a naive replay of the write sequence exactly, after flushes and compaction', () => {
     const writes = demoWrites(60, 1);
-    const plan = planLsm(writes, { memtableCapacity: 4, l0CompactionTrigger: 3, baseLevelCapacity: 8, levelSizeMultiplier: 2 });
+    const plan = planLsm(writes, { memtableCapacity: 4, l0CompactionTrigger: 3, baseLevelCapacity: 8, levelSizeMultiplier: 2, bitsPerKey: 8 });
     expect(onDiskLatest(plan)).toEqual(naiveLatest(writes));
   });
 
   it('holds for a run that cascades through several levels (tiny capacities force deep compaction)', () => {
     const writes = demoWrites(LSM_LIMITS.maxWrites, 7);
-    const plan = planLsm(writes, { memtableCapacity: 2, l0CompactionTrigger: 2, baseLevelCapacity: 2, levelSizeMultiplier: 2 });
+    const plan = planLsm(writes, { memtableCapacity: 2, l0CompactionTrigger: 2, baseLevelCapacity: 2, levelSizeMultiplier: 2, bitsPerKey: 8 });
     expect(plan.levels.length).toBeGreaterThan(3); // confirms this case genuinely cascades, not a vacuous check
     expect(onDiskLatest(plan)).toEqual(naiveLatest(writes));
   });
 
   it('writing the same key over and over keeps only its newest value', () => {
     const writes: LsmWrite[] = Array.from({ length: 50 }, (_, i) => ({ key: 1, value: i, seq: i }));
-    const plan = planLsm(writes, { memtableCapacity: 4, l0CompactionTrigger: 3, baseLevelCapacity: 8, levelSizeMultiplier: 2 });
+    const plan = planLsm(writes, { memtableCapacity: 4, l0CompactionTrigger: 3, baseLevelCapacity: 8, levelSizeMultiplier: 2, bitsPerKey: 8 });
     expect(plan.distinctKeysWritten).toBe(1);
     expect(onDiskLatest(plan).get(1)).toBe(49);
   });
@@ -86,19 +86,19 @@ describe('planLsm — correctness: the newest value for every key survives', () 
 describe('planLsm — structural invariants', () => {
   it('every level past L0 holds non-overlapping SSTables', () => {
     const writes = demoWrites(80, 3);
-    const plan = planLsm(writes, { memtableCapacity: 4, l0CompactionTrigger: 3, baseLevelCapacity: 8, levelSizeMultiplier: 2 });
+    const plan = planLsm(writes, { memtableCapacity: 4, l0CompactionTrigger: 3, baseLevelCapacity: 8, levelSizeMultiplier: 2, bitsPerKey: 8 });
     expect(levelsNonOverlapping(plan)).toBe(true);
   });
 
   it('never leaves a trailing empty level', () => {
     const writes = demoWrites(40, 2);
-    const plan = planLsm(writes, { memtableCapacity: 4, l0CompactionTrigger: 3, baseLevelCapacity: 8, levelSizeMultiplier: 2 });
+    const plan = planLsm(writes, { memtableCapacity: 4, l0CompactionTrigger: 3, baseLevelCapacity: 8, levelSizeMultiplier: 2, bitsPerKey: 8 });
     if (plan.levels.length > 1) expect(plan.levels[plan.levels.length - 1]!.length).toBeGreaterThan(0);
   });
 
   it('every SSTable a flush or compaction creates is named in exactly one event, and removed tables are never also current', () => {
     const writes = demoWrites(60, 4);
-    const plan = planLsm(writes, { memtableCapacity: 4, l0CompactionTrigger: 3, baseLevelCapacity: 8, levelSizeMultiplier: 2 });
+    const plan = planLsm(writes, { memtableCapacity: 4, l0CompactionTrigger: 3, baseLevelCapacity: 8, levelSizeMultiplier: 2, bitsPerKey: 8 });
     const currentIds = new Set(plan.levels.flatMap((l) => l.map((t) => t.id)));
     const removedIds = new Set(plan.events.flatMap((e) => e.removed));
     for (const id of removedIds) expect(currentIds.has(id)).toBe(false);
@@ -108,7 +108,7 @@ describe('planLsm — structural invariants', () => {
 describe('planLsm — amplification', () => {
   it('is at least 1 for a typical run — enough compaction happens that rewriting dominates', () => {
     const writes = demoWrites(60, 1);
-    const plan = planLsm(writes, { memtableCapacity: 4, l0CompactionTrigger: 3, baseLevelCapacity: 8, levelSizeMultiplier: 2 });
+    const plan = planLsm(writes, { memtableCapacity: 4, l0CompactionTrigger: 3, baseLevelCapacity: 8, levelSizeMultiplier: 2, bitsPerKey: 8 });
     expect(plan.writeAmplification).toBeGreaterThanOrEqual(1);
   });
 
@@ -116,35 +116,113 @@ describe('planLsm — amplification', () => {
     // Key 2 is written twice (seq 0 and 1) before the memtable (capacity 3) flushes for the first time — only
     // the newer value is ever physically written, so this flush costs 2 entries for 3 writes, not 3.
     const writes = demoWrites(10, 0);
-    const plan = planLsm(writes, { memtableCapacity: 3, l0CompactionTrigger: 5, baseLevelCapacity: 2, levelSizeMultiplier: 2 });
+    const plan = planLsm(writes, { memtableCapacity: 3, l0CompactionTrigger: 5, baseLevelCapacity: 2, levelSizeMultiplier: 2, bitsPerKey: 8 });
     expect(plan.writeAmplification).toBeLessThan(1);
     expect(plan.writeAmplification).toBeGreaterThan(0);
   });
 
   it('a tighter memtable and smaller levels cause more write amplification, not less, for the same writes', () => {
     const writes = demoWrites(100, 2);
-    const tight = planLsm(writes, { memtableCapacity: 2, l0CompactionTrigger: 2, baseLevelCapacity: 2, levelSizeMultiplier: 2 });
-    const roomy = planLsm(writes, { memtableCapacity: 8, l0CompactionTrigger: 6, baseLevelCapacity: 32, levelSizeMultiplier: 4 });
+    const tight = planLsm(writes, { memtableCapacity: 2, l0CompactionTrigger: 2, baseLevelCapacity: 2, levelSizeMultiplier: 2, bitsPerKey: 8 });
+    const roomy = planLsm(writes, { memtableCapacity: 8, l0CompactionTrigger: 6, baseLevelCapacity: 32, levelSizeMultiplier: 4, bitsPerKey: 8 });
     expect(tight.writeAmplification).toBeGreaterThan(roomy.writeAmplification);
   });
 
   it('space amplification is at least 1 — the live data is always a subset of what is on disk', () => {
     const writes = demoWrites(60, 5);
-    const plan = planLsm(writes, { memtableCapacity: 4, l0CompactionTrigger: 3, baseLevelCapacity: 8, levelSizeMultiplier: 2 });
+    const plan = planLsm(writes, { memtableCapacity: 4, l0CompactionTrigger: 3, baseLevelCapacity: 8, levelSizeMultiplier: 2, bitsPerKey: 8 });
     expect(plan.spaceAmplification).toBeGreaterThanOrEqual(1);
   });
 
   it('read amplification worst case counts every L0 table plus one per non-empty level below it', () => {
     const writes = demoWrites(60, 1);
-    const plan = planLsm(writes, { memtableCapacity: 4, l0CompactionTrigger: 3, baseLevelCapacity: 8, levelSizeMultiplier: 2 });
+    const plan = planLsm(writes, { memtableCapacity: 4, l0CompactionTrigger: 3, baseLevelCapacity: 8, levelSizeMultiplier: 2, bitsPerKey: 8 });
     const expected = plan.levels[0]!.length + plan.levels.slice(1).filter((l) => l.length > 0).length;
     expect(plan.readAmplificationWorstCase).toBe(expected);
+  });
+
+  it('measured read amplification is at most the worst case — the Bloom filter can only ever help, never hurt', () => {
+    const writes = demoWrites(80, 2);
+    const plan = planLsm(writes, { memtableCapacity: 4, l0CompactionTrigger: 3, baseLevelCapacity: 8, levelSizeMultiplier: 2, bitsPerKey: 10 });
+    expect(plan.readAmplificationAverage).toBeLessThanOrEqual(plan.readAmplificationWorstCase);
+  });
+
+  it('a wider Bloom filter (more bits per key) never increases the measured false-positive rate', () => {
+    const writes = demoWrites(100, 4);
+    const narrow = planLsm(writes, { memtableCapacity: 4, l0CompactionTrigger: 3, baseLevelCapacity: 8, levelSizeMultiplier: 2, bitsPerKey: 2 });
+    const wide = planLsm(writes, { memtableCapacity: 4, l0CompactionTrigger: 3, baseLevelCapacity: 8, levelSizeMultiplier: 2, bitsPerKey: 20 });
+    expect(wide.measuredFalsePositiveRate).toBeLessThanOrEqual(narrow.measuredFalsePositiveRate);
+  });
+});
+
+describe('lookupKey', () => {
+  it('finds every distinct written key, with its newest value, regardless of how many levels it cascaded through', () => {
+    const writes = demoWrites(60, 1);
+    const plan = planLsm(writes, { memtableCapacity: 2, l0CompactionTrigger: 2, baseLevelCapacity: 2, levelSizeMultiplier: 2, bitsPerKey: 10 });
+    const expected = onDiskLatest(plan);
+    for (const [key, value] of expected) {
+      const result = lookupKey(plan.levels, key);
+      expect(result.found).toBe(true);
+      expect(result.value).toBe(value);
+      expect(result.tablesChecked.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('when a key sits in two different L0 tables at once, returns the newer table\'s value, not the older one\'s', () => {
+    // A high trigger (4) keeps both flushes sitting in L0 together, uncompacted — the scenario leveled
+    // compaction's "L0 may overlap" wrinkle actually describes. Key 1 is flushed twice, with different values.
+    const writes: LsmWrite[] = [
+      { key: 1, value: 100, seq: 0 },
+      { key: 2, value: 1, seq: 1 },
+      { key: 1, value: 200, seq: 2 },
+      { key: 3, value: 1, seq: 3 },
+    ];
+    const plan = planLsm(writes, { memtableCapacity: 2, l0CompactionTrigger: 4, baseLevelCapacity: 8, levelSizeMultiplier: 2, bitsPerKey: 8 });
+    expect(plan.levels[0]).toHaveLength(2); // both flushes present, uncompacted — the scenario this test needs
+    const result = lookupKey(plan.levels, 1);
+    expect(result.found).toBe(true);
+    expect(result.value).toBe(200);
+  });
+
+  it('a key strictly past the highest one ever written is a genuine miss, every time', () => {
+    const writes = demoWrites(40, 3);
+    const plan = planLsm(writes, { memtableCapacity: 4, l0CompactionTrigger: 3, baseLevelCapacity: 8, levelSizeMultiplier: 2, bitsPerKey: 10 });
+    const maxKey = Math.max(...writes.map((w) => w.key));
+    const result = lookupKey(plan.levels, maxKey + 1000);
+    expect(result.found).toBe(false);
+    expect(result.value).toBeNull();
+    // Whatever it checked (if anything — the filter may have correctly said "no" every time) was a false
+    // positive by definition, since the key genuinely is not anywhere.
+    expect(result.falsePositives).toEqual(result.tablesChecked);
+  });
+
+  it('every table a lookup actually checked had already said "maybe" — never one the filter ruled out', () => {
+    const writes = demoWrites(70, 6);
+    const plan = planLsm(writes, { memtableCapacity: 3, l0CompactionTrigger: 2, baseLevelCapacity: 4, levelSizeMultiplier: 2, bitsPerKey: 16 });
+    const allTables = new Map(plan.levels.flatMap((l) => l.map((t) => [t.id, t] as const)));
+    for (const key of new Set(writes.map((w) => w.key))) {
+      const result = lookupKey(plan.levels, key);
+      for (const id of result.tablesChecked) {
+        const table = allTables.get(id)!;
+        const reallyThere = table.entries.some((e) => e.key === key);
+        // A checked table either genuinely holds the key (the hit, or a stale duplicate deeper down that a
+        // shallower hit already returned before reaching it) or is a counted false positive — never neither.
+        expect(reallyThere || result.falsePositives.includes(id)).toBe(true);
+      }
+    }
+  });
+
+  it('an empty structure finds nothing and checks nothing', () => {
+    const plan = planLsm([], { memtableCapacity: 4, l0CompactionTrigger: 3, baseLevelCapacity: 8, levelSizeMultiplier: 2, bitsPerKey: 8 });
+    const result = lookupKey(plan.levels, 1);
+    expect(result.found).toBe(false);
+    expect(result.tablesChecked).toEqual([]);
   });
 });
 
 describe('planLsm — edge cases', () => {
   it('no writes at all produces an empty L0 and no events', () => {
-    const plan = planLsm([], { memtableCapacity: 4, l0CompactionTrigger: 3, baseLevelCapacity: 8, levelSizeMultiplier: 2 });
+    const plan = planLsm([], { memtableCapacity: 4, l0CompactionTrigger: 3, baseLevelCapacity: 8, levelSizeMultiplier: 2, bitsPerKey: 8 });
     expect(plan.levels).toEqual([[]]);
     expect(plan.events).toEqual([]);
     expect(plan.writeAmplification).toBe(0);
@@ -152,7 +230,7 @@ describe('planLsm — edge cases', () => {
 
   it('fewer writes than the memtable capacity still flushes once at the end', () => {
     const writes = demoWrites(1, 1);
-    const plan = planLsm(writes, { memtableCapacity: 4, l0CompactionTrigger: 3, baseLevelCapacity: 8, levelSizeMultiplier: 2 });
+    const plan = planLsm(writes, { memtableCapacity: 4, l0CompactionTrigger: 3, baseLevelCapacity: 8, levelSizeMultiplier: 2, bitsPerKey: 8 });
     expect(plan.events).toHaveLength(1);
     expect(plan.events[0]!.kind).toBe('flush');
     expect(plan.totalEntriesOnDisk).toBe(1);
@@ -162,16 +240,17 @@ describe('planLsm — edge cases', () => {
 describe('planLsm — is deterministic and total', () => {
   it('the same inputs produce byte-identical plans', () => {
     const writes = demoWrites(40, 3);
-    const a = planLsm(writes, { memtableCapacity: 4, l0CompactionTrigger: 3, baseLevelCapacity: 8, levelSizeMultiplier: 2 });
-    const b = planLsm(writes, { memtableCapacity: 4, l0CompactionTrigger: 3, baseLevelCapacity: 8, levelSizeMultiplier: 2 });
+    const a = planLsm(writes, { memtableCapacity: 4, l0CompactionTrigger: 3, baseLevelCapacity: 8, levelSizeMultiplier: 2, bitsPerKey: 8 });
+    const b = planLsm(writes, { memtableCapacity: 4, l0CompactionTrigger: 3, baseLevelCapacity: 8, levelSizeMultiplier: 2, bitsPerKey: 8 });
     expect(JSON.stringify(a)).toEqual(JSON.stringify(b));
   });
 
   it('clamps out-of-range options rather than producing a broken plan', () => {
-    const plan = planLsm(demoWrites(10, 1), { memtableCapacity: 999, l0CompactionTrigger: 0, baseLevelCapacity: 8, levelSizeMultiplier: 999 });
+    const plan = planLsm(demoWrites(10, 1), { memtableCapacity: 999, l0CompactionTrigger: 0, baseLevelCapacity: 8, levelSizeMultiplier: 999, bitsPerKey: 999 });
     expect(plan.options.memtableCapacity).toBe(LSM_LIMITS.maxMemtableCapacity);
     expect(plan.options.l0CompactionTrigger).toBe(LSM_LIMITS.minL0Trigger);
     expect(plan.options.levelSizeMultiplier).toBe(LSM_LIMITS.maxLevelSizeMultiplier);
+    expect(plan.options.bitsPerKey).toBe(LSM_LIMITS.maxBitsPerKey);
   });
 
   it('never crashes, always resolves correctly, and keeps every level past L0 non-overlapping, for any legal parameters', () => {
@@ -183,15 +262,24 @@ describe('planLsm — is deterministic and total', () => {
         fc.integer({ min: LSM_LIMITS.minL0Trigger, max: LSM_LIMITS.maxL0Trigger }),
         fc.integer({ min: 2, max: 32 }),
         fc.integer({ min: LSM_LIMITS.minLevelSizeMultiplier, max: LSM_LIMITS.maxLevelSizeMultiplier }),
-        (count, seed, memtableCapacity, l0CompactionTrigger, baseLevelCapacity, levelSizeMultiplier) => {
+        fc.integer({ min: LSM_LIMITS.minBitsPerKey, max: LSM_LIMITS.maxBitsPerKey }),
+        (count, seed, memtableCapacity, l0CompactionTrigger, baseLevelCapacity, levelSizeMultiplier, bitsPerKey) => {
           const writes = demoWrites(count, seed);
-          const plan = planLsm(writes, { memtableCapacity, l0CompactionTrigger, baseLevelCapacity, levelSizeMultiplier });
+          const plan = planLsm(writes, { memtableCapacity, l0CompactionTrigger, baseLevelCapacity, levelSizeMultiplier, bitsPerKey });
           expect(onDiskLatest(plan)).toEqual(naiveLatest(writes));
           expect(levelsNonOverlapping(plan)).toBe(true);
           // Not always >= 1 — in-memtable coalescing (an overwrite before the first flush) can legitimately drop
           // it below 1, its own dedicated test above. It is always finite and never negative, though.
           expect(plan.writeAmplification).toBeGreaterThanOrEqual(0);
           expect(Number.isFinite(plan.writeAmplification)).toBe(true);
+          // A Bloom filter never produces a false NEGATIVE — every distinct key actually written must still
+          // resolve to a real hit through `lookupKey`, regardless of how aggressively `bitsPerKey` is tuned.
+          for (const key of new Set(writes.map((w) => w.key))) {
+            expect(lookupKey(plan.levels, key).found).toBe(true);
+          }
+          expect(plan.readAmplificationAverage).toBeGreaterThanOrEqual(0);
+          expect(plan.measuredFalsePositiveRate).toBeGreaterThanOrEqual(0);
+          expect(plan.measuredFalsePositiveRate).toBeLessThanOrEqual(1);
         },
       ),
     );

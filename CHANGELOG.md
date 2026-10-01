@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **A Bloom filter for the LSM-tree sandbox** (plan.md §25.4 F1, second slice) — every SSTable now carries its
+  own filter, sized by a tunable bits-per-key (2–20), and a real `lookupKey` read path checks it before ever
+  touching a table: look up any key and watch which SSTables it actually checked, highlighted green for the
+  real hit and amber for a filter false positive. Read amplification and the false-positive rate are measured
+  by running real lookups against every written key plus a sample of guaranteed misses, not estimated from the
+  textbook formula — closing the honesty gap the first slice named explicitly.
 - **An LSM-tree sandbox**, `/tools/lsm` (plan.md §25.4 F1, first slice) — writes buffer in a memtable, flush to
   disk as an immutable, sorted SSTable, then compact into fewer, larger files at the next level down. Change the
   memtable size or a level's capacity and watch the cascade, the non-overlapping key ranges it produces below

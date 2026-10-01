@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { demoWrites, LSM_LIMITS, planLsm } from '../../ui/lsm.ts';
-import type { LsmEvent, SSTable } from '../../ui/lsm.ts';
+import { demoWrites, LSM_LIMITS, lookupKey, planLsm } from '../../ui/lsm.ts';
+import type { LookupResult, LsmEvent, SSTable } from '../../ui/lsm.ts';
 import { PageHeader } from '../../ui/PageHeader.tsx';
-import { btnSecondary, inputField, panelSurface } from '../../ui/primitives.ts';
+import { btnPrimary, btnSecondary, inputField, panelSurface } from '../../ui/primitives.ts';
 
 /**
  * The LSM-tree standalone (plan.md §25.4 F1 `/tools/lsm`). §4's engine has only ever built a B+Tree, so this
@@ -13,11 +13,11 @@ import { btnSecondary, inputField, panelSurface } from '../../ui/primitives.ts';
  * numbers, and the level shapes move.
  *
  * URL state: `n` (writes), `mem` (memtable capacity), `trigger` (L0 compaction trigger), `base` (L1 capacity),
- * `mult` (level size multiplier) and `seed` (the write-key draw). Parsed defensively — a pasted link is a
- * stranger's input, the rule `src/ui/urlState.ts` follows.
+ * `mult` (level size multiplier), `bits` (Bloom filter bits per key) and `seed` (the write-key draw). Parsed
+ * defensively — a pasted link is a stranger's input, the rule `src/ui/urlState.ts` follows.
  */
 
-const DEFAULTS = { n: 60, memtableCapacity: 4, l0CompactionTrigger: 3, baseLevelCapacity: 8, levelSizeMultiplier: 2, seed: 1 };
+const DEFAULTS = { n: 60, memtableCapacity: 4, l0CompactionTrigger: 3, baseLevelCapacity: 8, levelSizeMultiplier: 2, bitsPerKey: 8, seed: 1 };
 const MAX_SEED = 999_999;
 const MAX_BASE_LEVEL_CAPACITY = 32;
 const MIN_BASE_LEVEL_CAPACITY = 2;
@@ -36,6 +36,7 @@ function readInitial() {
     l0CompactionTrigger: clampInt(p.get('trigger'), LSM_LIMITS.minL0Trigger, LSM_LIMITS.maxL0Trigger, DEFAULTS.l0CompactionTrigger),
     baseLevelCapacity: clampInt(p.get('base'), MIN_BASE_LEVEL_CAPACITY, MAX_BASE_LEVEL_CAPACITY, DEFAULTS.baseLevelCapacity),
     levelSizeMultiplier: clampInt(p.get('mult'), LSM_LIMITS.minLevelSizeMultiplier, LSM_LIMITS.maxLevelSizeMultiplier, DEFAULTS.levelSizeMultiplier),
+    bitsPerKey: clampInt(p.get('bits'), LSM_LIMITS.minBitsPerKey, LSM_LIMITS.maxBitsPerKey, DEFAULTS.bitsPerKey),
     seed: clampInt(p.get('seed'), 0, MAX_SEED, DEFAULTS.seed),
   };
 }
@@ -48,8 +49,13 @@ export function LsmToolPage() {
   const [l0CompactionTrigger, setL0CompactionTrigger] = useState(INITIAL.l0CompactionTrigger);
   const [baseLevelCapacity, setBaseLevelCapacity] = useState(INITIAL.baseLevelCapacity);
   const [levelSizeMultiplier, setLevelSizeMultiplier] = useState(INITIAL.levelSizeMultiplier);
+  const [bitsPerKey, setBitsPerKey] = useState(INITIAL.bitsPerKey);
   const [seed, setSeed] = useState(INITIAL.seed);
   const [selected, setSelected] = useState<number | null>(null);
+  const [lookupInput, setLookupInput] = useState('');
+  // Paired with the exact `plan` it was traced through, not just the result — so a parameter change (a new
+  // `plan` reference) can invalidate a stale lookup at render time, without an effect to do it imperatively.
+  const [lookupState, setLookupState] = useState<{ plan: ReturnType<typeof planLsm>; result: LookupResult } | null>(null);
 
   const plan = useMemo(
     () =>
@@ -58,9 +64,12 @@ export function LsmToolPage() {
         l0CompactionTrigger,
         baseLevelCapacity,
         levelSizeMultiplier,
+        bitsPerKey,
       }),
-    [n, memtableCapacity, l0CompactionTrigger, baseLevelCapacity, levelSizeMultiplier, seed],
+    [n, memtableCapacity, l0CompactionTrigger, baseLevelCapacity, levelSizeMultiplier, bitsPerKey, seed],
   );
+
+  const lookupResult = lookupState?.plan === plan ? lookupState.result : null;
 
   useEffect(() => {
     const t = window.setTimeout(() => {
@@ -70,12 +79,13 @@ export function LsmToolPage() {
       p.set('trigger', String(l0CompactionTrigger));
       p.set('base', String(baseLevelCapacity));
       p.set('mult', String(levelSizeMultiplier));
+      p.set('bits', String(bitsPerKey));
       p.set('seed', String(seed));
       const next = `${location.pathname}?${p.toString()}`;
       if (next !== `${location.pathname}${location.search}`) history.replaceState(null, '', next);
     }, 250);
     return () => { window.clearTimeout(t); };
-  }, [n, memtableCapacity, l0CompactionTrigger, baseLevelCapacity, levelSizeMultiplier, seed]);
+  }, [n, memtableCapacity, l0CompactionTrigger, baseLevelCapacity, levelSizeMultiplier, bitsPerKey, seed]);
 
   // Every table this table's own event (as the thing created, or the thing a later event removed) connects to —
   // its sources if it was compacted into being, or what it became if it was later compacted away.
@@ -171,6 +181,17 @@ export function LsmToolPage() {
           </select>
         </label>
 
+        <label className="flex flex-col gap-1 text-label text-ink-dim">
+          Bloom bits/key
+          <select
+            value={bitsPerKey}
+            onChange={(e) => { setBitsPerKey(Number(e.target.value)); }}
+            className={inputField}
+          >
+            {[2, 4, 8, 10, 16, 20].map((v) => <option key={v} value={v}>{v}</option>)}
+          </select>
+        </label>
+
         <button
           type="button"
           onClick={() => { setSeed(Math.floor(Math.random() * MAX_SEED)); setSelected(null); }}
@@ -189,7 +210,67 @@ export function LsmToolPage() {
         />
         <Stat label="write amplification" value={plan.writeAmplification} decimals={2} sub="bytes written ÷ bytes you asked to write" accent />
         <Stat label="space amplification" value={plan.spaceAmplification} decimals={2} sub="bytes on disk ÷ bytes of live data" accent />
-        <Stat label="read amplification" value={plan.readAmplificationWorstCase} sub="SSTables a lookup might check, worst case — no Bloom filter yet" accent />
+        <Stat label="read amp., worst case" value={plan.readAmplificationWorstCase} sub="every table a lookup could possibly have to check" accent />
+        <Stat
+          label="read amp., measured"
+          value={plan.readAmplificationAverage}
+          decimals={2}
+          sub="averaged over every real lookup below — the Bloom filter's own payoff"
+          accent
+        />
+        <Stat
+          label="false-positive rate"
+          value={plan.measuredFalsePositiveRate * 100}
+          decimals={1}
+          suffix="%"
+          sub="of every filter check that said “maybe”, measured against real lookups"
+          accent
+        />
+      </div>
+
+      <div className={`${panelSurface} flex flex-wrap items-end gap-3 p-3`}>
+        <label className="flex flex-col gap-1 text-label text-ink-dim">
+          Look up a key
+          <input
+            type="number"
+            value={lookupInput}
+            onChange={(e) => { setLookupInput(e.target.value); }}
+            placeholder="e.g. 5"
+            className={`${inputField} w-24 tabular-nums`}
+          />
+        </label>
+        <button
+          type="button"
+          className={btnPrimary}
+          disabled={lookupInput.trim() === '' || !Number.isInteger(Number(lookupInput))}
+          onClick={() => {
+            const key = Number(lookupInput);
+            setSelected(null);
+            setLookupState({ plan, result: lookupKey(plan.levels, key) });
+          }}
+        >
+          Look up
+        </button>
+        {lookupResult && (
+          <p className="text-label text-ink-dim">
+            Key <span className="tabular-nums text-ink">{lookupResult.key}</span>
+            {lookupResult.found ? (
+              <>
+                {' '}found — value <span className="tabular-nums text-ink">{lookupResult.value}</span>, after
+                checking <span className="tabular-nums text-ink">{plural(lookupResult.tablesChecked.length, 'SSTable')}</span>
+                {lookupResult.falsePositives.length > 0
+                  ? `, ${plural(lookupResult.falsePositives.length, 'filter false positive')} along the way`
+                  : ''}
+                .
+              </>
+            ) : (
+              <>
+                {' '}not found, after the Bloom filter still sent{' '}
+                <span className="tabular-nums text-ink">{plural(lookupResult.tablesChecked.length, 'false positive')}</span> to a real check.
+              </>
+            )}
+          </p>
+        )}
       </div>
 
       <div className="flex flex-col gap-3">
@@ -201,7 +282,8 @@ export function LsmToolPage() {
             selected={selected}
             related={related}
             eventFor={eventFor}
-            onSelect={(id) => { setSelected((cur) => (cur === id ? null : id)); }}
+            lookupResult={lookupResult}
+            onSelect={(id) => { setSelected((cur) => (cur === id ? null : id)); setLookupState(null); }}
           />
         ))}
       </div>
@@ -213,7 +295,9 @@ export function LsmToolPage() {
         <Link to="/tools/btree" className="underline underline-offset-2 hover:text-ink">
           leaf chain
         </Link>{' '}
-        never holds two leaves covering the same keys.
+        never holds two leaves covering the same keys. Look up a key to trace a real lookup through the
+        structure: green is the table that actually held it, amber is a filter false positive — a table the
+        Bloom filter sent to a real check that did not actually hold the key.
       </p>
     </div>
   );
@@ -224,18 +308,20 @@ function Stat({
   value,
   sub,
   decimals = 0,
+  suffix = '×',
   accent = false,
 }: {
   label: string;
   value: number;
   sub: string;
   decimals?: number;
+  suffix?: string;
   accent?: boolean;
 }) {
   return (
     <div className="flex flex-col">
       <span className={`text-heading font-semibold tabular-nums ${accent ? 'text-accent' : 'text-ink'}`}>
-        {decimals > 0 ? `${value.toFixed(decimals)}×` : value}
+        {decimals > 0 ? `${value.toFixed(decimals)}${suffix}` : value}
       </span>
       <span className="text-label text-ink-dim">{label}</span>
       <span className="text-label text-ink-dim/70">{sub}</span>
@@ -249,6 +335,7 @@ function LevelBlock({
   selected,
   related,
   eventFor,
+  lookupResult,
   onSelect,
 }: {
   levelIndex: number;
@@ -256,6 +343,7 @@ function LevelBlock({
   selected: number | null;
   related: ReadonlySet<number>;
   eventFor: ReadonlyMap<number, LsmEvent>;
+  lookupResult: LookupResult | null;
   onSelect: (id: number) => void;
 }) {
   const title = levelIndex === 0 ? 'L0 (flushed from the memtable)' : `L${String(levelIndex)}`;
@@ -277,7 +365,17 @@ function LevelBlock({
           {tables.map((table) => {
             const isSelected = table.id === selected;
             const isRelated = related.has(table.id);
-            const ringClass = isSelected ? 'ring-2 ring-accent' : isRelated ? 'ring-1 ring-ink-dim/40' : '';
+            const isFalsePositive = lookupResult?.falsePositives.includes(table.id) ?? false;
+            const isRealHit = lookupResult?.found && lookupResult.tablesChecked.includes(table.id) && !isFalsePositive;
+            const ringClass = isRealHit
+              ? 'ring-2 ring-hit'
+              : isFalsePositive
+                ? 'ring-2 ring-evict'
+                : isSelected
+                  ? 'ring-2 ring-accent'
+                  : isRelated
+                    ? 'ring-1 ring-ink-dim/40'
+                    : '';
             const builtBy = eventFor.get(table.id);
 
             return (
@@ -300,6 +398,8 @@ function LevelBlock({
                       : `compacted from ${plural(builtBy.removed.length, 'table')}`}
                   </span>
                 )}
+                {isRealHit && <span className="text-label text-hit">found here</span>}
+                {isFalsePositive && <span className="text-label text-evict">filter false positive</span>}
               </button>
             );
           })}

@@ -251,11 +251,27 @@ test('the LSM tree sandbox flushes, compacts, and shows write/space/read amplifi
   const stat = (label: string) => page.getByText(label, { exact: true }).locator('..');
   await expect(stat('flushes / compactions').getByText('21', { exact: true })).toBeVisible();
   await expect(stat('write amplification').getByText('3.83×', { exact: true })).toBeVisible();
-  await expect(stat('read amplification').getByText('1', { exact: true })).toBeVisible();
+  await expect(stat('read amp., worst case').getByText('1', { exact: true })).toBeVisible();
+  await expect(stat('read amp., measured').getByText('0.50×', { exact: true })).toBeVisible();
+  await expect(stat('false-positive rate').getByText('0.0%', { exact: true })).toBeVisible();
 
   // L0, L1 and L2 all drained down to L3 — the deepest, only non-empty level.
   await expect(page.getByText('L0 (flushed from the memtable)')).toBeVisible();
   await expect(page.getByText('empty').first()).toBeVisible();
+
+  // A real hit: key 1's value survived every flush and compaction, and the lookup highlights the table
+  // that actually held it.
+  await page.getByLabel('Look up a key').fill('1');
+  await page.getByRole('button', { name: 'Look up' }).click();
+  await expect(page.getByText(/found — value 427/)).toBeVisible();
+  await expect(page.getByText('found here')).toBeVisible();
+
+  // A genuine miss: strictly past the highest key ever written, so the Bloom filter correctly says "no"
+  // everywhere it is checked.
+  await page.getByLabel('Look up a key').fill('71');
+  await page.getByRole('button', { name: 'Look up' }).click();
+  await expect(page.getByText(/not found, after the Bloom filter still sent 0 false positives/)).toBeVisible();
+  await expect(page.getByText('found here')).not.toBeVisible();
 
   // A roomy memtable and level budget: everything fits, no compaction, and the write-amp drops below 1 —
   // the memtable coalescing an overwrite before it is ever flushed, a real reduction, not a bug.
@@ -264,7 +280,18 @@ test('the LSM tree sandbox flushes, compacts, and shows write/space/read amplifi
   await page.getByLabel('L1 capacity').selectOption('32');
   await expect(stat('flushes / compactions').getByText('4', { exact: true })).toBeVisible();
   await expect(stat('write amplification').getByText('0.90×', { exact: true })).toBeVisible();
+  await expect(stat('false-positive rate').getByText('11.8%', { exact: true })).toBeVisible();
   await expect.poll(() => page.url()).toMatch(/[?&]mem=8/);
+
+  // A narrower Bloom filter (fewer bits per key) raises the measured false-positive rate; a wider one drops
+  // it to zero — the filter's own size/accuracy trade-off, not a fixed property of the structure.
+  await page.getByLabel('Bloom bits/key').selectOption('2');
+  await expect(stat('false-positive rate').getByText('67.4%', { exact: true })).toBeVisible();
+  await expect.poll(() => page.url()).toMatch(/[?&]bits=2/);
+
+  await page.getByLabel('Bloom bits/key').selectOption('20');
+  await expect(stat('false-positive rate').getByText('0.0%', { exact: true })).toBeVisible();
+  await expect.poll(() => page.url()).toMatch(/[?&]bits=20/);
 
   // An SSTable is selectable and names what built it.
   const table = page.getByRole('button', { name: /entr(y|ies)/ }).first();

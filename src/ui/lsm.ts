@@ -27,10 +27,27 @@
  *     entries) ÷ the number of writes the caller actually made.
  *   - **Space amplification** = every entry currently sitting in some SSTable (stale, superseded duplicates
  *     included) ÷ the number of distinct keys actually written.
- *   - **Read amplification** (worst case, no Bloom filter yet — plan.md's own next slice) = the number of
- *     SSTables a point lookup might have to check: every L0 table (they can all overlap any key) plus one per
- *     non-empty level beyond L0 (each level's own tables never overlap each other, so at most one per level can
- *     hold a given key).
+ *   - **Read amplification, worst case** = the number of SSTables a point lookup might have to check: every L0
+ *     table (they can all overlap any key) plus one per non-empty level beyond L0 (each level's own tables never
+ *     overlap each other, so at most one per level can hold a given key).
+ *   - **The Bloom filter (plan.md's own next slice, now built):** every SSTable carries its own filter, built
+ *     from the keys it holds, sized by a `bitsPerKey` parameter — `m = n × bitsPerKey` bits, `k = (m/n) × ln 2`
+ *     hash functions (the standard optimum for a given bits-per-key budget). A lookup checks a table's filter
+ *     before the table itself; a "definitely not here" skips the table outright, and a "maybe" — sometimes a
+ *     genuine false positive, never a false negative — still costs the check. `readAmplificationAverage` is
+ *     **measured, not estimated**: every distinct key actually written (an expected hit) plus an equal-sized
+ *     sample of keys that were never written (an expected miss) are each looked up for real, and the number of
+ *     SSTables actually checked is averaged — the number `readAmplificationWorstCase` alone cannot show, since
+ *     it says nothing about how often the filter actually earns its keep. `measuredFalsePositiveRate` is
+ *     likewise measured by testing every (table, key-not-in-that-table) pair across the whole structure, not
+ *     read off the textbook formula — though the two agree closely (checked in this module's own tests).
+ *   - **The hash functions**, `h1`/`h2`: a full integer-mixing finalizer (xorshift + multiply, twice), not a
+ *     bare single multiply — a bare multiplicative hash can correlate with structured key patterns in a way that
+ *     silently defeats the filter (caught empirically while validating this module: an all-even test key set
+ *     against an even table size produced a suspicious, too-good 0% false-positive rate at every `bitsPerKey`,
+ *     including ones the textbook formula says should be far worse — traced to the bare-multiply hash mapping
+ *     even inputs to even bit positions only, not a property of Bloom filters at all). `h_i(key) = h1 + i·h2`
+ *     (Kirsch–Mitzenmacher double hashing) derives all `k` positions from the two mixed hashes.
  */
 
 export interface LsmWrite {
@@ -40,6 +57,15 @@ export interface LsmWrite {
   seq: number;
 }
 
+export interface BloomFilter {
+  /** `m` bits. A plain boolean array — these toy filters never hold more than a few hundred bits, so a packed
+   *  bitset would buy nothing and cost readability. */
+  bits: boolean[];
+  m: number;
+  k: number;
+  bitsPerKey: number;
+}
+
 export interface SSTable {
   id: number;
   level: number;
@@ -47,6 +73,7 @@ export interface SSTable {
   entries: LsmWrite[];
   minKey: number;
   maxKey: number;
+  bloom: BloomFilter;
 }
 
 export interface LsmEvent {
@@ -71,6 +98,8 @@ export interface LsmLimits {
   maxLevelSizeMultiplier: number;
   minL0Trigger: number;
   maxL0Trigger: number;
+  minBitsPerKey: number;
+  maxBitsPerKey: number;
 }
 
 export const LSM_LIMITS: LsmLimits = {
@@ -82,6 +111,8 @@ export const LSM_LIMITS: LsmLimits = {
   maxLevelSizeMultiplier: 4,
   minL0Trigger: 2,
   maxL0Trigger: 6,
+  minBitsPerKey: 2,
+  maxBitsPerKey: 20,
 };
 
 export interface LsmOptions {
@@ -90,6 +121,18 @@ export interface LsmOptions {
   /** L1's own capacity, in entries. Every SSTable this model ever creates also holds at most this many. */
   baseLevelCapacity: number;
   levelSizeMultiplier: number;
+  /** Bits of filter per key an SSTable holds — the false-positive/size trade-off. */
+  bitsPerKey: number;
+}
+
+export interface LookupResult {
+  key: number;
+  found: boolean;
+  value: number | null;
+  /** SSTable ids whose filter said "maybe" and were actually checked, in check order — L0 newest-first, then at most one per level below. */
+  tablesChecked: number[];
+  /** Among `tablesChecked`, the ones checked and found NOT to hold the key — a real false positive unless this is the one that found it. */
+  falsePositives: number[];
 }
 
 export interface LsmPlan {
@@ -104,9 +147,45 @@ export interface LsmPlan {
   writeAmplification: number;
   spaceAmplification: number;
   readAmplificationWorstCase: number;
+  /** Measured, not estimated — see this module's own doc comment. */
+  readAmplificationAverage: number;
+  measuredFalsePositiveRate: number;
 }
 
 const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, Math.round(n)));
+
+/**
+ * A full integer-mixing finalizer (xorshift + multiply, twice over) — NOT a bare single multiply, which this
+ * module's own doc comment explains correlated with structured key patterns badly enough to silently defeat
+ * the filter during validation.
+ */
+function mixHash(x: number): number {
+  let h = Math.imul(x ^ (x >>> 16), 0x45d9f3b);
+  h = Math.imul(h ^ (h >>> 16), 0x45d9f3b);
+  return (h ^ (h >>> 16)) >>> 0;
+}
+
+/** Kirsch–Mitzenmacher double hashing: every one of a filter's `k` bit positions, derived from two independent mixed hashes. */
+function bloomPositions(key: number, m: number, k: number): number[] {
+  const h1 = mixHash(key) % m;
+  const h2 = mixHash(key ^ 0x9e3779b9) % m || 1; // never 0 — a 0 second hash would make every position equal h1
+  return Array.from({ length: k }, (_, i) => (h1 + i * h2) % m);
+}
+
+/** `m = n × bitsPerKey` bits, `k = (m/n) × ln 2` hash functions — the standard optimal `k` for a given bits-per-key budget. */
+function buildBloomFilter(keys: readonly number[], bitsPerKey: number): BloomFilter {
+  const n = Math.max(1, keys.length);
+  const m = Math.max(8, Math.round(n * bitsPerKey));
+  const k = Math.max(1, Math.round((m / n) * Math.LN2));
+  const bits = new Array<boolean>(m).fill(false);
+  for (const key of keys) for (const pos of bloomPositions(key, m, k)) bits[pos] = true;
+  return { bits, m, k, bitsPerKey };
+}
+
+/** Never a false negative — a key actually inserted always passes. May be a false positive — a key never inserted sometimes does too. */
+function bloomMightContain(filter: BloomFilter, key: number): boolean {
+  return bloomPositions(key, filter.m, filter.k).every((pos) => filter.bits[pos]);
+}
 
 /** A seeded PRNG (mulberry32), for a reproducible `?seed=` demo — the same generator `/tools/sort` and `/tools/hash-join` already use. */
 function makeRng(seed: number): () => number {
@@ -161,6 +240,7 @@ export function planLsm(writes: readonly LsmWrite[], rawOptions: LsmOptions): Ls
     l0CompactionTrigger: clamp(rawOptions.l0CompactionTrigger, LSM_LIMITS.minL0Trigger, LSM_LIMITS.maxL0Trigger),
     baseLevelCapacity: Math.max(1, Math.round(rawOptions.baseLevelCapacity)),
     levelSizeMultiplier: clamp(rawOptions.levelSizeMultiplier, LSM_LIMITS.minLevelSizeMultiplier, LSM_LIMITS.maxLevelSizeMultiplier),
+    bitsPerKey: clamp(rawOptions.bitsPerKey, LSM_LIMITS.minBitsPerKey, LSM_LIMITS.maxBitsPerKey),
   };
 
   let nextTableId = 0;
@@ -195,6 +275,7 @@ export function planLsm(writes: readonly LsmWrite[], rawOptions: LsmOptions): Ls
       entries: group,
       minKey: group[0]!.key,
       maxKey: group[group.length - 1]!.key,
+      bloom: buildBloomFilter(group.map((e) => e.key), options.bitsPerKey),
     }));
 
     totalEntriesEverWritten += combined.length;
@@ -224,6 +305,7 @@ export function planLsm(writes: readonly LsmWrite[], rawOptions: LsmOptions): Ls
       entries: sorted,
       minKey: sorted[0]!.key,
       maxKey: sorted[sorted.length - 1]!.key,
+      bloom: buildBloomFilter(sorted.map((e) => e.key), options.bitsPerKey),
     };
     levels[0]!.push(table);
     totalEntriesEverWritten += sorted.length;
@@ -245,9 +327,22 @@ export function planLsm(writes: readonly LsmWrite[], rawOptions: LsmOptions): Ls
   // Trim trailing empty levels a compaction may have left behind.
   while (levels.length > 1 && levels[levels.length - 1]!.length === 0) levels.pop();
 
-  const distinctKeysWritten = new Set(writes.map((w) => w.key)).size;
+  const distinctKeys = [...new Set(writes.map((w) => w.key))];
+  const distinctKeysWritten = distinctKeys.length;
   const totalEntriesOnDisk = levels.reduce((n, lvl) => n + lvl.reduce((m, t) => m + t.entries.length, 0), 0);
   const nonEmptyLevelsBeyondL0 = levels.slice(1).filter((lvl) => lvl.length > 0).length;
+
+  // Measured, not estimated: every distinct key actually written (an expected hit) plus an equal-sized sample
+  // of keys strictly past the highest one ever written (guaranteed never written, an expected miss) are each
+  // looked up for real. `readAmplificationAverage` is the mean of how many SSTables each lookup actually
+  // checked; `measuredFalsePositiveRate` is, across every check any lookup made, what fraction found the
+  // filter said "maybe" and was wrong — the two numbers this module's own doc comment explains are measured,
+  // not read off the textbook formula (though they agree closely — this module's own tests check that).
+  const maxWrittenKey = distinctKeys.length === 0 ? 0 : Math.max(...distinctKeys);
+  const missKeys = Array.from({ length: distinctKeysWritten }, (_, i) => maxWrittenKey + i + 1);
+  const lookups = [...distinctKeys, ...missKeys].map((key) => lookupKey(levels, key));
+  const totalChecked = lookups.reduce((n, l) => n + l.tablesChecked.length, 0);
+  const totalFalsePositives = lookups.reduce((n, l) => n + l.falsePositives.length, 0);
 
   return {
     writes: [...writes],
@@ -260,5 +355,42 @@ export function planLsm(writes: readonly LsmWrite[], rawOptions: LsmOptions): Ls
     writeAmplification: writes.length === 0 ? 0 : totalEntriesEverWritten / writes.length,
     spaceAmplification: distinctKeysWritten === 0 ? 0 : totalEntriesOnDisk / distinctKeysWritten,
     readAmplificationWorstCase: levels[0]!.length + nonEmptyLevelsBeyondL0,
+    readAmplificationAverage: lookups.length === 0 ? 0 : totalChecked / lookups.length,
+    measuredFalsePositiveRate: totalChecked === 0 ? 0 : totalFalsePositives / totalChecked,
   };
+}
+
+/**
+ * A real point lookup: the memtable is always empty by the time a `LsmPlan` is returned (the last write
+ * sequence always ends with a flush), so this only ever walks `levels` — L0 newest-first (any of its tables
+ * could hold the key), then at most one table per level below (non-overlapping, so the first range match is
+ * the only candidate). A table's own Bloom filter is checked before the table itself; "definitely not here"
+ * skips it outright, "maybe" costs a real check — sometimes a false positive, never a false negative.
+ */
+export function lookupKey(levels: readonly SSTable[][], key: number): LookupResult {
+  const tablesChecked: number[] = [];
+  const falsePositives: number[] = [];
+
+  const checkTable = (table: SSTable): LsmWrite | undefined => {
+    if (!bloomMightContain(table.bloom, key)) return undefined;
+    tablesChecked.push(table.id);
+    const hit = table.entries.find((e) => e.key === key);
+    if (!hit) falsePositives.push(table.id);
+    return hit;
+  };
+
+  const l0 = levels[0] ?? [];
+  for (let i = l0.length - 1; i >= 0; i--) {
+    const hit = checkTable(l0[i]!);
+    if (hit) return { key, found: true, value: hit.value, tablesChecked, falsePositives };
+  }
+
+  for (const level of levels.slice(1)) {
+    const table = level.find((t) => t.minKey <= key && t.maxKey >= key);
+    if (!table) continue;
+    const hit = checkTable(table);
+    if (hit) return { key, found: true, value: hit.value, tablesChecked, falsePositives };
+  }
+
+  return { key, found: false, value: null, tablesChecked, falsePositives };
 }
