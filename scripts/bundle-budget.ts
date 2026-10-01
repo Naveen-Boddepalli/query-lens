@@ -183,11 +183,17 @@ const T = (name: string): string => `src/pages/tools/${name}.tsx`;
  *    sitting exactly at their ceiling: /progress (168.1 kB measured + 3, rounded to 171), /assignments/new (163.1
  *    kB measured + 3) and /tools/planner (165.0 kB measured + 3, the one route with its own direct `WhyNotNote`
  *    import on top of the engine-chunk growth every route above already pays).
+ *  - 2026-10-01, the `transactions` preset dataset (§25.4 C6, first slice): a new `DatasetId` member and its
+ *    `DATASET_CATALOGUE` entry add to the engine chunk and the shared dataset-picker code every route that
+ *    carries either reaches for — a wider set than usual, since the dataset picker itself (not just the
+ *    Playground) is shared by several tool/docs demo pages. Six routes were already at their ceiling, each now
+ *    its own measured size + 3: / (162.0 → 165), /stages (161.8 → 165), /tools/buffer-pool (166.1 → 169),
+ *    /tools/parser (164.5 → 168), /tools/page (162.3 → 166), /docs/concepts/buffer-pool (168.1 → 171).
  */
 export const ROUTES: readonly RouteBudget[] = [
-  { route: '/', roots: [P('LandingPage')], kb: 161, note: 'the landing page' },
+  { route: '/', roots: [P('LandingPage')], kb: 165, note: 'the landing page' },
   { route: '/playground', roots: [P('PlaygroundPage')], kb: 315, note: 'the Playground: the editor, every stage panel, the engine — the heaviest route, and the one most people land on' },
-  { route: '/stages', roots: ['src/ui/StagesLayout.tsx', P('StagesIndex')], kb: 161, note: 'the stage explainers, index' },
+  { route: '/stages', roots: ['src/ui/StagesLayout.tsx', P('StagesIndex')], kb: 165, note: 'the stage explainers, index' },
   { route: '/stages/:id', roots: ['src/ui/StagesLayout.tsx', P('StagePage')], kb: 180, note: 'one stage explainer' },
   { route: '/learn', roots: [P('LearnPage')], kb: 169, note: 'the lesson track' },
   { route: '/learn/:id', roots: [P('LessonPage')], kb: 167, note: 'one lesson' },
@@ -202,10 +208,10 @@ export const ROUTES: readonly RouteBudget[] = [
   { route: '/study', roots: [P('StudyPage')], kb: 122, note: 'the §9 study runner (unlisted); the instrument travels in the link, not the bundle (§25.4 A2)' },
   { route: '/assignments/new', roots: [P('AssignmentsNewPage')], kb: 166, note: 'assignment-link builder' },
   { route: '/tools', roots: [P('ToolsIndexPage')], kb: 116, note: 'the tools index' },
-  { route: '/tools/buffer-pool', roots: [T('BufferPoolToolPage')], kb: 165, note: 'buffer-pool sandbox' },
-  { route: '/tools/parser', roots: [T('ParserToolPage')], kb: 164, note: 'tokenizer + parser sandbox' },
+  { route: '/tools/buffer-pool', roots: [T('BufferPoolToolPage')], kb: 169, note: 'buffer-pool sandbox' },
+  { route: '/tools/parser', roots: [T('ParserToolPage')], kb: 168, note: 'tokenizer + parser sandbox' },
   { route: '/tools/btree', roots: [T('BTreeToolPage')], kb: 167, note: 'B+Tree sandbox' },
-  { route: '/tools/page', roots: [T('PageToolPage')], kb: 162, note: 'slotted-page inspector' },
+  { route: '/tools/page', roots: [T('PageToolPage')], kb: 166, note: 'slotted-page inspector' },
   { route: '/tools/sort', roots: [T('SortToolPage')], kb: 118, note: 'external merge sort' },
   { route: '/tools/planner', roots: [T('PlannerToolPage')], kb: 168, note: 'planner sandbox' },
   { route: '/tools/locks', roots: [T('LocksToolPage')], kb: 117, note: 'lock simulator' },
@@ -214,7 +220,7 @@ export const ROUTES: readonly RouteBudget[] = [
   { route: '/tools/join-order', roots: [T('JoinOrderToolPage')], kb: 163, note: 'Selinger join-order search over the subset lattice' },
   { route: '/docs', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 153, note: 'the docs shell and every prose page (one shared chunk)' },
   { route: '/docs/concepts/btree', roots: ['src/ui/DocsLayout.tsx', 'src/pages/DocsContent/concepts/btree.mdx'], kb: 170, note: 'a concept page with a live B+Tree widget' },
-  { route: '/docs/concepts/buffer-pool', roots: ['src/ui/DocsLayout.tsx', 'src/pages/DocsContent/concepts/buffer-pool.mdx'], kb: 167, note: 'a concept page with a live buffer-pool widget' },
+  { route: '/docs/concepts/buffer-pool', roots: ['src/ui/DocsLayout.tsx', 'src/pages/DocsContent/concepts/buffer-pool.mdx'], kb: 171, note: 'a concept page with a live buffer-pool widget' },
   { route: '/* (404)', roots: [P('NotFoundPage')], kb: 114, note: 'the not-found page' },
 ];
 

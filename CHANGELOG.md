@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **A `transactions` preset dataset** (plan.md §25.4 C6, first slice) — 3,000 rows, indexed on `id`, built for a
+  genuinely deep B+Tree (height 7, measured — two levels past any existing preset) and a scan that evicts hard
+  enough to be dramatic: the "Eviction storm" preset drives the buffer pool to a 0% hit rate. A point lookup or
+  a narrow indexed range stays a short trace regardless of table size; only the deliberately unindexed presets
+  cost what a full scan over 3,000 rows really costs.
 - **A "Why not?" panel** (plan.md §25.4 C5, fourth and closing slice) — every cost-based decision (index vs.
   scan, join algorithm, join order) already compared its chosen option against the one it beat; a small panel
   in the Playground and `/tools/planner` now shows that same comparison structured — "Why not a sequential

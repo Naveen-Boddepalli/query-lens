@@ -1,7 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { DATASETS, DATASET_IDS, DEFAULT_DATASET, isDatasetId } from '../datasets.ts';
 import { runQuery } from '../runQuery.ts';
+import { buildHeap, buildIndex, height } from '../index.ts';
 import type { SqlValue } from '../types.ts';
+
+/** The real tree's own height for `table`'s `id` index — the same B+Tree the engine builds to run a query. */
+function treeHeightOf(tableName: 'orders' | 'employees' | 'transactions'): number {
+  const db = DATASETS[tableName].make();
+  const table = db.tables[tableName]!;
+  const heap = buildHeap(table, 4);
+  return height(buildIndex(heap, 'id'));
+}
 
 describe('preset datasets', () => {
   it('the default is a member of the id list', () => {
@@ -56,6 +65,32 @@ describe('preset datasets', () => {
     const scan = runQuery('SELECT * FROM orders WHERE total > 500;', db);
     expect(scan.error).toBeUndefined();
     expect(scan.events.some((e) => e.stage === 'buffer' && e.action === 'evict')).toBe(true);
+  });
+
+  it('transactions has a genuinely taller B+Tree than every other preset (plan.md §25.4 C6)', () => {
+    expect(treeHeightOf('transactions')).toBeGreaterThan(treeHeightOf('employees'));
+    expect(treeHeightOf('transactions')).toBeGreaterThan(treeHeightOf('orders'));
+  });
+
+  it('transactions evicts far harder than orders on a comparable full-table scan', () => {
+    const ordersEvictions = runQuery(
+      'SELECT * FROM orders WHERE total > 500;',
+      DATASETS.orders.make(),
+    ).events.filter((e) => e.stage === 'buffer' && e.action === 'evict').length;
+    const transactionsEvictions = runQuery(
+      'SELECT * FROM transactions WHERE amount > 4500;',
+      DATASETS.transactions.make(),
+    ).events.filter((e) => e.stage === 'buffer' && e.action === 'evict').length;
+    expect(transactionsEvictions).toBeGreaterThan(ordersEvictions * 5);
+  });
+
+  it('a point lookup and a narrow indexed range on transactions still stay a short trace', () => {
+    const db = DATASETS.transactions.make();
+    const point = runQuery('SELECT * FROM transactions WHERE id = 1500;', db);
+    const range = runQuery('SELECT * FROM transactions WHERE id BETWEEN 1500 AND 1520;', db);
+    expect(point.events.length).toBeLessThan(100);
+    expect(range.events.length).toBeLessThan(300);
+    expect(range.rows).toHaveLength(21);
   });
 
   it('isDatasetId is a total guard', () => {

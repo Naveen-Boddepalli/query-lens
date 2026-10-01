@@ -12,16 +12,19 @@ import type { Database, Row } from './types.ts';
  *                   handful of rows or almost all of them
  *   - `employees` — `department` and `office` are perfectly correlated (plan.md §25.4 C2), so an `AND` of both
  *                   badly underestimates: independence multiplies two fractions that describe the *same* fact
+ *   - `transactions` — 3,000 rows (plan.md §25.4 C6): a genuinely taller B+Tree (height 7, measured, against
+ *                   `employees`'s 5) and a scan that evicts hard enough to be a real demonstration, not a
+ *                   token one — a point lookup or a narrow indexed range still stays a short trace either way
  *
  * Pure data, like `seed.ts`. The UI copy (labels, starter query, preset chips)
  * lives in `src/ui/datasetCatalogue.ts` so the engine stays free of it.
  */
 
-export type DatasetId = 'users' | 'orders' | 'logins' | 'employees';
+export type DatasetId = 'users' | 'orders' | 'logins' | 'employees' | 'transactions';
 
 export const DEFAULT_DATASET: DatasetId = 'users';
 
-export const DATASET_IDS: readonly DatasetId[] = ['users', 'orders', 'logins', 'employees'];
+export const DATASET_IDS: readonly DatasetId[] = ['users', 'orders', 'logins', 'employees', 'transactions'];
 
 export function isDatasetId(value: unknown): value is DatasetId {
   return typeof value === 'string' && (DATASET_IDS as readonly string[]).includes(value);
@@ -97,8 +100,44 @@ function employeeRows(): Row[] {
   );
 }
 
+const TRANSACTION_COUNT = 3000;
+const TRANSACTION_ACCOUNTS = Array.from({ length: 40 }, (_, i) => `acct-${String(i + 1).padStart(2, '0')}`);
+
+/**
+ * 3,000 rows: a genuinely taller B+Tree than any other preset (height 7, measured against `id` with this
+ * engine's real `maxKeys = 4` — `employees`'s 250 rows only reaches height 5) and 750 heap pages against the
+ * default 8 buffer frames, so a scan that touches most of the table evicts hard enough to be dramatic, not
+ * token. `amount` is deliberately unindexed and spans the whole table uniformly, so `amount > 4500` (~10%
+ * selectivity) still has to read every one of those 750 pages — `account` is likewise unindexed, 40 repeating
+ * values, for the same "an equality still costs a full scan" point a bigger table makes more vivid. Sized by a
+ * throwaway probe script measuring the real `height()`/heap-page count across 500–10,000 rows, not estimated
+ * (plan.md's own "measure, don't guess") — 3,000 was the smallest size that still reached height 7.
+ */
+function transactionRows(): Row[] {
+  return Array.from({ length: TRANSACTION_COUNT }, (_, i) => ({
+    id: i + 1,
+    account: TRANSACTION_ACCOUNTS[i % TRANSACTION_ACCOUNTS.length]!,
+    amount: 10 + ((i * 97) % 4990),
+    status: i % 5 === 0 ? 'failed' : 'settled',
+  }));
+}
+
 export const DATASETS: Record<DatasetId, DatasetSpec> = {
   users: { id: 'users', table: 'users', make: createSeedDatabase },
+  transactions: {
+    id: 'transactions',
+    table: 'transactions',
+    make: () => ({
+      tables: {
+        transactions: {
+          name: 'transactions',
+          columns: ['id', 'account', 'amount', 'status'],
+          rows: transactionRows(),
+          indexedColumns: ['id'],
+        },
+      },
+    }),
+  },
   employees: {
     id: 'employees',
     table: 'employees',

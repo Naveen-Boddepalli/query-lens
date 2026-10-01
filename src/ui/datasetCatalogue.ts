@@ -60,4 +60,18 @@ export const DATASET_CATALOGUE: Record<DatasetId, DatasetCatalogueEntry> = {
       { label: 'Point lookup', sql: 'SELECT *\nFROM employees\nWHERE id = 42;' },
     ],
   },
+  transactions: {
+    label: 'transactions',
+    blurb: '3,000 rows, indexed on id — a genuinely deep B+Tree and a scan that evicts hard, not just a little.',
+    starterSql: 'SELECT *\nFROM transactions\nWHERE id = 1500;',
+    presets: [
+      { label: 'Deep lookup', sql: 'SELECT *\nFROM transactions\nWHERE id = 1500;' },
+      { label: 'Range lookup', sql: 'SELECT *\nFROM transactions\nWHERE id BETWEEN 1500 AND 1520;' },
+      { label: 'Eviction storm', sql: 'SELECT *\nFROM transactions\nWHERE amount > 4500;' },
+      {
+        label: 'EXPLAIN ANALYZE',
+        sql: 'EXPLAIN ANALYZE\nSELECT *\nFROM transactions\nWHERE amount > 4500;',
+      },
+    ],
+  },
 };
