@@ -60,6 +60,7 @@ export function emitUpdatePlanEvents(
         rule: step.rule,
         before: display(before),
         after: display(step.plan, step.changed),
+        ...(step.whyNot ? { whyNot: step.whyNot } : {}),
       },
       step.prompt ? { predictable: step.prompt } : undefined,
     );

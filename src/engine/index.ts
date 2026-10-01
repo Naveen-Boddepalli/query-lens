@@ -95,6 +95,7 @@ export { analyzeTable, statsToRows } from './stats.ts';
 export type {
   ASTNode,
   ColumnStats,
+  CostAlternative,
   Database,
   EngineOptions,
   EventOf,
@@ -117,4 +118,5 @@ export type {
   StepEvent,
   StepEventBody,
   Table,
+  WhyNot,
 } from './types.ts';

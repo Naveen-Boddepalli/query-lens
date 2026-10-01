@@ -86,7 +86,14 @@ export function emitPlanEvents(
     const ratio = writtenCost.pages / Math.max(1, chosenCost.pages);
     emit(
       `This query's JOINs run in a different order than written (plan.md §25.4 C5 slice 3): a cost-based join-order search chose \`${chosenOrder.join(' → ')}\` over the written \`${writtenJoinOrder.join(' → ')}\` — an estimated ${String(chosenCost.pages)} pages against ${String(writtenCost.pages)}, about ${ratio.toFixed(1)}× cheaper. Unlike the algorithm each step runs (plan.md §25.4 C5 slice 2), there is no "declines but stays" version of this: every left-deep order of the same tables returns the same rows, so the cheaper one always wins.`,
-      { stage: 'plan', planTree: display(leftScan) },
+      {
+        stage: 'plan',
+        planTree: display(leftScan),
+        whyNot: {
+          chosen: { label: chosenOrder.join(' → '), estPages: chosenCost.pages },
+          runnerUp: { label: writtenJoinOrder.join(' → '), estPages: writtenCost.pages },
+        },
+      },
     );
   }
 
@@ -150,7 +157,18 @@ export function emitPlanEvents(
               : ' This query still runs in the order it was written; nothing here changes that.'
           }`
         : `A cost-based join-order search (plan.md §25.4 C4) agrees with the order written above — among left-deep orderings of these ${String(nodes.length)} tables, this is already about as cheap as it gets.`,
-      { stage: 'plan', planTree: display(current) },
+      {
+        stage: 'plan',
+        planTree: display(current),
+        ...(ratio >= 1.05
+          ? {
+              whyNot: {
+                chosen: { label: written.join(' → '), estPages: writtenCost.pages },
+                runnerUp: { label: dp.winner.tables.join(' → '), estPages: dp.winner.pages },
+              },
+            }
+          : {}),
+      },
     );
   }
 
@@ -274,6 +292,7 @@ export function emitPlanEvents(
         rule: step.rule,
         before: display(before),
         after: display(step.plan, step.changed),
+        ...(step.whyNot ? { whyNot: step.whyNot } : {}),
       },
       step.prompt ? { predictable: step.prompt } : undefined,
     );

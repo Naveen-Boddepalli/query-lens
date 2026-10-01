@@ -475,11 +475,22 @@ describe('optimize — chosen by cost, not just by shape (plan.md §25.4 C5)', (
     expect(step.changed.size).toBe(0);
     expect(step.label).toMatch(/estimated cost disagrees/);
     expect(step.label).toMatch(/no cheaper/);
+    // The "Why not?" panel (plan.md §25.4 C5, fourth slice): the scan won, so it is `chosen`; the index that lost
+    // is the `runnerUp`, named and priced the same way the narration above already says it in prose.
+    expect(step.whyNot?.chosen.label).toBe('a sequential scan');
+    expect(step.whyNot?.runnerUp.label).toMatch(/status.*index lookup/);
+    expect(step.whyNot!.chosen.estPages).toBeLessThan(step.whyNot!.runnerUp.estPages);
   });
 
   it('a selective equality on the same table is still accepted — the gate compares cost, it does not just refuse', () => {
     // `id` is unique on the same 50-row table `status` just lost on: the difference is the cost, not the table.
     expect(shape(final('SELECT * FROM logins WHERE id = 5', logins))).toEqual(['Project', 'IndexScan']);
+    const steps = optimize(plan('SELECT * FROM logins WHERE id = 5'), logins, ROWS_PER_PAGE);
+    const step = steps.find((s) => s.rule === 'index-selection')!;
+    // This time the index won: `chosen` and `runnerUp` swap sides from the declined case above.
+    expect(step.whyNot?.chosen.label).toMatch(/id.*index lookup/);
+    expect(step.whyNot?.runnerUp.label).toBe('a sequential scan');
+    expect(step.whyNot!.chosen.estPages).toBeLessThan(step.whyNot!.runnerUp.estPages);
   });
 
   it('a wide range that matches the predicate is declined the same way', () => {
@@ -488,6 +499,9 @@ describe('optimize — chosen by cost, not just by shape (plan.md §25.4 C5)', (
     expect(step.changed.size).toBe(0);
     expect(step.label).toMatch(/estimated cost disagrees/);
     expect(shape(final('SELECT * FROM users WHERE id > 20'))).toEqual(['Project', 'SeqScan']);
+    expect(step.whyNot?.chosen.label).toBe('a sequential scan');
+    expect(step.whyNot?.runnerUp.label).toMatch(/range scan on `id`/);
+    expect(step.whyNot!.chosen.estPages).toBeLessThan(step.whyNot!.runnerUp.estPages);
   });
 });
 
@@ -506,6 +520,9 @@ describe('optimize — join algorithm chosen by cost (plan.md §25.4 C5 slice 2)
     expect(outerJoin).toMatchObject({ op: 'Join', algorithm: 'hash' });
     expect(step.label).toMatch(/`authors` × `posts`: hash join chosen by cost/);
     expect(step.label).toMatch(/against nested-loop's \d+/);
+    // The "Why not?" panel (plan.md §25.4 C5, fourth slice): the cheapest of the candidates hash beat.
+    expect(step.whyNot?.chosen.label).toBe('hash join');
+    expect(step.whyNot!.chosen.estPages).toBeLessThan(step.whyNot!.runnerUp.estPages);
   });
 
   it('never touches a query with no JOIN at all', () => {

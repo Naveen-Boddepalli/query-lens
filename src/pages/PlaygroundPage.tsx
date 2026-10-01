@@ -37,6 +37,7 @@ import { PlaygroundTour } from '../ui/PlaygroundTour.tsx';
 import { TraceWorksheet } from '../ui/TraceWorksheet.tsx';
 import { START_TOUR_EVENT, takePendingTour } from '../ui/firstVisit.ts';
 import { ShortcutHints } from '../ui/ShortcutHints.tsx';
+import { WhyNotNote } from '../ui/WhyNotNote.tsx';
 import { recordPrediction, recordStages } from '../ui/progress.ts';
 import { stepAnnouncement } from '../ui/stepAnnouncement.ts';
 import { btnPrimary, btnSecondary, panelSurface } from '../ui/primitives.ts';
@@ -235,6 +236,15 @@ export function PlaygroundPage() {
 
   const activeSpan: Span | undefined =
     state?.lastEvent?.stage === 'parse' ? state.lastEvent.span : undefined;
+
+  // The "Why not?" panel (plan.md §25.4 C5, fourth slice): set on whichever step actually chose by cost —
+  // index-vs-scan and join-algorithm land on an `optimize` event, join order on a `plan` event.
+  const whyNot =
+    state?.lastEvent?.stage === 'optimize'
+      ? state.lastEvent.whyNot
+      : state?.lastEvent?.stage === 'plan'
+        ? state.lastEvent.whyNot
+        : undefined;
 
   publishRepro({
     sql,
@@ -786,6 +796,8 @@ export function PlaygroundPage() {
               {announcement}
             </p>
           </div>
+
+          {!prompt && whyNot && <WhyNotNote whyNot={whyNot} />}
 
           <div
             data-tour="playback"

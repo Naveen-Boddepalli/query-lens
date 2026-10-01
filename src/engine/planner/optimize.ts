@@ -12,7 +12,7 @@
  * `optimize` event carrying the before and after trees.
  */
 
-import type { IndexSpec, JoinAlgorithm, PredictionPrompt, SqlValue, Table } from '../types.ts';
+import type { IndexSpec, JoinAlgorithm, PredictionPrompt, SqlValue, Table, WhyNot } from '../types.ts';
 import { indexSelectionPrompt, leftmostPrefixPrompt } from '../predict.ts';
 import { describeKeys as describeKeysText } from '../index/lookup.ts';
 import { columnsOfIndex, indexNameOf, indexSpecsOf, isClusteringIndex, joinIndexFor } from '../index/spec.ts';
@@ -32,6 +32,8 @@ export interface Rewrite {
   changed: Set<Plan>;
   /** Asked before the rewrite is revealed. */
   prompt?: PredictionPrompt;
+  /** The "Why not?" panel's data (plan.md §25.4 C5, fourth slice) — set only by a rule that chose by cost. */
+  whyNot?: WhyNot;
 }
 
 /**
@@ -551,11 +553,22 @@ const joinAlgorithmSelection: Rule = (input, table, rowsPerPage, otherTables) =>
     })
     .join(' ');
 
+  // The "Why not?" panel (plan.md §25.4 C5, fourth slice) names one runner-up, not the whole candidate set — the
+  // first changed step's own cheapest alternative, since a `Rewrite` carries a single `whyNot`, not one per step.
+  // A chain with several changed steps still gets the full comparison in `label` above; only the panel is scoped
+  // to the first step.
+  const firstChange = result.changes[0]!;
+  const cheapestRunnerUp = firstChange.runnersUp.reduce((best, c) => (c.estPages < best.estPages ? c : best));
+
   return {
     rule: 'join-algorithm-selection',
     label,
     plan: root,
     changed: new Set<Plan>(result.changedNodes),
+    whyNot: {
+      chosen: { label: joinAlgorithmName(firstChange.chosen.algorithm), estPages: firstChange.chosen.estPages },
+      runnerUp: { label: joinAlgorithmName(cheapestRunnerUp.algorithm), estPages: cheapestRunnerUp.estPages },
+    },
   };
 };
 
@@ -738,6 +751,10 @@ const indexSelection: Rule = (input, table, rowsPerPage) => {
       label: `${nameOf(chosen)} matches the predicate, but the estimated cost disagrees: the lookup would read about ${String(indexPages)} page${indexPages === 1 ? '' : 's'} against the scan's ${String(scanPages)} — no cheaper, so the scan stays and the whole predicate is rechecked there instead.`,
       plan: input,
       changed: new Set(),
+      whyNot: {
+        chosen: { label: 'a sequential scan', estPages: scanPages },
+        runnerUp: { label: `${nameOf(chosen)} index lookup`, estPages: indexPages },
+      },
     };
   }
 
@@ -801,6 +818,10 @@ const indexSelection: Rule = (input, table, rowsPerPage) => {
         : composite
           ? indexSelectionPrompt(`(${chosen.columns.join(', ')})`, keys[0]!, lookupText(chosen.name, keys))
           : indexSelectionPrompt(chosen.name, chosen.matched[0]!.key),
+    whyNot: {
+      chosen: { label: `${nameOf(chosen)} index lookup`, estPages: indexPages },
+      runnerUp: { label: 'a sequential scan', estPages: scanPages },
+    },
   };
 };
 
@@ -894,6 +915,10 @@ const rangeIndexSelection: Rule = (input, table, rowsPerPage) => {
       label: `\`${chosen.column}\` matches the predicate's range, but the estimated cost disagrees: the range walk would read about ${String(rangePages)} page${rangePages === 1 ? '' : 's'} against the scan's ${String(scanPages)} — no cheaper, so the scan stays and the whole predicate is rechecked there instead.`,
       plan: input,
       changed: new Set(),
+      whyNot: {
+        chosen: { label: 'a sequential scan', estPages: scanPages },
+        runnerUp: { label: `a range scan on \`${chosen.column}\``, estPages: rangePages },
+      },
     };
   }
 
@@ -922,6 +947,10 @@ const rangeIndexSelection: Rule = (input, table, rowsPerPage) => {
       : `${indexedText} and the whole predicate is ${boundsText}${choiceClause}, so the scan becomes a single descent to the first matching leaf, then a walk along the leaf chain — no full table scan.`,
     plan: root,
     changed: new Set<Plan>([rangeScan]),
+    whyNot: {
+      chosen: { label: `a range scan on \`${chosen.column}\``, estPages: rangePages },
+      runnerUp: { label: 'a sequential scan', estPages: scanPages },
+    },
   };
 };
 

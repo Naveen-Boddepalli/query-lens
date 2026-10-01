@@ -81,6 +81,25 @@ export interface RaInfo {
   rel?: string;
 }
 
+/** One option a cost-based decision weighed, named and priced the same way `EXPLAIN` already prices a plan. */
+export interface CostAlternative {
+  label: string;
+  estPages: number;
+}
+
+/**
+ * The "Why not?" panel's own data (plan.md §25.4 C5, fourth and final slice): a cost-based decision's chosen
+ * option next to the one it beat, both priced the same `rootEstimate`/`costOfOrder` way `EXPLAIN` already shows —
+ * never a new number invented for the comparison. Every C5 mechanism already computes both sides of this
+ * narration in prose (`index-selection`'s scan-vs-index, `join-algorithm-selection`'s cheapest-vs-the-rest,
+ * join order's chosen-vs-written); this is that same comparison, structured, so a panel can show it without
+ * re-parsing a sentence.
+ */
+export interface WhyNot {
+  chosen: CostAlternative;
+  runnerUp: CostAlternative;
+}
+
 export interface PlanNode {
   /** Stable across a rewrite, so before/after trees can be compared. */
   id: string;
@@ -142,8 +161,10 @@ interface StepEventBase {
 
 export type StepEventBody =
   | { stage: 'parse'; ast: ASTNode; span?: Span }
-  | { stage: 'plan'; planTree: PlanNode }
-  | { stage: 'optimize'; rule: string; before: PlanNode; after: PlanNode }
+  /** `whyNot` is set only on the two join-order narration steps (plan.md §25.4 C5, fourth slice) — see `WhyNot`'s own doc comment. */
+  | { stage: 'plan'; planTree: PlanNode; whyNot?: WhyNot }
+  /** `whyNot` is set only for a step a cost-based rule produced — `index-selection`, `range-index-selection`, `join-algorithm-selection` (plan.md §25.4 C5, fourth slice); see `WhyNot`'s own doc comment. */
+  | { stage: 'optimize'; rule: string; before: PlanNode; after: PlanNode; whyNot?: WhyNot }
   /**
    * `table` disambiguates two nodes of the same `op` in one plan — a multi-join chain's several `SeqScan`s, or
    * its several `Join`s — so `explain.ts`'s EXPLAIN ANALYZE can key its "actual rows" lookup by more than `op`

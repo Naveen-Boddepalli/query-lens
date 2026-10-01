@@ -16,6 +16,7 @@ import type { Database, Plan, Table } from '../../engine/index.ts';
 import { PlanTree } from '../../ui/panels/PlanTree.tsx';
 import { PageHeader } from '../../ui/PageHeader.tsx';
 import { inputField, panelSurface } from '../../ui/primitives.ts';
+import { WhyNotNote } from '../../ui/WhyNotNote.tsx';
 
 /**
  * The optimizer standalone (plan.md §22.3). The rewrite rules already exist
@@ -214,22 +215,29 @@ export function PlannerToolPage() {
               const fired = plans.firedRules.has(name);
               const step = plans.steps.find((s) => s.rule === name);
               return (
-                <li key={name} className="flex gap-2 text-label leading-relaxed">
-                  <span
-                    aria-hidden
-                    className={`shrink-0 font-mono ${off ? 'text-ink-dim/50' : fired ? 'text-hit' : 'text-ink-dim'}`}
-                  >
-                    {off ? '✕' : fired ? '✓' : '–'}
-                  </span>
-                  <span className={off ? 'text-ink-dim/60' : 'text-ink-dim'}>
-                    <span className="font-mono text-ink">{name}</span>
-                    {' — '}
-                    {off
-                      ? 'turned off'
-                      : fired && step
-                        ? step.label
-                        : 'no match on this plan'}
-                  </span>
+                <li key={name} className="flex flex-col gap-1">
+                  <div className="flex gap-2 text-label leading-relaxed">
+                    <span
+                      aria-hidden
+                      className={`shrink-0 font-mono ${off ? 'text-ink-dim/50' : fired ? 'text-hit' : 'text-ink-dim'}`}
+                    >
+                      {off ? '✕' : fired ? '✓' : '–'}
+                    </span>
+                    <span className={off ? 'text-ink-dim/60' : 'text-ink-dim'}>
+                      <span className="font-mono text-ink">{name}</span>
+                      {' — '}
+                      {off
+                        ? 'turned off'
+                        : fired && step
+                          ? step.label
+                          : 'no match on this plan'}
+                    </span>
+                  </div>
+                  {!off && fired && step?.whyNot && (
+                    <div className="pl-6">
+                      <WhyNotNote whyNot={step.whyNot} />
+                    </div>
+                  )}
                 </li>
               );
             })}

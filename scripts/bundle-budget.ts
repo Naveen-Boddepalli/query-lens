@@ -176,6 +176,13 @@ const T = (name: string): string => `src/pages/tools/${name}.tsx`;
  *    lookup slot in `explain.ts`. A small, fixed-cost addition to the engine chunk, but two routes were already
  *    sitting exactly at their ceiling with no slack: /learn (166.1 kB measured + 3) and /challenges/:id (283.0 kB
  *    measured + 3).
+ *  - 2026-10-01, the "Why not?" panel (§25.4 C5, fourth and closing slice): `index-selection`, `range-index-
+ *    selection` and `join-algorithm-selection` each gained a structured `whyNot` (chosen vs. runner-up, both
+ *    already-computed page costs) threaded through `Rewrite` and the `optimize`/`plan` step events, plus a new
+ *    shared `WhyNotNote` component rendered in the Playground and `/tools/planner`. Three routes were already
+ *    sitting exactly at their ceiling: /progress (168.1 kB measured + 3, rounded to 171), /assignments/new (163.1
+ *    kB measured + 3) and /tools/planner (165.0 kB measured + 3, the one route with its own direct `WhyNotNote`
+ *    import on top of the engine-chunk growth every route above already pays).
  */
 export const ROUTES: readonly RouteBudget[] = [
   { route: '/', roots: [P('LandingPage')], kb: 161, note: 'the landing page' },
@@ -188,19 +195,19 @@ export const ROUTES: readonly RouteBudget[] = [
   { route: '/gallery', roots: [P('GalleryPage')], kb: 162, note: 'named moments' },
   { route: '/compare', roots: [P('ComparePage')], kb: 171, note: 'index vs scan, policy vs policy, hash vs sort, join algorithms' },
   { route: '/trace', roots: [P('TracePage')], kb: 167, note: 'the trace inspector' },
-  { route: '/progress', roots: [P('ProgressPage')], kb: 168, note: 'the progress dashboard' },
+  { route: '/progress', roots: [P('ProgressPage')], kb: 171, note: 'the progress dashboard' },
   { route: '/challenges', roots: [P('ChallengesPage')], kb: 164, note: 'challenge index' },
   { route: '/challenges/:id', roots: [P('ChallengePage')], kb: 286, note: 'one challenge' },
   { route: '/settings', roots: [P('SettingsPage')], kb: 116, note: 'preferences' },
   { route: '/study', roots: [P('StudyPage')], kb: 122, note: 'the §9 study runner (unlisted); the instrument travels in the link, not the bundle (§25.4 A2)' },
-  { route: '/assignments/new', roots: [P('AssignmentsNewPage')], kb: 163, note: 'assignment-link builder' },
+  { route: '/assignments/new', roots: [P('AssignmentsNewPage')], kb: 166, note: 'assignment-link builder' },
   { route: '/tools', roots: [P('ToolsIndexPage')], kb: 116, note: 'the tools index' },
   { route: '/tools/buffer-pool', roots: [T('BufferPoolToolPage')], kb: 165, note: 'buffer-pool sandbox' },
   { route: '/tools/parser', roots: [T('ParserToolPage')], kb: 164, note: 'tokenizer + parser sandbox' },
   { route: '/tools/btree', roots: [T('BTreeToolPage')], kb: 167, note: 'B+Tree sandbox' },
   { route: '/tools/page', roots: [T('PageToolPage')], kb: 162, note: 'slotted-page inspector' },
   { route: '/tools/sort', roots: [T('SortToolPage')], kb: 118, note: 'external merge sort' },
-  { route: '/tools/planner', roots: [T('PlannerToolPage')], kb: 165, note: 'planner sandbox' },
+  { route: '/tools/planner', roots: [T('PlannerToolPage')], kb: 168, note: 'planner sandbox' },
   { route: '/tools/locks', roots: [T('LocksToolPage')], kb: 117, note: 'lock simulator' },
   { route: '/tools/grammar', roots: [T('GrammarToolPage')], kb: 116, note: 'the SQL grammar diagram' },
   { route: '/tools/hash-join', roots: [T('HashJoinToolPage')], kb: 118, note: 'Grace hash join' },

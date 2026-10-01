@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **A "Why not?" panel** (plan.md §25.4 C5, fourth and closing slice) — every cost-based decision (index vs.
+  scan, join algorithm, join order) already compared its chosen option against the one it beat; a small panel
+  in the Playground and `/tools/planner` now shows that same comparison structured — "Why not a sequential
+  scan? An estimated 12 pages — against `id` index lookup's 4 pages, the one actually chosen" — rather than
+  leaving it for a reader to parse out of the step's own sentence. No new cost math: the same numbers the
+  narration already named.
 - **Join order chosen by cost** (plan.md §25.4 C5, third slice) — a chain of 2+ plain inner `JOIN`s now
   actually runs in whichever left-deep order C4's own Selinger-style search finds cheapest, not necessarily
   the order it was written in. Every original `JOIN` predicate is reused unchanged — reordering only ever

@@ -897,6 +897,12 @@ describe('multi-join (plan.md §25.4 C3 slice b)', () => {
     const { events, rows } = run(CHAIN_SQL, threeTableDb());
     const note = events.find((e) => e.stage === 'plan' && e.label.includes("JOINs run in a different order than written"));
     expect(note?.label).toMatch(/chose `comments → posts → authors` over the written `authors → posts → comments`/);
+    // The "Why not?" panel (plan.md §25.4 C5, fourth slice): the written order is the runner-up here — the one
+    // genuinely not taken, named the same way the narration above already names it in prose.
+    const whyNot = note?.stage === 'plan' ? note.whyNot : undefined;
+    expect(whyNot?.chosen.label).toBe('comments → posts → authors');
+    expect(whyNot?.runnerUp.label).toBe('authors → posts → comments');
+    expect(whyNot!.chosen.estPages).toBeLessThan(whyNot!.runnerUp.estPages);
     // The parse stage still narrates the query exactly as typed — only the plan/execution changed.
     expect(events.find((e) => e.stage === 'parse' && /Read the FROM clause/.test(e.label))?.label).toContain('`authors`');
     // The rows are unaffected either way — the point of associativity is that this is the same answer, cheaper.
@@ -915,6 +921,13 @@ describe('multi-join (plan.md §25.4 C3 slice b)', () => {
     const note = events.find((e) => e.stage === 'plan' && e.label.includes('cost-based join-order search'));
     expect(note?.label).toMatch(/would instead join these 3 tables as comments → posts → authors: an estimated \d+ pages, against the \d+/);
     expect(note?.label).toMatch(/never reordered for real.*LEFT JOIN is not commutative/);
+    // The "Why not?" panel (plan.md §25.4 C5, fourth slice): here the written order is `chosen` (it is what
+    // actually ran) and the cheaper order LEFT JOIN blocked is the `runnerUp` — the opposite pairing from the
+    // real-reordering test above, since nothing was actually rewritten this time.
+    const whyNot = note?.stage === 'plan' ? note.whyNot : undefined;
+    expect(whyNot?.chosen.label).toBe('authors → posts → comments');
+    expect(whyNot?.runnerUp.label).toBe('comments → posts → authors');
+    expect(whyNot!.chosen.estPages).toBeGreaterThan(whyNot!.runnerUp.estPages);
     // The query really did still run in the written order — the note is commentary, not a rewrite.
     expect(events[0]).toBeDefined();
     expect(events.find((e) => e.stage === 'plan' && /Start at the bottom/.test(e.label))?.label).toContain('`authors`');
