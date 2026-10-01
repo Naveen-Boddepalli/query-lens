@@ -243,6 +243,36 @@ test('the hash join sandbox partitions, spills, and shows a bucket collision', a
   await expect.poll(() => page.url()).toMatch(/[?&]mem=6/);
 });
 
+test('the LSM tree sandbox flushes, compacts, and shows write/space/read amplification', async ({ page }) => {
+  // 30 writes, a tight memtable (3) and L0 trigger (2) force real compaction cascades down to L3.
+  await page.goto('/tools/lsm?n=30&mem=3&trigger=2&base=4&mult=2&seed=1');
+  await expect(page.getByRole('heading', { name: 'LSM tree' })).toBeVisible();
+
+  const stat = (label: string) => page.getByText(label, { exact: true }).locator('..');
+  await expect(stat('flushes / compactions').getByText('21', { exact: true })).toBeVisible();
+  await expect(stat('write amplification').getByText('3.83×', { exact: true })).toBeVisible();
+  await expect(stat('read amplification').getByText('1', { exact: true })).toBeVisible();
+
+  // L0, L1 and L2 all drained down to L3 — the deepest, only non-empty level.
+  await expect(page.getByText('L0 (flushed from the memtable)')).toBeVisible();
+  await expect(page.getByText('empty').first()).toBeVisible();
+
+  // A roomy memtable and level budget: everything fits, no compaction, and the write-amp drops below 1 —
+  // the memtable coalescing an overwrite before it is ever flushed, a real reduction, not a bug.
+  await page.getByLabel('Memtable capacity').selectOption('8');
+  await page.getByLabel('L0 compaction trigger').selectOption('6');
+  await page.getByLabel('L1 capacity').selectOption('32');
+  await expect(stat('flushes / compactions').getByText('4', { exact: true })).toBeVisible();
+  await expect(stat('write amplification').getByText('0.90×', { exact: true })).toBeVisible();
+  await expect.poll(() => page.url()).toMatch(/[?&]mem=8/);
+
+  // An SSTable is selectable and names what built it.
+  const table = page.getByRole('button', { name: /entr(y|ies)/ }).first();
+  await table.click();
+  await expect(table).toHaveAttribute('aria-pressed', 'true');
+  await expect(table.getByText(/flushed from the memtable|compacted from/)).toBeVisible();
+});
+
 test('the planner sandbox runs the rewrite rules one at a time', async ({ page }) => {
   await page.goto('/tools/planner');
   await expect(page.getByRole('heading', { name: 'Planner sandbox' })).toBeVisible();

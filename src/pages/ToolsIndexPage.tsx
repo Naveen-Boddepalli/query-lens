@@ -78,6 +78,13 @@ const TOOLS = [
       'Selinger\'s dynamic-programming join-order search over the subset lattice: the cheapest way to join every subset of a query\'s tables, built up smallest first, with every candidate the DP considered for each one — not just the winner. A written query still runs in the order it names; this only ever shows what a cost-based search would have picked instead.',
     available: true,
   },
+  {
+    title: 'LSM tree',
+    href: '/tools/lsm',
+    description:
+      'Log-structured merge trees: writes buffer in a memtable, flush to disk as an immutable, sorted SSTable, then compact into fewer, larger files at the next level down. Change the memtable size or a level\'s capacity and watch the cascade — and the write, space and read amplification it costs.',
+    available: true,
+  },
 ] as const;
 
 export function ToolsIndexPage() {

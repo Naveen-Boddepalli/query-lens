@@ -189,6 +189,9 @@ const T = (name: string): string => `src/pages/tools/${name}.tsx`;
  *    Playground) is shared by several tool/docs demo pages. Six routes were already at their ceiling, each now
  *    its own measured size + 3: / (162.0 → 165), /stages (161.8 → 165), /tools/buffer-pool (166.1 → 169),
  *    /tools/parser (164.5 → 168), /tools/page (162.3 → 166), /docs/concepts/buffer-pool (168.1 → 171).
+ *  - 2026-10-01, the LSM-tree sandbox (§25.4 F1, first slice): a new route, /tools/lsm (114.7 kB measured + 3,
+ *    rounded to 118) — a self-contained `src/ui/lsm.ts` driver in the same family as `/tools/sort`'s and
+ *    `/tools/hash-join`'s, so it does not touch the shared engine chunk and no other route moved.
  */
 export const ROUTES: readonly RouteBudget[] = [
   { route: '/', roots: [P('LandingPage')], kb: 165, note: 'the landing page' },
@@ -218,6 +221,7 @@ export const ROUTES: readonly RouteBudget[] = [
   { route: '/tools/grammar', roots: [T('GrammarToolPage')], kb: 116, note: 'the SQL grammar diagram' },
   { route: '/tools/hash-join', roots: [T('HashJoinToolPage')], kb: 118, note: 'Grace hash join' },
   { route: '/tools/join-order', roots: [T('JoinOrderToolPage')], kb: 163, note: 'Selinger join-order search over the subset lattice' },
+  { route: '/tools/lsm', roots: [T('LsmToolPage')], kb: 118, note: 'log-structured merge-tree sandbox' },
   { route: '/docs', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 153, note: 'the docs shell and every prose page (one shared chunk)' },
   { route: '/docs/concepts/btree', roots: ['src/ui/DocsLayout.tsx', 'src/pages/DocsContent/concepts/btree.mdx'], kb: 170, note: 'a concept page with a live B+Tree widget' },
   { route: '/docs/concepts/buffer-pool', roots: ['src/ui/DocsLayout.tsx', 'src/pages/DocsContent/concepts/buffer-pool.mdx'], kb: 171, note: 'a concept page with a live buffer-pool widget' },

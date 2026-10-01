@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **An LSM-tree sandbox**, `/tools/lsm` (plan.md §25.4 F1, first slice) — writes buffer in a memtable, flush to
+  disk as an immutable, sorted SSTable, then compact into fewer, larger files at the next level down. Change the
+  memtable size or a level's capacity and watch the cascade, the non-overlapping key ranges it produces below
+  L0, and the write, space and read amplification it costs — including the non-obvious case where write
+  amplification drops *below* 1×, when the memtable itself coalesces an overwrite before it is ever flushed.
 - **A `transactions` preset dataset** (plan.md §25.4 C6, first slice) — 3,000 rows, indexed on `id`, built for a
   genuinely deep B+Tree (height 7, measured — two levels past any existing preset) and a scan that evicts hard
   enough to be dramatic: the "Eviction storm" preset drives the buffer pool to a 0% hit rate. A point lookup or
