@@ -192,6 +192,10 @@ const T = (name: string): string => `src/pages/tools/${name}.tsx`;
  *  - 2026-10-01, the LSM-tree sandbox (§25.4 F1, first slice): a new route, /tools/lsm (114.7 kB measured + 3,
  *    rounded to 118) — a self-contained `src/ui/lsm.ts` driver in the same family as `/tools/sort`'s and
  *    `/tools/hash-join`'s, so it does not touch the shared engine chunk and no other route moved.
+ *  - 2026-10-02, the B+Tree-vs-LSM `/compare` mode (§25.4 F1, closing slice): pulls in both `src/ui/lsm.ts` and
+ *    the new `src/ui/btreeWriteCost.ts` directly into `ComparePage`'s own lazy chunk (not the shared engine
+ *    chunk, since neither is imported by any other already-loaded route) — the whole 7.3 kB gzip difference is
+ *    this one route's own growth. 171 → 175 (measured 172.0, the usual +3 slack).
  */
 export const ROUTES: readonly RouteBudget[] = [
   { route: '/', roots: [P('LandingPage')], kb: 165, note: 'the landing page' },
@@ -202,7 +206,7 @@ export const ROUTES: readonly RouteBudget[] = [
   { route: '/learn/:id', roots: [P('LessonPage')], kb: 167, note: 'one lesson' },
   { route: '/examples', roots: [P('ExamplesPage')], kb: 115, note: 'preset queries' },
   { route: '/gallery', roots: [P('GalleryPage')], kb: 162, note: 'named moments' },
-  { route: '/compare', roots: [P('ComparePage')], kb: 171, note: 'index vs scan, policy vs policy, hash vs sort, join algorithms' },
+  { route: '/compare', roots: [P('ComparePage')], kb: 175, note: 'index vs scan, policy vs policy, hash vs sort, join algorithms, B+Tree vs. LSM' },
   { route: '/trace', roots: [P('TracePage')], kb: 167, note: 'the trace inspector' },
   { route: '/progress', roots: [P('ProgressPage')], kb: 171, note: 'the progress dashboard' },
   { route: '/challenges', roots: [P('ChallengesPage')], kb: 164, note: 'challenge index' },

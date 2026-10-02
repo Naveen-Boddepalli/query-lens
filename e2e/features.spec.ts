@@ -519,6 +519,41 @@ test('compare forces nested-loop, hash, sort-merge and index nested-loop join on
   await expect(page.getByText(/makes no difference/)).toBeVisible();
 });
 
+test('compare feeds the identical write sequence to a real B+Tree and an LSM tree, with amplification from real counters', async ({ page }) => {
+  await page.goto('/compare');
+  await page.getByRole('radio', { name: 'B+Tree vs. LSM tree' }).click();
+
+  const column = (heading: string) =>
+    page.locator('div.flex.flex-col.gap-2', { has: page.getByRole('heading', { name: heading, exact: true }) });
+  const stat = (heading: string, label: string) =>
+    column(heading).locator('div.contents', { hasText: label }).locator('dd');
+
+  // The default 150 writes: the B+Tree's own measured numbers.
+  await expect(stat('B+Tree', 'tree height')).toHaveText('4');
+  await expect(stat('B+Tree', 'index pages')).toHaveText('37');
+  await expect(stat('B+Tree', 'write amplification')).toHaveText('1.44×');
+  await expect(stat('B+Tree', 'point-lookup cost')).toHaveText('4');
+
+  // The LSM tree (leveled), same 150 writes — a real, measured counter-per-counter contrast, not a guess.
+  await expect(stat('LSM tree (leveled)', 'levels')).toHaveText('6');
+  await expect(stat('LSM tree (leveled)', 'write amplification')).toHaveText('6.21×');
+  await expect(stat('LSM tree (leveled)', 'read amp., worst case')).toHaveText('3');
+
+  // The B+Tree's own write cost stays low and roughly constant; the LSM tree's own write cost is genuinely
+  // higher at the same data size — the real, measured point of this comparison, not asserted from the text.
+  const btreeWriteAmp = Number((await stat('B+Tree', 'write amplification').innerText()).replace('×', ''));
+  const lsmWriteAmp = Number((await stat('LSM tree (leveled)', 'write amplification').innerText()).replace('×', ''));
+  expect(lsmWriteAmp).toBeGreaterThan(btreeWriteAmp);
+
+  // Fewer writes: both structures shrink, but the gap (and the trade-off's direction) still holds.
+  await page.getByLabel('Writes').fill('60');
+  await expect(stat('B+Tree', 'write amplification')).toHaveText('1.33×');
+  await expect(stat('LSM tree (leveled)', 'write amplification')).toHaveText('3.87×');
+
+  // The LSM tree's own tool page is one click away, for the full sandbox.
+  await expect(page.getByRole('link', { name: 'an LSM tree' })).toHaveAttribute('href', '/tools/lsm');
+});
+
 test('a diagram panel exports itself as a PNG with real bytes', async ({ page }) => {
   await page.goto('/stages/index'); // the B+Tree panel — a real diagram
   const button = page.getByRole('button', { name: 'Download PNG' });

@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
   createJoinCompareDatabase,
   createSeedDatabase,
@@ -20,6 +21,9 @@ import type {
   ReplacementPolicyName,
   RunResult,
 } from '../engine/index.ts';
+import { planBTreeWrites } from '../ui/btreeWriteCost.ts';
+import { demoWrites, LSM_LIMITS, planLsm } from '../ui/lsm.ts';
+import type { LsmOptions } from '../ui/lsm.ts';
 import { BufferPoolPanel } from '../ui/panels/BufferPoolPanel.tsx';
 import { PageHeader } from '../ui/PageHeader.tsx';
 import {
@@ -59,9 +63,24 @@ import {
  *    but pays for it by sorting both first, and the index join probes the
  *    right table's own B+Tree once per left row — which wins only when the
  *    left side is small and the right side big.
+ *  - **B+Tree vs. LSM tree** (§25.4 F1, closing slice): the exact same write
+ *    sequence (`/tools/lsm`'s own `demoWrites`) fed to the real engine B+Tree
+ *    (`engine/index/btree.ts`, the same code `/tools/btree` drives) and to
+ *    `planLsm`. Amplification numbers from real counters on both sides
+ *    (`src/ui/btreeWriteCost.ts`'s own doc comment explains why the two
+ *    counters are measured in different units — pages touched vs. entries
+ *    rewritten — and why that difference IS the lesson, not a bug to paper
+ *    over). A B+Tree updates in place: writes stay cheap and roughly constant
+ *    regardless of data size. An LSM tree defers writes into a memtable, then
+ *    pays for it later in compaction — cheaper to buffer, but physically
+ *    rewritten again and again as it cascades through levels, which is why
+ *    its own write amplification grows with data size where the B+Tree's
+ *    does not. The Bloom filter claws back the LSM tree's read disadvantage:
+ *    its worst-case read cost is comparable to the B+Tree's, but its real,
+ *    measured cost (with the filter) is usually lower.
  */
 
-type Mode = 'policies' | 'index' | 'build' | 'aggregate' | 'join';
+type Mode = 'policies' | 'index' | 'build' | 'aggregate' | 'join' | 'lsm';
 
 /* -------------------------------------------------------------------------- */
 /* Replacement-policy comparison                                              */
@@ -1072,6 +1091,154 @@ function JoinCompare() {
 }
 
 /* -------------------------------------------------------------------------- */
+/* B+Tree vs. LSM tree comparison (plan.md §25.4 F1, closing slice)            */
+/* -------------------------------------------------------------------------- */
+
+// The B+Tree side drives the real engine index (`engine/index/btree.ts`, the same code `/tools/btree` drives)
+// with DEFAULT_MAX_KEYS, its own standard fanout. The LSM side uses leveled compaction (the default strategy) at
+// `/tools/lsm`'s own default parameters — this comparison is about the two STRUCTURES, not about re-exposing
+// every tuning knob `/tools/lsm` already has its own page for.
+const LSM_COMPARE_MAX_KEYS = 4;
+const LSM_COMPARE_OPTIONS: LsmOptions = {
+  compactionStrategy: 'leveled',
+  memtableCapacity: 4,
+  l0CompactionTrigger: 3,
+  baseLevelCapacity: 8,
+  levelSizeMultiplier: 2,
+  bitsPerKey: 8,
+};
+const LSM_COMPARE_DEFAULT_WRITES = 150;
+
+function LsmCompare() {
+  const [n, setN] = useState(LSM_COMPARE_DEFAULT_WRITES);
+  const [seed, setSeed] = useState(1);
+
+  const writes = useMemo(() => demoWrites(n, seed), [n, seed]);
+  const btree = useMemo(() => planBTreeWrites(writes, LSM_COMPARE_MAX_KEYS), [writes]);
+  const lsm = useMemo(() => planLsm(writes, LSM_COMPARE_OPTIONS), [writes]);
+
+  return (
+    <>
+      <p className="text-body text-ink-dim">
+        The exact same {n} writes (plan.md §25.4 F1), fed once into a real B+Tree and once into{' '}
+        <Link to="/tools/lsm" className="underline underline-offset-2 hover:text-ink">
+          an LSM tree
+        </Link>
+        . A B+Tree updates <strong className="text-ink">in place</strong>: every write touches at least the one
+        leaf it belongs to, and nothing more unless a split cascades upward — cheap, and roughly constant
+        regardless of how much data already exists. An LSM tree <strong className="text-ink">defers</strong>{' '}
+        writes into a memtable, then pays for it later: the same entry gets physically rewritten again and
+        again as compaction sweeps it through deeper, bigger levels — buffering makes the write cheap to
+        <em> start</em>, but the total physical work grows with data size in a way the B+Tree&rsquo;s does not.
+        Both amplification numbers below come from real counters, not estimates — measured in different units on
+        purpose: the B+Tree in index <strong className="text-ink">pages</strong> touched, the LSM tree in raw{' '}
+        <strong className="text-ink">entries</strong> rewritten, because that unit difference is itself the
+        structural contrast between the two designs.
+      </p>
+
+      <div className="mt-2 flex flex-wrap items-end gap-3 rounded-xl border border-edge bg-surface-2 p-3 shadow-e1">
+        <label htmlFor="lsm-compare-writes" className="flex flex-col gap-1 text-label text-ink-dim">
+          Writes
+          <input
+            id="lsm-compare-writes"
+            type="number"
+            min={LSM_LIMITS.minWrites}
+            max={LSM_LIMITS.maxWrites}
+            value={n}
+            onChange={(e) => {
+              const v = Number(e.target.value);
+              if (Number.isInteger(v) && v >= LSM_LIMITS.minWrites && v <= LSM_LIMITS.maxWrites) setN(v);
+            }}
+            className={`${inputField} w-24 tabular-nums`}
+          />
+        </label>
+        <button
+          type="button"
+          onClick={() => { setSeed(Math.floor(Math.random() * 999_999)); }}
+          className={btnSecondary}
+        >
+          Reshuffle
+        </button>
+      </div>
+
+      <p className="rounded-xl border border-accent/40 bg-accent-soft px-3 py-2 text-label text-ink shadow-e1">
+        At {n} writes: the B+Tree touches <span className="font-mono">{btree.writeAmplification.toFixed(2)}</span> index
+        page{btree.writeAmplification === 1 ? '' : 's'} per write and a lookup always costs exactly{' '}
+        <span className="font-mono">{btree.readCost}</span> page read{btree.readCost === 1 ? '' : 's'}. The LSM
+        tree physically rewrites <span className="font-mono">{lsm.writeAmplification.toFixed(2)}</span> entries
+        per write, but a real lookup — Bloom filter included — costs only{' '}
+        <span className="font-mono">{lsm.readAmplificationAverage.toFixed(2)}</span> table checks on average
+        (worst case <span className="font-mono">{lsm.readAmplificationWorstCase}</span>).
+      </p>
+
+      <div className="flex flex-col gap-4 lg:flex-row">
+        <div className="flex min-w-0 flex-1 flex-col gap-2">
+          <div>
+            <h3 className="text-body font-semibold text-ink">B+Tree</h3>
+            <p className="text-label text-ink-dim">updates every page in place</p>
+          </div>
+          <dl className={`${panelSurface} grid grid-cols-[1fr_auto] gap-x-4 gap-y-1.5 p-3 text-label`}>
+            <div className="contents">
+              <dt className="text-ink-dim">tree height (levels)</dt>
+              <dd className="text-right font-mono tabular-nums text-ink">{btree.finalHeight}</dd>
+            </div>
+            <div className="contents">
+              <dt className="text-ink-dim">index pages</dt>
+              <dd className="text-right font-mono tabular-nums text-ink">{btree.finalNodeCount}</dd>
+            </div>
+            <div className="contents">
+              <dt className="text-ink-dim">page writes, total</dt>
+              <dd className="text-right font-mono tabular-nums text-ink">{btree.totalNodeWrites}</dd>
+            </div>
+            <div className="contents">
+              <dt className="text-ink-dim">write amplification (pages/write)</dt>
+              <dd className="text-right font-mono tabular-nums text-accent">{btree.writeAmplification.toFixed(2)}×</dd>
+            </div>
+            <div className="contents">
+              <dt className="text-ink-dim">point-lookup cost (page reads)</dt>
+              <dd className="text-right font-mono tabular-nums text-accent">{btree.readCost}</dd>
+            </div>
+          </dl>
+        </div>
+
+        <div className="flex min-w-0 flex-1 flex-col gap-2">
+          <div>
+            <h3 className="text-body font-semibold text-ink">LSM tree (leveled)</h3>
+            <p className="text-label text-ink-dim">buffers writes, pays for it in compaction</p>
+          </div>
+          <dl className={`${panelSurface} grid grid-cols-[1fr_auto] gap-x-4 gap-y-1.5 p-3 text-label`}>
+            <div className="contents">
+              <dt className="text-ink-dim">levels</dt>
+              <dd className="text-right font-mono tabular-nums text-ink">{lsm.levels.length}</dd>
+            </div>
+            <div className="contents">
+              <dt className="text-ink-dim">entries on disk</dt>
+              <dd className="text-right font-mono tabular-nums text-ink">{lsm.totalEntriesOnDisk}</dd>
+            </div>
+            <div className="contents">
+              <dt className="text-ink-dim">entries ever written</dt>
+              <dd className="text-right font-mono tabular-nums text-ink">{lsm.totalEntriesEverWritten}</dd>
+            </div>
+            <div className="contents">
+              <dt className="text-ink-dim">write amplification (entries/write)</dt>
+              <dd className="text-right font-mono tabular-nums text-accent">{lsm.writeAmplification.toFixed(2)}×</dd>
+            </div>
+            <div className="contents">
+              <dt className="text-ink-dim">read amp., measured (Bloom-aided)</dt>
+              <dd className="text-right font-mono tabular-nums text-accent">{lsm.readAmplificationAverage.toFixed(2)}×</dd>
+            </div>
+            <div className="contents">
+              <dt className="text-ink-dim">read amp., worst case</dt>
+              <dd className="text-right font-mono tabular-nums text-ink">{lsm.readAmplificationWorstCase}</dd>
+            </div>
+          </dl>
+        </div>
+      </div>
+    </>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
 
 export function ComparePage() {
   const [mode, setMode] = useState<Mode>('policies');
@@ -1090,6 +1257,7 @@ export function ComparePage() {
             ['build', 'Index build'],
             ['aggregate', 'Hash aggregate vs. sort aggregate'],
             ['join', 'JOIN algorithms'],
+            ['lsm', 'B+Tree vs. LSM tree'],
           ] as const
         ).map(([value, label]) => (
           <button
@@ -1113,8 +1281,10 @@ export function ComparePage() {
         <BuildCompare />
       ) : mode === 'aggregate' ? (
         <AggregateCompare />
-      ) : (
+      ) : mode === 'join' ? (
         <JoinCompare />
+      ) : (
+        <LsmCompare />
       )}
     </div>
   );

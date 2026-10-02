@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **A B+Tree-vs-LSM `/compare` mode, closing out the LSM-tree sandbox work** (plan.md §25.4 F1, fourth and
+  closing slice) — the exact same write sequence fed into a real B+Tree and into the LSM-tree model, side by
+  side, with write and read amplification reported from real counters on both sides (not estimates). The units
+  are deliberately different — index pages touched for the B+Tree, raw entries rewritten for the LSM tree —
+  because that difference is the actual structural contrast: a B+Tree updates in place, so its write cost stays
+  small and roughly constant as data grows; an LSM tree defers writes and pays for it later in compaction, so
+  its write cost measurably grows with data size instead.
 - **A tiered compaction strategy for the LSM-tree sandbox** (plan.md §25.4 F1, third slice) — alongside the
   existing leveled strategy, pick "Tiered" to see the real RocksDB-style alternative: merges accumulate into one
   unsplit table per tier instead of re-splitting into non-overlapping ranges, so any level can hold several
