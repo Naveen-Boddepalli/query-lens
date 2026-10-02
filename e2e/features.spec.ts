@@ -300,6 +300,37 @@ test('the LSM tree sandbox flushes, compacts, and shows write/space/read amplifi
   await expect(table.getByText(/flushed from the memtable|compacted from/)).toBeVisible();
 });
 
+test('switching the LSM sandbox to tiered compaction trades read amplification for write amplification', async ({ page }) => {
+  await page.goto('/tools/lsm?n=30&mem=3&trigger=2&base=4&mult=2&seed=1');
+  await expect(page.getByRole('heading', { name: 'LSM tree' })).toBeVisible();
+
+  const stat = (label: string) => page.getByText(label, { exact: true }).locator('..');
+
+  // Leveled (the default): the known baseline from the test above.
+  await expect(stat('write amplification').getByText('3.83×', { exact: true })).toBeVisible();
+  await expect(stat('read amp., worst case').getByText('1', { exact: true })).toBeVisible();
+
+  // Tiered never re-splits a merge or touches the next level's existing tables — less data rewritten per
+  // compaction, so less write amplification for the identical writes, but more tables can now overlap below
+  // L0 too, so more read amplification worst-case. Both directions of the same real trade-off, at once.
+  await page.getByLabel('Compaction strategy').selectOption('tiered');
+  await expect(stat('write amplification').getByText('2.97×', { exact: true })).toBeVisible();
+  await expect(stat('read amp., worst case').getByText('2', { exact: true })).toBeVisible();
+  await expect.poll(() => page.url()).toMatch(/[?&]strategy=tiered/);
+
+  // The leveled-only controls (re-split level capacity/multiplier) are disabled, not just hidden, and the
+  // shared trigger control's label changes to reflect its new, every-level meaning.
+  await expect(page.getByLabel('L1 capacity')).toBeDisabled();
+  await expect(page.getByLabel('Level size ×')).toBeDisabled();
+  await expect(page.getByLabel('Files per tier')).toBeVisible();
+
+  // Any level, not just L0, can now hold overlapping SSTables — clicking one names how many source tables it
+  // merged, same as leveled, but every tiered merge creates exactly one new table, never re-split.
+  const table = page.getByRole('button', { name: /entr(y|ies)/ }).first();
+  await table.click();
+  await expect(table.getByText(/compacted from 2 tables/)).toBeVisible();
+});
+
 test('the planner sandbox runs the rewrite rules one at a time', async ({ page }) => {
   await page.goto('/tools/planner');
   await expect(page.getByRole('heading', { name: 'Planner sandbox' })).toBeVisible();

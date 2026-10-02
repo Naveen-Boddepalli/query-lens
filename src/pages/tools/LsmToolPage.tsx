@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { demoWrites, LSM_LIMITS, lookupKey, planLsm } from '../../ui/lsm.ts';
-import type { LookupResult, LsmEvent, SSTable } from '../../ui/lsm.ts';
+import type { CompactionStrategy, LookupResult, LsmEvent, SSTable } from '../../ui/lsm.ts';
 import { PageHeader } from '../../ui/PageHeader.tsx';
 import { btnPrimary, btnSecondary, inputField, panelSurface } from '../../ui/primitives.ts';
 
@@ -17,7 +17,16 @@ import { btnPrimary, btnSecondary, inputField, panelSurface } from '../../ui/pri
  * defensively — a pasted link is a stranger's input, the rule `src/ui/urlState.ts` follows.
  */
 
-const DEFAULTS = { n: 60, memtableCapacity: 4, l0CompactionTrigger: 3, baseLevelCapacity: 8, levelSizeMultiplier: 2, bitsPerKey: 8, seed: 1 };
+const DEFAULTS = {
+  n: 60,
+  compactionStrategy: 'leveled' as CompactionStrategy,
+  memtableCapacity: 4,
+  l0CompactionTrigger: 3,
+  baseLevelCapacity: 8,
+  levelSizeMultiplier: 2,
+  bitsPerKey: 8,
+  seed: 1,
+};
 const MAX_SEED = 999_999;
 const MAX_BASE_LEVEL_CAPACITY = 32;
 const MIN_BASE_LEVEL_CAPACITY = 2;
@@ -32,6 +41,7 @@ function readInitial() {
   const p = new URLSearchParams(typeof location === 'undefined' ? '' : location.search);
   return {
     n: clampInt(p.get('n'), LSM_LIMITS.minWrites, LSM_LIMITS.maxWrites, DEFAULTS.n),
+    compactionStrategy: p.get('strategy') === 'tiered' ? 'tiered' : DEFAULTS.compactionStrategy,
     memtableCapacity: clampInt(p.get('mem'), LSM_LIMITS.minMemtableCapacity, LSM_LIMITS.maxMemtableCapacity, DEFAULTS.memtableCapacity),
     l0CompactionTrigger: clampInt(p.get('trigger'), LSM_LIMITS.minL0Trigger, LSM_LIMITS.maxL0Trigger, DEFAULTS.l0CompactionTrigger),
     baseLevelCapacity: clampInt(p.get('base'), MIN_BASE_LEVEL_CAPACITY, MAX_BASE_LEVEL_CAPACITY, DEFAULTS.baseLevelCapacity),
@@ -45,6 +55,7 @@ const INITIAL = readInitial();
 
 export function LsmToolPage() {
   const [n, setN] = useState(INITIAL.n);
+  const [compactionStrategy, setCompactionStrategy] = useState<CompactionStrategy>(INITIAL.compactionStrategy);
   const [memtableCapacity, setMemtableCapacity] = useState(INITIAL.memtableCapacity);
   const [l0CompactionTrigger, setL0CompactionTrigger] = useState(INITIAL.l0CompactionTrigger);
   const [baseLevelCapacity, setBaseLevelCapacity] = useState(INITIAL.baseLevelCapacity);
@@ -60,13 +71,14 @@ export function LsmToolPage() {
   const plan = useMemo(
     () =>
       planLsm(demoWrites(n, seed), {
+        compactionStrategy,
         memtableCapacity,
         l0CompactionTrigger,
         baseLevelCapacity,
         levelSizeMultiplier,
         bitsPerKey,
       }),
-    [n, memtableCapacity, l0CompactionTrigger, baseLevelCapacity, levelSizeMultiplier, bitsPerKey, seed],
+    [n, compactionStrategy, memtableCapacity, l0CompactionTrigger, baseLevelCapacity, levelSizeMultiplier, bitsPerKey, seed],
   );
 
   const lookupResult = lookupState?.plan === plan ? lookupState.result : null;
@@ -75,6 +87,7 @@ export function LsmToolPage() {
     const t = window.setTimeout(() => {
       const p = new URLSearchParams();
       p.set('n', String(n));
+      p.set('strategy', compactionStrategy);
       p.set('mem', String(memtableCapacity));
       p.set('trigger', String(l0CompactionTrigger));
       p.set('base', String(baseLevelCapacity));
@@ -85,7 +98,7 @@ export function LsmToolPage() {
       if (next !== `${location.pathname}${location.search}`) history.replaceState(null, '', next);
     }, 250);
     return () => { window.clearTimeout(t); };
-  }, [n, memtableCapacity, l0CompactionTrigger, baseLevelCapacity, levelSizeMultiplier, bitsPerKey, seed]);
+  }, [n, compactionStrategy, memtableCapacity, l0CompactionTrigger, baseLevelCapacity, levelSizeMultiplier, bitsPerKey, seed]);
 
   // Every table this table's own event (as the thing created, or the thing a later event removed) connects to —
   // its sources if it was compacted into being, or what it became if it was later compacted away.
@@ -134,6 +147,18 @@ export function LsmToolPage() {
         </label>
 
         <label className="flex flex-col gap-1 text-label text-ink-dim">
+          Compaction strategy
+          <select
+            value={compactionStrategy}
+            onChange={(e) => { setCompactionStrategy(e.target.value as CompactionStrategy); setSelected(null); }}
+            className={inputField}
+          >
+            <option value="leveled">Leveled</option>
+            <option value="tiered">Tiered</option>
+          </select>
+        </label>
+
+        <label className="flex flex-col gap-1 text-label text-ink-dim">
           Memtable capacity
           <select
             value={memtableCapacity}
@@ -147,7 +172,7 @@ export function LsmToolPage() {
         </label>
 
         <label className="flex flex-col gap-1 text-label text-ink-dim">
-          L0 compaction trigger
+          {compactionStrategy === 'tiered' ? 'Files per tier' : 'L0 compaction trigger'}
           <select
             value={l0CompactionTrigger}
             onChange={(e) => { setL0CompactionTrigger(Number(e.target.value)); setSelected(null); }}
@@ -159,10 +184,11 @@ export function LsmToolPage() {
           </select>
         </label>
 
-        <label className="flex flex-col gap-1 text-label text-ink-dim">
+        <label className={`flex flex-col gap-1 text-label text-ink-dim ${compactionStrategy === 'tiered' ? 'opacity-40' : ''}`}>
           L1 capacity
           <select
             value={baseLevelCapacity}
+            disabled={compactionStrategy === 'tiered'}
             onChange={(e) => { setBaseLevelCapacity(Number(e.target.value)); setSelected(null); }}
             className={inputField}
           >
@@ -170,10 +196,11 @@ export function LsmToolPage() {
           </select>
         </label>
 
-        <label className="flex flex-col gap-1 text-label text-ink-dim">
+        <label className={`flex flex-col gap-1 text-label text-ink-dim ${compactionStrategy === 'tiered' ? 'opacity-40' : ''}`}>
           Level size ×
           <select
             value={levelSizeMultiplier}
+            disabled={compactionStrategy === 'tiered'}
             onChange={(e) => { setLevelSizeMultiplier(Number(e.target.value)); setSelected(null); }}
             className={inputField}
           >
@@ -246,7 +273,7 @@ export function LsmToolPage() {
           onClick={() => {
             const key = Number(lookupInput);
             setSelected(null);
-            setLookupState({ plan, result: lookupKey(plan.levels, key) });
+            setLookupState({ plan, result: lookupKey(plan.levels, key, plan.options.compactionStrategy) });
           }}
         >
           Look up
@@ -279,6 +306,7 @@ export function LsmToolPage() {
             key={levelIndex}
             levelIndex={levelIndex}
             tables={level}
+            compactionStrategy={compactionStrategy}
             selected={selected}
             related={related}
             eventFor={eventFor}
@@ -290,14 +318,25 @@ export function LsmToolPage() {
 
       <p className="text-label leading-relaxed text-ink-dim">
         Click any SSTable to see what it was built from — a flush's own memtable writes, or a compaction's
-        source tables (which it replaced and removed). Level 0's tables can overlap in key range; every level
-        below it is kept non-overlapping by compaction, the same reason a B+Tree's{' '}
-        <Link to="/tools/btree" className="underline underline-offset-2 hover:text-ink">
-          leaf chain
-        </Link>{' '}
-        never holds two leaves covering the same keys. Look up a key to trace a real lookup through the
-        structure: green is the table that actually held it, amber is a filter false positive — a table the
-        Bloom filter sent to a real check that did not actually hold the key.
+        source tables (which it replaced and removed).{' '}
+        {compactionStrategy === 'tiered' ? (
+          <>
+            Tiered compaction never re-splits a merge's output, so any level can hold several SSTables with
+            overlapping key ranges — not just L0.
+          </>
+        ) : (
+          <>
+            Level 0's tables can overlap in key range; every level below it is kept non-overlapping by
+            compaction, the same reason a B+Tree's{' '}
+            <Link to="/tools/btree" className="underline underline-offset-2 hover:text-ink">
+              leaf chain
+            </Link>{' '}
+            never holds two leaves covering the same keys.
+          </>
+        )}{' '}
+        Look up a key to trace a real lookup through the structure: green is the table that actually held it,
+        amber is a filter false positive — a table the Bloom filter sent to a real check that did not actually
+        hold the key.
       </p>
     </div>
   );
@@ -332,6 +371,7 @@ function Stat({
 function LevelBlock({
   levelIndex,
   tables,
+  compactionStrategy,
   selected,
   related,
   eventFor,
@@ -340,6 +380,7 @@ function LevelBlock({
 }: {
   levelIndex: number;
   tables: readonly SSTable[];
+  compactionStrategy: CompactionStrategy;
   selected: number | null;
   related: ReadonlySet<number>;
   eventFor: ReadonlyMap<number, LsmEvent>;
@@ -347,6 +388,7 @@ function LevelBlock({
   onSelect: (id: number) => void;
 }) {
   const title = levelIndex === 0 ? 'L0 (flushed from the memtable)' : `L${String(levelIndex)}`;
+  const mayOverlap = levelIndex === 0 || compactionStrategy === 'tiered';
 
   return (
     <div className={`${panelSurface} p-3`}>
@@ -354,7 +396,7 @@ function LevelBlock({
         <span className="font-medium text-ink">{title}</span>
         <span className="text-ink-dim">
           {tables.length} SSTable{tables.length === 1 ? '' : 's'}
-          {levelIndex === 0 && tables.length > 1 ? ' — key ranges may overlap' : ''}
+          {mayOverlap && tables.length > 1 ? ' — key ranges may overlap' : ''}
         </span>
       </div>
 

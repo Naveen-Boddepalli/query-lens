@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **A tiered compaction strategy for the LSM-tree sandbox** (plan.md §25.4 F1, third slice) — alongside the
+  existing leveled strategy, pick "Tiered" to see the real RocksDB-style alternative: merges accumulate into one
+  unsplit table per tier instead of re-splitting into non-overlapping ranges, so any level can hold several
+  overlapping SSTables, not just L0. The trade-off is real and measured, not cosmetic: tiered costs less write
+  amplification than leveled for the identical writes, but more worst-case read amplification — both directions
+  shown live when you switch strategies on the same demo.
 - **A Bloom filter for the LSM-tree sandbox** (plan.md §25.4 F1, second slice) — every SSTable now carries its
   own filter, sized by a tunable bits-per-key (2–20), and a real `lookupKey` read path checks it before ever
   touching a table: look up any key and watch which SSTables it actually checked, highlighted green for the

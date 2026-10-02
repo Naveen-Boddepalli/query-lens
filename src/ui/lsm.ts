@@ -48,6 +48,19 @@
  *     including ones the textbook formula says should be far worse — traced to the bare-multiply hash mapping
  *     even inputs to even bit positions only, not a property of Bloom filters at all). `h_i(key) = h1 + i·h2`
  *     (Kirsch–Mitzenmacher double hashing) derives all `k` positions from the two mixed hashes.
+ *   - **A second, selectable compaction strategy: `tiered` (size-tiered), alongside the `leveled` model above.**
+ *     Where leveled compaction keeps every level past L0 non-overlapping (re-splitting a merge's output into
+ *     fresh, range-partitioned SSTables, and pulling in whatever next-level tables the merge's own key range
+ *     touches), tiered compaction does neither: once a level (any level, not just L0) accumulates
+ *     `filesPerTier` SSTables, they merge into ONE new, unsplit table that moves down a level — the next level's
+ *     *existing* tables are left completely untouched until that level, too, fills up. This is a real,
+ *     well-known trade-off (RocksDB calls it "universal" compaction, as opposed to its default "leveled"), not a
+ *     cosmetic toggle: tiered compaction touches less data per compaction event (never reading and rewriting
+ *     whatever the next level already holds), so it genuinely costs **less write amplification** for the same
+ *     writes — but every level below L0 can now hold several overlapping tables, the same wrinkle leveled
+ *     compaction confines to L0 alone, so a lookup may have to check every table at every level, costing
+ *     genuinely **more read amplification**, measured the same way leveled's is. Both directions of this
+ *     trade-off are measured in this module's own tests, not assumed from the textbook description.
  */
 
 export interface LsmWrite {
@@ -115,11 +128,16 @@ export const LSM_LIMITS: LsmLimits = {
   maxBitsPerKey: 20,
 };
 
+export type CompactionStrategy = 'leveled' | 'tiered';
+
 export interface LsmOptions {
+  compactionStrategy: CompactionStrategy;
   memtableCapacity: number;
+  /** Leveled: L0's own trigger only. Tiered: the SAME files-per-tier trigger, reused at every level. */
   l0CompactionTrigger: number;
-  /** L1's own capacity, in entries. Every SSTable this model ever creates also holds at most this many. */
+  /** L1's own capacity, in entries. Every SSTable this model ever creates also holds at most this many. Leveled only — tiered never re-splits a merge, so this is ignored under that strategy. */
   baseLevelCapacity: number;
+  /** Leveled only, same reason as `baseLevelCapacity`. */
   levelSizeMultiplier: number;
   /** Bits of filter per key an SSTable holds — the false-positive/size trade-off. */
   bitsPerKey: number;
@@ -236,6 +254,7 @@ function overlaps(table: SSTable, minKey: number, maxKey: number): boolean {
 
 export function planLsm(writes: readonly LsmWrite[], rawOptions: LsmOptions): LsmPlan {
   const options: LsmOptions = {
+    compactionStrategy: rawOptions.compactionStrategy === 'tiered' ? 'tiered' : 'leveled',
     memtableCapacity: clamp(rawOptions.memtableCapacity, LSM_LIMITS.minMemtableCapacity, LSM_LIMITS.maxMemtableCapacity),
     l0CompactionTrigger: clamp(rawOptions.l0CompactionTrigger, LSM_LIMITS.minL0Trigger, LSM_LIMITS.maxL0Trigger),
     baseLevelCapacity: Math.max(1, Math.round(rawOptions.baseLevelCapacity)),
@@ -256,8 +275,14 @@ export function planLsm(writes: readonly LsmWrite[], rawOptions: LsmOptions): Ls
     while (levels.length <= level) levels.push([]);
   }
 
-  /** Merges every SSTable currently in `level` (plus whatever it overlaps in `level + 1`) down one level. */
   function compact(level: number): void {
+    if (options.compactionStrategy === 'tiered') compactTiered(level);
+    else compactLeveled(level);
+  }
+
+  /** Leveled: merges every SSTable currently in `level` (plus whatever it overlaps in `level + 1`) down one
+   *  level, re-splitting the result into fresh, non-overlapping SSTables. */
+  function compactLeveled(level: number): void {
     ensureLevel(level + 1);
     const source = levels[level]!;
     if (source.length === 0) return;
@@ -292,8 +317,40 @@ export function planLsm(writes: readonly LsmWrite[], rawOptions: LsmOptions): Ls
     levels[level + 1] = [...untouched, ...newTables];
 
     if (levels[level + 1]!.reduce((n, t) => n + t.entries.length, 0) > levelCapacity(level + 1)) {
-      compact(level + 1);
+      compactLeveled(level + 1);
     }
+  }
+
+  /** Tiered: merges every SSTable currently in `level` into ONE new, unsplit table and moves it down a level —
+   *  whatever the next level already holds is left untouched until it, too, reaches `filesPerTier`. */
+  function compactTiered(level: number): void {
+    ensureLevel(level + 1);
+    const source = levels[level]!;
+    if (source.length === 0) return;
+    const merged = dedupeNewest(source.flatMap((t) => t.entries));
+    const newTable: SSTable = {
+      id: nextTableId++,
+      level: level + 1,
+      entries: merged,
+      minKey: merged[0]!.key,
+      maxKey: merged[merged.length - 1]!.key,
+      bloom: buildBloomFilter(merged.map((e) => e.key), options.bitsPerKey),
+    };
+
+    totalEntriesEverWritten += merged.length;
+    events.push({
+      id: nextEventId++,
+      kind: 'compaction',
+      level,
+      removed: source.map((t) => t.id),
+      created: [newTable.id],
+      entriesWritten: merged.length,
+    });
+
+    levels[level] = [];
+    levels[level + 1] = [...levels[level + 1]!, newTable];
+
+    if (levels[level + 1]!.length >= options.l0CompactionTrigger) compactTiered(level + 1);
   }
 
   function flush(memtable: readonly LsmWrite[]): void {
@@ -340,9 +397,16 @@ export function planLsm(writes: readonly LsmWrite[], rawOptions: LsmOptions): Ls
   // not read off the textbook formula (though they agree closely — this module's own tests check that).
   const maxWrittenKey = distinctKeys.length === 0 ? 0 : Math.max(...distinctKeys);
   const missKeys = Array.from({ length: distinctKeysWritten }, (_, i) => maxWrittenKey + i + 1);
-  const lookups = [...distinctKeys, ...missKeys].map((key) => lookupKey(levels, key));
+  const lookups = [...distinctKeys, ...missKeys].map((key) => lookupKey(levels, key, options.compactionStrategy));
   const totalChecked = lookups.reduce((n, l) => n + l.tablesChecked.length, 0);
   const totalFalsePositives = lookups.reduce((n, l) => n + l.falsePositives.length, 0);
+
+  // Leveled: at most every L0 table (they can all overlap) plus one per non-empty level below (each kept
+  // non-overlapping). Tiered: every level, not just L0, can hold several overlapping tables — worst case is
+  // every table, everywhere.
+  const totalTables = levels.reduce((n, lvl) => n + lvl.length, 0);
+  const readAmplificationWorstCase =
+    options.compactionStrategy === 'tiered' ? totalTables : levels[0]!.length + nonEmptyLevelsBeyondL0;
 
   return {
     writes: [...writes],
@@ -354,7 +418,7 @@ export function planLsm(writes: readonly LsmWrite[], rawOptions: LsmOptions): Ls
     totalEntriesEverWritten,
     writeAmplification: writes.length === 0 ? 0 : totalEntriesEverWritten / writes.length,
     spaceAmplification: distinctKeysWritten === 0 ? 0 : totalEntriesOnDisk / distinctKeysWritten,
-    readAmplificationWorstCase: levels[0]!.length + nonEmptyLevelsBeyondL0,
+    readAmplificationWorstCase,
     readAmplificationAverage: lookups.length === 0 ? 0 : totalChecked / lookups.length,
     measuredFalsePositiveRate: totalChecked === 0 ? 0 : totalFalsePositives / totalChecked,
   };
@@ -362,12 +426,14 @@ export function planLsm(writes: readonly LsmWrite[], rawOptions: LsmOptions): Ls
 
 /**
  * A real point lookup: the memtable is always empty by the time a `LsmPlan` is returned (the last write
- * sequence always ends with a flush), so this only ever walks `levels` — L0 newest-first (any of its tables
- * could hold the key), then at most one table per level below (non-overlapping, so the first range match is
- * the only candidate). A table's own Bloom filter is checked before the table itself; "definitely not here"
- * skips it outright, "maybe" costs a real check — sometimes a false positive, never a false negative.
+ * sequence always ends with a flush), so this only ever walks `levels`. L0 is always scanned newest-first in
+ * full — any of its tables could hold the key, leveled or tiered alike. Below L0, the two strategies differ:
+ * leveled keeps every level non-overlapping, so the first range match is the only candidate; tiered can leave
+ * several overlapping tables at any level, so every table at that level is scanned newest-first, same as L0. A
+ * table's own Bloom filter is checked before the table itself; "definitely not here" skips it outright, "maybe"
+ * costs a real check — sometimes a false positive, never a false negative.
  */
-export function lookupKey(levels: readonly SSTable[][], key: number): LookupResult {
+export function lookupKey(levels: readonly SSTable[][], key: number, strategy: CompactionStrategy): LookupResult {
   const tablesChecked: number[] = [];
   const falsePositives: number[] = [];
 
@@ -379,13 +445,23 @@ export function lookupKey(levels: readonly SSTable[][], key: number): LookupResu
     return hit;
   };
 
-  const l0 = levels[0] ?? [];
-  for (let i = l0.length - 1; i >= 0; i--) {
-    const hit = checkTable(l0[i]!);
-    if (hit) return { key, found: true, value: hit.value, tablesChecked, falsePositives };
-  }
+  const scanNewestFirst = (level: readonly SSTable[]): LsmWrite | undefined => {
+    for (let i = level.length - 1; i >= 0; i--) {
+      const hit = checkTable(level[i]!);
+      if (hit) return hit;
+    }
+    return undefined;
+  };
+
+  const l0Hit = scanNewestFirst(levels[0] ?? []);
+  if (l0Hit) return { key, found: true, value: l0Hit.value, tablesChecked, falsePositives };
 
   for (const level of levels.slice(1)) {
+    if (strategy === 'tiered') {
+      const hit = scanNewestFirst(level);
+      if (hit) return { key, found: true, value: hit.value, tablesChecked, falsePositives };
+      continue;
+    }
     const table = level.find((t) => t.minKey <= key && t.maxKey >= key);
     if (!table) continue;
     const hit = checkTable(table);
