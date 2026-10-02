@@ -85,6 +85,13 @@ const TOOLS = [
       'Log-structured merge trees: writes buffer in a memtable, flush to disk as an immutable, sorted SSTable, then compact into fewer, larger files at the next level down. Change the memtable size or a level\'s capacity and watch the cascade — and the write, space and read amplification it costs.',
     available: true,
   },
+  {
+    title: 'Hash index',
+    href: '/tools/hash-index',
+    description:
+      'Extendible hashing (a directory that doubles, buckets with their own local depth) and linear hashing (no directory, a round-robin split pointer growing the bucket array one at a time). Switch schemes on the same writes to compare them, and see exactly why neither can answer a range query.',
+    available: true,
+  },
 ] as const;
 
 export function ToolsIndexPage() {

@@ -331,6 +331,41 @@ test('switching the LSM sandbox to tiered compaction trades read amplification f
   await expect(table.getByText(/compacted from 2 tables/)).toBeVisible();
 });
 
+test('the hash-index sandbox grows a directory under extendible hashing and a bucket array under linear hashing', async ({ page }) => {
+  await page.goto('/tools/hash-index?n=60&cap=4&init=2&seed=1');
+  await expect(page.getByRole('heading', { name: 'Hash index', exact: true })).toBeVisible();
+
+  const stat = (label: string) => page.getByText(label, { exact: true }).locator('..');
+
+  // Extendible (the default): a directory, sized by a global depth.
+  await expect(stat('buckets').getByText('10', { exact: true })).toBeVisible();
+  await expect(stat('global depth').getByText('4', { exact: true })).toBeVisible();
+  await expect(page.getByText(/Directory \(16 slots, global depth 4\)/)).toBeVisible();
+
+  // A real hit and a genuine miss, both through the actual lookup path.
+  await page.getByLabel('Look up a key').fill('27');
+  await page.getByRole('button', { name: 'Look up' }).click();
+  await expect(page.getByText(/found — value 865/)).toBeVisible();
+  await page.getByLabel('Look up a key').fill('542');
+  await page.getByRole('button', { name: 'Look up' }).click();
+  await expect(page.getByText(/Key 542 not found/)).toBeVisible();
+
+  // Ten consecutive keys scatter across several different buckets — the reason this tool exists.
+  await expect(page.getByText(/consecutive keys, right after the highest one actually written/)).toBeVisible();
+
+  // Switching to linear hashing: no directory, a bucket array with a split pointer and overflow chains instead.
+  await page.getByLabel('Scheme').selectOption('linear');
+  await expect(stat('level').getByText('2', { exact: true })).toBeVisible();
+  await expect(stat('split pointer').getByText('1', { exact: true })).toBeVisible();
+  await expect(stat('max chain length').getByText('2', { exact: true })).toBeVisible();
+  await expect(page.getByText(/Buckets \(level 2, split pointer at address 1\)/)).toBeVisible();
+  await expect.poll(() => page.url()).toMatch(/[?&]strategy=linear/);
+
+  // Extendible's own "initial buckets" control is irrelevant to it and stays disabled.
+  await page.getByLabel('Scheme').selectOption('extendible');
+  await expect(page.getByLabel('Initial buckets')).toBeDisabled();
+});
+
 test('the planner sandbox runs the rewrite rules one at a time', async ({ page }) => {
   await page.goto('/tools/planner');
   await expect(page.getByRole('heading', { name: 'Planner sandbox' })).toBeVisible();

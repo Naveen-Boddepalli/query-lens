@@ -196,6 +196,9 @@ const T = (name: string): string => `src/pages/tools/${name}.tsx`;
  *    the new `src/ui/btreeWriteCost.ts` directly into `ComparePage`'s own lazy chunk (not the shared engine
  *    chunk, since neither is imported by any other already-loaded route) — the whole 7.3 kB gzip difference is
  *    this one route's own growth. 171 → 175 (measured 172.0, the usual +3 slack).
+ *  - 2026-10-02, extendible and linear hashing (§25.4 F2): a new route, /tools/hash-index (115.5 kB measured
+ *    + 3, rounded to 118) — a self-contained `src/ui/hashIndex.ts` driver in the same family as `/tools/lsm`'s,
+ *    so it does not touch the shared engine chunk and no other route moved.
  */
 export const ROUTES: readonly RouteBudget[] = [
   { route: '/', roots: [P('LandingPage')], kb: 165, note: 'the landing page' },
@@ -226,6 +229,7 @@ export const ROUTES: readonly RouteBudget[] = [
   { route: '/tools/hash-join', roots: [T('HashJoinToolPage')], kb: 118, note: 'Grace hash join' },
   { route: '/tools/join-order', roots: [T('JoinOrderToolPage')], kb: 163, note: 'Selinger join-order search over the subset lattice' },
   { route: '/tools/lsm', roots: [T('LsmToolPage')], kb: 118, note: 'log-structured merge-tree sandbox' },
+  { route: '/tools/hash-index', roots: [T('HashIndexToolPage')], kb: 118, note: 'extendible and linear hashing sandbox' },
   { route: '/docs', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 153, note: 'the docs shell and every prose page (one shared chunk)' },
   { route: '/docs/concepts/btree', roots: ['src/ui/DocsLayout.tsx', 'src/pages/DocsContent/concepts/btree.mdx'], kb: 170, note: 'a concept page with a live B+Tree widget' },
   { route: '/docs/concepts/buffer-pool', roots: ['src/ui/DocsLayout.tsx', 'src/pages/DocsContent/concepts/buffer-pool.mdx'], kb: 171, note: 'a concept page with a live buffer-pool widget' },
