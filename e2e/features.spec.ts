@@ -366,6 +366,38 @@ test('the hash-index sandbox grows a directory under extendible hashing and a bu
   await expect(page.getByLabel('Initial buckets')).toBeDisabled();
 });
 
+test('the columnar sandbox computes real compressed sizes, per-layout page counts, and a materialization gap', async ({ page }) => {
+  await page.goto('/tools/columnar?n=500&page=256&layout=DSM&seed=1');
+  await expect(page.getByRole('heading', { name: 'Row vs. column storage' })).toBeVisible();
+
+  // Each demo column auto-picks its own genuinely best encoding, with a real compressed byte count.
+  const columnRow = (name: string) => page.locator('div.flex.flex-wrap.items-center.gap-3', { hasText: name }).first();
+  await expect(columnRow('id').getByText('2000 B → 129 B')).toBeVisible();
+  await expect(columnRow('status_grouped').getByText('2000 B → 24 B')).toBeVisible();
+  await expect(columnRow('status_shuffled').getByText('2000 B → 125 B')).toBeVisible();
+  await expect(columnRow('amount').getByText('2000 B → 1938 B')).toBeVisible();
+
+  // DSM (the default): a single-column scan costs far fewer pages than a full scan, and reconstructing a row
+  // means visiting one region per column.
+  const dl = page.locator('dl').first();
+  await expect(dl.getByText('32', { exact: true })).toBeVisible();
+  await expect(dl.getByText('8', { exact: true }).first()).toBeVisible();
+  await expect(dl.getByText('4', { exact: true })).toBeVisible();
+
+  // Switching to NSM: no layout can skip a column within a page, so every single-column cost rises to match
+  // the full-scan cost, and a row is reconstructed from just one region (the opposite trade-off from DSM).
+  await page.getByRole('radio', { name: 'NSM' }).click();
+  const nsmValues = await dl.locator('dd').allTextContents();
+  expect(new Set(nsmValues.slice(0, 5))).toEqual(new Set(['32'])); // full scan + all 4 single-column costs tie
+  await expect(dl.getByText('1', { exact: true })).toBeVisible();
+  await expect.poll(() => page.url()).toMatch(/[?&]layout=NSM/);
+
+  // Late materialization touches far fewer bytes than early materialization for the default filter/project pair.
+  await expect(page.getByText(/\d+ of 500 rows match/)).toBeVisible();
+  await expect(page.getByText('8,000', { exact: true })).toBeVisible();
+  await expect(page.getByText('2,412', { exact: true })).toBeVisible();
+});
+
 test('the planner sandbox runs the rewrite rules one at a time', async ({ page }) => {
   await page.goto('/tools/planner');
   await expect(page.getByRole('heading', { name: 'Planner sandbox' })).toBeVisible();

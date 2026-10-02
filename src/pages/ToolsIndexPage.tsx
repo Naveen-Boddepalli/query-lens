@@ -92,6 +92,13 @@ const TOOLS = [
       'Extendible hashing (a directory that doubles, buckets with their own local depth) and linear hashing (no directory, a round-robin split pointer growing the bucket array one at a time). Switch schemes on the same writes to compare them, and see exactly why neither can answer a range query.',
     available: true,
   },
+  {
+    title: 'Row vs. column storage',
+    href: '/tools/columnar',
+    description:
+      'NSM (row store), DSM (column store) and PAX (the hybrid) laying out the same table three ways, with real compressed-size counters for dictionary, RLE, delta and bit-packing — and the late-materialization trick a column store only actually pays off with.',
+    available: true,
+  },
 ] as const;
 
 export function ToolsIndexPage() {

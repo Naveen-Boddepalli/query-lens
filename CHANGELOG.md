@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **A row-vs-column storage sandbox**, `/tools/columnar` (plan.md §25.4 F3, sandbox slice) — NSM (row store), DSM
+  (column store) and PAX (the hybrid) laying out the same table three ways, with real compressed-size counters
+  for dictionary, RLE, delta and bit-packing encodings, and the late-vs-early materialization trade-off that
+  decides whether a column store's own layout advantage actually pays off for a given query.
 - **An extendible/linear hashing sandbox**, `/tools/hash-index` (plan.md §25.4 F2) — pick a scheme and watch it
   grow: extendible hashing's directory doubles only when a full bucket has no spare depth to split into; linear
   hashing's round-robin split pointer grows the bucket array one at a time, decoupled from which bucket actually

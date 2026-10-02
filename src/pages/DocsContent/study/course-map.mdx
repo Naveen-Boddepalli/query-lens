@@ -48,7 +48,7 @@ four rows to a page, eight buffer frames, four keys to an index node. What trans
 | Storage: heap files and pages | Covered | The [slotted-page inspector](/tools/page) lays a page out byte by byte; the Playground reads real heap pages | Variable-length overflow, free-space maps |
 | Memory management: the buffer pool | Covered | [The buffer pool](/docs/concepts/buffer-pool), the [pool sandbox](/tools/buffer-pool) (LRU, clock, FIFO, second-chance, optimal, midpoint LRU), the [policy comparison](/compare), the *eviction storm* and *dirty eviction* [challenges](/challenges) | Pin/unpin contention between real concurrent queries |
 | Log-structured storage | Covered | The [LSM tree sandbox](/tools/lsm): memtables, SSTable flushes, leveled *and* tiered compaction (pick either), Bloom filters with a real lookup path, and the write/space/read amplification it costs — plus a [B+Tree-vs-LSM comparison](/compare) with amplification from real counters on both sides | — |
-| Storage models and compression | Not covered | — | Column stores, compression, PAX — every table here is a row store |
+| Storage models and compression | Partly | The [row-vs-column storage sandbox](/tools/columnar): NSM, DSM and PAX laid out three ways, with real compressed sizes for dictionary, RLE, delta and bit-packing, and the late-materialization trade-off that makes a column store pay off | The query engine itself still only ever stores and scans rows — the sandbox models columnar storage standalone, not wired into `EXPLAIN`/the Playground |
 | Hash tables | Covered | The [Grace hash join sandbox](/tools/hash-join) (partitioning, spill, bucket collisions), the engine's hash join and hash aggregate, and the [extendible/linear hash index sandbox](/tools/hash-index) (directory doubling, local/global depth, round-robin splitting, and why neither scheme can answer a range query) | — |
 | Tree indexes | Covered | [The B+Tree](/docs/concepts/btree): splits and merges in the [sandbox](/tools/btree), point lookups and range scans, **repeated keys**, **composite indexes and the leftmost-prefix rule**, **covering scans**, **`UNIQUE`**, bulk load vs one-at-a-time ([Compare → Index build](/compare)) | Clustered (index-organized) tables; secondary indexes that point at a key rather than a row address |
 | Filters, tries, vector indexes | Partly | [Bloom filters](/tools/lsm) sized by bits-per-key, with a real lookup path and a measured false-positive rate | Tries, similarity search, vector indexes |
@@ -76,7 +76,7 @@ algorithms, sorting and aggregation, and an optimizer you can step through. The
 Everything from **transactions onward** — concurrency-control theory, MVCC, logging, recovery,
 distributed systems — is either absent or (for two-phase locking) a standalone tool outside the
 engine. That is roughly a quarter of a typical course. Nothing on this page should be read as
-covering it. Column stores, tries, and similarity search are also absent.
+covering it. Tries and similarity search are also absent.
 
 If a topic above says *Not covered* and you need it, that is the right signal to reach for your
 course notes or the textbook — not a gap in your understanding.

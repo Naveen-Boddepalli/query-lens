@@ -199,6 +199,11 @@ const T = (name: string): string => `src/pages/tools/${name}.tsx`;
  *  - 2026-10-02, extendible and linear hashing (§25.4 F2): a new route, /tools/hash-index (115.5 kB measured
  *    + 3, rounded to 118) — a self-contained `src/ui/hashIndex.ts` driver in the same family as `/tools/lsm`'s,
  *    so it does not touch the shared engine chunk and no other route moved.
+ *  - 2026-10-02, row vs. column storage (§25.4 F3, standalone sandbox slice): a new route, /tools/columnar
+ *    (114.9 kB measured + 3, rounded to 118) — a self-contained `src/ui/columnar.ts` driver, same family as
+ *    `/tools/lsm`'s and `/tools/hash-index`'s, so it does not touch the shared engine chunk and no other route
+ *    moved. F3's own real `ColumnScan` operator + projection-pushdown wiring (a genuine engine change) is a
+ *    separate, later slice of the same item.
  */
 export const ROUTES: readonly RouteBudget[] = [
   { route: '/', roots: [P('LandingPage')], kb: 165, note: 'the landing page' },
@@ -230,6 +235,7 @@ export const ROUTES: readonly RouteBudget[] = [
   { route: '/tools/join-order', roots: [T('JoinOrderToolPage')], kb: 163, note: 'Selinger join-order search over the subset lattice' },
   { route: '/tools/lsm', roots: [T('LsmToolPage')], kb: 118, note: 'log-structured merge-tree sandbox' },
   { route: '/tools/hash-index', roots: [T('HashIndexToolPage')], kb: 118, note: 'extendible and linear hashing sandbox' },
+  { route: '/tools/columnar', roots: [T('ColumnarToolPage')], kb: 118, note: 'NSM/DSM/PAX row vs. column storage sandbox' },
   { route: '/docs', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 153, note: 'the docs shell and every prose page (one shared chunk)' },
   { route: '/docs/concepts/btree', roots: ['src/ui/DocsLayout.tsx', 'src/pages/DocsContent/concepts/btree.mdx'], kb: 170, note: 'a concept page with a live B+Tree widget' },
   { route: '/docs/concepts/buffer-pool', roots: ['src/ui/DocsLayout.tsx', 'src/pages/DocsContent/concepts/buffer-pool.mdx'], kb: 171, note: 'a concept page with a live buffer-pool widget' },

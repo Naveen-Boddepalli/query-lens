@@ -112,6 +112,9 @@ const LsmToolPage = lazy(() =>
 const HashIndexToolPage = lazy(() =>
   import('./pages/tools/HashIndexToolPage.tsx').then((m) => ({ default: m.HashIndexToolPage })),
 );
+const ColumnarToolPage = lazy(() =>
+  import('./pages/tools/ColumnarToolPage.tsx').then((m) => ({ default: m.ColumnarToolPage })),
+);
 const ComparePage = lazy(() =>
   import('./pages/ComparePage.tsx').then((m) => ({ default: m.ComparePage })),
 );
@@ -216,6 +219,7 @@ export default function App() {
               <Route path="join-order" element={suspended(JoinOrderToolPage)} />
               <Route path="lsm" element={suspended(LsmToolPage)} />
               <Route path="hash-index" element={suspended(HashIndexToolPage)} />
+              <Route path="columnar" element={suspended(ColumnarToolPage)} />
             </Route>
 
             <Route path="docs" element={suspended(DocsLayout)}>
