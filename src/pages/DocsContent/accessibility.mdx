@@ -1,0 +1,46 @@
+---
+title: Accessibility
+description: What QueryLens has been checked against for accessibility, how each check is run, and what has not been checked yet.
+---
+
+QueryLens aims at WCAG 2.2 level AA. This page says what has been checked, how, and what has not. It is **not** a
+conformance claim: a conformance statement needs the manual testing listed under *Not yet checked*, and that has not
+been done.
+
+## Checked automatically
+
+Fifty routes are scanned with [axe-core](https://github.com/dequelabs/axe-core) against the WCAG 2.0, 2.1 and 2.2
+rules at levels A and AA. The scan runs in the project's test suite (`e2e/audit.spec.ts`), with reduced motion on. It
+covers the landing page, the playground, every tool and comparison, every docs page, the not-found page, and one
+stage, one lesson and one challenge page standing for their kinds. The last run found no violations on any of them.
+The other stage, lesson and challenge pages are built from the same components, but they are not scanned one by one.
+
+Automated scanning catches only part of WCAG: a pass means no *detectable* violation, not that a page is accessible.
+
+## Checked by hand, in the browser
+
+- **Keyboard, in the tree diagrams.** The parse tree, the query plan and the B+Tree are each one tab stop. The arrow
+  keys move to the parent, to the first child, and left and right through siblings, and the view follows focus. Each
+  node is announced with its level and its place among its siblings.
+- **Tables for the simulators.** The hash index, LSM tree, join order and columnar storage each have a *Show as table*
+  control that shows the same numbers as a table, for readers who cannot use the diagram.
+
+## Not yet checked
+
+- **Screen readers.** Nothing has yet been tested with NVDA, VoiceOver or TalkBack. Until it has, the claims above are
+  about the markup, not about what a screen reader says aloud.
+- **Keyboard through every page.** The tree diagrams and the table views were checked by hand. The rest of the
+  keyboard flow was not walked end to end.
+- **Colour in every theme.** The automated contrast checks cover the themes, but a person has not reviewed the
+  charts and the highlights for colour-vision differences.
+
+## Known limits
+
+- The B+Tree's leaf sibling chain is drawn but not walkable with the arrow keys, which follow the tree only.
+- The step narration is text, but a few visuals carry their meaning in colour as well as in their labels.
+
+## Reporting a problem
+
+Tell us where, what you were doing, and what happened, on the project's
+[issue tracker](https://github.com/Naveen-Boddepalli/query-lens/issues). Please say which assistive technology you
+used, if any.

@@ -54,6 +54,7 @@ export const DOCS_NAV: readonly DocsNavGroup[] = [
       { to: '/docs/reference/shortcuts', label: 'Keyboard shortcuts' },
       { to: '/docs/reference/limits', label: 'Engine limits' },
       { to: '/docs/reference/answers', label: 'How we know the answers are right' },
+      { to: '/docs/accessibility', label: 'Accessibility' },
     ],
   },
   {

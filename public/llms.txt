@@ -42,6 +42,7 @@ https://github.com/Naveen-Boddepalli/query-lens.
 - [Keyboard shortcuts](https://query-lens.1234naveenboddepalli.workers.dev/docs/reference/shortcuts): Every keyboard shortcut QueryLens responds to.
 - [Engine limits](https://query-lens.1234naveenboddepalli.workers.dev/docs/reference/limits): The fixed numbers behind the engine — buffer pool size, B+Tree fan-out, and what's out of scope entirely.
 - [How we know the answers are right](https://query-lens.1234naveenboddepalli.workers.dev/docs/reference/answers): QueryLens's rows are checked against SQLite by a fuzzer on every build — what that proves, what it cannot, and the short list of places the two disagree on purpose.
+- [Accessibility](https://query-lens.1234naveenboddepalli.workers.dev/docs/accessibility): What QueryLens has been checked against for accessibility, how each check is run, and what has not been checked yet.
 
 ## Architecture
 
