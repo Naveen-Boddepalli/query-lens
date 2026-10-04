@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Installable, and works offline after a first visit** (plan.md §H1). A hand-written service worker caches the app's own files, so the Playground, the docs and every tool open with no network. The web manifest names install icons. Only the app's files are cached, never your queries or data. A new version applies once no open tab is still running the old one.
 - **Confidence ratings on predictions** (plan.md §G2) — "How sure?" before each prediction is committed, and a Calibration section on `/progress` showing how often rated predictions came true at each level. The rating is optional, so answering without one still reveals and counts toward the overall record.
 - **Six misconception challenges** (plan.md §G3) — each names a wrong belief about SQL (a filter the index cannot serve, an expression around an indexed column, `= NULL`, `COUNT(*)` vs `COUNT(col)`, `NOT IN` with a NULL, a WHERE on a LEFT JOIN's inner side) and reveals it once solved. The checks read the parsed predicate, so a query with the right rows and the wrong shape does not pass.
 - **A trace diff in the Playground** (plan.md G6) — re-running a query shows what changed since its last run: each measured number that moved, and whether the optimizer's plan changed shape. The numbers are `/compare`'s own scorecard.

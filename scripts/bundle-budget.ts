@@ -207,6 +207,9 @@ const T = (name: string): string => `src/pages/tools/${name}.tsx`;
  *  - 2026-10-04, latch crabbing (§25.4 F5): a new route, /tools/latch-crabbing (163.5 kB measured + 3, rounded
  *    to 167). Unlike the standalone sandboxes it drives the REAL engine B+Tree (`engine/index/btree.ts`, the same
  *    code /tools/btree uses), so it pays the shared engine chunk the same way /tools/btree does (ceiling 167).
+ *  - 2026-10-04, the service worker registration and web manifest (§25.4 H1): the registration in main.tsx grew the
+ *    entry chunk every route pays from 22.4 to 22.5 kB. /learn/:id was already at its ceiling (167.0 of 167), so
+ *    that tipped it over; raised to 168.
  *  - 2026-10-02, row vs. column storage (§25.4 F3, standalone sandbox slice): a new route, /tools/columnar
  *    (114.9 kB measured + 3, rounded to 118) — a self-contained `src/ui/columnar.ts` driver, same family as
  *    `/tools/lsm`'s and `/tools/hash-index`'s, so it does not touch the shared engine chunk and no other route
@@ -219,7 +222,7 @@ export const ROUTES: readonly RouteBudget[] = [
   { route: '/stages', roots: ['src/ui/StagesLayout.tsx', P('StagesIndex')], kb: 165, note: 'the stage explainers, index' },
   { route: '/stages/:id', roots: ['src/ui/StagesLayout.tsx', P('StagePage')], kb: 180, note: 'one stage explainer' },
   { route: '/learn', roots: [P('LearnPage')], kb: 169, note: 'the lesson track' },
-  { route: '/learn/:id', roots: [P('LessonPage')], kb: 167, note: 'one lesson' },
+  { route: '/learn/:id', roots: [P('LessonPage')], kb: 168, note: 'one lesson' },
   { route: '/examples', roots: [P('ExamplesPage')], kb: 115, note: 'preset queries' },
   { route: '/gallery', roots: [P('GalleryPage')], kb: 165, note: 'named moments' },
   { route: '/compare', roots: [P('ComparePage')], kb: 175, note: 'index vs scan, policy vs policy, hash vs sort, join algorithms, B+Tree vs. LSM' },

@@ -48,6 +48,15 @@ the narration said, your query and a link that reopens the moment. It is a plain
 you press Submit on GitHub, where you can edit or delete any of it first. That is how a tool with no
 telemetry hears which step confused someone.
 
+## Does it work offline?
+
+Yes, once it has loaded once. The first visit stores the app's own files in your browser through a service worker — about 670 KiB to
+download, the app's code, fonts and icons. After that every page, including the docs and the tools,
+opens with no network, and queries run as they always did, since they never left the tab. Only the app's
+files are stored, never your queries or your data. A new version of QueryLens reaches a browser when no
+open tab is still running the old one, so a tab left open keeps the version it loaded until it is closed.
+Browsers that support it offer to install QueryLens as an app from their menu; the offer itself depends on the browser.
+
 ## Can I use this in my course?
 
 Yes. The code is MIT-licensed and this documentation is CC BY 4.0 — between them: use it in a

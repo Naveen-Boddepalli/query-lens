@@ -43,3 +43,12 @@ createRoot(rootEl, {
     </ErrorBoundary>
   </StrictMode>,
 );
+
+// plan.md §H1. Production only: in dev the worker would hold files that change on every save.
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch((error: unknown) => {
+      console.warn('[QueryLens] offline support unavailable', error);
+    });
+  });
+}

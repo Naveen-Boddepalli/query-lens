@@ -1,4 +1,6 @@
 import { execSync } from 'node:child_process';
+import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
@@ -45,6 +47,42 @@ const SITE_URL = (
 ).replace(/\/$/, '');
 
 // https://vite.dev/config/
+// plan.md §H1. public/sw.js is written by hand; the build fills in the two things only the build knows: this
+// build's stamp, which names the cache, and every file it emitted, which is what the worker precaches.
+const SW_NOT_PRECACHED = new Set(['sw.js', '_headers', '_redirects']);
+
+function listFiles(dir: string, prefix = ''): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) =>
+    entry.isDirectory() ? listFiles(join(dir, entry.name), `${prefix}${entry.name}/`) : [`${prefix}${entry.name}`],
+  );
+}
+
+let swOutDir = '';
+
+const serviceWorkerPlugin = {
+  name: 'querylens-service-worker',
+  apply: 'build',
+  configResolved(config: { root: string; build: { outDir: string } }) {
+    swOutDir = resolve(config.root, config.build.outDir);
+  },
+  closeBundle() {
+    const file = join(swOutDir, 'sw.js');
+    const source = readFileSync(file, 'utf8');
+    if (!source.includes('__BUILD_STAMP__') || !source.includes('__PRECACHE__')) {
+      throw new Error('public/sw.js lost its __BUILD_STAMP__ or __PRECACHE__ placeholder');
+    }
+    const precache = listFiles(swOutDir)
+      .filter((f) => !SW_NOT_PRECACHED.has(f) && !f.split('/').some((seg) => seg.startsWith('.')))
+      .map((f) => `/${f}`);
+    writeFileSync(
+      file,
+      source
+        .replace('__BUILD_STAMP__', () => `${BUILD_SHA}-${BUILD_TIME}`)
+        .replace('__PRECACHE__', () => JSON.stringify(precache)),
+    );
+  },
+};
+
 export default defineConfig({
   plugins: [
     // `rehype-slug` gives every rendered heading a stable `id` (kebab-cased
@@ -93,6 +131,7 @@ export default defineConfig({
             ),
       },
     },
+    serviceWorkerPlugin,
   ],
   build: {
     // `dist/.vite/manifest.json`: which chunks each lazy route pulls in. `scripts/bundle-budget.ts` walks it to
