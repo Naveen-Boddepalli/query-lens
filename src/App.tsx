@@ -169,6 +169,8 @@ const DocsFaq = lazy(() => import('./pages/DocsContent/faq.mdx'));
 const DocsArchitecture = lazy(() => import('./pages/DocsContent/architecture.mdx'));
 const DocsBufferPool = lazy(() => import('./pages/DocsContent/concepts/buffer-pool.mdx'));
 const DocsBTree = lazy(() => import('./pages/DocsContent/concepts/btree.mdx'));
+const DocsEssayIndexWriteTax = lazy(() => import('./pages/DocsContent/essays/index-write-tax.mdx'));
+const DocsEssayScanResistance = lazy(() => import('./pages/DocsContent/essays/scan-resistance.mdx'));
 const DocsManualEviction = lazy(() => import('./pages/DocsContent/manual/eviction.mdx'));
 const DocsManualBTreeSplit = lazy(() => import('./pages/DocsContent/manual/btree-split.mdx'));
 const DocsCourseMap = lazy(() => import('./pages/DocsContent/study/course-map.mdx'));
@@ -236,6 +238,8 @@ export default function App() {
               <Route path="faq" element={<DocsFaq />} />
               <Route path="concepts/buffer-pool" element={<DocsBufferPool />} />
               <Route path="concepts/btree" element={<DocsBTree />} />
+              <Route path="essays/index-write-tax" element={<DocsEssayIndexWriteTax />} />
+              <Route path="essays/scan-resistance" element={<DocsEssayScanResistance />} />
               <Route path="manual/eviction" element={<DocsManualEviction />} />
               <Route path="manual/btree-split" element={<DocsManualBTreeSplit />} />
               <Route path="study/course-map" element={<DocsCourseMap />} />

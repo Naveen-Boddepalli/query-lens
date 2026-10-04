@@ -1,0 +1,59 @@
+---
+title: One scan can empty the cache
+description: Why one pass over a large table can push out the pages a workload keeps needing, and how LRU-2 avoids it, measured on QueryLens's buffer pool.
+---
+
+Picture a buffer pool of 8 frames and a workload that keeps reading the same four pages: an index's root, a
+frequently used row, a small lookup table. Then someone runs a query that reads a 40-page table once, from start
+to finish. The scan is correct and it finishes quickly. Afterwards the four hot pages are no longer in memory, and
+the next lookups go to disk.
+
+This is the scan problem. A sequential scan reads more pages than the pool holds, and under plain LRU each page it
+reads counts as more recently used than the hot set, so the hot set is the first thing to go.
+
+## The trace
+
+The sandbox links below run one fixed trace through the same buffer pool the rest of QueryLens uses: pages 0 to 3 are
+read twice, pages 100 to 139 are each read once, then pages 0 to 3 are read again. The pool has 8 frames, the default.
+Each link opens the trace under one policy, so you can step through the scan and watch what each policy evicts.
+
+- [LRU](/tools/buffer-pool?ref=0%201%202%203%200%201%202%203%20100%20101%20102%20103%20104%20105%20106%20107%20108%20109%20110%20111%20112%20113%20114%20115%20116%20117%20118%20119%20120%20121%20122%20123%20124%20125%20126%20127%20128%20129%20130%20131%20132%20133%20134%20135%20136%20137%20138%20139%200%201%202%203&frames=8&policy=lru)
+- [LRU-2](/tools/buffer-pool?ref=0%201%202%203%200%201%202%203%20100%20101%20102%20103%20104%20105%20106%20107%20108%20109%20110%20111%20112%20113%20114%20115%20116%20117%20118%20119%20120%20121%20122%20123%20124%20125%20126%20127%20128%20129%20130%20131%20132%20133%20134%20135%20136%20137%20138%20139%200%201%202%203&frames=8&policy=lru-k)
+
+Measured on that trace:
+
+| Policy | Misses, out of 52 reads | Misses on the final re-read of pages 0 to 3 |
+| --- | --- | --- |
+| LRU | 48 | 4 |
+| LRU-2 | 44 | 0 |
+
+Both policies miss all 40 scan pages, because a page that is read for the first time has to be fetched. What
+differs is what the scan evicts. LRU gives up the hot set; LRU-2 keeps it.
+
+## Why LRU-2 keeps the hot set
+
+LRU-2 remembers the last two times each page was read. When it needs a frame, it evicts the page whose second most
+recent read is oldest. A page read only once has no second most recent read, so it goes before any page that has
+been read twice. Each scan page is read once, so they are evicted first and the hot set stays. Among pages in the
+same position, the least recently used one goes first.
+
+LRU-2 comes from O'Neil, O'Neil and Weikum's paper on LRU-K ([SIGMOD 1993, pp. 297–306](https://dblp.org/rec/conf/sigmod/ONeilOW93.html)),
+where K is the number of past references kept per page. K = 1 is plain LRU.
+
+## What this does not show
+
+- **It is one trace, chosen to make the effect visible.** It is not a benchmark. A workload with no hot set, or
+  with a hot set larger than the pool, does not gain the same way, and LRU-2 cannot keep a page that is never read
+  again.
+- **LRU-2 costs more bookkeeping.** Each page keeps two timestamps instead of one, and the victim search has to
+  compare them.
+- **Real systems take other routes.** PostgreSQL sends large sequential scans through a small ring of buffers, so a
+  scan never reaches most of the pool at all. InnoDB inserts newly read pages into the middle of its LRU list, so a
+  page read only once starts behind the hot pages. Neither is modelled here. The comparison in this essay is between
+  LRU and LRU-2 only.
+
+## Try this
+
+- The [buffer-pool concept page](/docs/concepts/buffer-pool) has a smaller replay of LRU against clock sweep on a
+  four-frame trace.
+- Open the [buffer-pool sandbox](/tools/buffer-pool) to try other reference strings under each policy.

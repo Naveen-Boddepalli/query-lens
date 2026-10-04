@@ -33,6 +33,13 @@ export const DOCS_NAV: readonly DocsNavGroup[] = [
     ],
   },
   {
+    title: 'Essays',
+    items: [
+      { to: '/docs/essays/index-write-tax', label: 'An index is a tax on every write' },
+      { to: '/docs/essays/scan-resistance', label: 'One scan can empty the cache' },
+    ],
+  },
+  {
     title: 'Study',
     items: [
       { to: '/docs/study/course-map', label: 'Course map' },

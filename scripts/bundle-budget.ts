@@ -207,6 +207,11 @@ const T = (name: string): string => `src/pages/tools/${name}.tsx`;
  *  - 2026-10-04, latch crabbing (§25.4 F5): a new route, /tools/latch-crabbing (163.5 kB measured + 3, rounded
  *    to 167). Unlike the standalone sandboxes it drives the REAL engine B+Tree (`engine/index/btree.ts`, the same
  *    code /tools/btree uses), so it pays the shared engine chunk the same way /tools/btree does (ceiling 167).
+ *  - 2026-10-04, the essays (§25.4 H2): /docs/essays/index-write-tax and /docs/essays/scan-resistance are prose pages in
+ *    the shared docs chunk, so /docs grew from 151.7 to 154.6 kB (ceiling 153 → 158), and each essay route (which
+ *    downloads that chunk) gets the same ceiling. The Essays group in docsNav adds a few bytes to the entry chunk every
+ *    route pays, which put /tools/join-order just over 163 kB (→ 164). Live widgets were tried and reverted: a lazy or
+ *    static import of a shared demo pulled the docs chunk into the entry, costing every route about 50 kB.
  *  - 2026-10-04, the service worker registration and web manifest (§25.4 H1): the registration in main.tsx grew the
  *    entry chunk every route pays from 22.4 to 22.5 kB. /learn/:id was already at its ceiling (167.0 of 167), so
  *    that tipped it over; raised to 168.
@@ -243,14 +248,16 @@ export const ROUTES: readonly RouteBudget[] = [
   { route: '/tools/locks', roots: [T('LocksToolPage')], kb: 117, note: 'lock simulator' },
   { route: '/tools/grammar', roots: [T('GrammarToolPage')], kb: 116, note: 'the SQL grammar diagram' },
   { route: '/tools/hash-join', roots: [T('HashJoinToolPage')], kb: 118, note: 'Grace hash join' },
-  { route: '/tools/join-order', roots: [T('JoinOrderToolPage')], kb: 163, note: 'Selinger join-order search over the subset lattice' },
+  { route: '/tools/join-order', roots: [T('JoinOrderToolPage')], kb: 164, note: 'Selinger join-order search over the subset lattice' },
   { route: '/tools/lsm', roots: [T('LsmToolPage')], kb: 118, note: 'log-structured merge-tree sandbox' },
   { route: '/tools/hash-index', roots: [T('HashIndexToolPage')], kb: 118, note: 'extendible and linear hashing sandbox' },
   { route: '/tools/columnar', roots: [T('ColumnarToolPage')], kb: 118, note: 'NSM/DSM/PAX row vs. column storage sandbox' },
   { route: '/tools/vector-index', roots: [T('VectorIndexToolPage')], kb: 118, note: 'brute force vs. IVF vs. HNSW vector search' },
   { route: '/tools/latch-crabbing', roots: [T('LatchCrabbingToolPage')], kb: 167, note: 'latch crabbing: naive vs. lock coupling on a scripted B+Tree workload' },
-  { route: '/docs', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 153, note: 'the docs shell and every prose page (one shared chunk)' },
+  { route: '/docs', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 158, note: 'the docs shell and every prose page (one shared chunk)' },
   { route: '/docs/concepts/btree', roots: ['src/ui/DocsLayout.tsx', 'src/pages/DocsContent/concepts/btree.mdx'], kb: 173, note: 'a concept page with a live B+Tree widget' },
+  { route: '/docs/essays/index-write-tax', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 158, note: 'an essay: prose, with links into the B+Tree sandbox (plan.md §25.4 H2)' },
+  { route: '/docs/essays/scan-resistance', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 158, note: 'an essay: prose, with links into the buffer-pool sandbox under LRU and LRU-2 (plan.md §25.4 H2)' },
   { route: '/docs/concepts/buffer-pool', roots: ['src/ui/DocsLayout.tsx', 'src/pages/DocsContent/concepts/buffer-pool.mdx'], kb: 171, note: 'a concept page with a live buffer-pool widget' },
   { route: '/* (404)', roots: [P('NotFoundPage')], kb: 114, note: 'the not-found page' },
 ];

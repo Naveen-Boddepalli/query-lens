@@ -25,6 +25,11 @@ https://github.com/Naveen-Boddepalli/query-lens.
 - [Buffer pool](https://query-lens.1234naveenboddepalli.workers.dev/docs/concepts/buffer-pool): Why databases keep a fixed set of pages in memory, and how QueryLens's two eviction policies decide what to keep.
 - [B+Tree](https://query-lens.1234naveenboddepalli.workers.dev/docs/concepts/btree): How an index turns a table scan into a handful of pointer follows, and what QueryLens's traversal panel actually shows.
 
+## Essays
+
+- [An index is a tax on every write](https://query-lens.1234naveenboddepalli.workers.dev/docs/essays/index-write-tax): Why an index makes reads cheaper and writes dearer, with the page counts QueryLens measures for a B+Tree as it grows.
+- [One scan can empty the cache](https://query-lens.1234naveenboddepalli.workers.dev/docs/essays/scan-resistance): Why one pass over a large table can push out the pages a workload keeps needing, and how LRU-2 avoids it, measured on QueryLens's buffer pool.
+
 ## Study
 
 - [Course map](https://query-lens.1234naveenboddepalli.workers.dev/docs/study/course-map): A database course, topic by topic — where QueryLens lets you watch the idea happen, where it only touches it, and where it has nothing to offer.
