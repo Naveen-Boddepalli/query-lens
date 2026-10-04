@@ -1,11 +1,13 @@
 import { useState } from 'react';
 import type { PredictionPrompt } from '../engine/index.ts';
+import { CONFIDENCE_LABELS, CONFIDENCE_LEVELS } from './progress.ts';
+import type { Confidence } from './progress.ts';
 
 export interface PredictionCardProps {
   prompt: PredictionPrompt;
   /** The answer already given, if this prompt has been answered. */
   answer: string | undefined;
-  onAnswer: (optionId: string) => void;
+  onAnswer: (optionId: string, confidence: Confidence | undefined) => void;
   onSkip: () => void;
   /** False in assignment mode (plan.md §20.5): answering is the only way past. */
   canSkip?: boolean;
@@ -14,10 +16,12 @@ export interface PredictionCardProps {
 /**
  * Commit before the reveal. This is the one feature RESEARCH.md §1 argues the
  * evidence actually supports: a wrong guess you have committed to teaches more
- * than a correct animation you watched.
+ * than a correct animation you watched. The confidence rating (plan.md §G2) is
+ * taken before the option is committed, so it is on record before the feedback.
  */
 export function PredictionCard({ prompt, answer, onAnswer, onSkip, canSkip = true }: PredictionCardProps) {
   const [hovered, setHovered] = useState<string | null>(null);
+  const [confidence, setConfidence] = useState<Confidence | undefined>(undefined);
   const answered = answer !== undefined;
   const correct = answer === prompt.correctOptionId;
 
@@ -48,6 +52,28 @@ export function PredictionCard({ prompt, answer, onAnswer, onSkip, canSkip = tru
 
       <p className="text-body leading-relaxed">{prompt.question}</p>
 
+      {!answered && (
+        <div role="group" aria-label="How sure are you?" className="mt-3 flex flex-wrap items-center gap-1.5">
+          <span className="text-label text-ink-dim">How sure?</span>
+          {CONFIDENCE_LEVELS.map((level) => (
+            <button
+              key={level}
+              type="button"
+              aria-pressed={confidence === level}
+              onClick={() => { setConfidence(confidence === level ? undefined : level); }}
+              className={[
+                'rounded-full border px-2.5 py-0.5 text-label transition',
+                confidence === level
+                  ? 'border-accent bg-accent-soft text-accent'
+                  : 'border-edge text-ink-dim hover:border-accent/70 hover:text-ink',
+              ].join(' ')}
+            >
+              {CONFIDENCE_LABELS[level]}
+            </button>
+          ))}
+        </div>
+      )}
+
       <ul className="mt-3 space-y-1.5">
         {prompt.options.map((option) => {
           const isCorrect = option.id === prompt.correctOptionId;
@@ -65,7 +91,7 @@ export function PredictionCard({ prompt, answer, onAnswer, onSkip, canSkip = tru
               <button
                 type="button"
                 disabled={answered}
-                onClick={() => { onAnswer(option.id); }}
+                onClick={() => { onAnswer(option.id, confidence); }}
                 onMouseEnter={() => { setHovered(option.id); }}
                 onMouseLeave={() => { setHovered(null); }}
                 className={[
@@ -90,6 +116,7 @@ export function PredictionCard({ prompt, answer, onAnswer, onSkip, canSkip = tru
         <div className="mt-3 space-y-1.5">
           <p className={`text-label font-medium ${correct ? 'text-hit' : 'text-evict'}`}>
             {correct ? 'Right.' : 'Not quite.'}
+            {confidence && <span className="font-normal text-ink-dim"> You were {CONFIDENCE_LABELS[confidence].toLowerCase()}.</span>}
           </p>
           <p className="text-label leading-relaxed text-ink-dim">{prompt.explanation}</p>
           <p className="text-label text-ink-dim/80">

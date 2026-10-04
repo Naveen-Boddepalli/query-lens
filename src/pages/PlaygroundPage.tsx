@@ -766,12 +766,13 @@ export function PlaygroundPage() {
 
           {prompt && upcoming && (
             <PredictionCard
+              key={upcoming.id}
               prompt={prompt}
               answer={answers[upcoming.id]}
               canSkip={!ASSIGNMENT}
-              onAnswer={(optionId) => {
+              onAnswer={(optionId, confidence) => {
                 setAnswers((current) => ({ ...current, [upcoming.id]: optionId }));
-                recordPrediction(optionId === prompt.correctOptionId);
+                recordPrediction(optionId === prompt.correctOptionId, confidence);
               }}
               onSkip={() => {
                 setAnswers((current) => ({ ...current, [upcoming.id]: '' }));

@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { STAGES } from '../engine/index.ts';
 import { LESSONS } from './learn/lessons.tsx';
 import { clearCompleted, readCompleted } from '../ui/learnProgress.ts';
-import { clearProgress, readProgress } from '../ui/progress.ts';
+import { CONFIDENCE_LABELS, CONFIDENCE_LEVELS, clearProgress, readProgress } from '../ui/progress.ts';
 import { PageHeader } from '../ui/PageHeader.tsx';
 import { STAGE_META } from '../ui/stageMeta.ts';
 import { btnGhost, card } from '../ui/primitives.ts';
@@ -24,6 +24,7 @@ export function ProgressPage() {
 
   const hitRate =
     progress.asked === 0 ? '—' : `${Math.round((progress.right / progress.asked) * 100)}%`;
+  const rated = CONFIDENCE_LEVELS.reduce((n, level) => n + progress.byConfidence[level].asked, 0);
 
   function reset() {
     clearCompleted();
@@ -116,6 +117,40 @@ export function ProgressPage() {
               )}
             </p>
           </div>
+
+          {rated > 0 && (
+            <div className={card}>
+              <div className="flex items-baseline justify-between">
+                <h2 className="text-body font-semibold text-ink">Calibration</h2>
+                <span className="font-mono tabular-nums text-ink-dim">{rated} rated</span>
+              </div>
+              <p className="mt-2 text-label text-ink-dim">
+                How often a prediction came true, by how sure you said you were before committing. A bar from two or
+                three predictions is noise, not a trend.
+              </p>
+              <ul className="mt-3 space-y-2">
+                {CONFIDENCE_LEVELS.map((level) => {
+                  const t = progress.byConfidence[level];
+                  return (
+                    <li key={level}>
+                      <div className="flex items-baseline justify-between text-label">
+                        <span className="text-ink">{CONFIDENCE_LABELS[level]}</span>
+                        <span className="font-mono tabular-nums text-ink-dim">
+                          {t.asked === 0 ? 'none yet' : `${String(t.right)} of ${String(t.asked)} right`}
+                        </span>
+                      </div>
+                      <div className="mt-1 h-1.5 rounded-full bg-surface-3" aria-hidden>
+                        <div
+                          className="h-1.5 rounded-full bg-accent"
+                          style={{ width: `${String(t.asked === 0 ? 0 : Math.round((t.right / t.asked) * 100))}%` }}
+                        />
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
 
           <button type="button" onClick={reset} className={`${btnGhost} mt-2`}>
             Clear progress

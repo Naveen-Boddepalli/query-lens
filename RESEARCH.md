@@ -1096,9 +1096,12 @@ shows. This pass re-checked that and looked for what it implies for features Par
    work in *Memory & Cognition* both appear. Mechanism named in the sources: errorful generation — the
    learner commits, then notices the mismatch. It works **only when feedback follows**, which v1's
    reveal provides. *Implication:* asking for a **confidence rating** with each prediction is a candidate
-   upgrade — hypercorrection (a confidently held error is corrected more strongly) is the mechanism people
-   cite, but I am recalling that from Butterfield & Metcalfe (2001) and did **not** re-verify it this pass
-   **[judgment — verify before building]**.
+   upgrade. Hypercorrection (a confidently held error is corrected more strongly) was verified before G2 was
+   built: Butterfield & Metcalfe (2001, *Journal of Experimental Psychology: Learning, Memory, and Cognition*)
+   found that high-confidence errors were the most likely to be corrected on a retest after feedback
+   **[sourced]**. The follow-up caveat is that Butler et al. (2011) found the effect persisted over a week, but
+   the high-confidence errors came back **[sourced]**. So G2 records confidence for the calibration view and
+   does not claim retention.
 3. **Animation vs static, and pacing** **[sourced]**. Höffler & Leutner (2007), 26 studies / 76
    comparisons: animation beats static pictures overall, **d = 0.37** (95% CI 0.25–0.49); larger when the
    animation is *representational* (d = 0.40) and largest for *procedural-motor* knowledge (d = 1.06).

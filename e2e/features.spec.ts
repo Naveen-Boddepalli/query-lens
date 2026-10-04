@@ -1940,3 +1940,15 @@ test('EXPLAIN ANALYZE is a statement: a QUERY PLAN with estimate beside actual, 
   await expect(page.getByRole('cell', { name: /IndexScan users\.id/ })).toBeVisible();
   await expect(page.getByRole('cell', { name: /actual/ })).toHaveCount(0);
 });
+
+test('a confidence rating is taken before the commit and shown as a calibration bar (plan.md §G2)', async ({ page }) => {
+  await page.goto('/playground?q=SELECT+*+FROM+users+WHERE+id+%3D+5&p=lru&x=1&s=8');
+  await page.getByRole('group', { name: 'How sure are you?' }).getByRole('button', { name: 'Certain' }).click();
+  await page.getByRole('button', { name: /index lookup/i }).click();
+  await expect(page.getByText('You were certain.')).toBeVisible();
+
+  await page.goto('/progress');
+  await expect(page.getByRole('heading', { name: 'Calibration' })).toBeVisible();
+  await expect(page.locator('li', { hasText: 'Certain' }).filter({ hasText: /of 1 right/ })).toBeVisible();
+  await expect(page.locator('li', { hasText: 'Guessing' }).filter({ hasText: 'none yet' })).toBeVisible();
+});
