@@ -343,7 +343,8 @@ export type ReplacementPolicyName =
   | 'second-chance'
   | 'optimal'
   | 'midpoint'
-  | 'lru-k';
+  | 'lru-k'
+  | 'two-q';
 
 export interface Database {
   tables: Record<string, Table>;

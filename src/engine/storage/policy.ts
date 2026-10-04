@@ -48,6 +48,10 @@ export interface BufferState {
    * first use, so pools that never run LRU-K carry nothing extra.
    */
   history?: Record<number, number[]>;
+  /** 2Q's queue each resident frame sits in: `a1in` (read once, FIFO) or `am` (read again, LRU). Set on every load. */
+  queues?: Record<number, 'a1in' | 'am'>;
+  /** 2Q's ghost list (A1out): ids of pages recently evicted from A1in, oldest first. Their data is not kept. */
+  ghost?: number[];
 }
 
 /** Postgres caps `usage_count` at 5. Same here. */
@@ -355,6 +359,50 @@ const lruK: ReplacementPolicy = {
   },
 };
 
+/**
+ * 2Q (Johnson and Shasha, 1994). A page read once waits in a small FIFO, A1in. Only a page read again after it has
+ * left that FIFO, its id remembered in the ghost list, is promoted to the LRU of hot pages, Am. A one-pass scan
+ * therefore fills A1in and evicts only itself. A1in holds a quarter of the frames, the ghost list half as many ids.
+ */
+const twoQ: ReplacementPolicy = {
+  name: 'two-q',
+  onAccess(state, frameId) {
+    const f = frame(state, frameId);
+    if (!f) return;
+    // A re-reference while the page is still in A1in does not promote it: the paper's correlated-reference rule.
+    if (state.queues?.[frameId] === 'a1in') return;
+    state.now += 1;
+    f.lastUsedAt = state.now;
+    f.usageCount = Math.min(f.usageCount + 1, USAGE_COUNT_CAP);
+  },
+  onLoad(state, frameId) {
+    const f = frame(state, frameId);
+    if (!f) return;
+    state.now += 1;
+    f.lastUsedAt = state.now;
+    f.usageCount = Math.min(f.usageCount + 1, USAGE_COUNT_CAP);
+    const ghost = state.ghost ?? [];
+    const remembered = f.pageId !== null && ghost.includes(f.pageId);
+    if (remembered) state.ghost = ghost.filter((p) => p !== f.pageId);
+    (state.queues ??= {})[frameId] = remembered ? 'am' : 'a1in';
+  },
+  selectVictim(state) {
+    const queues = state.queues ?? {};
+    const candidates = state.frames.filter((f) => f.pinCount === 0);
+    const oldestFirst = (a: Frame, b: Frame) => a.lastUsedAt - b.lastUsedAt;
+    const a1in = candidates.filter((f) => queues[f.frameId] === 'a1in').sort(oldestFirst);
+    const am = candidates.filter((f) => queues[f.frameId] !== 'a1in').sort(oldestFirst);
+    const kin = Math.max(1, Math.floor(state.frames.length / 4));
+    const victim = a1in.length > kin || am.length === 0 ? a1in[0] : am[0];
+    if (!victim) return null;
+    if (queues[victim.frameId] === 'a1in' && victim.pageId !== null) {
+      const kout = Math.max(1, Math.floor(state.frames.length / 2));
+      state.ghost = [...(state.ghost ?? []), victim.pageId].slice(-kout);
+    }
+    return { frameId: victim.frameId };
+  },
+};
+
 const POLICIES: Record<ReplacementPolicyName, ReplacementPolicy> = {
   lru,
   clock,
@@ -363,6 +411,7 @@ const POLICIES: Record<ReplacementPolicyName, ReplacementPolicy> = {
   optimal,
   midpoint,
   'lru-k': lruK,
+  'two-q': twoQ,
 };
 
 export function policyFor(name: ReplacementPolicyName): ReplacementPolicy {
@@ -378,6 +427,7 @@ export const REPLACEMENT_POLICY_NAMES = [
   'optimal',
   'midpoint',
   'lru-k',
+  'two-q',
 ] as const satisfies readonly ReplacementPolicyName[];
 
 /** Short label for each policy, for `<select>`s and column headers. */
@@ -389,4 +439,5 @@ export const REPLACEMENT_POLICY_LABELS: Record<ReplacementPolicyName, string> = 
   optimal: 'Optimal (Bélády)',
   midpoint: 'Midpoint LRU (InnoDB)',
   'lru-k': 'LRU-2 (scan-resistant)',
+  'two-q': '2Q (scan-resistant)',
 };

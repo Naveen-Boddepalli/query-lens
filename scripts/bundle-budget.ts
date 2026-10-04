@@ -207,6 +207,9 @@ const T = (name: string): string => `src/pages/tools/${name}.tsx`;
  *  - 2026-10-04, latch crabbing (§25.4 F5): a new route, /tools/latch-crabbing (163.5 kB measured + 3, rounded
  *    to 167). Unlike the standalone sandboxes it drives the REAL engine B+Tree (`engine/index/btree.ts`, the same
  *    code /tools/btree uses), so it pays the shared engine chunk the same way /tools/btree does (ceiling 167).
+ *  - 2026-10-05, 2Q, a second scan-resistant replacement policy (§25.4 F7, slice 2): it lives in the engine's shared
+ *    policy registry, so every route that runs the engine grew a little. /stages/:id 180 → 184, /challenges/:id
+ *    286 → 290, /tools/join-order 164 → 168 (each measured + 3, rounded up).
  *  - 2026-10-04, named workspaces (§H7, slice 1): a Workspaces button in Custom mode, and a lazily loaded dialog for
  *    saving, opening, deleting and importing or exporting a workspace file. /playground went from 315.0 to 315.3 kB
  *    (ceiling 315 → 319). The dialog is an opt-in chunk (2.5 kB gzip, ceiling 6), not part of any route's first load.
@@ -228,7 +231,7 @@ export const ROUTES: readonly RouteBudget[] = [
   { route: '/', roots: [P('LandingPage')], kb: 165, note: 'the landing page' },
   { route: '/playground', roots: [P('PlaygroundPage')], kb: 319, note: 'the Playground: the editor, every stage panel, the engine — the heaviest route, and the one most people land on' },
   { route: '/stages', roots: ['src/ui/StagesLayout.tsx', P('StagesIndex')], kb: 165, note: 'the stage explainers, index' },
-  { route: '/stages/:id', roots: ['src/ui/StagesLayout.tsx', P('StagePage')], kb: 180, note: 'one stage explainer' },
+  { route: '/stages/:id', roots: ['src/ui/StagesLayout.tsx', P('StagePage')], kb: 184, note: 'one stage explainer' },
   { route: '/learn', roots: [P('LearnPage')], kb: 169, note: 'the lesson track' },
   { route: '/learn/:id', roots: [P('LessonPage')], kb: 168, note: 'one lesson' },
   { route: '/examples', roots: [P('ExamplesPage')], kb: 115, note: 'preset queries' },
@@ -237,7 +240,7 @@ export const ROUTES: readonly RouteBudget[] = [
   { route: '/trace', roots: [P('TracePage')], kb: 167, note: 'the trace inspector' },
   { route: '/progress', roots: [P('ProgressPage')], kb: 171, note: 'the progress dashboard' },
   { route: '/challenges', roots: [P('ChallengesPage')], kb: 167, note: 'challenge index' },
-  { route: '/challenges/:id', roots: [P('ChallengePage')], kb: 286, note: 'one challenge' },
+  { route: '/challenges/:id', roots: [P('ChallengePage')], kb: 290, note: 'one challenge' },
   { route: '/settings', roots: [P('SettingsPage')], kb: 116, note: 'preferences' },
   { route: '/study', roots: [P('StudyPage')], kb: 122, note: 'the §9 study runner (unlisted); the instrument travels in the link, not the bundle (§25.4 A2)' },
   { route: '/assignments/new', roots: [P('AssignmentsNewPage')], kb: 166, note: 'assignment-link builder' },
@@ -251,7 +254,7 @@ export const ROUTES: readonly RouteBudget[] = [
   { route: '/tools/locks', roots: [T('LocksToolPage')], kb: 117, note: 'lock simulator' },
   { route: '/tools/grammar', roots: [T('GrammarToolPage')], kb: 116, note: 'the SQL grammar diagram' },
   { route: '/tools/hash-join', roots: [T('HashJoinToolPage')], kb: 118, note: 'Grace hash join' },
-  { route: '/tools/join-order', roots: [T('JoinOrderToolPage')], kb: 164, note: 'Selinger join-order search over the subset lattice' },
+  { route: '/tools/join-order', roots: [T('JoinOrderToolPage')], kb: 168, note: 'Selinger join-order search over the subset lattice' },
   { route: '/tools/lsm', roots: [T('LsmToolPage')], kb: 118, note: 'log-structured merge-tree sandbox' },
   { route: '/tools/hash-index', roots: [T('HashIndexToolPage')], kb: 118, note: 'extendible and linear hashing sandbox' },
   { route: '/tools/columnar', roots: [T('ColumnarToolPage')], kb: 118, note: 'NSM/DSM/PAX row vs. column storage sandbox' },

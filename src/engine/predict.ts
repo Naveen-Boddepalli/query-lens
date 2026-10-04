@@ -26,6 +26,7 @@ const POLICY_LABEL: Record<ReplacementPolicyName, string> = {
   optimal: 'the optimal policy',
   midpoint: 'midpoint LRU',
   'lru-k': 'LRU-2',
+  'two-q': '2Q',
 };
 
 const POLICY_WHY: Record<ReplacementPolicyName, string> = {
@@ -41,6 +42,8 @@ const POLICY_WHY: Record<ReplacementPolicyName, string> = {
     'Midpoint LRU keeps an "old" sublist of pages read but not yet re-used. New pages land there, and eviction takes the least-recently-used one — so a one-pass scan flushes only itself, never the hot pages in the young sublist.',
   'lru-k':
     'LRU-2 evicts by the time of each page\'s second-most-recent reference. A page touched only once has no second reference at all, so it goes first, and a page touched twice survives a one-pass scan.',
+  'two-q':
+    '2Q keeps the pages read only once in a small FIFO and promotes a page only when it is read again after leaving that FIFO. A one-pass scan fills the FIFO and evicts only its own pages, so the hot set stays.',
 };
 
 /** "Which frame gets evicted?" — the canonical prompt from the research. */

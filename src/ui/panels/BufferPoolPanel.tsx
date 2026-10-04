@@ -55,6 +55,12 @@ const MOOD_TAG: Record<Exclude<FrameMood, null>, string> = {
  * (plan.md §20.4).
  */
 const POLICY_NOTE: Record<ReplacementPolicyName, ReactNode> = {
+  'two-q': (
+    <>
+      <span className="text-ink">2Q</span> keeps a page read only once in a small FIFO, and promotes a page to the hot queue
+      only if it is read again after leaving that FIFO. A one-pass scan fills the FIFO and evicts only its own pages.
+    </>
+  ),
   'lru-k': (
     <>
       <span className="text-ink">LRU-2</span> judges a page by its second-most-recent reference, not its last one. A page
