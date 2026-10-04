@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Named workspaces** (plan.md §H7). In Custom mode, a Workspaces dialog saves a database under a name in this browser's IndexedDB, opens or deletes it, and downloads it as a `.querylens.json` file that another browser can open. A file is checked in full before anything is opened. The live autosave still lives in `localStorage`.
 - **Keyboard navigation for tree diagrams** (plan.md §H6). The parse tree, query plan and B+Tree are reachable from the keyboard: Tab enters one, the arrow keys walk its nodes and the view follows, and a screen reader announces each node's level and place among its siblings.
 - **Two essays** (plan.md §H2): *An index is a tax on every write* and *One scan can empty the cache*, with measured page counts for the B+Tree and LRU against LRU-2 on one trace, and links into the sandboxes that replay them. In-page embeds are not built.
 - **Installable, and works offline after a first visit** (plan.md §H1). A hand-written service worker caches the app's own files, so the Playground, the docs and every tool open with no network. The web manifest names install icons. Only the app's files are cached, never your queries or data. A new version applies once no open tab is still running the old one.

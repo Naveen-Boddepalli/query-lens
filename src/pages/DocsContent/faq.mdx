@@ -42,6 +42,8 @@ in memory for that page load; a shareable link encodes your query, settings and 
 directly in the URL, not on a server. There is no telemetry, no analytics, and no cookies — nothing
 you do here is sent anywhere.
 
+A custom database you build in the Playground autosaves in this browser. **Workspaces** (the button beside *Manage tables*) keep named copies in the browser's IndexedDB, which has far more room than the autosave, and each one downloads as a `.querylens.json` file you can open in another browser. None of it is sent anywhere.
+
 The one thing that can leave your browser is something *you* send. **Report a confusing step**, under the
 Playground's narration, is a link that opens a prefilled GitHub issue in a new tab — the build, the step, what
 the narration said, your query and a link that reopens the moment. It is a plain link: nothing is sent until

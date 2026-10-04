@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import {
   createTraceProjector,
@@ -114,6 +114,10 @@ const INITIAL_RESULT = runQuery(START.sql, START.db, {
   policy: START.policy,
 });
 
+const WorkspaceDialog = lazy(() =>
+  import('../ui/WorkspaceDialog.tsx').then((m) => ({ default: m.WorkspaceDialog })),
+);
+
 export function PlaygroundPage() {
   const [sql, setSql] = useState(START.sql);
   const [policy, setPolicy] = useState<ReplacementPolicyName>(START.policy);
@@ -126,6 +130,7 @@ export function PlaygroundPage() {
   // staying `/tools/planner` + `/compare`-only.
   const [isCustom, setIsCustom] = useState(false);
   const [schemaEditorOpen, setSchemaEditorOpen] = useState(false);
+  const [workspacesOpen, setWorkspacesOpen] = useState(false);
   const [editingData, setEditingData] = useState(false);
   const [rowsEdited, setRowsEdited] = useState(SHARED.rows !== undefined);
   const [result, setResult] = useState<RunResult>(INITIAL_RESULT);
@@ -428,6 +433,13 @@ export function PlaygroundPage() {
     playback.land(landingStep(next, askToPredict));
   }
 
+  function openDatabase(next: Database) {
+    setWorkspacesOpen(false);
+    setDb(next);
+    setRowsEdited(true);
+    run(next);
+  }
+
   function applySchema(next: Database) {
     setDb(next);
     setRowsEdited(true);
@@ -592,13 +604,18 @@ export function PlaygroundPage() {
               Run{touch ? '' : ` ${RUN_HINT}`}
             </button>
             {isCustom ? (
-              <button
-                type="button"
-                onClick={() => { setSchemaEditorOpen(true); }}
-                className={btnSecondary}
-              >
-                Manage tables ({Object.keys(db.tables).length})
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={() => { setSchemaEditorOpen(true); }}
+                  className={btnSecondary}
+                >
+                  Manage tables ({Object.keys(db.tables).length})
+                </button>
+                <button type="button" onClick={() => { setWorkspacesOpen(true); }} className={btnSecondary}>
+                  Workspaces
+                </button>
+              </>
             ) : (
               <button
                 type="button"
@@ -847,6 +864,16 @@ export function PlaygroundPage() {
           onReset={resetData}
           onClose={() => { setEditingData(false); }}
         />
+      )}
+
+      {workspacesOpen && (
+        <Suspense fallback={null}>
+          <WorkspaceDialog
+            db={db}
+            onOpen={openDatabase}
+            onClose={() => { setWorkspacesOpen(false); }}
+          />
+        </Suspense>
       )}
 
       {schemaEditorOpen && (

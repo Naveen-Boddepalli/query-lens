@@ -88,7 +88,7 @@ function isValidTable(key: string, value: unknown): value is Table {
 }
 
 /** Total, defensive parse of whatever `localStorage` holds — untrusted input, same discipline `parseCsv.ts`/`traceFile.ts` apply, rejected whole on the first mismatch rather than half-applied. */
-function isValidDatabase(value: unknown): value is Database {
+export function isValidDatabase(value: unknown): value is Database {
   if (typeof value !== 'object' || value === null) return false;
   const tables = (value as { tables?: unknown }).tables;
   if (typeof tables !== 'object' || tables === null || Array.isArray(tables)) return false;

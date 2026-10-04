@@ -207,6 +207,9 @@ const T = (name: string): string => `src/pages/tools/${name}.tsx`;
  *  - 2026-10-04, latch crabbing (§25.4 F5): a new route, /tools/latch-crabbing (163.5 kB measured + 3, rounded
  *    to 167). Unlike the standalone sandboxes it drives the REAL engine B+Tree (`engine/index/btree.ts`, the same
  *    code /tools/btree uses), so it pays the shared engine chunk the same way /tools/btree does (ceiling 167).
+ *  - 2026-10-04, named workspaces (§H7, slice 1): a Workspaces button in Custom mode, and a lazily loaded dialog for
+ *    saving, opening, deleting and importing or exporting a workspace file. /playground went from 315.0 to 315.3 kB
+ *    (ceiling 315 → 319). The dialog is an opt-in chunk (2.5 kB gzip, ceiling 6), not part of any route's first load.
  *  - 2026-10-04, the essays (§25.4 H2): /docs/essays/index-write-tax and /docs/essays/scan-resistance are prose pages in
  *    the shared docs chunk, so /docs grew from 151.7 to 154.6 kB (ceiling 153 → 158), and each essay route (which
  *    downloads that chunk) gets the same ceiling. The Essays group in docsNav adds a few bytes to the entry chunk every
@@ -223,7 +226,7 @@ const T = (name: string): string => `src/pages/tools/${name}.tsx`;
  */
 export const ROUTES: readonly RouteBudget[] = [
   { route: '/', roots: [P('LandingPage')], kb: 165, note: 'the landing page' },
-  { route: '/playground', roots: [P('PlaygroundPage')], kb: 315, note: 'the Playground: the editor, every stage panel, the engine — the heaviest route, and the one most people land on' },
+  { route: '/playground', roots: [P('PlaygroundPage')], kb: 319, note: 'the Playground: the editor, every stage panel, the engine — the heaviest route, and the one most people land on' },
   { route: '/stages', roots: ['src/ui/StagesLayout.tsx', P('StagesIndex')], kb: 165, note: 'the stage explainers, index' },
   { route: '/stages/:id', roots: ['src/ui/StagesLayout.tsx', P('StagePage')], kb: 180, note: 'one stage explainer' },
   { route: '/learn', roots: [P('LearnPage')], kb: 169, note: 'the lesson track' },
@@ -266,9 +269,10 @@ export const ROUTES: readonly RouteBudget[] = [
  * Lazy chunks loaded *on top of* a route only after an explicit opt-in, so they belong to no route's budget
  * but must still stay small: [manifest key, kB ceiling, why].
  */
-export const OPT_IN: readonly { key: string; kb: number; note: string }[] = [
+export const OPT_IN: readonly { key: string; kb: number; note: string; after?: string }[] = [
   { key: '_html-to-image', kb: 8, note: 'panel PNG export (§20.3) — fetched on the first click of Download PNG' },
   { key: 'src/perf/inp.ts', kb: 2, note: 'the opt-in INP recorder for the §9 study (§25.4 A6) — fetched only after a participant opts in' },
+  { key: 'src/ui/WorkspaceDialog.tsx', kb: 6, after: 'src/pages/PlaygroundPage.tsx', note: 'the Workspaces dialog (§H7) — fetched only when Custom mode\'s Workspaces button is pressed' },
 ];
 
 /* -------------------------------------------------------------------------- */
@@ -312,8 +316,9 @@ function main(): number {
   for (const o of OPT_IN) {
     const files = [...closure(manifest, [o.key])];
     extras.push(...files);
-    // Only what the opt-in adds beyond the entry — its shared imports are already paid for by the route.
-    const own = files.filter((f) => !closure(manifest, [ENTRY_KEY]).has(f));
+    // Only what the opt-in adds beyond the entry (and the route it opens from, when it names one): its shared imports are already paid for.
+    const base = closure(manifest, o.after === undefined ? [ENTRY_KEY] : [ENTRY_KEY, o.after]);
+    const own = files.filter((f) => !base.has(f));
     const kb = own.reduce((s, f) => s + size(f), 0);
     const over = kb > o.kb;
     console.log(`${over ? '✗' : '✓'} ${`opt-in: ${o.key.split('/').pop() ?? o.key}`.padEnd(width)} ${kb.toFixed(1).padStart(6)} kB / ${String(o.kb).padStart(3)} kB  ${o.note}`);
