@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **A vector-index sandbox**, `/tools/vector-index` (plan.md §25.4 F6) — brute force, IVF and HNSW answering the
+  same nearest-neighbour question, scored by distances computed and recall over seeded queries. HNSW is a real layered
+  graph; at this size its recall-per-distance is not better than IVF's, and the page says so.
 - **A latch-crabbing sandbox**, `/tools/latch-crabbing` (plan.md §25.4 F5) — the same scripted concurrent inserts
   run under naive page latching and under lock coupling, side by side on the real engine B+Tree. Crabbing releases
   each ancestor once the child below is safe, so threads block far less. Optimistic lock coupling is not included.

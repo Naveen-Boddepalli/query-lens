@@ -106,6 +106,13 @@ const TOOLS = [
       'How concurrent threads can safely descend one B+Tree while inserting. Naive latching holds every page on the path and funnels every thread through the root; lock coupling releases each ancestor as soon as the child below it is safe. Same scripted workload, both protocols, side by side.',
     available: true,
   },
+  {
+    title: 'Vector index',
+    href: '/tools/vector-index',
+    description:
+      'Brute force, IVF and HNSW answering the same nearest-neighbour question, scored by distances computed and recall. HNSW is a layered proximity graph you can see; IVF is a set of clusters. A 2-D scatter makes the geometry visible.',
+    available: true,
+  },
 ] as const;
 
 export function ToolsIndexPage() {
