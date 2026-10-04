@@ -25,6 +25,7 @@ const POLICY_LABEL: Record<ReplacementPolicyName, string> = {
   'second-chance': 'second-chance',
   optimal: 'the optimal policy',
   midpoint: 'midpoint LRU',
+  'lru-k': 'LRU-2',
 };
 
 const POLICY_WHY: Record<ReplacementPolicyName, string> = {
@@ -38,6 +39,8 @@ const POLICY_WHY: Record<ReplacementPolicyName, string> = {
     'The optimal policy evicts the page whose next use is farthest in the future. It cannot be built for real — nothing knows the future — but it is the fewest-misses bound every real policy is judged against.',
   midpoint:
     'Midpoint LRU keeps an "old" sublist of pages read but not yet re-used. New pages land there, and eviction takes the least-recently-used one — so a one-pass scan flushes only itself, never the hot pages in the young sublist.',
+  'lru-k':
+    'LRU-2 evicts by the time of each page\'s second-most-recent reference. A page touched only once has no second reference at all, so it goes first, and a page touched twice survives a one-pass scan.',
 };
 
 /** "Which frame gets evicted?" — the canonical prompt from the research. */

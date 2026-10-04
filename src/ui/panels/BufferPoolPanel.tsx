@@ -55,6 +55,13 @@ const MOOD_TAG: Record<Exclude<FrameMood, null>, string> = {
  * (plan.md §20.4).
  */
 const POLICY_NOTE: Record<ReplacementPolicyName, ReactNode> = {
+  'lru-k': (
+    <>
+      <span className="text-ink">LRU-2</span> judges a page by its second-most-recent reference, not its last one. A page
+      read once has no second reference, so a one-pass scan evicts its own pages and leaves the twice-touched hot set alone.
+      It is plain LRU with one more memory of history, not a different mechanism.
+    </>
+  ),
   lru: (
     <>
       <span className="text-ink">LRU</span> evicts whichever page was used longest ago. It is

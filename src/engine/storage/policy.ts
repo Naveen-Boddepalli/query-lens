@@ -42,6 +42,12 @@ export interface BufferState {
   lookahead?: readonly number[];
   /** Index into `lookahead` of the access currently being resolved. */
   lookaheadCursor: number;
+  /**
+   * LRU-K's reference history, keyed by page: the last K logical times each page was touched. Keyed by page rather
+   * than frame, because LRU-K remembers a page's history across the times it is evicted and read back in. Created on
+   * first use, so pools that never run LRU-K carry nothing extra.
+   */
+  history?: Record<number, number[]>;
 }
 
 /** Postgres caps `usage_count` at 5. Same here. */
@@ -307,6 +313,48 @@ const midpoint: ReplacementPolicy = {
   },
 };
 
+/**
+ * LRU-K with K = 2 (O'Neil, O'Neil and Weikum, 1993). Plain LRU evicts whatever was touched least recently, so a
+ * single sequential scan can push out the pages that were genuinely hot. LRU-K evicts by the time of a page's K-th
+ * most recent reference instead. A page referenced only once has no K-th reference at all, so it is the first to go,
+ * and a page that has been touched twice survives a one-pass scan. That is the scan resistance this policy exists for.
+ */
+const LRU_K = 2;
+
+const lruK: ReplacementPolicy = {
+  name: 'lru-k',
+  onAccess(state, frameId) {
+    const f = frame(state, frameId);
+    if (!f) return;
+    state.now += 1;
+    f.lastUsedAt = state.now;
+    f.usageCount = Math.min(f.usageCount + 1, USAGE_COUNT_CAP);
+    if (f.pageId === null) return;
+    const history = (state.history ??= {});
+    const times = [...(history[f.pageId] ?? []), state.now].slice(-LRU_K);
+    history[f.pageId] = times;
+  },
+  selectVictim(state) {
+    let victim: Frame | undefined;
+    let victimKth = Number.POSITIVE_INFINITY;
+    for (const f of state.frames) {
+      if (f.pinCount > 0) continue;
+      const times = f.pageId === null ? [] : (state.history?.[f.pageId] ?? []);
+      // A page with fewer than K references has no K-th reference: treat it as older than anything, so it goes first.
+      const kth = times.length >= LRU_K ? times[0]! : Number.NEGATIVE_INFINITY;
+      if (
+        !victim ||
+        kth < victimKth ||
+        (kth === victimKth && f.lastUsedAt < victim.lastUsedAt)
+      ) {
+        victim = f;
+        victimKth = kth;
+      }
+    }
+    return victim ? { frameId: victim.frameId } : null;
+  },
+};
+
 const POLICIES: Record<ReplacementPolicyName, ReplacementPolicy> = {
   lru,
   clock,
@@ -314,6 +362,7 @@ const POLICIES: Record<ReplacementPolicyName, ReplacementPolicy> = {
   'second-chance': secondChance,
   optimal,
   midpoint,
+  'lru-k': lruK,
 };
 
 export function policyFor(name: ReplacementPolicyName): ReplacementPolicy {
@@ -328,6 +377,7 @@ export const REPLACEMENT_POLICY_NAMES = [
   'second-chance',
   'optimal',
   'midpoint',
+  'lru-k',
 ] as const satisfies readonly ReplacementPolicyName[];
 
 /** Short label for each policy, for `<select>`s and column headers. */
@@ -338,4 +388,5 @@ export const REPLACEMENT_POLICY_LABELS: Record<ReplacementPolicyName, string> = 
   'second-chance': 'Second-chance',
   optimal: 'Optimal (Bélády)',
   midpoint: 'Midpoint LRU (InnoDB)',
+  'lru-k': 'LRU-2 (scan-resistant)',
 };

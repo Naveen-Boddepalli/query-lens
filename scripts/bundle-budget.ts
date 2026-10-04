@@ -199,6 +199,11 @@ const T = (name: string): string => `src/pages/tools/${name}.tsx`;
  *  - 2026-10-02, extendible and linear hashing (§25.4 F2): a new route, /tools/hash-index (115.5 kB measured
  *    + 3, rounded to 118) — a self-contained `src/ui/hashIndex.ts` driver in the same family as `/tools/lsm`'s,
  *    so it does not touch the shared engine chunk and no other route moved.
+ *  - 2026-10-04, LRU-2 (LRU-K, K = 2) added to the engine's shared replacement-policy registry (§25.4 F7, slice 1):
+ *    the policy, its type, labels and explanations live in the engine chunk every route that touches the engine
+ *    already loads, so the four routes that sit closest to their ceiling took the growth. Each raised by three
+ *    kB from its measured size, the usual slack: /gallery 162 → 165, /challenges 164 → 167, /tools/btree 167 →
+ *    170, /docs/concepts/btree 170 → 173. /tools/buffer-pool and /compare moved within their own ceilings.
  *  - 2026-10-04, latch crabbing (§25.4 F5): a new route, /tools/latch-crabbing (163.5 kB measured + 3, rounded
  *    to 167). Unlike the standalone sandboxes it drives the REAL engine B+Tree (`engine/index/btree.ts`, the same
  *    code /tools/btree uses), so it pays the shared engine chunk the same way /tools/btree does (ceiling 167).
@@ -216,11 +221,11 @@ export const ROUTES: readonly RouteBudget[] = [
   { route: '/learn', roots: [P('LearnPage')], kb: 169, note: 'the lesson track' },
   { route: '/learn/:id', roots: [P('LessonPage')], kb: 167, note: 'one lesson' },
   { route: '/examples', roots: [P('ExamplesPage')], kb: 115, note: 'preset queries' },
-  { route: '/gallery', roots: [P('GalleryPage')], kb: 162, note: 'named moments' },
+  { route: '/gallery', roots: [P('GalleryPage')], kb: 165, note: 'named moments' },
   { route: '/compare', roots: [P('ComparePage')], kb: 175, note: 'index vs scan, policy vs policy, hash vs sort, join algorithms, B+Tree vs. LSM' },
   { route: '/trace', roots: [P('TracePage')], kb: 167, note: 'the trace inspector' },
   { route: '/progress', roots: [P('ProgressPage')], kb: 171, note: 'the progress dashboard' },
-  { route: '/challenges', roots: [P('ChallengesPage')], kb: 164, note: 'challenge index' },
+  { route: '/challenges', roots: [P('ChallengesPage')], kb: 167, note: 'challenge index' },
   { route: '/challenges/:id', roots: [P('ChallengePage')], kb: 286, note: 'one challenge' },
   { route: '/settings', roots: [P('SettingsPage')], kb: 116, note: 'preferences' },
   { route: '/study', roots: [P('StudyPage')], kb: 122, note: 'the §9 study runner (unlisted); the instrument travels in the link, not the bundle (§25.4 A2)' },
@@ -228,7 +233,7 @@ export const ROUTES: readonly RouteBudget[] = [
   { route: '/tools', roots: [P('ToolsIndexPage')], kb: 116, note: 'the tools index' },
   { route: '/tools/buffer-pool', roots: [T('BufferPoolToolPage')], kb: 169, note: 'buffer-pool sandbox' },
   { route: '/tools/parser', roots: [T('ParserToolPage')], kb: 168, note: 'tokenizer + parser sandbox' },
-  { route: '/tools/btree', roots: [T('BTreeToolPage')], kb: 167, note: 'B+Tree sandbox' },
+  { route: '/tools/btree', roots: [T('BTreeToolPage')], kb: 170, note: 'B+Tree sandbox' },
   { route: '/tools/page', roots: [T('PageToolPage')], kb: 166, note: 'slotted-page inspector' },
   { route: '/tools/sort', roots: [T('SortToolPage')], kb: 118, note: 'external merge sort' },
   { route: '/tools/planner', roots: [T('PlannerToolPage')], kb: 168, note: 'planner sandbox' },
@@ -242,7 +247,7 @@ export const ROUTES: readonly RouteBudget[] = [
   { route: '/tools/vector-index', roots: [T('VectorIndexToolPage')], kb: 118, note: 'brute force vs. IVF vs. HNSW vector search' },
   { route: '/tools/latch-crabbing', roots: [T('LatchCrabbingToolPage')], kb: 167, note: 'latch crabbing: naive vs. lock coupling on a scripted B+Tree workload' },
   { route: '/docs', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 153, note: 'the docs shell and every prose page (one shared chunk)' },
-  { route: '/docs/concepts/btree', roots: ['src/ui/DocsLayout.tsx', 'src/pages/DocsContent/concepts/btree.mdx'], kb: 170, note: 'a concept page with a live B+Tree widget' },
+  { route: '/docs/concepts/btree', roots: ['src/ui/DocsLayout.tsx', 'src/pages/DocsContent/concepts/btree.mdx'], kb: 173, note: 'a concept page with a live B+Tree widget' },
   { route: '/docs/concepts/buffer-pool', roots: ['src/ui/DocsLayout.tsx', 'src/pages/DocsContent/concepts/buffer-pool.mdx'], kb: 171, note: 'a concept page with a live buffer-pool widget' },
   { route: '/* (404)', roots: [P('NotFoundPage')], kb: 114, note: 'the not-found page' },
 ];

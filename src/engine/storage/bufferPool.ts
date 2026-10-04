@@ -72,6 +72,8 @@ function evictionReason(policy: ReplacementPolicyName): string {
       return "The optimal policy picked it because its next use is farthest away — the choice no real policy can make, since it needs the future.";
     case 'midpoint':
       return 'Midpoint LRU picked the least-recently-used page in the old sublist — a page read once and never touched again, which is exactly what it is built to evict first.';
+    case 'lru-k':
+      return 'LRU-2 picked it because its second-most-recent reference is the oldest — a page touched only once has no second reference at all, so it goes first.';
   }
 }
 

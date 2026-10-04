@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **LRU-2 buffer replacement** (plan.md §25.4 F7, slice 1) — a scan-resistant policy, selectable in the buffer-pool sandbox and the Compare policy picker. It evicts by each page's second-most-recent reference, so a one-pass scan no longer flushes a hot set of pages that are reused. The default policy is unchanged.
 - **A vector-index sandbox**, `/tools/vector-index` (plan.md §25.4 F6) — brute force, IVF and HNSW answering the
   same nearest-neighbour question, scored by distances computed and recall over seeded queries. HNSW is a real layered
   graph; at this size its recall-per-distance is not better than IVF's, and the page says so.

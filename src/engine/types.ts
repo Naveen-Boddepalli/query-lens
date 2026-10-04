@@ -342,7 +342,8 @@ export type ReplacementPolicyName =
   | 'fifo'
   | 'second-chance'
   | 'optimal'
-  | 'midpoint';
+  | 'midpoint'
+  | 'lru-k';
 
 export interface Database {
   tables: Record<string, Table>;

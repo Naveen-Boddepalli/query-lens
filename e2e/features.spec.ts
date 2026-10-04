@@ -443,6 +443,12 @@ test('vector index: brute force, IVF and HNSW, scored by distances computed and 
   await expect(page.getByText('200', { exact: true }).first()).toBeVisible();
 });
 
+test('LRU-2 is a selectable policy on the buffer-pool sandbox (its scan resistance is covered by unit tests)', async ({ page }) => {
+  await page.goto('/tools/buffer-pool');
+  await page.getByLabel('Policy').selectOption({ label: 'LRU-2 (scan-resistant)' });
+  await expect.poll(() => page.url()).toMatch(/policy=lru-k/);
+});
+
 test('the planner sandbox runs the rewrite rules one at a time', async ({ page }) => {
   await page.goto('/tools/planner');
   await expect(page.getByRole('heading', { name: 'Planner sandbox' })).toBeVisible();
