@@ -343,6 +343,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Vitest also runs tests under `scripts/` and `oracle/`; `oracle/` joins `tsconfig.node.json`.
 
 ### Fixed
+- Midpoint LRU caps its young sublist at five-eighths of the buffer pool, as InnoDB does. Before, re-used pages could fill the pool and the policy became plain LRU on long traces.
 - **EXPLAIN ANALYZE no longer undercounts an operator whose last candidate fails a residual check.** An index
   scan whose final candidate failed its extra predicate reported the discarded candidate's `0` as its row count, even
   when it had already returned rows. The plan now reports the largest count each operator reached.

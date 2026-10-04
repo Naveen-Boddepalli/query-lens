@@ -303,6 +303,13 @@ const midpoint: ReplacementPolicy = {
     state.now += 1;
     f.lastUsedAt = state.now;
     f.usageCount = 1; // a re-access promotes it to the young sublist
+    // InnoDB keeps the young sublist to five-eighths of the pool; past that, the least recently used young page is
+    // demoted to the old sublist, so re-used pages cannot fill the pool and turn this policy into plain LRU.
+    const young = state.frames.filter((x) => x.usageCount > 0 && x.pageId !== null);
+    if (young.length > Math.floor((state.frames.length * 5) / 8)) {
+      const demoted = young.reduce((a, b) => (b.lastUsedAt < a.lastUsedAt ? b : a));
+      demoted.usageCount = 0;
+    }
   },
   selectVictim(state) {
     let old: Frame | undefined;

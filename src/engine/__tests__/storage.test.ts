@@ -488,12 +488,19 @@ describe('midpoint LRU (InnoDB)', () => {
     expect(mid.hits).toBeGreaterThan(lru.hits);
   });
 
-  it('behaves like LRU when every page is re-used (all young)', () => {
-    // Nothing stays in the old sublist, so the fallback — overall LRU — runs.
-    const refs = [0, 1, 2, 0, 1, 2, 3];
-    expect(bufferActionsOf(refs, 3, 'midpoint').victims).toEqual(
-      bufferActionsOf(refs, 3, 'lru').victims,
-    );
+  it('keeps the young sublist to five-eighths of the pool, so re-used pages cannot pin the whole pool', () => {
+    // Seven pages are read and then re-read in an 8-frame pool, where at most five may be young. The two least recently
+    // used are demoted, so the one-pass scan that follows evicts them first and never touches the five that stay young.
+    // Plain LRU does evict the young pages here, which is what the cap is for. The users heap has 12 pages, so the scan
+    // is pages 7 to 11.
+    const reread = [0, 1, 2, 3, 4, 5, 6, 0, 1, 2, 3, 4, 5, 6];
+    const scan = [7, 8, 9, 10, 11];
+    const young = [2, 3, 4, 5, 6];
+    const mid = bufferActionsOf([...reread, ...scan], 8, 'midpoint');
+    const lru = bufferActionsOf([...reread, ...scan], 8, 'lru');
+    expect(mid.victims.slice(0, 2)).toEqual([0, 1]);
+    expect(mid.victims.filter((v) => young.includes(v))).toEqual([]);
+    expect(lru.victims.filter((v) => young.includes(v)).length).toBeGreaterThan(0);
   });
 });
 
