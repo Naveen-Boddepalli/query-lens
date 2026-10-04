@@ -26,7 +26,7 @@ import type { PlanNode, RunResult, StepEvent } from './types.ts';
 export const EXPLAIN_COLUMN = 'QUERY PLAN';
 
 /** The optimizer's final plan: the last rewrite's `after`, or the canonical plan if nothing rewrote it. */
-function finalPlan(events: readonly StepEvent[]): PlanNode | null {
+export function finalPlan(events: readonly StepEvent[]): PlanNode | null {
   for (let i = events.length - 1; i >= 0; i--) {
     const e = events[i]!;
     if (e.stage === 'optimize') return e.after;
@@ -52,7 +52,7 @@ function qError(estRows: number, actualRows: number): number {
  * all the others sharing that `op`. `table` (a scan's own table, or a `Join`'s `rightTable`) is always enough to
  * tell them apart, since the parser never lets a query name the same table twice.
  */
-function nodeKey(op: string, table: string | undefined): string {
+export function nodeKey(op: string, table: string | undefined): string {
   return table === undefined ? op : `${op}:${table}`;
 }
 

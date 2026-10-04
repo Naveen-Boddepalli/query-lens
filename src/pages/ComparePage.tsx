@@ -6,6 +6,8 @@ import {
   createTraceProjector,
   DATASETS,
   DEFAULT_ENGINE_OPTIONS,
+  finalPlan,
+  nodeKey,
   parseReferenceString,
   REPLACEMENT_POLICY_LABELS,
   REPLACEMENT_POLICY_NAMES,
@@ -18,6 +20,7 @@ import type {
   EngineOptions,
   IndexBuildOptions,
   IndexNode,
+  PlanNode,
   ReplacementPolicyName,
   RunResult,
 } from '../engine/index.ts';
@@ -80,7 +83,7 @@ import {
  *    measured cost (with the filter) is usually lower.
  */
 
-type Mode = 'policies' | 'index' | 'build' | 'aggregate' | 'join' | 'lsm';
+type Mode = 'policies' | 'index' | 'build' | 'aggregate' | 'join' | 'lsm' | 'vectorize';
 
 /* -------------------------------------------------------------------------- */
 /* Replacement-policy comparison                                              */
@@ -1240,6 +1243,186 @@ function LsmCompare() {
 
 /* -------------------------------------------------------------------------- */
 
+/* -------------------------------------------------------------------------- */
+/* Tuple-at-a-time vs. batched (vectorized) execution (plan.md §25.4 F4)       */
+/* -------------------------------------------------------------------------- */
+
+// One database carrying both the join demo's tables and the transactions dataset, so every preset runs against
+// the same object — the same single-database convention JoinCompare and AggregateCompare use.
+const VECTORIZE_DB: Database = {
+  tables: { ...createJoinCompareDatabase().tables, ...DATASETS.transactions.make().tables },
+};
+
+const VECTORIZE_PRESETS = [
+  { label: 'A large, unindexed scan', sql: 'SELECT * FROM transactions WHERE amount > 4500' },
+  {
+    label: 'A join across tables of different sizes',
+    sql: 'SELECT posts.title, comments.body FROM posts JOIN comments ON posts.id = comments.postId',
+  },
+] as const;
+
+const BATCH_SIZES = [1, 16, 64, 256, 1024] as const;
+const VECTORIZE_DEFAULT_BATCH = 256;
+
+interface OperatorCalls {
+  label: string;
+  rowsProduced: number;
+  tupleCalls: number;
+  batchedCalls: number;
+}
+
+/**
+ * The real, measured row count per operator: the largest `rowsProduced` seen for each `nodeKey`. A running max,
+ * not last-write — a bookkeeping `execute` event (a residual check that failed, a hash-join build announcement)
+ * can carry a smaller or zero `rowsProduced` after the real count has already grown, and taking the last one
+ * would undercount. The same trap `explain.ts`'s own actual-row map currently falls into.
+ */
+function operatorRowCounts(events: RunResult['events']): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const e of events) {
+    if (e.stage !== 'execute') continue;
+    const key = nodeKey(e.op, e.table);
+    counts.set(key, Math.max(counts.get(key) ?? 0, e.rowsProduced));
+  }
+  return counts;
+}
+
+/**
+ * Per operator, how many `next()` calls the engine's own tuple-at-a-time (Volcano) model makes — one per row the
+ * operator returns, which is exactly what its own counter measures — against how many a batched model would make
+ * for the same rows: `ceil(rows / batchSize)`, one call per batch. The EOF-signalling call is left out of both
+ * sides; it is one constant per operator, the same in either model.
+ */
+function operatorCalls(root: PlanNode, counts: ReadonlyMap<string, number>, batchSize: number): OperatorCalls[] {
+  const out: OperatorCalls[] = [];
+  const walk = (node: PlanNode): void => {
+    const rowsProduced = counts.get(nodeKey(node.op, node.table)) ?? 0;
+    out.push({
+      label: node.label,
+      rowsProduced,
+      tupleCalls: rowsProduced,
+      batchedCalls: Math.ceil(rowsProduced / batchSize),
+    });
+    (node.children ?? []).forEach(walk);
+  };
+  walk(root);
+  return out;
+}
+
+function VectorizeCompare() {
+  const [sqlInput, setSqlInput] = useState<string>(VECTORIZE_PRESETS[0].sql);
+  const [sql, setSql] = useState<string>(VECTORIZE_PRESETS[0].sql);
+  const [batchSize, setBatchSize] = useState<number>(VECTORIZE_DEFAULT_BATCH);
+
+  const run = useMemo(() => runQuery(sql, VECTORIZE_DB, DEFAULT_ENGINE_OPTIONS), [sql]);
+  const plan = useMemo(() => (run.error ? null : finalPlan(run.events)), [run]);
+  const rows = useMemo(
+    () => (plan ? operatorCalls(plan, operatorRowCounts(run.events), batchSize) : []),
+    [plan, run, batchSize],
+  );
+
+  const totals = rows.reduce(
+    (t, r) => ({ tuple: t.tuple + r.tupleCalls, batched: t.batched + r.batchedCalls }),
+    { tuple: 0, batched: 0 },
+  );
+  const ratio = totals.batched === 0 ? 0 : totals.tuple / totals.batched;
+
+  return (
+    <>
+      <p className="text-body text-ink-dim">
+        The engine executes every query one row at a time: each operator hands its parent one row per{' '}
+        <code className="font-mono text-ink">next()</code> call (plan.md §25.4 F4). A vectorized engine hands over
+        a batch of rows per call instead, paying the per-call overhead once per batch rather than once per row.
+        Both counts below are read from this same run — the tuple-at-a-time column is the engine&rsquo;s own
+        measured count; the batched column is the same rows divided into batches of the size you pick. Nothing
+        is re-executed, and the rows out are identical either way.
+      </p>
+
+      <div className="mt-2 flex flex-col gap-3 rounded-xl border border-edge bg-surface-2 p-3 shadow-e1">
+        <label htmlFor="vec-preset" className="flex flex-col gap-1 text-label text-ink-dim">
+          Query
+          <select
+            id="vec-preset"
+            value={VECTORIZE_PRESETS.some((p) => p.sql === sqlInput) ? sqlInput : 'custom'}
+            onChange={(e) => { if (e.target.value !== 'custom') setSqlInput(e.target.value); }}
+            className={inputField}
+          >
+            {VECTORIZE_PRESETS.map((p) => (
+              <option key={p.label} value={p.sql}>{p.label}</option>
+            ))}
+            <option value="custom">Custom (edit below)</option>
+          </select>
+        </label>
+        <div className="flex flex-wrap items-end gap-3">
+          <label htmlFor="vec-sql" className="flex flex-1 min-w-64 flex-col gap-1 text-label text-ink-dim">
+            SQL
+            <input
+              id="vec-sql"
+              type="text"
+              value={sqlInput}
+              onChange={(e) => { setSqlInput(e.target.value); }}
+              className={`${inputField} font-mono`}
+              spellCheck={false}
+            />
+          </label>
+          <button type="button" onClick={() => { setSql(sqlInput); }} className={btnPrimary}>
+            Run
+          </button>
+        </div>
+        <label htmlFor="vec-batch" className="flex flex-col gap-1 text-label text-ink-dim">
+          Batch size (rows per <code className="font-mono">next()</code> call)
+          <select
+            id="vec-batch"
+            value={batchSize}
+            onChange={(e) => { setBatchSize(Number(e.target.value)); }}
+            className={`${inputField} w-40`}
+          >
+            {BATCH_SIZES.map((b) => (
+              <option key={b} value={b}>{b === 1 ? '1 (tuple-at-a-time)' : String(b)}</option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      {run.error ? (
+        <p className="rounded-lg border border-evict/40 bg-evict/10 p-3 text-label text-ink">{run.error.message}</p>
+      ) : (
+        <>
+          <p className="rounded-xl border border-accent/40 bg-accent-soft px-3 py-2 text-label text-ink shadow-e1">
+            {run.rows.length} row{run.rows.length === 1 ? '' : 's'} out either way. Tuple-at-a-time takes{' '}
+            <span className="font-mono">{totals.tuple}</span> <code className="font-mono">next()</code> calls across
+            every operator; in batches of <span className="font-mono">{batchSize}</span>, the same rows take{' '}
+            <span className="font-mono">{totals.batched}</span> — <span className="font-mono">{ratio.toFixed(1)}×</span> fewer.
+          </p>
+
+          <div className={`${panelSurface} overflow-x-auto p-3`}>
+            <table className="w-full text-label">
+              <thead>
+                <tr className="text-left text-ink-dim">
+                  <th className="pb-2 font-medium">Operator</th>
+                  <th className="pb-2 text-right font-medium">Rows produced</th>
+                  <th className="pb-2 text-right font-medium">Tuple-at-a-time calls</th>
+                  <th className="pb-2 text-right font-medium">Batched calls</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r, i) => (
+                  <tr key={`${r.label}-${String(i)}`} className="border-t border-edge/60">
+                    <td className="py-1.5 font-mono text-ink">{r.label}</td>
+                    <td className="py-1.5 text-right font-mono tabular-nums text-ink">{r.rowsProduced}</td>
+                    <td className="py-1.5 text-right font-mono tabular-nums text-ink">{r.tupleCalls}</td>
+                    <td className="py-1.5 text-right font-mono tabular-nums text-accent">{r.batchedCalls}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </>
+  );
+}
+
 export function ComparePage() {
   const [mode, setMode] = useState<Mode>('policies');
 
@@ -1258,6 +1441,7 @@ export function ComparePage() {
             ['aggregate', 'Hash aggregate vs. sort aggregate'],
             ['join', 'JOIN algorithms'],
             ['lsm', 'B+Tree vs. LSM tree'],
+            ['vectorize', 'Tuple-at-a-time vs. batched'],
           ] as const
         ).map(([value, label]) => (
           <button
@@ -1283,8 +1467,10 @@ export function ComparePage() {
         <AggregateCompare />
       ) : mode === 'join' ? (
         <JoinCompare />
-      ) : (
+      ) : mode === 'lsm' ? (
         <LsmCompare />
+      ) : (
+        <VectorizeCompare />
       )}
     </div>
   );

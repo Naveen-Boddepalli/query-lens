@@ -586,6 +586,29 @@ test('compare forces nested-loop, hash, sort-merge and index nested-loop join on
   await expect(page.getByText(/makes no difference/)).toBeVisible();
 });
 
+test('compare counts next() calls per operator, tuple-at-a-time vs. batched, from one real run', async ({ page }) => {
+  await page.goto('/compare');
+  await page.getByRole('radio', { name: 'Tuple-at-a-time vs. batched' }).click();
+
+  // The default preset: a 3,000-row scan filtered to 296 rows. One SeqScan and one Project, each producing 296 rows,
+  // so 592 next() calls tuple-at-a-time, and 2 batches of 256 per operator — 4 calls batched.
+  await expect(page.getByText('296 rows out either way')).toBeVisible();
+  await expect(page.getByText('592', { exact: true })).toBeVisible();
+  await expect(page.getByText('148.0×')).toBeVisible();
+
+  // A join across different-sized tables: the same run, broken down per operator — 10 posts and 120 comments
+  // flow through the join, so the operators disagree about how many rows they each produced.
+  await page.getByLabel('Query').selectOption({ label: 'A join across tables of different sizes' });
+  await page.getByRole('button', { name: 'Run' }).click();
+  await expect(page.getByText('120 rows out either way')).toBeVisible();
+  await expect(page.getByText('370', { exact: true })).toBeVisible();
+  await expect(page.getByText('92.5×')).toBeVisible();
+
+  // Batch size 1 is tuple-at-a-time itself: the two counts must match, and the ratio is exactly 1.
+  await page.getByLabel('Batch size', { exact: false }).selectOption('1');
+  await expect(page.getByText('1.0×')).toBeVisible();
+});
+
 test('compare feeds the identical write sequence to a real B+Tree and an LSM tree, with amplification from real counters', async ({ page }) => {
   await page.goto('/compare');
   await page.getByRole('radio', { name: 'B+Tree vs. LSM tree' }).click();

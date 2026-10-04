@@ -92,6 +92,7 @@ export {
 export type { BufferFrame, LockHeld, TraceProjector, ViewState } from './viewState.ts';
 export { DEFAULT_ENGINE_OPTIONS, IMPLEMENTED_STAGES, STAGES } from './types.ts';
 export { analyzeTable, statsToRows } from './stats.ts';
+export { finalPlan, nodeKey } from './explain.ts';
 export type {
   ASTNode,
   ColumnStats,

@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **A tuple-at-a-time vs. batched `/compare` mode** (plan.md §25.4 F4) — runs one real query and counts the
+  `next()` calls each operator makes, per row, against the calls a batched engine would make for the same rows at a
+  batch size you pick. Nothing re-executes; the counts come from the run's own trace.
 - **A row-vs-column storage sandbox**, `/tools/columnar` (plan.md §25.4 F3, sandbox slice) — NSM (row store), DSM
   (column store) and PAX (the hybrid) laying out the same table three ways, with real compressed-size counters
   for dictionary, RLE, delta and bit-packing encodings, and the late-vs-early materialization trade-off that
