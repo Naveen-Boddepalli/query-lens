@@ -45,6 +45,9 @@ import { useThemeContext } from '../ui/ThemeContext.tsx';
 import { RUN_HINT, useIsTouch } from '../ui/platform.ts';
 import { readDefaultPolicy, readDefaultPredictOn } from '../ui/preferences.ts';
 import { StageDetail } from '../ui/panels/StageDetail.tsx';
+import { TraceDiffNote } from '../ui/panels/TraceDiffNote.tsx';
+import { diffRuns, readLastRuns, summarize, writeLastRun } from '../ui/traceDiff.ts';
+import type { TraceDiff } from '../ui/traceDiff.ts';
 import { STAGE_META } from '../ui/stageMeta.ts';
 import { usePlayback, usePlaybackShortcuts } from '../ui/usePlayback.ts';
 import {
@@ -126,6 +129,7 @@ export function PlaygroundPage() {
   const [editingData, setEditingData] = useState(false);
   const [rowsEdited, setRowsEdited] = useState(SHARED.rows !== undefined);
   const [result, setResult] = useState<RunResult>(INITIAL_RESULT);
+  const [traceDiff, setTraceDiff] = useState<{ sql: string; diff: TraceDiff | null } | null>(null);
 
   const [predictOn, setPredictOn] = useState(START.predictOn);
   const [presenting, setPresenting] = useState(PRESENT_INITIAL);
@@ -317,6 +321,14 @@ export function PlaygroundPage() {
     (database: Database = db) => {
       const next = runQuery(sql, database, options);
       setResult(next);
+      if (next.error) {
+        setTraceDiff({ sql, diff: null });
+      } else {
+        const after = summarize(next);
+        const before = readLastRuns()[sql];
+        writeLastRun(sql, after);
+        setTraceDiff({ sql, diff: before ? diffRuns(before, after) : null });
+      }
       setPinnedStage(null);
       setAnswers({});
       playback.land(landingStep(next, predictOn));
@@ -798,6 +810,7 @@ export function PlaygroundPage() {
           </div>
 
           {!prompt && whyNot && <WhyNotNote whyNot={whyNot} />}
+          {!prompt && traceDiff?.sql === sql && traceDiff.diff && <TraceDiffNote diff={traceDiff.diff} />}
 
           <div
             data-tour="playback"

@@ -927,6 +927,35 @@ test('DELETE removes a row for real — the Playground persists it across the ne
   await expect(page.getByText('47 rows returned')).toBeVisible();
 });
 
+test('trace diff: re-running a query reports what changed since its last run, including the rows a write added', async ({ page }) => {
+  await page.goto('/playground');
+  const editor = page.locator('.cm-content');
+  const diff = page.getByRole('region', { name: 'Since your last run' });
+
+  // The first run of a query has nothing to compare against, so no note appears.
+  await editor.click();
+  await page.keyboard.press('ControlOrMeta+A');
+  await page.keyboard.type('SELECT * FROM users;');
+  await page.getByRole('button', { name: 'Run' }).click();
+  await expect(diff).toHaveCount(0);
+
+  // The same query again, with nothing in between: the note says so.
+  await page.getByRole('button', { name: 'Run' }).click();
+  await expect(diff.getByText('Nothing measurable has changed')).toBeVisible();
+
+  // A write changes the table; the next run of the SELECT reports the row it now returns.
+  await editor.click();
+  await page.keyboard.press('ControlOrMeta+A');
+  await page.keyboard.type("INSERT INTO users (id, name, email, age) VALUES (999, 'zeta', 'zeta@example.com', 50);");
+  await page.getByRole('button', { name: 'Run' }).click();
+  await editor.click();
+  await page.keyboard.press('ControlOrMeta+A');
+  await page.keyboard.type('SELECT * FROM users;');
+  await page.getByRole('button', { name: 'Run' }).click();
+  await expect(diff.getByText('rows returned:')).toBeVisible();
+  await expect(diff.getByText('48 → 49')).toBeVisible();
+});
+
 test('INSERT adds a row for real — the Playground persists it across the next query', async ({
   page,
 }) => {

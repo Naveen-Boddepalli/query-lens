@@ -25,6 +25,8 @@ import type {
   RunResult,
 } from '../engine/index.ts';
 import { planBTreeWrites } from '../ui/btreeWriteCost.ts';
+import { scoreOf } from '../ui/scorecard.ts';
+import type { Scorecard } from '../ui/scorecard.ts';
 import { demoWrites, LSM_LIMITS, planLsm } from '../ui/lsm.ts';
 import type { LsmOptions } from '../ui/lsm.ts';
 import { BufferPoolPanel } from '../ui/panels/BufferPoolPanel.tsx';
@@ -317,31 +319,6 @@ const INDEX_PRESETS = [
   { label: 'Range on a non-indexed column', sql: 'SELECT * FROM users WHERE age > 30' },
   { label: 'Every row', sql: 'SELECT * FROM users' },
 ] as const;
-
-interface Scorecard {
-  steps: number;
-  diskReads: number;
-  hits: number;
-  evictions: number;
-  btreeReads: number;
-  locks: number;
-  rows: number;
-  usedIndex: boolean;
-}
-
-function scoreOf(result: RunResult): Scorecard {
-  const end = createTraceProjector(result.events, DEFAULT_ENGINE_OPTIONS).at(result.events.length);
-  return {
-    steps: result.events.length,
-    diskReads: end.bufferStats.misses,
-    hits: end.bufferStats.hits,
-    evictions: end.bufferStats.evictions,
-    btreeReads: end.indexPath.length,
-    locks: end.locksTaken,
-    rows: result.rows.length,
-    usedIndex: result.events.some((e) => e.stage === 'index'),
-  };
-}
 
 const STAT_ROWS: { key: keyof Scorecard; label: string }[] = [
   { key: 'steps', label: 'trace steps' },
