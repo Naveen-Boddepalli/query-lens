@@ -332,6 +332,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Vitest also runs tests under `scripts/` and `oracle/`; `oracle/` joins `tsconfig.node.json`.
 
 ### Fixed
+- **EXPLAIN ANALYZE no longer undercounts an operator whose last candidate fails a residual check.** An index
+  scan whose final candidate failed its extra predicate reported the discarded candidate's `0` as its row count, even
+  when it had already returned rows. The plan now reports the largest count each operator reached.
 - **`EXPLAIN ANALYZE`'s actual row count mixed up two nodes that shared an operator.** Its lookup kept one
   count per operator *name* (`SeqScan`, `Join`, …), so a multi-join chain's several `SeqScan`s or `Join`s all
   reported whichever one's count happened to be recorded last — an `authors` scan that really produced 5 rows

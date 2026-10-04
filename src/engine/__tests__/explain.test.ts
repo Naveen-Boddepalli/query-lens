@@ -155,7 +155,8 @@ describe('EXPLAIN ANALYZE — the run, reported', () => {
     const outer = out.find((l) => l.includes('employees × timesheets'))!;
     expect(inner).toMatch(/actual 200 rows/);
     expect(outer).toMatch(/actual 5000 rows/);
-  });
+    // The run emits about 2.3 million trace events (~1.3 s alone); under the parallel suite it can pass 5 s.
+  }, 20_000);
 });
 
 describe('q-error (plan.md §25.4 C2)', () => {
@@ -225,5 +226,24 @@ describe('it changes nothing', () => {
     for (const sql of ['EXPLAIN SELECT * FROM users WHERE id = 5', 'EXPLAIN ANALYZE SELECT * FROM users WHERE id = 5']) {
       expect(JSON.stringify(runQuery(sql, db()))).toBe(JSON.stringify(runQuery(sql, db())));
     }
+  });
+});
+
+describe('EXPLAIN ANALYZE — a late residual failure does not erase the rows already returned', () => {
+  // The index on `grp` matches three rows. The last one it visits fails the residual `ok = true`, and its own
+  // bookkeeping event reports `rowsProduced: 0`. The operator still returned the two rows before it.
+  const late = (): Database => {
+    const rows = Array.from({ length: 50 }, (_, i) => ({ id: i + 1, grp: 100 + i, ok: true }));
+    rows.push({ id: 901, grp: 1, ok: true }, { id: 902, grp: 1, ok: true }, { id: 903, grp: 1, ok: false });
+    return { tables: { t: { name: 't', columns: ['id', 'grp', 'ok'], rows, indexedColumns: ['grp'] } } };
+  };
+
+  it('reports the index scan’s real row count, not the zero from the discarded candidate', () => {
+    const out = runQuery('EXPLAIN ANALYZE SELECT * FROM t WHERE grp = 1 AND ok = true', late()).rows.map(
+      (r) => r[EXPLAIN_COLUMN] as string,
+    );
+    const scan = out.find((l) => l.includes('IndexScan'))!;
+    expect(scan).toMatch(/actual 2 rows/);
+    expect(scan).not.toMatch(/actual 0 rows/);
   });
 });

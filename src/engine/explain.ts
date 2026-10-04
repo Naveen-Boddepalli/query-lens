@@ -87,9 +87,14 @@ export function explainResult(sql: string, ast: ExplainStatement, run: (sql: str
   const plan = finalPlan(inner.events);
   if (!plan) return { events: inner.events, rows: [] };
 
-  // What ran, per operator: the executor's own last cumulative count.
+  // What ran, per operator: the largest count it reported. Bookkeeping events (a discarded candidate, a hash build
+  // announcement) can carry a 0 that lands after the real count has grown, so the last event is not always the total.
   const actual = new Map<string, number>();
-  for (const e of inner.events) if (e.stage === 'execute') actual.set(nodeKey(e.op, e.table), e.rowsProduced);
+  for (const e of inner.events) {
+    if (e.stage !== 'execute') continue;
+    const key = nodeKey(e.op, e.table);
+    actual.set(key, Math.max(actual.get(key) ?? 0, e.rowsProduced));
+  }
 
   const lines = planLines(plan, ast.analyze ? actual : null);
   if (ast.analyze) {
