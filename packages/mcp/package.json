@@ -1,0 +1,42 @@
+{
+  "name": "@querylens/mcp",
+  "version": "0.1.0",
+  "description": "QueryLens's engine as a Model Context Protocol server: run a query, step through its trace, or ask which buffer policy keeps a page, from your coding assistant.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "querylens-mcp": "dist/mcp/server.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.30.0",
+    "zod": "4.5.4"
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "database-internals",
+    "sql",
+    "education"
+  ],
+  "homepage": "https://query-lens.1234naveenboddepalli.workers.dev",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Naveen-Boddepalli/query-lens.git",
+    "directory": "packages/mcp"
+  },
+  "bugs": {
+    "url": "https://github.com/Naveen-Boddepalli/query-lens/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}

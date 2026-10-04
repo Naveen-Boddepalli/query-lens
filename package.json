@@ -47,6 +47,7 @@
     "study": "node --experimental-strip-types scripts/study.ts",
     "release-notes": "node --experimental-strip-types scripts/release-notes.ts",
     "test:cli": "node --experimental-strip-types bin/querylens.ts --help",
+    "build:packages": "node --experimental-strip-types scripts/build-packages.ts",
     "test:e2e": "playwright test"
   },
   "dependencies": {

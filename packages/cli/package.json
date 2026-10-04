@@ -1,0 +1,40 @@
+{
+  "name": "querylens",
+  "version": "0.1.0",
+  "description": "Trace a SQL query through QueryLens's toy database engine on the terminal: every parser, planner, buffer-pool and B+Tree step, one line each.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "querylens": "dist/bin/querylens.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "keywords": [
+    "database-internals",
+    "sql",
+    "b-tree",
+    "buffer-pool",
+    "query-planner",
+    "cli",
+    "education"
+  ],
+  "homepage": "https://query-lens.1234naveenboddepalli.workers.dev",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Naveen-Boddepalli/query-lens.git",
+    "directory": "packages/cli"
+  },
+  "bugs": {
+    "url": "https://github.com/Naveen-Boddepalli/query-lens/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}

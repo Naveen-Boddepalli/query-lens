@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Three publishable packages, not yet published** (plan.md §H3). `@querylens/engine`, the `querylens` terminal CLI and `@querylens/mcp` build into their own `dist` directories and install cleanly from their tarballs. A tag-triggered workflow publishes them with provenance once the npm organisation and trusted publishing are in place.
 - **2Q buffer replacement policy** (plan.md §25.4 F7, slice 2). A small FIFO for pages read once, promotion only on a re-read after leaving it, available in the buffer-pool sandbox, the pipeline and `/compare`. Its correlated-reference limit is recorded in the tests and the plan.
 - **Saved queries** (plan.md §H7). The Workspaces dialog in Custom mode keeps a named copy of the editor's SQL in this browser, and loads it back into the editor without running it.
 - **Table views of the v2 tools** (plan.md §H6). Hash index, LSM tree, join order and columnar storage each get a `Show as table` toggle with the same numbers as a real table that a screen reader can walk.

@@ -1,0 +1,97 @@
+# plan.md §H3. Publishes one of this repository's three packages when a tag is pushed:
+#
+#   engine-v<version>  →  @querylens/engine   (packages/engine)
+#   cli-v<version>     →  querylens           (packages/cli)
+#   mcp-v<version>     →  @querylens/mcp      (packages/mcp)
+#
+# No npm token is stored anywhere. Trusted publishing (OIDC) exchanges this run's identity for a short-lived publish
+# credential, and `--provenance` links the published tarball to this commit. Nothing is published until the npm
+# organisation `querylens` exists (the unscoped `querylens` needs no organisation) and trusted publishing is configured
+# for this repository and this file.
+#
+# Actions are pinned to full commit SHAs, as in ci.yml: a moved tag is how CI secrets have been exfiltrated before.
+name: publish-packages
+
+on:
+  push:
+    tags: ['engine-v*', 'cli-v*', 'mcp-v*']
+
+# Read-only by default. The one job that publishes adds `id-token: write`, which is what OIDC needs and nothing more.
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish from tag ${{ github.ref_name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+
+      - name: Install Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+
+      - name: Work out which package the tag names
+        run: |
+          case "$GITHUB_REF_NAME" in
+            engine-v*) pkg=engine ;;
+            cli-v*)    pkg=cli ;;
+            mcp-v*)    pkg=mcp ;;
+            *) echo "unknown tag $GITHUB_REF_NAME" >&2; exit 1 ;;
+          esac
+          tag_version="${GITHUB_REF_NAME#*-v}"
+          package_version="$(node -p "require('./packages/$pkg/package.json').version")"
+          if [ "$tag_version" != "$package_version" ]; then
+            echo "tag $tag_version does not match packages/$pkg/package.json version $package_version" >&2
+            exit 1
+          fi
+          echo "PKG=$pkg" >> "$GITHUB_ENV"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Gate
+        run: |
+          pnpm typecheck
+          pnpm test
+
+      - name: Build the packages
+        run: pnpm build:packages
+
+      - name: Check the built package runs
+        run: |
+          case "$PKG" in
+            engine)
+              node --input-type=module -e "import { runQuery, DATASETS, DEFAULT_ENGINE_OPTIONS } from './packages/engine/dist/index.js'; const r = runQuery('SELECT * FROM users WHERE id = 5', DATASETS.users.make(), DEFAULT_ENGINE_OPTIONS); if (r.rows.length !== 1 || r.error) { console.error('the built engine did not return the expected row'); process.exit(1); }"
+              ;;
+            cli)
+              node packages/cli/dist/bin/querylens.js "SELECT * FROM users WHERE id = 5" --json | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{ if (JSON.parse(s).rows.length !== 1) process.exit(1); })"
+              ;;
+            mcp)
+              printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"check","version":"0"}}}' | node packages/mcp/dist/mcp/server.js | grep -q '"name":"querylens"'
+              ;;
+          esac
+
+      - name: Upgrade npm for trusted publishing
+        run: npm install -g 'npm@^11.5.1' && npm --version
+
+      - name: Publish with provenance
+        working-directory: packages/${{ env.PKG }}
+        run: npm publish --provenance --access public

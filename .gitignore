@@ -26,3 +26,10 @@ build/
 
 # test downloads
 querylens-trace-*.json
+
+# plan.md §H3: copied in by scripts/build-engine.ts at publish time, so the root LICENSE stays the one source.
+packages/engine/LICENSE
+packages/cli/LICENSE
+
+# plan.md §H3: copied in by scripts/build-packages.ts at build time.
+packages/mcp/LICENSE

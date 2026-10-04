@@ -32,6 +32,26 @@ plan.md §25.4 A4. Two rules, both learned the hard way on the first deploy (CHA
 Semantic versioning: `2.x` is the v2 plan's releases (plan.md §25.3); a `2.0.0` is the first release that ships
 the whole of §25.8's 2.0 checklist. Anything before that on `version/v2` is unreleased work.
 
+## Releasing the packages
+
+Three packages publish from this repository, each with its own version and its own tag:
+
+| Tag | Package | Directory |
+| --- | --- | --- |
+| `engine-v<version>` | `@querylens/engine` | `packages/engine` |
+| `cli-v<version>` | `querylens` (the terminal trace) | `packages/cli` |
+| `mcp-v<version>` | `@querylens/mcp` (the MCP server) | `packages/mcp` |
+
+1. Bump `version` in the package's `package.json`, and add the change to `CHANGELOG.md`.
+2. Commit, then tag that commit with the tag above and push the tag.
+3. `.github/workflows/publish-packages.yml` checks the tag against the package version, runs the gate, builds with
+   `pnpm build:packages`, checks that the built package runs, and publishes with `npm publish --provenance`. No npm
+   token is involved: the publish is authorised by the workflow's OIDC identity.
+
+Nothing publishes until two things exist outside this repository: the npm organisation `querylens` (for the two
+`@querylens/` packages), and a trusted publisher configured for this repository and `publish-packages.yml`. Until
+both are in place the tag run fails at the publish step, and nothing is published.
+
 ## Deploy config
 
 These files change what the *platform* does rather than what the app does, and no local check exercises the

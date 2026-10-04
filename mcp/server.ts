@@ -17,6 +17,8 @@
  * equivalent, once H3 lands) to try it before then.
  */
 
+import { realpathSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
@@ -137,7 +139,18 @@ server.registerTool(
 
 export { server };
 
+/** True when this module is the program's entry point. npm runs a bin through a symlink, so the path is resolved first. */
+function invokedDirectly(moduleUrl: string): boolean {
+  const entry = process.argv[1];
+  if (entry === undefined) return false;
+  try {
+    return realpathSync(entry) === fileURLToPath(moduleUrl);
+  } catch {
+    return false;
+  }
+}
+
 // Only connect a real transport when run directly — a test imports `server` without starting stdio.
-if (process.argv[1] && new URL(import.meta.url).pathname === process.argv[1]) {
+if (invokedDirectly(import.meta.url)) {
   await server.connect(new StdioServerTransport());
 }
