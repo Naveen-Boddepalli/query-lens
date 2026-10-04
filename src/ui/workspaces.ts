@@ -13,8 +13,16 @@ export const WORKSPACE_FORMAT = 'querylens-workspace';
 export const WORKSPACE_VERSION = 1;
 
 const DB_NAME = 'querylens';
+const DB_VERSION = 2;
 const STORE = 'workspaces';
+const QUERIES = 'queries';
 const MAX_NAME_LENGTH = 60;
+
+export interface SavedQuery {
+  name: string;
+  sql: string;
+  savedAt: number;
+}
 
 export interface WorkspaceSummary {
   name: string;
@@ -39,18 +47,26 @@ export function workspaceNameProblem(name: string): string | null {
 
 function openDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, 1);
-    request.onupgradeneeded = () => { request.result.createObjectStore(STORE, { keyPath: 'name' }); };
+    const request = indexedDB.open(DB_NAME, DB_VERSION);
+    request.onupgradeneeded = () => {
+      for (const store of [STORE, QUERIES]) {
+        if (!request.result.objectStoreNames.contains(store)) request.result.createObjectStore(store, { keyPath: 'name' });
+      }
+    };
     request.onsuccess = () => { resolve(request.result); };
     request.onerror = () => { reject(request.error ?? new Error('IndexedDB could not be opened')); };
   });
 }
 
-async function run<T>(mode: IDBTransactionMode, action: (store: IDBObjectStore) => IDBRequest<T>): Promise<T> {
+async function run<T>(
+  storeName: string,
+  mode: IDBTransactionMode,
+  action: (store: IDBObjectStore) => IDBRequest<T>,
+): Promise<T> {
   const db = await openDatabase();
   try {
     return await new Promise<T>((resolve, reject) => {
-      const request = action(db.transaction(STORE, mode).objectStore(STORE));
+      const request = action(db.transaction(storeName, mode).objectStore(storeName));
       request.onsuccess = () => { resolve(request.result); };
       request.onerror = () => { reject(request.error ?? new Error('IndexedDB request failed')); };
     });
@@ -60,7 +76,7 @@ async function run<T>(mode: IDBTransactionMode, action: (store: IDBObjectStore) 
 }
 
 export async function listWorkspaces(): Promise<WorkspaceSummary[]> {
-  const stored = await run<StoredWorkspace[]>('readonly', (store) => store.getAll() as IDBRequest<StoredWorkspace[]>);
+  const stored = await run<StoredWorkspace[]>(STORE, 'readonly', (store) => store.getAll() as IDBRequest<StoredWorkspace[]>);
   return stored
     .filter((w) => isValidDatabase(w.database))
     .map((w) => ({ name: w.name, savedAt: w.savedAt, tables: Object.keys(w.database.tables).length }))
@@ -69,11 +85,12 @@ export async function listWorkspaces(): Promise<WorkspaceSummary[]> {
 
 export async function saveWorkspace(name: string, database: Database): Promise<void> {
   const record: StoredWorkspace = { name: name.trim(), savedAt: Date.now(), database };
-  await run('readwrite', (store) => store.put(record));
+  await run(STORE, 'readwrite', (store) => store.put(record));
 }
 
 export async function openWorkspace(name: string): Promise<Database | null> {
   const stored = await run<StoredWorkspace | undefined>(
+    STORE,
     'readonly',
     (store) => store.get(name) as IDBRequest<StoredWorkspace | undefined>,
   );
@@ -81,7 +98,7 @@ export async function openWorkspace(name: string): Promise<Database | null> {
 }
 
 export async function deleteWorkspace(name: string): Promise<void> {
-  await run('readwrite', (store) => store.delete(name));
+  await run(STORE, 'readwrite', (store) => store.delete(name));
 }
 
 export function workspaceFileText(name: string, database: Database): string {
@@ -112,4 +129,18 @@ export function parseWorkspaceFile(text: string): ParsedWorkspaceFile {
     return { ok: false, problem: "The workspace's tables do not check out, so nothing was loaded." };
   }
   return { ok: true, name: file.name.trim(), database: file.database };
+}
+
+export async function listSavedQueries(): Promise<SavedQuery[]> {
+  const stored = await run<SavedQuery[]>(QUERIES, 'readonly', (store) => store.getAll() as IDBRequest<SavedQuery[]>);
+  return stored.sort((a, b) => b.savedAt - a.savedAt);
+}
+
+export async function saveQuery(name: string, sql: string): Promise<void> {
+  const record: SavedQuery = { name: name.trim(), sql: sql.trim(), savedAt: Date.now() };
+  await run(QUERIES, 'readwrite', (store) => store.put(record));
+}
+
+export async function deleteSavedQuery(name: string): Promise<void> {
+  await run(QUERIES, 'readwrite', (store) => store.delete(name));
 }

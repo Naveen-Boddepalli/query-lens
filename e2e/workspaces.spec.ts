@@ -19,7 +19,7 @@ test('a saved workspace survives a reload, opens back in, and can be deleted (pl
 
   await page.getByRole('button', { name: 'Workspaces', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Workspaces' });
-  await dialog.getByLabel('Name').fill('Week 3 lab');
+  await dialog.getByLabel('Name', { exact: true }).fill('Week 3 lab');
   await dialog.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(dialog.getByRole('status')).toHaveText('Saved "Week 3 lab".');
   await dialog.getByRole('button', { name: 'Close', exact: true }).click();
@@ -48,7 +48,7 @@ test('a workspace downloads as a file and opens from one (plan.md §H7)', async 
   await page.getByRole('button', { name: 'Custom', exact: true }).click();
   await page.getByRole('button', { name: 'Workspaces', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Workspaces' });
-  await dialog.getByLabel('Name').fill('Shared lab');
+  await dialog.getByLabel('Name', { exact: true }).fill('Shared lab');
 
   const [download] = await Promise.all([
     page.waitForEvent('download'),
@@ -83,4 +83,28 @@ test('a file whose tables do not check out is refused whole, and the database is
   });
   await expect(dialog.getByRole('status')).toContainText('do not check out');
   await expect(dialog).toBeVisible();
+});
+
+test('a saved query loads back into the editor, and is not run (plan.md §H7)', async ({ page }) => {
+  await page.goto('/playground');
+  await page.getByRole('button', { name: 'Custom', exact: true }).click();
+  await page.getByRole('button', { name: 'Workspaces', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Workspaces' });
+  await dialog.getByLabel('Query name').fill('Authors with posts');
+  await dialog.getByRole('button', { name: 'Save query', exact: true }).click();
+  await expect(dialog.getByRole('status')).toHaveText('Saved the query "Authors with posts".');
+  await dialog.getByRole('button', { name: 'Close', exact: true }).click();
+
+  await page.reload();
+  await page.getByRole('button', { name: 'Custom', exact: true }).click();
+  await page.locator('.cm-content').click();
+  await page.keyboard.press('ControlOrMeta+A');
+  await page.keyboard.type('SELECT id FROM authors');
+  await expect(page.locator('.cm-content')).toContainText('SELECT id FROM authors');
+
+  await page.getByRole('button', { name: 'Workspaces', exact: true }).click();
+  const reopened = page.getByRole('dialog', { name: 'Workspaces' });
+  await reopened.getByRole('listitem').filter({ hasText: 'Authors with posts' }).getByRole('button', { name: 'Load' }).click();
+  await expect(reopened).toBeHidden();
+  await expect(page.locator('.cm-content')).toContainText('authors.name');
 });

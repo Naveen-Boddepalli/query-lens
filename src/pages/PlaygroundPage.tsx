@@ -870,7 +870,9 @@ export function PlaygroundPage() {
         <Suspense fallback={null}>
           <WorkspaceDialog
             db={db}
+            sql={sql}
             onOpen={openDatabase}
+            onLoadQuery={(text) => { setSql(text); }}
             onClose={() => { setWorkspacesOpen(false); }}
           />
         </Suspense>

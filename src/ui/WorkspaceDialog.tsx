@@ -2,28 +2,36 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Database } from '../engine/index.ts';
 import { btnGhost, btnPrimary, btnSecondary, inputField } from './primitives.ts';
 import {
+  deleteSavedQuery,
   deleteWorkspace,
+  listSavedQueries,
   listWorkspaces,
   openWorkspace,
   parseWorkspaceFile,
+  saveQuery,
   saveWorkspace,
   workspaceFileText,
   workspaceNameProblem,
 } from './workspaces.ts';
-import type { WorkspaceSummary } from './workspaces.ts';
+import type { SavedQuery, WorkspaceSummary } from './workspaces.ts';
 
 export interface WorkspaceDialogProps {
   db: Database;
+  /** The SQL in the editor, which "Save query" keeps. */
+  sql: string;
   onOpen: (db: Database) => void;
+  onLoadQuery: (sql: string) => void;
   onClose: () => void;
 }
 
 const UNAVAILABLE = 'Saved workspaces are not available in this browser, so they cannot be kept here.';
 
-export function WorkspaceDialog({ db, onOpen, onClose }: WorkspaceDialogProps) {
+export function WorkspaceDialog({ db, sql, onOpen, onLoadQuery, onClose }: WorkspaceDialogProps) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [name, setName] = useState('');
   const [saved, setSaved] = useState<WorkspaceSummary[]>([]);
+  const [queries, setQueries] = useState<SavedQuery[]>([]);
+  const [queryName, setQueryName] = useState('');
   const [message, setMessage] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
@@ -45,6 +53,10 @@ export function WorkspaceDialog({ db, onOpen, onClose }: WorkspaceDialogProps) {
         setMessage(UNAVAILABLE);
       },
     );
+    listSavedQueries().then(
+      (found) => { setQueries(found); },
+      () => { setQueries([]); },
+    );
   }, []);
 
   const close = () => { dialog.current?.close(); };
@@ -63,6 +75,38 @@ export function WorkspaceDialog({ db, onOpen, onClose }: WorkspaceDialogProps) {
       await refresh();
     } catch {
       setMessage('That did not save. The browser may be out of space, or blocking storage.');
+    }
+  }
+
+  async function keepQuery() {
+    const problem = workspaceNameProblem(queryName);
+    if (problem) {
+      setMessage(problem);
+      return;
+    }
+    if (sql.trim() === '') {
+      setMessage('The editor is empty, so there is no query to save.');
+      return;
+    }
+    const label = queryName.trim();
+    try {
+      await saveQuery(label, sql);
+      setQueryName('');
+      setQueries(await listSavedQueries());
+      setMessage(`Saved the query "${label}".`);
+    } catch {
+      setMessage('That query did not save. The browser may be out of space, or blocking storage.');
+    }
+  }
+
+  async function removeQuery(target: string) {
+    if (!window.confirm(`Delete the saved query "${target}"?`)) return;
+    try {
+      await deleteSavedQuery(target);
+      setQueries(await listSavedQueries());
+      setMessage(`Deleted the query "${target}".`);
+    } catch {
+      setMessage(UNAVAILABLE);
     }
   }
 
@@ -179,6 +223,54 @@ export function WorkspaceDialog({ db, onOpen, onClose }: WorkspaceDialogProps) {
                       Open
                     </button>
                     <button type="button" onClick={() => { void remove(w.name); }} className={btnGhost}>
+                      Delete
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
+          <section className="space-y-2">
+            <h3 className="text-body font-semibold">Saved queries</h3>
+            <p className="text-label text-ink-dim">
+              A query kept here loads back into the editor. It is not run until you press Run.
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="flex flex-1 flex-col gap-1 text-label text-ink-dim">
+                Query name
+                <input
+                  value={queryName}
+                  onChange={(e) => { setQueryName(e.target.value); }}
+                  placeholder="e.g. authors with posts"
+                  className={inputField}
+                />
+              </label>
+              <button type="button" onClick={() => { void keepQuery(); }} className={btnSecondary}>
+                Save query
+              </button>
+            </div>
+            {queries.length === 0 ? (
+              <p className="text-label text-ink-dim">No saved queries yet.</p>
+            ) : (
+              <ul className="space-y-2">
+                {queries.map((q) => (
+                  <li key={q.name} className="flex flex-wrap items-center gap-2 rounded-lg border border-edge bg-surface-2 px-3 py-2">
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate font-medium">{q.name}</p>
+                      <p className="truncate font-mono text-label text-ink-dim">{q.sql}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onLoadQuery(q.sql);
+                        close();
+                      }}
+                      className={btnSecondary}
+                    >
+                      Load
+                    </button>
+                    <button type="button" onClick={() => { void removeQuery(q.name); }} className={btnGhost}>
                       Delete
                     </button>
                   </li>
