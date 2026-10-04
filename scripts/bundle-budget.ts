@@ -199,6 +199,9 @@ const T = (name: string): string => `src/pages/tools/${name}.tsx`;
  *  - 2026-10-02, extendible and linear hashing (§25.4 F2): a new route, /tools/hash-index (115.5 kB measured
  *    + 3, rounded to 118) — a self-contained `src/ui/hashIndex.ts` driver in the same family as `/tools/lsm`'s,
  *    so it does not touch the shared engine chunk and no other route moved.
+ *  - 2026-10-04, latch crabbing (§25.4 F5): a new route, /tools/latch-crabbing (163.5 kB measured + 3, rounded
+ *    to 167). Unlike the standalone sandboxes it drives the REAL engine B+Tree (`engine/index/btree.ts`, the same
+ *    code /tools/btree uses), so it pays the shared engine chunk the same way /tools/btree does (ceiling 167).
  *  - 2026-10-02, row vs. column storage (§25.4 F3, standalone sandbox slice): a new route, /tools/columnar
  *    (114.9 kB measured + 3, rounded to 118) — a self-contained `src/ui/columnar.ts` driver, same family as
  *    `/tools/lsm`'s and `/tools/hash-index`'s, so it does not touch the shared engine chunk and no other route
@@ -236,6 +239,7 @@ export const ROUTES: readonly RouteBudget[] = [
   { route: '/tools/lsm', roots: [T('LsmToolPage')], kb: 118, note: 'log-structured merge-tree sandbox' },
   { route: '/tools/hash-index', roots: [T('HashIndexToolPage')], kb: 118, note: 'extendible and linear hashing sandbox' },
   { route: '/tools/columnar', roots: [T('ColumnarToolPage')], kb: 118, note: 'NSM/DSM/PAX row vs. column storage sandbox' },
+  { route: '/tools/latch-crabbing', roots: [T('LatchCrabbingToolPage')], kb: 167, note: 'latch crabbing: naive vs. lock coupling on a scripted B+Tree workload' },
   { route: '/docs', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 153, note: 'the docs shell and every prose page (one shared chunk)' },
   { route: '/docs/concepts/btree', roots: ['src/ui/DocsLayout.tsx', 'src/pages/DocsContent/concepts/btree.mdx'], kb: 170, note: 'a concept page with a live B+Tree widget' },
   { route: '/docs/concepts/buffer-pool', roots: ['src/ui/DocsLayout.tsx', 'src/pages/DocsContent/concepts/buffer-pool.mdx'], kb: 171, note: 'a concept page with a live buffer-pool widget' },

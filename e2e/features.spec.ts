@@ -398,6 +398,26 @@ test('the columnar sandbox computes real compressed sizes, per-layout page count
   await expect(page.getByText('2,412', { exact: true })).toBeVisible();
 });
 
+test('latch crabbing: lock coupling blocks threads less than naive latching on the same scripted inserts', async ({ page }) => {
+  await page.goto('/tools/latch-crabbing?fanout=4&threads=3&ops=2&seed=1');
+  await expect(page.getByRole('heading', { name: 'Latch crabbing', exact: true })).toBeVisible();
+
+  const column = (heading: string) =>
+    page.locator('div.flex.flex-col.gap-2', { has: page.getByRole('heading', { name: heading, exact: true }) });
+  const stat = (heading: string, label: string) =>
+    column(heading).locator('dt', { hasText: label }).locator('xpath=following-sibling::dd[1]');
+
+  // The same six inserts, both protocols. Naive funnels every thread through the root for the whole insert.
+  await expect(stat('Naive latching', 'ticks spent blocked')).toHaveText('30');
+  await expect(stat('Naive latching', 'ticks to finish')).toHaveText('28');
+  await expect(stat('Lock crabbing', 'ticks spent blocked')).toHaveText('20');
+  await expect(stat('Lock crabbing', 'ticks to finish')).toHaveText('24');
+
+  // The timeline is the engine's own schedule: switching protocol shows its first action list.
+  await page.getByRole('radio', { name: 'Naive timeline' }).click();
+  await expect(page.getByRole('cell', { name: 'blocked' }).first()).toBeVisible();
+});
+
 test('the planner sandbox runs the rewrite rules one at a time', async ({ page }) => {
   await page.goto('/tools/planner');
   await expect(page.getByRole('heading', { name: 'Planner sandbox' })).toBeVisible();

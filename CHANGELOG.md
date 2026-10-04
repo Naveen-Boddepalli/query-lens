@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **A latch-crabbing sandbox**, `/tools/latch-crabbing` (plan.md §25.4 F5) — the same scripted concurrent inserts
+  run under naive page latching and under lock coupling, side by side on the real engine B+Tree. Crabbing releases
+  each ancestor once the child below is safe, so threads block far less. Optimistic lock coupling is not included.
 - **A tuple-at-a-time vs. batched `/compare` mode** (plan.md §25.4 F4) — runs one real query and counts the
   `next()` calls each operator makes, per row, against the calls a batched engine would make for the same rows at a
   batch size you pick. Nothing re-executes; the counts come from the run's own trace.

@@ -99,6 +99,13 @@ const TOOLS = [
       'NSM (row store), DSM (column store) and PAX (the hybrid) laying out the same table three ways, with real compressed-size counters for dictionary, RLE, delta and bit-packing — and the late-materialization trick a column store only actually pays off with.',
     available: true,
   },
+  {
+    title: 'Latch crabbing',
+    href: '/tools/latch-crabbing',
+    description:
+      'How concurrent threads can safely descend one B+Tree while inserting. Naive latching holds every page on the path and funnels every thread through the root; lock coupling releases each ancestor as soon as the child below it is safe. Same scripted workload, both protocols, side by side.',
+    available: true,
+  },
 ] as const;
 
 export function ToolsIndexPage() {

@@ -115,6 +115,9 @@ const HashIndexToolPage = lazy(() =>
 const ColumnarToolPage = lazy(() =>
   import('./pages/tools/ColumnarToolPage.tsx').then((m) => ({ default: m.ColumnarToolPage })),
 );
+const LatchCrabbingToolPage = lazy(() =>
+  import('./pages/tools/LatchCrabbingToolPage.tsx').then((m) => ({ default: m.LatchCrabbingToolPage })),
+);
 const ComparePage = lazy(() =>
   import('./pages/ComparePage.tsx').then((m) => ({ default: m.ComparePage })),
 );
@@ -220,6 +223,7 @@ export default function App() {
               <Route path="lsm" element={suspended(LsmToolPage)} />
               <Route path="hash-index" element={suspended(HashIndexToolPage)} />
               <Route path="columnar" element={suspended(ColumnarToolPage)} />
+              <Route path="latch-crabbing" element={suspended(LatchCrabbingToolPage)} />
             </Route>
 
             <Route path="docs" element={suspended(DocsLayout)}>
