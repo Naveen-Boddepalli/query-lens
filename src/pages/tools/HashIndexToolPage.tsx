@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { DataView } from '../../ui/DataView.tsx';
 import { demoWrites, HASH_LIMITS, lookupHashKey, planHashIndex } from '../../ui/hashIndex.ts';
 import type { Bucket, HashStrategy } from '../../ui/hashIndex.ts';
 import { PageHeader } from '../../ui/PageHeader.tsx';
@@ -258,42 +259,79 @@ function ExtendibleView({ plan, lookupBucketIds }: { plan: ReturnType<typeof pla
     else groups.push({ from: i, to: i, bucketId });
   }
 
+  const slots = plan.directory.map((bucketId, slot) => ({
+    slot,
+    bucket: plan.buckets[bucketId]!,
+    hit: lookupBucketIds.includes(bucketId),
+  }));
+
   return (
     <div className={`${panelSurface} flex flex-col gap-3 p-4`}>
       <h3 className="text-body font-semibold text-ink">Directory ({plan.directory.length} slots, global depth {plan.globalDepth})</h3>
-      <div className="flex flex-wrap gap-2">
-        {groups.map((g) => {
-          const bucket = plan.buckets[g.bucketId]!;
-          return (
-            <div key={g.from} className="flex flex-col gap-1">
-              <span className="text-label tabular-nums text-ink-dim/70">
-                {g.from === g.to ? `slot ${g.from}` : `slots ${g.from}–${g.to}`}
-              </span>
-              <BucketChip bucket={bucket} isHit={lookupBucketIds.includes(g.bucketId)} extraLabel={`local depth ${bucket.localDepth}`} />
-            </div>
-          );
-        })}
-      </div>
+      <DataView
+        caption={`Directory: ${String(plan.directory.length)} slots, global depth ${String(plan.globalDepth)}`}
+        rows={slots}
+        keyOf={(r) => String(r.slot)}
+        columns={[
+          { header: 'Slot', cell: (r) => r.slot },
+          { header: 'Bucket', cell: (r) => r.bucket.id },
+          { header: 'Local depth', cell: (r) => r.bucket.localDepth },
+          { header: 'Keys', cell: (r) => (r.bucket.entries.length === 0 ? 'empty' : r.bucket.entries.map((e) => e.key).join(', ')) },
+          { header: 'Checked by the lookup', cell: (r) => (r.hit ? 'yes' : '') },
+        ]}
+      >
+        <div className="flex flex-wrap gap-2">
+          {groups.map((g) => {
+            const bucket = plan.buckets[g.bucketId]!;
+            return (
+              <div key={g.from} className="flex flex-col gap-1">
+                <span className="text-label tabular-nums text-ink-dim/70">
+                  {g.from === g.to ? `slot ${g.from}` : `slots ${g.from}–${g.to}`}
+                </span>
+                <BucketChip bucket={bucket} isHit={lookupBucketIds.includes(g.bucketId)} extraLabel={`local depth ${bucket.localDepth}`} />
+              </div>
+            );
+          })}
+        </div>
+      </DataView>
     </div>
   );
 }
 
 function LinearView({ plan, lookupBucketIds }: { plan: ReturnType<typeof planHashIndex>; lookupBucketIds: readonly number[] }) {
+  const chains = plan.primaryBuckets.map((primaryId, address) => {
+    const chain: Bucket[] = [];
+    let cur: number | null = primaryId;
+    while (cur !== null) {
+      const b: Bucket = plan.buckets[cur]!;
+      chain.push(b);
+      cur = b.next;
+    }
+    return { address, chain };
+  });
+  const rows = chains.flatMap(({ address, chain }) =>
+    chain.map((b, i) => ({ address, bucket: b, overflow: i > 0, hit: lookupBucketIds.includes(b.id) })),
+  );
+
   return (
     <div className={`${panelSurface} flex flex-col gap-3 p-4`}>
       <h3 className="text-body font-semibold text-ink">
         Buckets (level {plan.level}, split pointer at address {plan.splitPointer})
       </h3>
-      <div className="flex flex-col gap-2">
-        {plan.primaryBuckets.map((primaryId, address) => {
-          const chain: Bucket[] = [];
-          let cur: number | null = primaryId;
-          while (cur !== null) {
-            const b: Bucket = plan.buckets[cur]!;
-            chain.push(b);
-            cur = b.next;
-          }
-          return (
+      <DataView
+        caption={`Buckets: level ${String(plan.level)}, split pointer at address ${String(plan.splitPointer)}`}
+        rows={rows}
+        keyOf={(r) => String(r.bucket.id)}
+        columns={[
+          { header: 'Address', cell: (r) => r.address },
+          { header: 'Bucket', cell: (r) => r.bucket.id },
+          { header: 'Role', cell: (r) => (r.overflow ? 'overflow' : 'primary') },
+          { header: 'Keys', cell: (r) => (r.bucket.entries.length === 0 ? 'empty' : r.bucket.entries.map((e) => e.key).join(', ')) },
+          { header: 'Checked by the lookup', cell: (r) => (r.hit ? 'yes' : '') },
+        ]}
+      >
+        <div className="flex flex-col gap-2">
+          {chains.map(({ address, chain }) => (
             <div key={address} className="flex flex-wrap items-center gap-2">
               <span className="w-24 shrink-0 text-label tabular-nums text-ink-dim">
                 address {address}
@@ -303,9 +341,9 @@ function LinearView({ plan, lookupBucketIds }: { plan: ReturnType<typeof planHas
                 <BucketChip key={b.id} bucket={b} isHit={lookupBucketIds.includes(b.id)} extraLabel={i === 0 ? undefined : 'overflow'} />
               ))}
             </div>
-          );
-        })}
-      </div>
+          ))}
+        </div>
+      </DataView>
     </div>
   );
 }

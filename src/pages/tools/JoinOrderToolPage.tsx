@@ -10,6 +10,7 @@ import {
   writtenOrderFromAst,
 } from '../../engine/index.ts';
 import type { JoinOrderCandidate, SubsetPlan } from '../../engine/index.ts';
+import { DataView } from '../../ui/DataView.tsx';
 import { PageHeader } from '../../ui/PageHeader.tsx';
 import { btnSecondary, panelSurface, pill } from '../../ui/primitives.ts';
 
@@ -177,17 +178,28 @@ export function JoinOrderToolPage() {
         </p>
       </div>
 
-      <div className="flex flex-col gap-3">
-        {levels.map((subsetsAtLevel, i) => (
-          <LatticeLevel
-            key={i}
-            level={i + 1}
-            subsets={subsetsAtLevel}
-            selectedMask={selected.mask}
-            onSelect={setSelectedMask}
-          />
-        ))}
-      </div>
+      <DataView
+        caption="Every subset of the tables, with its cheapest plan's page cost"
+        rows={levels.flat()}
+        keyOf={(r) => String(r.mask)}
+        columns={[
+          { header: 'Subset', cell: (r) => r.tables.map(short).join(', ') },
+          { header: 'Tables', cell: (r) => r.tables.length },
+          { header: 'Pages', cell: (r) => fmt(r.pages) },
+        ]}
+      >
+        <div className="flex flex-col gap-3">
+          {levels.map((subsetsAtLevel, i) => (
+            <LatticeLevel
+              key={i}
+              level={i + 1}
+              subsets={subsetsAtLevel}
+              selectedMask={selected.mask}
+              onSelect={setSelectedMask}
+            />
+          ))}
+        </div>
+      </DataView>
 
       <SubsetDetail plan={selected} />
 

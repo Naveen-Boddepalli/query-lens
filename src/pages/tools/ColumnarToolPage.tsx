@@ -9,6 +9,7 @@ import {
   planMaterialization,
 } from '../../ui/columnar.ts';
 import type { Encoding, Layout } from '../../ui/columnar.ts';
+import { DataView } from '../../ui/DataView.tsx';
 import { PageHeader } from '../../ui/PageHeader.tsx';
 import { inputField, panelSurface } from '../../ui/primitives.ts';
 
@@ -149,7 +150,19 @@ export function ColumnarToolPage() {
           <code className="font-mono text-ink">amount</code> spans almost the full range nothing compresses
           well, honestly.
         </p>
-        <div className="flex flex-col gap-2">
+        <DataView
+          caption="Each column's encoding, its size raw and compressed, and the ratio"
+          rows={columnPlans}
+          keyOf={(r) => r.name}
+          columns={[
+            { header: 'Column', cell: (r) => r.name },
+            { header: 'Encoding', cell: (r) => ENCODING_LABELS[r.encoding] },
+            { header: 'Raw bytes', cell: (r) => r.rawBytes },
+            { header: 'Compressed bytes', cell: (r) => r.compressedBytes },
+            { header: 'Ratio', cell: (r) => `${r.compressionRatio.toFixed(2)}×` },
+          ]}
+        >
+          <div className="flex flex-col gap-2">
           {columnPlans.map((plan) => (
             <div key={plan.name} className="flex flex-wrap items-center gap-3 rounded-lg border border-edge bg-surface-3 p-2">
               <span className="w-40 shrink-0 font-mono text-label text-ink">{plan.name}</span>
@@ -172,7 +185,8 @@ export function ColumnarToolPage() {
               <span className="w-16 shrink-0 text-right text-label tabular-nums text-accent">{plan.compressionRatio.toFixed(2)}×</span>
             </div>
           ))}
-        </div>
+          </div>
+        </DataView>
       </div>
 
       <div className={`${panelSurface} flex flex-col gap-3 p-4`}>

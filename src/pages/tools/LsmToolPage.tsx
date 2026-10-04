@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { demoWrites, LSM_LIMITS, lookupKey, planLsm } from '../../ui/lsm.ts';
 import type { CompactionStrategy, LookupResult, LsmEvent, SSTable } from '../../ui/lsm.ts';
+import { DataView } from '../../ui/DataView.tsx';
 import { PageHeader } from '../../ui/PageHeader.tsx';
 import { btnPrimary, btnSecondary, inputField, panelSurface } from '../../ui/primitives.ts';
 
@@ -300,21 +301,44 @@ export function LsmToolPage() {
         )}
       </div>
 
-      <div className="flex flex-col gap-3">
-        {plan.levels.map((level, levelIndex) => (
-          <LevelBlock
-            key={levelIndex}
-            levelIndex={levelIndex}
-            tables={level}
-            compactionStrategy={compactionStrategy}
-            selected={selected}
-            related={related}
-            eventFor={eventFor}
-            lookupResult={lookupResult}
-            onSelect={(id) => { setSelected((cur) => (cur === id ? null : id)); setLookupState(null); }}
-          />
-        ))}
-      </div>
+      <DataView
+        caption="SSTables by level, with the key range, entries and how each was built"
+        rows={plan.levels.flatMap((tables, level) => tables.map((table) => ({ level, table })))}
+        keyOf={(r) => String(r.table.id)}
+        columns={[
+          { header: 'Level', cell: (r) => (r.level === 0 ? 'L0' : `L${String(r.level)}`) },
+          { header: 'SSTable', cell: (r) => r.table.id },
+          {
+            header: 'Keys',
+            cell: (r) => (r.table.minKey === r.table.maxKey ? String(r.table.minKey) : `${String(r.table.minKey)}–${String(r.table.maxKey)}`),
+          },
+          { header: 'Entries', cell: (r) => r.table.entries.length },
+          {
+            header: 'Built by',
+            cell: (r) => {
+              const built = eventFor.get(r.table.id);
+              if (!built) return '';
+              return built.kind === 'flush' ? 'flush' : `compaction of ${String(built.removed.length)} tables`;
+            },
+          },
+        ]}
+      >
+        <div className="flex flex-col gap-3">
+          {plan.levels.map((level, levelIndex) => (
+            <LevelBlock
+              key={levelIndex}
+              levelIndex={levelIndex}
+              tables={level}
+              compactionStrategy={compactionStrategy}
+              selected={selected}
+              related={related}
+              eventFor={eventFor}
+              lookupResult={lookupResult}
+              onSelect={(id) => { setSelected((cur) => (cur === id ? null : id)); setLookupState(null); }}
+            />
+          ))}
+        </div>
+      </DataView>
 
       <p className="text-label leading-relaxed text-ink-dim">
         Click any SSTable to see what it was built from — a flush's own memtable writes, or a compaction's
