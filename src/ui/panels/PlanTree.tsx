@@ -12,5 +12,5 @@ export function PlanTree({
   empty: string;
   notation?: PlanNotation;
 }) {
-  return <FlowTree root={root ? toFlow(root, notation) : null} tones={TONES} wide empty={empty} />;
+  return <FlowTree label="Query plan" root={root ? toFlow(root, notation) : null} tones={TONES} wide empty={empty} />;
 }

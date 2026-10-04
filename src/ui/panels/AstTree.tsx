@@ -5,6 +5,7 @@ import type { ASTNode, Span } from '../../engine/index.ts';
 export function AstTree({ root, highlight }: { root: ASTNode | null; highlight?: Span | undefined }) {
   return (
     <FlowTree
+      label="Parse tree"
       root={root}
       tones={TONES}
       activeSpan={highlight}
