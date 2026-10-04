@@ -1400,7 +1400,7 @@ test('a link that names a dataset reopens on it, in the Playground and the inspe
 
 test('a challenge checks the query on Run and remembers the solve', async ({ page }) => {
   await page.goto('/challenges');
-  await expect(page.getByText('0 of 12 solved')).toBeVisible();
+  await expect(page.getByText('0 of 18 solved')).toBeVisible();
   await page.getByRole('link', { name: /Make the planner use the index/ }).click();
   await expect(page).toHaveURL(/\/challenges\/use-the-index$/);
 
@@ -1424,9 +1424,9 @@ test('a challenge checks the query on Run and remembers the solve', async ({ pag
 
   // The solve persists to the index.
   await page.goto('/challenges');
-  await expect(page.getByText('1 of 12 solved')).toBeVisible();
+  await expect(page.getByText('1 of 18 solved')).toBeVisible();
   await page.getByRole('button', { name: 'Reset progress' }).click();
-  await expect(page.getByText('0 of 12 solved')).toBeVisible();
+  await expect(page.getByText('0 of 18 solved')).toBeVisible();
 });
 
 test('a challenge can run against a non-default preset table', async ({ page }) => {
@@ -1470,6 +1470,25 @@ test('a challenge with its own database reruns the query under a second algorith
   // No "step through" link — the Playground's own dataset URL scheme has no
   // way to name this one-off JOIN demo.
   await expect(page.getByRole('link', { name: /Step through this run in the Playground/ })).toHaveCount(0);
+});
+
+test('a misconception challenge reveals the belief it checks once it is solved (plan.md §G3)', async ({ page }) => {
+  await page.goto('/challenges/equals-null');
+  await expect(page.getByText(/The contacts table has one row whose/)).toBeVisible();
+
+  // The starter compares with = NULL, which is never true — it does not pass, and the belief is not shown yet.
+  await page.getByRole('button', { name: 'Run & check' }).click();
+  await expect(page.getByText(/Not there yet/)).toBeVisible();
+  await expect(page.getByText('The belief this checks:')).toHaveCount(0);
+
+  const editor = page.locator('.cm-content');
+  await editor.click();
+  await page.keyboard.press('ControlOrMeta+A');
+  await page.keyboard.type('SELECT * FROM contacts WHERE email IS NULL;');
+  await page.getByRole('button', { name: 'Run & check' }).click();
+  await expect(page.getByText('✓ Solved.')).toBeVisible();
+  await expect(page.getByText('The belief this checks:')).toBeVisible();
+  await expect(page.getByText(/x = NULL/)).toBeVisible();
 });
 
 test('the range-leap challenge is solved by an IndexRangeScan (plan.md §23.1/§23.2)', async ({ page }) => {

@@ -174,6 +174,11 @@ export function ChallengePage() {
       {solved && (
         <div className={`mt-6 ${card}`}>
           <p className="text-body text-ink">Nice.</p>
+          {challenge.misconception && (
+            <p className="mt-2 text-label leading-relaxed text-ink-dim">
+              <span className="text-ink">The belief this checks:</span> {challenge.misconception}
+            </p>
+          )}
           {next ? (
             <Link
               to={`/challenges/${next.id}`}

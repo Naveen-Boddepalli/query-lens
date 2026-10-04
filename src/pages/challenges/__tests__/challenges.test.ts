@@ -40,6 +40,13 @@ describe('challenges', () => {
     'hash-beats-loop': 'SELECT * FROM authors JOIN posts ON authors.id = posts.authorId;',
     'dirty-eviction': "UPDATE users SET name = 'edited' WHERE age > 30;",
     'range-leap': 'SELECT * FROM users WHERE id > 44;',
+    'the-index-it-cannot-serve': 'SELECT * FROM users WHERE id <> 5;',
+    'wrap-the-column': 'SELECT * FROM users WHERE id + 0 = 5;',
+    'equals-null': 'SELECT * FROM contacts WHERE email IS NULL;',
+    'count-the-nulls': 'SELECT COUNT(*), COUNT(email) FROM contacts;',
+    'not-in-the-null': 'SELECT * FROM people WHERE id NOT IN (SELECT person_id FROM banned);',
+    'keep-the-unmatched':
+      'SELECT authors.name, posts.title FROM authors LEFT JOIN posts ON authors.id = posts.authorId WHERE posts.title IS NULL;',
   };
 
   it('has a solution wired for every challenge', () => {
@@ -78,6 +85,25 @@ describe('challenges', () => {
     for (const c of CHALLENGES) {
       if (c.database) continue; // its own one-off database, not a DatasetId
       expect(DATASETS[challengeDataset(c)], `${c.id} names an unknown dataset`).toBeTruthy();
+    }
+  });
+
+  describe('the misconception challenges reject their nearby cheats', () => {
+    const cheats: [string, string][] = [
+      ['the-index-it-cannot-serve', 'SELECT * FROM users WHERE age <> 5;'],
+      ['wrap-the-column', 'SELECT * FROM users WHERE age + 0 = 5;'],
+      ['equals-null', 'SELECT * FROM contacts WHERE id = 2;'],
+      ['count-the-nulls', 'SELECT COUNT(*), COUNT(id) FROM contacts;'],
+      ['not-in-the-null', 'SELECT * FROM people WHERE id NOT IN (SELECT person_id FROM banned WHERE person_id IS NOT NULL) AND id > 9;'],
+      ['keep-the-unmatched', 'SELECT authors.name, posts.title FROM authors LEFT JOIN posts ON authors.id = posts.authorId WHERE posts.id = 999;'],
+    ];
+    for (const [id, sql] of cheats) {
+      it(`${id} rejects: ${sql}`, () => {
+        const c = challengeById(id)!;
+        const r = runOn(c, sql);
+        expect(r.error).toBeUndefined();
+        expect(c.check(r, sql)).toBe(false);
+      });
     }
   });
 

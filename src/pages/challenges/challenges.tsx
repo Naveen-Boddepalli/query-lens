@@ -45,6 +45,11 @@ export interface Challenge {
    * rather than trusting an estimate.
    */
   check: (result: RunResult, sql: string) => boolean;
+  /**
+   * The wrong belief this challenge exists to correct (plan.md §G3). Shown once the challenge is solved, not before,
+   * so the player meets the belief by running into it rather than by reading it first.
+   */
+  misconception?: ReactNode;
 }
 
 /** A challenge's dataset, defaulted. Meaningless once `database` is set — `challengeDatabase` below is what actually runs. */
@@ -102,6 +107,62 @@ const lastAst = (events: readonly StepEvent[]): ASTNode | undefined => {
   }
   return undefined;
 };
+
+/** The first node of `kind` in a tree, depth-first. */
+function findNode(node: ASTNode, match: (n: ASTNode) => boolean): ASTNode | undefined {
+  if (match(node)) return node;
+  for (const child of node.children ?? []) {
+    const hit = findNode(child, match);
+    if (hit) return hit;
+  }
+  return undefined;
+}
+
+/** The predicate under a query's WHERE clause, read from the last parse event the way the other checks read the AST. */
+const whereExpr = (events: readonly StepEvent[]): ASTNode | undefined => {
+  const ast = lastAst(events);
+  return ast ? findNode(ast, (n) => n.kind === 'Where')?.children?.[0] : undefined;
+};
+
+const isColumn = (n: ASTNode | undefined, name: string): boolean => n?.kind === 'Column' && n.label === name;
+
+/** A small table with a NULL in it, for the NULL-semantics challenges. */
+const contactsDatabase = (): Database => ({
+  tables: {
+    contacts: {
+      name: 'contacts',
+      columns: ['id', 'name', 'email'],
+      rows: [
+        { id: 1, name: 'ana', email: 'ana@example.com' },
+        { id: 2, name: 'ben', email: null },
+        { id: 3, name: 'cy', email: 'cy@example.com' },
+      ],
+      indexedColumns: [],
+    },
+  },
+});
+
+/** Three people, and a banned list that contains a NULL. */
+const bannedDatabase = (): Database => ({
+  tables: {
+    people: {
+      name: 'people',
+      columns: ['id', 'name'],
+      rows: [
+        { id: 1, name: 'ana' },
+        { id: 2, name: 'ben' },
+        { id: 3, name: 'cy' },
+      ],
+      indexedColumns: [],
+    },
+    banned: {
+      name: 'banned',
+      columns: ['person_id'],
+      rows: [{ person_id: 2 }, { person_id: null }],
+      indexedColumns: [],
+    },
+  },
+});
 
 export const CHALLENGES: Challenge[] = [
   {
@@ -358,6 +419,199 @@ export const CHALLENGES: Challenge[] = [
     ),
     starter: 'SELECT * FROM users WHERE age > 30;',
     check: (r) => !r.error && usesRangeScan(r.events) && diskReads(r.events) < 12,
+  },
+  {
+    id: 'the-index-it-cannot-serve',
+    title: 'Filter the indexed column the index cannot serve',
+    brief: (
+      <>
+        The seed table has a B+Tree index on <code className="font-mono">id</code>. Write a query that filters on{' '}
+        <code className="font-mono">id</code> and still returns rows, but that the planner cannot answer from the index.
+      </>
+    ),
+    hint: (
+      <>
+        The index answers equality and ranges. A <em>not-equal</em> test has no contiguous run of keys to walk, so the
+        planner reads the table.
+      </>
+    ),
+    starter: 'SELECT * FROM users WHERE id = 5;',
+    check: (r) => {
+      const w = whereExpr(r.events);
+      return (
+        !r.error &&
+        r.rows.length > 0 &&
+        !usesIndex(r.events) &&
+        !usesRangeScan(r.events) &&
+        w?.kind === 'Compare' &&
+        w.label === '<>' &&
+        isColumn(w.children?.[0], 'id')
+      );
+    },
+    misconception: (
+      <>
+        An index on a column makes every filter on that column fast. The index serves some predicates and not others —
+        here the planner reads all 47 rows and the index sits unused.
+      </>
+    ),
+  },
+  {
+    id: 'wrap-the-column',
+    title: 'Wrap the indexed column in arithmetic',
+    brief: (
+      <>
+        Write a query that filters <code className="font-mono">id</code> through an arithmetic expression, returns at least
+        one row, and gets no help from the index.
+      </>
+    ),
+    hint: (
+      <>
+        The index matches a bare column on one side of the comparison. Put anything around it — even{' '}
+        <code className="font-mono">+ 0</code> — and the optimiser can no longer see the column.
+      </>
+    ),
+    starter: 'SELECT * FROM users WHERE id = 5;',
+    check: (r) => {
+      const w = whereExpr(r.events);
+      return (
+        !r.error &&
+        r.rows.length > 0 &&
+        !usesIndex(r.events) &&
+        !usesRangeScan(r.events) &&
+        w?.kind === 'Compare' &&
+        w.children?.[0]?.kind === 'Arith' &&
+        (w.children[0].children ?? []).some((c) => isColumn(c, 'id'))
+      );
+    },
+    misconception: (
+      <>
+        Wrapping an indexed column in a function or expression keeps the index in play. The planner matches the column
+        itself; <code className="font-mono">id + 0</code> is a different expression with no index behind it.
+      </>
+    ),
+  },
+  {
+    id: 'equals-null',
+    title: 'Find the rows where the email is missing',
+    brief: (
+      <>
+        The <code className="font-mono">contacts</code> table has one row whose <code className="font-mono">email</code>{' '}
+        is missing. Return that row, and only that kind of row.
+      </>
+    ),
+    hint: (
+      <>
+        NULL is not a value, so no comparison with it is ever true — not even <code className="font-mono">= NULL</code>.
+        SQL has a dedicated test for missing values.
+      </>
+    ),
+    starter: 'SELECT * FROM contacts WHERE email = NULL;',
+    database: contactsDatabase,
+    check: (r) => {
+      const w = whereExpr(r.events);
+      return (
+        !r.error &&
+        r.rows.length > 0 &&
+        r.rows.every((row) => row.email === null) &&
+        w?.kind === 'IsNull' &&
+        isColumn(w.children?.[0], 'email')
+      );
+    },
+    misconception: (
+      <>
+        <code className="font-mono">x = NULL</code> finds the missing values. It finds nothing, because a comparison
+        with NULL is unknown, not true. Missing values are tested with <code className="font-mono">IS NULL</code>.
+      </>
+    ),
+  },
+  {
+    id: 'count-the-nulls',
+    title: 'Count the rows, then count the emails',
+    brief: (
+      <>
+        In one query on <code className="font-mono">contacts</code>, return the number of rows and the number of emails
+        side by side, so the two can be compared.
+      </>
+    ),
+    hint: (
+      <>
+        <code className="font-mono">COUNT(*)</code> counts rows. <code className="font-mono">COUNT(col)</code> counts the
+        rows where that column is not NULL. Put both in the SELECT list.
+      </>
+    ),
+    starter: 'SELECT COUNT(*) FROM contacts;',
+    database: contactsDatabase,
+    check: (r) => {
+      if (r.error || r.rows.length !== 1) return false;
+      const values = Object.values(r.rows[0]!);
+      return values.includes(3) && values.includes(2);
+    },
+    misconception: (
+      <>
+        <code className="font-mono">COUNT(*)</code> and <code className="font-mono">COUNT(col)</code> always agree. They
+        differ exactly where the column holds a NULL — here three rows, two emails.
+      </>
+    ),
+  },
+  {
+    id: 'not-in-the-null',
+    title: 'Return the people who are not banned',
+    brief: (
+      <>
+        Return the people who are <em>not</em> on the <code className="font-mono">banned</code> list. Ana and Cy are not
+        banned, so a correct answer returns them — but check what the list actually contains.
+      </>
+    ),
+    hint: (
+      <>
+        The banned list has a NULL in it. Compare that NULL with <code className="font-mono">NOT IN</code> and think about
+        what <code className="font-mono">id &lt;&gt; NULL</code> is.
+      </>
+    ),
+    starter: 'SELECT * FROM people WHERE id NOT IN (SELECT person_id FROM banned WHERE person_id IS NOT NULL);',
+    database: bannedDatabase,
+    check: (r) => {
+      const w = whereExpr(r.events);
+      return !r.error && r.rows.length === 0 && w?.kind === 'In' && w.label === 'NOT IN';
+    },
+    misconception: (
+      <>
+        <code className="font-mono">NOT IN</code> returns the rows that are not in the list. One NULL in the list makes
+        every <code className="font-mono">NOT IN</code> comparison unknown, so the query returns nothing at all, even
+        though Ana and Cy are not banned.
+      </>
+    ),
+  },
+  {
+    id: 'keep-the-unmatched',
+    title: 'Keep the authors who have no posts',
+    brief: (
+      <>
+        Return the authors who have written no posts, using a <code className="font-mono">LEFT JOIN</code> on{' '}
+        <code className="font-mono">posts</code>. Show the author&rsquo;s name.
+      </>
+    ),
+    hint: (
+      <>
+        A <code className="font-mono">LEFT JOIN</code> keeps an author with no match, padding the posts columns with NULL.
+        The filter that keeps only those padded rows is a test on a posts column for NULL.
+      </>
+    ),
+    starter:
+      'SELECT authors.name, posts.title FROM authors LEFT JOIN posts ON authors.id = posts.authorId WHERE posts.id = 999;',
+    database: createJoinDemoDatabase,
+    check: (r) =>
+      !r.error &&
+      r.rows.length > 0 &&
+      r.rows.every((row) => row['posts.title'] === null) &&
+      r.rows.some((row) => row['authors.name'] === 'barbara'),
+    misconception: (
+      <>
+        A <code className="font-mono">LEFT JOIN</code> keeps the unmatched rows no matter what the{' '}
+        <code className="font-mono">WHERE</code> says. A condition on the joined table drops them — and the way to keep
+        exactly the unmatched rows is to test that table for NULL.
+      </>
+    ),
   },
 ];
 
