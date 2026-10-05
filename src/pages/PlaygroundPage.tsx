@@ -17,11 +17,8 @@ import type {
   Stage,
 } from '../engine/index.ts';
 import { DATASET_CATALOGUE } from '../ui/datasetCatalogue.ts';
-import {
-  CUSTOM_STARTER_SQL,
-  loadCustomDatabase,
-  saveCustomDatabase,
-} from '../ui/customDatabase.ts';
+import { CUSTOM_STARTER_SQL } from '../ui/customDatabase.ts';
+import { loadWorkingCopy, saveWorkingCopy } from '../ui/workingCopy.ts';
 import { ErrorBoundary } from '../ui/ErrorBoundary.tsx';
 import { publishRepro } from '../ui/errorReport.ts';
 import { ReportStepLink } from '../ui/ReportStepLink.tsx';
@@ -129,6 +126,8 @@ export function PlaygroundPage() {
   // presets), so JOIN can finally run from the Playground itself instead of
   // staying `/tools/planner` + `/compare`-only.
   const [isCustom, setIsCustom] = useState(false);
+  // Counts every dataset change, so a custom database that finishes loading after the user has moved on is dropped.
+  const datasetChange = useRef(0);
   const [schemaEditorOpen, setSchemaEditorOpen] = useState(false);
   const [workspacesOpen, setWorkspacesOpen] = useState(false);
   const [editingData, setEditingData] = useState(false);
@@ -402,6 +401,7 @@ export function PlaygroundPage() {
    */
   function switchDataset(id: DatasetId) {
     if (!isCustom && id === datasetId) return;
+    datasetChange.current += 1;
     const nextDb = DATASETS[id].make();
     const nextSql = DATASET_CATALOGUE[id].starterSql;
     setDatasetId(id);
@@ -417,20 +417,23 @@ export function PlaygroundPage() {
     playback.land(landingStep(next, askToPredict));
   }
 
-  /** Switches to the user's own multi-table database — same shape as `switchDataset`, loading from `localStorage` instead of a fixed preset (plan.md §22.7). */
+  /** Switches to the user's own multi-table database — same shape as `switchDataset`, loading the working copy from IndexedDB instead of a fixed preset (plan.md §22.7). */
   function switchToCustom() {
     if (isCustom) return;
-    const nextDb = loadCustomDatabase();
-    setIsCustom(true);
-    setDb(nextDb);
-    setRowsEdited(false);
-    setEditingData(false);
-    setSql(CUSTOM_STARTER_SQL);
-    const next = runQuery(CUSTOM_STARTER_SQL, nextDb, options);
-    setResult(next);
-    setPinnedStage(null);
-    setAnswers({});
-    playback.land(landingStep(next, askToPredict));
+    const change = ++datasetChange.current;
+    void loadWorkingCopy().then((nextDb) => {
+      if (change !== datasetChange.current) return;
+      setIsCustom(true);
+      setDb(nextDb);
+      setRowsEdited(false);
+      setEditingData(false);
+      setSql(CUSTOM_STARTER_SQL);
+      const next = runQuery(CUSTOM_STARTER_SQL, nextDb, options);
+      setResult(next);
+      setPinnedStage(null);
+      setAnswers({});
+      playback.land(landingStep(next, askToPredict));
+    });
   }
 
   function openDatabase(next: Database) {
@@ -453,7 +456,11 @@ export function PlaygroundPage() {
   // result), never per keystroke, so there is no thrash to guard against, and
   // a debounce would risk losing an edit made just before switching away.
   useEffect(() => {
-    if (isCustom) saveCustomDatabase(db);
+    if (isCustom) {
+      void saveWorkingCopy(db).catch(() => {
+        // Not persisted this session; the database itself is still in memory, and nothing depends on the autosave.
+      });
+    }
   }, [isCustom, db]);
 
   // plan.md §22.5: the shareable moment as a file, for a dataset too big for a
@@ -494,6 +501,7 @@ export function PlaygroundPage() {
     setPolicy(t.policy);
     setPredictOn(t.predictOn);
     setDatasetId(t.dataset);
+    datasetChange.current += 1;
     setIsCustom(false); // a trace file always names one of the fixed presets
     setDb(nextDb);
     setRowsEdited(t.rows !== null);

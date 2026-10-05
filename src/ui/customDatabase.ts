@@ -5,7 +5,7 @@
  * in the engine needs to change; the gap was purely a UI for adding tables and
  * columns and declaring an index.
  *
- * Kept local (`localStorage`), not shareable via the URL: `urlState.ts`'s `d=`
+ * Kept local (IndexedDB, through `workingCopy.ts`), not shareable via the URL: `urlState.ts`'s `d=`
  * rows encoding is positional against a column list *already known* from a
  * fixed `DatasetId` (plan.md §15.2's link-size budget depends on that); a
  * custom schema has no such fixed list, so encoding it too would mean sending
@@ -15,8 +15,6 @@
  */
 import { createJoinDemoDatabase, tokenize, uniqueViolation } from '../engine/index.ts';
 import type { Database, Row, SqlValue, Table } from '../engine/index.ts';
-
-const STORAGE_KEY = 'querylens.customDatabase.v1';
 
 /**
  * A valid table or column name: exactly one `identifier` token and nothing
@@ -87,7 +85,7 @@ function isValidTable(key: string, value: unknown): value is Table {
   return true;
 }
 
-/** Total, defensive parse of whatever `localStorage` holds — untrusted input, same discipline `parseCsv.ts`/`traceFile.ts` apply, rejected whole on the first mismatch rather than half-applied. */
+/** Total, defensive parse of whatever the working copy holds — untrusted input, same discipline `parseCsv.ts`/`traceFile.ts` apply, rejected whole on the first mismatch rather than half-applied. */
 export function isValidDatabase(value: unknown): value is Database {
   if (typeof value !== 'object' || value === null) return false;
   const tables = (value as { tables?: unknown }).tables;
@@ -95,24 +93,9 @@ export function isValidDatabase(value: unknown): value is Database {
   return Object.entries(tables as Record<string, unknown>).every(([key, table]) => isValidTable(key, table));
 }
 
-export function loadCustomDatabase(): Database {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return starterCustomDatabase();
-    const parsed: unknown = JSON.parse(raw);
-    return isValidDatabase(parsed) ? parsed : starterCustomDatabase();
-  } catch {
-    return starterCustomDatabase();
-  }
-}
-
-export function saveCustomDatabase(db: Database): void {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(db));
-  } catch {
-    // Quota exceeded, or storage disabled (private browsing) — the autosave
-    // is lost, not the session; the in-memory database keeps working.
-  }
+/** A stored value if it describes a valid database, otherwise the starter: the whole value is refused, never half-loaded. */
+export function databaseOrStarter(value: unknown): Database {
+  return isValidDatabase(value) ? value : starterCustomDatabase();
 }
 
 /** Why a candidate table can't be added, or `null` when it's fine. */

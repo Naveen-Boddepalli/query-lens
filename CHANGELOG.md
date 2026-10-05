@@ -330,6 +330,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a `study` bundle row (5.4 kB gzip, its own lazy chunk), six Playwright tests, and STUDY.md §4.
 
 ### Changed
+- The custom database's working copy autosaves to IndexedDB instead of `localStorage`, so it is no longer capped at about 5 MB. A copy from the old key moves across once, the first time it loads.
 - **`DELETE` and `UPDATE` can find their rows by a range of an index.** `DELETE FROM users WHERE id > 40` walks the
   leaf chain instead of scanning the table (a write could only use an equality lookup before); the rows it touches
   are locked and their index entries dropped or moved exactly as before.

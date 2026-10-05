@@ -1,12 +1,11 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
   describeIndexes,
   isValidName,
-  loadCustomDatabase,
+  databaseOrStarter,
   parseColumnList,
   parseCompositeIndexes,
   parseUniqueIndexes,
-  saveCustomDatabase,
   starterCustomDatabase,
   validateCompositeIndexes,
   validateNewTable,
@@ -72,16 +71,14 @@ describe('composite indexes (plan.md §25.4 B3b)', () => {
     expect(validateUniqueRows(table([{ id: 1, email: 'a' }, { id: 2, email: 'a' }]))).toContain("(email) = ('a')");
   });
 
-  describe('a saved database with composite indexes', () => {
-    beforeEach(() => { localStorage.clear(); });
+  describe('a stored database with composite indexes', () => {
     const withIndexes = (indexes: unknown): unknown => ({
       tables: { t: { name: 't', columns: ['a', 'b'], rows: [], indexes } },
     });
 
     it('round-trips', () => {
       const db: Database = { tables: { t: { name: 't', columns: ['a', 'b'], rows: [{ a: 1, b: 2 }], indexes: [{ columns: ['a', 'b'] }] } } };
-      saveCustomDatabase(db);
-      expect(loadCustomDatabase()).toEqual(db);
+      expect(databaseOrStarter(db)).toEqual(db);
     });
 
     it.each([
@@ -91,8 +88,7 @@ describe('composite indexes (plan.md §25.4 B3b)', () => {
       ['the same index twice', [{ columns: ['a', 'b'] }, { columns: ['a', 'b'] }]],
       ['a non-array', 'a+b'],
     ])('falls back to the starter for %s', (_, indexes) => {
-      localStorage.setItem('querylens.customDatabase.v1', JSON.stringify(withIndexes(indexes)));
-      expect(Object.keys(loadCustomDatabase().tables).sort()).toEqual(['authors', 'posts']);
+      expect(Object.keys(databaseOrStarter(withIndexes(indexes)).tables).sort()).toEqual(['authors', 'posts']);
     });
   });
 });
@@ -145,11 +141,10 @@ describe('validateNewTable', () => {
   });
 });
 
-describe('loadCustomDatabase / saveCustomDatabase', () => {
-  beforeEach(() => { localStorage.clear(); });
+describe('databaseOrStarter', () => {
 
   it('falls back to the starter when nothing is stored', () => {
-    expect(loadCustomDatabase()).toEqual(starterCustomDatabase());
+    expect(databaseOrStarter(undefined)).toEqual(starterCustomDatabase());
   });
 
   it('round-trips a saved database', () => {
@@ -158,44 +153,26 @@ describe('loadCustomDatabase / saveCustomDatabase', () => {
         widgets: { name: 'widgets', columns: ['id', 'label'], rows: [{ id: 1, label: 'x' }], indexedColumns: ['id', 'label'] },
       },
     };
-    saveCustomDatabase(db);
-    expect(loadCustomDatabase()).toEqual(db);
+    expect(databaseOrStarter(db)).toEqual(db);
   });
 
   it('falls back to the starter on corrupt JSON', () => {
-    localStorage.setItem('querylens.customDatabase.v1', '{not json');
-    expect(loadCustomDatabase()).toEqual(starterCustomDatabase());
+    expect(databaseOrStarter('{not json')).toEqual(starterCustomDatabase());
   });
 
   it('rejects the whole thing on a single bad row rather than half-loading it', () => {
-    localStorage.setItem(
-      'querylens.customDatabase.v1',
-      JSON.stringify({ tables: { widgets: { name: 'widgets', columns: ['id'], rows: [{ id: 1, extra: 2 }] } } }),
-    );
-    expect(loadCustomDatabase()).toEqual(starterCustomDatabase());
+    expect(databaseOrStarter({ tables: { widgets: { name: 'widgets', columns: ['id'], rows: [{ id: 1, extra: 2 }] } } })).toEqual(starterCustomDatabase());
   });
 
   it("rejects a table whose declared name doesn't match its own key", () => {
-    localStorage.setItem(
-      'querylens.customDatabase.v1',
-      JSON.stringify({ tables: { widgets: { name: 'gadgets', columns: ['id'], rows: [] } } }),
-    );
-    expect(loadCustomDatabase()).toEqual(starterCustomDatabase());
+    expect(databaseOrStarter({ tables: { widgets: { name: 'gadgets', columns: ['id'], rows: [] } } })).toEqual(starterCustomDatabase());
   });
 
   it('rejects an indexedColumns entry that names a column the table does not have', () => {
-    localStorage.setItem(
-      'querylens.customDatabase.v1',
-      JSON.stringify({ tables: { widgets: { name: 'widgets', columns: ['id'], rows: [], indexedColumns: ['bogus'] } } }),
-    );
-    expect(loadCustomDatabase()).toEqual(starterCustomDatabase());
+    expect(databaseOrStarter({ tables: { widgets: { name: 'widgets', columns: ['id'], rows: [], indexedColumns: ['bogus'] } } })).toEqual(starterCustomDatabase());
   });
 
   it('rejects a repeated column in indexedColumns', () => {
-    localStorage.setItem(
-      'querylens.customDatabase.v1',
-      JSON.stringify({ tables: { widgets: { name: 'widgets', columns: ['id'], rows: [], indexedColumns: ['id', 'id'] } } }),
-    );
-    expect(loadCustomDatabase()).toEqual(starterCustomDatabase());
+    expect(databaseOrStarter({ tables: { widgets: { name: 'widgets', columns: ['id'], rows: [], indexedColumns: ['id', 'id'] } } })).toEqual(starterCustomDatabase());
   });
 });

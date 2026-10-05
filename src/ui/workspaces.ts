@@ -1,21 +1,20 @@
 /**
- * plan.md §H7, slice 1: named workspaces — snapshots of a custom database kept in IndexedDB, which is not capped at
- * `localStorage`'s ~5 MB, plus a JSON file format for moving one between browsers. The live working copy still
- * autosaves to `localStorage` (`customDatabase.ts`); this module is the library around it, not a replacement.
+ * plan.md §H7: named workspaces, snapshots of a custom database kept in IndexedDB (`idb.ts`), saved queries beside them,
+ * and a JSON file format for moving a workspace between browsers. The live working copy is `workingCopy.ts`; this
+ * module is the library around it.
  *
  * Every read goes through the validator the working copy uses, so a stored snapshot or a file that does not describe
  * a valid database is refused whole, never half-loaded.
  */
 import type { Database } from '../engine/index.ts';
 import { isValidDatabase } from './customDatabase.ts';
+import { run, STORES } from './idb.ts';
 
 export const WORKSPACE_FORMAT = 'querylens-workspace';
 export const WORKSPACE_VERSION = 1;
 
-const DB_NAME = 'querylens';
-const DB_VERSION = 2;
-const STORE = 'workspaces';
-const QUERIES = 'queries';
+const STORE = STORES.workspaces;
+const QUERIES = STORES.queries;
 const MAX_NAME_LENGTH = 60;
 
 export interface SavedQuery {
@@ -43,36 +42,6 @@ export function workspaceNameProblem(name: string): string | null {
   if (trimmed === '') return 'Name the workspace.';
   if (trimmed.length > MAX_NAME_LENGTH) return `Keep the name to ${String(MAX_NAME_LENGTH)} characters.`;
   return null;
-}
-
-function openDatabase(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
-    request.onupgradeneeded = () => {
-      for (const store of [STORE, QUERIES]) {
-        if (!request.result.objectStoreNames.contains(store)) request.result.createObjectStore(store, { keyPath: 'name' });
-      }
-    };
-    request.onsuccess = () => { resolve(request.result); };
-    request.onerror = () => { reject(request.error ?? new Error('IndexedDB could not be opened')); };
-  });
-}
-
-async function run<T>(
-  storeName: string,
-  mode: IDBTransactionMode,
-  action: (store: IDBObjectStore) => IDBRequest<T>,
-): Promise<T> {
-  const db = await openDatabase();
-  try {
-    return await new Promise<T>((resolve, reject) => {
-      const request = action(db.transaction(storeName, mode).objectStore(storeName));
-      request.onsuccess = () => { resolve(request.result); };
-      request.onerror = () => { reject(request.error ?? new Error('IndexedDB request failed')); };
-    });
-  } finally {
-    db.close();
-  }
 }
 
 export async function listWorkspaces(): Promise<WorkspaceSummary[]> {

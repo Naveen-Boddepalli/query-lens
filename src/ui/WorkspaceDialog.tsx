@@ -183,8 +183,7 @@ export function WorkspaceDialog({ db, sql, onOpen, onLoadQuery, onClose }: Works
           <section className="space-y-2">
             <h3 className="text-body font-semibold">Save this database</h3>
             <p className="text-label text-ink-dim">
-              A saved workspace is kept in this browser, separately from the working copy, and is not limited to the
-              size of the working copy.
+              A saved workspace is kept in this browser's IndexedDB, next to the working copy, which autosaves there too.
             </p>
             <div className="flex flex-wrap items-center gap-2">
               <label className="flex flex-1 flex-col gap-1 text-label text-ink-dim">
