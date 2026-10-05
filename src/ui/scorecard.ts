@@ -18,7 +18,7 @@ export function scoreOf(result: RunResult): Scorecard {
   const end = createTraceProjector(result.events, DEFAULT_ENGINE_OPTIONS).at(result.events.length);
   return {
     steps: result.events.length,
-    diskReads: end.bufferStats.misses,
+    diskReads: end.bufferStats.misses + end.bufferStats.prefetches,
     hits: end.bufferStats.hits,
     evictions: end.bufferStats.evictions,
     btreeReads: end.indexPath.length,

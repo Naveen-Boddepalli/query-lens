@@ -173,7 +173,11 @@ export type StepEventBody =
    * that can only ever appear once per query (`Filter`, `Project`, `Sort`, …), which never needed it.
    */
   | { stage: 'execute'; op: string; rowsProduced: number; table?: string }
-  | { stage: 'buffer'; action: 'hit' | 'load'; pageId: number; frameId: number }
+  /**
+   * `prefetch` is a read the engine made before anything asked for the page, because the scan before it was
+   * sequential (plan.md §25.4 F7). It costs the same I/O as a `load`; a later request for the page is a `hit`.
+   */
+  | { stage: 'buffer'; action: 'hit' | 'load' | 'prefetch'; pageId: number; frameId: number }
   /** A miss names no frame: nothing has been chosen to hold the page yet. */
   | { stage: 'buffer'; action: 'miss'; pageId: number }
   /** A page a `Sort` produced (a run, or a merge-pass output) rather than read off disk. */
@@ -366,6 +370,11 @@ export interface EngineOptions {
   /** Rows stored per simulated page. Small on purpose. */
   rowsPerPage: number;
   policy: ReplacementPolicyName;
+  /**
+   * Sequential read-ahead depth (plan.md §25.4 F7): after a request for page p that follows page p-1, the pool reads up to
+   * this many pages after p that are not yet resident. Absent or 0 means no read-ahead, which is every existing run.
+   */
+  readAhead?: number;
   /**
    * Which physical strategy a `GROUP BY` / aggregate query uses — `hash`
    * (the default, when absent) builds an in-memory hash table; `sort` sorts

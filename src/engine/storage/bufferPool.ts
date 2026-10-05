@@ -99,7 +99,7 @@ export function createBufferPool(
   const state = emptyState(options.bufferFrames);
   if (lookahead !== undefined) state.lookahead = lookahead;
   const policy: ReplacementPolicy = policyFor(options.policy);
-  const stats = { hits: 0, misses: 0, evictions: 0, writes: 0 };
+  const stats = { hits: 0, misses: 0, evictions: 0, writes: 0, prefetches: 0 };
   // Which access `fetch` is resolving, so `optimal` can look past it. Advances
   // once per successful `fetch`, staying aligned with the reference index.
   let accessIndex = -1;
@@ -110,6 +110,8 @@ export function createBufferPool(
   // resident or not, since a page can be marked dirty and evicted later in
   // the same query. Cleared once the writeback happens.
   const dirty = new Set<number>();
+  // The page the last `fetch` asked for: a request for the page after it is a sequential scan, which read-ahead follows.
+  let lastDemand: number | null = null;
 
   const resident = (pageId: number): Frame | undefined =>
     state.frames.find((f) => f.pageId === pageId);
@@ -174,12 +176,44 @@ export function createBufferPool(
     if (Number.isInteger(pageId) && pageId >= 0 && pageId < pageCount) dirty.add(pageId);
   }
 
+  /**
+   * Reads the pages after `pageId` that a sequential scan will ask for next, before it asks: each is a real disk read, so
+   * it claims a frame the same way a miss does, and is recorded as `prefetch`. Pages already resident are skipped.
+   */
+  function readAheadFrom(pageId: number): void {
+    const depth = options.readAhead ?? 0;
+    for (let next = pageId + 1; next <= pageId + depth && next < pageCount; next++) {
+      if (resident(next)) continue;
+      const target = claimFrame(next, false);
+      if (!target) return;
+      stats.prefetches += 1;
+      state.now += 1;
+      target.pageId = next;
+      target.usageCount = 0;
+      target.loadedAt = state.now;
+      (policy.onLoad ?? policy.onAccess)(state, target.frameId);
+      emit(
+        `Read page ${next} from disk into frame ${target.frameId} ahead of the scan. Nothing has asked for it yet, but the scan is sequential, so the pool reads it early — and the request, when it comes, is a hit.`,
+        { stage: 'buffer', action: 'prefetch', pageId: next, frameId: target.frameId },
+        { dwell: DISK_READ_DWELL },
+      );
+    }
+  }
+
   function fetch(pageId: number): FetchResult | null {
     if (!Number.isInteger(pageId) || pageId < 0 || pageId >= pageCount) return null;
 
     accessIndex += 1;
     state.lookaheadCursor = accessIndex;
+    const sequential = lastDemand !== null && pageId === lastDemand + 1;
+    lastDemand = pageId;
 
+    const result = resolve(pageId);
+    if (result && sequential) readAheadFrom(pageId);
+    return result;
+  }
+
+  function resolve(pageId: number): FetchResult | null {
     const hitFrame = resident(pageId);
     if (hitFrame) {
       stats.hits += 1;

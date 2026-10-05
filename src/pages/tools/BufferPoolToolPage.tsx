@@ -33,12 +33,14 @@ import { btnPrimary, btnSecondary, inputField, panelSurface } from '../../ui/pri
 const DEFAULT_REF = '0 1 2 3 4 0 1 2 3 4';
 const MIN_FRAMES = 2;
 const MAX_FRAMES = 8;
+const MAX_READ_AHEAD = 4;
 
 function readInitial() {
   const params = new URLSearchParams(typeof location === 'undefined' ? '' : location.search);
   const ref = params.get('ref');
   const framesRaw = Number(params.get('frames'));
   const policyRaw = params.get('policy');
+  const readAheadRaw = Number(params.get('ra'));
   const policy = (REPLACEMENT_POLICY_NAMES as readonly string[]).includes(policyRaw ?? '')
     ? (policyRaw as ReplacementPolicyName)
     : 'lru';
@@ -49,6 +51,7 @@ function readInitial() {
         ? framesRaw
         : 4,
     policy,
+    readAhead: Number.isInteger(readAheadRaw) && readAheadRaw >= 0 && readAheadRaw <= MAX_READ_AHEAD ? readAheadRaw : 0,
   };
 }
 
@@ -58,10 +61,11 @@ export function BufferPoolToolPage() {
   const [refInput, setRefInput] = useState(INITIAL.refInput);
   const [frames, setFrames] = useState(INITIAL.frames);
   const [policy, setPolicy] = useState<ReplacementPolicyName>(INITIAL.policy);
+  const [readAhead, setReadAhead] = useState(INITIAL.readAhead);
 
   const options = useMemo(
-    () => ({ ...DEFAULT_ENGINE_OPTIONS, bufferFrames: frames, policy }),
-    [frames, policy],
+    () => ({ ...DEFAULT_ENGINE_OPTIONS, bufferFrames: frames, policy, readAhead }),
+    [frames, policy, readAhead],
   );
 
   const [refs, setRefs] = useState<number[]>(() => parseReferenceString(INITIAL.refInput));
@@ -80,11 +84,12 @@ export function BufferPoolToolPage() {
       params.set('ref', refInput);
       params.set('frames', String(frames));
       params.set('policy', policy);
+      if (readAhead > 0) params.set('ra', String(readAhead));
       const next = `${location.pathname}?${params.toString()}`;
       if (next !== `${location.pathname}${location.search}`) history.replaceState(null, '', next);
     }, 250);
     return () => { window.clearTimeout(timer); };
-  }, [refInput, frames, policy]);
+  }, [refInput, frames, policy, readAhead]);
 
   function run() {
     setRefs(parseReferenceString(refInput));
@@ -150,6 +155,20 @@ export function BufferPoolToolPage() {
                 {REPLACEMENT_POLICY_LABELS[name]}
               </option>
             ))}
+          </select>
+        </label>
+
+        <label className="flex flex-col gap-1 text-label text-ink-dim">
+          Read-ahead
+          <select
+            value={readAhead}
+            onChange={(e) => { setReadAhead(Number(e.target.value)); }}
+            className={inputField}
+          >
+            <option value={0}>off</option>
+            <option value={1}>1 page</option>
+            <option value={2}>2 pages</option>
+            <option value={4}>4 pages</option>
           </select>
         </label>
 

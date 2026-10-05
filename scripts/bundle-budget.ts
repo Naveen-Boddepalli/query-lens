@@ -207,6 +207,9 @@ const T = (name: string): string => `src/pages/tools/${name}.tsx`;
  *  - 2026-10-04, latch crabbing (§25.4 F5): a new route, /tools/latch-crabbing (163.5 kB measured + 3, rounded
  *    to 167). Unlike the standalone sandboxes it drives the REAL engine B+Tree (`engine/index/btree.ts`, the same
  *    code /tools/btree uses), so it pays the shared engine chunk the same way /tools/btree does (ceiling 167).
+ *  - 2026-10-05, sequential read-ahead (§25.4 F7, decided: prefetches are reads shown as `prefetch`, and a later request is a
+ *    hit): the buffer pool is shared by every route that runs the engine, so /compare 175 → 179, /tools/planner 168 → 172,
+ *    /tools/lsm 118 → 121 (each measured + 3, rounded up).
  *  - 2026-10-05, 2Q, a second scan-resistant replacement policy (§25.4 F7, slice 2): it lives in the engine's shared
  *    policy registry, so every route that runs the engine grew a little. /stages/:id 180 → 184, /challenges/:id
  *    286 → 290, /tools/join-order 164 → 168 (each measured + 3, rounded up).
@@ -236,7 +239,7 @@ export const ROUTES: readonly RouteBudget[] = [
   { route: '/learn/:id', roots: [P('LessonPage')], kb: 168, note: 'one lesson' },
   { route: '/examples', roots: [P('ExamplesPage')], kb: 115, note: 'preset queries' },
   { route: '/gallery', roots: [P('GalleryPage')], kb: 165, note: 'named moments' },
-  { route: '/compare', roots: [P('ComparePage')], kb: 175, note: 'index vs scan, policy vs policy, hash vs sort, join algorithms, B+Tree vs. LSM' },
+  { route: '/compare', roots: [P('ComparePage')], kb: 179, note: 'index vs scan, policy vs policy, hash vs sort, join algorithms, B+Tree vs. LSM' },
   { route: '/trace', roots: [P('TracePage')], kb: 167, note: 'the trace inspector' },
   { route: '/progress', roots: [P('ProgressPage')], kb: 171, note: 'the progress dashboard' },
   { route: '/challenges', roots: [P('ChallengesPage')], kb: 167, note: 'challenge index' },
@@ -250,12 +253,12 @@ export const ROUTES: readonly RouteBudget[] = [
   { route: '/tools/btree', roots: [T('BTreeToolPage')], kb: 170, note: 'B+Tree sandbox' },
   { route: '/tools/page', roots: [T('PageToolPage')], kb: 166, note: 'slotted-page inspector' },
   { route: '/tools/sort', roots: [T('SortToolPage')], kb: 118, note: 'external merge sort' },
-  { route: '/tools/planner', roots: [T('PlannerToolPage')], kb: 168, note: 'planner sandbox' },
+  { route: '/tools/planner', roots: [T('PlannerToolPage')], kb: 172, note: 'planner sandbox' },
   { route: '/tools/locks', roots: [T('LocksToolPage')], kb: 117, note: 'lock simulator' },
   { route: '/tools/grammar', roots: [T('GrammarToolPage')], kb: 116, note: 'the SQL grammar diagram' },
   { route: '/tools/hash-join', roots: [T('HashJoinToolPage')], kb: 118, note: 'Grace hash join' },
   { route: '/tools/join-order', roots: [T('JoinOrderToolPage')], kb: 168, note: 'Selinger join-order search over the subset lattice' },
-  { route: '/tools/lsm', roots: [T('LsmToolPage')], kb: 118, note: 'log-structured merge-tree sandbox' },
+  { route: '/tools/lsm', roots: [T('LsmToolPage')], kb: 121, note: 'log-structured merge-tree sandbox' },
   { route: '/tools/hash-index', roots: [T('HashIndexToolPage')], kb: 118, note: 'extendible and linear hashing sandbox' },
   { route: '/tools/columnar', roots: [T('ColumnarToolPage')], kb: 118, note: 'NSM/DSM/PAX row vs. column storage sandbox' },
   { route: '/tools/vector-index', roots: [T('VectorIndexToolPage')], kb: 118, note: 'brute force vs. IVF vs. HNSW vector search' },

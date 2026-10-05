@@ -279,7 +279,7 @@ describe('stateAt', () => {
     expect(final.rows).toEqual([{ id: 5, name: 'ada' }]);
     expect(final.stage).toBe('result');
     expect(final.indexOutcome).toBe('found');
-    expect(final.bufferStats).toEqual({ hits: 1, misses: 2, evictions: 0, writes: 0 });
+    expect(final.bufferStats).toEqual({ hits: 1, misses: 2, evictions: 0, writes: 0, prefetches: 0 });
     expect(final.locks).toEqual([]);
   });
 });

@@ -4,13 +4,13 @@ import type { BufferFrame, ReplacementPolicyName, StepEvent } from '../../engine
 
 export interface BufferPoolPanelProps {
   frames: BufferFrame[];
-  stats: { hits: number; misses: number; evictions: number; writes: number };
+  stats: { hits: number; misses: number; evictions: number; writes: number; prefetches: number };
   clockHand: number;
   policy: ReplacementPolicyName;
   lastEvent: StepEvent | null;
 }
 
-type FrameMood = 'hit' | 'load' | 'write' | 'evict' | 'sweep' | null;
+type FrameMood = 'hit' | 'load' | 'prefetch' | 'write' | 'evict' | 'sweep' | null;
 
 function moodOf(frame: BufferFrame, lastEvent: StepEvent | null): FrameMood {
   if (lastEvent?.stage !== 'buffer') return null;
@@ -28,6 +28,7 @@ function moodOf(frame: BufferFrame, lastEvent: StepEvent | null): FrameMood {
 const MOOD_CLASS: Record<Exclude<FrameMood, null>, string> = {
   hit: 'border-hit bg-hit/15 shadow-[0_0_26px_-4px_var(--color-hit)] hover:bg-hit/25',
   load: 'border-miss bg-miss/15 shadow-[0_0_26px_-4px_var(--color-miss)] hover:bg-miss/25',
+  prefetch: 'border-miss/70 bg-miss/10 shadow-[0_0_20px_-6px_var(--color-miss)] hover:bg-miss/20',
   // Violet, not one of the read-path colours — a write is neither a hit nor a
   // disk read, and it shares its tone with the Sort plan node that causes it.
   write:
@@ -43,6 +44,7 @@ const MOOD_CLASS: Record<Exclude<FrameMood, null>, string> = {
 const MOOD_TAG: Record<Exclude<FrameMood, null>, string> = {
   hit: '✓ hit',
   load: '↓ disk read',
+  prefetch: '↓ prefetched',
   write: '✎ written',
   evict: '✕ evicted',
   sweep: '↻ swept',
@@ -212,7 +214,7 @@ export function BufferPoolPanel({
         </div>
         <div>
           <dt className="text-ink-dim"><span aria-hidden>↓ </span>disk reads</dt>
-          <dd className="font-mono text-miss">{stats.misses}</dd>
+          <dd className="font-mono text-miss">{stats.misses + stats.prefetches}</dd>
         </div>
         <div>
           <dt className="text-ink-dim"><span aria-hidden>✕ </span>evictions</dt>
@@ -222,6 +224,12 @@ export function BufferPoolPanel({
           <div>
             <dt className="text-ink-dim"><span aria-hidden>✎ </span>writes</dt>
             <dd className="font-mono text-hue-violet-ink">{stats.writes}</dd>
+          </div>
+        )}
+        {stats.prefetches > 0 && (
+          <div>
+            <dt className="text-ink-dim"><span aria-hidden>↓ </span>prefetched</dt>
+            <dd className="font-mono text-miss">{stats.prefetches}</dd>
           </div>
         )}
         <div>
