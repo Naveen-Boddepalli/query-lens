@@ -427,16 +427,16 @@ test('vector index: brute force, IVF and HNSW, scored by distances computed and 
   await expect(row(/brute force/)).toContainText('200.0');
   await expect(row(/brute force/)).toContainText('100.0%');
 
-  // IVF reaches full recall after four clusters for 69.3 distances; HNSW after a beam of 10 for 53.0. At this size
-  // HNSW is the cheaper route to full recall; at 400 points the order flips (checked in the unit tests' own probe).
+  // IVF reaches full recall after four clusters for 69.3 distances; HNSW after a beam of 10 for 55.3. At this size
+  // HNSW is the cheaper route to full recall; at 400 points the order flips (116.6 against IVF's 99.3, from the planner).
   await expect(row(/IVF, probe 4 of 14/)).toContainText('69.3');
   await expect(row(/IVF, probe 4 of 14/)).toContainText('100.0%');
-  await expect(row(/HNSW, beam width 10/)).toContainText('53.0');
+  await expect(row(/HNSW, beam width 10/)).toContainText('55.3');
 
   // The query's own panel: IVF probing two clusters misses one neighbour; HNSW at beam 16 finds all of them.
   await expect(page.getByText(/IVF, probing 2 clusters/)).toBeVisible();
   await expect(page.getByText('90.0% · 67 distances')).toBeVisible();
-  await expect(page.getByText('100.0% · 74 distances')).toBeVisible();
+  await expect(page.getByText('100.0% · 79 distances')).toBeVisible();
 
   // The HNSW layers thin out: every point on layer 0, one on the top layer.
   await expect(page.getByText('layer 0', { exact: true })).toBeVisible();

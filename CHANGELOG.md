@@ -343,6 +343,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Vitest also runs tests under `scripts/` and `oracle/`; `oracle/` joins `tsconfig.node.json`.
 
 ### Fixed
+- HNSW's layer-0 graph could leave points unreachable from the entry point, so a full-width search missed true neighbours. Layer 0 is now undirected and joined into one component. Found by a property test over random inputs.
 - Midpoint LRU caps its young sublist at five-eighths of the buffer pool, as InnoDB does. Before, re-used pages could fill the pool and the policy became plain LRU on long traces.
 - **EXPLAIN ANALYZE no longer undercounts an operator whose last candidate fails a residual check.** An index
   scan whose final candidate failed its extra predicate reported the discarded candidate's `0` as its row count, even

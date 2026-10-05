@@ -264,6 +264,51 @@ export function buildHnsw(points: readonly Point[], seed: number): HnswGraph {
     }
   });
 
+  // Pruning a neighbour's list can drop its link back to a point, and a point left with out-links only is unreachable
+  // from the entry: a full-width search then misses true neighbours. Layer 0 is made undirected, and any component the
+  // entry cannot reach is joined to it by its nearest pair, so every starting point reaches every point.
+  const n = points.length;
+  const linkZero = (a: number, b: number) => {
+    const la = links[a]![0]!;
+    if (!la.includes(b)) la.push(b);
+    const lb = links[b]![0]!;
+    if (!lb.includes(a)) lb.push(a);
+  };
+  const reachableFromEntry = (): Set<number> => {
+    const seen = new Set<number>([entry]);
+    const stack = [entry];
+    while (stack.length > 0) {
+      const c = stack.pop()!;
+      for (const nb of links[c]![0] ?? []) {
+        if (!seen.has(nb)) {
+          seen.add(nb);
+          stack.push(nb);
+        }
+      }
+    }
+    return seen;
+  };
+  for (let a = 0; a < n; a++) {
+    for (const b of [...links[a]![0]!]) linkZero(a, b);
+  }
+  for (let reach = reachableFromEntry(); reach.size < n; reach = reachableFromEntry()) {
+    let bestU = -1;
+    let bestR = -1;
+    let bestD = Infinity;
+    for (let u = 0; u < n; u++) {
+      if (reach.has(u)) continue;
+      for (const r of reach) {
+        const d = dist(u, r);
+        if (d < bestD) {
+          bestD = d;
+          bestU = u;
+          bestR = r;
+        }
+      }
+    }
+    linkZero(bestU, bestR);
+  }
+
   return { links, levelOf, entry, maxLevel, M, Mmax0 };
 }
 
