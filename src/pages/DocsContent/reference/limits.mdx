@@ -13,11 +13,20 @@ concept explanation.
   [challenges](/challenges) and [Compare](/compare) modes, to make an algorithm's actual behaviour
   visible rather than hidden by a pool big enough to cache everything.
 - **4 rows per page.**
-- **Two replacement policies in the main pipeline** — LRU and clock sweep, switchable per query.
-  The standalone sandbox adds four more for comparison: FIFO, second-chance, optimal (unbuildable
-  for real; the fewest-misses bound the others are measured against), and midpoint LRU (what
-  InnoDB does). See [The buffer pool](/docs/concepts/buffer-pool).
+- **Eight replacement policies**, all implemented in the engine itself: LRU, clock sweep, FIFO,
+  second-chance, optimal (unbuildable for real; the fewest-misses bound the others are measured
+  against), midpoint LRU (what InnoDB does), and the two scan-resistant ones, LRU-2 and 2Q. The
+  Playground's *Eviction* picker offers LRU and clock sweep; [Trace](/trace), [Compare](/compare) and
+  the [standalone sandbox](/tools/buffer-pool) offer all eight, and a trace run under any of them is
+  the same engine's own run. See [The buffer pool](/docs/concepts/buffer-pool).
 - Clock sweep's per-frame usage counter caps at **5**.
+- **Sequential read-ahead is off by default** (`readAhead`, a depth). With a depth of *n*, a request
+  for page *p* that follows a request for *p − 1* has the pool read up to *n* of the pages after *p*
+  that are not already resident, before anything asks for them. Each is a real disk read — it claims
+  a frame, and may evict one, exactly as a miss does — shown as a `prefetch` step and counted as a
+  disk read; the request that later arrives for that page is a hit. An access pattern that is not
+  sequential prefetches nothing. The [standalone sandbox](/tools/buffer-pool) offers 1, 2 or 4 pages
+  (`ra` in its URL).
 
 ## B+Tree index
 
@@ -62,13 +71,18 @@ concept explanation.
   See [The B+Tree index](/docs/concepts/btree).
 - The planner uses the index for an equality (`WHERE id = 5`, an `IndexScan`), a range (`WHERE id >
   30`, `<`, `<=`, `>=` or `BETWEEN`, an `IndexRangeScan`), or — when the SELECT list needs nothing
-  but the indexed column itself — an index-only lookup that never touches the heap at all. An
-  equality always wins over a range when both are available, by rule order, not a cost comparison.
-  A predicate on an unindexed column always runs as a sequential scan.
-- **An indexed column may repeat.** An entry is the value plus the row's own address, so two rows
-  with the same value are two entries, side by side in the leaves; an equality returns every match
-  (walking the leaf chain for as long as the value holds) and costs one heap page per row. There is
-  no `UNIQUE` — nothing stops a duplicate — and **NULLs are never indexed**, so `x IS NULL` scans.
+  but the indexed column itself — an index-only lookup that never touches the heap at all.
+  **Whether it does is decided by cost, not by shape alone** (plan.md §25.4 C5): an index that
+  matches the predicate is still declined when its estimated page cost is no lower than the scan it
+  would replace — a column where most rows match is cheaper to scan — and the plan says so, with
+  both page counts. An equality is tried before a range by rule order, the two never costed against
+  each other, but a declined equality leaves the range rule free to try its own candidate. A
+  predicate on an unindexed column always runs as a sequential scan.
+- **An indexed column may repeat, unless it is `UNIQUE`.** An entry is the value plus the row's own
+  address, so two rows with the same value are two entries, side by side in the leaves; an equality
+  returns every match (walking the leaf chain for as long as the value holds) and costs one heap page
+  per row. Nothing stops a duplicate in a plain index; declare it `UNIQUE` (above) to refuse them. In
+  a single-column index **NULLs are never indexed**, so `x IS NULL` scans.
   `DELETE`/`UPDATE` re-run the real `deleteKey`/`insert` algorithms against the one entry that
   belongs to each row; `UPDATE` re-indexes a row only when its own indexed column actually changed.
 
@@ -153,8 +167,8 @@ concept explanation.
 
 `DELETE`, `INSERT` and `UPDATE` all run for real and persist their effect — a write's changed rows
 become the table's new contents for every query that follows. Each finds its target rows the same
-way a `SELECT`'s `WHERE` would (an index lookup or a range walk of the index when it can, a scan
-otherwise), takes an exclusive lock on every page it will change, and drops and re-adds exactly the
+way a `SELECT`'s `WHERE` would (an index lookup or a range walk of the index when it can and its
+estimated cost beats the scan, a scan otherwise), takes an exclusive lock on every page it will change, and drops and re-adds exactly the
 index entries of the rows it touches.
 
 ## Statistics
@@ -203,24 +217,32 @@ index entries of the rows it touches.
 
 See [Supported SQL](/docs/reference/sql) for the complete accepted grammar.
 
+## What cost decides
+
+Three decisions are made by comparing estimated page costs (plan.md §25.4 C5), using the same numbers
+[EXPLAIN](/docs/reference/sql) prints:
+
+- **Whether an index is used.** `index-selection` and `range-index-selection` pick a candidate by shape,
+  then decline it when its estimated page cost is not lower than the scan it would replace; the plan names
+  both costs and keeps the scan.
+- **A join's algorithm.** Nested-loop, hash, sort-merge and — where the inner table has a usable index —
+  index nested-loop are each priced, and the cheapest wins outright.
+- **A join chain's order.** A chain of two or more plain inner `JOIN`s runs in whatever left-deep order
+  [`/tools/join-order`](/tools/join-order)'s Selinger-style search finds cheapest, not necessarily the order
+  it was written in. A chain with a `LEFT JOIN` anywhere in it keeps its order as written, since `LEFT JOIN`
+  is not commutative or associative in general; the search's suggestion is shown there as information only.
+
+Each is the default whenever the caller does not force something explicit — [Compare](/compare) and the
+Planner sandbox still force a specific `joinStrategy` to compare algorithms directly, and that is never
+overridden. The planner's *Why not?* note shows the runner-up each of these beat. Every other rewrite rule —
+constant folding, predicate pushdown, join predicate pushdown, and the index-only scan — still fires on a
+structural match alone; the cost estimates shown beside those plans only justify the narration, they do not
+decide whether the rewrite happens.
+
 ## What's out of scope entirely
 
 No subqueries anywhere but an uncorrelated `IN (SELECT …)` (plan.md §25.4 C3, closing C3 — no `EXISTS`, no
 scalar subquery like `x = (SELECT …)`, no correlated subquery). No `RIGHT`/`FULL`/`CROSS` join, no transactions,
-no real concurrency (the Locks panel is visual only). `index-selection`, `range-index-selection`,
-`join-algorithm-selection` and join *order* itself *are* all decided by cost (plan.md §25.4 C5): a candidate
-index that matches the predicate's shape can still lose to the scan it would replace, and does, whenever its own
-estimated page cost is not actually lower (slice 1); a `JOIN`'s algorithm — nested-loop, hash, sort-merge, or
-index nested-loop when the inner table has a usable index — is chosen by comparing all of them and keeping the
-cheapest, with no shape step at all (slice 2); a chain of 2+ plain inner `JOIN`s actually runs in whatever
-left-deep order [`/tools/join-order`](/tools/join-order)'s own Selinger search finds cheapest, not necessarily
-the order it was written in (slice 3). All three are the new default whenever the caller does not force something
-explicit — `/compare` and `/tools/planner` still force a specific `joinStrategy` to compare algorithms directly,
-which is never overridden, and a `LEFT JOIN` anywhere in a chain keeps its whole order exactly as written, since
-`LEFT JOIN` is not commutative or associative in general and reordering one can silently change which rows get
-NULL-padded, not just the cost — `/tools/join-order` and a multi-join query's own Planner panel still show what
-the search *would* pick for a chain like that, purely informational there. Every other rewrite rule still fires
-on a structural match alone, and the cost *estimates* shown alongside their plans exist only to justify the
-narration, not to decide whether the rewrite happens. `UNION` and `COUNT(DISTINCT …)` are also not accepted.
+no real concurrency (the Locks panel is visual only). `UNION` and `COUNT(DISTINCT …)` are also not accepted.
 These are deliberate exclusions for this release, not bugs — see the parser's own error messages in
 [Supported SQL](/docs/reference/sql) for exactly which keywords are recognised and rejected.

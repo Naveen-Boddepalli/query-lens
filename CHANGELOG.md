@@ -345,6 +345,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Vitest also runs tests under `scripts/` and `oracle/`; `oracle/` joins `tsconfig.node.json`.
 
 ### Fixed
+- **The Engine limits and Supported SQL pages no longer make claims the engine has outgrown.** They said an indexed column could never be `UNIQUE`, that an equality beat a range "by rule order, not a cost comparison", that cost estimates only justify narration, that two replacement policies exist, and that `DELETE`/`UPDATE` use an index only for an equality. Each is now stated as it is: cost declines an index that would not beat the scan, picks a join's algorithm and a chain's order, eight policies run, and the seed-table list includes `employees` and `transactions`.
 - HNSW's layer-0 graph could leave points unreachable from the entry point, so a full-width search missed true neighbours. Layer 0 is now undirected and joined into one component. Found by a property test over random inputs.
 - Midpoint LRU caps its young sublist at five-eighths of the buffer pool, as InnoDB does. Before, re-used pages could fill the pool and the policy became plain LRU on long traces.
 - **EXPLAIN ANALYZE no longer undercounts an operator whose last candidate fails a residual check.** An index

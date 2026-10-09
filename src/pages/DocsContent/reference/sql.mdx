@@ -118,8 +118,10 @@ ever is one. Run it in the [Playground](/playground) on a table with a NULL in i
 one) and open the parse stage: the WHERE tree shows every node of the predicate.
 
 `OR`, `NOT`, `IN`, `LIKE` and `<>` never become an index lookup — only a top-level `AND`ed equality or
-range on an indexed column does. `WHERE id = 5 AND (age < 30 OR age IS NULL)` still uses the index for
-`id = 5` and rechecks the parenthesised part on the one row it finds.
+range on an indexed column can. Even then it is taken only when the optimizer's estimate says it reads
+fewer pages than the scan it would replace: on a column where most rows match, the plan keeps the scan and
+says why. `WHERE id = 5 AND (age < 30 OR age IS NULL)` still uses the index for `id = 5` and rechecks the
+parenthesised part on the one row it finds.
 
 ## HAVING
 
@@ -249,7 +251,9 @@ UPDATE users SET name = 'Renamed', age = age + 1 WHERE id = 5;
 ```
 
 - **`DELETE`**/**`UPDATE`** take the same `WHERE` grammar as `SELECT`, found the same way — an
-  equality on an indexed column becomes an `IndexScan`, everything else a full scan.
+  equality on an indexed column becomes an `IndexScan`, a range an `IndexRangeScan`, each only when its
+  estimated cost beats the scan; everything else a full scan. A `UNIQUE` index also refuses an `INSERT` or
+  `UPDATE` that would repeat a key (see [Engine limits](/docs/reference/limits)).
 - **`INSERT`** takes an explicit column list (any order) or none at all, meaning every column in
   table order; either way there is exactly one row per statement. Each value is a literal, or
   arithmetic on literals (`-5`, `2 * 3`), which is worked out before the row is written — no column
@@ -279,11 +283,14 @@ with a generic syntax error:
 ## The seed tables
 
 Every query runs against one table at a time (more, for a chain of `JOIN`s). The default is `users`, with
-columns `id`, `name`, `email`, `age`; the **Data** chips above the editor also load `orders` (120
-rows — a deeper index and a heavier scan) and `logins` (a lopsided `status` column, for
-selectivity). Rows are editable from the app (**Edit data**), and both the choice of dataset and
+columns `id`, `name`, `email`, `age` (48 rows); the **Data** chips above the editor also load `orders`
+(120 rows — a deeper index and a heavier scan), `logins` (a lopsided `status` column, for selectivity),
+`employees` (250 rows whose `department` and `office` are perfectly correlated, so the optimizer's estimate
+for both together is badly off) and `transactions` (3,000 rows — the tallest B+Tree of the presets, and a
+scan that evicts hard). Rows are editable from the app (**Edit data**), and both the choice of dataset and
 any edits travel with a shareable link — see [URL parameters](/docs/reference/url-parameters).
 
 The **Custom** data chip lets you build your own multi-table database in the browser — add a
-table, declare one or more indexed columns, edit its rows, and `JOIN` across tables you built
-yourself. It's kept in this browser only (IndexedDB), outside the shareable-link scheme.
+table, declare indexes (single-column or composite, optionally `UNIQUE`), edit its rows, and `JOIN`
+across tables you built yourself. It's kept in this browser only (IndexedDB), outside the
+shareable-link scheme.
