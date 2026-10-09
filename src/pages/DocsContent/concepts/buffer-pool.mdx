@@ -1,6 +1,6 @@
 ---
 title: The buffer pool
-description: Why databases keep a fixed set of pages in memory, and how QueryLens's two eviction policies decide what to keep.
+description: Why databases keep a fixed set of pages in memory, and how eviction policies — LRU and clock sweep first — decide what to keep.
 ---
 
 import { BufferPoolMiniDemo } from '../../../ui/DocsBufferPoolDemo.tsx';
@@ -30,8 +30,9 @@ see below for why, and for where they actually diverge.
 
 ## Two eviction policies, and why both exist
 
-QueryLens implements two replacement policies, switchable from the dropdown next to Run. Step
-through the same eight-page access pattern under each one below — page 0 gets read three times
+QueryLens implements eight replacement policies, and the dropdown next to Run in the Playground
+switches between the two that teach the most. Step through the same eight-page access pattern
+under each one below — page 0 gets read three times
 before pages 4 and 5 arrive needing room. Both keep page 0 around (the point of having a
 replacement policy at all), but watch the step count each one needs to get there: clock sweep does
 more work — walking past hot frames, decrementing as it goes — to reach the same answer LRU's
@@ -56,14 +57,18 @@ policies tend to pick the same victims, because nothing is meaningfully "hotter"
 They only diverge once some pages are read more often than others, which is exactly what the point
 lookup vs. sequential scan contrast on the [Getting started](/docs/getting-started) page is built to show.
 
-The pipeline offers these two because they are the contrast that teaches. The standalone
-[buffer-pool sandbox](/tools/buffer-pool) adds four more to line up against them — **FIFO** (evict
-the oldest page, however hot), **second-chance** (FIFO with a reference bit — clock sweep's
-ancestor), **optimal** (evict the page used farthest in the future; unbuildable for real, but the
-fewest-misses bound every other policy is measured against), and **midpoint LRU** (what InnoDB does:
-a page read from disk enters an "old" sublist and only reaches the "young" one on a re-access, so a
-one-pass scan flushes only itself). [Compare](/compare) puts any two of the six side by side on one
-access pattern, or the same query with and without an index.
+The Playground offers these two because they are the contrast that teaches. The other six run in the
+same engine and are available in the standalone [buffer-pool sandbox](/tools/buffer-pool), on the
+[Trace](/trace) page, and in [Compare](/compare) — **FIFO** (evict the oldest page, however hot),
+**second-chance** (FIFO with a reference bit — clock sweep's ancestor), **optimal** (evict the page
+used farthest in the future; unbuildable for real, but the fewest-misses bound every other policy is
+measured against), **midpoint LRU** (what InnoDB does: a page read from disk enters an "old" sublist
+and only reaches the "young" one on a re-access, so a one-pass scan flushes only itself), and the two
+scan-resistant ones, **LRU-2** (evict by each page's second-most-recent use; a page touched once has
+no second use, so it goes first) and **2Q** (pages read once wait in a small FIFO and are promoted
+only by a re-read after leaving it) — see [One scan can empty the cache](/docs/essays/scan-resistance).
+Compare puts any two of the eight side by side on one access pattern, or the same query with and
+without an index.
 
 ## Where this simplifies
 

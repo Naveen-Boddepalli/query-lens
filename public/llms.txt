@@ -22,7 +22,7 @@ https://github.com/Naveen-Boddepalli/query-lens.
 
 ## Concepts
 
-- [Buffer pool](https://query-lens.1234naveenboddepalli.workers.dev/docs/concepts/buffer-pool): Why databases keep a fixed set of pages in memory, and how QueryLens's two eviction policies decide what to keep.
+- [Buffer pool](https://query-lens.1234naveenboddepalli.workers.dev/docs/concepts/buffer-pool): Why databases keep a fixed set of pages in memory, and how eviction policies — LRU and clock sweep first — decide what to keep.
 - [B+Tree](https://query-lens.1234naveenboddepalli.workers.dev/docs/concepts/btree): How an index turns a table scan into a handful of pointer follows, and what QueryLens's traversal panel actually shows.
 
 ## Essays
