@@ -41,6 +41,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `react` ceiling is raised 62 → 63 kB in `scripts/bundle-budget.ts`, with the measurement recorded
   beside it. Total is 392.2 of 424 kB.
 
+### Fixed
+- **The 60-second tour's spotlight pointed at the wrong region, and the page scrolled to the bottom
+  behind it.** `index.css` sets `scroll-behavior: smooth` on `<html>`, which `scrollIntoView` honours,
+  so the tour read the target's rect while the scroll was still in flight and parked the spotlight where
+  the target *used to be*; nothing re-measured it afterwards. It also centred every target
+  unconditionally, which on desktop dragged the window down into the footer for regions that were
+  already on screen. The tour now scrolls only when the target is not wholly in view, does it instantly
+  (`behavior: 'instant'`), and keeps the spotlight on its target through scrolls, resizes and layout
+  shifts (it glides on a step change but snaps while the page moves, so it never trails the content).
+  Adds an e2e test at a phone viewport that asserts, for all five steps, that the spotlight's box is the
+  target's box.
+
 ## [1.0.0] - 2026-09-23
 
 The first public release: the application as first deployed to Cloudflare (Workers static assets),

@@ -807,6 +807,44 @@ test('the 60-second tour steps through the Playground and is skippable', async (
   await expect(page.getByRole('dialog', { name: 'Playground tour' })).toHaveCount(0);
 });
 
+test('the tour spotlight lands on its target after the page scrolls to it', async ({ page }) => {
+  // A phone-sized viewport is where the page itself scrolls: the trace comes
+  // first and the editor sits a screen below it. The page sets
+  // `scroll-behavior: smooth`, which used to leave the spotlight at the
+  // target's pre-scroll position while the page scrolled out from under it.
+  await page.setViewportSize({ width: 390, height: 800 });
+  await page.goto('/playground?tour=1');
+
+  const tour = page.getByRole('dialog', { name: 'Playground tour' });
+  await expect(tour).toBeVisible();
+
+  for (const target of ['editor', 'pipeline', 'panel', 'narration', 'playback']) {
+    const spotlight = tour.locator(`[data-tour-spotlight="${target}"]`);
+    const framed = page.locator(`[data-tour="${target}"]`);
+    await expect(spotlight).toBeVisible();
+
+    // The spotlight is the target's box plus 6px of margin on every side. Poll,
+    // because it glides to its new place over a short transition.
+    await expect
+      .poll(async () => {
+        const [s, t] = await Promise.all([spotlight.boundingBox(), framed.boundingBox()]);
+        if (!s || !t) return Infinity;
+        return Math.max(
+          Math.abs(s.x - (t.x - 6)),
+          Math.abs(s.y - (t.y - 6)),
+          Math.abs(s.width - (t.width + 12)),
+          Math.abs(s.height - (t.height + 12)),
+        );
+      })
+      .toBeLessThanOrEqual(1);
+
+    // …and what it frames is actually on screen.
+    await expect(framed).toBeInViewport();
+
+    if (target !== 'playback') await tour.getByRole('button', { name: 'Next' }).click();
+  }
+});
+
 test('the tour degrades to a static numbered overlay under reduced motion', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.goto('/playground?tour=1');
