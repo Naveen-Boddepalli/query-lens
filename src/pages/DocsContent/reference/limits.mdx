@@ -27,6 +27,20 @@ concept explanation.
   disk read; the request that later arrives for that page is a hit. An access pattern that is not
   sequential prefetches nothing. The [standalone sandbox](/tools/buffer-pool) offers 1, 2 or 4 pages
   (`ra` in its URL).
+- **A scan ring is off by default** (`scanRing`, a size), modelled on PostgreSQL's bulk-read strategy.
+  With a size of *n*, a `SeqScan` of a table bigger than a quarter of the pool reads through its own
+  ring of *n* frames: its first *n* misses take frames the ordinary way, and every page after that
+  reuses the scan's own oldest frame instead of asking the policy for a victim, so a scan far longer
+  than the pool passes through without evicting everything else. The ring is kept across a
+  nested-loop join's rescans, a smaller table is cached whole as before, and `DELETE`/`UPDATE`'s own
+  full scans do not use one. It is a trade, not a free win: a full pool still loses up to *n* pages
+  to the first claims, and a table larger than the ring that is read again and again is re-read from
+  disk each pass. In one query it changes little — every run starts with an empty pool, and a join's
+  hot inner table is already protected by recency — except under FIFO and 2Q, where it takes a join
+  over `comments` and `posts` from 45 disk reads to 33. What it is for is a long scan arriving between
+  two uses of a hot set, which the [sandbox](/tools/buffer-pool) shows directly: a range in the
+  reference string, `10-50`, is one marked scan, and the *Scan ring* control (`sr` in its URL) reads
+  it through 2, 3 or 4 frames.
 
 ## B+Tree index
 

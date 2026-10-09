@@ -19,8 +19,44 @@ export interface FetchResult {
   hit: boolean;
 }
 
+/**
+ * A sequential scan's own small set of frames (plan.md §25.4 F7), modelled on PostgreSQL's `BufferAccessStrategy` for a
+ * bulk read. A scan that carries one cycles through `size` frames and reuses its own oldest page for each new one, so
+ * a table far bigger than the pool passes through without evicting the pages everything else is using.
+ *
+ * It is a claim, not a reservation: the frames stay ordinary frames the policy may choose, and the ring only decides
+ * which frame the *scan* takes next. Passed to `fetch` by the scan that owns it, so scans that overlap — a nested-loop
+ * join's outer and inner — each keep their own, and a fetch made without one never touches any of them.
+ */
+export interface ScanRing {
+  /** How many frames the scan may cycle through, however many pages it reads. */
+  readonly size: number;
+  /** The frame each slot is using, or null until that slot has first been filled. */
+  readonly frames: (number | null)[];
+  /** The page the scan put in each slot, so a slot whose frame now holds another page is no longer the scan's. */
+  readonly pages: (number | null)[];
+  /** The slot the next miss takes. Only moves forward, so the scan always reuses its oldest page first. */
+  cursor: number;
+  /** False once the scan has ended: a fetch that still carries the ring is then an ordinary one. */
+  active: boolean;
+}
+
+/**
+ * PostgreSQL's rule for when a scan goes through a ring: only a scan bigger than a quarter of the pool does. A smaller
+ * one is worth caching whole, and a ring would only throw its pages away and read them again on a rescan. Shared by
+ * the executor's `SeqScan` and by a marked scan in a bare reference string, so the two cannot disagree.
+ */
+export function scanUsesRing(pages: number, options: EngineOptions): boolean {
+  return (options.scanRing ?? 0) > 0 && pages > Math.floor(options.bufferFrames / 4);
+}
+
 export interface BufferPool {
-  fetch: (pageId: number) => FetchResult | null;
+  /** With a `ring`, a miss is placed by the scan's own ring rather than by the replacement policy alone. */
+  fetch: (pageId: number, ring?: ScanRing) => FetchResult | null;
+  /** Starts a scan that may use at most `size` frames (clamped to the pool). Hand the result to every `fetch` it makes. */
+  beginScan: (size: number) => ScanRing;
+  /** Ends a scan: its frames are ordinary frames again, with nothing left of the ring to honour. */
+  endScan: (ring: ScanRing) => void;
   /**
    * Claims a frame for a page this caller is producing, not reading off disk
    * — a `Sort` operator's spill (plan.md §22.2). Competes for the same frames
@@ -38,7 +74,7 @@ export interface BufferPool {
   markDirty: (pageId: number) => void;
   unpin: (frameId: number) => void;
   readonly state: BufferState;
-  readonly stats: { hits: number; misses: number; evictions: number; writes: number };
+  readonly stats: { hits: number; misses: number; evictions: number; writes: number; prefetches: number };
 }
 
 function emptyState(frameCount: number): BufferState {
@@ -77,6 +113,11 @@ function evictionReason(policy: ReplacementPolicyName): string {
     case 'lru-k':
       return 'LRU-2 picked it because its second-most-recent reference is the oldest — a page touched only once has no second reference at all, so it goes first.';
   }
+}
+
+/** How the `evict` event narrates a frame a scan reused from its own ring, whichever policy runs the pool. */
+function ringReason(size: number): string {
+  return `The scan reads through a ring of ${size} frames, so it reused its own oldest page rather than ask the policy for a victim — a long scan can then pass through without flushing the pages everything else is using.`;
 }
 
 /**
@@ -129,8 +170,22 @@ export function createBufferPool(
 
     const choice = policy.selectVictim(state, emit);
     if (choice === null) return null; // every frame pinned
-    const victimId = choice.frameId;
-    const victim = state.frames.find((f) => f.frameId === victimId)!;
+    const victim = state.frames.find((f) => f.frameId === choice.frameId)!;
+    return evictFrame(victim, incoming, forWrite, choice.clockHand === undefined ? {} : { clockHand: choice.clockHand });
+  }
+
+  /**
+   * Empties `victim` to make room for `incoming`: counts the eviction, pays a dirty page's writeback and narrates it.
+   * Shared by the two ways a victim is found — the policy's choice, and a scan reusing its own ring frame — so both
+   * are accounted for identically.
+   */
+  function evictFrame(
+    victim: Frame,
+    incoming: number,
+    forWrite: boolean,
+    how: { clockHand?: number; ring?: ScanRing },
+  ): Frame {
+    const victimId = victim.frameId;
     const evicted = victim.pageId!;
 
     stats.evictions += 1;
@@ -142,26 +197,30 @@ export function createBufferPool(
     if (writtenBack) stats.writes += 1;
 
     // The eviction question is asked once regardless of which path triggers
-    // it — a write can just as easily be the first eviction a trace shows.
-    const prompt = evictionAsked ? null : evictionPrompt(state.frames, victimId, incoming, options.policy);
-    evictionAsked = true;
+    // it — a write can just as easily be the first eviction a trace shows. A
+    // ring's reuse is not asked about: it is the ring's rule, not a choice the
+    // policy made, and it must not use up the one question the policy deserves.
+    const asks = how.ring === undefined && !evictionAsked;
+    const prompt = asks ? evictionPrompt(state.frames, victimId, incoming, options.policy) : null;
+    if (how.ring === undefined) evictionAsked = true;
 
     emit(
-      `The pool is full, so page ${evicted} is evicted from frame ${victimId} to make room ${
-        forWrite ? 'for a freshly written page' : ''
+      `The pool is full, so page ${evicted} is evicted from frame ${victimId} to make room${
+        forWrite ? ' for a freshly written page' : ''
       }. ${
         writtenBack
           ? `Page ${evicted} is dirty — a row was deleted from it — so evicting it costs a write back to disk first. `
           : ''
-      }${evictionReason(options.policy)}`,
+      }${how.ring ? ringReason(how.ring.size) : evictionReason(options.policy)}`,
       {
         stage: 'buffer',
         action: 'evict',
         frameId: victimId,
         victimPageId: evicted,
         pageId: incoming,
-        ...(choice.clockHand === undefined ? {} : { clockHand: choice.clockHand }),
+        ...(how.clockHand === undefined ? {} : { clockHand: how.clockHand }),
         ...(writtenBack ? { writtenBack } : {}),
+        ...(how.ring ? { ring: true } : {}),
       },
       prompt ? { predictable: prompt } : undefined,
     );
@@ -172,6 +231,53 @@ export function createBufferPool(
     return victim;
   }
 
+  /**
+   * A frame for a page a scan is reading through its ring. The scan cycles through `ring.size` slots in order: a slot
+   * not yet filled takes a frame the ordinary way (a free one, else the policy's victim), and a filled slot is reused
+   * outright — the scan evicts its own oldest page, not one the policy would have chosen. A slot whose frame is pinned,
+   * or has since been given to another page, is not the scan's to reuse and is refilled the ordinary way.
+   */
+  function claimRingFrame(ring: ScanRing, incoming: number): Frame | null {
+    const slot = ring.cursor % ring.size;
+    ring.cursor += 1;
+
+    const frameId = ring.frames[slot];
+    if (frameId !== null && frameId !== undefined) {
+      const frame = state.frames.find((f) => f.frameId === frameId)!;
+      if (frame.pageId !== null && frame.pageId === ring.pages[slot] && frame.pinCount === 0) {
+        ring.pages[slot] = incoming;
+        return evictFrame(frame, incoming, false, { ring });
+      }
+    }
+
+    const target = claimFrame(incoming, false);
+    if (target) {
+      ring.frames[slot] = target.frameId;
+      ring.pages[slot] = incoming;
+    }
+    return target;
+  }
+
+  /** A frame for a page about to be read: through the scan's ring when it has one, else by the policy alone. */
+  function claimForRead(incoming: number, ring: ScanRing | undefined): Frame | null {
+    return ring?.active ? claimRingFrame(ring, incoming) : claimFrame(incoming, false);
+  }
+
+  function beginScan(size: number): ScanRing {
+    const slots = Math.max(1, Math.min(Number.isInteger(size) && size > 0 ? size : 1, state.frames.length));
+    return {
+      size: slots,
+      frames: Array.from({ length: slots }, () => null),
+      pages: Array.from({ length: slots }, () => null),
+      cursor: 0,
+      active: true,
+    };
+  }
+
+  function endScan(ring: ScanRing): void {
+    ring.active = false;
+  }
+
   function markDirty(pageId: number): void {
     if (Number.isInteger(pageId) && pageId >= 0 && pageId < pageCount) dirty.add(pageId);
   }
@@ -180,11 +286,14 @@ export function createBufferPool(
    * Reads the pages after `pageId` that a sequential scan will ask for next, before it asks: each is a real disk read, so
    * it claims a frame the same way a miss does, and is recorded as `prefetch`. Pages already resident are skipped.
    */
-  function readAheadFrom(pageId: number): void {
-    const depth = options.readAhead ?? 0;
+  function readAheadFrom(pageId: number, ring: ScanRing | undefined): void {
+    // A scan's read-ahead stays inside its ring, and leaves one slot for the page it is reading: the pages read early
+    // go where the scan's own pages go, instead of to whichever frames the policy would have given up.
+    const requested = options.readAhead ?? 0;
+    const depth = ring?.active ? Math.min(requested, ring.size - 1) : requested;
     for (let next = pageId + 1; next <= pageId + depth && next < pageCount; next++) {
       if (resident(next)) continue;
-      const target = claimFrame(next, false);
+      const target = claimForRead(next, ring);
       if (!target) return;
       stats.prefetches += 1;
       state.now += 1;
@@ -200,7 +309,7 @@ export function createBufferPool(
     }
   }
 
-  function fetch(pageId: number): FetchResult | null {
+  function fetch(pageId: number, ring?: ScanRing): FetchResult | null {
     if (!Number.isInteger(pageId) || pageId < 0 || pageId >= pageCount) return null;
 
     accessIndex += 1;
@@ -208,12 +317,12 @@ export function createBufferPool(
     const sequential = lastDemand !== null && pageId === lastDemand + 1;
     lastDemand = pageId;
 
-    const result = resolve(pageId);
-    if (result && sequential) readAheadFrom(pageId);
+    const result = resolve(pageId, ring);
+    if (result && sequential) readAheadFrom(pageId, ring);
     return result;
   }
 
-  function resolve(pageId: number): FetchResult | null {
+  function resolve(pageId: number, ring: ScanRing | undefined): FetchResult | null {
     const hitFrame = resident(pageId);
     if (hitFrame) {
       stats.hits += 1;
@@ -233,7 +342,7 @@ export function createBufferPool(
       pageId,
     });
 
-    const target = claimFrame(pageId, false);
+    const target = claimForRead(pageId, ring);
     if (!target) return null;
 
     // Bump the clock on every load, not only in `onAccess` — FIFO and
@@ -248,8 +357,12 @@ export function createBufferPool(
     // treat the two differently — midpoint-LRU inserts at the old sublist.
     (policy.onLoad ?? policy.onAccess)(state, target.frameId);
 
+    // Said once per slot, the first time the scan fills the ring — after that the evictions carry the explanation.
+    const fillingRing = ring?.active === true && ring.cursor <= ring.size;
     emit(
-      `Read page ${pageId} from disk into frame ${target.frameId}. This is the expensive part — everything else is memory.`,
+      `Read page ${pageId} from disk into frame ${target.frameId}. This is the expensive part — everything else is memory.${
+        fillingRing ? ` The frame is one of the scan's ring of ${ring.size}: a scan this long reuses a few frames instead of competing for the whole pool.` : ''
+      }`,
       { stage: 'buffer', action: 'load', pageId, frameId: target.frameId },
       { dwell: DISK_READ_DWELL },
     );
@@ -293,5 +406,5 @@ export function createBufferPool(
     if (f && f.pinCount > 0) f.pinCount -= 1;
   }
 
-  return { fetch, write, markDirty, unpin, state, stats };
+  return { fetch, beginScan, endScan, write, markDirty, unpin, state, stats };
 }

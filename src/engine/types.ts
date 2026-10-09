@@ -192,6 +192,8 @@ export type StepEventBody =
       clockHand?: number;
       /** The victim was dirty, so eviction cost a writeback, not just a discard. */
       writtenBack?: boolean;
+      /** A scan reused a frame from its own ring (plan.md §25.4 F7); the policy was not asked for a victim. */
+      ring?: boolean;
     }
   /**
    * One tick of the clock-sweep hand. Emitted only by the `clock` policy, so
@@ -375,6 +377,12 @@ export interface EngineOptions {
    * this many pages after p that are not yet resident. Absent or 0 means no read-ahead, which is every existing run.
    */
   readAhead?: number;
+  /**
+   * Scan-resistant ring buffer (plan.md §25.4 F7): a `SeqScan` of a table larger than a quarter of the pool, as
+   * PostgreSQL's bulk-read strategy does, claims at most this many frames and reuses its own oldest page for each new
+   * one, so the scan cannot flush the pool. Absent or 0 means no ring, which is every existing run.
+   */
+  scanRing?: number;
   /**
    * Which physical strategy a `GROUP BY` / aggregate query uses — `hash`
    * (the default, when absent) builds an in-memory hash table; `sort` sorts

@@ -207,6 +207,9 @@ const T = (name: string): string => `src/pages/tools/${name}.tsx`;
  *  - 2026-10-04, latch crabbing (§25.4 F5): a new route, /tools/latch-crabbing (163.5 kB measured + 3, rounded
  *    to 167). Unlike the standalone sandboxes it drives the REAL engine B+Tree (`engine/index/btree.ts`, the same
  *    code /tools/btree uses), so it pays the shared engine chunk the same way /tools/btree does (ceiling 167).
+ *  - 2026-10-10, the scan ring (§25.4 F7): the pool's ring and the range notation for a marked scan are engine code, so the
+ *    routes that run the engine grew a little, and the buffer-pool sandbox also gained its Scan ring control. /learn/:id
+ *    168 → 172, /challenges 167 → 171, /tools/buffer-pool 169 → 173 (each measured + 3, rounded up).
  *  - 2026-10-05, sequential read-ahead (§25.4 F7, decided: prefetches are reads shown as `prefetch`, and a later request is a
  *    hit): the buffer pool is shared by every route that runs the engine, so /compare 175 → 179, /tools/planner 168 → 172,
  *    /tools/lsm 118 → 121 (each measured + 3, rounded up).
@@ -236,19 +239,19 @@ export const ROUTES: readonly RouteBudget[] = [
   { route: '/stages', roots: ['src/ui/StagesLayout.tsx', P('StagesIndex')], kb: 165, note: 'the stage explainers, index' },
   { route: '/stages/:id', roots: ['src/ui/StagesLayout.tsx', P('StagePage')], kb: 184, note: 'one stage explainer' },
   { route: '/learn', roots: [P('LearnPage')], kb: 169, note: 'the lesson track' },
-  { route: '/learn/:id', roots: [P('LessonPage')], kb: 168, note: 'one lesson' },
+  { route: '/learn/:id', roots: [P('LessonPage')], kb: 172, note: 'one lesson' },
   { route: '/examples', roots: [P('ExamplesPage')], kb: 115, note: 'preset queries' },
   { route: '/gallery', roots: [P('GalleryPage')], kb: 165, note: 'named moments' },
   { route: '/compare', roots: [P('ComparePage')], kb: 179, note: 'index vs scan, policy vs policy, hash vs sort, join algorithms, B+Tree vs. LSM' },
   { route: '/trace', roots: [P('TracePage')], kb: 167, note: 'the trace inspector' },
   { route: '/progress', roots: [P('ProgressPage')], kb: 171, note: 'the progress dashboard' },
-  { route: '/challenges', roots: [P('ChallengesPage')], kb: 167, note: 'challenge index' },
+  { route: '/challenges', roots: [P('ChallengesPage')], kb: 171, note: 'challenge index' },
   { route: '/challenges/:id', roots: [P('ChallengePage')], kb: 290, note: 'one challenge' },
   { route: '/settings', roots: [P('SettingsPage')], kb: 116, note: 'preferences' },
   { route: '/study', roots: [P('StudyPage')], kb: 122, note: 'the §9 study runner (unlisted); the instrument travels in the link, not the bundle (§25.4 A2)' },
   { route: '/assignments/new', roots: [P('AssignmentsNewPage')], kb: 166, note: 'assignment-link builder' },
   { route: '/tools', roots: [P('ToolsIndexPage')], kb: 116, note: 'the tools index' },
-  { route: '/tools/buffer-pool', roots: [T('BufferPoolToolPage')], kb: 169, note: 'buffer-pool sandbox' },
+  { route: '/tools/buffer-pool', roots: [T('BufferPoolToolPage')], kb: 173, note: 'buffer-pool sandbox' },
   { route: '/tools/parser', roots: [T('ParserToolPage')], kb: 168, note: 'tokenizer + parser sandbox' },
   { route: '/tools/btree', roots: [T('BTreeToolPage')], kb: 170, note: 'B+Tree sandbox' },
   { route: '/tools/page', roots: [T('PageToolPage')], kb: 166, note: 'slotted-page inspector' },

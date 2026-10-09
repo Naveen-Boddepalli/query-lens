@@ -1,11 +1,12 @@
 export { runQuery } from './runQuery.ts';
 export {
   MAX_REFERENCES,
+  parseReferenceScans,
   parseReferenceString,
   randomReferenceString,
   runBufferTrace,
 } from './bufferTrace.ts';
-export type { BufferTraceResult } from './bufferTrace.ts';
+export type { BufferTraceResult, ScanSpan } from './bufferTrace.ts';
 export {
   createJoinCompareDatabase,
   createJoinDemoDatabase,

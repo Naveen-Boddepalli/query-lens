@@ -13,7 +13,8 @@ import type { EngineOptions, Row, SqlValue, Table } from '../types.ts';
 import type { Expr } from '../parser/index.ts';
 import { lookupKeysOf } from '../planner/index.ts';
 import type { AggregateSpec, Plan, ProjectList, RangeBound } from '../planner/index.ts';
-import type { BufferPool, Heap } from '../storage/index.ts';
+import type { BufferPool, Heap, ScanRing } from '../storage/index.ts';
+import { scanUsesRing } from '../storage/index.ts';
 import type { LockManager } from '../locks/index.ts';
 import type { BPlusTree, RowPointer } from '../index/index.ts';
 import { columnsOfIndex, emitIndexLookup, emitRangeStart, nextInRange, pageCountFor, resolveClustered } from '../index/index.ts';
@@ -82,6 +83,9 @@ function seqScan(plan: Extract<Plan, { op: 'SeqScan' }>, ctx: ExecContext): Oper
   let pinnedFrame: number | null = null;
   let lockedPage: number | null = null;
   let skipped = 0;
+  // The scan's own claim on the pool (plan.md §25.4 F7). Made on the first `open` and kept across a nested-loop join's
+  // rescans, as PostgreSQL keeps its strategy across a rescan, so every pass reuses the same few frames.
+  let ring: ScanRing | undefined;
   const produced = counter(ctx, 'SeqScan', plan.table);
 
   function releasePage(): void {
@@ -100,6 +104,9 @@ function seqScan(plan: Extract<Plan, { op: 'SeqScan' }>, ctx: ExecContext): Oper
     open() {
       pageIndex = 0;
       rowIndex = 0;
+      if (ring === undefined && scanUsesRing(ctx.heap.pages.length, ctx.options)) {
+        ring = ctx.pool.beginScan(ctx.options.scanRing ?? 0);
+      }
     },
     next() {
       for (;;) {
@@ -117,7 +124,7 @@ function seqScan(plan: Extract<Plan, { op: 'SeqScan' }>, ctx: ExecContext): Oper
             `Take a shared lock on page ${String(page.pageId)} before reading its rows.`,
           );
           lockedPage = page.pageId;
-          const fetched = ctx.pool.fetch(page.pageId);
+          const fetched = ctx.pool.fetch(page.pageId, ring);
           if (!fetched) return null;
           // Held while its rows are read; released when we move on. Only an
           // unpinned frame can be evicted.
@@ -145,7 +152,13 @@ function seqScan(plan: Extract<Plan, { op: 'SeqScan' }>, ctx: ExecContext): Oper
         return row;
       }
     },
-    close: releasePage,
+    close() {
+      releasePage();
+      if (ring) {
+        ctx.pool.endScan(ring);
+        ring = undefined;
+      }
+    },
   };
 }
 

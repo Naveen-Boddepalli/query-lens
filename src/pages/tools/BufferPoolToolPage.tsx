@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import {
   createTraceProjector,
   DEFAULT_ENGINE_OPTIONS,
-  parseReferenceString,
+  parseReferenceScans,
   randomReferenceString,
   REPLACEMENT_POLICY_LABELS,
   REPLACEMENT_POLICY_NAMES,
@@ -34,6 +34,7 @@ const DEFAULT_REF = '0 1 2 3 4 0 1 2 3 4';
 const MIN_FRAMES = 2;
 const MAX_FRAMES = 8;
 const MAX_READ_AHEAD = 4;
+const MAX_SCAN_RING = 4;
 
 function readInitial() {
   const params = new URLSearchParams(typeof location === 'undefined' ? '' : location.search);
@@ -41,6 +42,7 @@ function readInitial() {
   const framesRaw = Number(params.get('frames'));
   const policyRaw = params.get('policy');
   const readAheadRaw = Number(params.get('ra'));
+  const scanRingRaw = Number(params.get('sr'));
   const policy = (REPLACEMENT_POLICY_NAMES as readonly string[]).includes(policyRaw ?? '')
     ? (policyRaw as ReplacementPolicyName)
     : 'lru';
@@ -52,6 +54,7 @@ function readInitial() {
         : 4,
     policy,
     readAhead: Number.isInteger(readAheadRaw) && readAheadRaw >= 0 && readAheadRaw <= MAX_READ_AHEAD ? readAheadRaw : 0,
+    scanRing: Number.isInteger(scanRingRaw) && scanRingRaw >= 0 && scanRingRaw <= MAX_SCAN_RING ? scanRingRaw : 0,
   };
 }
 
@@ -62,14 +65,16 @@ export function BufferPoolToolPage() {
   const [frames, setFrames] = useState(INITIAL.frames);
   const [policy, setPolicy] = useState<ReplacementPolicyName>(INITIAL.policy);
   const [readAhead, setReadAhead] = useState(INITIAL.readAhead);
+  const [scanRing, setScanRing] = useState(INITIAL.scanRing);
 
   const options = useMemo(
-    () => ({ ...DEFAULT_ENGINE_OPTIONS, bufferFrames: frames, policy, readAhead }),
-    [frames, policy, readAhead],
+    () => ({ ...DEFAULT_ENGINE_OPTIONS, bufferFrames: frames, policy, readAhead, scanRing }),
+    [frames, policy, readAhead, scanRing],
   );
 
-  const [refs, setRefs] = useState<number[]>(() => parseReferenceString(INITIAL.refInput));
-  const result = useMemo(() => runBufferTrace(refs, options), [refs, options]);
+  const [parsed, setParsed] = useState(() => parseReferenceScans(INITIAL.refInput));
+  const { refs, scans } = parsed;
+  const result = useMemo(() => runBufferTrace(refs, options, scans), [refs, scans, options]);
   const projector = useMemo(() => createTraceProjector(result.events, options), [result, options]);
   const dwells = useMemo(() => result.events.map((e) => e.dwell ?? 1), [result]);
 
@@ -85,21 +90,22 @@ export function BufferPoolToolPage() {
       params.set('frames', String(frames));
       params.set('policy', policy);
       if (readAhead > 0) params.set('ra', String(readAhead));
+      if (scanRing > 0) params.set('sr', String(scanRing));
       const next = `${location.pathname}?${params.toString()}`;
       if (next !== `${location.pathname}${location.search}`) history.replaceState(null, '', next);
     }, 250);
     return () => { window.clearTimeout(timer); };
-  }, [refInput, frames, policy, readAhead]);
+  }, [refInput, frames, policy, readAhead, scanRing]);
 
   function run() {
-    setRefs(parseReferenceString(refInput));
+    setParsed(parseReferenceScans(refInput));
     playback.reset();
   }
 
   function generate() {
     const generated = randomReferenceString(20, Math.max(frames + 2, 6));
     setRefInput(generated.join(' '));
-    setRefs(generated);
+    setParsed({ refs: generated, scans: [] });
     playback.reset();
   }
 
@@ -112,13 +118,13 @@ export function BufferPoolToolPage() {
         <Link to="/playground" className="underline underline-offset-2 hover:text-ink">
           Playground
         </Link>
-        , driven directly — with three policies the pipeline itself never uses (FIFO,
-        second-chance and the optimal bound).
+        , driven directly — with every replacement policy the engine has, and the read-ahead and
+        scan-ring options the Playground does not expose.
       </PageHeader>
 
       <div className="mt-4 flex flex-wrap items-end gap-3 rounded-xl border border-edge bg-surface-2 p-3 shadow-e1">
         <label className="flex flex-1 min-w-64 flex-col gap-1 text-label text-ink-dim">
-          Reference string (page numbers, space or comma separated)
+          Reference string (page numbers, space or comma separated; a range like 10-50 is one scan)
           <input
             type="text"
             value={refInput}
@@ -169,6 +175,20 @@ export function BufferPoolToolPage() {
             <option value={1}>1 page</option>
             <option value={2}>2 pages</option>
             <option value={4}>4 pages</option>
+          </select>
+        </label>
+
+        <label className="flex flex-col gap-1 text-label text-ink-dim">
+          Scan ring
+          <select
+            value={scanRing}
+            onChange={(e) => { setScanRing(Number(e.target.value)); }}
+            className={inputField}
+          >
+            <option value={0}>off</option>
+            <option value={2}>2 frames</option>
+            <option value={3}>3 frames</option>
+            <option value={4}>4 frames</option>
           </select>
         </label>
 
