@@ -18,7 +18,9 @@ export function execute(plan: Plan, ctx: ExecContext): Row[] {
   }
   root.close();
 
-  const { hits, misses, evictions } = ctx.pool.stats;
+  // A disk read is a miss or a page read ahead of the request: both are I/O the query paid for.
+  const { hits, evictions } = ctx.pool.stats;
+  const misses = ctx.pool.stats.misses + ctx.pool.stats.prefetches;
   // Every table this query names, including `ctx.table` itself — a chain's own cost-model recursion (plan.md
   // §25.4 C3 slice b) needs to resolve it by name again once it reaches the bottom of the chain, not just at the
   // top (see emit.ts's identical build for the fuller explanation).

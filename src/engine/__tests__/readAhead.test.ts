@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { runBufferTrace } from '../bufferTrace.ts';
+import { runQuery } from '../runQuery.ts';
+import { createSeedDatabase } from '../seed.ts';
 import { DEFAULT_ENGINE_OPTIONS } from '../types.ts';
 import type { StepEvent } from '../types.ts';
 
@@ -57,5 +59,18 @@ describe('sequential read-ahead (plan.md §25.4 F7, decided 2026-10-05)', () => 
     const prefetched = events.flatMap((e) => (e.stage === 'buffer' && e.action === 'prefetch' ? [e.pageId] : []));
     expect(Math.max(...prefetched)).toBe(pages - 1);
     expect(new Set(prefetched).size).toBe(prefetched.length);
+  });
+
+  it('a query that reads ahead reports its prefetches as disk reads, in the result it narrates', () => {
+    const result = runQuery('SELECT * FROM users', createSeedDatabase(), {
+      ...DEFAULT_ENGINE_OPTIONS,
+      readAhead: 2,
+    });
+    const reads = result.events.filter((e) => e.stage === 'buffer' && (e.action === 'load' || e.action === 'prefetch'));
+    const prefetches = reads.filter((e) => e.stage === 'buffer' && e.action === 'prefetch');
+    const final = result.events.find((e) => e.stage === 'result');
+    expect(prefetches.length).toBeGreaterThan(0);
+    // The sentence counts every page the query read, those it asked for and those read ahead of it.
+    expect(final?.label).toContain(`from ${String(reads.length)} disk reads`);
   });
 });

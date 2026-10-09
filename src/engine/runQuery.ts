@@ -95,6 +95,11 @@ function applyCostOrder(
   return reordered ? { ast: { ...ast, from: reordered.from, joins: reordered.joins }, writtenOrder: names } : { ast };
 }
 
+/** A disk read is a miss, or a page read ahead of the request (plan.md §25.4 F7) — both cost the same I/O. */
+function diskReads(pool: { stats: { misses: number; prefetches: number } }): number {
+  return pool.stats.misses + pool.stats.prefetches;
+}
+
 export function runQuery(
   sql: string,
   db: Database,
@@ -233,7 +238,7 @@ export function runQuery(
     const rows = [...table.rows, inserted];
 
     emit(
-      `1 row inserted, from ${pool.stats.misses} disk read${pool.stats.misses === 1 ? '' : 's'} and ${
+      `1 row inserted, from ${diskReads(pool)} disk read${diskReads(pool) === 1 ? '' : 's'} and ${
         pool.stats.writes
       } write${pool.stats.writes === 1 ? '' : 's'}. ${table.name} now has ${rows.length} row${
         rows.length === 1 ? '' : 's'
@@ -264,8 +269,8 @@ export function runQuery(
     const rows = table.rows.filter((r) => !removed.has(r));
 
     emit(
-      `${deleted.length} row${deleted.length === 1 ? '' : 's'} deleted, from ${pool.stats.misses} disk read${
-        pool.stats.misses === 1 ? '' : 's'
+      `${deleted.length} row${deleted.length === 1 ? '' : 's'} deleted, from ${diskReads(pool)} disk read${
+        diskReads(pool) === 1 ? '' : 's'
       } and ${pool.stats.evictions} eviction${pool.stats.evictions === 1 ? '' : 's'}. ${table.name} now has ${
         rows.length
       } row${rows.length === 1 ? '' : 's'}.`,
@@ -306,8 +311,8 @@ export function runQuery(
     const rows = table.rows.map((r) => replacements.get(r) ?? r);
 
     emit(
-      `${after.length} row${after.length === 1 ? '' : 's'} updated, from ${pool.stats.misses} disk read${
-        pool.stats.misses === 1 ? '' : 's'
+      `${after.length} row${after.length === 1 ? '' : 's'} updated, from ${diskReads(pool)} disk read${
+        diskReads(pool) === 1 ? '' : 's'
       } and ${pool.stats.evictions} eviction${pool.stats.evictions === 1 ? '' : 's'}.`,
       { stage: 'result', rows: after },
     );
