@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_ENGINE_OPTIONS, runQuery } from '../index.ts';
 import { DATASETS } from '../datasets.ts';
-import type { Database, Row } from '../types.ts';
+import type { Database } from '../types.ts';
 
 /**
  * plan.md §25.9's 2.0 checklist: "a homework-shaped query using OR, IN, LIKE, DISTINCT, HAVING and a non-unique
@@ -20,7 +20,7 @@ describe('a homework-shaped query', () => {
     const result = runQuery(sql, db, DEFAULT_ENGINE_OPTIONS);
     expect(result.error).toBeUndefined();
     const counts = new Map<string, number>();
-    for (const r of table.rows as Row[]) {
+    for (const r of table.rows) {
       const dept = r.department as string;
       const office = r.office as string;
       if (dept === 'engineering' || dept === 'sales' || office.startsWith('building-1')) {
