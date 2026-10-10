@@ -51,8 +51,14 @@ export function scanUsesRing(pages: number, options: EngineOptions): boolean {
 }
 
 export interface BufferPool {
-  /** With a `ring`, a miss is placed by the scan's own ring rather than by the replacement policy alone. */
-  fetch: (pageId: number, ring?: ScanRing) => FetchResult | null;
+  /**
+   * With a `ring`, a miss is placed by the scan's own ring rather than by the replacement policy alone. `until` is the
+   * scan's own extent — the first page number that is *not* one of the pages it is reading — and bounds read-ahead:
+   * a sequential scan prefetches only pages it will ask for. A query's pool does not know what the next page number
+   * holds (the heap's pages are followed by the indexes'), so without `until` a query's fetch reads nothing ahead.
+   * A bare reference string has no such structure and reads ahead through its whole page space.
+   */
+  fetch: (pageId: number, ring?: ScanRing, until?: number) => FetchResult | null;
   /** Starts a scan that may use at most `size` frames (clamped to the pool). Hand the result to every `fetch` it makes. */
   beginScan: (size: number) => ScanRing;
   /** Ends a scan: its frames are ordinary frames again, with nothing left of the ring to honour. */
@@ -286,12 +292,13 @@ export function createBufferPool(
    * Reads the pages after `pageId` that a sequential scan will ask for next, before it asks: each is a real disk read, so
    * it claims a frame the same way a miss does, and is recorded as `prefetch`. Pages already resident are skipped.
    */
-  function readAheadFrom(pageId: number, ring: ScanRing | undefined): void {
+  function readAheadFrom(pageId: number, ring: ScanRing | undefined, until: number | undefined): void {
     // A scan's read-ahead stays inside its ring, and leaves one slot for the page it is reading: the pages read early
     // go where the scan's own pages go, instead of to whichever frames the policy would have given up.
     const requested = options.readAhead ?? 0;
     const depth = ring?.active ? Math.min(requested, ring.size - 1) : requested;
-    for (let next = pageId + 1; next <= pageId + depth && next < pageCount; next++) {
+    const end = Math.min(pageCount, until ?? pageCount);
+    for (let next = pageId + 1; next <= pageId + depth && next < end; next++) {
       if (resident(next)) continue;
       const target = claimForRead(next, ring);
       if (!target) return;
@@ -309,7 +316,7 @@ export function createBufferPool(
     }
   }
 
-  function fetch(pageId: number, ring?: ScanRing): FetchResult | null {
+  function fetch(pageId: number, ring?: ScanRing, until?: number): FetchResult | null {
     if (!Number.isInteger(pageId) || pageId < 0 || pageId >= pageCount) return null;
 
     accessIndex += 1;
@@ -318,7 +325,10 @@ export function createBufferPool(
     lastDemand = pageId;
 
     const result = resolve(pageId, ring);
-    if (result && sequential) readAheadFrom(pageId, ring);
+    // A reference string (`lookahead` given) is all one page space and reads ahead through it; a query reads ahead only
+    // for a scan that has said where its pages end, or it would prefetch the index pages that follow the heap's.
+    const mayReadAhead = lookahead !== undefined || until !== undefined;
+    if (result && sequential && mayReadAhead) readAheadFrom(pageId, ring, until);
     return result;
   }
 

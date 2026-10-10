@@ -86,6 +86,7 @@ function seqScan(plan: Extract<Plan, { op: 'SeqScan' }>, ctx: ExecContext): Oper
   // The scan's own claim on the pool (plan.md §25.4 F7). Made on the first `open` and kept across a nested-loop join's
   // rescans, as PostgreSQL keeps its strategy across a rescan, so every pass reuses the same few frames.
   let ring: ScanRing | undefined;
+  const lastHeapPage = ctx.heap.pages[ctx.heap.pages.length - 1]?.pageId ?? -1;
   const produced = counter(ctx, 'SeqScan', plan.table);
 
   function releasePage(): void {
@@ -124,7 +125,8 @@ function seqScan(plan: Extract<Plan, { op: 'SeqScan' }>, ctx: ExecContext): Oper
             `Take a shared lock on page ${String(page.pageId)} before reading its rows.`,
           );
           lockedPage = page.pageId;
-          const fetched = ctx.pool.fetch(page.pageId, ring);
+          // The heap's pages end where this table's last page does: that is the scan's extent for read-ahead.
+          const fetched = ctx.pool.fetch(page.pageId, ring, lastHeapPage + 1);
           if (!fetched) return null;
           // Held while its rows are read; released when we move on. Only an
           // unpinned frame can be evicted.

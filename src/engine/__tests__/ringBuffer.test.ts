@@ -20,8 +20,8 @@ function poolWith(options: Partial<EngineOptions>, pages = 100) {
     { ...DEFAULT_ENGINE_OPTIONS, policy: 'lru', bufferFrames: 8, ...options },
     emit,
   );
-  const touch = (page: number, ring?: ScanRing) => {
-    const fetched = pool.fetch(page, ring);
+  const touch = (page: number, ring?: ScanRing, until?: number) => {
+    const fetched = pool.fetch(page, ring, until);
     if (fetched) pool.unpin(fetched.frameId);
     return fetched;
   };
@@ -47,7 +47,9 @@ function scanThrough(ringSize: number, hot = HOT, options: Partial<EngineOptions
   const run = poolWith(options);
   for (const page of hot) run.touch(page);
   const ring = ringSize > 0 ? run.pool.beginScan(ringSize) : undefined;
-  for (const page of SCAN) run.touch(page, ring);
+  // The scan's extent is its own last page: what the executor's SeqScan says, so that read-ahead stays inside it.
+  const until = SCAN[SCAN.length - 1]! + 1;
+  for (const page of SCAN) run.touch(page, ring, until);
   if (ring) run.pool.endScan(ring);
   return run;
 }
@@ -152,9 +154,11 @@ describe('a scan through a ring (the pool itself)', () => {
     const events = run.drain();
     expect(count(events, 'prefetch')).toBeGreaterThan(0);
     expect(run.resident().filter((p) => hot.includes(p))).toEqual(hot);
-    // Three frames hold everything that is not hot: the page being read and what was read ahead of it, which may run
-    // past the scan's last page — nothing knows the scan is about to end.
-    expect(run.resident().filter((p) => !hot.includes(p))).toHaveLength(3);
+    // Three frames hold everything that is not hot: the page being read and what was read ahead of it, and none of it is
+    // past the scan's last page, which the scan said was where its pages end.
+    const others = run.resident().filter((p) => !hot.includes(p));
+    expect(others).toHaveLength(3);
+    expect(Math.max(...others)).toBeLessThan(SCAN[SCAN.length - 1]! + 1);
   });
 
   it('behaves exactly as before when no scan ever begins', () => {

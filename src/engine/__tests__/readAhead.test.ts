@@ -61,6 +61,30 @@ describe('sequential read-ahead (plan.md §25.4 F7, decided 2026-10-05)', () => 
     expect(new Set(prefetched).size).toBe(prefetched.length);
   });
 
+  it('a query reads ahead inside the heap and no further: it never prefetches an index page', () => {
+    const db = createSeedDatabase();
+    const heapPages = Math.ceil(db.tables.users!.rows.length / DEFAULT_ENGINE_OPTIONS.rowsPerPage);
+    for (const readAhead of [1, 2, 4]) {
+      const result = runQuery('SELECT * FROM users', db, { ...DEFAULT_ENGINE_OPTIONS, readAhead });
+      const touched = result.events.flatMap((e) =>
+        e.stage === 'buffer' && (e.action === 'load' || e.action === 'prefetch') ? [e.pageId] : [],
+      );
+      // Each of the heap's pages is read once, as a request or as a prefetch, and nothing else is.
+      expect(touched.sort((a, b) => a - b)).toEqual(Array.from({ length: heapPages }, (_, i) => i));
+    }
+  });
+
+  it('a query that is not a sequential scan reads nothing ahead, even where its pages come in order', () => {
+    // A range through the index visits consecutive heap pages, one request after another: sequential in page numbers,
+    // not a scan of the heap, and not something the pool may read ahead through (the pages after the last are the
+    // index's).
+    for (const sql of ['SELECT * FROM users WHERE id = 5', 'SELECT * FROM users WHERE id BETWEEN 3 AND 9']) {
+      const result = runQuery(sql, createSeedDatabase(), { ...DEFAULT_ENGINE_OPTIONS, readAhead: 4 });
+      expect(result.error).toBeUndefined();
+      expect(result.events.some((e) => e.stage === 'buffer' && e.action === 'prefetch')).toBe(false);
+    }
+  });
+
   it('a query that reads ahead reports its prefetches as disk reads, in the result it narrates', () => {
     const result = runQuery('SELECT * FROM users', createSeedDatabase(), {
       ...DEFAULT_ENGINE_OPTIONS,
