@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_PAGES,
   MAX_WAL_STEPS,
+  comparePolicies,
   formatWalStep,
   parseWalStep,
   runWal,
@@ -264,11 +265,12 @@ describe('whatever the script', () => {
   );
   const scripts = fc.array(step, { maxLength: 30 });
   const frames = fc.integer({ min: 1, max: 4 });
+  const policy = fc.record({ steal: fc.boolean(), force: fc.boolean() });
 
   it('with the rule enforced, no page on disk is ever ahead of the durable log', () => {
     fc.assert(
-      fc.property(scripts, frames, (steps, n) => {
-        const run = runWal(steps, { frames: n });
+      fc.property(scripts, frames, policy, (steps, n, p) => {
+        const run = runWal(steps, { frames: n, ...p });
         for (const r of run.steps) {
           expect(r.violations).toEqual([]);
           for (const p of r.state.disk) expect(p.pageLSN).toBeLessThanOrEqual(r.state.flushedLSN);
@@ -280,8 +282,8 @@ describe('whatever the script', () => {
 
   it('the durable log is a gapless prefix and the buffer carries on from it', () => {
     fc.assert(
-      fc.property(scripts, frames, fc.boolean(), (steps, n, enforce) => {
-        const run = runWal(steps, { frames: n, enforce });
+      fc.property(scripts, frames, fc.boolean(), policy, (steps, n, enforce, p) => {
+        const run = runWal(steps, { frames: n, enforce, ...p });
         for (const r of run.steps) {
           const s = r.state;
           const lsns = [...s.log, ...s.logBuffer].map((x) => x.lsn);
@@ -296,8 +298,8 @@ describe('whatever the script', () => {
 
   it('a commit is durable the moment it returns', () => {
     fc.assert(
-      fc.property(scripts, frames, (steps, n) => {
-        const run = runWal(steps, { frames: n });
+      fc.property(scripts, frames, policy, (steps, n, p) => {
+        const run = runWal(steps, { frames: n, ...p });
         for (const r of run.steps) {
           if (r.step.op !== 'commit' || r.error !== undefined) continue;
           const commit = r.state.log.find((x) => x.type === 'commit' && x.txn === (r.step as { txn: string }).txn);
@@ -311,8 +313,8 @@ describe('whatever the script', () => {
 
   it('each transaction’s records chain back through prevLSN, strictly downwards, to its first', () => {
     fc.assert(
-      fc.property(scripts, frames, (steps, n) => {
-        const s = runWal(steps, { frames: n }).final;
+      fc.property(scripts, frames, policy, (steps, n, p) => {
+        const s = runWal(steps, { frames: n, ...p }).final;
         const records = allRecords(s);
         const byLsn = new Map(records.map((r) => [r.lsn, r]));
         for (const t of s.txns) {
@@ -332,8 +334,8 @@ describe('whatever the script', () => {
 
   it('what the database holds is what the newest record for each cell says, rollbacks included', () => {
     fc.assert(
-      fc.property(scripts, frames, (steps, n) => {
-        const s = runWal(steps, { frames: n }).final;
+      fc.property(scripts, frames, policy, (steps, n, p) => {
+        const s = runWal(steps, { frames: n, ...p }).final;
         const expected: Record<string, number> = {};
         for (const cells of Object.values(DEFAULT_PAGES)) Object.assign(expected, cells);
         for (const r of allRecords(s)) {
@@ -352,5 +354,242 @@ describe('whatever the script', () => {
     // Not a property: a witness. The rule is not vacuous — turning it off really does break the invariant.
     const run = runWal(script('begin T1', 'set T1 a = 1', 'write page 1'), { enforce: false });
     expect(run.final.disk.find((p) => p.page === 1)!.pageLSN).toBeGreaterThan(run.final.flushedLSN);
+  });
+});
+
+describe('steal and force (plan.md §25.4 E2)', () => {
+  const crashAt = (run: ReturnType<typeof runWal>, i = run.steps.length - 1) => run.steps[i]!.crash;
+
+  describe('steal', () => {
+    const script1 = script('begin T1', 'set T1 a = 1', 'read page 2', 'read page 3');
+
+    it('lets the pool write out a page with an uncommitted change, and a crash then finds it on disk', () => {
+      const run = runWal(script1, { frames: 2, steal: true });
+      expect(crashAt(run).undo).toEqual([{ page: 1, key: 'a', onDisk: 1, committed: 10, by: 'T1', logged: true }]);
+      expect(crashAt(run).redo).toEqual([]);
+    });
+
+    it('which is only recoverable because the log was flushed first', () => {
+      const run = runWal(script('begin T1', 'set T1 a = 1', 'write page 1'), { enforce: false });
+      expect(crashAt(run).undo).toEqual([{ page: 1, key: 'a', onDisk: 1, committed: 10, by: 'T1', logged: false }]);
+      expect(crashAt(run).lostRecords).toBe(1);
+    });
+
+    it('a rolled-back change that reached disk still has to be undone there, until the page is written again', () => {
+      const run = runWal(script('begin T1', 'set T1 a = 1', 'write page 1', 'abort T1'));
+      expect(crashAt(run).undo).toMatchObject([{ key: 'a', onDisk: 1, committed: 10, by: 'T1' }]);
+      const healed = runWal(script('begin T1', 'set T1 a = 1', 'write page 1', 'abort T1', 'write page 1'));
+      expect(crashAt(healed).undo).toEqual([]);
+    });
+  });
+
+  describe('no-steal', () => {
+    it('will not write out a page that holds an uncommitted change, on request', () => {
+      const run = runWal(script('begin T1', 'set T1 a = 1', 'write page 1'), { steal: false });
+      const step = run.steps[2]!;
+      expect(step.error).toContain("No-steal: page 1 holds T1's uncommitted change");
+      expect(step.state).toEqual(run.steps[1]!.state);
+    });
+
+    it('keeps such a page in the pool, and refuses what would need its frame', () => {
+      const run = runWal(script('begin T1', 'set T1 a = 1', 'set T1 c = 2', 'read page 3'), { frames: 2, steal: false });
+      const step = run.steps[3]!;
+      expect(step.error).toContain('No-steal: every frame holds an uncommitted change (T1)');
+      expect(step.state).toEqual(run.steps[2]!.state);
+      expect(crashAt(run).undo).toEqual([]);
+    });
+
+    it('still makes room by dropping a page that holds nothing uncommitted', () => {
+      const run = runWal(script('begin T1', 'set T1 a = 1', 'read page 2', 'read page 3'), { frames: 2, steal: false });
+      expect(run.steps.every((r) => r.error === undefined)).toBe(true);
+      // Page 2 was clean, so it went; page 1, with T1's change, did not.
+      expect(run.final.pool.map((f) => f?.page).sort()).toEqual([1, 3]);
+      expect(crashAt(run).undo).toEqual([]);
+    });
+
+    it('lets the page out once its transaction has ended', () => {
+      const run = runWal(script('begin T1', 'set T1 a = 1', 'commit T1', 'write page 1'), { steal: false });
+      expect(run.steps[3]!.error).toBeUndefined();
+      // The commit already made the log durable far enough, so there is nothing to flush first.
+      expect(run.steps[3]!.effects.map((e) => e.kind)).toEqual(['page-write']);
+    });
+
+    it('a rollback never needed the disk: the page was never allowed out', () => {
+      const run = runWal(script('begin T1', 'set T1 a = 1', 'abort T1', 'write page 1'), { steal: false });
+      expect(crashAt(run, 2).undo).toEqual([]);
+      expect(crashAt(run, 2).redo).toEqual([]);
+    });
+  });
+
+  describe('force', () => {
+    const script2 = script('begin T1', 'set T1 a = 1', 'set T1 c = 2', 'commit T1');
+
+    it('writes every page the transaction changed as part of the commit, after the log', () => {
+      const run = runWal(script2, { force: true });
+      const commit = run.steps[3]!;
+      expect(commit.effects.filter((e) => e.kind !== 'log-append').map((e) => e.kind)).toEqual([
+        'log-flush',
+        'page-write',
+        'page-write',
+      ]);
+      expect(commit.effects.filter((e) => e.kind === 'page-write').map((e) => (e as { reason: string }).reason)).toEqual([
+        'force',
+        'force',
+      ]);
+      expect(crashAt(run).redo).toEqual([]);
+      expect(run.final.pool.every((f) => f === null || f.recLSN === null)).toBe(true);
+    });
+
+    it('no-force leaves the same pages owing: a crash after the commit would have to redo them', () => {
+      const run = runWal(script2, { force: false });
+      expect(crashAt(run).redo.map((c) => `${c.key}:${String(c.onDisk)}→${String(c.committed)} by ${c.by}`)).toEqual([
+        'a:10→1 by T1',
+        'c:30→2 by T1',
+      ]);
+      expect(crashAt(run).undo).toEqual([]);
+    });
+
+    it('before the commit, nothing is owed in either case', () => {
+      for (const force of [true, false]) {
+        const run = runWal(script2, { force });
+        expect(crashAt(run, 2).redo).toEqual([]);
+      }
+    });
+
+    it('under no-steal waits to write a page that another running transaction has also changed', () => {
+      const run = runWal(
+        script('begin T1', 'begin T2', 'set T1 a = 1', 'set T2 b = 2', 'commit T1', 'commit T2'),
+        { force: true, steal: false },
+      );
+      const afterT1 = run.steps[4]!;
+      expect(afterT1.effects.some((e) => e.kind === 'page-write')).toBe(false);
+      expect(afterT1.notes.join(' ')).toContain("T2's uncommitted change");
+      // T1 committed, but its change is still only in the pool: a crash now has it to redo.
+      expect(afterT1.crash.redo.map((c) => c.key)).toEqual(['a']);
+      // T2's commit is what lets the page go.
+      const afterT2 = run.steps[5]!;
+      expect(afterT2.effects.filter((e) => e.kind === 'page-write')).toHaveLength(1);
+      expect(afterT2.crash.redo).toEqual([]);
+    });
+
+    it('and writes it when the other transaction rolls back instead, which is not itself a force', () => {
+      const run = runWal(
+        script('begin T1', 'begin T2', 'set T1 a = 1', 'set T2 b = 2', 'commit T1', 'abort T2'),
+        { force: true, steal: false },
+      );
+      const afterAbort = run.steps[5]!;
+      expect(afterAbort.effects.filter((e) => e.kind === 'page-write')).toEqual([
+        { kind: 'page-write', page: 1, pageLSN: afterAbort.state.pool.find((f) => f?.page === 1)!.pageLSN, reason: 'force' },
+      ]);
+      expect(afterAbort.crash.redo).toEqual([]);
+      expect(afterAbort.crash.undo).toEqual([]);
+      expect(run.final.disk.find((p) => p.page === 1)!.cells).toEqual({ a: 1, b: 20 });
+    });
+
+    it('under steal writes the shared page at once, T2’s uncommitted change with it', () => {
+      const run = runWal(
+        script('begin T1', 'begin T2', 'set T1 a = 1', 'set T2 b = 2', 'commit T1'),
+        { force: true, steal: true },
+      );
+      const afterT1 = run.steps[4]!;
+      expect(afterT1.effects.filter((e) => e.kind === 'page-write')).toHaveLength(1);
+      expect(afterT1.crash.redo).toEqual([]);
+      expect(afterT1.crash.undo.map((c) => `${c.key} by ${c.by}`)).toEqual(['b by T2']);
+    });
+  });
+
+  describe('comparing the four', () => {
+    const steps = script('begin T1', 'set T1 a = 1', 'set T1 c = 2', 'set T1 e = 3', 'commit T1');
+    const by = (frames: number) => {
+      const out = comparePolicies(steps, { frames });
+      const pick = (steal: boolean, force: boolean) => out.find((o) => o.steal === steal && o.force === force)!;
+      return { pick };
+    };
+
+    it('only force pays for pages inside the commit, and only no-force owes them afterwards', () => {
+      const { pick } = by(4);
+      expect(pick(true, false)).toMatchObject({ commitWrites: 0, endRedo: 3, endUndo: 0, logForces: 1 });
+      expect(pick(true, true)).toMatchObject({ commitWrites: 3, endRedo: 0, endUndo: 0, logForces: 1 });
+      expect(pick(false, false)).toMatchObject({ commitWrites: 0, endRedo: 3, worstUndo: 0 });
+      expect(pick(false, true)).toMatchObject({ commitWrites: 3, endRedo: 0, worstUndo: 0 });
+    });
+
+    it('only steal ever owes an undo, and only when the pool is small', () => {
+      const small = by(2);
+      expect(small.pick(true, false).worstUndo).toBeGreaterThan(0);
+      expect(small.pick(true, true).worstUndo).toBeGreaterThan(0);
+      expect(small.pick(false, false).worstUndo).toBe(0);
+      expect(small.pick(false, false).refused).toBeGreaterThan(0);
+      const large = by(4);
+      expect(large.pick(true, false).worstUndo).toBe(0);
+    });
+  });
+
+  describe('whatever the script', () => {
+    const key = fc.constantFrom('a', 'b', 'c', 'd', 'e', 'f', 'g', 'h');
+    const txn = fc.constantFrom('T1', 'T2', 'T3');
+    const step: fc.Arbitrary<WalStep> = fc.oneof(
+      txn.map((t): WalStep => ({ op: 'begin', txn: t })),
+      fc
+        .record({ txn, key, value: fc.integer({ min: 0, max: 99 }) })
+        .map(({ txn: t, key: k, value }): WalStep => ({ op: 'set', txn: t, key: k, value })),
+      txn.map((t): WalStep => ({ op: 'commit', txn: t })),
+      txn.map((t): WalStep => ({ op: 'abort', txn: t })),
+      fc.constant<WalStep>({ op: 'flush-log' }),
+      fc.integer({ min: 1, max: 4 }).map((page): WalStep => ({ op: 'write-page', page })),
+      fc.integer({ min: 1, max: 4 }).map((page): WalStep => ({ op: 'read-page', page })),
+    );
+    const scripts = fc.array(step, { maxLength: 30 });
+    const frames = fc.integer({ min: 1, max: 4 });
+
+    it('under no-steal no uncommitted value is ever on disk', () => {
+      fc.assert(
+        fc.property(scripts, frames, fc.boolean(), fc.boolean(), (steps, n, force, enforce) => {
+          const run = runWal(steps, { frames: n, steal: false, force, enforce });
+          for (const r of run.steps) expect(r.crash.undo).toEqual([]);
+        }),
+        { numRuns: 500 },
+      );
+    });
+
+    it('under force and steal no committed value is ever missing from disk', () => {
+      fc.assert(
+        fc.property(scripts, frames, fc.boolean(), (steps, n, enforce) => {
+          const run = runWal(steps, { frames: n, steal: true, force: true, enforce });
+          for (const r of run.steps) expect(r.crash.redo).toEqual([]);
+        }),
+        { numRuns: 500 },
+      );
+    });
+
+    it('a step a policy refuses changes nothing', () => {
+      fc.assert(
+        fc.property(scripts, frames, fc.boolean(), fc.boolean(), (steps, n, steal, force) => {
+          const run = runWal(steps, { frames: n, steal, force });
+          let before = run.initial;
+          for (const r of run.steps) {
+            if (r.error !== undefined) {
+              expect(r.state).toEqual(before);
+              expect(r.effects).toEqual([]);
+            }
+            before = r.state;
+          }
+        }),
+        { numRuns: 300 },
+      );
+    });
+
+    it('the policies change when pages are written, never what is logged', () => {
+      fc.assert(
+        fc.property(scripts, frames, (steps, n) => {
+          const outcomes = comparePolicies(steps, { frames: n });
+          // A step no-steal refuses is not run, so only scripts nobody refused are comparable.
+          fc.pre(outcomes.every((o) => o.refused === 0));
+          const logs = outcomes.map((o) => JSON.stringify([...o.run.final.log, ...o.run.final.logBuffer]));
+          expect(new Set(logs).size).toBe(1);
+        }),
+        { numRuns: 300 },
+      );
+    });
   });
 });

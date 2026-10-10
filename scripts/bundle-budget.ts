@@ -207,6 +207,9 @@ const T = (name: string): string => `src/pages/tools/${name}.tsx`;
  *  - 2026-10-04, latch crabbing (§25.4 F5): a new route, /tools/latch-crabbing (163.5 kB measured + 3, rounded
  *    to 167). Unlike the standalone sandboxes it drives the REAL engine B+Tree (`engine/index/btree.ts`, the same
  *    code /tools/btree uses), so it pays the shared engine chunk the same way /tools/btree does (ceiling 167).
+ *  - 2026-10-10, steal and force (§25.4 E2): /tools/wal 122 → 125 (measured 121.6 + 3, rounded up). The two policy
+ *    toggles, the crash-image panel and the four-way comparison are all that page's own; the model grew inside the
+ *    same standalone module, so no other route moved.
  *  - 2026-10-10, the write-ahead log (§25.4 E1): a new route, /tools/wal (118.9 kB measured + 3, rounded to 122). It
  *    is a self-contained model (`engine/recovery/wal.ts` imports nothing from the engine), so it does not touch the
  *    shared engine chunk and no other route moved.
@@ -288,7 +291,7 @@ export const ROUTES: readonly RouteBudget[] = [
   { route: '/tools/planner', roots: [T('PlannerToolPage')], kb: 172, note: 'planner sandbox' },
   { route: '/tools/locks', roots: [T('LocksToolPage')], kb: 117, note: 'lock simulator' },
   { route: '/tools/isolation', roots: [T('IsolationToolPage')], kb: 177, note: 'the Hermitage isolation matrix (both engines, computed)' },
-  { route: '/tools/wal', roots: [T('WalToolPage')], kb: 122, note: 'write-ahead log: a pool, a disk, a log and the rule between them' },
+  { route: '/tools/wal', roots: [T('WalToolPage')], kb: 125, note: 'write-ahead log: a pool, a disk, a log and the rule between them' },
   { route: '/tools/concurrency', roots: [T('ConcurrencyToolPage')], kb: 182, note: 'one schedule under five concurrency-control protocols, each really run' },
   { route: '/tools/schedule', roots: [T('ScheduleToolPage')], kb: 181, note: 'transaction schedules (the engine, a shared database, two sessions)' },
   { route: '/tools/grammar', roots: [T('GrammarToolPage')], kb: 116, note: 'the SQL grammar diagram' },

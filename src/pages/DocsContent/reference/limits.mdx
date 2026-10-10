@@ -351,10 +351,22 @@ index entries of the rows it touches.
 - **A cell changed by a transaction that has not ended is its alone** until it does — strict two-phase locking in one
   rule, so that a rollback never has to undo over someone else's change. A second transaction asking for it is
   refused, not made to wait; there is no concurrency in this script.
-- **Not yet:** a crash, checkpoints and recovery (E3), the steal/no-steal and force/no-force choices (E2: here a
-  dirty page of an uncommitted transaction may be written, which is *steal*, and a commit does not write its pages,
-  which is *no-force* — the combination ARIES is built for, but not yet a choice), and any storage but whole-page
-  writes. There are no inserts or deletes, only changes to existing cells, and no savepoints.
+- **Steal and force are choices, and each has a price you can see** (plan.md §25.4 E2). **Steal** lets the pool write a
+  page that holds an uncommitted change, which frees the frame and leaves a change on disk that nobody committed:
+  after a crash it has to be **undone**, so the log must carry the old value. **No-steal** pins such a page until its
+  transaction ends, so there is never anything to undo — and with two frames, a transaction that has changed two
+  pages cannot read a third (the step is refused). **Force** writes every page a transaction changed inside its
+  commit, so no committed change is ever missing from disk and nothing is **redone**, at the price of those writes
+  in every commit. **No-force** commits with one log write and *owes* the pages. The page computes the consequence
+  for any step as a *crash image*: each cell on disk that no committed transaction wrote (undo), and each committed
+  value that never reached disk (redo). Under no-steal the first is empty at every step, and under steal with force
+  the second is, which the tests hold over random scripts. Two details a textbook skips: the log is not forced less
+  because of force (it is forced first, then the pages); and under *force with no-steal* a page that another running
+  transaction has also changed cannot be written at the first commit, so its write waits until that transaction
+  ends — page-grained logging makes force and no-steal at odds, which record-level logging avoids.
+- **Not yet:** a crash, checkpoints and recovery (E3) — the *crash image* says what recovery would have to do, and
+  nothing yet does it — and any storage but whole-page writes. There are no inserts or deletes, only changes to
+  existing cells, and no savepoints.
 
 ## SQL
 

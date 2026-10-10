@@ -17,6 +17,15 @@
  *    since it was last written (**recLSN**);
  *  - `COMMIT` forces the log through the commit record, and nothing else about a commit touches a data page;
  *  - rolling back writes a **compensation log record** (CLR) for every change it undoes, so undoing is itself logged.
+ *
+ * Two policies decide how pages and transactions interact (plan.md §25.4 E2), and each has a price you can see:
+ *  - **steal**: the pool may write out a page that holds an *uncommitted* change. It frees the frame, and means that a
+ *    crash can find a change on disk that nobody committed, which recovery must **undo**. **No-steal** never does: a
+ *    page with an uncommitted change is pinned until its transaction ends, so a big transaction needs a big pool.
+ *  - **force**: a commit writes every page the transaction changed. A crash then never finds a committed change
+ *    missing from disk, so nothing has to be **redone** — at the price of random page writes inside every commit.
+ *    **No-force** commits with one sequential log write, and owes the pages: recovery redoes them.
+ * `crashImage` is the consequence, computed: what a crash at this very moment would find.
  */
 
 export type PageId = number;
@@ -50,6 +59,13 @@ export interface WalOptions {
    * pageLSN. Off, the page is written anyway and the run says what that would have cost — the point of the rule.
    */
   enforce: boolean;
+  /**
+   * Whether the pool may write a page that holds an uncommitted change. Off (no-steal), such a page is pinned until its
+   * transaction ends, and a step that would need its frame is refused. Default on, as ARIES assumes.
+   */
+  steal: boolean;
+  /** Whether a commit writes every page its transaction changed. Default off (no-force), as ARIES assumes. */
+  force: boolean;
   /** The pages on disk at the start, as cells by name. A key lives on exactly one page. */
   pages: Record<PageId, Record<string, Cell>>;
 }
@@ -63,7 +79,7 @@ export const DEFAULT_PAGES: Record<PageId, Record<string, Cell>> = {
 
 export const MAX_WAL_STEPS = 40;
 
-export const DEFAULT_WAL_OPTIONS: WalOptions = { frames: 3, enforce: true, pages: DEFAULT_PAGES };
+export const DEFAULT_WAL_OPTIONS: WalOptions = { frames: 3, enforce: true, steal: true, force: false, pages: DEFAULT_PAGES };
 
 export interface FrameState {
   slot: number;
@@ -73,6 +89,8 @@ export interface FrameState {
   pageLSN: number;
   /** LSN of the first record that dirtied it since it was last written; null while clean. */
   recLSN: number | null;
+  /** The transactions, still running, that have changed something on this page: its uncommitted changes are theirs. */
+  holders: string[];
 }
 
 export interface DiskPageState {
@@ -108,9 +126,32 @@ export type WalEffect =
   | { kind: 'log-flush'; from: number; to: number; reason: 'commit' | 'log-before-data' | 'explicit' }
   | { kind: 'page-fetch'; page: PageId; hit: boolean; slot: number }
   | { kind: 'page-evict'; page: PageId; dirty: boolean; slot: number }
-  | { kind: 'page-write'; page: PageId; pageLSN: number; reason: 'eviction' | 'background' }
+  | { kind: 'page-write'; page: PageId; pageLSN: number; reason: 'eviction' | 'background' | 'force' }
   /** The rule is off and a page went to disk ahead of its log. */
   | { kind: 'rule-violated'; page: PageId; pageLSN: number; flushedLSN: number };
+
+/** A cell whose value on disk is not the value a committed transaction left. */
+export interface CrashCell {
+  page: PageId;
+  key: string;
+  onDisk: Cell;
+  /** What recovery has to make it: the newest committed value. */
+  committed: Cell;
+  /** The transaction whose change is on disk (to undo) or whose commit is missing from disk (to redo). */
+  by: string;
+  /** For an undo: whether the log record that would say how to undo it is durable. A page written ahead of its log has none. */
+  logged: boolean;
+}
+
+/** What a crash at this moment would find: the consequence of the steal and force choices. */
+export interface CrashImage {
+  /** Values on disk that no committed transaction wrote — **steal** puts them there. Recovery must undo each. */
+  undo: CrashCell[];
+  /** Committed values that never reached disk — **no-force** leaves them in the pool. Recovery must redo each. */
+  redo: CrashCell[];
+  /** Records still in the log buffer: gone with the machine. */
+  lostRecords: number;
+}
 
 export interface WalStepResult {
   index: number;
@@ -123,6 +164,8 @@ export interface WalStepResult {
   state: WalState;
   /** Everything wrong with `state` as a log-before-data matter: empty whenever the rule is enforced. */
   violations: string[];
+  /** What a crash right after this step would find. */
+  crash: CrashImage;
 }
 
 export interface WalRun {
@@ -141,6 +184,108 @@ export function walViolations(state: WalState): string[] {
       (p) =>
         `Page ${String(p.page)} on disk carries a change from LSN ${String(p.pageLSN)}, but the log is durable only through LSN ${String(state.flushedLSN)}: after a crash nothing could say what that change was, or undo it.`,
     );
+}
+
+/**
+ * What a crash at this moment would find (plan.md §25.4 E2). The database a recovery must produce is the initial one
+ * with every *committed* transaction's changes applied in log order, and a transaction is committed when its commit
+ * record is durable. Each cell on disk is then either right, or:
+ *  - holding a value an uncommitted transaction wrote (it got there by **steal**): **undo**; or
+ *  - behind a committed change that never reached the disk (**no-force**): **redo**.
+ */
+export function crashImage(state: WalState, initial: Record<PageId, Record<string, Cell>>): CrashImage {
+  const records = [...state.log, ...state.logBuffer];
+  const committedTxns = new Set(state.log.filter((r) => r.type === 'commit').map((r) => r.txn));
+  const committedValue: Record<string, Cell> = {};
+  const committedBy: Record<string, string> = {};
+  for (const cells of Object.values(initial)) Object.assign(committedValue, cells);
+  for (const r of state.log) {
+    if (r.type === 'update' && committedTxns.has(r.txn)) {
+      committedValue[r.key] = r.after;
+      committedBy[r.key] = r.txn;
+    }
+  }
+  const undo: CrashCell[] = [];
+  const redo: CrashCell[] = [];
+  for (const p of state.disk) {
+    for (const [key, onDisk] of Object.entries(p.cells)) {
+      const committed = committedValue[key]!;
+      if (onDisk === committed) continue;
+      // The record that explains what is on disk: the newest change to this cell that the page on disk includes.
+      let explains: LogRecord | undefined;
+      for (const r of records) {
+        if ((r.type === 'update' || r.type === 'clr') && r.key === key && r.page === p.page && r.lsn <= p.pageLSN) {
+          explains = r;
+        }
+      }
+      if (explains && !committedTxns.has(explains.txn)) {
+        undo.push({ page: p.page, key, onDisk, committed, by: explains.txn, logged: explains.lsn <= state.flushedLSN });
+      } else {
+        redo.push({ page: p.page, key, onDisk, committed, by: committedBy[key] ?? '?', logged: true });
+      }
+    }
+  }
+  return { undo, redo, lostRecords: state.logBuffer.length };
+}
+
+/** One of the four steal/force combinations, run on a script, with what it cost and what it left owing. */
+export interface PolicyOutcome {
+  steal: boolean;
+  force: boolean;
+  run: WalRun;
+  /** Data pages written inside commits — what force charges. */
+  commitWrites: number;
+  /** Data pages written otherwise: by the writer, or to make room. */
+  otherWrites: number;
+  /** Times the log was forced to disk. */
+  logForces: number;
+  /** Steps no-steal refused: a page it would not write out, or a frame it could not free. */
+  refused: number;
+  /** The most cells a crash at any single step would have left needing an undo, and a redo. */
+  worstUndo: number;
+  worstRedo: number;
+  /** The same, for a crash after the last step. */
+  endUndo: number;
+  endRedo: number;
+}
+
+/** The same script under steal/no-steal × force/no-force, in that order: (steal, no-force) first. */
+export function comparePolicies(steps: readonly WalStep[], given: Partial<WalOptions> = {}): PolicyOutcome[] {
+  const combos: [boolean, boolean][] = [
+    [true, false],
+    [true, true],
+    [false, false],
+    [false, true],
+  ];
+  return combos.map(([steal, force]) => {
+    const run = runWal(steps, { ...given, steal, force });
+    let commitWrites = 0;
+    let otherWrites = 0;
+    let logForces = 0;
+    for (const r of run.steps) {
+      for (const e of r.effects) {
+        if (e.kind === 'page-write') {
+          if (e.reason === 'force') commitWrites += 1;
+          else otherWrites += 1;
+        } else if (e.kind === 'log-flush') logForces += 1;
+      }
+    }
+    const crashes = [run.steps.at(-1)?.crash, ...run.steps.map((r) => r.crash)].filter((c) => c !== undefined);
+    const end = run.steps.at(-1)?.crash;
+    return {
+      steal,
+      force,
+      run,
+      commitWrites,
+      otherWrites,
+      logForces,
+      refused: run.steps.filter((r) => r.error?.startsWith('No-steal')).length,
+      worstUndo: Math.max(0, ...crashes.map((c) => c.undo.length)),
+      worstRedo: Math.max(0, ...crashes.map((c) => c.redo.length)),
+      endUndo: end?.undo.length ?? 0,
+      endRedo: end?.redo.length ?? 0,
+    };
+  });
 }
 
 /** The cells as text, for a table cell or a note. */
@@ -240,7 +385,7 @@ export function runWal(steps: readonly WalStep[], given: Partial<WalOptions> = {
   let notes: string[] = [];
 
   const snapshot = (): WalState => ({
-    pool: pool.map((f) => (f ? { ...f, cells: { ...f.cells } } : null)),
+    pool: pool.map((f) => (f ? { ...f, cells: { ...f.cells }, holders: [...f.holders] } : null)),
     disk: [...disk.entries()]
       .sort((a, b) => a[0] - b[0])
       .map(([page, p]) => ({ page, cells: { ...p.cells }, pageLSN: p.pageLSN })),
@@ -280,7 +425,7 @@ export function runWal(steps: readonly WalStep[], given: Partial<WalOptions> = {
     effects.push({ kind: 'log-flush', from, to, reason });
   }
 
-  function writePage(frame: FrameState, reason: 'eviction' | 'background'): void {
+  function writePage(frame: FrameState, reason: 'eviction' | 'background' | 'force'): void {
     const need = frame.pageLSN;
     if (need > flushedLSN) {
       if (options.enforce) {
@@ -301,9 +446,16 @@ export function runWal(steps: readonly WalStep[], given: Partial<WalOptions> = {
     notes.push(`Page ${String(frame.page)} is written to disk (pageLSN ${String(frame.pageLSN)}).`);
   }
 
-  function fetch(page: PageId): FrameState {
-    clock += 1;
+  /**
+   * The frame holding `page`, reading it in if need be. Null — with nothing done — when no-steal leaves no frame free:
+   * every one holds an uncommitted change, and none of those may be written out to make room.
+   */
+  function fetch(page: PageId): FrameState | null {
     const resident = pool.findIndex((f) => f?.page === page);
+    if (resident < 0 && !options.steal && pool.every((f) => f !== null && f.holders.length > 0)) {
+      return null;
+    }
+    clock += 1;
     if (resident >= 0) {
       lastUsed[resident] = clock;
       effects.push({ kind: 'page-fetch', page, hit: true, slot: resident });
@@ -311,7 +463,14 @@ export function runWal(steps: readonly WalStep[], given: Partial<WalOptions> = {
     }
     let slot = pool.findIndex((f) => f === null);
     if (slot < 0) {
-      slot = lastUsed.indexOf(Math.min(...lastUsed));
+      // Least recently used — among the frames the policy allows to leave: all of them under steal, and under
+      // no-steal only those with no uncommitted change.
+      let best = -1;
+      for (let i = 0; i < pool.length; i += 1) {
+        if (!options.steal && pool[i]!.holders.length > 0) continue;
+        if (best < 0 || lastUsed[i]! < lastUsed[best]!) best = i;
+      }
+      slot = best;
       const victim = pool[slot]!;
       const dirty = victim.recLSN !== null;
       effects.push({ kind: 'page-evict', page: victim.page, dirty, slot });
@@ -321,7 +480,7 @@ export function runWal(steps: readonly WalStep[], given: Partial<WalOptions> = {
       if (dirty) writePage(victim, 'eviction');
     }
     const onDisk = disk.get(page)!;
-    const frame: FrameState = { slot, page, cells: { ...onDisk.cells }, pageLSN: onDisk.pageLSN, recLSN: null };
+    const frame: FrameState = { slot, page, cells: { ...onDisk.cells }, pageLSN: onDisk.pageLSN, recLSN: null, holders: [] };
     pool[slot] = frame;
     lastUsed[slot] = clock;
     effects.push({ kind: 'page-fetch', page, hit: false, slot });
@@ -330,15 +489,57 @@ export function runWal(steps: readonly WalStep[], given: Partial<WalOptions> = {
   }
 
   /** Puts `after` into `key` on its page, as the change a log record describes. */
-  function apply(frame: FrameState, key: string, after: Cell, lsn: number): void {
+  function apply(frame: FrameState, key: string, after: Cell, lsn: number, txn: string): void {
     frame.cells[key] = after;
     frame.pageLSN = lsn;
     if (frame.recLSN === null) frame.recLSN = lsn;
+    if (!frame.holders.includes(txn)) frame.holders.push(txn);
   }
 
-  function release(txn: string): void {
+  /** Pages a committed transaction would have forced, but a transaction still running has changes on. */
+  const deferred = new Set<PageId>();
+
+  /**
+   * A transaction has ended. Its cells are free, its changes are no longer uncommitted, and — under force — its pages
+   * are written. A page that also holds a still-running transaction's change cannot be written under no-steal, so its
+   * write waits for that transaction.
+   */
+  function finish(txn: string, committed: boolean): void {
     for (const [key, who] of [...holder]) if (who === txn) holder.delete(key);
+    if (committed && options.force) {
+      for (const frame of pool) {
+        if (!frame || !frame.holders.includes(txn) || frame.recLSN === null) continue;
+        const others = frame.holders.filter((h) => h !== txn);
+        if (!options.steal && others.length > 0) {
+          deferred.add(frame.page);
+          notes.push(
+            `Page ${String(frame.page)} also holds ${others.join(' and ')}'s uncommitted change, and no-steal will not write that out, so forcing it waits until ${others.length === 1 ? 'that transaction ends' : 'those transactions end'}.`,
+          );
+        } else {
+          notes.push(`Force: ${txn}'s page ${String(frame.page)} is written as part of the commit.`);
+          writePage(frame, 'force');
+        }
+      }
+    }
+    for (const frame of pool) {
+      if (frame) frame.holders = frame.holders.filter((h) => h !== txn);
+    }
+    for (const page of [...deferred]) {
+      const frame = pool.find((f) => f?.page === page) ?? null;
+      if (frame === null) {
+        deferred.delete(page);
+      } else if (frame.holders.length === 0) {
+        deferred.delete(page);
+        if (frame.recLSN !== null) {
+          notes.push(`Page ${String(page)} is free of uncommitted changes now, so the write the commit owed it is made.`);
+          writePage(frame, 'force');
+        }
+      }
+    }
   }
+
+  const noFrame = (page: PageId): string =>
+    `No-steal: every frame holds an uncommitted change (${[...new Set(pool.flatMap((f) => f?.holders ?? []))].join(', ')}), and none may be written out to make room, so page ${String(page)} cannot be brought in. The transaction would have to wait for a frame.`;
 
   const results: WalStepResult[] = [];
 
@@ -386,9 +587,13 @@ export function runWal(steps: readonly WalStep[], given: Partial<WalOptions> = {
           break;
         }
         const frame = fetch(page);
+        if (!frame) {
+          error = noFrame(page);
+          break;
+        }
         const before = frame.cells[step.key]!;
         const record = append({ type: 'update', txn: step.txn, page, key: step.key, before, after: step.value });
-        apply(frame, step.key, step.value, record.lsn);
+        apply(frame, step.key, step.value, record.lsn, step.txn);
         holder.set(step.key, step.txn);
         notes.push(
           `${step.txn} sets ${step.key} from ${String(before)} to ${String(step.value)}: log record LSN ${String(record.lsn)} goes to the log buffer, and page ${String(page)} (in the pool) takes pageLSN ${String(record.lsn)}. Neither is on disk yet.`,
@@ -409,12 +614,14 @@ export function runWal(steps: readonly WalStep[], given: Partial<WalOptions> = {
         notes.push(`${step.txn} commits: record LSN ${String(commit.lsn)}.`);
         flushLog(commit.lsn, 'commit');
         notes.push(
-          `The log is forced through LSN ${String(commit.lsn)} — that is what makes the commit durable. No data page is written: the log already holds everything needed to redo it.`,
+          options.force
+            ? `The log is forced through LSN ${String(commit.lsn)} — that is what makes the commit durable.`
+            : `The log is forced through LSN ${String(commit.lsn)} — that is what makes the commit durable. No data page is written: the log already holds everything needed to redo it.`,
         );
         append({ type: 'end', txn: step.txn });
         t.status = 'ended';
         t.outcome = 'committed';
-        release(step.txn);
+        finish(step.txn, true);
         break;
       }
 
@@ -437,9 +644,11 @@ export function runWal(steps: readonly WalStep[], given: Partial<WalOptions> = {
           lsn = r.prevLSN;
         }
         for (const u of updates) {
-          const frame = fetch(u.page);
+          // Under no-steal a page holding this transaction's change was never allowed to leave the pool, so this is a
+          // hit; under steal there is always a frame to take.
+          const frame = fetch(u.page)!;
           const clr = append({ type: 'clr', txn: step.txn, page: u.page, key: u.key, after: u.before, undoNextLSN: u.prevLSN });
-          apply(frame, u.key, u.before, clr.lsn);
+          apply(frame, u.key, u.before, clr.lsn, step.txn);
           notes.push(
             `Undo LSN ${String(u.lsn)}: ${u.key} goes back to ${String(u.before)}, logged as a compensation record (LSN ${String(clr.lsn)}) so that the undo is itself redoable and is never done twice.`,
           );
@@ -447,7 +656,7 @@ export function runWal(steps: readonly WalStep[], given: Partial<WalOptions> = {
         append({ type: 'end', txn: step.txn });
         t.status = 'ended';
         t.outcome = 'rolled-back';
-        release(step.txn);
+        finish(step.txn, false);
         break;
       }
 
@@ -470,6 +679,8 @@ export function runWal(steps: readonly WalStep[], given: Partial<WalOptions> = {
           notes.push(`Page ${String(step.page)} is not in the pool, so there is nothing of it to write.`);
         } else if (frame.recLSN === null) {
           notes.push(`Page ${String(step.page)} is clean — the disk already has this copy.`);
+        } else if (!options.steal && frame.holders.length > 0) {
+          error = `No-steal: page ${String(step.page)} holds ${frame.holders.join(' and ')}'s uncommitted change, and an uncommitted change may not be written to disk.`;
         } else {
           writePage(frame, 'background');
         }
@@ -482,7 +693,10 @@ export function runWal(steps: readonly WalStep[], given: Partial<WalOptions> = {
           break;
         }
         const wasResident = pool.some((f) => f?.page === step.page);
-        fetch(step.page);
+        if (fetch(step.page) === null) {
+          error = noFrame(step.page);
+          break;
+        }
         if (wasResident) notes.push(`Page ${String(step.page)} is already in the pool.`);
         break;
       }
@@ -501,6 +715,7 @@ export function runWal(steps: readonly WalStep[], given: Partial<WalOptions> = {
       ...(error === undefined ? {} : { error }),
       state,
       violations: walViolations(state),
+      crash: crashImage(state, options.pages),
     });
   });
 
