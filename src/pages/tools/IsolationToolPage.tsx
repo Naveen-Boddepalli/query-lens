@@ -9,10 +9,10 @@ import {
   hermitageMatrix,
 } from '../../engine/hermitage.ts';
 import type { AnomalyId, EngineKind, MatrixCell } from '../../engine/hermitage.ts';
-import type { ScheduleStepResult } from '../../engine/schedule.ts';
 import type { IsolationLevel } from '../../engine/transactionControl.ts';
 import { PageHeader } from '../../ui/PageHeader.tsx';
-import { card, panelSurface, pill } from '../../ui/primitives.ts';
+import { panelSurface } from '../../ui/primitives.ts';
+import { StepList } from '../../ui/ScheduleStepList.tsx';
 
 /**
  * plan.md §25.4 D5: the ten Hermitage anomalies at four isolation levels, on both engines. Nothing here is a lookup:
@@ -36,13 +36,6 @@ const ENGINES: { kind: EngineKind; title: string; blurb: string; reference: stri
   },
 ];
 
-const PHASE_NOTE: Partial<Record<ScheduleStepResult['phase'], string>> = {
-  blocked: 'waits for a lock',
-  queued: 'waits behind its session',
-  resumed: 'resumed',
-  victim: 'rolled back',
-};
-
 interface Selected {
   engine: EngineKind;
   test: AnomalyId;
@@ -56,38 +49,6 @@ function readCell(raw: string | null): Selected | null {
   const found = HERMITAGE_TESTS.find((t) => t.id === test);
   const lvl = HERMITAGE_LEVELS.find((l) => l === level);
   return found && lvl ? { engine, test: found.id, level: lvl } : null;
-}
-
-function StepList({ steps }: { steps: ScheduleStepResult[] }) {
-  return (
-    <ol className="flex flex-col gap-2">
-      {steps.map((step, at) => {
-        const note = PHASE_NOTE[step.phase];
-        return (
-          <li key={`${String(at)}-${String(step.index)}-${step.phase}`} className={`${card} ${step.anomalies.length > 0 ? 'border-evict/60' : ''}`}>
-            <div className="flex flex-wrap items-center gap-2 text-label text-ink-dim">
-              <span className="tabular-nums">{step.index + 1}.</span>
-              <span className={pill}>{step.session}</span>
-              {note && <span className="rounded-full border border-edge px-2 py-0.5 text-ink">{note}</span>}
-            </div>
-            <code className="mt-1 block break-words font-mono text-label text-ink">{step.sql}</code>
-            {step.error && <p className="mt-1 text-label text-evict">{step.error}</p>}
-            {step.kind === 'statement' && step.run && !step.run.write && !step.error && step.rows.length > 0 && step.rows.length <= 3 && (
-              <p className="mt-1 font-mono text-label text-ink">{step.rows.map((r) => JSON.stringify(r)).join(' ')}</p>
-            )}
-            {step.kind === 'statement' && step.run && !step.run.write && !step.error && step.rows.length > 3 && (
-              <p className="mt-1 text-label text-ink-dim">{step.rows.length} rows, including {step.rows.slice(0, 2).map((r) => JSON.stringify(r)).join(' ')}</p>
-            )}
-            <ul className="mt-1 space-y-0.5 text-label text-ink-dim">
-              {step.notes.map((n) => (
-                <li key={n}>{n}</li>
-              ))}
-            </ul>
-          </li>
-        );
-      })}
-    </ol>
-  );
 }
 
 export function IsolationToolPage() {

@@ -72,6 +72,13 @@ const TOOLS = [
     available: true,
   },
   {
+    title: 'Concurrency-control compare',
+    href: '/tools/concurrency',
+    description:
+      'One schedule under five protocols — two-phase locking, timestamp ordering, optimistic validation, snapshots, and serializable snapshots — each really running it. The table is the bill: who waited, who was aborted and how much work went with them, what was let through, and whether what survived is what running the committed transactions one at a time would have left.',
+    available: true,
+  },
+  {
     title: 'Grammar sandbox',
     href: '/tools/grammar',
     description:

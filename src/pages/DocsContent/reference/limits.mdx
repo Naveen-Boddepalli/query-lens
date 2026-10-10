@@ -289,6 +289,30 @@ index entries of the rows it touches.
   and SQL Server's locking levels (for locks) publish: 79 of 80 cells agree, and the one that does not —
   `OTV` at `READ UNCOMMITTED` — is marked and explained on the page. MySQL/InnoDB's `REPEATABLE READ` is a
   hybrid of locks and snapshots that neither engine models, so it is not held against either.
+- **Two protocols never wait** (plan.md §25.4 D6), for comparing against locks and snapshots. **Basic timestamp
+  ordering** gives each transaction a timestamp when it begins, and each row remembers the newest timestamp that
+  read it and the newest that wrote it; an operation that arrives after a *younger* transaction has already read
+  or written what it needs is aborted on the spot, and nothing ever waits. A row that is no longer there to carry
+  a stamp is covered by predicate — one a younger transaction removed or re-keyed, and a new row a younger
+  transaction's `WHERE` would have picked up — so an older transaction cannot quietly miss either. It is **not
+  strict**: a younger transaction may read or write what an older one has not committed, so if that one rolls
+  back, work built on it stands, and the page flags it as a dirty read or write. **Optimistic validation** reads
+  what is committed, writes into a private workspace nobody else sees, and at `COMMIT` is checked against
+  everything that committed since it began: if a row it read or wrote was changed, a unique key it adds was taken,
+  or what one of its reads' `WHERE` matches has changed, it is aborted having done all its work. Neither can
+  deadlock, and both abort a transaction that locking would only have made wait.
+- **The [concurrency-control compare](/tools/concurrency)** runs one schedule under five protocols — two-phase
+  locking, timestamp ordering, optimistic validation, snapshots, serializable snapshots — and reads each run back
+  as a bill: committed, aborted, waits, statements run inside a transaction that was then aborted, and the
+  anomalies that reached a transaction which was *not* aborted (a phantom that validation caught at `COMMIT` was
+  seen, not let through). *One at a time?* is not a lookup: the committed transactions are replayed serially on a
+  fresh database, in an order that has to give every statement the answer it gave in the run — the rows a
+  `SELECT` returned, the rows a write affected — and leave the table that survived. The commit order is tried
+  first, then the begin order, then a search of every order (pruned by those answers, with a budget; the page
+  says *None found* instead of *No* if the budget runs out). Write skew is *No* by this test even though the
+  table it leaves is one a serial run could leave, because each transaction read something no serial order would
+  have shown it. It is a check on one run, not a proof about the protocol; the protocols that claim
+  serializability are held to it, in tests, over thousands of fuzzed schedules.
 - **A row another open transaction has deleted or re-keyed** keeps its old image, still locked, until that
   transaction ends — otherwise a lookup for the old key finds nothing, touches no page, takes no lock, and
   reads a change nobody committed.
@@ -300,7 +324,7 @@ index entries of the rows it touches.
   index-range or next-key lock.
 - A statement outside `BEGIN … COMMIT` is its own transaction. A statement that fails changes nothing and
   leaves the transaction open, as MySQL does; PostgreSQL would instead refuse everything until
-  `ROLLBACK`. There are no savepoints and no `BEGIN ISOLATION LEVEL …` yet.
+  `ROLLBACK`. There are no savepoints.
 - Each statement is its own run, with its own buffer pool: a schedule shows what the data does, not what
   the pool does between statements.
 
@@ -334,7 +358,7 @@ decide whether the rewrite happens.
 
 No subqueries anywhere but an uncorrelated `IN (SELECT …)` (plan.md §25.4 C3, closing C3 — no `EXISTS`, no
 scalar subquery like `x = (SELECT …)`, no correlated subquery). No `RIGHT`/`FULL`/`CROSS` join, no transactions in
-the Playground (they exist only in [Transaction schedules](/tools/schedule), with no isolation yet), no real
+the Playground (they exist only in [Transaction schedules](/tools/schedule)), no real
 concurrency there (the Locks panel is visual only). `UNION` and `COUNT(DISTINCT …)` are also not accepted.
 These are deliberate exclusions for this release, not bugs — see the parser's own error messages in
 [Supported SQL](/docs/reference/sql) for exactly which keywords are recognised and rejected.

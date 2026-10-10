@@ -1,10 +1,12 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import { MAX_SCHEDULE_STEPS, runSchedule } from '../schedule.ts';
+import type { LockingOptions } from '../schedule.ts';
 import { controlKindOf, isolationLevelOf } from '../transactionControl.ts';
 import { runQuery } from '../runQuery.ts';
 import type { ScheduleStep } from '../schedule.ts';
 import { createAccountsDatabase } from '../seed.ts';
+import { serialCheck } from '../serialCheck.ts';
 import type { Row } from '../types.ts';
 
 /** plan.md §25.4 D1: sessions, an interleaving the caller chose, and a shared database with no concurrency control. */
@@ -226,6 +228,51 @@ describe('what no concurrency control lets through', () => {
     );
     expect(own.steps[2]!.anomalies).toEqual([]);
     expect(own.steps[3]!.anomalies).toEqual([]);
+  });
+
+  it('a write that works from an uncommitted value is a dirty read, in its write form', () => {
+    // B adds one to a balance A has set and not committed: what B writes rests on a number that may never exist.
+    const result = runSchedule(
+      steps(
+        ['A', 'BEGIN'],
+        ['A', 'UPDATE accounts SET balance = 0 WHERE id = 1'],
+        ['B', 'UPDATE accounts SET balance = balance + 1 WHERE id = 1'],
+      ),
+      createAccountsDatabase(),
+    );
+    const kinds = result.steps[2]!.anomalies.map((a) => a.kind);
+    expect(kinds).toContain('dirty-read');
+    expect(kinds).toContain('dirty-write');
+    expect(result.steps[2]!.anomalies.find((a) => a.kind === 'dirty-read')!.message).toContain('would have written');
+  });
+
+  it('a write whose WHERE misses a row because of an uncommitted change is a dirty read too', () => {
+    const result = runSchedule(
+      steps(
+        ['A', 'BEGIN'],
+        ['A', 'DELETE FROM accounts WHERE id = 1'],
+        ['B', 'UPDATE accounts SET balance = 5 WHERE id = 1'],
+      ),
+      createAccountsDatabase(),
+    );
+    const read = result.steps[2]!.anomalies.find((a) => a.kind === 'dirty-read')!;
+    expect(read.session).toBe('B');
+    expect(read.message).toContain('would have written');
+  });
+
+  it('a write that does not depend on what another session left uncommitted is not a dirty read', () => {
+    const result = runSchedule(
+      steps(
+        ['A', 'BEGIN'],
+        ['A', 'UPDATE accounts SET balance = 0 WHERE id = 1'],
+        ['B', 'UPDATE accounts SET balance = 7 WHERE id = 2'],
+        ['B', 'UPDATE accounts SET balance = 9 WHERE id = 1'],
+      ),
+      createAccountsDatabase(),
+    );
+    expect(result.steps[2]!.anomalies).toEqual([]);
+    // Constant over a row A changed: a dirty write, but it read nothing of A's.
+    expect(result.steps[3]!.anomalies.map((a) => a.kind)).toEqual(['dirty-write']);
   });
 
   it('a read after the writer commits is not a dirty read', () => {
@@ -1152,5 +1199,516 @@ describe('multi-version concurrency control (plan.md §25.4 D4)', () => {
       }),
       { numRuns: 300 },
     );
+  });
+});
+
+describe('protocols that never wait (plan.md §25.4 D6)', () => {
+  const timestamp = (schedule: ScheduleStep[], rows = 20) =>
+    runSchedule(schedule, createAccountsDatabase(rows), undefined, { granularity: 'row', protocol: 'timestamp' });
+  const optimistic = (schedule: ScheduleStep[], rows = 20) =>
+    runSchedule(schedule, createAccountsDatabase(rows), undefined, { granularity: 'row', protocol: 'optimistic' });
+  const kinds = (result: ReturnType<typeof runSchedule>) => result.steps.flatMap((s) => s.anomalies.map((a) => a.kind));
+  const aborted = (result: ReturnType<typeof runSchedule>) =>
+    result.steps.filter((s) => s.phase === 'victim').map((s) => `${s.session}:${s.kind}`);
+  const bal = (result: ReturnType<typeof runSchedule>, n = 3) =>
+    result.final.tables.accounts!.rows.slice(0, n).map((r) => r.balance);
+
+  const lostUpdate = steps(
+    ['A', 'BEGIN'],
+    ['B', 'BEGIN'],
+    ['A', 'SELECT balance FROM accounts WHERE id = 1'],
+    ['B', 'SELECT balance FROM accounts WHERE id = 1'],
+    ['A', 'UPDATE accounts SET balance = 110 WHERE id = 1'],
+    ['B', 'UPDATE accounts SET balance = 120 WHERE id = 1'],
+    ['A', 'COMMIT'],
+    ['B', 'COMMIT'],
+  );
+  const readSkew = steps(
+    ['A', 'BEGIN'],
+    ['B', 'BEGIN'],
+    ['A', 'SELECT balance FROM accounts WHERE id = 1'],
+    ['B', 'UPDATE accounts SET balance = 50 WHERE id = 1'],
+    ['B', 'UPDATE accounts SET balance = 150 WHERE id = 2'],
+    ['B', 'COMMIT'],
+    ['A', 'SELECT balance FROM accounts WHERE id = 2'],
+    ['A', 'COMMIT'],
+  );
+
+  describe('timestamp ordering', () => {
+    it('refuses the older transaction’s write once a younger one has read the row, and never waits', () => {
+      const result = timestamp(lostUpdate);
+      expect(aborted(result)).toEqual(['A:statement']);
+      expect(result.steps.some((s) => s.phase === 'blocked')).toBe(false);
+      expect(result.steps.find((s) => s.phase === 'victim')!.error).toContain('too late');
+      expect(bal(result)[0]).toBe(120);
+    });
+
+    it('refuses a read that comes after a younger transaction has written the row', () => {
+      const result = timestamp(readSkew);
+      expect(aborted(result)).toEqual(['A:statement']);
+      expect(result.steps.find((s) => s.phase === 'victim')!.error).toContain('already written it');
+      // The younger transaction's work stands.
+      expect(bal(result, 2)).toEqual([50, 150]);
+    });
+
+    it('lets operations through that arrive in timestamp order, and records each on the row', () => {
+      const result = timestamp(
+        steps(
+          ['A', 'BEGIN'],
+          ['A', 'SELECT balance FROM accounts WHERE id = 1'],
+          ['A', 'UPDATE accounts SET balance = 7 WHERE id = 1'],
+          ['A', 'COMMIT'],
+          ['B', 'BEGIN'],
+          ['B', 'UPDATE accounts SET balance = 8 WHERE id = 1'],
+          ['B', 'COMMIT'],
+        ),
+      );
+      expect(aborted(result)).toEqual([]);
+      expect(bal(result)[0]).toBe(8);
+    });
+
+    it('lets a transaction go back to a row it has already written or read', () => {
+      const result = timestamp(
+        steps(
+          ['A', 'BEGIN'],
+          ['A', 'UPDATE accounts SET balance = 7 WHERE id = 1'],
+          ['A', 'SELECT balance FROM accounts WHERE id = 1'],
+          ['A', 'UPDATE accounts SET balance = 8 WHERE id = 1'],
+          ['A', 'COMMIT'],
+        ),
+      );
+      expect(aborted(result)).toEqual([]);
+      expect(bal(result)[0]).toBe(8);
+    });
+
+    it('refuses an older transaction a table from which a younger one has since removed a row', () => {
+      // A began first, so in timestamp order it runs first and must see row 1; B's delete has already taken it away.
+      const result = timestamp(
+        steps(['A', 'BEGIN'], ['B', 'DELETE FROM accounts WHERE id = 1'], ['A', 'SELECT * FROM accounts WHERE balance > 4']),
+      );
+      expect(aborted(result)).toEqual(['A:statement']);
+      expect(result.steps.find((s) => s.phase === 'victim')!.error).toContain('changed or removed a row');
+    });
+
+    it('catches a row a younger transaction re-keyed, which an id lookup would otherwise just not find', () => {
+      const result = timestamp(
+        steps(
+          ['A', 'BEGIN'],
+          ['B', 'UPDATE accounts SET id = 30 WHERE id = 3'],
+          ['A', 'SELECT balance FROM accounts WHERE id = 3'],
+        ),
+      );
+      expect(aborted(result)).toEqual(['A:statement']);
+    });
+
+    it('lets an older transaction past removed rows its WHERE would not have matched', () => {
+      const result = timestamp(
+        steps(['A', 'BEGIN'], ['B', 'DELETE FROM accounts WHERE id = 1'], ['A', 'SELECT balance FROM accounts WHERE id = 2']),
+      );
+      expect(aborted(result)).toEqual([]);
+    });
+
+    it('refuses a phantom: an older transaction adding a row a younger one’s scan would have picked up', () => {
+      const result = timestamp(
+        steps(
+          ['A', 'BEGIN'],
+          ['B', 'SELECT * FROM accounts WHERE balance > 4'],
+          ['A', "INSERT INTO accounts VALUES (30, 'zed', 100)"],
+        ),
+      );
+      expect(aborted(result)).toEqual(['A:statement']);
+      expect(result.steps.find((s) => s.phase === 'victim')!.error).toContain('would have seen it');
+    });
+
+    it('lets an older transaction add a row the younger one’s scan would not have matched', () => {
+      const result = timestamp(
+        steps(
+          ['A', 'BEGIN'],
+          ['B', 'SELECT * FROM accounts WHERE balance > 500'],
+          ['A', "INSERT INTO accounts VALUES (30, 'zed', 100)"],
+        ),
+      );
+      expect(aborted(result)).toEqual([]);
+    });
+
+    it('is not strict: a younger transaction can read or overwrite what an older one has not committed', () => {
+      const dirty = timestamp(
+        steps(
+          ['A', 'BEGIN'],
+          ['B', 'BEGIN'],
+          ['A', 'UPDATE accounts SET balance = 0 WHERE id = 1'],
+          ['B', 'SELECT balance FROM accounts WHERE id = 1'],
+          ['A', 'ROLLBACK'],
+        ),
+      );
+      expect(kinds(dirty)).toEqual(['dirty-read']);
+      const overwrite = timestamp(
+        steps(
+          ['A', 'BEGIN'],
+          ['B', 'BEGIN'],
+          ['A', 'UPDATE accounts SET balance = 1 WHERE id = 1'],
+          ['B', 'UPDATE accounts SET balance = 2 WHERE id = 1'],
+        ),
+      );
+      expect(kinds(overwrite)).toEqual(['dirty-write']);
+    });
+
+    it('stamps a row an insert makes, so an older transaction cannot read it', () => {
+      const result = timestamp(
+        steps(
+          ['A', 'BEGIN'],
+          ['B', 'BEGIN'],
+          ['B', "INSERT INTO accounts VALUES (30, 'zed', 100)"],
+          ['A', 'SELECT * FROM accounts WHERE id = 30'],
+        ),
+      );
+      expect(aborted(result)).toEqual(['A:statement']);
+    });
+  });
+
+  describe('optimistic concurrency control', () => {
+    it('keeps a transaction’s writes private until it commits', () => {
+      const result = optimistic(
+        steps(
+          ['A', 'BEGIN'],
+          ['A', 'UPDATE accounts SET balance = 0 WHERE id = 1'],
+          ['A', 'SELECT balance FROM accounts WHERE id = 1'],
+          ['B', 'SELECT balance FROM accounts WHERE id = 1'],
+          ['A', 'COMMIT'],
+          ['B', 'SELECT balance FROM accounts WHERE id = 1'],
+        ),
+      );
+      // A reads its own write; B does not see it until the commit.
+      expect(result.steps[2]!.rows).toEqual([{ balance: 0 }]);
+      expect(result.steps[3]!.rows).toEqual([{ balance: 100 }]);
+      expect(result.steps[5]!.rows).toEqual([{ balance: 0 }]);
+      expect(result.steps.some((s) => s.phase === 'blocked')).toBe(false);
+    });
+
+    it('lets both transactions run and refuses the second to commit, having done all its work', () => {
+      const result = optimistic(lostUpdate);
+      expect(aborted(result)).toEqual(['B:commit']);
+      expect(result.steps.find((s) => s.phase === 'victim')!.error).toContain('Could not serialize');
+      expect(bal(result)[0]).toBe(110);
+    });
+
+    it('refuses a transaction whose reads were changed by one that committed since it began', () => {
+      const result = optimistic(readSkew);
+      expect(aborted(result)).toEqual(['A:commit']);
+      expect(result.steps.find((s) => s.phase === 'victim')!.error).toContain('a row this transaction read was changed by');
+      expect(bal(result, 2)).toEqual([50, 150]);
+    });
+
+    it('commits a transaction whose reads were not touched', () => {
+      const result = optimistic(
+        steps(
+          ['A', 'BEGIN'],
+          ['A', 'SELECT balance FROM accounts WHERE id = 1'],
+          ['B', 'UPDATE accounts SET balance = 5 WHERE id = 7'],
+          ['A', 'UPDATE accounts SET balance = 9 WHERE id = 2'],
+          ['A', 'COMMIT'],
+        ),
+      );
+      expect(aborted(result)).toEqual([]);
+      expect(bal(result)[1]).toBe(9);
+    });
+
+    it('catches a phantom: a row committed that matches a predicate it read', () => {
+      const result = optimistic(
+        steps(
+          ['A', 'BEGIN'],
+          ['A', 'SELECT * FROM accounts WHERE balance > 50'],
+          ['B', "INSERT INTO accounts VALUES (30, 'zed', 100)"],
+          ['A', 'UPDATE accounts SET balance = 1 WHERE id = 1'],
+          ['A', 'COMMIT'],
+        ),
+      );
+      expect(aborted(result)).toEqual(['A:commit']);
+      expect(result.steps.find((s) => s.phase === 'victim')!.error).toContain('a row matching');
+    });
+
+    it('refuses a blind write over a row another transaction has since committed a change to', () => {
+      const result = optimistic(
+        steps(
+          ['A', 'BEGIN'],
+          ['B', 'BEGIN'],
+          ['A', 'UPDATE accounts SET balance = 1 WHERE id = 3'],
+          ['B', 'UPDATE accounts SET balance = 2 WHERE id = 3'],
+          ['A', 'COMMIT'],
+          ['B', 'COMMIT'],
+        ),
+      );
+      expect(aborted(result)).toEqual(['B:commit']);
+      expect(result.steps.find((s) => s.phase === 'victim')!.error).toContain('a row this transaction wrote was changed by');
+      expect(result.final.tables.accounts!.rows.find((r) => r.id === 3)!.balance).toBe(1);
+    });
+
+    it('refuses a write over a row another transaction has since deleted', () => {
+      const result = optimistic(
+        steps(
+          ['A', 'BEGIN'],
+          ['B', 'BEGIN'],
+          ['A', 'DELETE FROM accounts WHERE id = 3'],
+          ['B', 'UPDATE accounts SET balance = 2 WHERE id = 3'],
+          ['A', 'COMMIT'],
+          ['B', 'COMMIT'],
+        ),
+      );
+      expect(aborted(result)).toEqual(['B:commit']);
+      expect(result.steps.find((s) => s.phase === 'victim')!.error).toContain('a row this transaction wrote was changed by');
+      expect(result.final.tables.accounts!.rows.some((r) => r.id === 3)).toBe(false);
+    });
+
+    it('does not count a transaction that committed before this one began as a conflict', () => {
+      const result = optimistic(
+        steps(
+          ['A', 'BEGIN'],
+          ['A', 'UPDATE accounts SET balance = 1 WHERE id = 3'],
+          ['A', 'COMMIT'],
+          ['B', 'BEGIN'],
+          ['B', 'UPDATE accounts SET balance = 2 WHERE id = 3'],
+          ['B', 'COMMIT'],
+        ),
+      );
+      expect(aborted(result)).toEqual([]);
+      expect(result.final.tables.accounts!.rows.find((r) => r.id === 3)!.balance).toBe(2);
+    });
+
+    it('a rolled-back transaction leaves nothing behind', () => {
+      const result = optimistic(
+        steps(['A', 'BEGIN'], ['A', 'UPDATE accounts SET balance = 0 WHERE id = 1'], ['A', 'ROLLBACK']),
+      );
+      expect(bal(result)[0]).toBe(100);
+      expect(result.committed.tables.accounts!.rows).toEqual(result.final.tables.accounts!.rows);
+    });
+  });
+
+  it('neither ever waits, queues, or deadlocks, whatever the interleaving', () => {
+    const statement = fc.oneof(
+      fc.constant('BEGIN'),
+      fc.constant('COMMIT'),
+      fc.constant('ROLLBACK'),
+      fc.record({ id: fc.integer({ min: 1, max: 4 }), balance: fc.integer({ min: 0, max: 9 }) }).map(
+        ({ id, balance }) => `UPDATE accounts SET balance = ${String(balance)} WHERE id = ${String(id)}`,
+      ),
+      fc.integer({ min: 21, max: 24 }).map((id) => `INSERT INTO accounts VALUES (${String(id)}, 'x', 7)`),
+      fc.integer({ min: 1, max: 4 }).map((id) => `DELETE FROM accounts WHERE id = ${String(id)}`),
+      fc.constant('SELECT * FROM accounts WHERE balance > 4'),
+      fc.integer({ min: 1, max: 4 }).map((id) => `SELECT balance FROM accounts WHERE id = ${String(id)}`),
+    );
+    const step = fc.record({ session: fc.constantFrom('A', 'B', 'C'), sql: statement });
+    fc.assert(
+      fc.property(fc.array(step, { maxLength: 16 }), (schedule) => {
+        for (const run of [timestamp, optimistic]) {
+          const result = run(schedule);
+          expect(result.deadlocks).toBe(0);
+          expect(result.stuck).toEqual([]);
+          expect(result.steps.every((s) => s.phase !== 'blocked' && s.phase !== 'queued')).toBe(true);
+        }
+      }),
+      { numRuns: 300 },
+    );
+  });
+});
+
+const byId = (rows: Row[]): Row[] => [...rows].sort((a, b) => (a.id as number) - (b.id as number));
+
+describe('what committed means, whatever the protocol (plan.md §25.4 D6)', () => {
+  const statement = fc.oneof(
+    fc.constant('BEGIN'),
+    fc.constant('COMMIT'),
+    fc.constant('ROLLBACK'),
+    fc.record({ id: fc.integer({ min: 1, max: 4 }), balance: fc.integer({ min: 0, max: 9 }) }).map(
+      ({ id, balance }) => `UPDATE accounts SET balance = ${String(balance)} WHERE id = ${String(id)}`,
+    ),
+    fc.integer({ min: 1, max: 4 }).map((id) => `UPDATE accounts SET balance = balance + 1 WHERE id = ${String(id)}`),
+    fc.record({ id: fc.integer({ min: 1, max: 4 }), to: fc.integer({ min: 30, max: 32 }) }).map(
+      ({ id, to }) => `UPDATE accounts SET id = ${String(to)} WHERE id = ${String(id)}`,
+    ),
+    fc.integer({ min: 21, max: 24 }).map((id) => `INSERT INTO accounts VALUES (${String(id)}, 'x', 7)`),
+    fc.integer({ min: 1, max: 4 }).map((id) => `DELETE FROM accounts WHERE id = ${String(id)}`),
+    fc.constant('SELECT * FROM accounts WHERE balance > 4'),
+    fc.integer({ min: 1, max: 4 }).map((id) => `SELECT balance FROM accounts WHERE id = ${String(id)}`),
+  );
+  const step = fc.record({ session: fc.constantFrom('A', 'B', 'C'), sql: statement });
+  // `reads` says whether the protocol promises serializability, and so that no committed transaction's reads can have
+  // differed from a serial run's. Repeatable read does not: it lets a phantom through, and the check names it.
+  const protocols: [string, LockingOptions, boolean][] = [
+    ['strict two-phase locking, rows', { granularity: 'row', isolation: 'serializable' }, true],
+    ['strict two-phase locking, pages', { granularity: 'page', isolation: 'serializable' }, true],
+    ['repeatable read, pages', { granularity: 'page', isolation: 'repeatable-read' }, false],
+    ['optimistic validation', { granularity: 'row', protocol: 'optimistic' }, true],
+    ['serializable snapshots', { granularity: 'row', isolation: 'serializable', mvcc: true }, true],
+  ];
+
+  for (const [name, locking, reads] of protocols) {
+    it(`${name}: what survives is what the committed transactions do when run one after another, in commit order`, () => {
+      for (const rows of [3, 20]) {
+        fc.assert(
+          fc.property(fc.array(step, { maxLength: 18 }), (schedule) => {
+            const result = runSchedule(schedule, createAccountsDatabase(rows), undefined, locking);
+            const check = serialCheck(result, rows);
+            expect(byId(result.committed.tables.accounts!.rows)).toEqual(byId(check.rows));
+            // And nothing a committed transaction read would have been different run serially.
+            if (reads) expect(check.differentRead).toBeNull();
+          }),
+          { numRuns: 150 },
+        );
+      }
+    });
+  }
+
+  it('timestamp ordering is serializable in the order of its timestamps, except where a dirty read or write says otherwise', () => {
+    for (const rows of [3, 20]) {
+      fc.assert(
+        fc.property(fc.array(step, { maxLength: 22 }), (schedule) => {
+          const result = runSchedule(schedule, createAccountsDatabase(rows), undefined, {
+            granularity: 'row',
+            protocol: 'timestamp',
+          });
+          const dirty = result.steps.some((s) =>
+            s.anomalies.some((a) => a.kind === 'dirty-read' || a.kind === 'dirty-write'),
+          );
+          if (dirty) return;
+          const check = serialCheck(result, rows, 'begin');
+          expect(check.sameTable).toBe(true);
+          expect(check.differentRead).toBeNull();
+        }),
+        { numRuns: 400 },
+      );
+    }
+  });
+
+  it('basic timestamp ordering is the exception: it is not strict, so what it reads may be rolled back under it', () => {
+    // B reads A's uncommitted value and builds on it; A then rolls back. B's work rests on data that never existed.
+    const result = runSchedule(
+      steps(
+        ['A', 'BEGIN'],
+        ['A', 'UPDATE accounts SET balance = 0 WHERE id = 1'],
+        ['B', 'UPDATE accounts SET balance = balance + 1 WHERE id = 1'],
+        ['A', 'ROLLBACK'],
+      ),
+      createAccountsDatabase(20),
+      undefined,
+      { granularity: 'row', protocol: 'timestamp' },
+    );
+    expect(result.steps.flatMap((s) => s.anomalies.map((a) => a.kind))).toContain('dirty-write');
+    // Serially, B's increment lands on 100; here it landed on A's uncommitted 0, and A's rollback could not undo it.
+    expect(result.committed.tables.accounts!.rows[0]!.balance).toBe(1);
+    expect(serialCheck(result, 20).rows[0]!.balance).toBe(101);
+  });
+});
+
+describe('bugs a fuzz found while comparing protocols (plan.md §25.4 D6)', () => {
+  it('a rolled-back delete goes back where it was, even after rows ahead of it were deleted and others updated', () => {
+    const result = runSchedule(
+      steps(
+        ['B', 'BEGIN'],
+        ['C', 'BEGIN'],
+        ['C', 'DELETE FROM accounts WHERE id = 3'],
+        ['B', 'DELETE FROM accounts WHERE id = 4'],
+        ['A', 'DELETE FROM accounts WHERE id = 1'],
+        ['A', 'UPDATE accounts SET balance = balance + 1 WHERE id = 5'],
+        ['C', 'ROLLBACK'],
+        ['B', 'ROLLBACK'],
+      ),
+      createAccountsDatabase(20),
+      undefined,
+      { granularity: 'row', isolation: 'repeatable-read' },
+    );
+    expect(result.final.tables.accounts!.rows.slice(0, 5).map((r) => r.id)).toEqual([2, 3, 4, 5, 6]);
+  });
+
+  it('under snapshots, two transactions cannot both add the same unique key: the second waits, then is refused', () => {
+    const result = runSchedule(
+      steps(
+        ['A', 'BEGIN'],
+        ['A', "INSERT INTO accounts VALUES (30, 'a', 1)"],
+        ['B', "INSERT INTO accounts VALUES (30, 'b', 2)"],
+        ['A', 'COMMIT'],
+      ),
+      createAccountsDatabase(20),
+      undefined,
+      { granularity: 'row', isolation: 'read-committed', mvcc: true },
+    );
+    expect(result.steps.some((s) => s.session === 'B' && s.phase === 'blocked')).toBe(true);
+    const refused = result.steps.find((s) => s.session === 'B' && s.phase === 'resumed')!;
+    expect(refused.error).toContain('Duplicate key');
+    expect(result.final.tables.accounts!.rows.filter((r) => r.id === 30)).toHaveLength(1);
+  });
+
+  it('a snapshot does not hide a committed duplicate from the unique index', () => {
+    const result = runSchedule(
+      steps(
+        ['A', 'BEGIN'],
+        ['A', 'SELECT * FROM accounts WHERE id = 1'],
+        ['B', "INSERT INTO accounts VALUES (30, 'b', 2)"],
+        ['A', "INSERT INTO accounts VALUES (30, 'a', 1)"],
+      ),
+      createAccountsDatabase(20),
+      undefined,
+      { granularity: 'row', isolation: 'repeatable-read', mvcc: true },
+    );
+    expect(result.steps.at(-1)!.error).toContain('duplicate key');
+  });
+
+  it('under optimistic control the second to commit a key is refused at commit', () => {
+    const result = runSchedule(
+      steps(
+        ['A', 'BEGIN'],
+        ['B', 'BEGIN'],
+        ['A', "INSERT INTO accounts VALUES (30, 'a', 1)"],
+        ['B', "INSERT INTO accounts VALUES (30, 'b', 2)"],
+        ['A', 'COMMIT'],
+        ['B', 'COMMIT'],
+      ),
+      createAccountsDatabase(20),
+      undefined,
+      { granularity: 'row', protocol: 'optimistic' },
+    );
+    const refused = result.steps.find((s) => s.phase === 'victim')!;
+    expect(refused.session).toBe('B');
+    expect(refused.error).toContain('unique key');
+    expect(result.final.tables.accounts!.rows.filter((r) => r.id === 30)).toHaveLength(1);
+  });
+
+  it('the victim of a deadlock gets its waiting steps run before the statement that closed the cycle is carried out', () => {
+    // C's SELECT waits on B's uncommitted insert, with its UPDATE queued behind it. B's update then closes a cycle,
+    // C is chosen, and its queued UPDATE runs. B's statement must not overwrite that with a result it worked out first.
+    const result = runSchedule(
+      steps(
+        ['B', 'BEGIN'],
+        ['B', "INSERT INTO accounts VALUES (21, 'x', 7)"],
+        ['C', 'SELECT * FROM accounts WHERE balance > 4'],
+        ['C', 'UPDATE accounts SET balance = 0 WHERE id = 1'],
+        ['B', 'UPDATE accounts SET balance = 0 WHERE id = 2'],
+        ['B', 'COMMIT'],
+      ),
+      createAccountsDatabase(20),
+      undefined,
+      { granularity: 'row', isolation: 'serializable' },
+    );
+    const rows = result.final.tables.accounts!.rows;
+    expect(rows.find((r) => r.id === 1)?.balance).toBe(0);
+    expect(rows.find((r) => r.id === 2)?.balance).toBe(0);
+  });
+
+  it('a page lock follows the row to the page it was made on, not to where a later delete shifts it', () => {
+    // Twenty rows fill five pages exactly, so A's insert opens a sixth. B's delete then moves every row up one place,
+    // and A's row lands on the fifth, which A never locked.
+    const result = runSchedule(
+      steps(
+        ['A', 'BEGIN'],
+        ['A', "INSERT INTO accounts VALUES (21, 'x', 7)"],
+        ['B', 'DELETE FROM accounts WHERE id = 1'],
+        ['B', 'SELECT * FROM accounts WHERE balance > 4'],
+        ['A', 'COMMIT'],
+      ),
+      createAccountsDatabase(20),
+      undefined,
+      { granularity: 'page', isolation: 'serializable' },
+    );
+    expect(result.steps.flatMap((s) => s.anomalies.map((a) => a.kind))).toEqual([]);
+    expect(result.steps.some((s) => s.session === 'B' && s.phase === 'blocked')).toBe(true);
   });
 });

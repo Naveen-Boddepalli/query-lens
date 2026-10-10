@@ -36,6 +36,7 @@
  */
 
 import { passes } from './exec/evaluate.ts';
+import { indexNameOf, indexSpecsOf } from './index/spec.ts';
 import { emptyTable, forget, holds, release, releaseAll, request } from './locks/lockTable.ts';
 import type { LockMode, LockTableState } from './locks/lockTable.ts';
 import { parseStatement, walkExpr } from './parser/index.ts';
@@ -71,12 +72,21 @@ export interface LockingOptions {
    * whatever `granularity` says; `READ UNCOMMITTED` behaves as `READ COMMITTED`, as in PostgreSQL.
    */
   mvcc?: boolean;
+  /**
+   * A protocol that takes no locks at all (plan.md §25.4 D6), for comparing against the two above. `timestamp` is basic
+   * timestamp ordering: each transaction gets a timestamp when it begins, each row remembers the newest timestamp
+   * that read and wrote it, and an operation that arrives too late for the order the timestamps give is aborted on
+   * the spot. `optimistic` is backward-validating optimistic concurrency control: a transaction reads what is
+   * committed, writes into a private workspace, and is validated at `COMMIT` against everything that committed since
+   * it began. Neither ever waits, so neither can deadlock.
+   */
+  protocol?: 'timestamp' | 'optimistic';
 }
 
 /** What a write did to one row, in the terms needed to put it back. Rows are identified by reference, not by value. */
 export type UndoEntry =
   | { kind: 'insert'; table: string; row: Row }
-  | { kind: 'delete'; table: string; row: Row; index: number }
+  | { kind: 'delete'; table: string; row: Row; index: number; rid: number }
   | { kind: 'update'; table: string; before: Row; after: Row };
 
 export type AnomalyKind = 'dirty-read' | 'dirty-write' | 'non-repeatable-read' | 'phantom' | 'lost-update';
@@ -198,6 +208,15 @@ interface Transaction {
   snapshot: Set<number> | null;
   /** Under MVCC at SERIALIZABLE: every read's predicate, re-checked at COMMIT. */
   readPredicates: { table: string; where: Expr | undefined }[];
+  /** Under optimistic control: what the transaction has read and written, privately, until it commits. */
+  workspace: {
+    /** The committed transactions at the moment it began: anything committed after is what validation looks for. */
+    start: Set<number>;
+    pending: Version[];
+    removed: Set<Version>;
+    reads: Set<number>;
+    writes: Set<number>;
+  } | null;
   log: Logged[];
   isolation: IsolationLevel;
   /** What each distinct `SELECT` returned the last time this transaction ran it, to notice when it changes. */
@@ -250,6 +269,7 @@ function withRows(db: Database, table: string, rows: Row[]): Database {
 function undo(
   db: Database,
   entries: readonly Logged[],
+  ridOf: (row: Row) => number,
 ): { db: Database; notes: string[]; restored: number } {
   let next = db;
   const notes: string[] = [];
@@ -266,7 +286,10 @@ function undo(
       }
       rows.splice(at, 1);
     } else if (entry.kind === 'delete') {
-      rows.splice(Math.min(entry.index, rows.length), 0, entry.row);
+      // Back where it was. Row ids are handed out in table order and inserts only append, so the row goes in front
+      // of the first row with a larger id; its old position alone is wrong once rows ahead of it have been removed.
+      const at = rows.findIndex((r) => ridOf(r) > entry.rid);
+      rows.splice(at < 0 ? rows.length : at, 0, entry.row);
     } else {
       const at = rows.indexOf(entry.after);
       if (at < 0) {
@@ -292,7 +315,13 @@ function producedBy(entries: readonly Logged[], row: Row): Logged | undefined {
 }
 
 /** What a successful write did to `table`, as undo entries — found by comparing the rows before and after. */
-function entriesOf(kind: 'insert' | 'delete' | 'update', table: string, before: Row[], after: Row[]): UndoEntry[] {
+function entriesOf(
+  kind: 'insert' | 'delete' | 'update',
+  table: string,
+  before: Row[],
+  after: Row[],
+  ridOf: (row: Row) => number,
+): UndoEntry[] {
   const kept = new Set(after);
   const had = new Set(before);
   if (kind === 'insert') {
@@ -301,7 +330,8 @@ function entriesOf(kind: 'insert' | 'delete' | 'update', table: string, before: 
   if (kind === 'delete') {
     const entries: UndoEntry[] = [];
     before.forEach((row, index) => {
-      if (!kept.has(row)) entries.push({ kind: 'delete', table, row, index });
+      if (kept.has(row)) return;
+      entries.push({ kind: 'delete', table, row, index, rid: ridOf(row) });
     });
     return entries;
   }
@@ -363,9 +393,31 @@ export function runSchedule(
     return id;
   };
 
+  // Every row starts with an id in table order. Rows only ever leave or are appended, so id order stays table order.
+  // A row also has a home page, the one it was made on: a slotted heap does not slide the rows behind a deleted one
+  // forward, and a page lock has to follow the row, not whichever position a later delete pushes it into.
+  const homePages = new Map<number, number>();
+  for (const table of Object.values(db.tables)) {
+    table.rows.forEach((row, at) => {
+      homePages.set(ridOf(row), Math.floor(at / options.rowsPerPage));
+    });
+  }
+  const homeOf = (row: Row): number => homePages.get(ridOf(row)) ?? 0;
+
   // MVCC state (plan.md §25.4 D4). Inert unless `locking.mvcc`.
-  const mvcc = locking?.mvcc === true;
-  const rowLevel = mvcc || locking?.granularity === 'row';
+  const optimistic = locking?.protocol === 'optimistic';
+  const timestamped = locking?.protocol === 'timestamp';
+  const mvcc = locking?.mvcc === true || optimistic;
+  const rowLevel = mvcc || timestamped || locking?.granularity === 'row';
+  // Timestamp ordering: the newest timestamp that read and that wrote each row, by row identity.
+  const stamps = new Map<number, { read: number; write: number }>();
+  // Timestamp ordering: what a row looked like before a transaction changed or removed it, and that transaction's
+  // timestamp. A row that is gone cannot be stamp-checked, so an older transaction whose WHERE would have matched
+  // the old image is refused against this instead.
+  const graveyard: { table: string; image: Row; written: number }[] = [];
+  // And what each timestamped statement asked of its table, so a row that did not exist then — a phantom — can be
+  // refused too: an older transaction may not now add a row that a younger one's WHERE would have picked up.
+  const predicateReads: { table: string; where: Expr | undefined; ts: number }[] = [];
   let template = db;
   const committedXids = new Set<number>([0]);
   const abortedXids = new Set<number>();
@@ -509,13 +561,26 @@ export function runSchedule(
 
     if (!rowLevel) {
       const all = opaque(target.where);
-      for (const stone of tombstones) {
-        // An insert looks for no existing row, so it has no use for a row's old image.
-        if (target.kind === 'insert') break;
-        if (!all && !passes(target.where, stone.row)) continue;
-        if (pages.get(stone.page) !== 'exclusive') pages.set(stone.page, writes ? 'exclusive' : 'shared');
+      // The positions the engine touched, turned into the pages their rows were made on.
+      const homes = new Map<number, LockMode>();
+      const note = (page: number, mode: LockMode): void => {
+        if (homes.get(page) !== 'exclusive') homes.set(page, mode);
+      };
+      if (target.kind === 'insert') {
+        for (const [pageId, mode] of pages) note(pageId, mode);
+      } else {
+        const heap = buildHeap(table, rowsPerPage);
+        for (const [pageId, mode] of pages) {
+          const resident = heap.pages[pageId]?.rows ?? [];
+          if (resident.length === 0) note(pageId, mode);
+          for (const row of resident) note(homeOf(row), mode);
+        }
+        for (const stone of tombstones) {
+          if (!all && !passes(target.where, stone.row)) continue;
+          note(homeOf(stone.row), writes ? 'exclusive' : 'shared');
+        }
       }
-      return [...pages.entries()].map(([pageId, mode]) => ({
+      return [...homes.entries()].map(([pageId, mode]) => ({
         key: `${target.table}/page/${String(pageId)}`,
         label: pageLabel(pageId),
         mode,
@@ -584,7 +649,7 @@ export function runSchedule(
     const target = targetOf(sql);
     if (!target || !run.write || (target.kind !== 'insert' && target.kind !== 'update')) return [];
     const before = current.tables[run.write.table]?.rows ?? [];
-    const images = entriesOf(run.write.kind, run.write.table, before, run.write.rows).flatMap((entry) =>
+    const images = entriesOf(run.write.kind, run.write.table, before, run.write.rows, ridOf).flatMap((entry) =>
       entry.kind === 'insert' ? [entry.row] : entry.kind === 'update' ? [entry.after] : [],
     );
     return predicates
@@ -651,7 +716,7 @@ export function runSchedule(
       current = latest();
       return [`${session}'s transaction T${String(txn.number)} is rolled back: its versions are now invisible to everyone.`];
     }
-    const undone = undo(current, [...txn.log].sort((a, b) => b.step - a.step));
+    const undone = undo(current, [...txn.log].sort((a, b) => b.step - a.step), ridOf);
     current = undone.db;
     transactions.delete(session);
     return [
@@ -662,6 +727,141 @@ export function runSchedule(
       }.`,
       ...undone.notes,
     ];
+  }
+
+  const ridOfKey = (key: string): number => Number(key.slice(key.lastIndexOf('/') + 1));
+
+  /** Every unique key a row holds, as a lock resource and in words. A key with a NULL in it never conflicts. */
+  function uniqueKeysOf(table: string, row: Row): { index: string; key: string; text: string }[] {
+    const definition = template.tables[table];
+    if (!definition) return [];
+    return indexSpecsOf(definition)
+      .filter((spec) => spec.unique)
+      .flatMap((spec) => {
+        const values = spec.columns.map((c) => row[c] ?? null);
+        if (values.some((v) => v === null)) return [];
+        const index = indexNameOf(spec.columns);
+        return [
+          {
+            index,
+            key: `${table}/unique/${index}/${JSON.stringify(values)}`,
+            text: `${spec.columns.join(', ')} = ${values.map(String).join(', ')}`,
+          },
+        ];
+      });
+  }
+
+  /** The row images a write would leave behind whose unique keys are new: what must be free for it to succeed. */
+  function newKeysOf(run: RunResult, db: Database): { table: string; rid: number | null; index: string; key: string; text: string }[] {
+    if (!run.write) return [];
+    const table = run.write.table;
+    const entries = entriesOf(run.write.kind, table, db.tables[table]?.rows ?? [], run.write.rows, ridOf);
+    return entries.flatMap((entry) => {
+      if (entry.kind === 'delete') return [];
+      const image = entry.kind === 'insert' ? entry.row : entry.after;
+      const had = entry.kind === 'update' ? new Set(uniqueKeysOf(table, entry.before).map((k) => k.key)) : new Set<string>();
+      const rid = entry.kind === 'update' ? ridOf(entry.before) : null;
+      return uniqueKeysOf(table, image).filter((k) => !had.has(k.key)).map((k) => ({ table, rid, ...k }));
+    });
+  }
+
+  /** A committed, still-live row some other row of the store already holds `key` in — whatever snapshot is asking. */
+  function committedHolder(table: string, key: string, self: number | null, ignore: ReadonlySet<Version>): Version | undefined {
+    return store.find(
+      (v) =>
+        v.table === table &&
+        !ignore.has(v) &&
+        v.rid !== self &&
+        committedXids.has(v.xmin) &&
+        (v.xmax === null || !committedXids.has(v.xmax)) &&
+        uniqueKeysOf(table, v.row).some((k) => k.key === key),
+    );
+  }
+
+  /** An optimistic transaction's view: what is committed, minus what it has removed, plus what it has added. */
+  function workspaceView(txn: Transaction): Database {
+    const ws = txn.workspace!;
+    const versions: Version[] = [...store.map((v) => (ws.removed.has(v) ? { ...v, xmax: txn.xid } : v)), ...ws.pending];
+    return viewOf(template, versions, new Set(committedXids), txn.xid);
+  }
+
+  /**
+   * Backward validation (plan.md §25.4 D6): did any transaction commit, since this one began, a change to a row it
+   * read or wrote — or to what one of its reads' predicates matches? If so what it did rested on a state that is gone.
+   */
+  function optimisticConflict(txn: Transaction): string | null {
+    const ws = txn.workspace!;
+    for (const v of store) {
+      const madeAfter = committedXids.has(v.xmin) && !ws.start.has(v.xmin);
+      const removedAfter = v.xmax !== null && committedXids.has(v.xmax) && !ws.start.has(v.xmax);
+      if (!madeAfter && !removedAfter) continue;
+      if (!ws.reads.has(v.rid) && !ws.writes.has(v.rid)) continue;
+      const by = madeAfter ? v.xmin : v.xmax;
+      return `a row this transaction ${ws.writes.has(v.rid) ? 'wrote' : 'read'} was changed by T${String(by)}, which committed after it began`;
+    }
+    // A key it is about to add may have been taken by a transaction that committed in the meantime.
+    for (const pending of ws.pending) {
+      for (const k of uniqueKeysOf(pending.table, pending.row)) {
+        if (committedHolder(pending.table, k.key, pending.rid, ws.removed)) {
+          return `the unique key ${k.text} was taken by a transaction that committed after this one began`;
+        }
+      }
+    }
+    return readConflict(txn);
+  }
+
+  /**
+   * Basic timestamp ordering: an operation that arrives after a younger transaction has already read or written the
+   * row is too late for the order the timestamps give, and is refused. Rows that are not there to carry a stamp are
+   * covered too (a row a younger transaction removed, a phantom one it would have read), by predicate. Returns why,
+   * or null (and then records the operation, so the next one is checked against it).
+   */
+  function timestampCheck(ts: number, needs: Need[], sql: string, written: Row[]): string | null {
+    for (const need of needs) {
+      const rid = ridOfKey(need.key);
+      const seen = stamps.get(rid) ?? { read: 0, write: 0 };
+      if (ts < seen.write) {
+        return `T${String(ts)} came too late for row ${String(rid)}: a younger transaction, T${String(seen.write)}, has already written it`;
+      }
+      if (need.mode === 'exclusive' && ts < seen.read) {
+        return `T${String(ts)} came too late to write row ${String(rid)}: a younger transaction, T${String(seen.read)}, has already read it`;
+      }
+    }
+    // Rows that are not there to carry a stamp: ones a younger transaction has changed or removed, and ones a younger
+    // transaction's WHERE would have picked up had they existed then.
+    const target = targetOf(sql);
+    if (target) {
+      if (target.kind !== 'insert') {
+        const any = target.where === undefined || opaque(target.where);
+        const gone = graveyard.find(
+          (g) => g.table === target.table && g.written > ts && (any || passes(target.where, g.image)),
+        );
+        if (gone) {
+          return `T${String(ts)} came too late: a younger transaction, T${String(gone.written)}, has already changed or removed a row this statement would have matched`;
+        }
+      }
+      const phantom = predicateReads.find(
+        (p) =>
+          p.table === target.table &&
+          p.ts > ts &&
+          written.some((image) => p.where === undefined || opaque(p.where) || passes(p.where, image)),
+      );
+      if (phantom) {
+        return `T${String(ts)} came too late to write: a younger transaction, T${String(phantom.ts)}, has already read rows like ${
+          target.kind === 'insert' ? 'this one' : 'these'
+        } and would have seen ${target.kind === 'insert' ? 'it' : 'them'}`;
+      }
+      if (target.kind !== 'insert') predicateReads.push({ table: target.table, where: target.where, ts });
+    }
+    for (const need of needs) {
+      const rid = ridOfKey(need.key);
+      const seen = stamps.get(rid) ?? { read: 0, write: 0 };
+      stamps.set(rid, {
+        read: Math.max(seen.read, ts),
+        write: need.mode === 'exclusive' ? Math.max(seen.write, ts) : seen.write,
+      });
+    }
+    return null;
   }
 
   /**
@@ -718,8 +918,11 @@ export function runSchedule(
         transactions.set(session, {
           number,
           xid: number,
-          snapshot: null,
+          snapshot: optimistic ? new Set(committedXids) : null,
           readPredicates: [],
+          workspace: optimistic
+            ? { start: new Set(committedXids), pending: [], removed: new Set(), reads: new Set(), writes: new Set() }
+            : null,
           log: [],
           isolation: level,
           reads: new Map(),
@@ -740,7 +943,11 @@ export function runSchedule(
       if (!txn) {
         notes.push(`${session} has no transaction open — COMMIT changes nothing.`);
       } else {
-        const conflict = mvcc && txn.isolation === 'serializable' ? readConflict(txn) : null;
+        const conflict = optimistic
+          ? optimisticConflict(txn)
+          : mvcc && txn.isolation === 'serializable'
+            ? readConflict(txn)
+            : null;
         if (conflict) {
           // The read the transaction acted on is stale, so it cannot commit: it is rolled back instead.
           const rolled = rollBackTransaction(session);
@@ -757,9 +964,15 @@ export function runSchedule(
             txn.log.length === 1 ? 'is' : 'are'
           } now permanent, and visible to everyone.`,
         );
+        if (optimistic && txn.workspace) {
+          // Validated, so its private workspace becomes the database all at once.
+          for (const v of txn.workspace.removed) v.xmax = txn.xid;
+          store.push(...txn.workspace.pending);
+        }
         if (mvcc) {
           committedXids.add(txn.xid);
           openXids.delete(txn.xid);
+          if (optimistic) current = latest();
         }
         transactions.delete(session);
       }
@@ -777,7 +990,7 @@ export function runSchedule(
         // as dead tuples until a VACUUM.
         notes.push(...rollBackTransaction(session));
       } else {
-        const undone = undo(current, [...txn.log].sort((a, b) => b.step - a.step));
+        const undone = undo(current, [...txn.log].sort((a, b) => b.step - a.step), ridOf);
         current = undone.db;
         const whole = undone.restored === txn.log.length;
         notes.push(
@@ -818,7 +1031,13 @@ export function runSchedule(
     // An ordinary statement. What it *sees* is the shared database as it stands — or, under MVCC, the versions its
     // snapshot can see, whatever else is going on.
     const isolation = txn?.isolation ?? defaultIsolation;
-    const view = mvcc ? viewOf(template, store, snapshotFor(txn, isolation), txn?.xid ?? -1) : current;
+    const viewNow = (): Database =>
+      optimistic && txn?.workspace
+        ? workspaceView(txn)
+        : mvcc
+          ? viewOf(template, store, snapshotFor(txn, isolation), txn?.xid ?? -1)
+          : current;
+    const view = viewNow();
     const run = runQuery(sql, view, options);
     if (run.error) {
       record(step, 'statement', phase, {
@@ -834,9 +1053,39 @@ export function runSchedule(
     const heldShared = new Set<string>();
     if (locking) {
       needs = footprint(sql, run, view);
+      if (optimistic && txn?.workspace) {
+        for (const n of needs) (n.mode === 'exclusive' ? txn.workspace.writes : txn.workspace.reads).add(ridOfKey(n.key));
+      }
+      if (timestamped) {
+        // The operations are checked against the timestamps, in the order the statement makes them. An autocommit
+        // statement is a transaction of its own, and the youngest so far.
+        const ts = txn ? txn.number : nextNumber;
+        const written = run.write
+          ? [...(run.write.kind === 'insert' ? [] : matchedRows(sql, view)), ...(run.write.kind === 'delete' ? [] : run.rows)]
+          : [];
+        const violation = timestampCheck(ts, needs, sql, written);
+        if (violation) {
+          const rolled = txn ? rollBackTransaction(session) : [];
+          record(step, 'statement', 'victim', {
+            run,
+            error: `Timestamp ordering violated: ${violation}.${txn ? ` ${session} is aborted.` : ''}`,
+            notes: rolled,
+          });
+          return 'victim';
+        }
+      }
+      // These two never wait: whatever they must refuse, they refuse (or defer to commit) instead.
+      if (optimistic || timestamped) needs = [];
       // READ UNCOMMITTED reads without asking anyone, and so does every reader under MVCC. Writes still take their
       // exclusive locks.
       if (mvcc || isolation === 'read-uncommitted') needs = needs.filter((n) => n.mode === 'exclusive');
+      // Under MVCC another transaction's uncommitted row is invisible, so a duplicate of its key would go unnoticed:
+      // a write that adds a unique key waits for whoever else is adding it, as a real unique index makes it.
+      if (mvcc && !optimistic) {
+        for (const k of newKeysOf(run, view)) {
+          needs.push({ key: k.key, label: `the unique key ${k.text} of ${k.table}`, mode: 'exclusive' });
+        }
+      }
       // Any write waits for a predicate another session is holding that it would change, whatever level the writer
       // runs at: a lock is not optional for the one it is taken against.
       if (!mvcc) needs = [...needs, ...predicateNeeds(session, sql, run)];
@@ -888,14 +1137,31 @@ export function runSchedule(
           } else {
             notes.push(...outcome.narration, ...rolled);
           }
+          // The victim's own waiting steps may now run, and they change the table. What this statement worked out
+          // before that is stale, so it starts again against what is there now: the locks it has already taken are
+          // still held, and any it still lacks are asked for afresh.
           runQueued(victim);
-
-          // The abort may have granted the lock this statement was asking for.
-          if (holds(locks, session, need.key, need.mode)) continue;
-          blocked.set(session, { ...step, need });
-          record(step, 'statement', 'blocked', { notes: [...notes], waitingOn: outcome.waitingOn ?? [] });
-          return 'blocked';
+          return execute(step, resumed);
         }
+      }
+    }
+
+    // Holding the key's lock, check the key against everything committed, whatever the snapshot — a unique index
+    // does not look at a snapshot.
+    if (mvcc && !optimistic && run.write) {
+      const duplicate = newKeysOf(run, view)
+        .map((k) => ({ k, holder: committedHolder(k.table, k.key, k.rid, new Set()) }))
+        .find((x) => x.holder !== undefined);
+      if (duplicate) {
+        notes.push(txn ? `No effect, and T${String(txn.number)} stays open.` : 'No effect.');
+        if (!txn) endLocks(session, notes);
+        record(step, 'statement', phase, {
+          run,
+          error: `duplicate key value violates unique index ${duplicate.k.index}`,
+          notes,
+        });
+        if (!txn) drain();
+        return 'done';
       }
     }
 
@@ -904,16 +1170,21 @@ export function runSchedule(
     if (run.write) {
       const { table, rows: written } = run.write;
       const before = view.tables[table]?.rows ?? [];
-      const entries = entriesOf(run.write.kind, table, before, written);
+      const entries = entriesOf(run.write.kind, table, before, written, ridOf);
 
-      // Carry each updated row's identity across to the row that replaced it.
+      // Carry each updated row's identity across to the row that replaced it, and number a new row at once, so that
+      // id order keeps meaning table order.
       for (const entry of entries) {
         if (entry.kind === 'update') rowIds.set(entry.after, ridOf(entry.before));
+        else if (entry.kind === 'insert') {
+          ridOf(entry.row);
+          homePages.set(ridOf(entry.row), Math.floor(written.indexOf(entry.row) / options.rowsPerPage));
+        }
       }
 
       // First committer wins: under a snapshot, a row this statement can still see may already have been replaced by a
       // transaction that committed after the snapshot was taken. Writing over it would lose that change.
-      if (mvcc) {
+      if (mvcc && !optimistic) {
         const stale = entries.find((entry) => {
           if (entry.kind === 'insert') return false;
           const was = entry.kind === 'delete' ? entry.row : entry.before;
@@ -983,7 +1254,28 @@ export function runSchedule(
         });
       }
 
-      if (mvcc) {
+      if (optimistic && txn?.workspace) {
+        // The changes stay in the transaction's workspace, which no one else can see, until it commits.
+        const ws = txn.workspace;
+        for (const entry of entries) {
+          if (entry.kind === 'insert') {
+            ws.pending.push({ rid: ridOf(entry.row), table, row: entry.row, xmin: txn.xid, xmax: null, order: nextOrder });
+            nextOrder += 1;
+            ws.writes.add(ridOf(entry.row));
+            continue;
+          }
+          const was = entry.kind === 'delete' ? entry.row : entry.before;
+          const own = ws.pending.findIndex((v) => v.row === was);
+          const base = own >= 0 ? ws.pending[own] : store.find((v) => v.row === was);
+          if (!base) continue;
+          ws.writes.add(base.rid);
+          if (own >= 0) ws.pending.splice(own, 1);
+          else ws.removed.add(base);
+          if (entry.kind === 'update') {
+            ws.pending.push({ rid: base.rid, table, row: entry.after, xmin: txn.xid, xmax: null, order: base.order });
+          }
+        }
+      } else if (mvcc) {
         // The statement's changes become versions: a deletion stamps the old one, an update stamps it and adds the
         // new one, an insert adds one. An autocommit statement is its own transaction and commits at once.
         const xid = txn ? txn.xid : nextNumber;
@@ -1059,7 +1351,7 @@ export function runSchedule(
     }
 
     // SERIALIZABLE under MVCC re-checks, at COMMIT, everything the transaction read.
-    if (mvcc && txn && txn.isolation === 'serializable' && !run.analyze) {
+    if (mvcc && txn && (optimistic || txn.isolation === 'serializable') && !run.analyze) {
       const target = targetOf(sql);
       if (target && target.kind !== 'insert') txn.readPredicates.push({ table: target.table, where: target.where });
     }
@@ -1067,7 +1359,7 @@ export function runSchedule(
     // A read that would have returned something else without another session's uncommitted changes.
     const others = othersOpenLog(session);
     if (!mvcc && !run.write && !run.analyze && others.length > 0) {
-      const committedView = undo(current, [...others].sort((a, b) => b.step - a.step)).db;
+      const committedView = undo(current, [...others].sort((a, b) => b.step - a.step), ridOf).db;
       const clean = runQuery(sql, committedView, options);
       if (!clean.error && JSON.stringify(clean.rows) !== JSON.stringify(rows)) {
         const against = [...new Set(others.map((l) => l.session))];
@@ -1082,6 +1374,37 @@ export function runSchedule(
       }
     }
 
+    // The same for a write: its WHERE (or the values it computes) was answered from another session's uncommitted
+    // change, so it changed what it would not have changed — or wrote what it would not have written — without it.
+    if (!mvcc && run.write && others.length > 0) {
+      const committedView = undo(view, [...others].sort((a, b) => b.step - a.step), ridOf).db;
+      const clean = runQuery(sql, committedView, options);
+      if (!clean.error && clean.write && JSON.stringify(clean.rows) !== JSON.stringify(run.rows)) {
+        const against = [...new Set(others.map((l) => l.session))];
+        anomalies.push({
+          kind: 'dirty-read',
+          session,
+          against,
+          message: `Dirty read: ${session}'s statement worked from changes ${against.join(' and ')} has not committed. Without them it ${
+            clean.rows.length === 0 ? 'would have changed no rows' : `would have written ${clean.rows.map(rowText).join(', ')}`
+          }; if ${against.join(' or ')} rolls back, ${session} has acted on data that never existed.`,
+        });
+      }
+    }
+
+    if (timestamped) {
+      const ts = txn ? txn.number : nextNumber;
+      if (run.write) {
+        for (const entry of entriesOf(run.write.kind, run.write.table, view.tables[run.write.table]?.rows ?? [], run.write.rows, ridOf)) {
+          if (entry.kind === 'insert') stamps.set(ridOf(entry.row), { read: ts, write: ts });
+          else {
+            const image = entry.kind === 'delete' ? entry.row : entry.before;
+            graveyard.push({ table: run.write.table, image, written: ts });
+          }
+        }
+      }
+      if (!txn) nextNumber += 1;
+    }
     if (resumed === 'lock') notes.unshift(`${session}'s statement had to wait for a lock, and now runs.`);
     if (resumed === 'queue') notes.unshift(`${session}'s step waited behind its blocked statement, and now runs.`);
     let gaveBack = false;
@@ -1117,7 +1440,7 @@ export function runSchedule(
 
     // An autocommit statement is its own transaction: its locks end with it.
     if (!txn && locking) endLocks(session, notes);
-    record(step, 'statement', phase, { run, rows, notes, anomalies, ...(mvcc ? { view } : {}) });
+    record(step, 'statement', phase, { run, rows, notes, anomalies, ...(mvcc ? { view: viewNow() } : {}) });
     if ((!txn && locking) || gaveBack) drain();
     return 'done';
   }
@@ -1146,7 +1469,7 @@ export function runSchedule(
   // What would survive a crash: the database with every still-open transaction undone.
   const stillOpen = [...transactions.keys()];
   const allOpen = [...transactions.values()].flatMap((t) => t.log).sort((a, b) => b.step - a.step);
-  const committed = mvcc ? viewOf(template, store, committedXids, -1) : undo(current, allOpen).db;
+  const committed = mvcc ? viewOf(template, store, committedXids, -1) : undo(current, allOpen, ridOf).db;
   const dead = mvcc ? deadVersions() : [];
 
   return {

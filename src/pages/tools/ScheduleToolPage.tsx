@@ -611,6 +611,10 @@ export function ScheduleToolPage() {
   }
 
   const full = steps.length >= MAX_SCHEDULE_STEPS;
+  const compareParams = new URLSearchParams();
+  if (steps.length > 0) compareParams.set('s', encodeSchedule(steps));
+  compareParams.set('n', String(rows));
+  const compareLink = `/tools/concurrency?${compareParams.toString()}`;
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-4 p-6 sm:p-8">
@@ -623,7 +627,11 @@ export function ScheduleToolPage() {
         <Link to="/tools/locks" className="underline underline-offset-2 hover:text-ink">
           locks sandbox
         </Link>{' '}
-        shows the lock table on its own.
+        shows the lock table on its own, and the{' '}
+        <Link to={compareLink} className="underline underline-offset-2 hover:text-ink">
+          concurrency-control compare
+        </Link>{' '}
+        runs this schedule under every protocol at once.
       </PageHeader>
 
       <div className={`${panelSurface} p-4`}>

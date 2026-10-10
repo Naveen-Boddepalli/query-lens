@@ -207,6 +207,13 @@ const T = (name: string): string => `src/pages/tools/${name}.tsx`;
  *  - 2026-10-04, latch crabbing (§25.4 F5): a new route, /tools/latch-crabbing (163.5 kB measured + 3, rounded
  *    to 167). Unlike the standalone sandboxes it drives the REAL engine B+Tree (`engine/index/btree.ts`, the same
  *    code /tools/btree uses), so it pays the shared engine chunk the same way /tools/btree does (ceiling 167).
+ *  - 2026-10-10, the concurrency-control compare (§25.4 D6): a new lazy route again grows the entry chunk every page
+ *    loads, which pushed the five routes sitting at their ceilings over by a few hundred bytes: /stages 165 → 169,
+ *    /gallery 165 → 169 and /docs, with its two essays, 162 → 166 (each measured + 3, rounded up).
+ *    /tools/concurrency is 178.3, ceiling 182: it runs five protocols and a serial-order search over the whole
+ *    schedule runner. Timestamp ordering's extra rules and the dirty-read check on writes live in `schedule.ts`, which
+ *    moved /tools/isolation from 173.1 to 175.1; /tools/schedule is at 179.9 of 181. Both are inside their ceilings,
+ *    so neither was raised.
  *  - 2026-10-10, the isolation matrix (§25.4 D5): a new lazy route grows the entry chunk every page loads by a little
  *    (its import and its route element), which is what moved the two routes sitting within a kB of their ceilings:
  *    / 165 → 169 and /assignments/new 166 → 170 (each measured + 3, rounded up). /tools/isolation itself is 173.1,
@@ -255,12 +262,12 @@ const T = (name: string): string => `src/pages/tools/${name}.tsx`;
 export const ROUTES: readonly RouteBudget[] = [
   { route: '/', roots: [P('LandingPage')], kb: 169, note: 'the landing page' },
   { route: '/playground', roots: [P('PlaygroundPage')], kb: 319, note: 'the Playground: the editor, every stage panel, the engine — the heaviest route, and the one most people land on' },
-  { route: '/stages', roots: ['src/ui/StagesLayout.tsx', P('StagesIndex')], kb: 165, note: 'the stage explainers, index' },
+  { route: '/stages', roots: ['src/ui/StagesLayout.tsx', P('StagesIndex')], kb: 169, note: 'the stage explainers, index' },
   { route: '/stages/:id', roots: ['src/ui/StagesLayout.tsx', P('StagePage')], kb: 184, note: 'one stage explainer' },
   { route: '/learn', roots: [P('LearnPage')], kb: 173, note: 'the lesson track' },
   { route: '/learn/:id', roots: [P('LessonPage')], kb: 172, note: 'one lesson' },
   { route: '/examples', roots: [P('ExamplesPage')], kb: 115, note: 'preset queries' },
-  { route: '/gallery', roots: [P('GalleryPage')], kb: 165, note: 'named moments' },
+  { route: '/gallery', roots: [P('GalleryPage')], kb: 169, note: 'named moments' },
   { route: '/compare', roots: [P('ComparePage')], kb: 179, note: 'index vs scan, policy vs policy, hash vs sort, join algorithms, B+Tree vs. LSM' },
   { route: '/trace', roots: [P('TracePage')], kb: 171, note: 'the trace inspector' },
   { route: '/progress', roots: [P('ProgressPage')], kb: 175, note: 'the progress dashboard' },
@@ -278,6 +285,7 @@ export const ROUTES: readonly RouteBudget[] = [
   { route: '/tools/planner', roots: [T('PlannerToolPage')], kb: 172, note: 'planner sandbox' },
   { route: '/tools/locks', roots: [T('LocksToolPage')], kb: 117, note: 'lock simulator' },
   { route: '/tools/isolation', roots: [T('IsolationToolPage')], kb: 177, note: 'the Hermitage isolation matrix (both engines, computed)' },
+  { route: '/tools/concurrency', roots: [T('ConcurrencyToolPage')], kb: 182, note: 'one schedule under five concurrency-control protocols, each really run' },
   { route: '/tools/schedule', roots: [T('ScheduleToolPage')], kb: 181, note: 'transaction schedules (the engine, a shared database, two sessions)' },
   { route: '/tools/grammar', roots: [T('GrammarToolPage')], kb: 116, note: 'the SQL grammar diagram' },
   { route: '/tools/hash-join', roots: [T('HashJoinToolPage')], kb: 118, note: 'Grace hash join' },
@@ -287,10 +295,10 @@ export const ROUTES: readonly RouteBudget[] = [
   { route: '/tools/columnar', roots: [T('ColumnarToolPage')], kb: 118, note: 'NSM/DSM/PAX row vs. column storage sandbox' },
   { route: '/tools/vector-index', roots: [T('VectorIndexToolPage')], kb: 118, note: 'brute force vs. IVF vs. HNSW vector search' },
   { route: '/tools/latch-crabbing', roots: [T('LatchCrabbingToolPage')], kb: 167, note: 'latch crabbing: naive vs. lock coupling on a scripted B+Tree workload' },
-  { route: '/docs', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 162, note: 'the docs shell and every prose page (one shared chunk)' },
+  { route: '/docs', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 166, note: 'the docs shell and every prose page (one shared chunk)' },
   { route: '/docs/concepts/btree', roots: ['src/ui/DocsLayout.tsx', 'src/pages/DocsContent/concepts/btree.mdx'], kb: 177, note: 'a concept page with a live B+Tree widget' },
-  { route: '/docs/essays/index-write-tax', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 162, note: 'an essay: prose, with links into the B+Tree sandbox (plan.md §25.4 H2)' },
-  { route: '/docs/essays/scan-resistance', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 162, note: 'an essay: prose, with links into the buffer-pool sandbox under LRU and LRU-2 (plan.md §25.4 H2)' },
+  { route: '/docs/essays/index-write-tax', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 166, note: 'an essay: prose, with links into the B+Tree sandbox (plan.md §25.4 H2)' },
+  { route: '/docs/essays/scan-resistance', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 166, note: 'an essay: prose, with links into the buffer-pool sandbox under LRU and LRU-2 (plan.md §25.4 H2)' },
   { route: '/docs/concepts/buffer-pool', roots: ['src/ui/DocsLayout.tsx', 'src/pages/DocsContent/concepts/buffer-pool.mdx'], kb: 175, note: 'a concept page with a live buffer-pool widget' },
   { route: '/* (404)', roots: [P('NotFoundPage')], kb: 114, note: 'the not-found page' },
 ];
