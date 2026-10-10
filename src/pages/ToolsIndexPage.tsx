@@ -86,6 +86,13 @@ const TOOLS = [
     available: true,
   },
   {
+    title: 'Crash recovery',
+    href: '/tools/recovery',
+    description:
+      'Press Crash and the pool, the log buffer and every transaction are gone; the disk and the durable log stay. Then watch ARIES restart from the last checkpoint: analysis rebuilds the dirty page table and the transaction table, redo repeats history and skips what a page already has, undo rolls the losers back with compensation records — and a crash during recovery never undoes a change twice.',
+    available: true,
+  },
+  {
     title: 'Grammar sandbox',
     href: '/tools/grammar',
     description:

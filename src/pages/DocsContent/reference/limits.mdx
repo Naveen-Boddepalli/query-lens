@@ -364,8 +364,30 @@ index entries of the rows it touches.
   because of force (it is forced first, then the pages); and under *force with no-steal* a page that another running
   transaction has also changed cannot be written at the first commit, so its write waits until that transaction
   ends — page-grained logging makes force and no-steal at odds, which record-level logging avoids.
-- **Not yet:** a crash, checkpoints and recovery (E3) — the *crash image* says what recovery would have to do, and
-  nothing yet does it — and any storage but whole-page writes. There are no inserts or deletes, only changes to
+- **A crash, checkpoints and ARIES recovery** (plan.md §25.4 E3, [`/tools/recovery`](/tools/recovery)). A **fuzzy
+  checkpoint** writes a begin record, copies the transaction table and the dirty page table as they are then, and
+  writes an end record holding them: no page is written and nobody waits, so work between its two records is not in
+  its tables — which is fine, because the restart scans forward from the begin record. A forced end record moves the
+  *master record* that says where a restart begins. **A crash** drops the pool, the log buffer and every transaction;
+  it keeps the disk, the durable log and the master record, and the next LSN is numbered from the end of the *durable*
+  log, so a lost record's number is reused. **Recovery** is three passes, each shown: *analysis* scans from the
+  checkpoint, rebuilding both tables and naming the **losers** (no commit record); *redo* repeats history from the
+  oldest recLSN in the dirty page table, skipping a record whose page is not in the table, whose LSN is before the
+  page's recLSN, or whose page on disk already has it (pageLSN ≥ LSN); *undo* takes the losers' last records and always
+  the newest next, writing a **compensation record** for each undone change (and an end record when a transaction is
+  fully undone), forcing each as it goes. A compensation record is redo-only and carries `undoNextLSN`, so a restart
+  that meets one follows it and does not undo what it compensates: a crash *during* recovery (the *Recover, then
+  crash* button) picks up where it stopped. A committed transaction whose end record was lost gets one written. The
+  tests hold, over random scripts with checkpoints and any pool size or policy, that recovery leaves exactly the
+  committed state — also after any number of interrupted recoveries — that analysis names as losers exactly the
+  transactions that wrote and neither committed nor ended, that no transaction has more compensation records than
+  changes, and that the crash image predicted exactly the cells recovery had to fix.
+- **With the rule off, recovery can be wrong, and says so.** A page that reached disk ahead of its log record has
+  nothing durable that says how to undo it, so the restart leaves the uncommitted value in place. The page's *Is the
+  database right?* panel names the cell. This is the only way the model's recovery produces a wrong database.
+- **Not yet, and not modelled:** the SQL engine's own pages (E4 joins the two); log truncation, so the log only grows;
+  a log-record `end` for a checkpoint that was interrupted; concurrent transactions *during* recovery (the machine is
+  down until it finishes); and any storage but whole-page writes. There are no inserts or deletes, only changes to
   existing cells, and no savepoints.
 
 ## SQL

@@ -9,7 +9,8 @@ import {
   runWal,
   walViolations,
 } from '../recovery/wal.ts';
-import type { LogRecord, WalState, WalStep } from '../recovery/wal.ts';
+import { isTxnRecord } from '../recovery/wal.ts';
+import type { LogRecord, TxnRecord, WalState, WalStep } from '../recovery/wal.ts';
 
 const script = (...lines: string[]): WalStep[] =>
   lines.map((l) => {
@@ -19,7 +20,7 @@ const script = (...lines: string[]): WalStep[] =>
   });
 
 const last = (run: ReturnType<typeof runWal>) => run.final;
-const allRecords = (s: WalState): LogRecord[] => [...s.log, ...s.logBuffer];
+const allRecords = (s: WalState): TxnRecord[] => [...s.log, ...s.logBuffer].filter(isTxnRecord);
 
 describe('parsing', () => {
   it('reads each step and writes it back the same way', () => {

@@ -207,6 +207,10 @@ const T = (name: string): string => `src/pages/tools/${name}.tsx`;
  *  - 2026-10-04, latch crabbing (§25.4 F5): a new route, /tools/latch-crabbing (163.5 kB measured + 3, rounded
  *    to 167). Unlike the standalone sandboxes it drives the REAL engine B+Tree (`engine/index/btree.ts`, the same
  *    code /tools/btree uses), so it pays the shared engine chunk the same way /tools/btree does (ceiling 167).
+ *  - 2026-10-10, checkpoints, crash and recovery (§25.4 E3): a new route, /tools/recovery (125.4 kB measured + 3,
+ *    rounded to 129). It shares the write-ahead-log model with /tools/wal, which now ships the checkpoint and
+ *    restart code as well: /tools/wal 125 → 129 (measured 125.5 + 3, rounded up). Neither touches the shared engine
+ *    chunk, so no other route moved.
  *  - 2026-10-10, steal and force (§25.4 E2): /tools/wal 122 → 125 (measured 121.6 + 3, rounded up). The two policy
  *    toggles, the crash-image panel and the four-way comparison are all that page's own; the model grew inside the
  *    same standalone module, so no other route moved.
@@ -291,7 +295,8 @@ export const ROUTES: readonly RouteBudget[] = [
   { route: '/tools/planner', roots: [T('PlannerToolPage')], kb: 172, note: 'planner sandbox' },
   { route: '/tools/locks', roots: [T('LocksToolPage')], kb: 117, note: 'lock simulator' },
   { route: '/tools/isolation', roots: [T('IsolationToolPage')], kb: 177, note: 'the Hermitage isolation matrix (both engines, computed)' },
-  { route: '/tools/wal', roots: [T('WalToolPage')], kb: 125, note: 'write-ahead log: a pool, a disk, a log and the rule between them' },
+  { route: '/tools/recovery', roots: [T('RecoveryToolPage')], kb: 129, note: 'crash recovery: checkpoints, a crash, and ARIES analysis, redo and undo' },
+  { route: '/tools/wal', roots: [T('WalToolPage')], kb: 129, note: 'write-ahead log: a pool, a disk, a log and the rule between them' },
   { route: '/tools/concurrency', roots: [T('ConcurrencyToolPage')], kb: 182, note: 'one schedule under five concurrency-control protocols, each really run' },
   { route: '/tools/schedule', roots: [T('ScheduleToolPage')], kb: 181, note: 'transaction schedules (the engine, a shared database, two sessions)' },
   { route: '/tools/grammar', roots: [T('GrammarToolPage')], kb: 116, note: 'the SQL grammar diagram' },
