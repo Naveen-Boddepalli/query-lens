@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { createAccountsDatabase } from '../../engine/index.ts';
+import { createAccountsDatabase, DEFAULT_ENGINE_OPTIONS, runBufferTrace } from '../../engine/index.ts';
 import type { Database, Row } from '../../engine/index.ts';
+import { explainVisibility } from '../../engine/mvcc.ts';
 import { MAX_SCHEDULE_STEPS, runSchedule } from '../../engine/schedule.ts';
 import type { LockingOptions, ScheduleStep, ScheduleStepResult, VersionRow } from '../../engine/schedule.ts';
 import { ISOLATION_LEVELS } from '../../engine/isolation.ts';
@@ -314,6 +315,135 @@ function VersionTable({ versions, columns, caption }: { versions: VersionRow[]; 
         </tbody>
       </table>
     </div>
+  );
+}
+
+/**
+ * Predict, then reveal (plan.md §25.4 D4): would a statement a session ran now see this version? The answer is the
+ * visibility rule applied to that session's snapshot, and the reveal says which half of the rule decided it.
+ */
+function VisibilityQuiz({
+  versions,
+  snapshots,
+  columns,
+}: {
+  versions: VersionRow[];
+  snapshots: { session: string; xid: number | null; committed: number[] }[];
+  columns: string[];
+}) {
+  const candidates = versions.filter((v) => v.xmin !== 0 || v.xmax !== null);
+  const [pick, setPick] = useState(0);
+  const [asked, setAsked] = useState<string>(snapshots[0]?.session ?? 'A');
+  const [answer, setAnswer] = useState<boolean | null>(null);
+  const version = candidates[Math.min(pick, candidates.length - 1)];
+  const snapshot = snapshots.find((x) => x.session === asked) ?? snapshots[0];
+  if (!version || !snapshot) return null;
+
+  const label = (v: VersionRow) =>
+    `${columns.map((c) => `${c} ${String(v.row[c] ?? 'NULL')}`).join(', ')} · xmin ${String(v.xmin)} · xmax ${v.xmax === null ? '—' : String(v.xmax)}`;
+  const explained = explainVisibility(
+    { rid: version.rid, table: version.table, row: version.row, xmin: version.xmin, xmax: version.xmax, order: 0 },
+    new Set(snapshot.committed),
+    snapshot.xid ?? -1,
+  );
+
+  return (
+    <section className="mt-4 rounded-lg border border-edge p-3" aria-label="Visibility question">
+      <h3 className="mb-2 text-body font-semibold text-ink">Can they see it?</h3>
+      <div className="flex flex-wrap items-end gap-3 text-label text-ink-dim">
+        <label className="flex flex-col gap-1">
+          Version
+          <select
+            className={inputField}
+            value={pick}
+            onChange={(e) => { setPick(Number(e.target.value)); setAnswer(null); }}
+          >
+            {candidates.map((v, i) => (
+              <option key={i} value={i}>{label(v)}</option>
+            ))}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1">
+          Session
+          <select
+            className={inputField}
+            value={asked}
+            onChange={(e) => { setAsked(e.target.value); setAnswer(null); }}
+          >
+            {snapshots.map((x) => (
+              <option key={x.session} value={x.session}>{x.session}</option>
+            ))}
+          </select>
+        </label>
+      </div>
+      <p className="mt-2 text-label text-ink">
+        If session {snapshot.session} ran a statement now, would it see this version?
+      </p>
+      <div className="mt-1 flex gap-2">
+        <button type="button" className={btnSecondary} onClick={() => { setAnswer(true); }}>Yes, it sees it</button>
+        <button type="button" className={btnSecondary} onClick={() => { setAnswer(false); }}>No, it does not</button>
+      </div>
+      {answer !== null && (
+        <div className="mt-2 text-label" role="status">
+          <p className={answer === explained.visible ? 'text-hit' : 'text-evict'}>
+            {answer === explained.visible ? 'Right.' : 'Not quite.'} Session {snapshot.session}{' '}
+            {explained.visible ? 'sees' : 'does not see'} this version.
+          </p>
+          <p className="mt-1 text-ink-dim">
+            {snapshot.session}&rsquo;s snapshot counts {snapshot.committed.map((x) => String(x)).join(', ')} as committed
+            {snapshot.xid === null ? '' : `, and it is transaction ${String(snapshot.xid)} itself`}.
+          </p>
+          <ul className="mt-1 list-disc pl-5 text-ink-dim">
+            <li>{explained.created}</li>
+            <li>{explained.removed}</li>
+          </ul>
+        </div>
+      )}
+    </section>
+  );
+}
+
+/** What dead versions cost, run through the real buffer pool: three scans of the heap, as it is and after a VACUUM. */
+function BloatPanel({ pages, pagesAfterVacuum }: { pages: number; pagesAfterVacuum: number }) {
+  const [frames, setFrames] = useState(5);
+  const reads = (heapPages: number): number => {
+    const once = Array.from({ length: heapPages }, (_, i) => i);
+    const trace = runBufferTrace([...once, ...once, ...once], {
+      ...DEFAULT_ENGINE_OPTIONS,
+      bufferFrames: frames,
+      policy: 'lru',
+    });
+    return trace.events.filter((e) => e.stage === 'buffer' && e.action === 'miss').length;
+  };
+  if (pages === 0) return null;
+  const now = reads(pages);
+  const after = reads(pagesAfterVacuum);
+  return (
+    <section className="mt-4 rounded-lg border border-edge p-3" aria-label="What the dead versions cost">
+      <h3 className="mb-2 text-body font-semibold text-ink">What the dead versions cost</h3>
+      <label className="flex w-fit flex-col gap-1 text-label text-ink-dim">
+        Buffer pool frames
+        <input
+          type="number"
+          min={2}
+          max={8}
+          value={frames}
+          onChange={(e) => {
+            const n = Number(e.target.value);
+            if (Number.isInteger(n) && n >= 2 && n <= 8) setFrames(n);
+          }}
+          className={`${inputField} w-20 tabular-nums`}
+        />
+      </label>
+      <p className="mt-2 text-label text-ink" role="status">
+        Three full scans of the heap through {String(frames)} LRU frames read {String(now)} pages from disk as it is
+        ({String(pages)} pages), and {String(after)} after a VACUUM ({String(pagesAfterVacuum)} pages).
+      </p>
+      <p className="mt-1 text-label text-ink-dim">
+        Run through the real buffer pool, one reference per page of the scan; the versions are laid out four to a page.
+        A heap that has grown past the pool is read from disk on every pass.
+      </p>
+    </section>
   );
 }
 
@@ -721,6 +851,12 @@ export function ScheduleToolPage() {
               ? `No dead versions: the heap needs ${String(result.bloat.pages)} pages.`
               : `${String(result.bloat.dead)} dead version${result.bloat.dead === 1 ? '' : 's'} no snapshot can see again: the heap needs ${String(result.bloat.pages)} pages, ${String(result.bloat.pagesAfterVacuum)} after a VACUUM. A scan reads them all.`}
           </p>
+          <BloatPanel pages={result.bloat.pages} pagesAfterVacuum={result.bloat.pagesAfterVacuum} />
+          <VisibilityQuiz
+            versions={result.steps.at(-1)?.versions ?? []}
+            snapshots={result.snapshots}
+            columns={columns}
+          />
         </div>
       )}
 

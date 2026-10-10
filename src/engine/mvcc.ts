@@ -67,3 +67,33 @@ export function isDead(
   if (version.xmax === null || !committed.has(version.xmax)) return false;
   return openSnapshots.every((snapshot) => snapshot.has(version.xmax!));
 }
+
+/**
+ * The visibility rule said as steps, for a reader to check an answer against: whether the version's creator counts as
+ * committed for this snapshot, whether its remover does, and so whether the reader sees it.
+ */
+export function explainVisibility(
+  version: Version,
+  committed: ReadonlySet<number>,
+  self: number,
+): { visible: boolean; created: string; removed: string } {
+  let created: string;
+  if (version.xmin === 0) created = 'It is part of the data the schedule began with, committed before anyone started, so it exists.';
+  else if (version.xmin === self) created = `Transaction ${String(version.xmin)} made it and this reader is that transaction, so it exists for it.`;
+  else if (committed.has(version.xmin)) {
+    created = `Transaction ${String(version.xmin)} made it and had committed when the snapshot was taken, so it exists.`;
+  } else {
+    created = `Transaction ${String(version.xmin)} made it, and it had not committed when the snapshot was taken, so it does not exist for this reader yet.`;
+  }
+
+  let removed: string;
+  if (version.xmax === null) removed = 'Nobody has deleted or replaced it.';
+  else if (version.xmax === self) removed = `Transaction ${String(version.xmax)} removed it and this reader is that transaction, so it is gone for it.`;
+  else if (committed.has(version.xmax)) {
+    removed = `Transaction ${String(version.xmax)} deleted or replaced it and had committed when the snapshot was taken, so it is gone.`;
+  } else {
+    removed = `Transaction ${String(version.xmax)} deleted or replaced it, but had not committed when the snapshot was taken, so as far as this reader is concerned it is still there.`;
+  }
+
+  return { visible: isVisible(version, committed, self), created, removed };
+}

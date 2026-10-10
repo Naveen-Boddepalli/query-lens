@@ -174,6 +174,11 @@ export interface ScheduleResult {
   truncated: boolean;
   /** Under MVCC, how many dead versions the store holds at the end, and how many pages the heap would need without them. */
   bloat: { dead: number; pages: number; pagesAfterVacuum: number } | null;
+  /**
+   * Under MVCC, what each session would see if it ran a statement now: the transactions its snapshot counts as
+   * committed, and the id it would run as (null in autocommit, which sees only what is committed).
+   */
+  snapshots: { session: string; xid: number | null; committed: number[] }[];
 }
 
 /** A hostile or pasted schedule should not hang the tab. Not a security boundary — a size limit. */
@@ -1152,6 +1157,17 @@ export function runSchedule(
     stuck: [...blocked.keys()],
     deadlocks,
     truncated: schedule.length > MAX_SCHEDULE_STEPS,
+    snapshots: mvcc
+      ? sessionOrder.map((session) => {
+          const txn = transactions.get(session);
+          const fresh = txn === undefined || txn.isolation === 'read-committed' || txn.isolation === 'read-uncommitted';
+          return {
+            session,
+            xid: txn?.xid ?? null,
+            committed: [...(fresh ? committedXids : (txn.snapshot ?? committedXids))].sort((a, b) => a - b),
+          };
+        })
+      : [],
     bloat: mvcc
       ? {
           dead: dead.length,

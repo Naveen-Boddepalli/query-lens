@@ -120,3 +120,30 @@ test('dead versions pile up and VACUUM reclaims them', async ({ page }) => {
   await page.getByRole('button', { name: 'VACUUM' }).click();
   await expect(page.getByText(/No dead versions/)).toBeVisible();
 });
+
+test('a visibility question is answered against the session’s snapshot, and revealed', async ({ page }) => {
+  await page.goto('/tools/schedule');
+  await page.getByRole('button', { name: 'Snapshot read' }).click();
+  // Leave A's transaction open, so its snapshot is still the one taken before B's update committed.
+  await page.getByRole('button', { name: 'Remove step 5' }).click();
+  const quiz = page.getByRole('region', { name: 'Visibility question' });
+  await expect(quiz).toBeVisible();
+  await quiz.getByLabel('Session').selectOption('A');
+  // The first version listed is the one B replaced: A's snapshot has not seen that replacement.
+  await quiz.getByLabel('Version').selectOption({ index: 0 });
+  await quiz.getByRole('button', { name: 'Yes, it sees it' }).click();
+  await expect(quiz.getByRole('status')).toContainText('Right.');
+  await expect(quiz.getByRole('status')).toContainText('still there');
+
+  // B, running as its own autocommit statement, has seen it, and the same question is answered the other way.
+  await quiz.getByLabel('Session').selectOption('B');
+  await quiz.getByRole('button', { name: 'Yes, it sees it' }).click();
+  await expect(quiz.getByRole('status')).toContainText('Not quite.');
+});
+
+test('dead versions can push a heap past the pool, and a VACUUM brings it back', async ({ page }) => {
+  await page.goto('/tools/schedule');
+  await page.getByRole('button', { name: 'Dead tuples' }).click();
+  const cost = page.getByRole('region', { name: 'What the dead versions cost' });
+  await expect(cost.getByRole('status')).toContainText('read 18 pages from disk as it is (6 pages), and 5 after a VACUUM (5 pages)');
+});

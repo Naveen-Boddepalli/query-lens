@@ -1109,6 +1109,22 @@ describe('multi-version concurrency control (plan.md §25.4 D4)', () => {
     expect(balances(result.final, 3)).toEqual([1, 3, 100]);
   });
 
+  it('reports what each session would see now: its own snapshot inside a snapshot transaction, everything otherwise', () => {
+    const result = mvcc(
+      steps(
+        ['A', 'BEGIN'],
+        ['A', 'SELECT balance FROM accounts WHERE id = 1'],
+        ['B', 'UPDATE accounts SET balance = 50 WHERE id = 1'],
+      ),
+      'repeatable-read',
+    );
+    const byName = Object.fromEntries(result.snapshots.map((s) => [s.session, s]));
+    // A's snapshot was taken before B's autocommit transaction (xid 2) committed.
+    expect(byName.A).toEqual({ session: 'A', xid: 1, committed: [0] });
+    expect(byName.B).toEqual({ session: 'B', xid: null, committed: [0, 2] });
+    expect(runSchedule(steps(['A', 'SELECT * FROM accounts']), createAccountsDatabase()).snapshots).toEqual([]);
+  });
+
   it('REPEATABLE READ and SERIALIZABLE let no anomaly through, and READ COMMITTED only its own three', () => {
     const statement = fc.oneof(
       fc.constant('BEGIN'),

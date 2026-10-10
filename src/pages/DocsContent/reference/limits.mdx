@@ -276,13 +276,17 @@ index entries of the rows it touches.
 - **Rollback undoes nothing under MVCC.** The transaction's versions simply stop being visible to anyone, and
   stay in the heap as *dead tuples* — as do the old versions an update or delete leaves behind — so a scan
   reads more pages than the live rows need. **`VACUUM`** removes the versions no open snapshot can see again;
-  one an old snapshot still needs is kept. The page shows each version's `xmin` and `xmax`, and the dead
-  count and the heap's size with and without them.
+  one an old snapshot still needs is kept. The page shows each version's `xmin` and `xmax`, the dead count,
+  and what they cost: three scans of the heap run through the real buffer pool, as it is and after a
+  `VACUUM`, so a heap that has grown past the pool shows as a disk read for every page of every pass. A
+  *Can they see it?* question asks, for a version and a session, whether a statement run now would see it,
+  and reveals the answer against that session's snapshot.
 - **A row another open transaction has deleted or re-keyed** keeps its old image, still locked, until that
   transaction ends — otherwise a lookup for the old key finds nothing, touches no page, takes no lock, and
   reads a change nobody committed.
-- **Not yet:** the dead versions are counted and sized, not read through the buffer pool by a real scan (the
-  executor does not skip invisible tuples), and a wait for another session's uncommitted row on a `UNIQUE` key — a duplicate is rejected at once, where a
+- **Not yet:** the scan that measures the dead versions' cost is a reference string of their pages, not the
+  executor reading them (it does not skip invisible tuples, and the index has no entries for dead versions),
+  and a wait for another session's uncommitted row on a `UNIQUE` key — a duplicate is rejected at once, where a
   real engine would wait to find out whether the other insert commits. The predicate lock is a *toy*: it
   matches a `WHERE` against the rows a write would add, which is enough for these tables and nothing like an
   index-range or next-key lock.

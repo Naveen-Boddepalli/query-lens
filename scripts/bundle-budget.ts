@@ -207,6 +207,9 @@ const T = (name: string): string => `src/pages/tools/${name}.tsx`;
  *  - 2026-10-04, latch crabbing (§25.4 F5): a new route, /tools/latch-crabbing (163.5 kB measured + 3, rounded
  *    to 167). Unlike the standalone sandboxes it drives the REAL engine B+Tree (`engine/index/btree.ts`, the same
  *    code /tools/btree uses), so it pays the shared engine chunk the same way /tools/btree does (ceiling 167).
+ *  - 2026-10-10, versions and snapshots (§25.4 D4): the schedule tool gained the version store's panels, a visibility
+ *    question and a buffer-pool scan, none of it shared with another route. /tools/schedule 176 → 181 (measured 177.0 + 3,
+ *    rounded up). `mvcc.ts` is imported only by the schedule runner, so no other route moved.
  *  - 2026-10-10, isolation levels (§25.4 D3): `runQuery` recognises `BEGIN ISOLATION LEVEL …` (engine code every route
  *    shares; the level names live in `isolation.ts`, which only the schedule tool imports). /learn 169 → 173,
  *    /tools/btree 170 → 174, and the schedule tool itself 172 → 176 (each measured + 3, rounded up).
@@ -270,7 +273,7 @@ export const ROUTES: readonly RouteBudget[] = [
   { route: '/tools/sort', roots: [T('SortToolPage')], kb: 118, note: 'external merge sort' },
   { route: '/tools/planner', roots: [T('PlannerToolPage')], kb: 172, note: 'planner sandbox' },
   { route: '/tools/locks', roots: [T('LocksToolPage')], kb: 117, note: 'lock simulator' },
-  { route: '/tools/schedule', roots: [T('ScheduleToolPage')], kb: 176, note: 'transaction schedules (the engine, a shared database, two sessions)' },
+  { route: '/tools/schedule', roots: [T('ScheduleToolPage')], kb: 181, note: 'transaction schedules (the engine, a shared database, two sessions)' },
   { route: '/tools/grammar', roots: [T('GrammarToolPage')], kb: 116, note: 'the SQL grammar diagram' },
   { route: '/tools/hash-join', roots: [T('HashJoinToolPage')], kb: 118, note: 'Grace hash join' },
   { route: '/tools/join-order', roots: [T('JoinOrderToolPage')], kb: 168, note: 'Selinger join-order search over the subset lattice' },
