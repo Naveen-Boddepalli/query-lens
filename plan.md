@@ -2696,22 +2696,22 @@ other items depends on the result, so they proceed in parallel; only 2.2 waits.
 - [x] `1.0.0` tagged; CHANGELOG cut (T0).
 - [x] The oracle runs in CI (seeded, bounded); a divergence ledger and "How we know the answers are right" exist. *(built 2026-09-25; TLP lands with B1)*
 - [ ] The study kit is live *(built 2026-09-24; automated tests pass on desktop and a phone-width run was checked by hand)* and at least one **real participant** has completed it end to end on a phone *and* a laptop.
-- [ ] A homework-shaped query using `OR`, `IN`, `LIKE`, `DISTINCT`, `HAVING` and a **non-unique** indexed column runs and narrates end to end; `sql.mdx`, `limits.mdx` and `/tools/grammar` all agree.
-- [ ] `limits.mdx` no longer says "unique key" or that a join never uses an index.
+- [x] A homework-shaped query using `OR`, `IN`, `LIKE`, `DISTINCT`, `HAVING` and a **non-unique** indexed column runs and narrates end to end; `sql.mdx`, `limits.mdx` and `/tools/grammar` all agree. *(Held by `homework.test.ts` against a plain computation of the same rows; the grammar page's own test checks it against the parser.)*
+- [x] `limits.mdx` no longer says "unique key" or that a join never uses an index. *(Rewritten 2026-10-10; the only "unique key" left is the optimistic-validation rule that refuses a key another transaction took.)*
 - [ ] Name decided and recorded *(done: keep, with descriptor)*; custom domain live; the launch post published; CLI, engine and MCP on npm.
-- [ ] Per-route budgets replace the single sum.
+- [x] Per-route budgets replace the single sum. *(H8, built 2026-09-25; every route and tool has a row in `scripts/bundle-budget.ts`.)*
 
 **2.1 — The optimizer, honestly**
 - [x] `ANALYZE` statistics are inspectable; at least one dataset shows a q-error ≥ 10×. *(C1 built 2026-09-29: `ANALYZE table`, `pg_stats`-shaped per-column stats, read by the cost model. C2 built 2026-09-29: the `employees` dataset's correlated `department`/`office` measures 11.0×, shown under `EXPLAIN ANALYZE`.)*
-- [ ] A three-table query is ordered by DP with the lattice visible; "Why not?" shows the runner-up.
-- [ ] `limits.mdx`'s "cost never decides" is replaced by the true statement.
+- [x] A three-table query is ordered by DP with the lattice visible; "Why not?" shows the runner-up. *(C4 and C5: `/tools/join-order` and the planner's *Why not?* note.)*
+- [x] `limits.mdx`'s "cost never decides" is replaced by the true statement. *(The *What cost decides* section.)*
 
 **2.2 — Transactions**
-- [ ] Two sessions interleave in the Playground from a URL; a deadlock resolves live *in the engine*.
-- [ ] The isolation matrix's PostgreSQL and InnoDB columns match Hermitage's documented outcomes **in tests**; write skew reproduces under SI and is prevented under SER.
+- [ ] Two sessions interleave in the Playground from a URL; a deadlock resolves live *in the engine*. *(Built at `/tools/schedule`, which takes the interleaving from the URL and resolves a deadlock in the engine's own lock table; the Playground itself still runs one session, so this stays open as written.)*
+- [ ] The isolation matrix's PostgreSQL and InnoDB columns match Hermitage's documented outcomes **in tests**; write skew reproduces under SI and is prevented under SER. *(Met for PostgreSQL's and SQL Server's published results, 79 of 80 cells with the one difference declared; write skew reproduces under snapshots and is prevented under SERIALIZABLE. There is no InnoDB column: its REPEATABLE READ is a hybrid of locks and snapshots that neither engine models.)*
 
 **2.3 — Durability**
-- [ ] Crash → recover restores exactly the committed state; all four steal / force combinations are demonstrated; analysis, redo and undo are each a stage in the trace.
+- [ ] Crash → recover restores exactly the committed state; all four steal / force combinations are demonstrated; analysis, redo and undo are each a stage in the trace. *(The first two are met and held by properties, at `/tools/recovery` and in the Playground's Durability dialog. Analysis, redo and undo are three panels of a recovery report, not stages of the query pipeline's trace, so this stays open as written.)*
 
 **2.4 — Storage engines**
 - [ ] Every shipped tool has a lesson, a challenge, a data-table view and its own budget row; B+Tree vs. LSM reports amplification numbers from real counters.
