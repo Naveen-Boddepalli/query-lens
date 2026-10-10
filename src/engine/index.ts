@@ -8,6 +8,7 @@ export {
 } from './bufferTrace.ts';
 export type { BufferTraceResult, ScanSpan } from './bufferTrace.ts';
 export {
+  createAccountsDatabase,
   createJoinCompareDatabase,
   createJoinDemoDatabase,
   createJoinOrderDemoDatabase,

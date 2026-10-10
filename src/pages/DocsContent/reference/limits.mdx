@@ -227,6 +227,23 @@ index entries of the rows it touches.
   constraint. The [locks sandbox](/tools/locks) simulates two transactions separately, with real
   blocking, deadlock detection and victim selection, outside the main pipeline.
 
+## Transactions
+
+- **`BEGIN`, `COMMIT` and `ROLLBACK` exist only in [Transaction schedules](/tools/schedule)**, not the
+  Playground — they mean nothing to one statement on its own, and the Playground runs one at a time.
+  A schedule is a list of statements, each tagged with the session that runs it, in an order you choose;
+  two sessions, `A` and `B`, share one `accounts` table (up to 40 steps).
+- **There is no concurrency control yet.** A statement sees and changes whatever the table holds,
+  another session's uncommitted changes included. `ROLLBACK` is real: each transaction keeps an undo log
+  of the rows it changed and puts them back, newest first. The page names what that lets through — a
+  *dirty read* (a session read a change that was never committed) and a *dirty write* (a session
+  changed a row another had changed and not committed, which a later rollback can no longer undo).
+- A statement outside `BEGIN … COMMIT` is its own transaction. A statement that fails changes nothing and
+  leaves the transaction open, as MySQL does; PostgreSQL would instead refuse everything until
+  `ROLLBACK`. There are no savepoints and no `BEGIN ISOLATION LEVEL …` yet.
+- Each statement is its own run, with its own buffer pool: a schedule shows what the data does, not what
+  the pool does between statements.
+
 ## SQL
 
 See [Supported SQL](/docs/reference/sql) for the complete accepted grammar.
@@ -256,7 +273,8 @@ decide whether the rewrite happens.
 ## What's out of scope entirely
 
 No subqueries anywhere but an uncorrelated `IN (SELECT …)` (plan.md §25.4 C3, closing C3 — no `EXISTS`, no
-scalar subquery like `x = (SELECT …)`, no correlated subquery). No `RIGHT`/`FULL`/`CROSS` join, no transactions,
-no real concurrency (the Locks panel is visual only). `UNION` and `COUNT(DISTINCT …)` are also not accepted.
+scalar subquery like `x = (SELECT …)`, no correlated subquery). No `RIGHT`/`FULL`/`CROSS` join, no transactions in
+the Playground (they exist only in [Transaction schedules](/tools/schedule), with no isolation yet), no real
+concurrency there (the Locks panel is visual only). `UNION` and `COUNT(DISTINCT …)` are also not accepted.
 These are deliberate exclusions for this release, not bugs — see the parser's own error messages in
 [Supported SQL](/docs/reference/sql) for exactly which keywords are recognised and rejected.

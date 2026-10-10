@@ -278,6 +278,7 @@ with a generic syntax error:
 | `SELECT a, DISTINCT b`, `COUNT(DISTINCT x)` | *DISTINCT applies to the whole SELECT list — write `SELECT DISTINCT a, b …`. Inside an aggregate it is not supported yet.* |
 | `UNION` | *UNION is not in the v0 subset.* |
 | A subquery anywhere but `IN`, e.g. `x = (SELECT …)` | *A subquery is not supported here — write the value out, join the two tables, or use IN (SELECT …).* |
+| `BEGIN` / `COMMIT` / `ROLLBACK` | *`BEGIN`, `COMMIT` and `ROLLBACK` need two sessions to mean anything, and the Playground runs one statement at a time.* They run in [Transaction schedules](/tools/schedule). |
 | `CREATE` / `DROP` | *QueryLens only runs SELECT, DELETE, INSERT and UPDATE. Edit the seed data to change the table.* |
 
 ## The seed tables

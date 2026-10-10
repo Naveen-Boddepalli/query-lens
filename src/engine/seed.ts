@@ -41,6 +41,28 @@ export function createSeedDatabase(): Database {
   };
 }
 
+/**
+ * Three bank accounts (plan.md §25.4 D1), the textbook table for a transaction: small enough that a schedule's every
+ * row fits on screen, with a `balance` two sessions can disagree about. `id` is a UNIQUE index, so an `INSERT` of a
+ * repeated id is rejected the way a primary key would be.
+ */
+export function createAccountsDatabase(): Database {
+  return {
+    tables: {
+      accounts: {
+        name: 'accounts',
+        columns: ['id', 'owner', 'balance'],
+        rows: [
+          { id: 1, owner: 'ada', balance: 100 },
+          { id: 2, owner: 'bo', balance: 100 },
+          { id: 3, owner: 'cy', balance: 100 },
+        ],
+        indexes: [{ columns: ['id'], unique: true }],
+      },
+    },
+  };
+}
+
 const AUTHOR_NAMES = ['ada', 'alan', 'grace', 'donald', 'barbara'] as const;
 
 // `authorId` is a real foreign key shape: two authors with several posts,

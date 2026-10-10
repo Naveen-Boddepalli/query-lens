@@ -31,6 +31,7 @@ import {
 } from './planner/index.ts';
 import type { Plan } from './planner/index.ts';
 import { buildHeap, createBufferPool } from './storage/index.ts';
+import { controlKindOf } from './transactionControl.ts';
 import { buildIndexes, describeUniqueKey, findIndexSpec, indexSpecsOf, pageCountFor } from './index/index.ts';
 import type { BPlusTree } from './index/index.ts';
 import type { Heap } from './storage/index.ts';
@@ -107,6 +108,18 @@ export function runQuery(
   hooks: RunHooks = {},
 ): RunResult {
   const { emit, drain } = createTracer();
+
+  // `BEGIN`, `COMMIT` and `ROLLBACK` mean nothing to a single statement: say where they do (plan.md §25.4 D1).
+  if (controlKindOf(sql) !== null) {
+    return {
+      events: drain(),
+      rows: [],
+      error: {
+        message: '`BEGIN`, `COMMIT` and `ROLLBACK` need two sessions to mean anything, and the Playground runs one statement at a time.',
+        hint: 'Open Transaction schedules (/tools/schedule), where two sessions share a table and you choose the interleaving.',
+      },
+    };
+  }
 
   const parsed = parseStatement(sql);
   if (!parsed.ok) {

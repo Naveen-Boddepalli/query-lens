@@ -97,6 +97,9 @@ const PlannerToolPage = lazy(() =>
 const LocksToolPage = lazy(() =>
   import('./pages/tools/LocksToolPage.tsx').then((m) => ({ default: m.LocksToolPage })),
 );
+const ScheduleToolPage = lazy(() =>
+  import('./pages/tools/ScheduleToolPage.tsx').then((m) => ({ default: m.ScheduleToolPage })),
+);
 const GrammarToolPage = lazy(() =>
   import('./pages/tools/GrammarToolPage.tsx').then((m) => ({ default: m.GrammarToolPage })),
 );
@@ -223,6 +226,7 @@ export default function App() {
               <Route path="sort" element={suspended(SortToolPage)} />
               <Route path="planner" element={suspended(PlannerToolPage)} />
               <Route path="locks" element={suspended(LocksToolPage)} />
+              <Route path="schedule" element={suspended(ScheduleToolPage)} />
               <Route path="grammar" element={suspended(GrammarToolPage)} />
               <Route path="hash-join" element={suspended(HashJoinToolPage)} />
               <Route path="join-order" element={suspended(JoinOrderToolPage)} />

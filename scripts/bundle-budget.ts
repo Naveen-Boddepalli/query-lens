@@ -207,6 +207,12 @@ const T = (name: string): string => `src/pages/tools/${name}.tsx`;
  *  - 2026-10-04, latch crabbing (§25.4 F5): a new route, /tools/latch-crabbing (163.5 kB measured + 3, rounded
  *    to 167). Unlike the standalone sandboxes it drives the REAL engine B+Tree (`engine/index/btree.ts`, the same
  *    code /tools/btree uses), so it pays the shared engine chunk the same way /tools/btree does (ceiling 167).
+ *  - 2026-10-10, transaction schedules (§25.4 D1): `runQuery` now recognises BEGIN/COMMIT/ROLLBACK and says where they
+ *    work, which is engine code every route shares, and the docs gained a Transactions section and two table rows.
+ *    /trace 167 → 171, /progress 171 → 175, /docs and the two essays 158 → 162, /docs/concepts/buffer-pool 171 → 175
+ *    (each measured + 3, rounded up). `schedule.ts` itself is deliberately NOT in the engine barrel: re-exporting it
+ *    added 4.7 kB (1.7 kB gzip) to the shared engine chunk of every route, for one tool that uses it, so the tool
+ *    imports it directly. The package barrel can take it back when a subpath export for the transactions work exists.
  *  - 2026-10-10, the scan ring (§25.4 F7): the pool's ring and the range notation for a marked scan are engine code, so the
  *    routes that run the engine grew a little, and the buffer-pool sandbox also gained its Scan ring control. /learn/:id
  *    168 → 172, /challenges 167 → 171, /tools/buffer-pool 169 → 173 (each measured + 3, rounded up).
@@ -243,8 +249,8 @@ export const ROUTES: readonly RouteBudget[] = [
   { route: '/examples', roots: [P('ExamplesPage')], kb: 115, note: 'preset queries' },
   { route: '/gallery', roots: [P('GalleryPage')], kb: 165, note: 'named moments' },
   { route: '/compare', roots: [P('ComparePage')], kb: 179, note: 'index vs scan, policy vs policy, hash vs sort, join algorithms, B+Tree vs. LSM' },
-  { route: '/trace', roots: [P('TracePage')], kb: 167, note: 'the trace inspector' },
-  { route: '/progress', roots: [P('ProgressPage')], kb: 171, note: 'the progress dashboard' },
+  { route: '/trace', roots: [P('TracePage')], kb: 171, note: 'the trace inspector' },
+  { route: '/progress', roots: [P('ProgressPage')], kb: 175, note: 'the progress dashboard' },
   { route: '/challenges', roots: [P('ChallengesPage')], kb: 171, note: 'challenge index' },
   { route: '/challenges/:id', roots: [P('ChallengePage')], kb: 290, note: 'one challenge' },
   { route: '/settings', roots: [P('SettingsPage')], kb: 116, note: 'preferences' },
@@ -258,6 +264,7 @@ export const ROUTES: readonly RouteBudget[] = [
   { route: '/tools/sort', roots: [T('SortToolPage')], kb: 118, note: 'external merge sort' },
   { route: '/tools/planner', roots: [T('PlannerToolPage')], kb: 172, note: 'planner sandbox' },
   { route: '/tools/locks', roots: [T('LocksToolPage')], kb: 117, note: 'lock simulator' },
+  { route: '/tools/schedule', roots: [T('ScheduleToolPage')], kb: 172, note: 'transaction schedules (the engine, a shared database, two sessions)' },
   { route: '/tools/grammar', roots: [T('GrammarToolPage')], kb: 116, note: 'the SQL grammar diagram' },
   { route: '/tools/hash-join', roots: [T('HashJoinToolPage')], kb: 118, note: 'Grace hash join' },
   { route: '/tools/join-order', roots: [T('JoinOrderToolPage')], kb: 168, note: 'Selinger join-order search over the subset lattice' },
@@ -266,11 +273,11 @@ export const ROUTES: readonly RouteBudget[] = [
   { route: '/tools/columnar', roots: [T('ColumnarToolPage')], kb: 118, note: 'NSM/DSM/PAX row vs. column storage sandbox' },
   { route: '/tools/vector-index', roots: [T('VectorIndexToolPage')], kb: 118, note: 'brute force vs. IVF vs. HNSW vector search' },
   { route: '/tools/latch-crabbing', roots: [T('LatchCrabbingToolPage')], kb: 167, note: 'latch crabbing: naive vs. lock coupling on a scripted B+Tree workload' },
-  { route: '/docs', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 158, note: 'the docs shell and every prose page (one shared chunk)' },
+  { route: '/docs', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 162, note: 'the docs shell and every prose page (one shared chunk)' },
   { route: '/docs/concepts/btree', roots: ['src/ui/DocsLayout.tsx', 'src/pages/DocsContent/concepts/btree.mdx'], kb: 173, note: 'a concept page with a live B+Tree widget' },
-  { route: '/docs/essays/index-write-tax', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 158, note: 'an essay: prose, with links into the B+Tree sandbox (plan.md §25.4 H2)' },
-  { route: '/docs/essays/scan-resistance', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 158, note: 'an essay: prose, with links into the buffer-pool sandbox under LRU and LRU-2 (plan.md §25.4 H2)' },
-  { route: '/docs/concepts/buffer-pool', roots: ['src/ui/DocsLayout.tsx', 'src/pages/DocsContent/concepts/buffer-pool.mdx'], kb: 171, note: 'a concept page with a live buffer-pool widget' },
+  { route: '/docs/essays/index-write-tax', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 162, note: 'an essay: prose, with links into the B+Tree sandbox (plan.md §25.4 H2)' },
+  { route: '/docs/essays/scan-resistance', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 162, note: 'an essay: prose, with links into the buffer-pool sandbox under LRU and LRU-2 (plan.md §25.4 H2)' },
+  { route: '/docs/concepts/buffer-pool', roots: ['src/ui/DocsLayout.tsx', 'src/pages/DocsContent/concepts/buffer-pool.mdx'], kb: 175, note: 'a concept page with a live buffer-pool widget' },
   { route: '/* (404)', roots: [P('NotFoundPage')], kb: 114, note: 'the not-found page' },
 ];
 

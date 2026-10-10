@@ -58,6 +58,13 @@ const TOOLS = [
     available: true,
   },
   {
+    title: 'Transaction schedules',
+    href: '/tools/schedule',
+    description:
+      'Two sessions, one database, and an interleaving you choose: BEGIN, COMMIT and ROLLBACK across a shared table. With no concurrency control yet, one session reads what the other has not committed (a dirty read) or overwrites it (a dirty write), and the page names it. The first piece of the transactions subject; locks, isolation levels and MVCC build on the same schedule.',
+    available: true,
+  },
+  {
     title: 'Grammar sandbox',
     href: '/tools/grammar',
     description:
