@@ -9,7 +9,7 @@ import { expect, test } from '@playwright/test';
 const ROUTES = [
   '/', '/playground', '/stages', '/stages/parse', '/learn', '/learn/one-row', '/challenges',
   '/challenges/exactly-one', '/tools', '/tools/buffer-pool', '/tools/parser', '/tools/planner', '/tools/btree',
-  '/tools/page', '/tools/sort', '/tools/locks', '/tools/schedule', '/tools/isolation', '/tools/concurrency', '/tools/grammar', '/tools/hash-join', '/tools/join-order',
+  '/tools/page', '/tools/sort', '/tools/locks', '/tools/schedule', '/tools/isolation', '/tools/concurrency', '/tools/wal', '/tools/grammar', '/tools/hash-join', '/tools/join-order',
   '/tools/lsm', '/tools/hash-index', '/tools/columnar', '/tools/latch-crabbing', '/tools/vector-index', '/gallery',
   '/examples', '/trace', '/compare', '/progress', '/settings', '/assignments/new', '/study', '/docs',
   '/docs/getting-started', '/docs/faq', '/docs/architecture', '/docs/concepts/btree', '/docs/concepts/buffer-pool',

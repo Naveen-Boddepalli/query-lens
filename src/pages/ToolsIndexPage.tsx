@@ -79,6 +79,13 @@ const TOOLS = [
     available: true,
   },
   {
+    title: 'Write-ahead log',
+    href: '/tools/wal',
+    description:
+      'A buffer pool, a disk and a log, and the one rule that ties them: a page may not reach disk before the log records that describe it are durable. Write a script of changes, commits and rollbacks and watch what is appended, what is forced and what is written — then switch the rule off and see the page that got to disk ahead of its log.',
+    available: true,
+  },
+  {
     title: 'Grammar sandbox',
     href: '/tools/grammar',
     description:

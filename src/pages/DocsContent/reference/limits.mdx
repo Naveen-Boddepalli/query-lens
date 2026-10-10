@@ -328,6 +328,34 @@ index entries of the rows it touches.
 - Each statement is its own run, with its own buffer pool: a schedule shows what the data does, not what
   the pool does between statements.
 
+## Durability
+
+- **[The write-ahead log](/tools/wal) is its own model, not the engine's.** It has a disk of four pages, a buffer
+  pool of two to four frames, and a log, and a page is a few named integer cells (`a = 10`), not a slotted heap page
+  or a row. The SQL pipeline does not log, and its buffer pool — a read cache whose only "dirty" is a marked page —
+  is not the one the log-before-data rule is enforced on. Bringing the two together is what a later step does
+  (plan.md §25.4 E4); until then this page shows the mechanism, and the engine keeps its own statistics.
+- **What it models.** Every change appends a log record with a **LSN** (strictly increasing) and a **prevLSN**, the
+  transaction's previous record, so each transaction's records chain backwards. A record is in the *log buffer*
+  until it is flushed and *durable* after, and `flushedLSN` is the last durable one. A page remembers the LSN of the
+  last record applied to it (**pageLSN**) and of the one that first dirtied it since it was last written
+  (**recLSN**). A commit forces the log through its commit record and writes **no** data page. Rolling back undoes
+  newest first and writes a **compensation record** for each undo, so the undo is itself logged and is never done
+  twice. This is ARIES's logging; its recovery is not built yet.
+- **The rule is enforced, and can be switched off.** Before a dirty page is written — on request, or because the pool
+  needs its frame — the log is flushed through that page's pageLSN, and only that far. With the rule off the page is
+  written anyway, and the page names what a crash would then find: a change on disk that nothing records. A property
+  test holds the enforced rule over thousands of random scripts (no page on disk is ever ahead of the durable log; a
+  commit is durable when it returns; the durable log is a gapless prefix; what the database holds is what the newest
+  record for each cell says, rollbacks included).
+- **A cell changed by a transaction that has not ended is its alone** until it does — strict two-phase locking in one
+  rule, so that a rollback never has to undo over someone else's change. A second transaction asking for it is
+  refused, not made to wait; there is no concurrency in this script.
+- **Not yet:** a crash, checkpoints and recovery (E3), the steal/no-steal and force/no-force choices (E2: here a
+  dirty page of an uncommitted transaction may be written, which is *steal*, and a commit does not write its pages,
+  which is *no-force* — the combination ARIES is built for, but not yet a choice), and any storage but whole-page
+  writes. There are no inserts or deletes, only changes to existing cells, and no savepoints.
+
 ## SQL
 
 See [Supported SQL](/docs/reference/sql) for the complete accepted grammar.

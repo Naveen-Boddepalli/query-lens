@@ -106,6 +106,9 @@ const IsolationToolPage = lazy(() =>
 const ConcurrencyToolPage = lazy(() =>
   import('./pages/tools/ConcurrencyToolPage.tsx').then((m) => ({ default: m.ConcurrencyToolPage })),
 );
+const WalToolPage = lazy(() =>
+  import('./pages/tools/WalToolPage.tsx').then((m) => ({ default: m.WalToolPage })),
+);
 const GrammarToolPage = lazy(() =>
   import('./pages/tools/GrammarToolPage.tsx').then((m) => ({ default: m.GrammarToolPage })),
 );
@@ -235,6 +238,7 @@ export default function App() {
               <Route path="schedule" element={suspended(ScheduleToolPage)} />
               <Route path="isolation" element={suspended(IsolationToolPage)} />
               <Route path="concurrency" element={suspended(ConcurrencyToolPage)} />
+              <Route path="wal" element={suspended(WalToolPage)} />
               <Route path="grammar" element={suspended(GrammarToolPage)} />
               <Route path="hash-join" element={suspended(HashJoinToolPage)} />
               <Route path="join-order" element={suspended(JoinOrderToolPage)} />
