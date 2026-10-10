@@ -37,6 +37,7 @@ export const DOCS_NAV: readonly DocsNavGroup[] = [
     items: [
       { to: '/docs/essays/index-write-tax', label: 'An index is a tax on every write' },
       { to: '/docs/essays/scan-resistance', label: 'One scan can empty the cache' },
+      { to: '/docs/essays/repeatable-read', label: 'REPEATABLE READ means two things' },
     ],
   },
   {

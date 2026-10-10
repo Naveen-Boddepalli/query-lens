@@ -14,7 +14,7 @@ const ROUTES = [
   '/examples', '/trace', '/compare', '/progress', '/settings', '/assignments/new', '/study', '/docs',
   '/docs/getting-started', '/docs/faq', '/docs/architecture', '/docs/concepts/btree', '/docs/concepts/buffer-pool',
   '/docs/manual/eviction', '/docs/manual/btree-split', '/docs/essays/index-write-tax',
-  '/docs/essays/scan-resistance', '/docs/study/course-map', '/docs/study/interview-roadmap',
+  '/docs/essays/scan-resistance', '/docs/essays/repeatable-read', '/docs/study/course-map', '/docs/study/interview-roadmap',
   '/docs/reference/sql', '/docs/reference/url-parameters', '/docs/reference/shortcuts', '/docs/reference/limits',
   '/docs/reference/answers', '/docs/accessibility', '/nothing-here',
 ];

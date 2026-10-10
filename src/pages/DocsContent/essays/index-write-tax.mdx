@@ -44,12 +44,14 @@ and how often the table is written.
 
 ## What the model leaves out
 
-- **Logging.** A real engine writes each change to a write-ahead log before it touches the page. QueryLens does not
-  model the log, so its write counts are page writes only.
+- **Logging.** A real engine writes each change to a write-ahead log before it touches the page. QueryLens models
+  that log in [its own tool](/tools/wal), but the counts here are page writes only: the log's records are not
+  added to them.
 - **Page size.** A real page holds hundreds of keys, so a real tree is far shallower than the fan-out of 4 used
   here. The small fan-out is chosen so that splits happen often enough to see.
 - **Concurrency.** A write also has to lock the pages it changes, which can make it wait for other transactions.
-  Locking is a separate topic, and QueryLens has a lock simulator for it at `/tools/locks`.
+  The counts here are for one writer alone. [Transaction schedules](/tools/schedule) run two sessions against a
+  table under real locks, with a [lock simulator](/tools/locks) for the lock table on its own.
 
 ## Try this
 

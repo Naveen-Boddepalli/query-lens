@@ -29,6 +29,7 @@ https://github.com/Naveen-Boddepalli/query-lens.
 
 - [An index is a tax on every write](https://query-lens.1234naveenboddepalli.workers.dev/docs/essays/index-write-tax): Why an index makes reads cheaper and writes dearer, with the page counts QueryLens measures for a B+Tree as it grows.
 - [One scan can empty the cache](https://query-lens.1234naveenboddepalli.workers.dev/docs/essays/scan-resistance): Why one pass over a large table can push out the pages a workload keeps needing, and how LRU-2 avoids it, measured on QueryLens's buffer pool.
+- [REPEATABLE READ means two things](https://query-lens.1234naveenboddepalli.workers.dev/docs/essays/repeatable-read): Two engines in QueryLens both offer REPEATABLE READ, and the anomalies each lets through are opposites — computed from the isolation matrix, and held by a test.
 
 ## Study
 

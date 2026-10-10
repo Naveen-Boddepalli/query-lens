@@ -207,6 +207,10 @@ const T = (name: string): string => `src/pages/tools/${name}.tsx`;
  *  - 2026-10-04, latch crabbing (§25.4 F5): a new route, /tools/latch-crabbing (163.5 kB measured + 3, rounded
  *    to 167). Unlike the standalone sandboxes it drives the REAL engine B+Tree (`engine/index/btree.ts`, the same
  *    code /tools/btree uses), so it pays the shared engine chunk the same way /tools/btree does (ceiling 167).
+ *  - 2026-10-10, the REPEATABLE READ essay (§25.4 H2): a new prose route, /docs/essays/repeatable-read, in the one
+ *    shared docs chunk (168.9 kB measured for the three essays, ceiling 170). The tools index gained three entries in
+ *    this stretch (concurrency compare, write-ahead log, crash recovery): /tools 116 → 120 (measured 116.0 + 3, rounded
+ *    up), and the entry chunk's growth moved /tools/latch-crabbing 167 → 170 (measured 167.0 + 3).
  *  - 2026-10-10, recovery in the pipeline (§25.4 E4): the Playground records each write statement as log steps
  *    (`durableLog.ts` and `recovery/heap.ts`, imported by the route, plus its own state and button: 1.8 kB gzip), so
  *    /playground 319 → 324 (measured 320.3 + 3, rounded up). The write-ahead-log machine and the dialog are an
@@ -293,7 +297,7 @@ export const ROUTES: readonly RouteBudget[] = [
   { route: '/settings', roots: [P('SettingsPage')], kb: 116, note: 'preferences' },
   { route: '/study', roots: [P('StudyPage')], kb: 122, note: 'the §9 study runner (unlisted); the instrument travels in the link, not the bundle (§25.4 A2)' },
   { route: '/assignments/new', roots: [P('AssignmentsNewPage')], kb: 170, note: 'assignment-link builder' },
-  { route: '/tools', roots: [P('ToolsIndexPage')], kb: 116, note: 'the tools index' },
+  { route: '/tools', roots: [P('ToolsIndexPage')], kb: 120, note: 'the tools index' },
   { route: '/tools/buffer-pool', roots: [T('BufferPoolToolPage')], kb: 173, note: 'buffer-pool sandbox' },
   { route: '/tools/parser', roots: [T('ParserToolPage')], kb: 172, note: 'tokenizer + parser sandbox' },
   { route: '/tools/btree', roots: [T('BTreeToolPage')], kb: 174, note: 'B+Tree sandbox' },
@@ -313,10 +317,11 @@ export const ROUTES: readonly RouteBudget[] = [
   { route: '/tools/hash-index', roots: [T('HashIndexToolPage')], kb: 118, note: 'extendible and linear hashing sandbox' },
   { route: '/tools/columnar', roots: [T('ColumnarToolPage')], kb: 118, note: 'NSM/DSM/PAX row vs. column storage sandbox' },
   { route: '/tools/vector-index', roots: [T('VectorIndexToolPage')], kb: 118, note: 'brute force vs. IVF vs. HNSW vector search' },
-  { route: '/tools/latch-crabbing', roots: [T('LatchCrabbingToolPage')], kb: 167, note: 'latch crabbing: naive vs. lock coupling on a scripted B+Tree workload' },
+  { route: '/tools/latch-crabbing', roots: [T('LatchCrabbingToolPage')], kb: 170, note: 'latch crabbing: naive vs. lock coupling on a scripted B+Tree workload' },
   { route: '/docs', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 170, note: 'the docs shell and every prose page (one shared chunk)' },
   { route: '/docs/concepts/btree', roots: ['src/ui/DocsLayout.tsx', 'src/pages/DocsContent/concepts/btree.mdx'], kb: 177, note: 'a concept page with a live B+Tree widget' },
   { route: '/docs/essays/index-write-tax', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 170, note: 'an essay: prose, with links into the B+Tree sandbox (plan.md §25.4 H2)' },
+  { route: '/docs/essays/repeatable-read', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 170, note: 'an essay: prose, with links into the isolation matrix and the schedule tool (plan.md §25.4 H2)' },
   { route: '/docs/essays/scan-resistance', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 170, note: 'an essay: prose, with links into the buffer-pool sandbox under LRU and LRU-2 (plan.md §25.4 H2)' },
   { route: '/docs/concepts/buffer-pool', roots: ['src/ui/DocsLayout.tsx', 'src/pages/DocsContent/concepts/buffer-pool.mdx'], kb: 175, note: 'a concept page with a live buffer-pool widget' },
   { route: '/* (404)', roots: [P('NotFoundPage')], kb: 114, note: 'the not-found page' },

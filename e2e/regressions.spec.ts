@@ -403,6 +403,7 @@ test('every route renders the app on a cold load, not the 404 page', async ({ pa
     ['/docs/accessibility', /Checked automatically/],
     ['/docs/essays/index-write-tax', /Every index pays separately/],
     ['/docs/essays/scan-resistance', /Why LRU-2 keeps the hot set/],
+    ['/docs/essays/repeatable-read', /Two ways to keep one promise/],
     // The §21.3 feature routes (built after M13, on the same manifest/lazy
     // wiring — a route missing its own Suspense boundary would blank here).
     ['/gallery', /Gallery/],
