@@ -1,0 +1,212 @@
+import { useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
+import {
+  DOCUMENTED,
+  HERMITAGE_LEVELS,
+  HERMITAGE_LEVEL_LABELS,
+  HERMITAGE_TESTS,
+  KNOWN_DIFFERENCES,
+  hermitageMatrix,
+} from '../../engine/hermitage.ts';
+import type { AnomalyId, EngineKind, MatrixCell } from '../../engine/hermitage.ts';
+import type { ScheduleStepResult } from '../../engine/schedule.ts';
+import type { IsolationLevel } from '../../engine/transactionControl.ts';
+import { PageHeader } from '../../ui/PageHeader.tsx';
+import { card, panelSurface, pill } from '../../ui/primitives.ts';
+
+/**
+ * plan.md §25.4 D5: the ten Hermitage anomalies at four isolation levels, on both engines. Nothing here is a lookup:
+ * each cell is a schedule that was run, judged by what its transactions saw and wrote, and every cell opens the
+ * schedule that produced it. The published results sit beside the computed ones, and a cell outlined differently
+ * says where the two part company.
+ */
+
+const ENGINES: { kind: EngineKind; title: string; blurb: string; reference: string }[] = [
+  {
+    kind: 'locks',
+    title: 'Two-phase locking',
+    blurb: 'Read locks held for as long as the level says; a predicate lock for each read at SERIALIZABLE.',
+    reference: 'SQL Server’s locking levels',
+  },
+  {
+    kind: 'mvcc',
+    title: 'Versions and snapshots',
+    blurb: 'Readers take no lock. REPEATABLE READ is snapshot isolation; SERIALIZABLE checks reads at commit.',
+    reference: 'PostgreSQL',
+  },
+];
+
+const PHASE_NOTE: Partial<Record<ScheduleStepResult['phase'], string>> = {
+  blocked: 'waits for a lock',
+  queued: 'waits behind its session',
+  resumed: 'resumed',
+  victim: 'rolled back',
+};
+
+interface Selected {
+  engine: EngineKind;
+  test: AnomalyId;
+  level: IsolationLevel;
+}
+
+function readCell(raw: string | null): Selected | null {
+  if (raw === null) return null;
+  const [engine, test, level] = raw.split('.');
+  if (engine !== 'locks' && engine !== 'mvcc') return null;
+  const found = HERMITAGE_TESTS.find((t) => t.id === test);
+  const lvl = HERMITAGE_LEVELS.find((l) => l === level);
+  return found && lvl ? { engine, test: found.id, level: lvl } : null;
+}
+
+function StepList({ steps }: { steps: ScheduleStepResult[] }) {
+  return (
+    <ol className="flex flex-col gap-2">
+      {steps.map((step, at) => {
+        const note = PHASE_NOTE[step.phase];
+        return (
+          <li key={`${String(at)}-${String(step.index)}-${step.phase}`} className={`${card} ${step.anomalies.length > 0 ? 'border-evict/60' : ''}`}>
+            <div className="flex flex-wrap items-center gap-2 text-label text-ink-dim">
+              <span className="tabular-nums">{step.index + 1}.</span>
+              <span className={pill}>{step.session}</span>
+              {note && <span className="rounded-full border border-edge px-2 py-0.5 text-ink">{note}</span>}
+            </div>
+            <code className="mt-1 block break-words font-mono text-label text-ink">{step.sql}</code>
+            {step.error && <p className="mt-1 text-label text-evict">{step.error}</p>}
+            {step.kind === 'statement' && step.run && !step.run.write && !step.error && step.rows.length > 0 && step.rows.length <= 3 && (
+              <p className="mt-1 font-mono text-label text-ink">{step.rows.map((r) => JSON.stringify(r)).join(' ')}</p>
+            )}
+            {step.kind === 'statement' && step.run && !step.run.write && !step.error && step.rows.length > 3 && (
+              <p className="mt-1 text-label text-ink-dim">{step.rows.length} rows, including {step.rows.slice(0, 2).map((r) => JSON.stringify(r)).join(' ')}</p>
+            )}
+            <ul className="mt-1 space-y-0.5 text-label text-ink-dim">
+              {step.notes.map((n) => (
+                <li key={n}>{n}</li>
+              ))}
+            </ul>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+export function IsolationToolPage() {
+  const matrices = useMemo(
+    () => ({ locks: hermitageMatrix('locks'), mvcc: hermitageMatrix('mvcc') }),
+    [],
+  );
+  const [selected, setSelected] = useState<Selected>(() => {
+    const fromUrl = readCell(new URLSearchParams(typeof location === 'undefined' ? '' : location.search).get('c'));
+    return fromUrl ?? { engine: 'mvcc', test: 'G2-item', level: 'repeatable-read' };
+  });
+
+  const cell: MatrixCell | undefined = matrices[selected.engine].find(
+    (c) => c.test === selected.test && c.level === selected.level,
+  );
+  const test = HERMITAGE_TESTS.find((t) => t.id === selected.test)!;
+  const documented = DOCUMENTED[selected.engine][selected.level][selected.test];
+  const known = KNOWN_DIFFERENCES.find(
+    (d) => d.engine === selected.engine && d.level === selected.level && d.test === selected.test,
+  );
+
+  function choose(next: Selected) {
+    setSelected(next);
+    const params = new URLSearchParams();
+    params.set('c', `${next.engine}.${next.test}.${next.level}`);
+    history.replaceState(null, '', `${location.pathname}?${params.toString()}`);
+  }
+
+  return (
+    <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-4 p-6 sm:p-8">
+      <PageHeader title="Isolation matrix">
+        Ten anomalies from the Hermitage suite, each a fixed schedule of three transactions, run at four isolation
+        levels on two engines (plan.md §25.4 D5). A <strong>—</strong> means the anomaly <em>happened</em> in that
+        schedule at that level; a <strong>✓</strong> means it did not. Every cell was computed by running the schedule
+        and checking what its transactions saw and wrote, and opens the run. The tables are held against what
+        PostgreSQL and SQL Server publish; the{' '}
+        <Link to="/tools/schedule" className="underline underline-offset-2 hover:text-ink">
+          transaction schedules
+        </Link>{' '}
+        tool is where you build your own.
+      </PageHeader>
+
+      {ENGINES.map((engine) => (
+        <div key={engine.kind} className={`${panelSurface} p-4`}>
+          <h2 className="text-body font-semibold text-ink">{engine.title}</h2>
+          <p className="mb-2 text-label text-ink-dim">
+            {engine.blurb} Compared with {engine.reference}.
+          </p>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[34rem] text-left text-label">
+              <caption className="sr-only">
+                Which anomalies can occur, by isolation level, under {engine.title}
+              </caption>
+              <thead>
+                <tr className="text-ink-dim">
+                  <th scope="col" className="py-1 pr-3 font-medium">Anomaly</th>
+                  {HERMITAGE_LEVELS.map((level) => (
+                    <th key={level} scope="col" className="px-2 py-1 text-center font-medium">
+                      {HERMITAGE_LEVEL_LABELS[level]}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {HERMITAGE_TESTS.map((t) => (
+                  <tr key={t.id}>
+                    <th scope="row" className="py-0.5 pr-3 font-normal text-ink">
+                      <span className="font-mono">{t.id}</span> <span className="text-ink-dim">{t.name}</span>
+                    </th>
+                    {HERMITAGE_LEVELS.map((level) => {
+                      const c = matrices[engine.kind].find((x) => x.test === t.id && x.level === level)!;
+                      const differs = c.occurred !== DOCUMENTED[engine.kind][level][t.id];
+                      const isSelected =
+                        selected.engine === engine.kind && selected.test === t.id && selected.level === level;
+                      return (
+                        <td key={level} className="px-1 py-0.5 text-center">
+                          <button
+                            type="button"
+                            onClick={() => { choose({ engine: engine.kind, test: t.id, level }); }}
+                            aria-pressed={isSelected}
+                            aria-label={`${t.id} at ${HERMITAGE_LEVEL_LABELS[level]}, ${engine.title}: ${
+                              c.occurred ? 'can occur' : 'prevented'
+                            }${differs ? ', differs from the published result' : ''}`}
+                            className={`w-full rounded-md border px-2 py-1 font-mono ${
+                              isSelected ? 'border-accent' : differs ? 'border-dashed border-ink-dim' : 'border-edge'
+                            } ${c.occurred ? 'text-evict' : 'text-hit'}`}
+                          >
+                            {c.occurred ? '—' : '✓'}
+                            {differs ? '*' : ''}
+                          </button>
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ))}
+
+      {cell && (
+        <div className={`${panelSurface} p-4`} aria-label="The schedule behind the selected cell" role="region">
+          <h2 className="text-body font-semibold text-ink">
+            <span className="font-mono">{test.id}</span> {test.name} at {HERMITAGE_LEVEL_LABELS[selected.level]},{' '}
+            {ENGINES.find((e) => e.kind === selected.engine)!.title}
+          </h2>
+          <p className="mt-1 text-label text-ink-dim">{test.means}</p>
+          <p className="mt-2 text-label text-ink" role="status">
+            {cell.occurred ? 'It happened.' : 'It did not happen.'} The published result is that it{' '}
+            {documented ? 'can occur' : 'is prevented'} at this level
+            {cell.occurred === documented ? ', which agrees.' : '.'}
+          </p>
+          {known && <p className="mt-1 text-label text-ink-dim">{known.why}</p>}
+          <div className="mt-3">
+            <StepList steps={cell.result.steps} />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

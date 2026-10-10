@@ -281,6 +281,14 @@ index entries of the rows it touches.
   `VACUUM`, so a heap that has grown past the pool shows as a disk read for every page of every pass. A
   *Can they see it?* question asks, for a version and a session, whether a statement run now would see it,
   and reveals the answer against that session's snapshot.
+- **The [isolation matrix](/tools/isolation)** runs ten anomalies from the Hermitage suite — dirty writes,
+  aborted and intermediate reads, circular information flow, observed-transaction-vanishes,
+  predicate-many-preceders, lost update, read skew, and write skew on an item and on a predicate — at the four
+  levels on both engines. Each cell is a three-transaction schedule that was *run*, and the anomaly is judged by
+  what its transactions saw and wrote. The results are held, in a test, against what PostgreSQL (for versions)
+  and SQL Server's locking levels (for locks) publish: 79 of 80 cells agree, and the one that does not —
+  `OTV` at `READ UNCOMMITTED` — is marked and explained on the page. MySQL/InnoDB's `REPEATABLE READ` is a
+  hybrid of locks and snapshots that neither engine models, so it is not held against either.
 - **A row another open transaction has deleted or re-keyed** keeps its old image, still locked, until that
   transaction ends — otherwise a lookup for the old key finds nothing, touches no page, takes no lock, and
   reads a change nobody committed.

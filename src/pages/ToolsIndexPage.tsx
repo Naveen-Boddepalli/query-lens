@@ -65,6 +65,13 @@ const TOOLS = [
     available: true,
   },
   {
+    title: 'Isolation matrix',
+    href: '/tools/isolation',
+    description:
+      'Ten anomalies from the Hermitage suite — dirty writes, aborted and intermediate reads, lost update, read skew, write skew and more — at four isolation levels, on two engines. Every cell is a schedule that was run and judged by what its transactions saw, held against the results PostgreSQL and SQL Server publish, and opens the run behind it.',
+    available: true,
+  },
+  {
     title: 'Grammar sandbox',
     href: '/tools/grammar',
     description:

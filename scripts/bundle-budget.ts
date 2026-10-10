@@ -207,6 +207,10 @@ const T = (name: string): string => `src/pages/tools/${name}.tsx`;
  *  - 2026-10-04, latch crabbing (§25.4 F5): a new route, /tools/latch-crabbing (163.5 kB measured + 3, rounded
  *    to 167). Unlike the standalone sandboxes it drives the REAL engine B+Tree (`engine/index/btree.ts`, the same
  *    code /tools/btree uses), so it pays the shared engine chunk the same way /tools/btree does (ceiling 167).
+ *  - 2026-10-10, the isolation matrix (§25.4 D5): a new lazy route grows the entry chunk every page loads by a little
+ *    (its import and its route element), which is what moved the two routes sitting within a kB of their ceilings:
+ *    / 165 → 169 and /assignments/new 166 → 170 (each measured + 3, rounded up). /tools/isolation itself is 173.1,
+ *    ceiling 177: it runs eighty schedules through the whole schedule runner, which no other route needs.
  *  - 2026-10-10, versions and snapshots (§25.4 D4): the schedule tool gained the version store's panels, a visibility
  *    question and a buffer-pool scan, none of it shared with another route. /tools/schedule 176 → 181 (measured 177.0 + 3,
  *    rounded up). `mvcc.ts` is imported only by the schedule runner, so no other route moved.
@@ -249,7 +253,7 @@ const T = (name: string): string => `src/pages/tools/${name}.tsx`;
  *    separate, later slice of the same item.
  */
 export const ROUTES: readonly RouteBudget[] = [
-  { route: '/', roots: [P('LandingPage')], kb: 165, note: 'the landing page' },
+  { route: '/', roots: [P('LandingPage')], kb: 169, note: 'the landing page' },
   { route: '/playground', roots: [P('PlaygroundPage')], kb: 319, note: 'the Playground: the editor, every stage panel, the engine — the heaviest route, and the one most people land on' },
   { route: '/stages', roots: ['src/ui/StagesLayout.tsx', P('StagesIndex')], kb: 165, note: 'the stage explainers, index' },
   { route: '/stages/:id', roots: ['src/ui/StagesLayout.tsx', P('StagePage')], kb: 184, note: 'one stage explainer' },
@@ -264,7 +268,7 @@ export const ROUTES: readonly RouteBudget[] = [
   { route: '/challenges/:id', roots: [P('ChallengePage')], kb: 290, note: 'one challenge' },
   { route: '/settings', roots: [P('SettingsPage')], kb: 116, note: 'preferences' },
   { route: '/study', roots: [P('StudyPage')], kb: 122, note: 'the §9 study runner (unlisted); the instrument travels in the link, not the bundle (§25.4 A2)' },
-  { route: '/assignments/new', roots: [P('AssignmentsNewPage')], kb: 166, note: 'assignment-link builder' },
+  { route: '/assignments/new', roots: [P('AssignmentsNewPage')], kb: 170, note: 'assignment-link builder' },
   { route: '/tools', roots: [P('ToolsIndexPage')], kb: 116, note: 'the tools index' },
   { route: '/tools/buffer-pool', roots: [T('BufferPoolToolPage')], kb: 173, note: 'buffer-pool sandbox' },
   { route: '/tools/parser', roots: [T('ParserToolPage')], kb: 172, note: 'tokenizer + parser sandbox' },
@@ -273,6 +277,7 @@ export const ROUTES: readonly RouteBudget[] = [
   { route: '/tools/sort', roots: [T('SortToolPage')], kb: 118, note: 'external merge sort' },
   { route: '/tools/planner', roots: [T('PlannerToolPage')], kb: 172, note: 'planner sandbox' },
   { route: '/tools/locks', roots: [T('LocksToolPage')], kb: 117, note: 'lock simulator' },
+  { route: '/tools/isolation', roots: [T('IsolationToolPage')], kb: 177, note: 'the Hermitage isolation matrix (both engines, computed)' },
   { route: '/tools/schedule', roots: [T('ScheduleToolPage')], kb: 181, note: 'transaction schedules (the engine, a shared database, two sessions)' },
   { route: '/tools/grammar', roots: [T('GrammarToolPage')], kb: 116, note: 'the SQL grammar diagram' },
   { route: '/tools/hash-join', roots: [T('HashJoinToolPage')], kb: 118, note: 'Grace hash join' },
