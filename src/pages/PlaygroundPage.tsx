@@ -24,6 +24,8 @@ import { publishRepro } from '../ui/errorReport.ts';
 import { ReportStepLink } from '../ui/ReportStepLink.tsx';
 import type { Moment } from '../ui/stepReport.ts';
 import { PipelineTracker } from '../ui/PipelineTracker.tsx';
+import { appendStep, carryOn, openLog, recordWrite } from '../ui/durableLog.ts';
+import type { DurableLog } from '../ui/durableLog.ts';
 import { PlaybackControls } from '../ui/PlaybackControls.tsx';
 import { SqlEditor } from '../ui/SqlEditor.tsx';
 import { DataEditor } from '../ui/DataEditor.tsx';
@@ -115,6 +117,11 @@ const WorkspaceDialog = lazy(() =>
   import('../ui/WorkspaceDialog.tsx').then((m) => ({ default: m.WorkspaceDialog })),
 );
 
+// plan.md §25.4 E4: the write-ahead log, crash and recovery, loaded when a visitor opens it.
+const DurabilityDialog = lazy(() =>
+  import('../ui/DurabilityDialog.tsx').then((m) => ({ default: m.DurabilityDialog })),
+);
+
 export function PlaygroundPage() {
   const [sql, setSql] = useState(START.sql);
   const [policy, setPolicy] = useState<ReplacementPolicyName>(START.policy);
@@ -130,6 +137,7 @@ export function PlaygroundPage() {
   const datasetChange = useRef(0);
   const [schemaEditorOpen, setSchemaEditorOpen] = useState(false);
   const [workspacesOpen, setWorkspacesOpen] = useState(false);
+  const [durabilityOpen, setDurabilityOpen] = useState(false);
   const [editingData, setEditingData] = useState(false);
   const [rowsEdited, setRowsEdited] = useState(SHARED.rows !== undefined);
   const [result, setResult] = useState<RunResult>(INITIAL_RESULT);
@@ -147,6 +155,9 @@ export function PlaygroundPage() {
   const askToPredict = predictOn && !presenting;
 
   const options = useMemo(() => ({ ...DEFAULT_ENGINE_OPTIONS, policy }), [policy]);
+  // The write statements run here, as log steps (plan.md §25.4 E4). Kept as plain data; the machine runs only when
+  // the Durability dialog is opened.
+  const [durable, setDurable] = useState<DurableLog>(() => openLog(START.db, DEFAULT_ENGINE_OPTIONS.rowsPerPage));
   const tableName = DATASETS[datasetId].table;
   const table = db.tables[tableName];
   const presets = DATASET_CATALOGUE[datasetId].presets;
@@ -348,6 +359,10 @@ export function PlaygroundPage() {
             tables: { ...database.tables, [next.write.table]: { ...target, rows: next.write.rows } },
           });
           setRowsEdited(true);
+          const write = next.write;
+          setDurable((log) =>
+            recordWrite(log, database, sql, { table: write.table, kind: write.kind, rows: write.rows }),
+          );
         }
       }
 
@@ -633,6 +648,9 @@ export function PlaygroundPage() {
                 Edit data ({table?.rows.length ?? 0})
               </button>
             )}
+            <button type="button" onClick={() => { setDurabilityOpen(true); }} className={btnSecondary}>
+              Durability{durable.statements.length > 0 ? ` (${String(durable.statements.length)})` : ''}
+            </button>
             <label className="ml-auto flex items-center gap-2 text-label text-ink-dim">
               Eviction
               <select
@@ -882,6 +900,32 @@ export function PlaygroundPage() {
             onOpen={openDatabase}
             onLoadQuery={(text) => { setSql(text); }}
             onClose={() => { setWorkspacesOpen(false); }}
+          />
+        </Suspense>
+      )}
+
+      {durabilityOpen && (
+        <Suspense fallback={null}>
+          <DurabilityDialog
+            db={db}
+            log={durable}
+            onAppend={(step) => { setDurable((log) => appendStep(log, step)); }}
+            onRestart={() => { setDurable(openLog(db, options.rowsPerPage)); }}
+            onUse={(recovered, heap) => {
+              setDb(recovered);
+              setRowsEdited(true);
+              setDurable((log) => carryOn(log, recovered, heap));
+              setDurabilityOpen(false);
+              // A read can show the recovered rows at once; a write must not be run a second time.
+              const again = runQuery(sql, recovered, options);
+              if (!again.write) {
+                setResult(again);
+                setPinnedStage(null);
+                setAnswers({});
+                playback.land(landingStep(again, predictOn));
+              }
+            }}
+            onClose={() => { setDurabilityOpen(false); }}
           />
         </Suspense>
       )}

@@ -37,7 +37,11 @@
  */
 
 export type PageId = number;
-export type Cell = number;
+/**
+ * What a cell holds. The toy pages of `/tools/wal` hold integers; a page in the SQL pipeline's heap holds one row per
+ * cell, as its JSON text, or `null` for a slot with no row in it (a deleted one, or one not yet used).
+ */
+export type Cell = number | string | null;
 
 export type LogRecord =
   | { type: 'update'; lsn: number; prevLSN: number | null; txn: string; page: PageId; key: string; before: Cell; after: Cell }
@@ -67,7 +71,7 @@ export function isTxnRecord(r: LogRecord): r is TxnRecord {
 
 export type WalStep =
   | { op: 'begin'; txn: string }
-  | { op: 'set'; txn: string; key: string; value: number }
+  | { op: 'set'; txn: string; key: string; value: Cell }
   | { op: 'commit'; txn: string }
   | { op: 'abort'; txn: string }
   /** Force everything in the log buffer to the durable log. */
@@ -103,6 +107,8 @@ export interface WalOptions {
   force: boolean;
   /** The pages on disk at the start, as cells by name. A key lives on exactly one page. */
   pages: Record<PageId, Record<string, Cell>>;
+  /** The most steps a script may have; the rest are ignored. Default `MAX_WAL_STEPS`. */
+  maxSteps: number;
 }
 
 export const DEFAULT_PAGES: Record<PageId, Record<string, Cell>> = {
@@ -114,7 +120,14 @@ export const DEFAULT_PAGES: Record<PageId, Record<string, Cell>> = {
 
 export const MAX_WAL_STEPS = 40;
 
-export const DEFAULT_WAL_OPTIONS: WalOptions = { frames: 3, enforce: true, steal: true, force: false, pages: DEFAULT_PAGES };
+export const DEFAULT_WAL_OPTIONS: WalOptions = {
+  frames: 3,
+  enforce: true,
+  steal: true,
+  force: false,
+  pages: DEFAULT_PAGES,
+  maxSteps: MAX_WAL_STEPS,
+};
 
 export interface FrameState {
   slot: number;
@@ -370,19 +383,36 @@ export function comparePolicies(steps: readonly WalStep[], given: Partial<WalOpt
   });
 }
 
+/** One cell as text: an integer as itself, an empty slot as ∅, and a row's JSON as its values in a tuple. */
+export function cellText(cell: Cell): string {
+  if (cell === null) return '∅';
+  if (typeof cell === 'number') return String(cell);
+  try {
+    const parsed: unknown = JSON.parse(cell);
+    if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+      return `(${Object.values(parsed as Record<string, unknown>)
+        .map((v) => (v === null ? 'NULL' : typeof v === 'object' ? JSON.stringify(v) : String(v as string | number | boolean)))
+        .join(', ')})`;
+    }
+  } catch {
+    // Not JSON: it is shown as it is.
+  }
+  return cell;
+}
+
 /** The cells as text, for a table cell or a note. */
 export const cellsText = (cells: Record<string, Cell>): string =>
   Object.entries(cells)
-    .map(([k, v]) => `${k}=${String(v)}`)
+    .map(([k, v]) => `${k}=${cellText(v)}`)
     .join(', ');
 
 /** The record in words, short enough for a log table. */
 export function describeRecord(r: LogRecord): string {
   switch (r.type) {
     case 'update':
-      return `update page ${String(r.page)}: ${r.key} ${String(r.before)} → ${String(r.after)}`;
+      return `update page ${String(r.page)}: ${r.key} ${cellText(r.before)} → ${cellText(r.after)}`;
     case 'clr':
-      return `undo on page ${String(r.page)}: ${r.key} back to ${String(r.after)}; next to undo ${r.undoNextLSN === null ? 'nothing' : `LSN ${String(r.undoNextLSN)}`}`;
+      return `undo on page ${String(r.page)}: ${r.key} back to ${cellText(r.after)}; next to undo ${r.undoNextLSN === null ? 'nothing' : `LSN ${String(r.undoNextLSN)}`}`;
     case 'commit':
       return 'commit';
     case 'abort':
@@ -461,8 +491,8 @@ export function runWal(steps: readonly WalStep[], given: Partial<WalOptions> = {
     ...given,
     frames: Math.max(1, Math.min(8, Math.floor(given.frames ?? DEFAULT_WAL_OPTIONS.frames))),
   };
-  const truncated = steps.length > MAX_WAL_STEPS;
-  const script = steps.slice(0, MAX_WAL_STEPS);
+  const truncated = steps.length > options.maxSteps;
+  const script = steps.slice(0, options.maxSteps);
 
   const disk = new Map<PageId, { cells: Record<string, Cell>; pageLSN: number }>();
   const keyPage = new Map<string, PageId>();
@@ -774,7 +804,7 @@ export function runWal(steps: readonly WalStep[], given: Partial<WalOptions> = {
         frame.cells[r.key] = r.after;
         frame.pageLSN = r.lsn;
         if (frame.recLSN === null) frame.recLSN = r.lsn;
-        report.redo.push({ lsn: r.lsn, page: r.page, key: r.key, action: 'redo', reason: `the page's pageLSN is ${String(had)}, older than this record, so ${r.key} is set to ${String(r.after)}` });
+        report.redo.push({ lsn: r.lsn, page: r.page, key: r.key, action: 'redo', reason: `the page's pageLSN is ${String(had)}, older than this record, so ${r.key} is set to ${cellText(r.after)}` });
       }
     } else {
       notes.push('Redo has nothing to do: no page was dirty.');
@@ -809,7 +839,7 @@ export function runWal(steps: readonly WalStep[], given: Partial<WalOptions> = {
           lsn,
           txn: r.txn,
           action: 'undo',
-          detail: `${r.key} goes back from ${String(r.after)} to ${String(r.before)} on page ${String(r.page)}`,
+          detail: `${r.key} goes back from ${cellText(r.after)} to ${cellText(r.before)} on page ${String(r.page)}`,
           clr: record.lsn,
         });
       } else if (r.type === 'clr') {
@@ -923,7 +953,7 @@ export function runWal(steps: readonly WalStep[], given: Partial<WalOptions> = {
         apply(frame, step.key, step.value, record.lsn, step.txn);
         holder.set(step.key, step.txn);
         notes.push(
-          `${step.txn} sets ${step.key} from ${String(before)} to ${String(step.value)}: log record LSN ${String(record.lsn)} goes to the log buffer, and page ${String(page)} (in the pool) takes pageLSN ${String(record.lsn)}. Neither is on disk yet.`,
+          `${step.txn} sets ${step.key} from ${cellText(before)} to ${cellText(step.value)}: log record LSN ${String(record.lsn)} goes to the log buffer, and page ${String(page)} (in the pool) takes pageLSN ${String(record.lsn)}. Neither is on disk yet.`,
         );
         break;
       }
@@ -977,7 +1007,7 @@ export function runWal(steps: readonly WalStep[], given: Partial<WalOptions> = {
           const clr = append({ type: 'clr', txn: step.txn, page: u.page, key: u.key, after: u.before, undoNextLSN: u.prevLSN });
           apply(frame, u.key, u.before, clr.lsn, step.txn);
           notes.push(
-            `Undo LSN ${String(u.lsn)}: ${u.key} goes back to ${String(u.before)}, logged as a compensation record (LSN ${String(clr.lsn)}) so that the undo is itself redoable and is never done twice.`,
+            `Undo LSN ${String(u.lsn)}: ${u.key} goes back to ${cellText(u.before)}, logged as a compensation record (LSN ${String(clr.lsn)}) so that the undo is itself redoable and is never done twice.`,
           );
         }
         append({ type: 'end', txn: step.txn });

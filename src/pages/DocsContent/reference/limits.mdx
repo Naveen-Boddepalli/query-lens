@@ -332,9 +332,10 @@ index entries of the rows it touches.
 
 - **[The write-ahead log](/tools/wal) is its own model, not the engine's.** It has a disk of four pages, a buffer
   pool of two to four frames, and a log, and a page is a few named integer cells (`a = 10`), not a slotted heap page
-  or a row. The SQL pipeline does not log, and its buffer pool — a read cache whose only "dirty" is a marked page —
-  is not the one the log-before-data rule is enforced on. Bringing the two together is what a later step does
-  (plan.md §25.4 E4); until then this page shows the mechanism, and the engine keeps its own statistics.
+  or a row. The SQL pipeline itself does not log, and its buffer pool — a read cache whose only "dirty" is a marked
+  page — is not the one the log-before-data rule is enforced on. The Playground's *Durability* dialog (below) feeds
+  this model the statements you run, so that a crash and a recovery can be tried on a real table; the engine's
+  statistics are still its own.
 - **What it models.** Every change appends a log record with a **LSN** (strictly increasing) and a **prevLSN**, the
   transaction's previous record, so each transaction's records chain backwards. A record is in the *log buffer*
   until it is flushed and *durable* after, and `flushedLSN` is the last durable one. A page remembers the LSN of the
@@ -385,10 +386,25 @@ index entries of the rows it touches.
 - **With the rule off, recovery can be wrong, and says so.** A page that reached disk ahead of its log record has
   nothing durable that says how to undo it, so the restart leaves the uncommitted value in place. The page's *Is the
   database right?* panel names the cell. This is the only way the model's recovery produces a wrong database.
-- **Not yet, and not modelled:** the SQL engine's own pages (E4 joins the two); log truncation, so the log only grows;
-  a log-record `end` for a checkpoint that was interrupted; concurrent transactions *during* recovery (the machine is
-  down until it finishes); and any storage but whole-page writes. There are no inserts or deletes, only changes to
-  existing cells, and no savepoints.
+- **The Playground can crash and recover** (plan.md §25.4 E4, the *Durability* button by *Edit data*). Each
+  `INSERT`, `UPDATE` and `DELETE` run there is kept as the log steps a write-ahead log would have made of it — one
+  transaction per statement, left open, since the Playground shows its own changes at once — and the dialog is where
+  you decide: commit it, roll it back, write a page, take a checkpoint, **crash**, **recover**. A table's rows are laid
+  out as the engine lays out its heap (four to a page, in table order), one row per cell, as its JSON; a deleted row
+  leaves a tombstone, so the rows after it keep their slots, and an update changes one cell. After a recovery the
+  dialog lists each row whose value differs between the database the Playground held before the crash, the
+  database recovery rebuilt, and what committed — and can replace the Playground's table with the rebuilt one. The
+  tests run a table through commits, a lost uncommitted delete and a lost insert, and recovery gives back exactly
+  what committed.
+- **What the Playground's log cannot do:** a heap cannot grow a page it did not start with, so each table has **eight
+  spare slots** for inserted rows, and a ninth is refused with the reason; a statement that changes more than sixty
+  rows is refused (a log of every row of a large table is not something to step through); the log keeps up to four
+  hundred steps; a table whose data is edited, reloaded or switched starts a new log, and the dialog says when the one
+  it holds is of a database the Playground no longer has; and only `INSERT`/`UPDATE`/`DELETE` are logged — an index is
+  rebuilt from the rows after a recovery, not recovered itself.
+- **Not yet, and not modelled:** log truncation, so the log only grows; concurrent transactions *during* recovery
+  (the machine is down until it finishes); the engine's own buffer pool as the pool the rule is enforced on; and
+  any storage but whole-page writes. There are no savepoints.
 
 ## SQL
 

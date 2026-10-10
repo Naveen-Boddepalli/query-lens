@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { cellsText, describeRecord } from '../engine/recovery/wal.ts';
+import { cellText, cellsText, describeRecord } from '../engine/recovery/wal.ts';
 import type { CrashImage, LogRecord, RecoveryReport, WalEffect, WalState } from '../engine/recovery/wal.ts';
 import { card } from './primitives.ts';
 
@@ -113,9 +113,9 @@ export function CrashPanel({ crash }: { crash: CrashImage }) {
             {crash.undo.map((c) => (
               <li key={`${String(c.page)}-${c.key}`}>
                 <span className="font-mono text-ink">
-                  {c.key} = {c.onDisk}
+                  {c.key} = {cellText(c.onDisk)}
                 </span>{' '}
-                on page {c.page}, written by {c.by}, should be {c.committed}
+                on page {c.page}, written by {c.by}, should be {cellText(c.committed)}
                 {c.logged ? '' : ' — and the log record that says how to undo it is not durable'}
               </li>
             ))}
@@ -132,9 +132,9 @@ export function CrashPanel({ crash }: { crash: CrashImage }) {
             {crash.redo.map((c) => (
               <li key={`${String(c.page)}-${c.key}`}>
                 <span className="font-mono text-ink">
-                  {c.key} = {c.onDisk}
+                  {c.key} = {cellText(c.onDisk)}
                 </span>{' '}
-                on page {c.page}, should be {c.committed} (committed by {c.by})
+                on page {c.page}, should be {cellText(c.committed)} (committed by {c.by})
               </li>
             ))}
           </ul>

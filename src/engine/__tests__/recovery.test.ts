@@ -1,7 +1,7 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_PAGES, isTxnRecord, parseWalStep, runWal } from '../recovery/wal.ts';
-import type { WalState, WalStep } from '../recovery/wal.ts';
+import type { Cell, WalState, WalStep } from '../recovery/wal.ts';
 
 const script = (...lines: string[]): WalStep[] =>
   lines.map((l) => {
@@ -11,16 +11,16 @@ const script = (...lines: string[]): WalStep[] =>
   });
 
 /** What the database holds: the disk, with the pool's pages over it. */
-function logical(s: WalState): Record<string, number> {
-  const out: Record<string, number> = {};
+function logical(s: WalState): Record<string, Cell> {
+  const out: Record<string, Cell> = {};
   for (const p of s.disk) Object.assign(out, p.cells);
   for (const f of s.pool) if (f) Object.assign(out, f.cells);
   return out;
 }
 
 /** What recovery must produce: the initial data with every committed transaction's changes, in log order. */
-function committed(s: WalState): Record<string, number> {
-  const out: Record<string, number> = {};
+function committed(s: WalState): Record<string, Cell> {
+  const out: Record<string, Cell> = {};
   for (const cells of Object.values(DEFAULT_PAGES)) Object.assign(out, cells);
   const winners = new Set(s.log.filter(isTxnRecord).filter((r) => r.type === 'commit').map((r) => r.txn));
   for (const r of s.log) if (r.type === 'update' && winners.has(r.txn)) out[r.key] = r.after;
@@ -382,7 +382,7 @@ describe('whatever the script and wherever the crash', () => {
         const run = runWal([...steps, crash(), recover()], { frames: n, ...p });
         const atCrash = run.steps[steps.length]!;
         const wrong = new Set([...atCrash.crash.undo, ...atCrash.crash.redo].map((c) => c.key));
-        const diskAtCrash = Object.assign({}, ...atCrash.state.disk.map((d) => d.cells)) as Record<string, number>;
+        const diskAtCrash = Object.assign({}, ...atCrash.state.disk.map((d) => d.cells)) as Record<string, Cell>;
         const want = committed(run.final);
         const actuallyWrong = Object.keys(diskAtCrash).filter((k) => diskAtCrash[k] !== want[k]);
         expect([...wrong].sort()).toEqual(actuallyWrong.sort());

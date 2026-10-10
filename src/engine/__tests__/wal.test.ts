@@ -10,7 +10,7 @@ import {
   walViolations,
 } from '../recovery/wal.ts';
 import { isTxnRecord } from '../recovery/wal.ts';
-import type { LogRecord, TxnRecord, WalState, WalStep } from '../recovery/wal.ts';
+import type { Cell, LogRecord, TxnRecord, WalState, WalStep } from '../recovery/wal.ts';
 
 const script = (...lines: string[]): WalStep[] =>
   lines.map((l) => {
@@ -337,12 +337,12 @@ describe('whatever the script', () => {
     fc.assert(
       fc.property(scripts, frames, policy, (steps, n, p) => {
         const s = runWal(steps, { frames: n, ...p }).final;
-        const expected: Record<string, number> = {};
+        const expected: Record<string, Cell> = {};
         for (const cells of Object.values(DEFAULT_PAGES)) Object.assign(expected, cells);
         for (const r of allRecords(s)) {
           if (r.type === 'update' || r.type === 'clr') expected[r.key] = r.after;
         }
-        const actual: Record<string, number> = {};
+        const actual: Record<string, Cell> = {};
         for (const p of s.disk) Object.assign(actual, p.cells);
         for (const f of s.pool) if (f) Object.assign(actual, f.cells);
         expect(actual).toEqual(expected);
