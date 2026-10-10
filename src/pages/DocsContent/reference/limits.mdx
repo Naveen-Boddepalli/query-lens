@@ -241,7 +241,8 @@ index entries of the rows it touches.
 - **With page or row locking** the same schedule runs under **strict two-phase locking**, enforced by the
   engine's lock table (`engine/locks/lockTable.ts`, the one [`/tools/locks`](/tools/locks) also drives). A
   statement takes a lock for what it touches — shared to read, exclusive to change — before it runs, and
-  holds every lock until `COMMIT` or `ROLLBACK`. One that cannot get its lock **waits**: nothing runs,
+  holds every lock until `COMMIT` or `ROLLBACK` (the default, `REPEATABLE READ`; see below for the other
+  levels). One that cannot get its lock **waits**: nothing runs,
   the session's later steps queue behind it, and it resumes the moment the holder lets go, against
   whatever the holder committed. Two sessions each waiting on the other is a **deadlock**, and the
   youngest transaction (the one whose first request came last) is rolled back; a session left waiting at
@@ -250,9 +251,23 @@ index entries of the rows it touches.
   lookup — which is why, on three accounts that the planner scans, a row lock gains nothing, and on twenty
   it does. A row another open transaction has deleted stays locked until that transaction ends. Index
   pages are latched, not locked, so only data pages and rows are a transaction's to hold.
-- **Not yet:** isolation levels that release locks early (D3), predicate locks, so a *phantom* row can
-  still appear, and a wait for another session's uncommitted row on a `UNIQUE` key — a duplicate is
-  rejected at once, where a real engine would wait to find out whether the other insert commits.
+- **Isolation levels are lock durations.** Write locks are held to the end at every level; the levels differ in
+  how long a *read* lock lasts. **`READ UNCOMMITTED`** takes none, so it reads changes that are not committed.
+  **`READ COMMITTED`** takes them and gives each back when the statement ends, so a repeated read can change
+  (a *non-repeatable read*) and a value worked out from an old read can overwrite a newer one (a *lost update*).
+  **`REPEATABLE READ`** — the default — holds them to the end, but a lock covers only rows that exist, so a new
+  row that matches an earlier read can still appear (a *phantom*). **`SERIALIZABLE`** also holds each read's
+  `WHERE` as a **predicate lock** until the transaction ends: a write that would add a matching row waits for
+  it, whatever level the writer runs at. The schedule has a default level, and a transaction may ask for its
+  own with `BEGIN ISOLATION LEVEL …`. The page names each anomaly when it happens.
+- **A row another open transaction has deleted or re-keyed** keeps its old image, still locked, until that
+  transaction ends — otherwise a lookup for the old key finds nothing, touches no page, takes no lock, and
+  reads a change nobody committed.
+- **Not yet:** MVCC and snapshot reads (D4), so every read here waits or reads the one current version, and a
+  wait for another session's uncommitted row on a `UNIQUE` key — a duplicate is rejected at once, where a
+  real engine would wait to find out whether the other insert commits. The predicate lock is a *toy*: it
+  matches a `WHERE` against the rows a write would add, which is enough for these tables and nothing like an
+  index-range or next-key lock.
 - A statement outside `BEGIN … COMMIT` is its own transaction. A statement that fails changes nothing and
   leaves the transaction open, as MySQL does; PostgreSQL would instead refuse everything until
   `ROLLBACK`. There are no savepoints and no `BEGIN ISOLATION LEVEL …` yet.

@@ -4,6 +4,8 @@ import { createAccountsDatabase } from '../../engine/index.ts';
 import type { Database, Row } from '../../engine/index.ts';
 import { MAX_SCHEDULE_STEPS, runSchedule } from '../../engine/schedule.ts';
 import type { LockingOptions, ScheduleStep, ScheduleStepResult } from '../../engine/schedule.ts';
+import { ISOLATION_LEVELS } from '../../engine/isolation.ts';
+import type { IsolationLevel } from '../../engine/transactionControl.ts';
 import { PageHeader } from '../../ui/PageHeader.tsx';
 import { decodeSchedule, encodeSchedule, MAX_STATEMENT_LENGTH, SESSIONS } from '../../ui/scheduleUrl.ts';
 import type { SessionName } from '../../ui/scheduleUrl.ts';
@@ -27,6 +29,7 @@ import {
  */
 
 type LockingMode = 'none' | 'page' | 'row';
+const DEFAULT_ISOLATION: IsolationLevel = 'repeatable-read';
 const LOCKING_MODES: { value: LockingMode; label: string }[] = [
   { value: 'none', label: 'No locking' },
   { value: 'page', label: 'Page locks' },
@@ -35,11 +38,19 @@ const LOCKING_MODES: { value: LockingMode; label: string }[] = [
 const TABLE_SIZES = [3, 20] as const;
 type TableSize = (typeof TABLE_SIZES)[number];
 
+const ISOLATION_BUTTONS: Record<IsolationLevel, string> = {
+  'read-uncommitted': 'Read uncommitted',
+  'read-committed': 'Read committed',
+  'repeatable-read': 'Repeatable read',
+  serializable: 'Serializable',
+};
+
 interface Preset {
   label: string;
   steps: ScheduleStep[];
   locking: LockingMode;
   rows: TableSize;
+  isolation?: IsolationLevel;
 }
 
 const PRESETS: Preset[] = [
@@ -89,6 +100,45 @@ const PRESETS: Preset[] = [
     ],
   },
   {
+    label: 'Non-repeatable read',
+    locking: 'row',
+    rows: 20,
+    isolation: 'read-committed',
+    steps: [
+      { session: 'A', sql: 'BEGIN' },
+      { session: 'A', sql: 'SELECT balance FROM accounts WHERE id = 1' },
+      { session: 'B', sql: 'UPDATE accounts SET balance = 50 WHERE id = 1' },
+      { session: 'A', sql: 'SELECT balance FROM accounts WHERE id = 1' },
+      { session: 'A', sql: 'COMMIT' },
+    ],
+  },
+  {
+    label: 'Lost update',
+    locking: 'row',
+    rows: 20,
+    isolation: 'read-committed',
+    steps: [
+      { session: 'A', sql: 'BEGIN' },
+      { session: 'A', sql: 'SELECT balance FROM accounts WHERE id = 1' },
+      { session: 'B', sql: 'UPDATE accounts SET balance = 150 WHERE id = 1' },
+      { session: 'A', sql: 'UPDATE accounts SET balance = 120 WHERE id = 1' },
+      { session: 'A', sql: 'COMMIT' },
+    ],
+  },
+  {
+    label: 'Phantom',
+    locking: 'row',
+    rows: 20,
+    isolation: 'repeatable-read',
+    steps: [
+      { session: 'A', sql: 'BEGIN' },
+      { session: 'A', sql: 'SELECT * FROM accounts WHERE balance > 50' },
+      { session: 'B', sql: "INSERT INTO accounts VALUES (30, 'zed', 100)" },
+      { session: 'A', sql: 'SELECT * FROM accounts WHERE balance > 50' },
+      { session: 'A', sql: 'COMMIT' },
+    ],
+  },
+  {
     label: 'Deadlock',
     locking: 'row',
     rows: 20,
@@ -111,15 +161,21 @@ const CONTROL: { label: string; sql: string }[] = [
   { label: 'ROLLBACK', sql: 'ROLLBACK' },
 ];
 
-function readInitial(): { steps: ScheduleStep[]; locking: LockingMode; rows: TableSize } {
+function readInitial(): { steps: ScheduleStep[]; locking: LockingMode; rows: TableSize; isolation: IsolationLevel } {
   const params = new URLSearchParams(typeof location === 'undefined' ? '' : location.search);
   const steps = decodeSchedule(params.get('s'));
   const lockingRaw = params.get('l');
   const rowsRaw = Number(params.get('n'));
+  const isolationRaw = params.get('i');
   const locking: LockingMode = lockingRaw === 'page' || lockingRaw === 'row' ? lockingRaw : 'none';
   const rows: TableSize = rowsRaw === 20 ? 20 : 3;
-  if (steps === null) return { steps: PRESETS[0]!.steps, locking: PRESETS[0]!.locking, rows: PRESETS[0]!.rows };
-  return { steps, locking, rows };
+  const isolation: IsolationLevel =
+    ISOLATION_LEVELS.find((level) => level === isolationRaw) ?? DEFAULT_ISOLATION;
+  if (steps === null) {
+    const first = PRESETS[0]!;
+    return { steps: first.steps, locking: first.locking, rows: first.rows, isolation: first.isolation ?? DEFAULT_ISOLATION };
+  }
+  return { steps, locking, rows, isolation };
 }
 
 const INITIAL = readInitial();
@@ -266,13 +322,14 @@ export function ScheduleToolPage() {
   const [steps, setSteps] = useState<ScheduleStep[]>(INITIAL.steps);
   const [locking, setLocking] = useState<LockingMode>(INITIAL.locking);
   const [rows, setRows] = useState<TableSize>(INITIAL.rows);
+  const [isolation, setIsolation] = useState<IsolationLevel>(INITIAL.isolation);
   const [session, setSession] = useState<SessionName>('A');
   const [sql, setSql] = useState('');
 
   const database = useMemo(() => createAccountsDatabase(rows), [rows]);
   const lockingOptions = useMemo<LockingOptions | undefined>(
-    () => (locking === 'none' ? undefined : { granularity: locking }),
-    [locking],
+    () => (locking === 'none' ? undefined : { granularity: locking, isolation }),
+    [locking, isolation],
   );
   const result = useMemo(
     () => runSchedule(steps, database, undefined, lockingOptions),
@@ -286,11 +343,12 @@ export function ScheduleToolPage() {
       if (steps.length > 0) params.set('s', encodeSchedule(steps));
       if (locking !== 'none') params.set('l', locking);
       if (rows !== 3) params.set('n', String(rows));
+      if (locking !== 'none' && isolation !== DEFAULT_ISOLATION) params.set('i', isolation);
       const next = `${location.pathname}${params.size > 0 ? `?${params.toString()}` : ''}`;
       if (next !== `${location.pathname}${location.search}`) history.replaceState(null, '', next);
     }, 250);
     return () => { window.clearTimeout(timer); };
-  }, [steps, locking, rows]);
+  }, [steps, locking, rows, isolation]);
 
   function add(statement: string) {
     const trimmed = statement.trim();
@@ -391,6 +449,25 @@ export function ScheduleToolPage() {
             ))}
           </div>
         </div>
+        {locking !== 'none' && (
+          <div className="flex flex-col gap-1 text-label text-ink-dim">
+            Isolation
+            <div className="flex flex-wrap gap-1" role="radiogroup" aria-label="Isolation level">
+              {ISOLATION_LEVELS.map((level) => (
+                <button
+                  key={level}
+                  type="button"
+                  role="radio"
+                  aria-checked={isolation === level}
+                  onClick={() => { setIsolation(level); }}
+                  className={`${segBase} ${isolation === level ? segOn : segOff}`}
+                >
+                  {ISOLATION_BUTTONS[level]}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         <div className="flex flex-col gap-1 text-label text-ink-dim">
           Accounts
           <div className="flex gap-1" role="radiogroup" aria-label="Number of accounts">
@@ -411,11 +488,21 @@ export function ScheduleToolPage() {
         <p className="min-w-56 flex-1 text-label text-ink-dim">
           {locking === 'none'
             ? 'Nothing stops a session reading or overwriting another’s uncommitted change.'
-            : locking === 'page'
-              ? 'Strict two-phase locking, a lock per page: every row on a touched page is covered, so unrelated rows collide.'
-              : rows === 3
-                ? 'Strict two-phase locking, a lock per row. Three accounts fit one page and the planner scans them, so a scan examines every row and a row lock covers all three.'
-                : 'Strict two-phase locking, a lock per row. With twenty accounts an id lookup goes through the index and touches one row, so its neighbours are free.'}
+            : `${
+                locking === 'page'
+                  ? 'A lock per page: every row on a touched page is covered, so unrelated rows collide.'
+                  : rows === 3
+                    ? 'A lock per row. Three accounts fit one page and the planner scans them, so a scan examines every row and a row lock covers all three.'
+                    : 'A lock per row. With twenty accounts an id lookup goes through the index and touches one row, so its neighbours are free.'
+              } ${
+                isolation === 'read-uncommitted'
+                  ? 'Read uncommitted takes no read locks, so it reads changes that are not committed.'
+                  : isolation === 'read-committed'
+                    ? 'Read committed gives each read lock back as the statement ends, so a repeated read can change.'
+                    : isolation === 'repeatable-read'
+                      ? 'Repeatable read holds read locks to the end, but locks only rows that exist: a new matching row can still appear.'
+                      : 'Serializable also holds each read’s WHERE as a lock, so an insert that would match it waits.'
+              }`}
         </p>
       </div>
 
@@ -429,6 +516,7 @@ export function ScheduleToolPage() {
               setSteps(p.steps);
               setLocking(p.locking);
               setRows(p.rows);
+              setIsolation(p.isolation ?? DEFAULT_ISOLATION);
             }}
             className={btnSecondary}
           >

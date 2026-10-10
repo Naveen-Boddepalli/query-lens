@@ -60,3 +60,26 @@ test('a deadlock rolls back the youngest transaction and the other finishes', as
   await expect(end.getByRole('row').nth(1).getByRole('cell').nth(2)).toHaveText('1');
   await expect(end.getByRole('row').nth(2).getByRole('cell').nth(2)).toHaveText('3');
 });
+
+// plan.md §25.4 D3: isolation levels are lock durations, and each one lets a different anomaly through.
+test('repeatable read lets a phantom in; serializable makes the insert wait', async ({ page }) => {
+  await page.goto('/tools/schedule');
+  await page.getByRole('button', { name: 'Phantom', exact: true }).click();
+  await expect(page.getByRole('note').filter({ hasText: 'Phantom' })).toBeVisible();
+
+  await page.getByRole('radio', { name: 'Serializable' }).click();
+  await expect(page.getByRole('note')).toHaveCount(0);
+  await expect(page.getByText('blocked on a lock')).toBeVisible();
+});
+
+test('read committed gives its read locks back, so a repeated read changes and an update is lost', async ({ page }) => {
+  await page.goto('/tools/schedule');
+  await page.getByRole('button', { name: 'Non-repeatable read' }).click();
+  await expect(page.getByRole('note').filter({ hasText: 'Non-repeatable read' })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Lost update' }).click();
+  await expect(page.getByRole('note').filter({ hasText: 'Lost update' })).toBeVisible();
+
+  await page.getByRole('radio', { name: 'Repeatable read' }).click();
+  await expect(page.getByRole('note')).toHaveCount(0);
+});

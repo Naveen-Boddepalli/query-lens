@@ -207,6 +207,9 @@ const T = (name: string): string => `src/pages/tools/${name}.tsx`;
  *  - 2026-10-04, latch crabbing (§25.4 F5): a new route, /tools/latch-crabbing (163.5 kB measured + 3, rounded
  *    to 167). Unlike the standalone sandboxes it drives the REAL engine B+Tree (`engine/index/btree.ts`, the same
  *    code /tools/btree uses), so it pays the shared engine chunk the same way /tools/btree does (ceiling 167).
+ *  - 2026-10-10, isolation levels (§25.4 D3): `runQuery` recognises `BEGIN ISOLATION LEVEL …` (engine code every route
+ *    shares; the level names live in `isolation.ts`, which only the schedule tool imports). /learn 169 → 173,
+ *    /tools/btree 170 → 174, and the schedule tool itself 172 → 176 (each measured + 3, rounded up).
  *  - 2026-10-10, enforced locking (§25.4 D2): the accounts seed became parameterised (three rows or twenty), which is
  *    engine code every route shares, and the lock rules moved into `engine/locks/lockTable.ts`. /tools/parser 168 → 172
  *    and /docs/concepts/btree 173 → 177 (each measured + 3, rounded up); /tools/schedule itself is at 171 of 172.
@@ -247,7 +250,7 @@ export const ROUTES: readonly RouteBudget[] = [
   { route: '/playground', roots: [P('PlaygroundPage')], kb: 319, note: 'the Playground: the editor, every stage panel, the engine — the heaviest route, and the one most people land on' },
   { route: '/stages', roots: ['src/ui/StagesLayout.tsx', P('StagesIndex')], kb: 165, note: 'the stage explainers, index' },
   { route: '/stages/:id', roots: ['src/ui/StagesLayout.tsx', P('StagePage')], kb: 184, note: 'one stage explainer' },
-  { route: '/learn', roots: [P('LearnPage')], kb: 169, note: 'the lesson track' },
+  { route: '/learn', roots: [P('LearnPage')], kb: 173, note: 'the lesson track' },
   { route: '/learn/:id', roots: [P('LessonPage')], kb: 172, note: 'one lesson' },
   { route: '/examples', roots: [P('ExamplesPage')], kb: 115, note: 'preset queries' },
   { route: '/gallery', roots: [P('GalleryPage')], kb: 165, note: 'named moments' },
@@ -262,12 +265,12 @@ export const ROUTES: readonly RouteBudget[] = [
   { route: '/tools', roots: [P('ToolsIndexPage')], kb: 116, note: 'the tools index' },
   { route: '/tools/buffer-pool', roots: [T('BufferPoolToolPage')], kb: 173, note: 'buffer-pool sandbox' },
   { route: '/tools/parser', roots: [T('ParserToolPage')], kb: 172, note: 'tokenizer + parser sandbox' },
-  { route: '/tools/btree', roots: [T('BTreeToolPage')], kb: 170, note: 'B+Tree sandbox' },
+  { route: '/tools/btree', roots: [T('BTreeToolPage')], kb: 174, note: 'B+Tree sandbox' },
   { route: '/tools/page', roots: [T('PageToolPage')], kb: 166, note: 'slotted-page inspector' },
   { route: '/tools/sort', roots: [T('SortToolPage')], kb: 118, note: 'external merge sort' },
   { route: '/tools/planner', roots: [T('PlannerToolPage')], kb: 172, note: 'planner sandbox' },
   { route: '/tools/locks', roots: [T('LocksToolPage')], kb: 117, note: 'lock simulator' },
-  { route: '/tools/schedule', roots: [T('ScheduleToolPage')], kb: 172, note: 'transaction schedules (the engine, a shared database, two sessions)' },
+  { route: '/tools/schedule', roots: [T('ScheduleToolPage')], kb: 176, note: 'transaction schedules (the engine, a shared database, two sessions)' },
   { route: '/tools/grammar', roots: [T('GrammarToolPage')], kb: 116, note: 'the SQL grammar diagram' },
   { route: '/tools/hash-join', roots: [T('HashJoinToolPage')], kb: 118, note: 'Grace hash join' },
   { route: '/tools/join-order', roots: [T('JoinOrderToolPage')], kb: 168, note: 'Selinger join-order search over the subset lattice' },

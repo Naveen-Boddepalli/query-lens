@@ -1,7 +1,7 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import { MAX_SCHEDULE_STEPS, runSchedule } from '../schedule.ts';
-import { controlKindOf } from '../transactionControl.ts';
+import { controlKindOf, isolationLevelOf } from '../transactionControl.ts';
 import { runQuery } from '../runQuery.ts';
 import type { ScheduleStep } from '../schedule.ts';
 import { createAccountsDatabase } from '../seed.ts';
@@ -21,14 +21,25 @@ describe('transaction control statements', () => {
     expect(controlKindOf('COMMIT -- done')).toBe('commit');
     expect(controlKindOf('/* x */ ROLLBACK WORK;')).toBe('rollback');
     expect(controlKindOf('SELECT * FROM accounts')).toBeNull();
-    expect(controlKindOf('BEGIN ISOLATION LEVEL SERIALIZABLE')).toBe('malformed');
+    expect(controlKindOf('BEGIN ISOLATION LEVEL SERIALIZABLE')).toBe('begin');
+    expect(controlKindOf('begin transaction isolation level read committed;')).toBe('begin');
+    expect(controlKindOf('BEGIN ISOLATION LEVEL CHAOS')).toBe('malformed');
     expect(controlKindOf('SAVEPOINT a')).toBe('malformed');
   });
 
   it('refuses a transaction statement it does not understand, rather than guess', () => {
-    const result = runSchedule(steps(['A', 'BEGIN ISOLATION LEVEL SERIALIZABLE']), createAccountsDatabase());
+    const result = runSchedule(steps(['A', 'BEGIN ISOLATION LEVEL CHAOS']), createAccountsDatabase());
     expect(result.steps[0]!.error).toContain('BEGIN, COMMIT and ROLLBACK');
     expect(result.open).toEqual([]);
+  });
+});
+
+describe('isolation level clauses', () => {
+  it('reads the level a BEGIN asks for, in any spelling', () => {
+    expect(isolationLevelOf('BEGIN ISOLATION LEVEL READ UNCOMMITTED')).toBe('read-uncommitted');
+    expect(isolationLevelOf('begin work isolation level  repeatable   read ;')).toBe('repeatable-read');
+    expect(isolationLevelOf('START TRANSACTION ISOLATION LEVEL SERIALIZABLE')).toBe('serializable');
+    expect(isolationLevelOf('BEGIN')).toBeNull();
   });
 });
 
@@ -573,10 +584,290 @@ describe('strict two-phase locking (plan.md §25.4 D2)', () => {
       fc.assert(
         fc.property(fc.array(step, { maxLength: 14 }), (schedule) => {
           const result = runSchedule(schedule, createAccountsDatabase(), undefined, locking);
-          for (const record of result.steps) expect(record.anomalies).toEqual([]);
+          // Phantoms and the like are the isolation level's business (D3); a lock rules these two out at any level.
+          for (const record of result.steps) {
+            expect(record.anomalies.filter((a) => a.kind === 'dirty-read' || a.kind === 'dirty-write')).toEqual([]);
+          }
         }),
         { numRuns: 300 },
       );
+    }
+  });
+});
+
+describe('isolation levels as lock durations (plan.md §25.4 D3)', () => {
+  type Level = 'read-uncommitted' | 'read-committed' | 'repeatable-read' | 'serializable';
+  const at = (schedule: ScheduleStep[], isolation: Level, granularity: 'page' | 'row' = 'row', rows = 20) =>
+    runSchedule(schedule, createAccountsDatabase(rows), undefined, { granularity, isolation });
+  const phases = (result: ReturnType<typeof runSchedule>) => result.steps.map((s) => `${s.session}${String(s.index)}:${s.phase}`);
+  const kinds = (result: ReturnType<typeof runSchedule>) => result.steps.flatMap((s) => s.anomalies.map((a) => a.kind));
+
+  const dirtyRead = steps(
+    ['A', 'BEGIN'],
+    ['A', 'UPDATE accounts SET balance = 0 WHERE id = 1'],
+    ['B', 'BEGIN'],
+    ['B', 'SELECT balance FROM accounts WHERE id = 1'],
+    ['A', 'ROLLBACK'],
+    ['B', 'COMMIT'],
+  );
+  const nonRepeatable = steps(
+    ['A', 'BEGIN'],
+    ['A', 'SELECT balance FROM accounts WHERE id = 1'],
+    ['B', 'BEGIN'],
+    ['B', 'UPDATE accounts SET balance = 50 WHERE id = 1'],
+    ['B', 'COMMIT'],
+    ['A', 'SELECT balance FROM accounts WHERE id = 1'],
+    ['A', 'COMMIT'],
+  );
+  const phantom = steps(
+    ['A', 'BEGIN'],
+    ['A', 'SELECT * FROM accounts WHERE balance > 50'],
+    ['B', 'BEGIN'],
+    ['B', "INSERT INTO accounts VALUES (30, 'zed', 100)"],
+    ['B', 'COMMIT'],
+    ['A', 'SELECT * FROM accounts WHERE balance > 50'],
+    ['A', 'COMMIT'],
+  );
+  const lostUpdate = steps(
+    ['A', 'BEGIN'],
+    ['A', 'SELECT balance FROM accounts WHERE id = 1'],
+    ['B', 'BEGIN'],
+    ['B', 'UPDATE accounts SET balance = 150 WHERE id = 1'],
+    ['B', 'COMMIT'],
+    ['A', 'UPDATE accounts SET balance = 120 WHERE id = 1'],
+    ['A', 'COMMIT'],
+  );
+
+  it('READ UNCOMMITTED reads without asking, so it reads a change that is later rolled back', () => {
+    const result = at(dirtyRead, 'read-uncommitted');
+    expect(phases(result)).not.toContain('B3:blocked');
+    expect(result.steps[3]!.rows).toEqual([{ balance: 0 }]);
+    expect(kinds(result)).toEqual(['dirty-read']);
+  });
+
+  it('READ UNCOMMITTED still holds write locks, so two writers cannot overwrite each other', () => {
+    const result = at(
+      steps(
+        ['A', 'BEGIN'],
+        ['A', 'UPDATE accounts SET balance = 0 WHERE id = 1'],
+        ['B', 'UPDATE accounts SET balance = 50 WHERE id = 1'],
+        ['A', 'ROLLBACK'],
+      ),
+      'read-uncommitted',
+    );
+    expect(phases(result)).toContain('B2:blocked');
+    expect(kinds(result)).not.toContain('dirty-write');
+  });
+
+  it('READ COMMITTED waits for an uncommitted change instead of reading it', () => {
+    const result = at(dirtyRead, 'read-committed');
+    expect(phases(result)).toContain('B3:blocked');
+    expect(kinds(result)).toEqual([]);
+    expect(result.steps.find((s) => s.index === 3 && s.phase === 'resumed')!.rows).toEqual([{ balance: 100 }]);
+  });
+
+  it('READ COMMITTED gives its read locks back when the statement ends, so a repeated read can change', () => {
+    const result = at(nonRepeatable, 'read-committed');
+    expect(phases(result)).not.toContain('B3:blocked');
+    expect(result.steps[1]!.locks).toEqual([]);
+    expect(result.steps[1]!.notes.join(' ')).toContain('gives back');
+    expect(result.steps[5]!.rows).toEqual([{ balance: 50 }]);
+    expect(kinds(result)).toEqual(['non-repeatable-read']);
+  });
+
+  it('REPEATABLE READ holds its read locks, so the writer waits and the second read matches the first', () => {
+    const result = at(nonRepeatable, 'repeatable-read');
+    expect(phases(result)).toContain('B3:blocked');
+    expect(result.steps.find((s) => s.index === 5)!.rows).toEqual([{ balance: 100 }]);
+    expect(kinds(result)).toEqual([]);
+  });
+
+  it('REPEATABLE READ cannot see a phantom coming: the new row goes in and the second read has it', () => {
+    const result = at(phantom, 'repeatable-read');
+    expect(phases(result)).not.toContain('B3:blocked');
+    expect(kinds(result)).toEqual(['phantom']);
+    expect(result.steps[5]!.rows).toHaveLength(21);
+  });
+
+  it('SERIALIZABLE holds the read’s WHERE as a lock, so the insert waits and there is no phantom', () => {
+    const result = at(phantom, 'serializable');
+    expect(phases(result)).toContain('B3:blocked');
+    expect(result.steps.find((s) => s.index === 3 && s.phase === 'blocked')!.waitingOn).toEqual(['A']);
+    expect(result.steps.find((s) => s.index === 5)!.rows).toHaveLength(20);
+    expect(kinds(result)).toEqual([]);
+    // The insert goes in once A has committed.
+    expect(result.final.tables.accounts!.rows).toHaveLength(21);
+  });
+
+  it('a predicate lock ends with its transaction', () => {
+    const result = at(phantom, 'serializable');
+    const afterRead = result.steps[1]!;
+    expect(afterRead.locks.some((l) => l.resource.includes('balance > 50'))).toBe(true);
+    expect(afterRead.notes.join(' ')).toContain('predicate lock');
+    expect(result.steps.at(-1)!.locks).toEqual([]);
+  });
+
+  it('once its transaction has ended a predicate is forgotten, and no later write is made to wait on it', () => {
+    const result = at(
+      steps(
+        ['A', 'BEGIN'],
+        ['A', 'SELECT * FROM accounts WHERE balance > 50'],
+        ['A', 'COMMIT'],
+        ['B', 'BEGIN'],
+        ['B', "INSERT INTO accounts VALUES (30, 'zed', 100)"],
+        ['B', 'COMMIT'],
+      ),
+      'serializable',
+    );
+    expect(result.steps[4]!.locks.some((l) => l.resource.includes('balance > 50'))).toBe(false);
+    expect(phases(result).every((p) => p.endsWith(':ran'))).toBe(true);
+  });
+
+  it('a predicate lock only stops a write that would match it', () => {
+    const result = at(
+      steps(
+        ['A', 'BEGIN'],
+        ['A', 'SELECT * FROM accounts WHERE balance > 500'],
+        ['B', "INSERT INTO accounts VALUES (30, 'zed', 100)"],
+        ['A', 'COMMIT'],
+      ),
+      'serializable',
+    );
+    expect(phases(result)).toEqual(['A0:ran', 'A1:ran', 'B2:ran', 'A3:ran']);
+  });
+
+  it('a statement outside any transaction waits for a predicate too, and so does a writer at a lower level', () => {
+    const insert = "INSERT INTO accounts VALUES (30, 'zed', 100)";
+    const autocommit = at(
+      steps(['A', 'BEGIN'], ['A', 'SELECT * FROM accounts WHERE balance > 50'], ['B', insert], ['A', 'COMMIT']),
+      'serializable',
+    );
+    expect(phases(autocommit)).toContain('B2:blocked');
+
+    const lower = at(
+      steps(
+        ['A', 'BEGIN'],
+        ['A', 'SELECT * FROM accounts WHERE balance > 50'],
+        ['B', 'BEGIN ISOLATION LEVEL READ UNCOMMITTED'],
+        ['B', insert],
+        ['A', 'COMMIT'],
+        ['B', 'COMMIT'],
+      ),
+      'serializable',
+    );
+    expect(phases(lower)).toContain('B3:blocked');
+  });
+
+  it('READ COMMITTED loses an update that REPEATABLE READ prevents', () => {
+    const rc = at(lostUpdate, 'read-committed');
+    expect(kinds(rc)).toEqual(['lost-update']);
+    expect(rc.final.tables.accounts!.rows[0]!.balance).toBe(120);
+
+    const rr = at(lostUpdate, 'repeatable-read');
+    expect(kinds(rr)).toEqual([]);
+    // B's update waited for A, so both land and B's is the last: nothing was overwritten unseen.
+    expect(rr.final.tables.accounts!.rows[0]!.balance).toBe(150);
+  });
+
+  it('a session’s own change between two identical reads is not a phantom or a non-repeatable read', () => {
+    const result = at(
+      steps(
+        ['A', 'BEGIN'],
+        ['A', 'SELECT * FROM accounts WHERE balance > 50'],
+        ['A', "INSERT INTO accounts VALUES (30, 'zed', 100)"],
+        ['A', 'SELECT * FROM accounts WHERE balance > 50'],
+        ['A', 'UPDATE accounts SET balance = 1 WHERE id = 1'],
+        ['A', 'SELECT * FROM accounts WHERE balance > 50'],
+        ['A', 'COMMIT'],
+      ),
+      'read-committed',
+    );
+    expect(kinds(result)).toEqual([]);
+  });
+
+  it('each transaction can ask for its own level, whatever the schedule’s default', () => {
+    const result = at(
+      steps(
+        ['A', 'BEGIN ISOLATION LEVEL READ COMMITTED'],
+        ['A', 'SELECT balance FROM accounts WHERE id = 1'],
+        ['B', 'UPDATE accounts SET balance = 7 WHERE id = 1'],
+        ['A', 'SELECT balance FROM accounts WHERE id = 1'],
+        ['A', 'COMMIT'],
+      ),
+      'serializable',
+    );
+    expect(result.steps[0]!.notes.join(' ')).toContain('at READ COMMITTED');
+    expect(phases(result)).not.toContain('B2:blocked');
+    expect(kinds(result)).toEqual(['non-repeatable-read']);
+  });
+
+  it('says a level changes nothing when there is no locking to enforce it', () => {
+    const result = runSchedule(
+      steps(['A', 'BEGIN ISOLATION LEVEL SERIALIZABLE']),
+      createAccountsDatabase(),
+    );
+    expect(result.steps[0]!.notes.join(' ')).toContain('changes nothing');
+  });
+
+  it('a lookup for a row another transaction has deleted waits for that transaction, at either granularity', () => {
+    // The index no longer holds the key, so the lookup touches no page: the deleted row's old image has to be locked.
+    const schedule = steps(
+      ['B', 'BEGIN'],
+      ['B', 'DELETE FROM accounts WHERE id = 2'],
+      ['A', 'SELECT balance FROM accounts WHERE id = 2'],
+      ['B', 'ROLLBACK'],
+    );
+    for (const granularity of ['page', 'row'] as const) {
+      const result = at(schedule, 'repeatable-read', granularity);
+      expect(phases(result)).toContain('A2:blocked');
+      expect(result.steps.at(-1)!.rows).toEqual([{ balance: 100 }]);
+      expect(kinds(result)).toEqual([]);
+    }
+  });
+
+  it('a lookup for a key another transaction has changed waits too, and then finds nothing once it commits', () => {
+    const schedule = steps(
+      ['B', 'BEGIN'],
+      ['B', 'UPDATE accounts SET id = 99 WHERE id = 2'],
+      ['A', 'SELECT balance FROM accounts WHERE id = 2'],
+      ['B', 'COMMIT'],
+    );
+    for (const granularity of ['page', 'row'] as const) {
+      const result = at(schedule, 'repeatable-read', granularity);
+      expect(phases(result)).toContain('A2:blocked');
+      expect(result.steps.at(-1)!.rows).toEqual([]);
+    }
+  });
+
+  it('SERIALIZABLE lets no anomaly through, whatever the interleaving; REPEATABLE READ lets only phantoms', () => {
+    const statement = fc.oneof(
+      fc.record({ id: fc.integer({ min: 1, max: 4 }), to: fc.integer({ min: 30, max: 32 }) }).map(
+        ({ id, to }) => `UPDATE accounts SET id = ${String(to)} WHERE id = ${String(id)}`,
+      ),
+      fc.integer({ min: 30, max: 32 }).map((id) => `SELECT balance FROM accounts WHERE id = ${String(id)}`),
+      fc.constant('BEGIN'),
+      fc.constant('COMMIT'),
+      fc.constant('ROLLBACK'),
+      fc.record({ id: fc.integer({ min: 1, max: 4 }), balance: fc.integer({ min: 0, max: 9 }) }).map(
+        ({ id, balance }) => `UPDATE accounts SET balance = ${String(balance)} WHERE id = ${String(id)}`,
+      ),
+      fc.integer({ min: 21, max: 24 }).map((id) => `INSERT INTO accounts VALUES (${String(id)}, 'x', 7)`),
+      fc.integer({ min: 1, max: 4 }).map((id) => `DELETE FROM accounts WHERE id = ${String(id)}`),
+      fc.constant('SELECT * FROM accounts WHERE balance > 4'),
+      fc.integer({ min: 1, max: 4 }).map((id) => `SELECT balance FROM accounts WHERE id = ${String(id)}`),
+    );
+    const step = fc.record({ session: fc.constantFrom('A', 'B'), sql: statement });
+    for (const rows of [3, 20]) {
+      for (const granularity of ['page', 'row'] as const) {
+        fc.assert(
+          fc.property(fc.array(step, { maxLength: 14 }), (schedule) => {
+            expect(kinds(at(schedule, 'serializable', granularity, rows))).toEqual([]);
+            const rr = kinds(at(schedule, 'repeatable-read', granularity, rows)).filter((k) => k !== 'phantom');
+            expect(rr).toEqual([]);
+          }),
+          { numRuns: 150 },
+        );
+      }
     }
   });
 });

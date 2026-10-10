@@ -16,19 +16,27 @@
  * committed. Two sessions each waiting on the other is a deadlock, and the youngest is rolled back. A session blocked
  * for good is reported as stuck.
  *
+ * **Isolation levels** (D3) are lock-duration rules, as in the textbook definition. `READ UNCOMMITTED` takes no read
+ * locks; `READ COMMITTED` takes them and gives them back when the statement ends; `REPEATABLE READ` holds them to the
+ * end (D2's strict two-phase locking, and the default); `SERIALIZABLE` adds a predicate lock for each read's `WHERE`, so
+ * an insert that would match it has to wait — the only level that stops a phantom. Write locks are held to the end at
+ * every level. A level is the schedule's default, or one transaction's own through `BEGIN ISOLATION LEVEL …`.
+ *
  * A statement outside `BEGIN … COMMIT` is its own transaction (autocommit). A statement that fails changes nothing and
  * leaves the transaction open, as MySQL does; PostgreSQL would instead refuse everything until `ROLLBACK`.
  */
 
 import { passes } from './exec/evaluate.ts';
-import { emptyTable, forget, holds, releaseAll, request } from './locks/lockTable.ts';
+import { emptyTable, forget, holds, release, releaseAll, request } from './locks/lockTable.ts';
 import type { LockMode, LockTableState } from './locks/lockTable.ts';
 import { parseStatement, walkExpr } from './parser/index.ts';
 import type { Expr } from './parser/index.ts';
+import { exprToSql } from './planner/index.ts';
 import { runQuery } from './runQuery.ts';
 import { buildHeap } from './storage/index.ts';
-import { controlKindOf } from './transactionControl.ts';
-import type { ControlKind } from './transactionControl.ts';
+import { ISOLATION_LABELS } from './isolation.ts';
+import { controlKindOf, isolationLevelOf } from './transactionControl.ts';
+import type { ControlKind, IsolationLevel } from './transactionControl.ts';
 import { DEFAULT_ENGINE_OPTIONS } from './types.ts';
 import type { Database, EngineOptions, Row, RunResult, Table } from './types.ts';
 
@@ -45,6 +53,8 @@ export type StepKind = ControlKind | 'statement';
  */
 export interface LockingOptions {
   granularity: 'page' | 'row';
+  /** The level a transaction runs at unless its own `BEGIN ISOLATION LEVEL …` says otherwise. Default `repeatable-read`. */
+  isolation?: IsolationLevel;
 }
 
 /** What a write did to one row, in the terms needed to put it back. Rows are identified by reference, not by value. */
@@ -53,7 +63,7 @@ export type UndoEntry =
   | { kind: 'delete'; table: string; row: Row; index: number }
   | { kind: 'update'; table: string; before: Row; after: Row };
 
-export type AnomalyKind = 'dirty-read' | 'dirty-write';
+export type AnomalyKind = 'dirty-read' | 'dirty-write' | 'non-repeatable-read' | 'phantom' | 'lost-update';
 
 export interface ScheduleAnomaly {
   kind: AnomalyKind;
@@ -142,6 +152,20 @@ interface Logged {
 interface Transaction {
   number: number;
   log: Logged[];
+  isolation: IsolationLevel;
+  /** What each distinct `SELECT` returned the last time this transaction ran it, to notice when it changes. */
+  reads: Map<string, Row[]>;
+  /** The version of each row this transaction last read or wrote, by row identity, to notice a lost update. */
+  seen: Map<number, Row>;
+}
+
+/** A read's `WHERE`, held as a lock until its transaction ends (SERIALIZABLE only). */
+interface PredicateLock {
+  key: string;
+  session: string;
+  table: string;
+  where: Expr | undefined;
+  text: string;
 }
 
 interface Queued {
@@ -276,6 +300,9 @@ export function runSchedule(
   const blocked = new Map<string, Pending>();
   const queued = new Map<string, Queued[]>();
   let deadlocks = 0;
+  const defaultIsolation: IsolationLevel = locking?.isolation ?? 'repeatable-read';
+  const predicates: PredicateLock[] = [];
+  let nextPredicate = 1;
   // A row keeps one identity through every update, so a row lock outlives the object that was replaced under it.
   const rowIds = new WeakMap<Row, number>();
   let nextRowId = 1;
@@ -365,7 +392,29 @@ export function runSchedule(
       pages.set(Math.floor(table.rows.length / rowsPerPage), 'exclusive');
     }
 
+    // What other open transactions have deleted or re-keyed is gone from the table but not yet from the world: its old
+    // image still counts, and still sits where it was, until that transaction ends. Without this a lookup for such a
+    // row finds nothing, touches no page, takes no lock, and reads a deletion nobody has committed.
+    const tombstones: { row: Row; page: number }[] = [];
+    for (const open of transactions.values()) {
+      for (const { entry } of open.log) {
+        if (entry.table !== target.table) continue;
+        if (entry.kind === 'delete') tombstones.push({ row: entry.row, page: Math.floor(entry.index / rowsPerPage) });
+        if (entry.kind === 'update') {
+          const at = table.rows.indexOf(entry.after);
+          if (at >= 0) tombstones.push({ row: entry.before, page: Math.floor(at / rowsPerPage) });
+        }
+      }
+    }
+
     if (locking?.granularity !== 'row') {
+      const all = opaque(target.where);
+      for (const stone of tombstones) {
+        // An insert looks for no existing row, so it has no use for a row's old image.
+        if (target.kind === 'insert') break;
+        if (!all && !passes(target.where, stone.row)) continue;
+        if (pages.get(stone.page) !== 'exclusive') pages.set(stone.page, writes ? 'exclusive' : 'shared');
+      }
       return [...pages.entries()].map(([pageId, mode]) => ({
         key: `${target.table}/page/${String(pageId)}`,
         label: pageLabel(pageId),
@@ -401,14 +450,47 @@ export function runSchedule(
     for (const pageId of pages.keys()) {
       for (const row of heap.pages[pageId]?.rows ?? []) consider(row);
     }
-    // A row an open transaction has deleted is gone from the table but not yet from the world: it stays locked until
-    // that transaction ends, so a scan waits for it rather than silently reading a table that is missing it.
-    for (const open of transactions.values()) {
-      for (const { entry } of open.log) {
-        if (entry.kind === 'delete' && entry.table === target.table) consider(entry.row);
-      }
-    }
+    // The old image of a row another open transaction changed or deleted (above) is locked like any other it examines.
+    for (const stone of tombstones) consider(stone.row);
     return [...needs.values()];
+  }
+
+  /** True when `where` holds a subquery, which has no value until it has run: treated as matching every row. */
+  function opaque(where: Expr | undefined): boolean {
+    let found = false;
+    if (where) {
+      walkExpr(where, (e) => {
+        if (e.kind === 'in' && e.subquery) found = true;
+      });
+    }
+    return found;
+  }
+
+  /** The rows of the statement's table that its `WHERE` picks out, as the table stands now. */
+  function matchedRows(sql: string): Row[] {
+    const target = targetOf(sql);
+    const table = target ? current.tables[target.table] : undefined;
+    if (!target || !table || target.kind === 'insert') return [];
+    const all = opaque(target.where);
+    return table.rows.filter((row) => all || passes(target.where, row));
+  }
+
+  /**
+   * A write that would add a row matching a read another session is holding a predicate lock on has to wait for it:
+   * the predicate is a lock the reader holds exclusively and the writer asks for shared, so writers never wait on
+   * each other, only on the readers whose answer they would change (plan.md §25.4 D3, the toy predicate lock).
+   */
+  function predicateNeeds(session: string, sql: string, run: RunResult): Need[] {
+    const target = targetOf(sql);
+    if (!target || !run.write || (target.kind !== 'insert' && target.kind !== 'update')) return [];
+    const before = current.tables[run.write.table]?.rows ?? [];
+    const images = entriesOf(run.write.kind, run.write.table, before, run.write.rows).flatMap((entry) =>
+      entry.kind === 'insert' ? [entry.row] : entry.kind === 'update' ? [entry.after] : [],
+    );
+    return predicates
+      .filter((p) => p.session !== session && p.table === target.table)
+      .filter((p) => images.some((image) => p.where === undefined || opaque(p.where) || passes(p.where, image)))
+      .map((p) => ({ key: p.key, label: `the rows ${p.text} that ${p.session} read`, mode: 'shared' as const }));
   }
 
   /** Lets go of everything `session` holds, so whatever was waiting on it can be promoted. */
@@ -417,6 +499,9 @@ export function runSchedule(
     const released = releaseAll(locks, session, labelOf);
     locks = forget(released.state, session);
     notes.push(...released.narration);
+    for (let at = predicates.length - 1; at >= 0; at -= 1) {
+      if (predicates[at]!.session === session) predicates.splice(at, 1);
+    }
   }
 
   /** The statements waiting for a lock that has since been granted, resumed in the order they blocked. */
@@ -500,8 +585,14 @@ export function runSchedule(
       } else {
         const number = nextNumber;
         nextNumber += 1;
-        transactions.set(session, { number, log: [] });
-        notes.push(`${session} begins transaction T${String(number)}.`);
+        const asked = isolationLevelOf(sql);
+        const level = asked ?? defaultIsolation;
+        transactions.set(session, { number, log: [], isolation: level, reads: new Map(), seen: new Map() });
+        notes.push(
+          `${session} begins transaction T${String(number)}${
+            locking ? ` at ${ISOLATION_LABELS[level]}` : ''
+          }${asked && !locking ? ` (it asks for ${ISOLATION_LABELS[asked]}, but with no locking the level changes nothing)` : ''}.`,
+        );
       }
       record(step, 'begin', phase, { notes });
       return 'done';
@@ -559,8 +650,19 @@ export function runSchedule(
     }
 
     // Under locking, take every lock the statement needs before it runs, holding each to the end of the transaction.
+    const isolation = txn?.isolation ?? defaultIsolation;
+    let needs: Need[] = [];
+    const heldShared = new Set<string>();
     if (locking) {
-      const needs = footprint(sql, run);
+      needs = footprint(sql, run);
+      // READ UNCOMMITTED reads without asking anyone. Writes still take their exclusive locks.
+      if (isolation === 'read-uncommitted') needs = needs.filter((n) => n.mode === 'exclusive');
+      // Any write waits for a predicate another session is holding that it would change, whatever level the writer
+      // runs at: a lock is not optional for the one it is taken against.
+      needs = [...needs, ...predicateNeeds(session, sql, run)];
+      for (const n of needs) {
+        if (n.mode === 'shared' && holds(locks, session, n.key, 'shared')) heldShared.add(n.key);
+      }
       for (const need of needs) {
         labels.set(need.key, need.label);
         const outcome = request(locks, session, need.key, need.mode, labelOf);
@@ -629,6 +731,36 @@ export function runSchedule(
         if (entry.kind === 'update') rowIds.set(entry.after, ridOf(entry.before));
       }
 
+      // A write on top of a row this transaction read, which someone else has changed since: the change is overwritten
+      // by a value worked out from a stale read.
+      if (txn) {
+        // The transaction's own change is a legitimate reason for a repeated query to answer differently.
+        txn.reads.clear();
+        const lost: Row[] = [];
+        for (const entry of entries) {
+          if (entry.kind === 'insert') {
+            txn.seen.set(ridOf(entry.row), entry.row);
+            continue;
+          }
+          const was = entry.kind === 'delete' ? entry.row : entry.before;
+          const rid = ridOf(was);
+          const read = txn.seen.get(rid);
+          if (read !== undefined && read !== was) lost.push(read);
+          if (entry.kind === 'update') txn.seen.set(rid, entry.after);
+        }
+        if (lost.length > 0) {
+          const against = sessionOrder.filter((name) => name !== session);
+          anomalies.push({
+            kind: 'lost-update',
+            session,
+            against,
+            message: `Lost update: ${session} read ${lost.map(rowText).join(', ')} and then wrote over a row that has since been changed and committed by ${
+              against.join(' or ') || 'someone else'
+            }. That change is overwritten by a value worked out from the old read.`,
+          });
+        }
+      }
+
       // A write to a row somebody else has changed and not committed.
       const others = othersOpenLog(session);
       const clobbered = new Set<string>();
@@ -675,6 +807,25 @@ export function runSchedule(
       notes.push(`Statistics for ${run.analyze.table} recorded.`);
     } else {
       notes.push(`${plural(rows.length, 'row')} returned.`);
+      if (txn) {
+        // The same question asked twice in one transaction, answered differently.
+        const asked = sql.trim().replace(/\s+/g, ' ');
+        const previous = txn.reads.get(asked);
+        if (previous !== undefined && JSON.stringify(previous) !== JSON.stringify(rows)) {
+          const against = sessionOrder.filter((name) => name !== session);
+          const phantom = previous.length !== rows.length;
+          anomalies.push({
+            kind: phantom ? 'phantom' : 'non-repeatable-read',
+            session,
+            against,
+            message: phantom
+              ? `Phantom: ${session} ran this query twice in T${String(txn.number)} and the second answer has ${plural(rows.length, 'row')} where the first had ${String(previous.length)} — ${against.join(' or ') || 'another session'} committed a row that matches it in between.`
+              : `Non-repeatable read: ${session} ran this query twice in T${String(txn.number)} and got different values — ${against.join(' or ') || 'another session'} committed a change to a row it had already read.`,
+          });
+        }
+        txn.reads.set(asked, rows);
+        for (const row of matchedRows(sql)) txn.seen.set(ridOf(row), row);
+      }
     }
 
     // A read that would have returned something else without another session's uncommitted changes.
@@ -697,10 +848,41 @@ export function runSchedule(
 
     if (resumed === 'lock') notes.unshift(`${session}'s statement had to wait for a lock, and now runs.`);
     if (resumed === 'queue') notes.unshift(`${session}'s step waited behind its blocked statement, and now runs.`);
+    let gaveBack = false;
+    if (locking && txn) {
+      if (isolation === 'read-committed') {
+        // READ COMMITTED reads under a lock held only as long as the statement, then gives it back.
+        let released = 0;
+        for (const need of needs) {
+          if (need.mode !== 'shared' || heldShared.has(need.key) || !holds(locks, session, need.key, 'shared')) continue;
+          locks = release(locks, session, need.key, 'shared', labelOf).state;
+          released += 1;
+        }
+        if (released > 0) {
+          gaveBack = true;
+          notes.push(
+            `${session} is at ${ISOLATION_LABELS[isolation]}, so it gives back the ${plural(released, 'shared lock')} this statement took.`,
+          );
+        }
+      } else if (isolation === 'serializable') {
+        // SERIALIZABLE keeps the read's WHERE as a lock until the transaction ends, against inserts that would match.
+        const target = targetOf(sql);
+        if (target && target.kind !== 'insert') {
+          const key = `${target.table}/predicate/${String(nextPredicate)}`;
+          nextPredicate += 1;
+          const text = target.where ? exprToSql(target.where) : 'of every row';
+          labels.set(key, `the rows ${text} that ${session} read`);
+          locks = request(locks, session, key, 'exclusive', labelOf).state;
+          predicates.push({ key, session, table: target.table, where: target.where, text });
+          notes.push(`${session} also holds a predicate lock on ${target.where ? `the rows where ${text}` : 'every row'}.`);
+        }
+      }
+    }
+
     // An autocommit statement is its own transaction: its locks end with it.
     if (!txn && locking) endLocks(session, notes);
     record(step, 'statement', phase, { run, rows, notes, anomalies });
-    if (!txn && locking) drain();
+    if ((!txn && locking) || gaveBack) drain();
     return 'done';
   }
 
