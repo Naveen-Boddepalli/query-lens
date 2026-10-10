@@ -222,10 +222,10 @@ index entries of the rows it touches.
 
 - **Page-level**, coarse-grained: one shared read lock per page, taken and released as a scan or
   descent visits it, upgraded to exclusive for the page a write actually changes.
-- **Visual only** — QueryLens runs exactly one query at a time, so no lock ever actually waits on
-  another. The panel draws what a real engine's lock manager would be doing, not an enforced
-  constraint. The [locks sandbox](/tools/locks) simulates two transactions separately, with real
-  blocking, deadlock detection and victim selection, outside the main pipeline.
+- **Visual only in the Playground** — it runs exactly one query at a time, so no lock ever actually waits
+  on another there. The panel draws what a real engine's lock manager would be doing. The enforced
+  version is the [locks sandbox](/tools/locks) (two transactions placing lock requests directly) and
+  [Transaction schedules](/tools/schedule) (the same lock table applied to real statements).
 
 ## Transactions
 
@@ -233,11 +233,26 @@ index entries of the rows it touches.
   Playground — they mean nothing to one statement on its own, and the Playground runs one at a time.
   A schedule is a list of statements, each tagged with the session that runs it, in an order you choose;
   two sessions, `A` and `B`, share one `accounts` table (up to 40 steps).
-- **There is no concurrency control yet.** A statement sees and changes whatever the table holds,
-  another session's uncommitted changes included. `ROLLBACK` is real: each transaction keeps an undo log
-  of the rows it changed and puts them back, newest first. The page names what that lets through — a
-  *dirty read* (a session read a change that was never committed) and a *dirty write* (a session
-  changed a row another had changed and not committed, which a later rollback can no longer undo).
+- **With no locking** a statement sees and changes whatever the table holds, another session's
+  uncommitted changes included. `ROLLBACK` is real: each transaction keeps an undo log of the rows it
+  changed and puts them back, newest first. The page names what that lets through — a *dirty read* (a
+  session read a change that was never committed) and a *dirty write* (a session changed a row another
+  had changed and not committed, which a later rollback can no longer undo).
+- **With page or row locking** the same schedule runs under **strict two-phase locking**, enforced by the
+  engine's lock table (`engine/locks/lockTable.ts`, the one [`/tools/locks`](/tools/locks) also drives). A
+  statement takes a lock for what it touches — shared to read, exclusive to change — before it runs, and
+  holds every lock until `COMMIT` or `ROLLBACK`. One that cannot get its lock **waits**: nothing runs,
+  the session's later steps queue behind it, and it resumes the moment the holder lets go, against
+  whatever the holder committed. Two sessions each waiting on the other is a **deadlock**, and the
+  youngest transaction (the one whose first request came last) is rolled back; a session left waiting at
+  the end is reported as stuck. A *page* lock covers every row on a heap page; a *row* lock covers the rows
+  a statement **examines** — every row on the pages a scan visits, only the matching rows for an index
+  lookup — which is why, on three accounts that the planner scans, a row lock gains nothing, and on twenty
+  it does. A row another open transaction has deleted stays locked until that transaction ends. Index
+  pages are latched, not locked, so only data pages and rows are a transaction's to hold.
+- **Not yet:** isolation levels that release locks early (D3), predicate locks, so a *phantom* row can
+  still appear, and a wait for another session's uncommitted row on a `UNIQUE` key — a duplicate is
+  rejected at once, where a real engine would wait to find out whether the other insert commits.
 - A statement outside `BEGIN … COMMIT` is its own transaction. A statement that fails changes nothing and
   leaves the transaction open, as MySQL does; PostgreSQL would instead refuse everything until
   `ROLLBACK`. There are no savepoints and no `BEGIN ISOLATION LEVEL …` yet.

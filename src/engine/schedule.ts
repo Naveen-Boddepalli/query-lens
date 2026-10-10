@@ -1,20 +1,32 @@
 /**
- * Schedules (plan.md §25.4 D1): statements from several sessions, in an order the *caller* chose, run against one
+ * Schedules (plan.md §25.4 D1, D2): statements from several sessions, in an order the *caller* chose, run against one
  * shared database. The interleaving is an input, so the engine stays pure — the same schedule always produces the same
  * result, and a schedule is a value that can sit in a URL.
  *
- * This is the baseline with **no concurrency control at all**: every statement runs at once against whatever the
+ * **Without `locking`** (D1) there is no concurrency control at all: every statement runs at once against whatever the
  * database holds, including another session's uncommitted writes. `ROLLBACK` is real — each transaction keeps an undo
  * log of the rows it changed and puts them back, newest first — but nothing stops a second session reading a row the
  * first has changed and not committed (a dirty read), or changing it too (a dirty write). The result *names* those
- * when they happen rather than preventing them; enforced locks (D2), isolation levels (D3) and MVCC (D4) are what
- * prevent them, and they plug into this same loop.
+ * when they happen rather than preventing them.
+ *
+ * **With `locking`** (D2) the same schedule runs under strict two-phase locking, enforced by the engine's lock table
+ * (`locks/lockTable.ts`): a statement first takes a lock for what it touches — shared to read, exclusive to change —
+ * and holds every lock until `COMMIT` or `ROLLBACK`. A statement that cannot get its lock *blocks*: nothing runs, the
+ * session's later steps wait behind it, and it resumes the moment the holder lets go, seeing whatever the holder
+ * committed. Two sessions each waiting on the other is a deadlock, and the youngest is rolled back. A session blocked
+ * for good is reported as stuck.
  *
  * A statement outside `BEGIN … COMMIT` is its own transaction (autocommit). A statement that fails changes nothing and
  * leaves the transaction open, as MySQL does; PostgreSQL would instead refuse everything until `ROLLBACK`.
  */
 
+import { passes } from './exec/evaluate.ts';
+import { emptyTable, forget, holds, releaseAll, request } from './locks/lockTable.ts';
+import type { LockMode, LockTableState } from './locks/lockTable.ts';
+import { parseStatement, walkExpr } from './parser/index.ts';
+import type { Expr } from './parser/index.ts';
 import { runQuery } from './runQuery.ts';
+import { buildHeap } from './storage/index.ts';
 import { controlKindOf } from './transactionControl.ts';
 import type { ControlKind } from './transactionControl.ts';
 import { DEFAULT_ENGINE_OPTIONS } from './types.ts';
@@ -26,6 +38,14 @@ export interface ScheduleStep {
 }
 
 export type StepKind = ControlKind | 'statement';
+
+/**
+ * What the locks cover. A `page` lock covers every row on a heap page, so two sessions touching different rows of one
+ * page still collide; a `row` lock covers exactly the rows a statement returns or changes, so they do not.
+ */
+export interface LockingOptions {
+  granularity: 'page' | 'row';
+}
 
 /** What a write did to one row, in the terms needed to put it back. Rows are identified by reference, not by value. */
 export type UndoEntry =
@@ -50,28 +70,51 @@ export interface SessionSnapshot {
   transaction: number | null;
   /** Rows this session has changed and not yet committed. */
   uncommitted: number;
+  /** True while a statement of this session is waiting for a lock. */
+  waiting: boolean;
+}
+
+/**
+ * How a record relates to the step it came from. Under locking one input step can leave several records: it is
+ * `queued` when it arrives behind a blocked statement, `blocked` when it cannot get a lock, and `resumed` when it
+ * finally runs; `victim` is a statement a deadlock killed. Without locking every record is `ran`.
+ */
+export type StepPhase = 'ran' | 'queued' | 'blocked' | 'resumed' | 'victim';
+
+export interface LockRow {
+  /** The words for the resource, e.g. "page 0". */
+  resource: string;
+  holders: { session: string; mode: LockMode }[];
+  waiters: { session: string; mode: LockMode }[];
 }
 
 export interface ScheduleStepResult {
+  /** The step's position in the schedule that was given. */
   index: number;
   session: string;
   sql: string;
   kind: StepKind;
-  /** The engine's own run of a statement — its whole trace. Absent for BEGIN, COMMIT and ROLLBACK. */
+  phase: StepPhase;
+  /** The engine's own run of a statement — its whole trace. Absent for BEGIN, COMMIT, ROLLBACK, queued and blocked. */
   run?: RunResult;
   /** What the statement returned (a `SELECT`) or wrote. */
   rows: Row[];
   error?: string;
-  /** What this step did to the schedule, in words. */
+  /** What this record did to the schedule, in words. */
   notes: string[];
   anomalies: ScheduleAnomaly[];
-  /** The shared database after this step, uncommitted changes included. */
+  /** For `blocked`: the sessions holding the lock this statement is waiting for. */
+  waitingOn?: string[];
+  /** The shared database after this record, uncommitted changes included. */
   after: Database;
-  /** Every session's state after this step. */
+  /** Every session's state after this record. */
   sessions: SessionSnapshot[];
+  /** The lock table after this record. Empty without `locking`. */
+  locks: LockRow[];
 }
 
 export interface ScheduleResult {
+  /** In the order things *happened*, which under locking is not always the order the steps were given. */
   steps: ScheduleStepResult[];
   /** The database as the last step left it, uncommitted changes included. */
   final: Database;
@@ -79,6 +122,10 @@ export interface ScheduleResult {
   committed: Database;
   /** Sessions whose transaction was never committed or rolled back. */
   open: string[];
+  /** Sessions still waiting for a lock at the end: they never got it, and their later steps never ran. */
+  stuck: string[];
+  /** Deadlocks the lock table found, and so transactions it rolled back. */
+  deadlocks: number;
   /** True when the schedule was longer than `MAX_SCHEDULE_STEPS` and the rest was ignored. */
   truncated: boolean;
 }
@@ -97,6 +144,24 @@ interface Transaction {
   log: Logged[];
 }
 
+interface Queued {
+  index: number;
+  session: string;
+  sql: string;
+}
+
+/** One lock a statement needs, in the order it will ask for them. */
+interface Need {
+  key: string;
+  label: string;
+  mode: LockMode;
+}
+
+/** The lock a blocked statement is waiting for. */
+interface Pending extends Queued {
+  need: Need;
+}
+
 const plural = (n: number, word: string) => `${String(n)} ${word}${n === 1 ? '' : 's'}`;
 
 function rowText(row: Row): string {
@@ -111,7 +176,10 @@ function withRows(db: Database, table: string, rows: Row[]): Database {
 }
 
 /** Puts `entries` back, in the order given (newest first). Returns what could not be restored, in words. */
-function undo(db: Database, entries: readonly Logged[]): { db: Database; notes: string[]; restored: number } {
+function undo(
+  db: Database,
+  entries: readonly Logged[],
+): { db: Database; notes: string[]; restored: number } {
   let next = db;
   const notes: string[] = [];
   let restored = 0;
@@ -174,10 +242,25 @@ function entriesOf(kind: 'insert' | 'delete' | 'update', table: string, before: 
   return entries;
 }
 
+/** The table a statement reads or changes and what it filters on — enough to decide what it must lock. */
+function targetOf(
+  sql: string,
+): { table: string; kind: 'select' | 'insert' | 'update' | 'delete'; where: Expr | undefined } | null {
+  const parsed = parseStatement(sql);
+  if (!parsed.ok) return null;
+  const ast = parsed.ast;
+  if (ast.kind === 'select') return { table: ast.from.name, kind: 'select', where: ast.where };
+  if (ast.kind === 'insert') return { table: ast.into.name, kind: 'insert', where: undefined };
+  if (ast.kind === 'update') return { table: ast.table.name, kind: 'update', where: ast.where };
+  if (ast.kind === 'delete') return { table: ast.from.name, kind: 'delete', where: ast.where };
+  return null;
+}
+
 export function runSchedule(
   schedule: readonly ScheduleStep[],
   db: Database,
   options: EngineOptions = DEFAULT_ENGINE_OPTIONS,
+  locking?: LockingOptions,
 ): ScheduleResult {
   const steps = schedule.slice(0, MAX_SCHEDULE_STEPS);
   const transactions = new Map<string, Transaction>();
@@ -186,44 +269,245 @@ export function runSchedule(
   let current = db;
   const results: ScheduleStepResult[] = [];
 
+  // Locking state. Everything below is inert when `locking` is undefined.
+  let locks: LockTableState = emptyTable();
+  const labels = new Map<string, string>();
+  const labelOf = (resource: string): string => labels.get(resource) ?? resource;
+  const blocked = new Map<string, Pending>();
+  const queued = new Map<string, Queued[]>();
+  let deadlocks = 0;
+  // A row keeps one identity through every update, so a row lock outlives the object that was replaced under it.
+  const rowIds = new WeakMap<Row, number>();
+  let nextRowId = 1;
+  const ridOf = (row: Row): number => {
+    let id = rowIds.get(row);
+    if (id === undefined) {
+      id = nextRowId;
+      nextRowId += 1;
+      rowIds.set(row, id);
+    }
+    return id;
+  };
+
   const othersOpenLog = (session: string): Logged[] =>
     [...transactions.entries()].filter(([name]) => name !== session).flatMap(([, t]) => t.log);
 
   const snapshots = (): SessionSnapshot[] =>
     sessionOrder.map((session) => {
       const txn = transactions.get(session);
-      return { session, transaction: txn?.number ?? null, uncommitted: txn?.log.length ?? 0 };
+      return {
+        session,
+        transaction: txn?.number ?? null,
+        uncommitted: txn?.log.length ?? 0,
+        waiting: blocked.has(session),
+      };
     });
 
-  steps.forEach((step, index) => {
-    if (!sessionOrder.includes(step.session)) sessionOrder.push(step.session);
-    const { session, sql } = step;
+  const lockRows = (): LockRow[] => {
+    if (!locking) return [];
+    const keys = new Set([...Object.keys(locks.holders), ...Object.keys(locks.waiters)]);
+    return [...keys]
+      .map((key) => ({
+        resource: labelOf(key),
+        holders: (locks.holders[key] ?? []).map((h) => ({ session: h.transaction, mode: h.mode })),
+        waiters: (locks.waiters[key] ?? []).map((w) => ({ session: w.transaction, mode: w.mode })),
+      }))
+      .filter((row) => row.holders.length > 0 || row.waiters.length > 0);
+  };
+
+  function record(
+    step: Queued,
+    kind: StepKind,
+    phase: StepPhase,
+    parts: Partial<Pick<ScheduleStepResult, 'run' | 'rows' | 'error' | 'notes' | 'anomalies' | 'waitingOn'>>,
+  ): void {
+    results.push({
+      index: step.index,
+      session: step.session,
+      sql: step.sql,
+      kind,
+      phase,
+      ...(parts.run ? { run: parts.run } : {}),
+      rows: parts.rows ?? [],
+      ...(parts.error === undefined ? {} : { error: parts.error }),
+      notes: parts.notes ?? [],
+      anomalies: parts.anomalies ?? [],
+      ...(parts.waitingOn ? { waitingOn: parts.waitingOn } : {}),
+      after: current,
+      sessions: snapshots(),
+      locks: lockRows(),
+    });
+  }
+
+  /** The locks a statement needs, in the order it will ask: what it reads is shared, what it changes is exclusive. */
+  function footprint(sql: string, run: RunResult): Need[] {
+    const target = targetOf(sql);
+    if (!target) return [];
+    const table = current.tables[target.table];
+    if (!table) return [];
+    const rowsPerPage = options.rowsPerPage;
+    const heapPages = Math.ceil(table.rows.length / rowsPerPage);
+    const multi = Object.keys(current.tables).length > 1;
+    const pageLabel = (n: number) => (multi ? `page ${String(n)} of ${target.table}` : `page ${String(n)}`);
+    const writes = target.kind !== 'select';
+
+    // The pages the statement touched, from the engine's own lock events — the same ones the Locks panel draws. Index
+    // pages come after the heap and are latched, not locked; only the data pages are a transaction's to hold.
+    const pages = new Map<number, LockMode>();
+    for (const event of run.events) {
+      if (event.stage !== 'lock' || event.action !== 'acquire') continue;
+      if (event.pageId >= heapPages) continue;
+      if (pages.get(event.pageId) !== 'exclusive') pages.set(event.pageId, event.mode);
+    }
+    if (target.kind === 'insert') {
+      // The page the new row lands on: the last one, or a fresh one when that is full.
+      pages.clear();
+      pages.set(Math.floor(table.rows.length / rowsPerPage), 'exclusive');
+    }
+
+    if (locking?.granularity !== 'row') {
+      return [...pages.entries()].map(([pageId, mode]) => ({
+        key: `${target.table}/page/${String(pageId)}`,
+        label: pageLabel(pageId),
+        mode,
+      }));
+    }
+
+    // Row granularity: the rows the statement *examines*. A scan reads every row on the pages it visits, so every one
+    // of them is locked (shared, or exclusive for a row it then changes); an index lookup fetches only the rows that
+    // match. An insert has no existing row to lock — it takes its own once it has one.
+    if (target.kind === 'insert') return [];
+    let unresolved = false;
+    if (target.where) {
+      walkExpr(target.where, (e) => {
+        if (e.kind === 'in' && e.subquery) unresolved = true;
+      });
+    }
+    const scanned = run.events.some((e) => e.stage === 'execute' && e.op === 'SeqScan');
+    const first = table.columns[0];
+    const needs = new Map<string, Need>();
+    const consider = (row: Row): void => {
+      // A subquery has no value until it has run; treating every row as matching is the safe reading.
+      const matches = unresolved || passes(target.where, row);
+      if (!scanned && !matches) return;
+      const key = `${target.table}/row/${String(ridOf(row))}`;
+      const mode: LockMode = matches && writes ? 'exclusive' : 'shared';
+      const value = first === undefined ? '' : String(row[first] ?? 'NULL');
+      const had = needs.get(key);
+      if (had?.mode === 'exclusive') return;
+      needs.set(key, { key, label: `the row of ${target.table} with ${first ?? 'id'} = ${value}`, mode });
+    };
+    const heap = buildHeap(table, rowsPerPage);
+    for (const pageId of pages.keys()) {
+      for (const row of heap.pages[pageId]?.rows ?? []) consider(row);
+    }
+    // A row an open transaction has deleted is gone from the table but not yet from the world: it stays locked until
+    // that transaction ends, so a scan waits for it rather than silently reading a table that is missing it.
+    for (const open of transactions.values()) {
+      for (const { entry } of open.log) {
+        if (entry.kind === 'delete' && entry.table === target.table) consider(entry.row);
+      }
+    }
+    return [...needs.values()];
+  }
+
+  /** Lets go of everything `session` holds, so whatever was waiting on it can be promoted. */
+  function endLocks(session: string, notes: string[]): void {
+    if (!locking) return;
+    const released = releaseAll(locks, session, labelOf);
+    locks = forget(released.state, session);
+    notes.push(...released.narration);
+  }
+
+  /** The statements waiting for a lock that has since been granted, resumed in the order they blocked. */
+  let draining = false;
+  let drainAgain = false;
+  function drain(): void {
+    if (!locking) return;
+    if (draining) {
+      drainAgain = true;
+      return;
+    }
+    draining = true;
+    try {
+      do {
+        drainAgain = false;
+        for (const [session, pending] of [...blocked.entries()]) {
+          if (!holds(locks, session, pending.need.key, pending.need.mode)) continue;
+          blocked.delete(session);
+          const outcome = execute(pending, 'lock');
+          if (outcome !== 'blocked') runQueued(session);
+          drainAgain = true;
+          break;
+        }
+      } while (drainAgain);
+    } finally {
+      draining = false;
+    }
+  }
+
+  /** A session's steps that arrived while it was blocked, run in order until one blocks again. */
+  function runQueued(session: string): void {
+    const line = queued.get(session);
+    while (line && line.length > 0 && !blocked.has(session)) {
+      const next = line.shift()!;
+      execute(next, 'queue');
+    }
+  }
+
+  /** Ends `session`'s transaction by rolling it back, as a deadlock victim's is. Returns the notes. */
+  function rollBackTransaction(session: string): string[] {
+    const txn = transactions.get(session);
+    if (!txn) return [];
+    const undone = undo(current, [...txn.log].sort((a, b) => b.step - a.step));
+    current = undone.db;
+    transactions.delete(session);
+    return [
+      `${session}'s transaction T${String(txn.number)} is rolled back: ${
+        undone.restored === txn.log.length
+          ? `${plural(txn.log.length, 'change')} undone`
+          : `${String(undone.restored)} of ${plural(txn.log.length, 'change')} undone`
+      }.`,
+      ...undone.notes,
+    ];
+  }
+
+  /**
+   * Runs one step now. Returns what became of it: `done`, `blocked` (waiting for a lock — it has been recorded and
+   * will resume) or `victim` (a deadlock rolled it back). `resumed` marks a step that did not run when it arrived.
+   */
+  function execute(step: Queued, resumed: false | 'lock' | 'queue'): 'done' | 'blocked' | 'victim' {
+    const { index, session, sql } = step;
     const notes: string[] = [];
     const anomalies: ScheduleAnomaly[] = [];
-    let kind: StepKind = 'statement';
-    let run: RunResult | undefined;
-    let rows: Row[] = [];
-    let error: string | undefined;
-
-    const control = controlKindOf(sql);
+    const phase: StepPhase = resumed === false ? 'ran' : 'resumed';
     const txn = transactions.get(session);
+    const control = controlKindOf(sql);
 
     if (control === 'malformed') {
-      kind = 'statement';
-      error = 'Transaction control here is BEGIN, COMMIT and ROLLBACK, with nothing after them.';
-      notes.push('No effect.');
-    } else if (control === 'begin') {
-      kind = 'begin';
+      record(step, 'statement', phase, {
+        error: 'Transaction control here is BEGIN, COMMIT and ROLLBACK, with nothing after them.',
+        notes: ['No effect.'],
+      });
+      return 'done';
+    }
+
+    if (control === 'begin') {
       if (txn) {
-        notes.push(`${session} already has transaction T${String(txn.number)} open — BEGIN changes nothing (PostgreSQL warns the same).`);
+        notes.push(
+          `${session} already has transaction T${String(txn.number)} open — BEGIN changes nothing (PostgreSQL warns the same).`,
+        );
       } else {
         const number = nextNumber;
         nextNumber += 1;
         transactions.set(session, { number, log: [] });
         notes.push(`${session} begins transaction T${String(number)}.`);
       }
-    } else if (control === 'commit') {
-      kind = 'commit';
+      record(step, 'begin', phase, { notes });
+      return 'done';
+    }
+
+    if (control === 'commit') {
       if (!txn) {
         notes.push(`${session} has no transaction open — COMMIT changes nothing.`);
       } else {
@@ -234,13 +518,17 @@ export function runSchedule(
         );
         transactions.delete(session);
       }
-    } else if (control === 'rollback') {
-      kind = 'rollback';
+      endLocks(session, notes);
+      record(step, 'commit', phase, { notes });
+      drain();
+      return 'done';
+    }
+
+    if (control === 'rollback') {
       if (!txn) {
         notes.push(`${session} has no transaction open — ROLLBACK changes nothing.`);
       } else {
-        const newestFirst = [...txn.log].sort((a, b) => b.step - a.step);
-        const undone = undo(current, newestFirst);
+        const undone = undo(current, [...txn.log].sort((a, b) => b.step - a.step));
         current = undone.db;
         const whole = undone.restored === txn.log.length;
         notes.push(
@@ -253,92 +541,188 @@ export function runSchedule(
         );
         transactions.delete(session);
       }
-    } else {
-      // An ordinary statement. What it *sees* is the shared database exactly as it stands.
-      run = runQuery(sql, current, options);
-      rows = run.rows;
-      if (run.error) {
-        error = run.error.message;
-        notes.push(
-          txn
-            ? `No effect, and T${String(txn.number)} stays open.`
-            : 'No effect.',
-        );
-      } else {
-        if (run.write) {
-          const { table, rows: written } = run.write;
-          const before = current.tables[table]?.rows ?? [];
-          const entries = entriesOf(run.write.kind, table, before, written);
+      endLocks(session, notes);
+      record(step, 'rollback', phase, { notes });
+      drain();
+      return 'done';
+    }
 
-          // A write to a row somebody else has changed and not committed.
-          const others = othersOpenLog(session);
-          const clobbered = new Set<string>();
-          for (const entry of entries) {
-            const touched = entry.kind === 'insert' ? undefined : entry.kind === 'delete' ? entry.row : entry.before;
-            const owner = touched ? producedBy(others, touched) : undefined;
-            if (owner) clobbered.add(owner.session);
-          }
-          if (clobbered.size > 0) {
-            const against = [...clobbered];
-            anomalies.push({
-              kind: 'dirty-write',
-              session,
-              against,
-              message: `Dirty write: ${session} changed a row that ${against.join(' and ')} has changed and not committed. Nothing stopped it, and if ${against.join(' or ')} rolls back, there may be nothing left to restore.`,
-            });
-          }
+    // An ordinary statement. What it *sees* is the shared database exactly as it stands.
+    const run = runQuery(sql, current, options);
+    if (run.error) {
+      record(step, 'statement', phase, {
+        run,
+        error: run.error.message,
+        notes: [txn ? `No effect, and T${String(txn.number)} stays open.` : 'No effect.'],
+      });
+      return 'done';
+    }
 
-          current = withRows(current, table, written);
-          const verb = run.write.kind === 'insert' ? 'inserted' : run.write.kind === 'delete' ? 'deleted' : 'updated';
-          if (txn) {
-            for (const entry of entries) txn.log.push({ step: index, session, entry });
-            notes.push(`${plural(entries.length, 'row')} ${verb} in ${table}; ${session} has ${plural(txn.log.length, 'uncommitted change')}.`);
-          } else {
-            notes.push(`${plural(entries.length, 'row')} ${verb} in ${table}, committed at once (autocommit).`);
-          }
-        } else if (run.analyze) {
-          const target = current.tables[run.analyze.table];
-          if (target) {
-            current = { tables: { ...current.tables, [run.analyze.table]: { ...target, stats: run.analyze.stats } } };
-          }
-          notes.push(`Statistics for ${run.analyze.table} recorded.`);
-        } else {
-          notes.push(`${plural(rows.length, 'row')} returned.`);
+    // Under locking, take every lock the statement needs before it runs, holding each to the end of the transaction.
+    if (locking) {
+      const needs = footprint(sql, run);
+      for (const need of needs) {
+        labels.set(need.key, need.label);
+        const outcome = request(locks, session, need.key, need.mode, labelOf);
+        locks = outcome.state;
+        if (outcome.kind === 'granted') notes.push(...outcome.narration);
+        if (outcome.kind === 'granted' || outcome.kind === 'already-held') continue;
+
+        if (outcome.kind === 'blocked') {
+          blocked.set(session, { ...step, need });
+          record(step, 'statement', 'blocked', {
+            notes: [...notes, ...outcome.narration],
+            waitingOn: outcome.waitingOn ?? [],
+          });
+          return 'blocked';
         }
 
-        // A read that would have returned something else without another session's uncommitted changes.
-        const others = othersOpenLog(session);
-        if (!run.write && !run.analyze && others.length > 0) {
-          const committedView = undo(current, [...others].sort((a, b) => b.step - a.step)).db;
-          const clean = runQuery(sql, committedView, options);
-          if (!clean.error && JSON.stringify(clean.rows) !== JSON.stringify(rows)) {
-            const against = [...new Set(others.map((l) => l.session))];
-            anomalies.push({
-              kind: 'dirty-read',
-              session,
-              against,
-              message: `Dirty read: ${session} saw changes ${against.join(' and ')} has not committed. Without them this query returns ${
-                clean.rows.length === 0 ? 'no rows' : clean.rows.map(rowText).join(', ')
-              }; if ${against.join(' or ')} rolls back, ${session} has read data that never existed.`,
+        if (outcome.kind === 'deadlock') {
+          deadlocks += 1;
+          const victim = outcome.victim!;
+          const cycle = outcome.cycle?.join(' → ') ?? '';
+          if (victim === session) {
+            // The requester is the youngest in the cycle: it is the one rolled back.
+            const rolled = rollBackTransaction(session);
+            locks = forget(locks, session);
+            record(step, 'statement', 'victim', {
+              error: `Deadlock: ${cycle} — ${session} was rolled back to break it.`,
+              notes: [...notes, ...outcome.narration, ...rolled],
             });
+            drain();
+            return 'victim';
           }
+
+          // Another session was chosen: its blocked statement fails and its transaction is rolled back.
+          const killed = blocked.get(victim);
+          blocked.delete(victim);
+          const rolled = rollBackTransaction(victim);
+          locks = forget(locks, victim);
+          if (killed) {
+            record(killed, 'statement', 'victim', {
+              error: `Deadlock: ${cycle} — ${victim} was rolled back to break it.`,
+              notes: [...outcome.narration, ...rolled],
+            });
+          } else {
+            notes.push(...outcome.narration, ...rolled);
+          }
+          runQueued(victim);
+
+          // The abort may have granted the lock this statement was asking for.
+          if (holds(locks, session, need.key, need.mode)) continue;
+          blocked.set(session, { ...step, need });
+          record(step, 'statement', 'blocked', { notes: [...notes], waitingOn: outcome.waitingOn ?? [] });
+          return 'blocked';
         }
       }
     }
 
-    results.push({
-      index,
-      session,
-      sql,
-      kind,
-      ...(run ? { run } : {}),
-      rows,
-      ...(error === undefined ? {} : { error }),
-      notes,
-      anomalies,
-      after: current,
-      sessions: snapshots(),
-    });
+    // The statement runs. Anything below is the same with and without locking.
+    const rows: Row[] = run.rows;
+    if (run.write) {
+      const { table, rows: written } = run.write;
+      const before = current.tables[table]?.rows ?? [];
+      const entries = entriesOf(run.write.kind, table, before, written);
+
+      // Carry each updated row's identity across to the row that replaced it.
+      for (const entry of entries) {
+        if (entry.kind === 'update') rowIds.set(entry.after, ridOf(entry.before));
+      }
+
+      // A write to a row somebody else has changed and not committed.
+      const others = othersOpenLog(session);
+      const clobbered = new Set<string>();
+      for (const entry of entries) {
+        const touched = entry.kind === 'insert' ? undefined : entry.kind === 'delete' ? entry.row : entry.before;
+        const owner = touched ? producedBy(others, touched) : undefined;
+        if (owner) clobbered.add(owner.session);
+      }
+      if (clobbered.size > 0) {
+        const against = [...clobbered];
+        anomalies.push({
+          kind: 'dirty-write',
+          session,
+          against,
+          message: `Dirty write: ${session} changed a row that ${against.join(' and ')} has changed and not committed. Nothing stopped it, and if ${against.join(' or ')} rolls back, there may be nothing left to restore.`,
+        });
+      }
+
+      current = withRows(current, table, written);
+      // A row this statement just made is locked by it from the first moment, which no one else could have asked for.
+      if (locking?.granularity === 'row' && txn) {
+        for (const entry of entries) {
+          if (entry.kind !== 'insert') continue;
+          const key = `${table}/row/${String(ridOf(entry.row))}`;
+          const first = current.tables[table]?.columns[0];
+          labels.set(key, `the row of ${table} with ${first ?? 'id'} = ${String(first === undefined ? '' : (entry.row[first] ?? 'NULL'))}`);
+          locks = request(locks, session, key, 'exclusive', labelOf).state;
+        }
+      }
+      const verb = run.write.kind === 'insert' ? 'inserted' : run.write.kind === 'delete' ? 'deleted' : 'updated';
+      if (txn) {
+        for (const entry of entries) txn.log.push({ step: index, session, entry });
+        notes.push(
+          `${plural(entries.length, 'row')} ${verb} in ${table}; ${session} has ${plural(txn.log.length, 'uncommitted change')}.`,
+        );
+      } else {
+        notes.push(`${plural(entries.length, 'row')} ${verb} in ${table}, committed at once (autocommit).`);
+      }
+    } else if (run.analyze) {
+      const target = current.tables[run.analyze.table];
+      if (target) {
+        current = { tables: { ...current.tables, [run.analyze.table]: { ...target, stats: run.analyze.stats } } };
+      }
+      notes.push(`Statistics for ${run.analyze.table} recorded.`);
+    } else {
+      notes.push(`${plural(rows.length, 'row')} returned.`);
+    }
+
+    // A read that would have returned something else without another session's uncommitted changes.
+    const others = othersOpenLog(session);
+    if (!run.write && !run.analyze && others.length > 0) {
+      const committedView = undo(current, [...others].sort((a, b) => b.step - a.step)).db;
+      const clean = runQuery(sql, committedView, options);
+      if (!clean.error && JSON.stringify(clean.rows) !== JSON.stringify(rows)) {
+        const against = [...new Set(others.map((l) => l.session))];
+        anomalies.push({
+          kind: 'dirty-read',
+          session,
+          against,
+          message: `Dirty read: ${session} saw changes ${against.join(' and ')} has not committed. Without them this query returns ${
+            clean.rows.length === 0 ? 'no rows' : clean.rows.map(rowText).join(', ')
+          }; if ${against.join(' or ')} rolls back, ${session} has read data that never existed.`,
+        });
+      }
+    }
+
+    if (resumed === 'lock') notes.unshift(`${session}'s statement had to wait for a lock, and now runs.`);
+    if (resumed === 'queue') notes.unshift(`${session}'s step waited behind its blocked statement, and now runs.`);
+    // An autocommit statement is its own transaction: its locks end with it.
+    if (!txn && locking) endLocks(session, notes);
+    record(step, 'statement', phase, { run, rows, notes, anomalies });
+    if (!txn && locking) drain();
+    return 'done';
+  }
+
+  steps.forEach((step, index) => {
+    if (!sessionOrder.includes(step.session)) sessionOrder.push(step.session);
+    const item: Queued = { index, session: step.session, sql: step.sql };
+
+    // Behind a statement that is waiting for a lock, a session's later steps wait too.
+    if (locking && blocked.has(item.session)) {
+      const line = queued.get(item.session) ?? [];
+      line.push(item);
+      queued.set(item.session, line);
+      const control = controlKindOf(item.sql);
+      record(item, control === 'begin' || control === 'commit' || control === 'rollback' ? control : 'statement', 'queued', {
+        notes: [`${item.session} is waiting for a lock, so this step waits behind it.`],
+      });
+      return;
+    }
+
+    const outcome = execute(item, false);
+    if (outcome !== 'blocked') runQueued(item.session);
+    drain();
   });
 
   // What would survive a crash: the database with every still-open transaction undone.
@@ -351,6 +735,8 @@ export function runSchedule(
     final: current,
     committed,
     open: stillOpen,
+    stuck: [...blocked.keys()],
+    deadlocks,
     truncated: schedule.length > MAX_SCHEDULE_STEPS,
   };
 }

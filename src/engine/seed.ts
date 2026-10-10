@@ -41,22 +41,28 @@ export function createSeedDatabase(): Database {
   };
 }
 
+const ACCOUNT_OWNERS = ['ada', 'bo', 'cy', 'di', 'ed', 'flo', 'gus', 'hal', 'ivy', 'jo'] as const;
+
 /**
- * Three bank accounts (plan.md §25.4 D1), the textbook table for a transaction: small enough that a schedule's every
- * row fits on screen, with a `balance` two sessions can disagree about. `id` is a UNIQUE index, so an `INSERT` of a
- * repeated id is rejected the way a primary key would be.
+ * Bank accounts (plan.md §25.4 D1, D2), the textbook table for a transaction: `count` rows (three by default, small
+ * enough that a schedule's every row fits on screen) with a `balance` two sessions can disagree about. `id` is a
+ * UNIQUE index, so an `INSERT` of a repeated id is rejected the way a primary key would be.
+ *
+ * Size matters to locking, not only to reading: below about sixteen rows the planner reads the table with a scan,
+ * which examines every row, so a row lock covers the whole table. At twenty rows an `id` lookup goes through the
+ * index and touches one row, which is what lets a row lock leave its neighbours alone.
  */
-export function createAccountsDatabase(): Database {
+export function createAccountsDatabase(count = 3): Database {
   return {
     tables: {
       accounts: {
         name: 'accounts',
         columns: ['id', 'owner', 'balance'],
-        rows: [
-          { id: 1, owner: 'ada', balance: 100 },
-          { id: 2, owner: 'bo', balance: 100 },
-          { id: 3, owner: 'cy', balance: 100 },
-        ],
+        rows: Array.from({ length: count }, (_, i) => ({
+          id: i + 1,
+          owner: ACCOUNT_OWNERS[i] ?? `acct${String(i + 1)}`,
+          balance: 100,
+        })),
         indexes: [{ columns: ['id'], unique: true }],
       },
     },

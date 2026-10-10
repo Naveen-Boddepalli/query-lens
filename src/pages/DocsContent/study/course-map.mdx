@@ -59,8 +59,8 @@ four rows to a page, eight buffer frames, four keys to an index node. What trans
 | Parallel execution | Not covered | — | Multi-core operators, exchange |
 | Query planning and optimization | Covered | The rule-based optimizer, one rewrite at a time in the [planner sandbox](/tools/planner); predicate pushdown, index selection, index-only scans; **`EXPLAIN ANALYZE`** with estimated rows beside the executor's actual rows | — |
 | Cost models and join ordering | Covered | Row and page estimates on every plan node, `EXPLAIN ANALYZE` beside the executor's actual count, cost-based choice between an index and a scan, between join algorithms, and between join orders — each with a **Why not?** panel naming the runner-up — and [Selinger's DP search over the whole subset lattice](/tools/join-order) | Histograms beyond a few most-common values; only left-deep plans are enumerated, never bushy ones |
-| Concurrency-control theory, timestamp ordering, MVCC | Partly | [Transaction schedules](/tools/schedule): two sessions on one table, an interleaving you choose, `BEGIN`/`COMMIT`/`ROLLBACK` with a real undo log, and the anomalies that no concurrency control lets through (a dirty read, a dirty write) named when they happen | Isolation levels, serializability, versions and snapshots, timestamp ordering |
-| Two-phase locking | Partly | The [lock simulator](/tools/locks): shared/exclusive locks, waiters, deadlock detection and victim choice | Locks do not yet belong to the query engine's transactions |
+| Concurrency-control theory, timestamp ordering, MVCC | Partly | [Transaction schedules](/tools/schedule): two sessions on one table, an interleaving you choose, `BEGIN`/`COMMIT`/`ROLLBACK` with a real undo log, the anomalies that no concurrency control lets through (a dirty read, a dirty write) named when they happen, and the same schedule under strict two-phase locking | Isolation levels, serializability, versions and snapshots, timestamp ordering |
+| Two-phase locking | Covered | Strict 2PL on real statements in [Transaction schedules](/tools/schedule): shared and exclusive locks at page or row granularity held to commit, blocking, deadlock detection and victim choice, and the [lock simulator](/tools/locks) on its own | Isolation levels that release locks early, predicate locks |
 | Logging and recovery | Not covered | — | WAL, checkpoints, ARIES |
 | Distributed databases | Not covered | — | Replication, partitioning, consensus |
 
@@ -74,7 +74,7 @@ algorithms, sorting and aggregation, and an optimizer you can step through. The
 ## The biggest holes
 
 Everything from **transactions onward** — concurrency-control theory, MVCC, logging, recovery,
-distributed systems — is absent, begun (schedules with no isolation yet) or (for two-phase locking) a
+distributed systems — is absent, begun (schedules with locks but no isolation levels yet) or (for two-phase locking) a
 standalone tool outside the engine. That is roughly a quarter of a typical course. Nothing on this page should be read as
 covering it. Tries are also absent.
 
