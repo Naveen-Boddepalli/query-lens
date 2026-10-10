@@ -148,6 +148,9 @@ const LearnPage = lazy(() =>
 const ProgressPage = lazy(() =>
   import('./pages/ProgressPage.tsx').then((m) => ({ default: m.ProgressPage })),
 );
+const PracticePage = lazy(() =>
+  import('./pages/PracticePage.tsx').then((m) => ({ default: m.PracticePage })),
+);
 const ChallengesPage = lazy(() =>
   import('./pages/ChallengesPage.tsx').then((m) => ({ default: m.ChallengesPage })),
 );
@@ -222,6 +225,7 @@ export default function App() {
             <Route path="compare" element={suspended(ComparePage)} />
             <Route path="trace" element={suspended(TracePage)} />
             <Route path="progress" element={suspended(ProgressPage)} />
+              <Route path="practice" element={suspended(PracticePage)} />
             <Route path="challenges">
               <Route index element={suspended(ChallengesPage)} />
               <Route path=":challengeId" element={suspended(ChallengePage)} />

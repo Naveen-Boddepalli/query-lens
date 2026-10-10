@@ -207,6 +207,9 @@ const T = (name: string): string => `src/pages/tools/${name}.tsx`;
  *  - 2026-10-04, latch crabbing (§25.4 F5): a new route, /tools/latch-crabbing (163.5 kB measured + 3, rounded
  *    to 167). Unlike the standalone sandboxes it drives the REAL engine B+Tree (`engine/index/btree.ts`, the same
  *    code /tools/btree uses), so it pays the shared engine chunk the same way /tools/btree does (ceiling 167).
+ *  - 2026-10-10, generated questions (§25.4 G4): a new route, /practice (178.3 kB measured + 3, rounded to 182). The
+ *    generators call the real engine for their answers (the buffer pool, the B+Tree, the planner, the visibility
+ *    rule, the recovery machine), so it pays the shared engine chunk the way the Playground does.
  *  - 2026-10-10, the REPEATABLE READ essay (§25.4 H2): a new prose route, /docs/essays/repeatable-read, in the one
  *    shared docs chunk (168.9 kB measured for the three essays, ceiling 170). The tools index gained three entries in
  *    this stretch (concurrency compare, write-ahead log, crash recovery): /tools 116 → 120 (measured 116.0 + 3, rounded
@@ -292,6 +295,7 @@ export const ROUTES: readonly RouteBudget[] = [
   { route: '/compare', roots: [P('ComparePage')], kb: 179, note: 'index vs scan, policy vs policy, hash vs sort, join algorithms, B+Tree vs. LSM' },
   { route: '/trace', roots: [P('TracePage')], kb: 171, note: 'the trace inspector' },
   { route: '/progress', roots: [P('ProgressPage')], kb: 175, note: 'the progress dashboard' },
+  { route: '/practice', roots: [P('PracticePage')], kb: 182, note: 'generated questions with engine-computed answers, and a Leitner schedule' },
   { route: '/challenges', roots: [P('ChallengesPage')], kb: 171, note: 'challenge index' },
   { route: '/challenges/:id', roots: [P('ChallengePage')], kb: 290, note: 'one challenge' },
   { route: '/settings', roots: [P('SettingsPage')], kb: 116, note: 'preferences' },

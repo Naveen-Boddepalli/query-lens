@@ -11,7 +11,7 @@ const ROUTES = [
   '/challenges/exactly-one', '/tools', '/tools/buffer-pool', '/tools/parser', '/tools/planner', '/tools/btree',
   '/tools/page', '/tools/sort', '/tools/locks', '/tools/schedule', '/tools/isolation', '/tools/concurrency', '/tools/wal', '/tools/recovery', '/tools/grammar', '/tools/hash-join', '/tools/join-order',
   '/tools/lsm', '/tools/hash-index', '/tools/columnar', '/tools/latch-crabbing', '/tools/vector-index', '/gallery',
-  '/examples', '/trace', '/compare', '/progress', '/settings', '/assignments/new', '/study', '/docs',
+  '/examples', '/trace', '/compare', '/progress', '/practice', '/settings', '/assignments/new', '/study', '/docs',
   '/docs/getting-started', '/docs/faq', '/docs/architecture', '/docs/concepts/btree', '/docs/concepts/buffer-pool',
   '/docs/manual/eviction', '/docs/manual/btree-split', '/docs/essays/index-write-tax',
   '/docs/essays/scan-resistance', '/docs/essays/repeatable-read', '/docs/study/course-map', '/docs/study/interview-roadmap',

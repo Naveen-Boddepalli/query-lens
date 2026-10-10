@@ -409,6 +409,7 @@ test('every route renders the app on a cold load, not the 404 page', async ({ pa
     ['/gallery', /Gallery/],
     ['/trace', /Trace inspector/],
     ['/progress', /A little of what you have done/],
+    ['/practice', /Questions made fresh each time/],
     ['/challenges', /goal-shaped puzzles/i],
     ['/challenges/exactly-one', /Return exactly one row/],
     ['/tools', /Tools/],

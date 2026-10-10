@@ -37,7 +37,11 @@ export function ProgressPage() {
     <div className="mx-auto w-full max-w-2xl p-6 sm:p-8">
       <PageHeader title="Progress">
         A little of what you have done here, kept in this browser only — clearing it below, or
-        clearing site data, resets it.
+        clearing site data, resets it. Want questions the engine answers itself?{' '}
+        <Link to="/practice" className="underline underline-offset-2 hover:text-ink">
+          Practise
+        </Link>
+        .
       </PageHeader>
 
       {nothing ? (
