@@ -55,7 +55,7 @@ test('a row lock lets a neighbour through that a page lock held back', async ({ 
 test('a deadlock rolls back the youngest transaction and the other finishes', async ({ page }) => {
   await page.goto('/tools/schedule');
   await page.getByRole('button', { name: 'Deadlock' }).click();
-  await expect(page.getByText('deadlock victim')).toBeVisible();
+  await expect(page.getByText('rolled back', { exact: true })).toBeVisible();
   const end = page.getByRole('table', { name: 'accounts at the end' });
   await expect(end.getByRole('row').nth(1).getByRole('cell').nth(2)).toHaveText('1');
   await expect(end.getByRole('row').nth(2).getByRole('cell').nth(2)).toHaveText('3');
@@ -82,4 +82,41 @@ test('read committed gives its read locks back, so a repeated read changes and a
 
   await page.getByRole('radio', { name: 'Repeatable read' }).click();
   await expect(page.getByRole('note')).toHaveCount(0);
+});
+
+// plan.md §25.4 D4: versions and snapshots instead of read locks.
+test('under MVCC a reader never waits, and a snapshot repeats its read', async ({ page }) => {
+  await page.goto('/tools/schedule');
+  await page.getByRole('button', { name: 'Snapshot read' }).click();
+  await expect(page.getByText('blocked on a lock')).toHaveCount(0);
+  await expect(page.getByRole('note')).toHaveCount(0);
+  await expect(page.getByRole('table', { name: 'Row versions at the end' })).toBeVisible();
+
+  await page.getByRole('radio', { name: 'Read committed' }).click();
+  await expect(page.getByRole('note').filter({ hasText: 'Non-repeatable read' })).toBeVisible();
+});
+
+test('first committer wins, and write skew needs serializable to be stopped', async ({ page }) => {
+  await page.goto('/tools/schedule');
+  await page.getByRole('button', { name: 'First committer wins' }).click();
+  await expect(page.getByText('rolled back', { exact: true })).toBeVisible();
+  await expect(page.getByText('Could not serialize access due to a concurrent update')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Write skew' }).click();
+  await expect(page.getByText('rolled back', { exact: true })).toHaveCount(0);
+  const end = page.getByRole('table', { name: 'accounts at the end' });
+  await expect(end.getByRole('row').nth(1).getByRole('cell').nth(2)).toHaveText('0');
+  await expect(end.getByRole('row').nth(2).getByRole('cell').nth(2)).toHaveText('0');
+
+  await page.getByRole('radio', { name: 'Serializable' }).click();
+  await expect(page.getByText('Could not serialize access: ')).toBeVisible();
+  await expect(end.getByRole('row').nth(2).getByRole('cell').nth(2)).toHaveText('100');
+});
+
+test('dead versions pile up and VACUUM reclaims them', async ({ page }) => {
+  await page.goto('/tools/schedule');
+  await page.getByRole('button', { name: 'Dead tuples' }).click();
+  await expect(page.getByText(/4 dead versions no snapshot can see again/)).toBeVisible();
+  await page.getByRole('button', { name: 'VACUUM' }).click();
+  await expect(page.getByText(/No dead versions/)).toBeVisible();
 });

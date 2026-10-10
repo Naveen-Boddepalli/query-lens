@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { createAccountsDatabase } from '../../engine/index.ts';
 import type { Database, Row } from '../../engine/index.ts';
 import { MAX_SCHEDULE_STEPS, runSchedule } from '../../engine/schedule.ts';
-import type { LockingOptions, ScheduleStep, ScheduleStepResult } from '../../engine/schedule.ts';
+import type { LockingOptions, ScheduleStep, ScheduleStepResult, VersionRow } from '../../engine/schedule.ts';
 import { ISOLATION_LEVELS } from '../../engine/isolation.ts';
 import type { IsolationLevel } from '../../engine/transactionControl.ts';
 import { PageHeader } from '../../ui/PageHeader.tsx';
@@ -28,12 +28,13 @@ import {
  * strict two-phase locking: a statement that cannot get its lock waits, and a deadlock rolls back the youngest.
  */
 
-type LockingMode = 'none' | 'page' | 'row';
+type LockingMode = 'none' | 'page' | 'row' | 'mvcc';
 const DEFAULT_ISOLATION: IsolationLevel = 'repeatable-read';
 const LOCKING_MODES: { value: LockingMode; label: string }[] = [
   { value: 'none', label: 'No locking' },
   { value: 'page', label: 'Page locks' },
   { value: 'row', label: 'Row locks' },
+  { value: 'mvcc', label: 'Versions (MVCC)' },
 ];
 const TABLE_SIZES = [3, 20] as const;
 type TableSize = (typeof TABLE_SIZES)[number];
@@ -139,6 +140,64 @@ const PRESETS: Preset[] = [
     ],
   },
   {
+    label: 'Snapshot read',
+    locking: 'mvcc',
+    rows: 20,
+    isolation: 'repeatable-read',
+    steps: [
+      { session: 'A', sql: 'BEGIN' },
+      { session: 'A', sql: 'SELECT balance FROM accounts WHERE id = 1' },
+      { session: 'B', sql: 'UPDATE accounts SET balance = 50 WHERE id = 1' },
+      { session: 'A', sql: 'SELECT balance FROM accounts WHERE id = 1' },
+      { session: 'A', sql: 'COMMIT' },
+    ],
+  },
+  {
+    label: 'First committer wins',
+    locking: 'mvcc',
+    rows: 20,
+    isolation: 'repeatable-read',
+    steps: [
+      { session: 'A', sql: 'BEGIN' },
+      { session: 'A', sql: 'SELECT balance FROM accounts WHERE id = 1' },
+      { session: 'B', sql: 'BEGIN' },
+      { session: 'B', sql: 'UPDATE accounts SET balance = 150 WHERE id = 1' },
+      { session: 'B', sql: 'COMMIT' },
+      { session: 'A', sql: 'UPDATE accounts SET balance = 120 WHERE id = 1' },
+      { session: 'A', sql: 'COMMIT' },
+    ],
+  },
+  {
+    label: 'Write skew',
+    locking: 'mvcc',
+    rows: 20,
+    isolation: 'repeatable-read',
+    steps: [
+      { session: 'A', sql: 'BEGIN' },
+      { session: 'B', sql: 'BEGIN' },
+      { session: 'A', sql: 'SELECT * FROM accounts WHERE id <= 2' },
+      { session: 'B', sql: 'SELECT * FROM accounts WHERE id <= 2' },
+      { session: 'A', sql: 'UPDATE accounts SET balance = 0 WHERE id = 1' },
+      { session: 'B', sql: 'UPDATE accounts SET balance = 0 WHERE id = 2' },
+      { session: 'A', sql: 'COMMIT' },
+      { session: 'B', sql: 'COMMIT' },
+    ],
+  },
+  {
+    label: 'Dead tuples',
+    locking: 'mvcc',
+    rows: 20,
+    isolation: 'read-committed',
+    steps: [
+      { session: 'A', sql: 'UPDATE accounts SET balance = 1 WHERE id = 1' },
+      { session: 'A', sql: 'UPDATE accounts SET balance = 2 WHERE id = 1' },
+      { session: 'A', sql: 'UPDATE accounts SET balance = 3 WHERE id = 1' },
+      { session: 'B', sql: 'BEGIN' },
+      { session: 'B', sql: 'UPDATE accounts SET balance = 0 WHERE id = 2' },
+      { session: 'B', sql: 'ROLLBACK' },
+    ],
+  },
+  {
     label: 'Deadlock',
     locking: 'row',
     rows: 20,
@@ -167,7 +226,8 @@ function readInitial(): { steps: ScheduleStep[]; locking: LockingMode; rows: Tab
   const lockingRaw = params.get('l');
   const rowsRaw = Number(params.get('n'));
   const isolationRaw = params.get('i');
-  const locking: LockingMode = lockingRaw === 'page' || lockingRaw === 'row' ? lockingRaw : 'none';
+  const locking: LockingMode =
+    lockingRaw === 'page' || lockingRaw === 'row' || lockingRaw === 'mvcc' ? lockingRaw : 'none';
   const rows: TableSize = rowsRaw === 20 ? 20 : 3;
   const isolation: IsolationLevel =
     ISOLATION_LEVELS.find((level) => level === isolationRaw) ?? DEFAULT_ISOLATION;
@@ -185,7 +245,7 @@ const PHASE_LABEL: Record<ScheduleStepResult['phase'], string | null> = {
   queued: 'waiting behind its session',
   blocked: 'blocked on a lock',
   resumed: 'resumed',
-  victim: 'deadlock victim',
+  victim: 'rolled back',
 };
 
 function RowsTable({ caption, columns, rows }: { caption: string; columns: string[]; rows: Row[] }) {
@@ -207,6 +267,48 @@ function RowsTable({ caption, columns, rows }: { caption: string; columns: strin
               {columns.map((c) => (
                 <td key={c} className="pr-4 font-mono">{String(row[c] ?? 'NULL')}</td>
               ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function versionState(v: VersionRow): string {
+  if (v.creator === 'aborted') return 'aborted — dead';
+  if (v.creator === 'in-progress') return 'uncommitted';
+  return v.live ? 'live' : 'replaced';
+}
+
+/** Every version of a row that has a history, with the transaction ids that made and removed it. */
+function VersionTable({ versions, columns, caption }: { versions: VersionRow[]; columns: string[]; caption: string }) {
+  const changed = new Set(versions.filter((v) => v.xmin !== 0 || v.xmax !== null).map((v) => v.rid));
+  const shown = versions.filter((v) => changed.has(v.rid));
+  if (shown.length === 0) return <p className="text-label text-ink-dim">{caption}: every row is still its original version.</p>;
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-left text-label tabular-nums">
+        <caption className="sr-only">{caption}</caption>
+        <thead>
+          <tr className="text-ink-dim">
+            {columns.map((c) => (
+              <th key={c} scope="col" className="pr-3 font-medium">{c}</th>
+            ))}
+            <th scope="col" className="pr-3 font-medium">xmin</th>
+            <th scope="col" className="pr-3 font-medium">xmax</th>
+            <th scope="col" className="font-medium">state</th>
+          </tr>
+        </thead>
+        <tbody>
+          {shown.map((v, i) => (
+            <tr key={i} className={v.live && v.creator === 'committed' ? 'text-ink' : 'text-ink-dim'}>
+              {columns.map((c) => (
+                <td key={c} className="pr-3 font-mono">{String(v.row[c] ?? 'NULL')}</td>
+              ))}
+              <td className="pr-3 font-mono">{v.xmin}</td>
+              <td className="pr-3 font-mono">{v.xmax ?? '—'}</td>
+              <td>{versionState(v)}</td>
             </tr>
           ))}
         </tbody>
@@ -304,6 +406,19 @@ function StepCard({
         </details>
       )}
 
+      {step.versions.length > 0 && (
+        <details className="mt-2">
+          <summary className="cursor-pointer text-label text-ink-dim">Row versions after this step</summary>
+          <div className="mt-1">
+            <VersionTable
+              versions={step.versions}
+              columns={columns}
+              caption={`Versions after step ${String(step.index + 1)}, ${step.phase}`}
+            />
+          </div>
+        </details>
+      )}
+
       <details className="mt-2">
         <summary className="cursor-pointer text-label text-ink-dim">The table after this step</summary>
         <div className="mt-1">
@@ -328,7 +443,10 @@ export function ScheduleToolPage() {
 
   const database = useMemo(() => createAccountsDatabase(rows), [rows]);
   const lockingOptions = useMemo<LockingOptions | undefined>(
-    () => (locking === 'none' ? undefined : { granularity: locking, isolation }),
+    () =>
+      locking === 'none'
+        ? undefined
+        : { granularity: locking === 'page' ? 'page' : 'row', isolation, ...(locking === 'mvcc' ? { mvcc: true } : {}) },
     [locking, isolation],
   );
   const result = useMemo(
@@ -429,6 +547,11 @@ export function ScheduleToolPage() {
             {c.label}
           </button>
         ))}
+        {locking === 'mvcc' && (
+          <button type="button" disabled={full} onClick={() => { add('VACUUM'); }} className={btnSecondary}>
+            VACUUM
+          </button>
+        )}
       </div>
 
       <div className="flex flex-wrap items-end gap-4 rounded-xl border border-edge bg-surface-2 p-3 shadow-e1">
@@ -488,6 +611,14 @@ export function ScheduleToolPage() {
         <p className="min-w-56 flex-1 text-label text-ink-dim">
           {locking === 'none'
             ? 'Nothing stops a session reading or overwriting another’s uncommitted change.'
+            : locking === 'mvcc'
+              ? `A row is a chain of versions, and a reader takes no lock: it sees the versions its snapshot can see. Writers still lock the rows they change. ${
+                  isolation === 'repeatable-read'
+                    ? 'Repeatable read takes one snapshot per transaction: reads repeat and phantoms cannot appear, a write over a row changed since the snapshot fails (first committer wins), but write skew gets through.'
+                    : isolation === 'serializable'
+                      ? 'Serializable also checks, at commit, that nothing the transaction read has changed since its snapshot, which stops write skew.'
+                      : 'Read committed takes a fresh snapshot per statement, so a repeated read can change.'
+                }`
             : `${
                 locking === 'page'
                   ? 'A lock per page: every row on a touched page is covered, so unrelated rows collide.'
@@ -576,6 +707,22 @@ export function ScheduleToolPage() {
           </p>
         )}
       </div>
+
+      {result.bloat !== null && (
+        <div className={card}>
+          <h2 className="mb-2 text-body font-semibold text-ink">Row versions</h2>
+          <VersionTable
+            versions={result.steps.at(-1)?.versions ?? []}
+            columns={columns}
+            caption="Row versions at the end"
+          />
+          <p className="mt-2 text-label text-ink-dim" role="status">
+            {result.bloat.dead === 0
+              ? `No dead versions: the heap needs ${String(result.bloat.pages)} pages.`
+              : `${String(result.bloat.dead)} dead version${result.bloat.dead === 1 ? '' : 's'} no snapshot can see again: the heap needs ${String(result.bloat.pages)} pages, ${String(result.bloat.pagesAfterVacuum)} after a VACUUM. A scan reads them all.`}
+          </p>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div className={card}>

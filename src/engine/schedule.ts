@@ -22,6 +22,15 @@
  * an insert that would match it has to wait — the only level that stops a phantom. Write locks are held to the end at
  * every level. A level is the schedule's default, or one transaction's own through `BEGIN ISOLATION LEVEL …`.
  *
+ * **With `mvcc`** (D4) a row is a chain of versions (`mvcc.ts`) and a reader takes no lock at all: it sees the versions
+ * its snapshot can see. `READ COMMITTED` takes a fresh snapshot per statement, so a repeated read can change;
+ * `REPEATABLE READ` takes one for the transaction, which is snapshot isolation — no dirty, non-repeatable or phantom
+ * read, and a write to a row someone else committed since the snapshot fails (first committer wins), but write skew
+ * gets through; `SERIALIZABLE` adds a check at `COMMIT` that nothing the transaction read has changed since its
+ * snapshot, which stops write skew at the price of more aborts than PostgreSQL's own scheme. Writers still take an
+ * exclusive lock on each row they change, so two writers to one row wait for each other, and a deadlock is still a
+ * deadlock. `VACUUM` removes the versions no one can see again.
+ *
  * A statement outside `BEGIN … COMMIT` is its own transaction (autocommit). A statement that fails changes nothing and
  * leaves the transaction open, as MySQL does; PostgreSQL would instead refuse everything until `ROLLBACK`.
  */
@@ -35,6 +44,8 @@ import { exprToSql } from './planner/index.ts';
 import { runQuery } from './runQuery.ts';
 import { buildHeap } from './storage/index.ts';
 import { ISOLATION_LABELS } from './isolation.ts';
+import { isDead, viewOf } from './mvcc.ts';
+import type { Version } from './mvcc.ts';
 import { controlKindOf, isolationLevelOf } from './transactionControl.ts';
 import type { ControlKind, IsolationLevel } from './transactionControl.ts';
 import { DEFAULT_ENGINE_OPTIONS } from './types.ts';
@@ -55,6 +66,11 @@ export interface LockingOptions {
   granularity: 'page' | 'row';
   /** The level a transaction runs at unless its own `BEGIN ISOLATION LEVEL …` says otherwise. Default `repeatable-read`. */
   isolation?: IsolationLevel;
+  /**
+   * Versions and snapshots instead of read locks (plan.md §25.4 D4). Locks are then taken only by writers, on rows,
+   * whatever `granularity` says; `READ UNCOMMITTED` behaves as `READ COMMITTED`, as in PostgreSQL.
+   */
+  mvcc?: boolean;
 }
 
 /** What a write did to one row, in the terms needed to put it back. Rows are identified by reference, not by value. */
@@ -82,6 +98,22 @@ export interface SessionSnapshot {
   uncommitted: number;
   /** True while a statement of this session is waiting for a lock. */
   waiting: boolean;
+  /** Under MVCC, the id its changes are stamped with; null in autocommit. */
+  xid: number | null;
+}
+
+/** One version of one row, as the version store holds it (MVCC only). */
+export interface VersionRow {
+  table: string;
+  /** The logical row; every version of a row shares it. */
+  rid: number;
+  row: Row;
+  xmin: number;
+  xmax: number | null;
+  /** `committed` or `in-progress` for the creator, `aborted` once it rolled back. */
+  creator: 'committed' | 'in-progress' | 'aborted';
+  /** True while it is the newest version of its row and nobody has removed it. */
+  live: boolean;
 }
 
 /**
@@ -121,6 +153,8 @@ export interface ScheduleStepResult {
   sessions: SessionSnapshot[];
   /** The lock table after this record. Empty without `locking`. */
   locks: LockRow[];
+  /** Every version in the store after this record. Empty without `mvcc`. */
+  versions: VersionRow[];
 }
 
 export interface ScheduleResult {
@@ -138,6 +172,8 @@ export interface ScheduleResult {
   deadlocks: number;
   /** True when the schedule was longer than `MAX_SCHEDULE_STEPS` and the rest was ignored. */
   truncated: boolean;
+  /** Under MVCC, how many dead versions the store holds at the end, and how many pages the heap would need without them. */
+  bloat: { dead: number; pages: number; pagesAfterVacuum: number } | null;
 }
 
 /** A hostile or pasted schedule should not hang the tab. Not a security boundary — a size limit. */
@@ -151,6 +187,12 @@ interface Logged {
 
 interface Transaction {
   number: number;
+  /** Under MVCC, the id its versions are stamped with (the same as its number). */
+  xid: number;
+  /** Under MVCC at REPEATABLE READ and above: the transactions that were committed when its first statement ran. */
+  snapshot: Set<number> | null;
+  /** Under MVCC at SERIALIZABLE: every read's predicate, re-checked at COMMIT. */
+  readPredicates: { table: string; where: Expr | undefined }[];
   log: Logged[];
   isolation: IsolationLevel;
   /** What each distinct `SELECT` returned the last time this transaction ran it, to notice when it changes. */
@@ -316,6 +358,54 @@ export function runSchedule(
     return id;
   };
 
+  // MVCC state (plan.md §25.4 D4). Inert unless `locking.mvcc`.
+  const mvcc = locking?.mvcc === true;
+  const rowLevel = mvcc || locking?.granularity === 'row';
+  let template = db;
+  const committedXids = new Set<number>([0]);
+  const abortedXids = new Set<number>();
+  const openXids = new Set<number>();
+  const store: Version[] = [];
+  let nextOrder = 1;
+  if (mvcc) {
+    for (const [name, table] of Object.entries(db.tables)) {
+      for (const row of table.rows) {
+        store.push({ rid: ridOf(row), table: name, row, xmin: 0, xmax: null, order: nextOrder });
+        nextOrder += 1;
+      }
+    }
+  }
+  /** Everything committed or still open: the database as it stands, uncommitted changes included. */
+  const latest = (): Database => viewOf(template, store, new Set([...committedXids, ...openXids]), -1);
+  /** What a statement of `txn` sees: a fresh snapshot per statement, or the transaction's own from its first statement. */
+  const snapshotFor = (txn: Transaction | undefined, level: IsolationLevel): Set<number> => {
+    const now = new Set(committedXids);
+    if (!txn || level === 'read-committed' || level === 'read-uncommitted') return now;
+    txn.snapshot ??= now;
+    return txn.snapshot;
+  };
+  const versionRows = (): VersionRow[] =>
+    store.map((v) => ({
+      table: v.table,
+      rid: v.rid,
+      row: v.row,
+      xmin: v.xmin,
+      xmax: v.xmax,
+      creator: committedXids.has(v.xmin) ? 'committed' : abortedXids.has(v.xmin) ? 'aborted' : 'in-progress',
+      live: !abortedXids.has(v.xmin) && (v.xmax === null || abortedXids.has(v.xmax)),
+    }));
+  const openSnapshots = (): Set<number>[] =>
+    [...transactions.values()].filter((t) => t.xid > 0).map((t) => t.snapshot ?? new Set(committedXids));
+  const deadVersions = (): Version[] =>
+    store.filter((v) => isDead(v, committedXids, abortedXids, openSnapshots()));
+  const pagesFor = (versions: readonly Version[]): number => {
+    const perTable = new Map<string, number>();
+    for (const v of versions) perTable.set(v.table, (perTable.get(v.table) ?? 0) + 1);
+    let pages = 0;
+    for (const count of perTable.values()) pages += Math.ceil(count / options.rowsPerPage);
+    return pages;
+  };
+
   const othersOpenLog = (session: string): Logged[] =>
     [...transactions.entries()].filter(([name]) => name !== session).flatMap(([, t]) => t.log);
 
@@ -327,6 +417,7 @@ export function runSchedule(
         transaction: txn?.number ?? null,
         uncommitted: txn?.log.length ?? 0,
         waiting: blocked.has(session),
+        xid: mvcc ? (txn?.xid ?? null) : null,
       };
     });
 
@@ -346,7 +437,10 @@ export function runSchedule(
     step: Queued,
     kind: StepKind,
     phase: StepPhase,
-    parts: Partial<Pick<ScheduleStepResult, 'run' | 'rows' | 'error' | 'notes' | 'anomalies' | 'waitingOn'>>,
+    parts: Partial<Pick<ScheduleStepResult, 'run' | 'rows' | 'error' | 'notes' | 'anomalies' | 'waitingOn'>> & {
+      /** The table as the acting session saw it, when that is not simply the latest state (MVCC). */
+      view?: Database;
+    },
   ): void {
     results.push({
       index: step.index,
@@ -360,21 +454,22 @@ export function runSchedule(
       notes: parts.notes ?? [],
       anomalies: parts.anomalies ?? [],
       ...(parts.waitingOn ? { waitingOn: parts.waitingOn } : {}),
-      after: current,
+      after: parts.view ?? current,
       sessions: snapshots(),
       locks: lockRows(),
+      versions: mvcc ? versionRows() : [],
     });
   }
 
   /** The locks a statement needs, in the order it will ask: what it reads is shared, what it changes is exclusive. */
-  function footprint(sql: string, run: RunResult): Need[] {
+  function footprint(sql: string, run: RunResult, db: Database): Need[] {
     const target = targetOf(sql);
     if (!target) return [];
-    const table = current.tables[target.table];
+    const table = db.tables[target.table];
     if (!table) return [];
     const rowsPerPage = options.rowsPerPage;
     const heapPages = Math.ceil(table.rows.length / rowsPerPage);
-    const multi = Object.keys(current.tables).length > 1;
+    const multi = Object.keys(db.tables).length > 1;
     const pageLabel = (n: number) => (multi ? `page ${String(n)} of ${target.table}` : `page ${String(n)}`);
     const writes = target.kind !== 'select';
 
@@ -407,7 +502,7 @@ export function runSchedule(
       }
     }
 
-    if (locking?.granularity !== 'row') {
+    if (!rowLevel) {
       const all = opaque(target.where);
       for (const stone of tombstones) {
         // An insert looks for no existing row, so it has no use for a row's old image.
@@ -467,9 +562,9 @@ export function runSchedule(
   }
 
   /** The rows of the statement's table that its `WHERE` picks out, as the table stands now. */
-  function matchedRows(sql: string): Row[] {
+  function matchedRows(sql: string, db: Database): Row[] {
     const target = targetOf(sql);
-    const table = target ? current.tables[target.table] : undefined;
+    const table = target ? db.tables[target.table] : undefined;
     if (!target || !table || target.kind === 'insert') return [];
     const all = opaque(target.where);
     return table.rows.filter((row) => all || passes(target.where, row));
@@ -544,6 +639,13 @@ export function runSchedule(
   function rollBackTransaction(session: string): string[] {
     const txn = transactions.get(session);
     if (!txn) return [];
+    if (mvcc) {
+      abortedXids.add(txn.xid);
+      openXids.delete(txn.xid);
+      transactions.delete(session);
+      current = latest();
+      return [`${session}'s transaction T${String(txn.number)} is rolled back: its versions are now invisible to everyone.`];
+    }
     const undone = undo(current, [...txn.log].sort((a, b) => b.step - a.step));
     current = undone.db;
     transactions.delete(session);
@@ -555,6 +657,27 @@ export function runSchedule(
       }.`,
       ...undone.notes,
     ];
+  }
+
+  /**
+   * SERIALIZABLE under MVCC: has anything this transaction read been changed by a transaction that committed after its
+   * snapshot was taken? Re-checks every read's predicate against the version store: a row matching it that appeared,
+   * or one it could see that has since been removed, means the answer it acted on is no longer the answer.
+   */
+  function readConflict(txn: Transaction): string | null {
+    const snapshot = txn.snapshot ?? new Set(committedXids);
+    for (const read of txn.readPredicates) {
+      const any = read.where === undefined || opaque(read.where);
+      for (const v of store) {
+        if (v.table !== read.table || v.xmin === txn.xid || v.xmax === txn.xid) continue;
+        if (!any && !passes(read.where, v.row)) continue;
+        const appeared = committedXids.has(v.xmin) && !snapshot.has(v.xmin);
+        const vanished = snapshot.has(v.xmin) && v.xmax !== null && committedXids.has(v.xmax) && !snapshot.has(v.xmax);
+        if (appeared) return `a row matching ${read.where ? exprToSql(read.where) : 'a read of the whole table'} has been committed by T${String(v.xmin)} since this transaction's snapshot`;
+        if (vanished) return `a row this transaction read has been changed by T${String(v.xmax)} since its snapshot`;
+      }
+    }
+    return null;
   }
 
   /**
@@ -587,7 +710,17 @@ export function runSchedule(
         nextNumber += 1;
         const asked = isolationLevelOf(sql);
         const level = asked ?? defaultIsolation;
-        transactions.set(session, { number, log: [], isolation: level, reads: new Map(), seen: new Map() });
+        transactions.set(session, {
+          number,
+          xid: number,
+          snapshot: null,
+          readPredicates: [],
+          log: [],
+          isolation: level,
+          reads: new Map(),
+          seen: new Map(),
+        });
+        if (mvcc) openXids.add(number);
         notes.push(
           `${session} begins transaction T${String(number)}${
             locking ? ` at ${ISOLATION_LABELS[level]}` : ''
@@ -602,11 +735,27 @@ export function runSchedule(
       if (!txn) {
         notes.push(`${session} has no transaction open — COMMIT changes nothing.`);
       } else {
+        const conflict = mvcc && txn.isolation === 'serializable' ? readConflict(txn) : null;
+        if (conflict) {
+          // The read the transaction acted on is stale, so it cannot commit: it is rolled back instead.
+          const rolled = rollBackTransaction(session);
+          endLocks(session, notes);
+          record(step, 'commit', 'victim', {
+            error: `Could not serialize access: ${conflict}. ${session} is rolled back.`,
+            notes: [...rolled, ...notes],
+          });
+          drain();
+          return 'victim';
+        }
         notes.push(
           `${session} commits T${String(txn.number)}: its ${plural(txn.log.length, 'change')} ${
             txn.log.length === 1 ? 'is' : 'are'
           } now permanent, and visible to everyone.`,
         );
+        if (mvcc) {
+          committedXids.add(txn.xid);
+          openXids.delete(txn.xid);
+        }
         transactions.delete(session);
       }
       endLocks(session, notes);
@@ -618,6 +767,10 @@ export function runSchedule(
     if (control === 'rollback') {
       if (!txn) {
         notes.push(`${session} has no transaction open — ROLLBACK changes nothing.`);
+      } else if (mvcc) {
+        // Nothing is undone: the transaction's versions simply stop being visible to anyone, and stay in the heap
+        // as dead tuples until a VACUUM.
+        notes.push(...rollBackTransaction(session));
       } else {
         const undone = undo(current, [...txn.log].sort((a, b) => b.step - a.step));
         current = undone.db;
@@ -638,8 +791,30 @@ export function runSchedule(
       return 'done';
     }
 
-    // An ordinary statement. What it *sees* is the shared database exactly as it stands.
-    const run = runQuery(sql, current, options);
+    // VACUUM reclaims the versions no snapshot can see again. Without versions there is nothing for it to do.
+    if (/^VACUUM(\s+\w+)?\s*;?\s*$/i.test(sql.trim())) {
+      if (!mvcc) {
+        record(step, 'statement', phase, {
+          error: 'VACUUM reclaims old row versions, and there are none without MVCC.',
+          notes: ['No effect.'],
+        });
+        return 'done';
+      }
+      const dead = deadVersions();
+      const pagesBefore = pagesFor(store);
+      for (const v of dead) store.splice(store.indexOf(v), 1);
+      notes.push(
+        `VACUUM removed ${plural(dead.length, 'dead version')}; the heap needs ${plural(pagesFor(store), 'page')} instead of ${String(pagesBefore)}.`,
+      );
+      record(step, 'statement', phase, { notes });
+      return 'done';
+    }
+
+    // An ordinary statement. What it *sees* is the shared database as it stands — or, under MVCC, the versions its
+    // snapshot can see, whatever else is going on.
+    const isolation = txn?.isolation ?? defaultIsolation;
+    const view = mvcc ? viewOf(template, store, snapshotFor(txn, isolation), txn?.xid ?? -1) : current;
+    const run = runQuery(sql, view, options);
     if (run.error) {
       record(step, 'statement', phase, {
         run,
@@ -650,16 +825,16 @@ export function runSchedule(
     }
 
     // Under locking, take every lock the statement needs before it runs, holding each to the end of the transaction.
-    const isolation = txn?.isolation ?? defaultIsolation;
     let needs: Need[] = [];
     const heldShared = new Set<string>();
     if (locking) {
-      needs = footprint(sql, run);
-      // READ UNCOMMITTED reads without asking anyone. Writes still take their exclusive locks.
-      if (isolation === 'read-uncommitted') needs = needs.filter((n) => n.mode === 'exclusive');
+      needs = footprint(sql, run, view);
+      // READ UNCOMMITTED reads without asking anyone, and so does every reader under MVCC. Writes still take their
+      // exclusive locks.
+      if (mvcc || isolation === 'read-uncommitted') needs = needs.filter((n) => n.mode === 'exclusive');
       // Any write waits for a predicate another session is holding that it would change, whatever level the writer
       // runs at: a lock is not optional for the one it is taken against.
-      needs = [...needs, ...predicateNeeds(session, sql, run)];
+      if (!mvcc) needs = [...needs, ...predicateNeeds(session, sql, run)];
       for (const n of needs) {
         if (n.mode === 'shared' && holds(locks, session, n.key, 'shared')) heldShared.add(n.key);
       }
@@ -723,12 +898,36 @@ export function runSchedule(
     const rows: Row[] = run.rows;
     if (run.write) {
       const { table, rows: written } = run.write;
-      const before = current.tables[table]?.rows ?? [];
+      const before = view.tables[table]?.rows ?? [];
       const entries = entriesOf(run.write.kind, table, before, written);
 
       // Carry each updated row's identity across to the row that replaced it.
       for (const entry of entries) {
         if (entry.kind === 'update') rowIds.set(entry.after, ridOf(entry.before));
+      }
+
+      // First committer wins: under a snapshot, a row this statement can still see may already have been replaced by a
+      // transaction that committed after the snapshot was taken. Writing over it would lose that change.
+      if (mvcc) {
+        const stale = entries.find((entry) => {
+          if (entry.kind === 'insert') return false;
+          const was = entry.kind === 'delete' ? entry.row : entry.before;
+          const version = store.find((v) => v.row === was);
+          return version !== undefined && version.xmax !== null && version.xmax !== txn?.xid && committedXids.has(version.xmax);
+        });
+        if (stale) {
+          const rolled = txn ? rollBackTransaction(session) : [];
+          endLocks(session, notes);
+          record(step, 'statement', 'victim', {
+            run,
+            error: `Could not serialize access due to a concurrent update: a row this ${
+              txn ? 'transaction' : 'statement'
+            } read was changed by a transaction that committed after its snapshot. ${txn ? `${session} is rolled back.` : ''}`.trim(),
+            notes: [...rolled, ...notes],
+          });
+          drain();
+          return 'victim';
+        }
       }
 
       // A write on top of a row this transaction read, which someone else has changed since: the change is overwritten
@@ -779,9 +978,33 @@ export function runSchedule(
         });
       }
 
-      current = withRows(current, table, written);
+      if (mvcc) {
+        // The statement's changes become versions: a deletion stamps the old one, an update stamps it and adds the
+        // new one, an insert adds one. An autocommit statement is its own transaction and commits at once.
+        const xid = txn ? txn.xid : nextNumber;
+        if (!txn) nextNumber += 1;
+        for (const entry of entries) {
+          if (entry.kind === 'insert') {
+            store.push({ rid: ridOf(entry.row), table, row: entry.row, xmin: xid, xmax: null, order: nextOrder });
+            nextOrder += 1;
+            continue;
+          }
+          const was = entry.kind === 'delete' ? entry.row : entry.before;
+          const version = store.find((v) => v.row === was);
+          if (!version) continue;
+          version.xmax = xid;
+          if (entry.kind === 'update') {
+            store.push({ rid: version.rid, table, row: entry.after, xmin: xid, xmax: null, order: version.order });
+          }
+        }
+        if (!txn) committedXids.add(xid);
+        else openXids.add(xid);
+        current = latest();
+      } else {
+        current = withRows(current, table, written);
+      }
       // A row this statement just made is locked by it from the first moment, which no one else could have asked for.
-      if (locking?.granularity === 'row' && txn) {
+      if (rowLevel && txn) {
         for (const entry of entries) {
           if (entry.kind !== 'insert') continue;
           const key = `${table}/row/${String(ridOf(entry.row))}`;
@@ -803,6 +1026,8 @@ export function runSchedule(
       const target = current.tables[run.analyze.table];
       if (target) {
         current = { tables: { ...current.tables, [run.analyze.table]: { ...target, stats: run.analyze.stats } } };
+        const base = template.tables[run.analyze.table];
+        if (base) template = { tables: { ...template.tables, [run.analyze.table]: { ...base, stats: run.analyze.stats } } };
       }
       notes.push(`Statistics for ${run.analyze.table} recorded.`);
     } else {
@@ -824,13 +1049,19 @@ export function runSchedule(
           });
         }
         txn.reads.set(asked, rows);
-        for (const row of matchedRows(sql)) txn.seen.set(ridOf(row), row);
+        for (const row of matchedRows(sql, view)) txn.seen.set(ridOf(row), row);
       }
+    }
+
+    // SERIALIZABLE under MVCC re-checks, at COMMIT, everything the transaction read.
+    if (mvcc && txn && txn.isolation === 'serializable' && !run.analyze) {
+      const target = targetOf(sql);
+      if (target && target.kind !== 'insert') txn.readPredicates.push({ table: target.table, where: target.where });
     }
 
     // A read that would have returned something else without another session's uncommitted changes.
     const others = othersOpenLog(session);
-    if (!run.write && !run.analyze && others.length > 0) {
+    if (!mvcc && !run.write && !run.analyze && others.length > 0) {
       const committedView = undo(current, [...others].sort((a, b) => b.step - a.step)).db;
       const clean = runQuery(sql, committedView, options);
       if (!clean.error && JSON.stringify(clean.rows) !== JSON.stringify(rows)) {
@@ -864,7 +1095,7 @@ export function runSchedule(
             `${session} is at ${ISOLATION_LABELS[isolation]}, so it gives back the ${plural(released, 'shared lock')} this statement took.`,
           );
         }
-      } else if (isolation === 'serializable') {
+      } else if (isolation === 'serializable' && !mvcc) {
         // SERIALIZABLE keeps the read's WHERE as a lock until the transaction ends, against inserts that would match.
         const target = targetOf(sql);
         if (target && target.kind !== 'insert') {
@@ -881,7 +1112,7 @@ export function runSchedule(
 
     // An autocommit statement is its own transaction: its locks end with it.
     if (!txn && locking) endLocks(session, notes);
-    record(step, 'statement', phase, { run, rows, notes, anomalies });
+    record(step, 'statement', phase, { run, rows, notes, anomalies, ...(mvcc ? { view } : {}) });
     if ((!txn && locking) || gaveBack) drain();
     return 'done';
   }
@@ -910,7 +1141,8 @@ export function runSchedule(
   // What would survive a crash: the database with every still-open transaction undone.
   const stillOpen = [...transactions.keys()];
   const allOpen = [...transactions.values()].flatMap((t) => t.log).sort((a, b) => b.step - a.step);
-  const committed = undo(current, allOpen).db;
+  const committed = mvcc ? viewOf(template, store, committedXids, -1) : undo(current, allOpen).db;
+  const dead = mvcc ? deadVersions() : [];
 
   return {
     steps: results,
@@ -920,5 +1152,12 @@ export function runSchedule(
     stuck: [...blocked.keys()],
     deadlocks,
     truncated: schedule.length > MAX_SCHEDULE_STEPS,
+    bloat: mvcc
+      ? {
+          dead: dead.length,
+          pages: pagesFor(store),
+          pagesAfterVacuum: pagesFor(store.filter((v) => !dead.includes(v))),
+        }
+      : null,
   };
 }

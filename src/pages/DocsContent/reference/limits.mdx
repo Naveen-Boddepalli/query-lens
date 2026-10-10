@@ -260,11 +260,29 @@ index entries of the rows it touches.
   `WHERE` as a **predicate lock** until the transaction ends: a write that would add a matching row waits for
   it, whatever level the writer runs at. The schedule has a default level, and a transaction may ask for its
   own with `BEGIN ISOLATION LEVEL …`. The page names each anomaly when it happens.
+- **With versions (MVCC)** a row is a chain of versions, each stamped with the transaction that made it (`xmin`)
+  and the one that deleted or replaced it (`xmax`), and a reader takes **no lock at all**: it sees, for every
+  row, the version its *snapshot* can see — one created by a transaction that had committed when the snapshot was
+  taken (or by itself), and not removed by one that had. Writers still take an exclusive lock on each row they
+  change, so two writers to one row wait for each other, and a deadlock is still a deadlock. **`READ COMMITTED`**
+  takes a fresh snapshot per statement, so a repeated read can change. **`REPEATABLE READ`** takes one for the
+  transaction, which is *snapshot isolation*: no dirty, non-repeatable or phantom reads, and a write to a row
+  someone committed since the snapshot **fails** instead of overwriting it (*first committer wins*) — but **write
+  skew** gets through, two transactions reading the same rows and each changing a different one.
+  **`SERIALIZABLE`** adds a check at `COMMIT` that nothing the transaction read has been changed by a
+  transaction committed since its snapshot, which stops write skew; it aborts more transactions than
+  PostgreSQL's own scheme does, which tracks only the read/write dependencies that can form a cycle. `READ
+  UNCOMMITTED` behaves as `READ COMMITTED`, as it does in PostgreSQL.
+- **Rollback undoes nothing under MVCC.** The transaction's versions simply stop being visible to anyone, and
+  stay in the heap as *dead tuples* — as do the old versions an update or delete leaves behind — so a scan
+  reads more pages than the live rows need. **`VACUUM`** removes the versions no open snapshot can see again;
+  one an old snapshot still needs is kept. The page shows each version's `xmin` and `xmax`, and the dead
+  count and the heap's size with and without them.
 - **A row another open transaction has deleted or re-keyed** keeps its old image, still locked, until that
   transaction ends — otherwise a lookup for the old key finds nothing, touches no page, takes no lock, and
   reads a change nobody committed.
-- **Not yet:** MVCC and snapshot reads (D4), so every read here waits or reads the one current version, and a
-  wait for another session's uncommitted row on a `UNIQUE` key — a duplicate is rejected at once, where a
+- **Not yet:** the dead versions are counted and sized, not read through the buffer pool by a real scan (the
+  executor does not skip invisible tuples), and a wait for another session's uncommitted row on a `UNIQUE` key — a duplicate is rejected at once, where a
   real engine would wait to find out whether the other insert commits. The predicate lock is a *toy*: it
   matches a `WHERE` against the rows a write would add, which is enough for these tables and nothing like an
   index-range or next-key lock.

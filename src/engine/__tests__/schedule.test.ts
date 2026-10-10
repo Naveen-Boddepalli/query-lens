@@ -75,9 +75,9 @@ describe('autocommit and COMMIT', () => {
       ),
       createAccountsDatabase(),
     );
-    expect(result.steps[0]!.sessions).toEqual([{ session: 'A', transaction: 1, uncommitted: 0, waiting: false }]);
-    expect(result.steps[1]!.sessions).toEqual([{ session: 'A', transaction: 1, uncommitted: 1, waiting: false }]);
-    expect(result.steps[2]!.sessions).toEqual([{ session: 'A', transaction: null, uncommitted: 0, waiting: false }]);
+    expect(result.steps[0]!.sessions).toEqual([{ session: 'A', transaction: 1, uncommitted: 0, waiting: false, xid: null }]);
+    expect(result.steps[1]!.sessions).toEqual([{ session: 'A', transaction: 1, uncommitted: 1, waiting: false, xid: null }]);
+    expect(result.steps[2]!.sessions).toEqual([{ session: 'A', transaction: null, uncommitted: 0, waiting: false, xid: null }]);
     expect(result.steps[2]!.notes.join(' ')).toContain('now permanent');
     expect(rowsOf(result.committed)[0]!.balance).toBe(50);
   });
@@ -85,8 +85,8 @@ describe('autocommit and COMMIT', () => {
   it('numbers transactions in the order they begin, across sessions', () => {
     const result = runSchedule(steps(['B', 'BEGIN'], ['A', 'BEGIN']), createAccountsDatabase());
     expect(result.steps[1]!.sessions).toEqual([
-      { session: 'B', transaction: 1, uncommitted: 0, waiting: false },
-      { session: 'A', transaction: 2, uncommitted: 0, waiting: false },
+      { session: 'B', transaction: 1, uncommitted: 0, waiting: false, xid: null },
+      { session: 'A', transaction: 2, uncommitted: 0, waiting: false, xid: null },
     ]);
   });
 
@@ -129,7 +129,7 @@ describe('ROLLBACK', () => {
       ),
       createAccountsDatabase(),
     );
-    expect(result.steps[2]!.sessions).toEqual([{ session: 'A', transaction: null, uncommitted: 0, waiting: false }]);
+    expect(result.steps[2]!.sessions).toEqual([{ session: 'A', transaction: null, uncommitted: 0, waiting: false, xid: null }]);
     expect(result.steps[3]!.notes.join(' ')).toContain('autocommit');
     expect(result.open).toEqual([]);
     expect(rowsOf(result.committed)).toEqual(rowsOf(result.final));
@@ -869,5 +869,272 @@ describe('isolation levels as lock durations (plan.md §25.4 D3)', () => {
         );
       }
     }
+  });
+});
+
+describe('multi-version concurrency control (plan.md §25.4 D4)', () => {
+  type Level = 'read-uncommitted' | 'read-committed' | 'repeatable-read' | 'serializable';
+  const mvcc = (schedule: ScheduleStep[], isolation: Level = 'repeatable-read', rows = 20) =>
+    runSchedule(schedule, createAccountsDatabase(rows), undefined, { granularity: 'row', isolation, mvcc: true });
+  const phases = (result: ReturnType<typeof runSchedule>) => result.steps.map((s) => `${s.session}${String(s.index)}:${s.phase}`);
+  const kinds = (result: ReturnType<typeof runSchedule>) => result.steps.flatMap((s) => s.anomalies.map((a) => a.kind));
+  const balances = (db: ReturnType<typeof createAccountsDatabase>, n = 3) =>
+    db.tables.accounts!.rows.slice(0, n).map((r) => r.balance);
+
+  const uncommittedWrite = steps(
+    ['A', 'BEGIN'],
+    ['A', 'UPDATE accounts SET balance = 0 WHERE id = 1'],
+    ['B', 'SELECT balance FROM accounts WHERE id = 1'],
+    ['A', 'ROLLBACK'],
+  );
+  const repeatedRead = steps(
+    ['A', 'BEGIN'],
+    ['A', 'SELECT balance FROM accounts WHERE id = 1'],
+    ['B', 'UPDATE accounts SET balance = 50 WHERE id = 1'],
+    ['A', 'SELECT balance FROM accounts WHERE id = 1'],
+    ['A', 'COMMIT'],
+  );
+  const staleWrite = steps(
+    ['A', 'BEGIN'],
+    ['A', 'SELECT balance FROM accounts WHERE id = 1'],
+    ['B', 'BEGIN'],
+    ['B', 'UPDATE accounts SET balance = 150 WHERE id = 1'],
+    ['B', 'COMMIT'],
+    ['A', 'UPDATE accounts SET balance = 120 WHERE id = 1'],
+    ['A', 'COMMIT'],
+  );
+  const writeSkew = steps(
+    ['A', 'BEGIN'],
+    ['B', 'BEGIN'],
+    ['A', 'SELECT * FROM accounts WHERE id <= 2'],
+    ['B', 'SELECT * FROM accounts WHERE id <= 2'],
+    ['A', 'UPDATE accounts SET balance = 0 WHERE id = 1'],
+    ['B', 'UPDATE accounts SET balance = 0 WHERE id = 2'],
+    ['A', 'COMMIT'],
+    ['B', 'COMMIT'],
+  );
+
+  it('a reader never waits for a writer and sees only what was committed', () => {
+    const result = mvcc(uncommittedWrite, 'read-committed');
+    expect(phases(result)).toEqual(['A0:ran', 'A1:ran', 'B2:ran', 'A3:ran']);
+    expect(result.steps[2]!.rows).toEqual([{ balance: 100 }]);
+    expect(result.steps[2]!.locks).toEqual([
+      { resource: 'the row of accounts with id = 1', holders: [{ session: 'A', mode: 'exclusive' }], waiters: [] },
+    ]);
+    expect(kinds(result)).toEqual([]);
+  });
+
+  it('READ COMMITTED takes a snapshot per statement, so a repeated read sees the commit in between', () => {
+    const result = mvcc(repeatedRead, 'read-committed');
+    expect(result.steps[3]!.rows).toEqual([{ balance: 50 }]);
+    expect(kinds(result)).toEqual(['non-repeatable-read']);
+  });
+
+  it('REPEATABLE READ takes one snapshot for the transaction, so both reads agree', () => {
+    const result = mvcc(repeatedRead, 'repeatable-read');
+    expect(result.steps[1]!.rows).toEqual(result.steps[3]!.rows);
+    expect(result.steps[3]!.rows).toEqual([{ balance: 100 }]);
+    expect(kinds(result)).toEqual([]);
+    // The change is not lost: it is simply not in A's snapshot.
+    expect(balances(result.final)[0]).toBe(50);
+  });
+
+  it('a snapshot has no phantoms: rows committed after it was taken do not appear', () => {
+    const result = mvcc(
+      steps(
+        ['A', 'BEGIN'],
+        ['A', 'SELECT * FROM accounts WHERE balance > 50'],
+        ['B', "INSERT INTO accounts VALUES (30, 'zed', 100)"],
+        ['A', 'SELECT * FROM accounts WHERE balance > 50'],
+        ['A', 'COMMIT'],
+      ),
+    );
+    expect(result.steps[3]!.rows).toHaveLength(20);
+    expect(kinds(result)).toEqual([]);
+    expect(result.final.tables.accounts!.rows).toHaveLength(21);
+  });
+
+  it('first committer wins: writing over a row committed since the snapshot fails instead of losing the change', () => {
+    const result = mvcc(staleWrite, 'repeatable-read');
+    const loser = result.steps.find((s) => s.phase === 'victim')!;
+    expect(loser.session).toBe('A');
+    expect(loser.error).toContain('concurrent update');
+    expect(balances(result.final)[0]).toBe(150);
+    expect(kinds(result)).toEqual([]);
+  });
+
+  it('READ COMMITTED writes on top of the newer version instead, which is a lost update', () => {
+    const result = mvcc(staleWrite, 'read-committed');
+    expect(phases(result)).not.toContain('A5:victim');
+    expect(kinds(result)).toEqual(['lost-update']);
+    expect(balances(result.final)[0]).toBe(120);
+  });
+
+  it('two writers to one row still wait for each other, and the snapshot one then fails', () => {
+    const schedule = steps(
+      ['A', 'BEGIN'],
+      ['A', 'UPDATE accounts SET balance = 1 WHERE id = 1'],
+      ['B', 'BEGIN'],
+      ['B', 'UPDATE accounts SET balance = 2 WHERE id = 1'],
+      ['A', 'COMMIT'],
+      ['B', 'COMMIT'],
+    );
+    const snapshot = mvcc(schedule, 'repeatable-read');
+    expect(phases(snapshot)).toContain('B3:blocked');
+    expect(snapshot.steps.find((s) => s.index === 3 && s.phase === 'victim')!.error).toContain('concurrent update');
+    expect(balances(snapshot.final)[0]).toBe(1);
+
+    const readCommitted = mvcc(schedule, 'read-committed');
+    expect(phases(readCommitted)).toContain('B3:resumed');
+    expect(balances(readCommitted.final)[0]).toBe(2);
+  });
+
+  it('write skew gets through snapshot isolation: two transactions read the same rows and change different ones', () => {
+    const result = mvcc(writeSkew, 'repeatable-read');
+    expect(result.steps.some((s) => s.phase === 'victim')).toBe(false);
+    expect(balances(result.final, 3)).toEqual([0, 0, 100]);
+  });
+
+  it('SERIALIZABLE refuses the commit whose reads have been changed since its snapshot', () => {
+    const result = mvcc(writeSkew, 'serializable');
+    const refused = result.steps.find((s) => s.phase === 'victim')!;
+    expect(refused.session).toBe('B');
+    expect(refused.kind).toBe('commit');
+    expect(refused.error).toContain('Could not serialize');
+    expect(balances(result.final, 3)).toEqual([0, 100, 100]);
+  });
+
+  it('SERIALIZABLE lets a transaction commit when nothing it read has changed', () => {
+    const result = mvcc(
+      steps(
+        ['A', 'BEGIN'],
+        ['A', 'SELECT * FROM accounts WHERE id = 1'],
+        ['B', 'UPDATE accounts SET balance = 5 WHERE id = 7'],
+        ['A', 'UPDATE accounts SET balance = 9 WHERE id = 2'],
+        ['A', 'COMMIT'],
+      ),
+      'serializable',
+    );
+    expect(result.steps.some((s) => s.phase === 'victim')).toBe(false);
+  });
+
+  it('stamps every version with the transaction that made and the one that removed it', () => {
+    const result = mvcc(
+      steps(
+        ['A', 'BEGIN'],
+        ['A', 'UPDATE accounts SET balance = 1 WHERE id = 1'],
+        ['A', 'COMMIT'],
+        ['B', 'DELETE FROM accounts WHERE id = 2'],
+      ),
+    );
+    const first = result.steps.at(-1)!.versions.filter((v) => v.table === 'accounts' && (v.rid === 1 || v.rid === 2));
+    // Row 1: the original (xmin 0) was replaced by transaction 1, whose version is the live one.
+    const row1 = first.filter((v) => v.rid === 1);
+    expect(row1.map((v) => [v.xmin, v.xmax, v.live])).toEqual([
+      [0, 1, false],
+      [1, null, true],
+    ]);
+    // Row 2 was deleted by an autocommit statement, which took the next id.
+    expect(first.find((v) => v.rid === 2)!.xmax).toBe(2);
+  });
+
+  it('a transaction sees its own changes, and not its own deletions', () => {
+    const result = mvcc(
+      steps(
+        ['A', 'BEGIN'],
+        ['A', 'UPDATE accounts SET balance = 0 WHERE id = 1'],
+        ['A', 'DELETE FROM accounts WHERE id = 2'],
+        ['A', 'SELECT balance FROM accounts WHERE id <= 3'],
+        ['B', 'SELECT balance FROM accounts WHERE id <= 3'],
+      ),
+    );
+    // Row 1 as A changed it, row 2 gone, row 3 untouched; B, who has seen none of it, still sees all three.
+    expect(result.steps[3]!.rows).toEqual([{ balance: 0 }, { balance: 100 }]);
+    expect(result.steps[4]!.rows).toHaveLength(3);
+  });
+
+  it('a rollback undoes nothing: its versions stop being visible, and linger as dead tuples until VACUUM', () => {
+    const result = mvcc(
+      steps(['A', 'BEGIN'], ['A', 'UPDATE accounts SET balance = 0 WHERE id = 1'], ['A', 'ROLLBACK']),
+      'read-committed',
+    );
+    expect(balances(result.final)[0]).toBe(100);
+    expect(result.bloat).toEqual({ dead: 1, pages: 6, pagesAfterVacuum: 5 });
+    const vacuumed = mvcc(
+      steps(['A', 'BEGIN'], ['A', 'UPDATE accounts SET balance = 0 WHERE id = 1'], ['A', 'ROLLBACK'], ['A', 'VACUUM']),
+      'read-committed',
+    );
+    expect(vacuumed.bloat).toEqual({ dead: 0, pages: 5, pagesAfterVacuum: 5 });
+    expect(vacuumed.steps.at(-1)!.notes.join(' ')).toContain('removed 1 dead version');
+  });
+
+  it('VACUUM keeps a version some open snapshot can still see', () => {
+    const result = mvcc(
+      steps(
+        ['A', 'BEGIN'],
+        ['A', 'SELECT balance FROM accounts WHERE id = 1'],
+        ['B', 'UPDATE accounts SET balance = 50 WHERE id = 1'],
+        ['B', 'VACUUM'],
+        ['A', 'SELECT balance FROM accounts WHERE id = 1'],
+        ['A', 'COMMIT'],
+        ['B', 'VACUUM'],
+      ),
+      'repeatable-read',
+    );
+    // A's snapshot still needs the old version, so the first VACUUM cannot take it; the second can.
+    expect(result.steps[3]!.notes.join(' ')).toContain('removed 0 dead versions');
+    expect(result.steps[4]!.rows).toEqual([{ balance: 100 }]);
+    expect(result.steps.at(-1)!.notes.join(' ')).toContain('removed 1 dead version');
+  });
+
+  it('VACUUM without versions says there is nothing for it to do', () => {
+    const result = runSchedule(steps(['A', 'VACUUM']), createAccountsDatabase());
+    expect(result.steps[0]!.error).toContain('without MVCC');
+  });
+
+  it('a deadlock between two writers is still a deadlock', () => {
+    const result = mvcc(
+      steps(
+        ['A', 'BEGIN'],
+        ['B', 'BEGIN'],
+        ['A', 'UPDATE accounts SET balance = 1 WHERE id = 1'],
+        ['B', 'UPDATE accounts SET balance = 2 WHERE id = 2'],
+        ['A', 'UPDATE accounts SET balance = 3 WHERE id = 2'],
+        ['B', 'UPDATE accounts SET balance = 4 WHERE id = 1'],
+        ['A', 'COMMIT'],
+      ),
+      'read-committed',
+    );
+    expect(result.deadlocks).toBe(1);
+    expect(balances(result.final, 3)).toEqual([1, 3, 100]);
+  });
+
+  it('REPEATABLE READ and SERIALIZABLE let no anomaly through, and READ COMMITTED only its own three', () => {
+    const statement = fc.oneof(
+      fc.constant('BEGIN'),
+      fc.constant('COMMIT'),
+      fc.constant('ROLLBACK'),
+      fc.record({ id: fc.integer({ min: 1, max: 4 }), balance: fc.integer({ min: 0, max: 9 }) }).map(
+        ({ id, balance }) => `UPDATE accounts SET balance = ${String(balance)} WHERE id = ${String(id)}`,
+      ),
+      fc.integer({ min: 21, max: 24 }).map((id) => `INSERT INTO accounts VALUES (${String(id)}, 'x', 7)`),
+      fc.integer({ min: 1, max: 4 }).map((id) => `DELETE FROM accounts WHERE id = ${String(id)}`),
+      fc.constant('SELECT * FROM accounts WHERE balance > 4'),
+      fc.integer({ min: 1, max: 4 }).map((id) => `SELECT balance FROM accounts WHERE id = ${String(id)}`),
+      fc.constant('VACUUM'),
+    );
+    const step = fc.record({ session: fc.constantFrom('A', 'B'), sql: statement });
+    fc.assert(
+      fc.property(fc.array(step, { maxLength: 14 }), (schedule) => {
+        for (const level of ['repeatable-read', 'serializable'] as const) {
+          expect(kinds(mvcc(schedule, level))).toEqual([]);
+        }
+        const rc = kinds(mvcc(schedule, 'read-committed')).filter(
+          (k) => k !== 'non-repeatable-read' && k !== 'phantom' && k !== 'lost-update',
+        );
+        expect(rc).toEqual([]);
+      }),
+      { numRuns: 300 },
+    );
   });
 });
