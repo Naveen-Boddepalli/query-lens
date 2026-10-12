@@ -28,7 +28,7 @@ test('with the rule off the page goes out ahead of its log, and the page says so
 
 test('a step can be chosen to see the state after it', async ({ page }) => {
   await page.goto('/tools/wal');
-  await page.getByRole('button', { name: /^Step 2:/ }).click();
+  await page.getByRole('button', { name: /^Step 1:/ }).click();
   await expect(stepRegion(page)).toContainText('begins');
 });
 
