@@ -7,7 +7,7 @@ import type { DurableHeap } from '../engine/recovery/heap.ts';
 import { LOG_MAX_STEPS, inSync } from './durableLog.ts';
 import type { DurableLog } from './durableLog.ts';
 import { btnGhost, btnPrimary, btnSecondary, inputField, segBase, segOff, segOn } from './primitives.ts';
-import { CrashPanel, EffectLine, RecoveryPanels, ScrollBox, StatePanels } from './walPanels.tsx';
+import { CrashPanel, EffectsList, RecoveryPanels, ScrollBox, StatePanels } from './walPanels.tsx';
 
 /**
  * plan.md §25.4 E4: the statements run in the Playground, as a write-ahead log would have kept them — and the choice of
@@ -336,15 +336,9 @@ export function DurabilityDialog({ db, log, onAppend, onRestart, onUse, onClose 
                   <li key={i}>{n}</li>
                 ))}
               </ul>
-              {lastControl.effects.length > 0 && (
-                <ul className="mt-2 list-disc pl-5 text-label text-ink-dim">
-                  {lastControl.effects.map((e, i) => (
-                    <li key={i}>
-                      <EffectLine effect={e} />
-                    </li>
-                  ))}
-                </ul>
-              )}
+              <div className="mt-2">
+                <EffectsList effects={lastControl.effects} />
+              </div>
             </section>
           )}
 

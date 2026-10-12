@@ -9,7 +9,7 @@ import {
 import type { WalStep } from '../../engine/recovery/wal.ts';
 import { PageHeader } from '../../ui/PageHeader.tsx';
 import { btnPrimary, btnSecondary, inputField, panelSurface, segBase, segOff, segOn } from '../../ui/primitives.ts';
-import { CrashPanel, EffectLine, ScrollBox, StatePanels } from '../../ui/walPanels.tsx';
+import { CrashPanel, EffectsList, ScrollBox, StatePanels } from '../../ui/walPanels.tsx';
 import { decodeWalSteps, encodeWalSteps } from '../../ui/walUrl.ts';
 
 /**
@@ -453,15 +453,7 @@ export function WalToolPage() {
                     ))}
                   </ul>
                 )}
-                {current.effects.length > 0 && (
-                  <ul className="list-disc pl-5 text-label text-ink-dim">
-                    {current.effects.map((e, i) => (
-                      <li key={i}>
-                        <EffectLine effect={e} />
-                      </li>
-                    ))}
-                  </ul>
-                )}
+                <EffectsList effects={current.effects} />
                 {current.violations.length > 0 && (
                   <p className="mt-2 rounded-md border border-evict/50 p-2 text-label text-evict" role="alert">
                     {current.violations.join(' ')}

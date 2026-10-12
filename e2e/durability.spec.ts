@@ -46,3 +46,18 @@ test('a database changed some other way makes the log say it is stale', async ({
   await page.getByRole('button', { name: /^Durability/ }).click();
   await expect(page.getByRole('dialog', { name: 'Durability' }).getByRole('alert')).toContainText('not the one this log began with');
 });
+
+test('the recovery in the Durability dialog can be read as a table, as on the recovery page (plan.md §H6)', async ({ page }) => {
+  await page.goto('/playground');
+  await run(page, 'DELETE FROM users WHERE id = 6');
+  await page.getByRole('button', { name: /^Durability/ }).click();
+  const dialog = page.getByRole('dialog', { name: 'Durability' });
+  // Without a flush the statement's log record is still in the buffer and dies with the machine: nothing to recover.
+  await dialog.getByRole('button', { name: 'Flush log' }).click();
+  await dialog.getByRole('button', { name: 'Crash', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Recover', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Show as table' }).last().click();
+  const table = dialog.getByRole('table', { name: /The three passes of recovery/ });
+  await expect(table).toContainText('loser');
+  await expect(table).toContainText('undone');
+});

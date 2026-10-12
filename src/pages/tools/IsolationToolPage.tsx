@@ -12,7 +12,10 @@ import type { AnomalyId, EngineKind, MatrixCell } from '../../engine/hermitage.t
 import type { IsolationLevel } from '../../engine/transactionControl.ts';
 import { PageHeader } from '../../ui/PageHeader.tsx';
 import { panelSurface } from '../../ui/primitives.ts';
+import { DataView } from '../../ui/DataView.tsx';
 import { StepList } from '../../ui/ScheduleStepList.tsx';
+import { MATRIX_COLUMNS, matrixRows } from '../../ui/isolationTable.ts';
+import { SCHEDULE_COLUMNS, scheduleRows } from '../../ui/transactionTables.ts';
 
 /**
  * plan.md §25.4 D5: the ten Hermitage anomalies at four isolation levels, on both engines. Nothing here is a lookup:
@@ -91,64 +94,73 @@ export function IsolationToolPage() {
         tool is where you build your own.
       </PageHeader>
 
-      {ENGINES.map((engine) => (
-        <div key={engine.kind} className={`${panelSurface} p-4`}>
-          <h2 className="text-body font-semibold text-ink">{engine.title}</h2>
-          <p className="mb-2 text-label text-ink-dim">
-            {engine.blurb} Compared with {engine.reference}.
-          </p>
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[34rem] text-left text-label">
-              <caption className="sr-only">
-                Which anomalies can occur, by isolation level, under {engine.title}
-              </caption>
-              <thead>
-                <tr className="text-ink-dim">
-                  <th scope="col" className="py-1 pr-3 font-medium">Anomaly</th>
-                  {HERMITAGE_LEVELS.map((level) => (
-                    <th key={level} scope="col" className="px-2 py-1 text-center font-medium">
-                      {HERMITAGE_LEVEL_LABELS[level]}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {HERMITAGE_TESTS.map((t) => (
-                  <tr key={t.id}>
-                    <th scope="row" className="py-0.5 pr-3 font-normal text-ink">
-                      <span className="font-mono">{t.id}</span> <span className="text-ink-dim">{t.name}</span>
-                    </th>
-                    {HERMITAGE_LEVELS.map((level) => {
-                      const c = matrices[engine.kind].find((x) => x.test === t.id && x.level === level)!;
-                      const differs = c.occurred !== DOCUMENTED[engine.kind][level][t.id];
-                      const isSelected =
-                        selected.engine === engine.kind && selected.test === t.id && selected.level === level;
-                      return (
-                        <td key={level} className="px-1 py-0.5 text-center">
-                          <button
-                            type="button"
-                            onClick={() => { choose({ engine: engine.kind, test: t.id, level }); }}
-                            aria-pressed={isSelected}
-                            aria-label={`${t.id} at ${HERMITAGE_LEVEL_LABELS[level]}, ${engine.title}: ${
-                              c.occurred ? 'can occur' : 'prevented'
-                            }${differs ? ', differs from the published result' : ''}`}
-                            className={`w-full rounded-md border px-2 py-1 font-mono ${
-                              isSelected ? 'border-accent' : differs ? 'border-dashed border-ink-dim' : 'border-edge'
-                            } ${c.occurred ? 'text-evict' : 'text-hit'}`}
-                          >
-                            {c.occurred ? '—' : '✓'}
-                            {differs ? '*' : ''}
-                          </button>
-                        </td>
-                      );
-                    })}
+      <DataView
+        caption="Every anomaly at every isolation level on both engines, with the published result beside each"
+        columns={MATRIX_COLUMNS}
+        rows={matrixRows(matrices)}
+        keyOf={(r, i) => `${String(i)}-${r.anomaly}`}
+      >
+        <div className="flex flex-col gap-4">
+        {ENGINES.map((engine) => (
+          <div key={engine.kind} className={`${panelSurface} p-4`}>
+            <h2 className="text-body font-semibold text-ink">{engine.title}</h2>
+            <p className="mb-2 text-label text-ink-dim">
+              {engine.blurb} Compared with {engine.reference}.
+            </p>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[34rem] text-left text-label">
+                <caption className="sr-only">
+                  Which anomalies can occur, by isolation level, under {engine.title}
+                </caption>
+                <thead>
+                  <tr className="text-ink-dim">
+                    <th scope="col" className="py-1 pr-3 font-medium">Anomaly</th>
+                    {HERMITAGE_LEVELS.map((level) => (
+                      <th key={level} scope="col" className="px-2 py-1 text-center font-medium">
+                        {HERMITAGE_LEVEL_LABELS[level]}
+                      </th>
+                    ))}
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {HERMITAGE_TESTS.map((t) => (
+                    <tr key={t.id}>
+                      <th scope="row" className="py-0.5 pr-3 font-normal text-ink">
+                        <span className="font-mono">{t.id}</span> <span className="text-ink-dim">{t.name}</span>
+                      </th>
+                      {HERMITAGE_LEVELS.map((level) => {
+                        const c = matrices[engine.kind].find((x) => x.test === t.id && x.level === level)!;
+                        const differs = c.occurred !== DOCUMENTED[engine.kind][level][t.id];
+                        const isSelected =
+                          selected.engine === engine.kind && selected.test === t.id && selected.level === level;
+                        return (
+                          <td key={level} className="px-1 py-0.5 text-center">
+                            <button
+                              type="button"
+                              onClick={() => { choose({ engine: engine.kind, test: t.id, level }); }}
+                              aria-pressed={isSelected}
+                              aria-label={`${t.id} at ${HERMITAGE_LEVEL_LABELS[level]}, ${engine.title}: ${
+                                c.occurred ? 'can occur' : 'prevented'
+                              }${differs ? ', differs from the published result' : ''}`}
+                              className={`w-full rounded-md border px-2 py-1 font-mono ${
+                                isSelected ? 'border-accent' : differs ? 'border-dashed border-ink-dim' : 'border-edge'
+                              } ${c.occurred ? 'text-evict' : 'text-hit'}`}
+                            >
+                              {c.occurred ? '—' : '✓'}
+                              {differs ? '*' : ''}
+                            </button>
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
+        ))}
         </div>
-      ))}
+      </DataView>
 
       {cell && (
         <div className={`${panelSurface} p-4`} aria-label="The schedule behind the selected cell" role="region">
@@ -164,7 +176,14 @@ export function IsolationToolPage() {
           </p>
           {known && <p className="mt-1 text-label text-ink-dim">{known.why}</p>}
           <div className="mt-3">
-            <StepList steps={cell.result.steps} />
+            <DataView
+              caption="The schedule behind the selected cell, one row for each thing that happened"
+              columns={SCHEDULE_COLUMNS}
+              rows={scheduleRows(cell.result.steps)}
+              keyOf={(r, i) => `${String(i)}-${String(r.n)}`}
+            >
+              <StepList steps={cell.result.steps} />
+            </DataView>
           </div>
         </div>
       )}

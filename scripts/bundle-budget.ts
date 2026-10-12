@@ -207,6 +207,12 @@ const T = (name: string): string => `src/pages/tools/${name}.tsx`;
  *  - 2026-10-04, latch crabbing (§25.4 F5): a new route, /tools/latch-crabbing (163.5 kB measured + 3, rounded
  *    to 167). Unlike the standalone sandboxes it drives the REAL engine B+Tree (`engine/index/btree.ts`, the same
  *    code /tools/btree uses), so it pays the shared engine chunk the same way /tools/btree does (ceiling 167).
+ *  - 2026-10-12, data-table views for the transaction and durability tools (§H6): `DataView` and the row builders
+ *    (`transactionTables.ts`; the matrix's own in `isolationTable.ts`, so the schedule tool does not carry the
+ *    Hermitage suite) came into /tools/schedule, /tools/isolation and /tools/concurrency, and the write-ahead-log
+ *    panels (`walTables.ts`) into /tools/wal, /tools/recovery and the Durability dialog. /tools/schedule 181 → 185
+ *    (measured 181.5 + 3, rounded up), /tools/isolation 177 → 181 (177.0 + 3), the Durability opt-in chunk 14 → 17
+ *    (14.3 + 3).
  *  - 2026-10-10, generated questions (§25.4 G4): a new route, /practice (178.3 kB measured + 3, rounded to 182). The
  *    generators call the real engine for their answers (the buffer pool, the B+Tree, the planner, the visibility
  *    rule, the recovery machine), so it pays the shared engine chunk the way the Playground does.
@@ -309,11 +315,11 @@ export const ROUTES: readonly RouteBudget[] = [
   { route: '/tools/sort', roots: [T('SortToolPage')], kb: 118, note: 'external merge sort' },
   { route: '/tools/planner', roots: [T('PlannerToolPage')], kb: 172, note: 'planner sandbox' },
   { route: '/tools/locks', roots: [T('LocksToolPage')], kb: 117, note: 'lock simulator' },
-  { route: '/tools/isolation', roots: [T('IsolationToolPage')], kb: 177, note: 'the Hermitage isolation matrix (both engines, computed)' },
+  { route: '/tools/isolation', roots: [T('IsolationToolPage')], kb: 181, note: 'the Hermitage isolation matrix (both engines, computed)' },
   { route: '/tools/recovery', roots: [T('RecoveryToolPage')], kb: 129, note: 'crash recovery: checkpoints, a crash, and ARIES analysis, redo and undo' },
   { route: '/tools/wal', roots: [T('WalToolPage')], kb: 129, note: 'write-ahead log: a pool, a disk, a log and the rule between them' },
   { route: '/tools/concurrency', roots: [T('ConcurrencyToolPage')], kb: 182, note: 'one schedule under five concurrency-control protocols, each really run' },
-  { route: '/tools/schedule', roots: [T('ScheduleToolPage')], kb: 181, note: 'transaction schedules (the engine, a shared database, two sessions)' },
+  { route: '/tools/schedule', roots: [T('ScheduleToolPage')], kb: 185, note: 'transaction schedules (the engine, a shared database, two sessions)' },
   { route: '/tools/grammar', roots: [T('GrammarToolPage')], kb: 116, note: 'the SQL grammar diagram' },
   { route: '/tools/hash-join', roots: [T('HashJoinToolPage')], kb: 118, note: 'Grace hash join' },
   { route: '/tools/join-order', roots: [T('JoinOrderToolPage')], kb: 168, note: 'Selinger join-order search over the subset lattice' },
@@ -339,7 +345,7 @@ export const OPT_IN: readonly { key: string; kb: number; note: string; after?: s
   { key: '_html-to-image', kb: 8, note: 'panel PNG export (§20.3) — fetched on the first click of Download PNG' },
   { key: 'src/perf/inp.ts', kb: 2, note: 'the opt-in INP recorder for the §9 study (§25.4 A6) — fetched only after a participant opts in' },
   { key: 'src/ui/WorkspaceDialog.tsx', kb: 6, after: 'src/pages/PlaygroundPage.tsx', note: 'the Workspaces dialog (§H7) — fetched only when Custom mode\'s Workspaces button is pressed' },
-  { key: 'src/ui/DurabilityDialog.tsx', kb: 14, after: 'src/pages/PlaygroundPage.tsx', note: 'the Durability dialog (§25.4 E4): the write-ahead-log machine, crash and recovery — fetched only when the Playground\'s Durability button is pressed' },
+  { key: 'src/ui/DurabilityDialog.tsx', kb: 17, after: 'src/pages/PlaygroundPage.tsx', note: 'the Durability dialog (§25.4 E4): the write-ahead-log machine, crash and recovery — fetched only when the Playground\'s Durability button is pressed' },
 ];
 
 /* -------------------------------------------------------------------------- */

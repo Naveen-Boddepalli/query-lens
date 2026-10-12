@@ -6,7 +6,9 @@ import type { ScheduleStep } from '../../engine/schedule.ts';
 import { PageHeader } from '../../ui/PageHeader.tsx';
 import { btnSecondary, panelSurface, pill, segBase, segOff, segOn } from '../../ui/primitives.ts';
 import { decodeSchedule, encodeSchedule, SESSIONS } from '../../ui/scheduleUrl.ts';
+import { DataView } from '../../ui/DataView.tsx';
 import { StepList } from '../../ui/ScheduleStepList.tsx';
+import { SCHEDULE_COLUMNS, scheduleRows } from '../../ui/transactionTables.ts';
 
 /**
  * plan.md §25.4 D6: one schedule, run under every concurrency-control protocol the schedule runner implements. The
@@ -366,7 +368,14 @@ export function ConcurrencyToolPage() {
         </div>
 
         <div className="mt-3">
-          <StepList steps={selected.result.steps} />
+          <DataView
+            caption={`The run under ${selected.protocol.label}, one row for each thing that happened`}
+            columns={SCHEDULE_COLUMNS}
+            rows={scheduleRows(selected.result.steps)}
+            keyOf={(r, i) => `${String(i)}-${String(r.n)}`}
+          >
+            <StepList steps={selected.result.steps} />
+          </DataView>
         </div>
       </div>
     </div>

@@ -1,7 +1,9 @@
 import type { ReactNode } from 'react';
 import { cellText, cellsText, describeRecord } from '../engine/recovery/wal.ts';
 import type { CrashImage, LogRecord, RecoveryReport, WalEffect, WalState } from '../engine/recovery/wal.ts';
+import { DataView } from './DataView.tsx';
 import { card } from './primitives.ts';
+import { effectRows, recoveryRows } from './walTables.ts';
 
 /** The panels the write-ahead-log and recovery pages share: the effects of a step, the log, the pool and the disk. */
 
@@ -256,125 +258,165 @@ export function StatePanels({ state, frames }: { state: WalState; frames: number
   );
 }
 
+/** What a step did, effect by effect: as sentences, or as a table to walk cell by cell. */
+export function EffectsList({ effects }: { effects: WalEffect[] }) {
+  if (effects.length === 0) return null;
+  return (
+    <DataView
+      caption="What the step did, effect by effect"
+      rows={effectRows(effects)}
+      keyOf={(r) => String(r.n)}
+      columns={[
+        { header: '#', cell: (r) => r.n },
+        { header: 'What', cell: (r) => r.what },
+        { header: 'Page', cell: (r) => r.page },
+        { header: 'LSN', cell: (r) => r.lsn },
+        { header: 'Detail', cell: (r) => r.detail },
+      ]}
+    >
+      <ul className="list-disc pl-5 text-label text-ink-dim">
+        {effects.map((e, i) => (
+          <li key={i}>
+            <EffectLine effect={e} />
+          </li>
+        ))}
+      </ul>
+    </DataView>
+  );
+}
+
 /** The three passes of a restart, one panel each: what analysis rebuilt, what redo did and skipped, what undo wrote. */
 export function RecoveryPanels({ report }: { report: RecoveryReport }) {
   const a = report.analysis;
   const redone = report.redo.filter((r) => r.action === 'redo').length;
   const undone = report.undo.filter((r) => r.action === 'undo').length;
   return (
-    <div className="grid grid-cols-1 gap-3 md:grid-cols-3" role="region" aria-label="The three passes of recovery">
-      <div className={card}>
-        <h3 className="mb-1 text-body font-semibold text-ink">1. Analysis</h3>
-        <p className="mb-2 text-label text-ink-dim">
-          {a.checkpoint === null
-            ? 'No checkpoint: the scan starts at the beginning of the log.'
-            : `Scan from the checkpoint that began at LSN ${String(a.checkpoint)}, with the tables it saved.`}
-        </p>
-        <p className="text-label font-medium text-ink">Dirty page table</p>
-        {a.dirtyPages.length === 0 ? (
-          <p className="mb-2 text-label text-ink-dim">Empty.</p>
-        ) : (
-          <ScrollBox label="The dirty page table">
-            <table className="mb-2 w-full text-left text-label tabular-nums">
-              <caption className="sr-only">The dirty page table analysis built</caption>
-              <thead>
-                <tr className="text-ink-dim">
-                  <th scope="col" className="pr-3 font-medium">page</th>
-                  <th scope="col" className="font-medium">recLSN</th>
-                </tr>
-              </thead>
-              <tbody>
-                {a.dirtyPages.map((d) => (
-                  <tr key={d.page} className="text-ink">
-                    <td className="pr-3 font-mono">{d.page}</td>
-                    <td className="font-mono">{d.recLSN}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </ScrollBox>
-        )}
-        <p className="text-label font-medium text-ink">Transaction table</p>
-        {a.txns.length === 0 ? (
-          <p className="mb-2 text-label text-ink-dim">Empty: every transaction had ended.</p>
-        ) : (
-          <ScrollBox label="The transaction table">
-            <table className="mb-2 w-full text-left text-label tabular-nums">
-              <caption className="sr-only">The transaction table analysis built</caption>
-              <thead>
-                <tr className="text-ink-dim">
-                  <th scope="col" className="pr-3 font-medium">txn</th>
-                  <th scope="col" className="pr-3 font-medium">status</th>
-                  <th scope="col" className="font-medium">lastLSN</th>
-                </tr>
-              </thead>
-              <tbody>
-                {a.txns.map((t) => (
-                  <tr key={t.txn} className={t.status === 'committed' ? 'text-ink' : 'text-evict'}>
-                    <td className="pr-3">{t.txn}</td>
-                    <td className="pr-3">{t.status === 'committed' ? 'committed' : t.status === 'aborting' ? 'rolling back' : 'running'}</td>
-                    <td className="font-mono">{t.lastLSN}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </ScrollBox>
-        )}
-        <p className="text-label text-ink">
-          {a.losers.length === 0 ? 'No losers.' : `Losers: ${a.losers.join(', ')}.`}{' '}
-          {a.redoFrom === null ? 'Nothing to redo.' : `Redo starts at LSN ${String(a.redoFrom)}.`}
-        </p>
-      </div>
-
-      <div className={card}>
-        <h3 className="mb-1 text-body font-semibold text-ink">2. Redo</h3>
-        <p className="mb-2 text-label text-ink-dim">
-          Repeat history: every change from the oldest recLSN, whoever made it, unless the page already has it.{' '}
-          <strong>{redone}</strong> redone, <strong>{report.redo.length - redone}</strong> skipped.
-        </p>
-        {report.redo.length === 0 ? (
-          <p className="text-label text-ink-dim">Nothing examined.</p>
-        ) : (
-          <ul className="flex flex-col gap-1 text-label">
-            {report.redo.map((r) => (
-              <li key={r.lsn} className={r.action === 'redo' ? 'text-ink' : 'text-ink-dim'}>
-                <span className="font-mono">LSN {r.lsn}</span> ({r.key}, page {r.page}) —{' '}
-                <strong>{r.action === 'redo' ? 'redo' : 'skip'}</strong>: {r.reason}
-              </li>
-            ))}
-          </ul>
-        )}
-        {report.ended.length > 0 && (
-          <p className="mt-2 text-label text-ink-dim">
-            End record written for {report.ended.join(', ')}: committed, with nothing left to do.
+    <DataView
+      caption="The three passes of recovery, one row for each thing found or done"
+      rows={recoveryRows(report)}
+      keyOf={(r) => String(r.n)}
+      columns={[
+        { header: 'Pass', cell: (r) => r.pass },
+        { header: 'LSN', cell: (r) => r.lsn },
+        { header: 'Subject', cell: (r) => r.subject },
+        { header: 'Action', cell: (r) => r.action },
+        { header: 'Why', cell: (r) => r.why },
+      ]}
+    >
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-3" role="region" aria-label="The three passes of recovery">
+        <div className={card}>
+          <h3 className="mb-1 text-body font-semibold text-ink">1. Analysis</h3>
+          <p className="mb-2 text-label text-ink-dim">
+            {a.checkpoint === null
+              ? 'No checkpoint: the scan starts at the beginning of the log.'
+              : `Scan from the checkpoint that began at LSN ${String(a.checkpoint)}, with the tables it saved.`}
           </p>
-        )}
-      </div>
+          <p className="text-label font-medium text-ink">Dirty page table</p>
+          {a.dirtyPages.length === 0 ? (
+            <p className="mb-2 text-label text-ink-dim">Empty.</p>
+          ) : (
+            <ScrollBox label="The dirty page table">
+              <table className="mb-2 w-full text-left text-label tabular-nums">
+                <caption className="sr-only">The dirty page table analysis built</caption>
+                <thead>
+                  <tr className="text-ink-dim">
+                    <th scope="col" className="pr-3 font-medium">page</th>
+                    <th scope="col" className="font-medium">recLSN</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {a.dirtyPages.map((d) => (
+                    <tr key={d.page} className="text-ink">
+                      <td className="pr-3 font-mono">{d.page}</td>
+                      <td className="font-mono">{d.recLSN}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </ScrollBox>
+          )}
+          <p className="text-label font-medium text-ink">Transaction table</p>
+          {a.txns.length === 0 ? (
+            <p className="mb-2 text-label text-ink-dim">Empty: every transaction had ended.</p>
+          ) : (
+            <ScrollBox label="The transaction table">
+              <table className="mb-2 w-full text-left text-label tabular-nums">
+                <caption className="sr-only">The transaction table analysis built</caption>
+                <thead>
+                  <tr className="text-ink-dim">
+                    <th scope="col" className="pr-3 font-medium">txn</th>
+                    <th scope="col" className="pr-3 font-medium">status</th>
+                    <th scope="col" className="font-medium">lastLSN</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {a.txns.map((t) => (
+                    <tr key={t.txn} className={t.status === 'committed' ? 'text-ink' : 'text-evict'}>
+                      <td className="pr-3">{t.txn}</td>
+                      <td className="pr-3">{t.status === 'committed' ? 'committed' : t.status === 'aborting' ? 'rolling back' : 'running'}</td>
+                      <td className="font-mono">{t.lastLSN}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </ScrollBox>
+          )}
+          <p className="text-label text-ink">
+            {a.losers.length === 0 ? 'No losers.' : `Losers: ${a.losers.join(', ')}.`}{' '}
+            {a.redoFrom === null ? 'Nothing to redo.' : `Redo starts at LSN ${String(a.redoFrom)}.`}
+          </p>
+        </div>
 
-      <div className={card}>
-        <h3 className="mb-1 text-body font-semibold text-ink">3. Undo</h3>
-        <p className="mb-2 text-label text-ink-dim">
-          Roll the losers back, newest record first, logging a compensation record for each: <strong>{undone}</strong>{' '}
-          undone{report.interrupted ? ' — and then the machine stopped again' : ''}.
-        </p>
-        {report.undo.length === 0 ? (
-          <p className="text-label text-ink-dim">Nothing to undo.</p>
-        ) : (
-          <ul className="flex flex-col gap-1 text-label">
-            {report.undo.map((u, i) => (
-              <li key={i} className={u.action === 'undo' ? 'text-ink' : 'text-ink-dim'}>
-                <span className="font-mono">LSN {u.lsn}</span> ({u.txn}) — <strong>{u.action}</strong>: {u.detail}
-                {u.clr !== null && (
-                  <>
-                    {' '}
-                    — logged as <span className="font-mono">LSN {u.clr}</span>
-                  </>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
+        <div className={card}>
+          <h3 className="mb-1 text-body font-semibold text-ink">2. Redo</h3>
+          <p className="mb-2 text-label text-ink-dim">
+            Repeat history: every change from the oldest recLSN, whoever made it, unless the page already has it.{' '}
+            <strong>{redone}</strong> redone, <strong>{report.redo.length - redone}</strong> skipped.
+          </p>
+          {report.redo.length === 0 ? (
+            <p className="text-label text-ink-dim">Nothing examined.</p>
+          ) : (
+            <ul className="flex flex-col gap-1 text-label">
+              {report.redo.map((r) => (
+                <li key={r.lsn} className={r.action === 'redo' ? 'text-ink' : 'text-ink-dim'}>
+                  <span className="font-mono">LSN {r.lsn}</span> ({r.key}, page {r.page}) —{' '}
+                  <strong>{r.action === 'redo' ? 'redo' : 'skip'}</strong>: {r.reason}
+                </li>
+              ))}
+            </ul>
+          )}
+          {report.ended.length > 0 && (
+            <p className="mt-2 text-label text-ink-dim">
+              End record written for {report.ended.join(', ')}: committed, with nothing left to do.
+            </p>
+          )}
+        </div>
+
+        <div className={card}>
+          <h3 className="mb-1 text-body font-semibold text-ink">3. Undo</h3>
+          <p className="mb-2 text-label text-ink-dim">
+            Roll the losers back, newest record first, logging a compensation record for each: <strong>{undone}</strong>{' '}
+            undone{report.interrupted ? ' — and then the machine stopped again' : ''}.
+          </p>
+          {report.undo.length === 0 ? (
+            <p className="text-label text-ink-dim">Nothing to undo.</p>
+          ) : (
+            <ul className="flex flex-col gap-1 text-label">
+              {report.undo.map((u, i) => (
+                <li key={i} className={u.action === 'undo' ? 'text-ink' : 'text-ink-dim'}>
+                  <span className="font-mono">LSN {u.lsn}</span> ({u.txn}) — <strong>{u.action}</strong>: {u.detail}
+                  {u.clr !== null && (
+                    <>
+                      {' '}
+                      — logged as <span className="font-mono">LSN {u.clr}</span>
+                    </>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       </div>
-    </div>
+    </DataView>
   );
 }

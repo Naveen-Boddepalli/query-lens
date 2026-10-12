@@ -8,7 +8,9 @@ import type { LockingOptions, ScheduleStep, ScheduleStepResult, VersionRow } fro
 import { ISOLATION_LEVELS } from '../../engine/isolation.ts';
 import type { IsolationLevel } from '../../engine/transactionControl.ts';
 import { PageHeader } from '../../ui/PageHeader.tsx';
+import { DataView } from '../../ui/DataView.tsx';
 import { decodeSchedule, encodeSchedule, MAX_STATEMENT_LENGTH, SESSIONS } from '../../ui/scheduleUrl.ts';
+import { SCHEDULE_COLUMNS, scheduleRows } from '../../ui/transactionTables.ts';
 import type { SessionName } from '../../ui/scheduleUrl.ts';
 import {
   btnPrimary,
@@ -805,30 +807,37 @@ export function ScheduleToolPage() {
         {result.steps.length === 0 ? (
           <p className="text-label text-ink-dim">Add a step, or load an example.</p>
         ) : (
-          <ol className="flex flex-col gap-3">
-            {result.steps.map((step, at) => (
-              <li
-                key={`${String(at)}-${String(step.index)}-${step.phase}`}
-                className="grid grid-cols-1 gap-2 sm:grid-cols-[2rem_1fr_1fr] sm:items-start"
-              >
-                <span className="text-label tabular-nums text-ink-dim">{step.index + 1}.</span>
-                {SESSIONS.map((lane) =>
-                  lane === step.session ? (
-                    <StepCard
-                      key={lane}
-                      step={step}
-                      database={database}
-                      onRemove={() => {
-                        setSteps((prev) => prev.filter((_, i) => i !== step.index));
-                      }}
-                    />
-                  ) : (
-                    <div key={lane} className="hidden sm:block" aria-hidden />
-                  ),
-                )}
-              </li>
-            ))}
-          </ol>
+          <DataView
+            caption="The schedule as it ran, one row for each thing that happened"
+            columns={SCHEDULE_COLUMNS}
+            rows={scheduleRows(result.steps)}
+            keyOf={(r, i) => `${String(i)}-${String(r.n)}`}
+          >
+            <ol className="flex flex-col gap-3">
+              {result.steps.map((step, at) => (
+                <li
+                  key={`${String(at)}-${String(step.index)}-${step.phase}`}
+                  className="grid grid-cols-1 gap-2 sm:grid-cols-[2rem_1fr_1fr] sm:items-start"
+                >
+                  <span className="text-label tabular-nums text-ink-dim">{step.index + 1}.</span>
+                  {SESSIONS.map((lane) =>
+                    lane === step.session ? (
+                      <StepCard
+                        key={lane}
+                        step={step}
+                        database={database}
+                        onRemove={() => {
+                          setSteps((prev) => prev.filter((_, i) => i !== step.index));
+                        }}
+                      />
+                    ) : (
+                      <div key={lane} className="hidden sm:block" aria-hidden />
+                    ),
+                  )}
+                </li>
+              ))}
+            </ol>
+          </DataView>
         )}
         {result.truncated && (
           <p className="mt-2 text-label text-evict">Only the first {MAX_SCHEDULE_STEPS} steps were run.</p>

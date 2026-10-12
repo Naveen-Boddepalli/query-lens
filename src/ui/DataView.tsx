@@ -20,7 +20,9 @@ export interface DataTableProps<Row> {
 
 export function DataTable<Row>({ caption, columns, rows, keyOf }: DataTableProps<Row>) {
   return (
-    <div className="overflow-x-auto">
+    // A scrollable region has to be reachable from the keyboard, and a table of plain text has nothing focusable in it.
+    // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
+    <div className="overflow-x-auto" role="region" aria-label={caption} tabIndex={0}>
       <table className="w-full border-collapse text-label">
         <caption className="mb-2 text-left text-ink-dim">{caption}</caption>
         <thead>
