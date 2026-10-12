@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { lazy, Suspense, useState } from 'react';
 import { Link, Navigate, useParams } from 'react-router-dom';
 import { DEFAULT_ENGINE_OPTIONS, runQuery } from '../engine/index.ts';
 import type { RunResult } from '../engine/index.ts';
@@ -10,6 +10,7 @@ import {
   challengeOptions,
   challengeStats,
 } from './challenges/challenges.tsx';
+import { SCRIPT_CHALLENGES, scriptChallengeById } from './challenges/scriptChallenges.tsx';
 import { markSolved, readSolved } from '../ui/challengeProgress.ts';
 import { PageHeader } from '../ui/PageHeader.tsx';
 import { SqlEditor } from '../ui/SqlEditor.tsx';
@@ -17,9 +18,41 @@ import { useThemeContext } from '../ui/ThemeContext.tsx';
 import { encodeShareState } from '../ui/urlState.ts';
 import { btnPrimary, btnSecondary, card, panelSurface } from '../ui/primitives.ts';
 
-/** One `/challenges/:id`. Runs the query on a fixed engine config and checks it. */
+// The transaction and durability challenges run a schedule or a log script, not a query; their view carries the
+// schedule runner and the log machine, which a query challenge has no use for, so it is loaded only when one is opened.
+const ScriptChallengeView = lazy(() =>
+  import('./challenges/ScriptChallengeView.tsx').then((m) => ({ default: m.ScriptChallengeView })),
+);
+
+/** The query challenges and then the script ones, as the index lists them: what "3 of 31" and "next" count over. */
+const ORDER: { id: string; title: string }[] = [...CHALLENGES, ...SCRIPT_CHALLENGES].map((c) => ({
+  id: c.id,
+  title: c.title,
+}));
+
+/** One `/challenges/:id`: a query run on a fixed engine config, or a script run on the schedule and log machines. */
 export function ChallengePage() {
   const { challengeId } = useParams();
+  const script = scriptChallengeById(challengeId);
+  if (script) {
+    const index = ORDER.findIndex((c) => c.id === script.id);
+    return (
+      <Suspense fallback={<div className="flex-1" aria-hidden />}>
+        <ScriptChallengeView
+          key={script.id}
+          challenge={script}
+          index={index}
+          total={ORDER.length}
+          next={ORDER[index + 1] ?? null}
+        />
+      </Suspense>
+    );
+  }
+  return <QueryChallengeView challengeId={challengeId} />;
+}
+
+/** One query challenge. Runs the query on a fixed engine config and checks it. */
+function QueryChallengeView({ challengeId }: { challengeId: string | undefined }) {
   const challenge = challengeById(challengeId);
   const { theme } = useThemeContext();
   const dataset = challenge ? challengeDataset(challenge) : 'users';
@@ -41,8 +74,8 @@ export function ChallengePage() {
 
   if (!challenge) return <Navigate to="/challenges" replace />;
 
-  const index = CHALLENGES.findIndex((c) => c.id === challenge.id);
-  const next = CHALLENGES[index + 1];
+  const index = ORDER.findIndex((c) => c.id === challenge.id);
+  const next = ORDER[index + 1];
   const result = run?.result ?? null;
   const passed = run !== null && !run.result.error && challenge.check(run.result, run.sql);
   const stats = result && !result.error ? challengeStats(result) : null;
@@ -71,7 +104,7 @@ export function ChallengePage() {
           Challenges
         </Link>
         {' · '}
-        {index + 1} of {CHALLENGES.length}
+        {index + 1} of {ORDER.length}
       </p>
       <PageHeader title={challenge.title} className="mt-2">
         {challenge.brief}

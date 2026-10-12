@@ -9,10 +9,11 @@ been done.
 
 ## Checked automatically
 
-Fifty-eight routes are scanned with [axe-core](https://github.com/dequelabs/axe-core) against the WCAG 2.0, 2.1 and 2.2
+Sixty-one routes are scanned with [axe-core](https://github.com/dequelabs/axe-core) against the WCAG 2.0, 2.1 and 2.2
 rules at levels A and AA. The scan runs in the project's test suite (`e2e/audit.spec.ts`), with reduced motion on. It
 covers the landing page, the playground, every tool and comparison, every docs page, the not-found page, and one
-stage, one lesson and one challenge page standing for their kinds. The last run found no violations on any of them.
+stage, two lessons and three challenge pages standing for their kinds — a query challenge, and the two script
+challenges (a schedule and a log script), which are a different view. The last run found no violations on any of them.
 The other stage, lesson and challenge pages are built from the same components, but they are not scanned one by one.
 
 Automated scanning catches only part of WCAG: a pass means no *detectable* violation, not that a page is accessible.

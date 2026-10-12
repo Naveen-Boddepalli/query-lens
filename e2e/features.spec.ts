@@ -1400,7 +1400,7 @@ test('a link that names a dataset reopens on it, in the Playground and the inspe
 
 test('a challenge checks the query on Run and remembers the solve', async ({ page }) => {
   await page.goto('/challenges');
-  await expect(page.getByText('0 of 18 solved')).toBeVisible();
+  await expect(page.getByText(/^0 of \d+ solved$/)).toBeVisible();
   await page.getByRole('link', { name: /Make the planner use the index/ }).click();
   await expect(page).toHaveURL(/\/challenges\/use-the-index$/);
 
@@ -1424,9 +1424,9 @@ test('a challenge checks the query on Run and remembers the solve', async ({ pag
 
   // The solve persists to the index.
   await page.goto('/challenges');
-  await expect(page.getByText('1 of 18 solved')).toBeVisible();
+  await expect(page.getByText(/^1 of \d+ solved$/)).toBeVisible();
   await page.getByRole('button', { name: 'Reset progress' }).click();
-  await expect(page.getByText('0 of 18 solved')).toBeVisible();
+  await expect(page.getByText(/^0 of \d+ solved$/)).toBeVisible();
 });
 
 test('a challenge can run against a non-default preset table', async ({ page }) => {
@@ -1743,11 +1743,11 @@ test('the Playground prints its trace as a paper worksheet', async ({ page }) =>
 
 test('the learn track opens lessons that deep-link into the Playground and remembers progress', async ({ page }) => {
   await page.goto('/learn');
-  await expect(page.getByText('0 of 9 complete')).toBeVisible();
+  await expect(page.getByText(/^0 of \d+ complete$/)).toBeVisible();
 
   await page.getByRole('link', { name: /Follow one row from disk to result/ }).click();
   await expect(page).toHaveURL(/\/learn\/one-row$/);
-  await expect(page.getByText('Lesson 2 of 9')).toBeVisible();
+  await expect(page.getByText(/Lesson 2 of \d+/)).toBeVisible();
 
   // A step link carries a computed Playground step.
   const jump = page.getByRole('link', { name: /Jump to the optimiser rewrite/ });
@@ -1762,9 +1762,9 @@ test('the learn track opens lessons that deep-link into the Playground and remem
   await expect(page.getByRole('button', { name: /Completed/ })).toBeVisible();
 
   await page.goto('/learn');
-  await expect(page.getByText('1 of 9 complete')).toBeVisible();
+  await expect(page.getByText(/^1 of \d+ complete$/)).toBeVisible();
   await page.getByRole('button', { name: 'Reset progress' }).click();
-  await expect(page.getByText('0 of 9 complete')).toBeVisible();
+  await expect(page.getByText(/^0 of \d+ complete$/)).toBeVisible();
 
   // An unknown lesson id lands back on the index rather than erroring.
   await page.goto('/learn/no-such-lesson');

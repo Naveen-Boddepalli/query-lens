@@ -207,6 +207,16 @@ const T = (name: string): string => `src/pages/tools/${name}.tsx`;
  *  - 2026-10-04, latch crabbing (§25.4 F5): a new route, /tools/latch-crabbing (163.5 kB measured + 3, rounded
  *    to 167). Unlike the standalone sandboxes it drives the REAL engine B+Tree (`engine/index/btree.ts`, the same
  *    code /tools/btree uses), so it pays the shared engine chunk the same way /tools/btree does (ceiling 167).
+ *  - 2026-10-13, lessons and challenges for the transaction and durability tools (§25.4, release checklist §2.4):
+ *    seven lessons (`transactionLessons.tsx`) and thirteen challenges (`scriptChallenges.tsx`) are prose and data in
+ *    the routes that list them, so /learn 173 → 179, /learn/:id 172 → 179, /progress 175 → 181, /challenges 171 →
+ *    176 and /challenges/:id 290 → 296 (each measured + 3, rounded up: 175.8, 175.7, 178.0, 172.9, 292.8). The
+ *    schedule runner, the protocol comparison and the log machine are NOT in any of them: a challenge's script is
+ *    parsed, run and checked in `scriptRunner.ts`, behind the lazily-imported `ScriptChallengeView`, which is a new
+ *    opt-in chunk (27.4 kB measured + 3, rounded to 31) fetched only when one of those challenges is opened. The
+ *    lesson links are built from plain data (`transactionScenarios.ts`) so that `/learn/:id` does not import the
+ *    engines either. The index routes do carry every lesson's steps — a split of the lesson list from its prose would
+ *    take that back, and is the first thing to do if /learn needs to shrink.
  *  - 2026-10-12, data-table views for the transaction and durability tools (§H6): `DataView` and the row builders
  *    (`transactionTables.ts`; the matrix's own in `isolationTable.ts`, so the schedule tool does not carry the
  *    Hermitage suite) came into /tools/schedule, /tools/isolation and /tools/concurrency, and the write-ahead-log
@@ -294,16 +304,16 @@ export const ROUTES: readonly RouteBudget[] = [
   { route: '/playground', roots: [P('PlaygroundPage')], kb: 324, note: 'the Playground: the editor, every stage panel, the engine — the heaviest route, and the one most people land on' },
   { route: '/stages', roots: ['src/ui/StagesLayout.tsx', P('StagesIndex')], kb: 169, note: 'the stage explainers, index' },
   { route: '/stages/:id', roots: ['src/ui/StagesLayout.tsx', P('StagePage')], kb: 184, note: 'one stage explainer' },
-  { route: '/learn', roots: [P('LearnPage')], kb: 173, note: 'the lesson track' },
-  { route: '/learn/:id', roots: [P('LessonPage')], kb: 172, note: 'one lesson' },
+  { route: '/learn', roots: [P('LearnPage')], kb: 179, note: 'the lesson track' },
+  { route: '/learn/:id', roots: [P('LessonPage')], kb: 179, note: 'one lesson' },
   { route: '/examples', roots: [P('ExamplesPage')], kb: 115, note: 'preset queries' },
   { route: '/gallery', roots: [P('GalleryPage')], kb: 169, note: 'named moments' },
   { route: '/compare', roots: [P('ComparePage')], kb: 179, note: 'index vs scan, policy vs policy, hash vs sort, join algorithms, B+Tree vs. LSM' },
   { route: '/trace', roots: [P('TracePage')], kb: 171, note: 'the trace inspector' },
-  { route: '/progress', roots: [P('ProgressPage')], kb: 175, note: 'the progress dashboard' },
+  { route: '/progress', roots: [P('ProgressPage')], kb: 181, note: 'the progress dashboard' },
   { route: '/practice', roots: [P('PracticePage')], kb: 182, note: 'generated questions with engine-computed answers, and a Leitner schedule' },
-  { route: '/challenges', roots: [P('ChallengesPage')], kb: 171, note: 'challenge index' },
-  { route: '/challenges/:id', roots: [P('ChallengePage')], kb: 290, note: 'one challenge' },
+  { route: '/challenges', roots: [P('ChallengesPage')], kb: 176, note: 'challenge index' },
+  { route: '/challenges/:id', roots: [P('ChallengePage')], kb: 296, note: 'one challenge' },
   { route: '/settings', roots: [P('SettingsPage')], kb: 116, note: 'preferences' },
   { route: '/study', roots: [P('StudyPage')], kb: 122, note: 'the §9 study runner (unlisted); the instrument travels in the link, not the bundle (§25.4 A2)' },
   { route: '/assignments/new', roots: [P('AssignmentsNewPage')], kb: 170, note: 'assignment-link builder' },
@@ -346,6 +356,7 @@ export const OPT_IN: readonly { key: string; kb: number; note: string; after?: s
   { key: 'src/perf/inp.ts', kb: 2, note: 'the opt-in INP recorder for the §9 study (§25.4 A6) — fetched only after a participant opts in' },
   { key: 'src/ui/WorkspaceDialog.tsx', kb: 6, after: 'src/pages/PlaygroundPage.tsx', note: 'the Workspaces dialog (§H7) — fetched only when Custom mode\'s Workspaces button is pressed' },
   { key: 'src/ui/DurabilityDialog.tsx', kb: 17, after: 'src/pages/PlaygroundPage.tsx', note: 'the Durability dialog (§25.4 E4): the write-ahead-log machine, crash and recovery — fetched only when the Playground\'s Durability button is pressed' },
+  { key: 'src/pages/challenges/ScriptChallengeView.tsx', kb: 31, after: 'src/pages/ChallengePage.tsx', note: 'a transaction or durability challenge: the schedule runner, the protocol comparison and the log machine — fetched only when one of those challenges is opened' },
 ];
 
 /* -------------------------------------------------------------------------- */

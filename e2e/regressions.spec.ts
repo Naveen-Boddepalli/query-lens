@@ -393,7 +393,7 @@ test('every route renders the app on a cold load, not the 404 page', async ({ pa
     ['/playground', /steps in this trace/],
     ['/stages', /Pipeline stages/i],
     ['/stages/parse', /Parser/],
-    ['/learn', /ordered path through the pipeline/],
+    ['/learn', /ordered path through the engine/],
     ['/learn/one-row', /Follow one row from disk to result/],
     ['/examples', /Examples/],
     ['/docs/faq', /Frequently Asked|FAQ|data/i],

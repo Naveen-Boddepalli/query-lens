@@ -10,7 +10,7 @@ import { Callout, Contents, DocMeta } from '../../../ui/DocsComponents.tsx';
 <DocMeta items={[
   { label: 'For', value: 'Someone preparing for backend, data or database-systems interviews' },
   { label: 'Time', value: 'About six weeks at 3–4 hours a week — compress or stretch it' },
-  { label: 'Scope', value: 'Storage, indexes, query execution and optimization. Transactions and recovery are outside it.' },
+  { label: 'Scope', value: 'Storage, indexes, query execution, optimization, transactions and recovery.' },
 ]} />
 
 <Callout>
@@ -26,7 +26,7 @@ import { Callout, Contents, DocMeta } from '../../../ui/DocsComponents.tsx';
   { href: '#week-2-indexes', label: 'Week 2 — Indexes' },
   { href: '#week-3-joins-sorting-and-aggregation', label: 'Week 3 — Joins, sorting, aggregation' },
   { href: '#week-4-the-optimizer', label: 'Week 4 — The optimizer' },
-  { href: '#week-5-transactions-the-part-that-is-mostly-not-here', label: 'Week 5 — Transactions' },
+  { href: '#week-5-transactions-and-recovery', label: 'Week 5 — Transactions and recovery' },
   { href: '#week-6-put-it-together', label: 'Week 6 — Put it together' },
   { href: '#what-this-will-not-prepare-you-for', label: 'What this will not prepare you for' },
 ]} />
@@ -118,19 +118,38 @@ estimated rows sit beside the actual ones. The [planner lesson](/learn/planner) 
 
 **Check.** [Push the filter down](/challenges/push-it-down) and [two conditions, still a hit](/challenges/and-that-matches).
 
-## Week 5 — Transactions, the part that is mostly not here
+## Week 5 — Transactions and recovery
 
-Be honest with yourself here: QueryLens has **no transactions, no MVCC, no logging**. The
-[lock simulator](/tools/locks) covers two-phase locking on its own — shared and exclusive locks, waiters,
-deadlock detection and victim choice — outside the query engine. Use it for the mechanism, and use a textbook
-or your course for the rest.
+**Watch.** Two sessions on one table in the [schedule tool](/tools/schedule): run the dirty-read preset with no
+locking, then under row locks, then on versions. The [dirty-read](/learn/dirty-read) and
+[snapshots](/learn/snapshots) lessons walk it, and the [isolation matrix](/tools/isolation) shows which level lets
+which anomaly through — each cell a run, not a lookup. Then the log: in the [write-ahead log](/tools/wal) switch
+the log-before-data rule off and see what a crash leaves behind, and in [crash recovery](/tools/recovery) read
+analysis, redo and undo pass by pass. The [log-first](/learn/log-first),
+[steal-and-force](/learn/steal-and-force) and [recovery](/learn/recovery) lessons walk those. The
+[lock simulator](/tools/locks) shows the lock table on its own, and the
+[protocol comparison](/tools/concurrency) runs one schedule under five ways of keeping it correct.
 
-**Explain, from other material.**
+**Explain.**
 
-- ACID: what does each letter cost? Isolation levels and the anomalies each one allows.
-- Two-phase locking: growing and shrinking phases; why strict 2PL; how deadlocks are found and broken.
-- MVCC: what does a reader see, and what do writers do to old versions?
-- Write-ahead logging: why log before the page, what a checkpoint is, the idea of redo and undo.
+- ACID: what does each letter cost? Which anomalies does each isolation level allow, and why does a level mean
+  "how long a lock is held"?
+- Two-phase locking: growing and shrinking phases; why strict 2PL; how deadlocks are found, and who is chosen to
+  lose.
+- MVCC: what does a reader see, what do writers do to old versions, and what does it cost (dead versions, `VACUUM`)?
+- Snapshot isolation is not serializable: construct write skew. What does a serializable check at commit add?
+- Timestamp ordering and optimistic validation: when does each abort a transaction, and how much work goes with it?
+- Write-ahead logging: why log before the page? What does a commit actually write? What do steal and force each
+  cost, and who pays?
+- What does a fuzzy checkpoint record, and why does it not shorten redo by itself?
+- Analysis, redo, undo: why is history repeated, including the changes of transactions that did not commit? Why is
+  undo itself logged?
+
+**Check.** [Read a value that never existed](/challenges/read-the-unreal),
+[make A the deadlock victim](/challenges/pick-the-victim),
+[commit what no order explains](/challenges/write-skew),
+[make recovery redo a commit](/challenges/redo-a-commit) and
+[start redo in the middle of the log](/challenges/start-redo-late).
 
 ## Week 6 — Put it together
 
@@ -145,6 +164,6 @@ reads; a scan is a hundred."
 
 ## What this will not prepare you for
 
-System-design rounds, distributed databases, recovery, the SQL you would write at work beyond the supported
+System-design rounds, distributed databases, the SQL you would write at work beyond the supported
 subset, and the behaviour of any particular production database. Treat QueryLens as the place you *watch the
 mechanism*, and the answers above as scaffolding for the depth an interviewer will probe.

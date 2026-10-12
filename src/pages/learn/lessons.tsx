@@ -6,6 +6,7 @@ import type { ReactNode } from 'react';
 import { createSeedDatabase, DEFAULT_ENGINE_OPTIONS, runQuery } from '../../engine/index.ts';
 import type { ReplacementPolicyName, StepEvent } from '../../engine/index.ts';
 import { encodeShareState } from '../../ui/urlState.ts';
+import { TRANSACTION_LESSONS } from './transactionLessons.tsx';
 
 /**
  * The §17.2 manual tasks as an ordered, in-app track (plan.md §21.3 `/learn`).
@@ -69,7 +70,8 @@ export function stepLink(spec: OpenSpec): { href: string; label: string } {
   return { href: `/playground?${query}`, label: spec.label ?? 'Open this in the Playground' };
 }
 
-export const LESSONS: Lesson[] = [
+/** The query pipeline: the Playground, the planner, the buffer pool and the B+Tree. */
+export const PIPELINE_LESSONS: Lesson[] = [
   {
     id: 'first-query',
     title: 'Run your first query',
@@ -490,6 +492,9 @@ export const LESSONS: Lesson[] = [
     ],
   },
 ];
+
+/** The whole track, in order: the pipeline first, then transactions and durability (`transactionLessons.tsx`). */
+export const LESSONS: Lesson[] = [...PIPELINE_LESSONS, ...TRANSACTION_LESSONS];
 
 export function lessonById(id: string | undefined): Lesson | undefined {
   return LESSONS.find((l) => l.id === id);
