@@ -59,35 +59,73 @@ export function SettingsChallengeView({ challenge, index, total, next }: Setting
         </p>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           {challenge.controls.map((control) => {
-            // The range is a description of the input, not part of its name.
+            const id = `control-${control.key}`;
             const rangeId = `range-${control.key}`;
+            const set = (value: string) => { setValues((prev) => ({ ...prev, [control.key]: value })); };
+            const value = values[control.key] ?? '';
+            if (control.kind === 'checks') {
+              const on = new Set(value.split(',').filter((v) => v.length > 0));
+              return (
+                <fieldset key={control.key} className="flex flex-col gap-1 text-label text-ink-dim sm:col-span-2">
+                  <legend className="mb-1">{control.label}</legend>
+                  <div className="flex flex-wrap gap-x-4 gap-y-1">
+                    {control.options.map((o) => (
+                      <label key={o.value} className="flex items-center gap-1.5 font-mono text-ink">
+                        <input
+                          type="checkbox"
+                          checked={on.has(o.value)}
+                          onChange={(e) => {
+                            const next = new Set(on);
+                            if (e.target.checked) next.add(o.value);
+                            else next.delete(o.value);
+                            set(control.options.filter((x) => next.has(x.value)).map((x) => x.value).join(','));
+                          }}
+                          className="accent-[var(--color-accent)]"
+                        />
+                        {o.label}
+                      </label>
+                    ))}
+                  </div>
+                </fieldset>
+              );
+            }
             return (
-              <div key={control.key} className="flex flex-col gap-1 text-label text-ink-dim">
-                <label htmlFor={`control-${control.key}`}>{control.label}</label>
+              <div
+                key={control.key}
+                className={`flex flex-col gap-1 text-label text-ink-dim ${control.kind === 'text' ? 'sm:col-span-2' : ''}`}
+              >
+                <label htmlFor={id}>{control.label}</label>
                 {control.kind === 'select' ? (
-                  <select
-                    id={`control-${control.key}`}
-                    value={values[control.key] ?? ''}
-                    onChange={(e) => { setValues((prev) => ({ ...prev, [control.key]: e.target.value })); }}
-                    className={inputField}
-                  >
+                  <select id={id} value={value} onChange={(e) => { set(e.target.value); }} className={inputField}>
                     {control.options.map((o) => (
                       <option key={o.value} value={o.value}>
                         {o.label}
                       </option>
                     ))}
                   </select>
+                ) : control.kind === 'text' ? (
+                  <input
+                    id={id}
+                    type="text"
+                    value={value}
+                    maxLength={control.max}
+                    spellCheck={false}
+                    autoComplete="off"
+                    onChange={(e) => { set(e.target.value); }}
+                    className={`${inputField} font-mono`}
+                  />
                 ) : (
                   <>
+                    {/* The range is a description of the input, not part of its name. */}
                     <input
-                      id={`control-${control.key}`}
+                      id={id}
                       type="number"
                       inputMode="numeric"
                       min={control.min}
                       max={control.max}
-                      value={values[control.key] ?? ''}
+                      value={value}
                       aria-describedby={rangeId}
-                      onChange={(e) => { setValues((prev) => ({ ...prev, [control.key]: e.target.value })); }}
+                      onChange={(e) => { set(e.target.value); }}
                       className={`${inputField} tabular-nums`}
                     />
                     <span id={rangeId} className="text-ink-dim">

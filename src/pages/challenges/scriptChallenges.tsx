@@ -18,7 +18,9 @@ export type ScriptSetup =
   /** The same two sessions, run under every protocol the schedule runner has. */
   | { kind: 'protocols'; rows: 3 | 20 }
   /** The write-ahead-log machine over pages 1–4, under the given policies. */
-  | { kind: 'wal'; frames: 2 | 3 | 4; enforce: boolean; steal: boolean; force: boolean };
+  | { kind: 'wal'; frames: 2 | 3 | 4; enforce: boolean; steal: boolean; force: boolean }
+  /** The locks sandbox: two transactions, four pages, requests and releases in the order written. */
+  | { kind: 'locks' };
 
 export interface ScriptChallenge {
   id: string;
@@ -37,6 +39,57 @@ const code = (text: string) => <code className="font-mono">{text}</code>;
 const WAL_DEFAULTS = { kind: 'wal', frames: 3, enforce: true, steal: true, force: false } as const;
 
 export const SCRIPT_CHALLENGES: ScriptChallenge[] = [
+  {
+    id: 'one-page-deadlock',
+    title: 'Deadlock on a single page',
+    brief: (
+      <>
+        Two transactions, four pages, and every request goes to the lock table in the order you write it. Write a script in
+        which the lock table finds a deadlock — and <strong>every request is for page 0</strong>.
+      </>
+    ),
+    hint: (
+      <>
+        A deadlock needs a circle of waits, not two resources. Both transactions can hold a shared lock on one page at
+        once; what does each of them wait for if it then asks to change it?
+      </>
+    ),
+    starter: ['T1 exclusive 0', 'T2 exclusive 1', 'T1 exclusive 1', 'T2 exclusive 0'].join('\n'),
+    setup: { kind: 'locks' },
+    misconception: (
+      <>
+        A deadlock needs two resources, each held by one side and wanted by the other. One page is enough: two readers who
+        both ask to become writers each wait for the other to let go of the lock it holds — the upgrade deadlock, and a
+        reason systems take the exclusive lock first when they know a write is coming.
+      </>
+    ),
+  },
+  {
+    id: 'same-order-no-deadlock',
+    title: 'Take the pages in the same order',
+    brief: (
+      <>
+        Two transactions each need exclusive locks on pages 0 and 1, and in the starter they take them in opposite orders
+        and deadlock. Write a script in which T2 has to wait, <strong>nobody is aborted</strong>, and T2 ends up holding
+        both pages.
+      </>
+    ),
+    hint: (
+      <>
+        Let T1 finish what it started: it takes both pages and then lets them go. T2&apos;s request waits behind it and is
+        promoted when T1 releases — then T2 asks for the other page.
+      </>
+    ),
+    starter: ['T1 exclusive 0', 'T2 exclusive 1', 'T1 exclusive 1', 'T2 exclusive 0'].join('\n'),
+    setup: { kind: 'locks' },
+    misconception: (
+      <>
+        Deadlocks are a risk locking runs, and the lock table has to find and break them. They are also avoidable: if every
+        transaction takes the pages it needs in one agreed order, there is no circle to form, and the cost is a wait, not
+        an abort.
+      </>
+    ),
+  },
   {
     id: 'read-the-unreal',
     title: 'Read a value that never existed',

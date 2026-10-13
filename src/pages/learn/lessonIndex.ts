@@ -87,6 +87,30 @@ export const LESSON_GROUPS: readonly LessonGroup[] = [
         summary: 'A panel that breaks does not lose your trace — and the report writes itself.',
       },
       {
+        id: 'tokens-and-trees',
+        title: 'From text to tokens to a tree',
+        minutes: 3,
+        summary: 'The tokenizer, the parser and where AND ends up — and what an error looks like.',
+      },
+      {
+        id: 'grammar-diagram',
+        title: 'Read the grammar diagram',
+        minutes: 3,
+        summary: 'What the parser can read, why AND binds tighter than OR, and what the engine refuses anyway.',
+      },
+      {
+        id: 'planner-rules',
+        title: 'Rewrite rules need each other',
+        minutes: 3,
+        summary: 'Seven rules, two of which make a lookup — and what each does alone.',
+      },
+      {
+        id: 'buffer-pool',
+        title: 'Replay a page-reference string',
+        minutes: 5,
+        summary: 'A loop that beats LRU, a bigger pool that misses more, and a scan that sweeps the hot set.',
+      },
+      {
         id: 'external-sort',
         title: 'Sort more than fits in memory',
         minutes: 4,
@@ -154,6 +178,12 @@ export const LESSON_GROUPS: readonly LessonGroup[] = [
     title: 'Transactions and durability',
     about: 'Two sessions on one table, then a crash: locks, snapshots, the log and recovery.',
     lessons: [
+      {
+        id: 'lock-table',
+        title: 'The lock table: share, wait, deadlock',
+        minutes: 4,
+        summary: 'Readers share a page, a writer waits and is promoted, and a circle of waits has a victim.',
+      },
       {
         id: 'dirty-read',
         title: 'Let a dirty read happen, then stop it',

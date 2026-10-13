@@ -2,8 +2,9 @@ import type { ReactNode } from 'react';
 
 /**
  * The challenges for the sort, the hash join, the join order, the slotted page, hash indexes, the LSM tree, columnar
- * layouts, latch crabbing and the vector index. Not queries and not scripts: the player sets a few numbers — the
- * same ones the tool itself takes — and the check is a predicate over what the tool's own driver makes of them.
+ * layouts, latch crabbing and the vector index — and for the older sandboxes: the buffer pool, the planner's rules,
+ * the B+Tree and the isolation matrix. Not queries and not scripts: the player sets a few things — the same ones the
+ * tool itself takes — and the check is a predicate over what the tool's own driver makes of them.
  *
  * This file is only the list, and imports nothing of any driver, for the reason `scriptChallenges.tsx` does not:
  * the challenge index should not carry eight drivers to list ten titles. The checks and the running are in
@@ -14,7 +15,11 @@ import type { ReactNode } from 'react';
 
 export type Control =
   | { kind: 'number'; key: string; label: string; min: number; max: number; note?: string }
-  | { kind: 'select'; key: string; label: string; options: readonly { value: string; label: string }[] };
+  | { kind: 'select'; key: string; label: string; options: readonly { value: string; label: string }[] }
+  /** Free text, such as a page-reference string; at most `max` characters. */
+  | { kind: 'text'; key: string; label: string; max: number }
+  /** Any subset of `options`, kept as their values joined by commas. */
+  | { kind: 'checks'; key: string; label: string; options: readonly { value: string; label: string }[] };
 
 export type SettingsTool =
   | 'sort'
@@ -25,11 +30,17 @@ export type SettingsTool =
   | 'lsm'
   | 'columnar'
   | 'latch-crabbing'
-  | 'vector-index';
+  | 'vector-index'
+  | 'buffer-pool'
+  | 'planner'
+  | 'btree'
+  | 'isolation';
 
 export interface SettingsChallenge {
   id: string;
   title: string;
+  /** Which group of the challenge index it sits in. */
+  group: 'storage' | 'transactions';
   /** The tool whose driver runs the settings, and whose page the solved run links to. */
   tool: SettingsTool;
   brief: ReactNode;
@@ -55,6 +66,40 @@ const STRATEGY = {
   ],
 } as const;
 
+const POLICIES = [
+  { value: 'lru', label: 'LRU' },
+  { value: 'clock', label: 'Clock sweep' },
+  { value: 'fifo', label: 'FIFO' },
+  { value: 'second-chance', label: 'Second-chance' },
+  { value: 'optimal', label: 'Optimal (Bélády)' },
+  { value: 'midpoint', label: 'Midpoint LRU (InnoDB)' },
+  { value: 'lru-k', label: 'LRU-2 (scan-resistant)' },
+  { value: 'two-q', label: '2Q (scan-resistant)' },
+] as const;
+
+const RULES = [
+  { value: 'constant-folding', label: 'constant-folding' },
+  { value: 'predicate-pushdown', label: 'predicate-pushdown' },
+  { value: 'join-predicate-pushdown', label: 'join-predicate-pushdown' },
+  { value: 'join-algorithm-selection', label: 'join-algorithm-selection' },
+  { value: 'index-selection', label: 'index-selection' },
+  { value: 'range-index-selection', label: 'range-index-selection' },
+  { value: 'index-only-scan', label: 'index-only-scan' },
+] as const;
+
+const ANOMALIES = [
+  { value: 'G0', label: 'G0 Write cycles' },
+  { value: 'G1a', label: 'G1a Aborted reads' },
+  { value: 'G1b', label: 'G1b Intermediate reads' },
+  { value: 'G1c', label: 'G1c Circular information flow' },
+  { value: 'OTV', label: 'OTV Observed transaction vanishes' },
+  { value: 'PMP', label: 'PMP Predicate-many-preceders' },
+  { value: 'P4', label: 'P4 Lost update' },
+  { value: 'G-single', label: 'G-single Read skew' },
+  { value: 'G2-item', label: 'G2-item Write skew' },
+  { value: 'G2', label: 'G2 Anti-dependency cycles' },
+] as const;
+
 const TABLES = [
   { value: 'departments', label: 'departments' },
   { value: 'projects', label: 'projects' },
@@ -66,6 +111,7 @@ export const SETTINGS_CHALLENGES: SettingsChallenge[] = [
   {
     id: 'one-merge-pass',
     title: 'Sort in a single merge pass',
+    group: 'storage',
     tool: 'sort',
     brief: (
       <>
@@ -98,6 +144,7 @@ export const SETTINGS_CHALLENGES: SettingsChallenge[] = [
   {
     id: 'more-memory-more-io',
     title: 'Give a join more memory and make it slower',
+    group: 'storage',
     tool: 'hash-join',
     brief: (
       <>
@@ -131,6 +178,7 @@ export const SETTINGS_CHALLENGES: SettingsChallenge[] = [
   {
     id: 'cheapest-order',
     title: 'Pick the join order',
+    group: 'storage',
     tool: 'join-order',
     brief: (
       <>
@@ -163,6 +211,7 @@ export const SETTINGS_CHALLENGES: SettingsChallenge[] = [
   {
     id: 'tightest-page',
     title: 'Find the smallest page that holds the rows',
+    group: 'storage',
     tool: 'page',
     brief: (
       <>
@@ -194,6 +243,7 @@ export const SETTINGS_CHALLENGES: SettingsChallenge[] = [
   {
     id: 'split-the-other-bucket',
     title: 'Split a bucket that did not overflow',
+    group: 'storage',
     tool: 'hash-index',
     brief: (
       <>
@@ -234,6 +284,7 @@ export const SETTINGS_CHALLENGES: SettingsChallenge[] = [
   {
     id: 'cheap-writes-cheap-reads',
     title: 'Cheap writes and cheap reads',
+    group: 'storage',
     tool: 'lsm',
     brief: (
       <>
@@ -268,6 +319,7 @@ export const SETTINGS_CHALLENGES: SettingsChallenge[] = [
   {
     id: 'write-amp-below-one',
     title: 'Write less than you were asked to',
+    group: 'storage',
     tool: 'lsm',
     brief: (
       <>
@@ -300,6 +352,7 @@ export const SETTINGS_CHALLENGES: SettingsChallenge[] = [
   {
     id: 'column-store-saving',
     title: 'Make the column store pay off',
+    group: 'storage',
     tool: 'columnar',
     brief: (
       <>
@@ -341,6 +394,7 @@ export const SETTINGS_CHALLENGES: SettingsChallenge[] = [
   {
     id: 'crabbing-saves-a-fifth',
     title: 'Make crabbing save a fifth of the time',
+    group: 'storage',
     tool: 'latch-crabbing',
     brief: (
       <>
@@ -373,6 +427,7 @@ export const SETTINGS_CHALLENGES: SettingsChallenge[] = [
   {
     id: 'recall-for-a-quarter',
     title: 'Beat brute force by four to one',
+    group: 'storage',
     tool: 'vector-index',
     brief: (
       <>
@@ -408,6 +463,197 @@ export const SETTINGS_CHALLENGES: SettingsChallenge[] = [
         An approximate index always beats brute force. On a small table the clusters and the graph leave little to skip,
         and the bar — high recall for a quarter of the work — cannot be met by any setting; it takes a few hundred points
         before there is room to save a distance computation without losing a neighbour.
+      </>
+    ),
+  },
+  {
+    id: 'bigger-pool-more-misses',
+    title: 'Give a pool more frames and make it miss more',
+    group: 'storage',
+    tool: 'buffer-pool',
+    brief: (
+      <>
+        A bigger buffer pool should miss less. Write a page-reference string and choose a policy and a number of frames so
+        that the same string misses <strong>more</strong> with one more frame than with the number you chose.
+      </>
+    ),
+    hint: (
+      <>
+        Not every policy is one a larger cache always holds a superset of. The one that evicts the oldest page, whether or
+        not it was used since, is the classic — and there is a well-known string of twelve references that does it in
+        three frames.
+      </>
+    ),
+    needs: 'more misses with one more frame than with the number chosen, under the same policy',
+    controls: [
+      { kind: 'text', key: 'ref', label: 'Page-reference string', max: 200 },
+      { kind: 'number', key: 'frames', label: 'Frames (then one more)', min: 2, max: 7 },
+      { kind: 'select', key: 'policy', label: 'Policy', options: POLICIES },
+    ],
+    starter: { ref: '1 2 3 4 1 2 5 1 2 3 4 5', frames: '3', policy: 'lru' },
+    misconception: (
+      <>
+        More frames never means more misses. It holds for LRU and for the optimal policy, whose bigger cache always
+        contains the smaller one&apos;s pages; FIFO and second-chance have no such property, and on the right string a
+        bigger pool misses more. It is called Bélády&apos;s anomaly, and it is why &ldquo;add memory&rdquo; is a
+        measurement and not an axiom.
+      </>
+    ),
+  },
+  {
+    id: 'clock-is-not-lru',
+    title: 'Make LRU and clock sweep choose differently',
+    group: 'storage',
+    tool: 'buffer-pool',
+    brief: (
+      <>
+        Real engines run clock sweep, an approximation of LRU, and are often said to run LRU. Write a page-reference
+        string and a number of frames on which the two <strong>evict different pages</strong>.
+      </>
+    ),
+    hint: (
+      <>
+        Clock keeps one bit of recency where LRU keeps a full order. A string where a page is used once, long ago, and then
+        another is used twice in quick succession, is where one bit and an order part ways.
+      </>
+    ),
+    needs: 'the sequence of evicted pages differs between LRU and clock sweep',
+    controls: [
+      { kind: 'text', key: 'ref', label: 'Page-reference string', max: 200 },
+      { kind: 'number', key: 'frames', label: 'Frames', min: 2, max: 8 },
+    ],
+    starter: { ref: '0 1 2 3 4 0 1 2 3 4', frames: '4' },
+    misconception: (
+      <>
+        PostgreSQL, and most engines, run LRU. They run clock sweep or something like it, because keeping a perfect order
+        costs a lock and a list move on every hit. The two agree on easy strings and part ways on others — and a database
+        that says &ldquo;LRU&rdquo; is usually describing the idea, not the code.
+      </>
+    ),
+  },
+  {
+    id: 'scan-keeps-the-hot-set',
+    title: 'Keep the hot pages through a scan',
+    group: 'storage',
+    tool: 'buffer-pool',
+    brief: (
+      <>
+        Four hot pages are read three times, then a 21-page sequential scan runs through the pool, then the hot pages are
+        read again. Choose a policy, a pool size and a scan ring so that all eight of the later hot reads are{' '}
+        <strong>hits</strong> — sixteen hits in all.
+      </>
+    ),
+    hint: (
+      <>
+        Two kinds of fix: a policy that does not promote a page on its first touch, and a ring that lets the scan reuse its
+        own few frames. A ring only helps if it leaves the hot pages&apos; frames alone.
+      </>
+    ),
+    needs: 'sixteen hits in all, with every hot page still resident after the scan',
+    controls: [
+      { kind: 'select', key: 'policy', label: 'Policy', options: POLICIES },
+      { kind: 'number', key: 'frames', label: 'Frames', min: 2, max: 8 },
+      { kind: 'number', key: 'ring', label: 'Scan ring (frames)', min: 0, max: 4 },
+    ],
+    starter: { policy: 'lru', frames: '6', ring: '0' },
+    misconception: (
+      <>
+        LRU keeps what you use most, so a scan can only evict what it needs to. A page that was read once and never again
+        is the most recently used page in the pool, and it pushes out the hot set to make room for itself — twenty-one
+        times over. That is sequential flooding, and scan-resistant policies and rings exist because of it.
+      </>
+    ),
+  },
+  {
+    id: 'index-with-two-rules',
+    title: 'Get the lookup with two rules',
+    group: 'storage',
+    tool: 'planner',
+    brief: (
+      <>
+        The planner has seven rewrite rules, all on. For {code('SELECT name, email FROM users WHERE id = 5 AND age > 30')}{' '}
+        the result is an {code('IndexScan')}. Switch rules off until <strong>at most two remain</strong> and the plan is
+        still an {code('IndexScan')}.
+      </>
+    ),
+    hint: (
+      <>
+        Switch rules off one at a time and watch the plan: the ones that change nothing when they go are the ones to drop.
+        When the lookup disappears, put back what you took away — and ask what the index rule needs to find.
+      </>
+    ),
+    needs: 'an IndexScan in the plan, with at most two rules switched on',
+    controls: [{ kind: 'checks', key: 'rules', label: 'Rules that are on', options: RULES }],
+    starter: {
+      rules:
+        'constant-folding,predicate-pushdown,join-predicate-pushdown,join-algorithm-selection,index-selection,range-index-selection,index-only-scan',
+    },
+    misconception: (
+      <>
+        Each rewrite rule stands alone: the index rule turns a filter into an index lookup by itself. It looks for a
+        predicate that has already been folded into the scan, so on its own it finds nothing. Rules compose — one makes
+        what another can match — and the order they run in is part of what they do.
+      </>
+    ),
+  },
+  {
+    id: 'third-level',
+    title: 'Grow a third level with twelve keys',
+    group: 'storage',
+    tool: 'btree',
+    brief: (
+      <>
+        Insert keys in order into a B+Tree and it grows a level each time the root splits. Choose a fan-out and a number
+        of keys so that the tree is <strong>three levels tall</strong> with <strong>at most twelve keys</strong>.
+      </>
+    ),
+    hint: (
+      <>
+        Keys arriving in order leave every leaf only half full, so the tree grows sooner than a full tree&apos;s capacity
+        suggests — and sooner the narrower the pages are. Try the narrowest fan-out.
+      </>
+    ),
+    needs: 'a tree of height 3 holding at most 12 keys',
+    controls: [
+      { kind: 'number', key: 'fanout', label: 'Fan-out (keys a page holds)', min: 3, max: 6 },
+      { kind: 'number', key: 'keys', label: 'Keys, inserted in order', min: 1, max: 200 },
+    ],
+    starter: { fanout: '4', keys: '12' },
+    misconception: (
+      <>
+        A third level appears when the second is full: at fan-out four a page holds four keys and a root has five children,
+        so a two-level tree is full at twenty keys and the twenty-first should do it. Keys arriving in order leave every
+        leaf at its minimum, not full, so the root splits at seventeen. A tree is taller than its capacity says whenever
+        its pages are not full.
+      </>
+    ),
+  },
+  {
+    id: 'same-level-different-promise',
+    title: 'One level, two promises',
+    group: 'transactions',
+    tool: 'isolation',
+    brief: (
+      <>
+        {code('REPEATABLE READ')} is one name, and the two engines here keep it in different ways: one with locks held to
+        the end, one with a snapshot. Choose an anomaly that <strong>happens on one of them and is prevented on the
+        other</strong> at that level.
+      </>
+    ),
+    hint: (
+      <>
+        Locks stop a read being changed under you; a snapshot stops you seeing the change at all. One of them lets a new row
+        appear in a range you read; the other lets two transactions each read and then write what the other read.
+      </>
+    ),
+    needs: 'an anomaly that happens on one engine and is prevented on the other, at REPEATABLE READ',
+    controls: [{ kind: 'select', key: 'anomaly', label: 'Anomaly', options: ANOMALIES }],
+    starter: { anomaly: 'G0' },
+    misconception: (
+      <>
+        {code('REPEATABLE READ')} means the same thing wherever you see it. With locks it lets a phantom through and stops
+        write skew; with snapshots it stops the phantom and lets write skew through. The standard names the level by what it
+        forbids, and engines honour the name differently — so the level is a thing to look up per system.
       </>
     ),
   },

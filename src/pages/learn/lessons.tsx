@@ -8,6 +8,7 @@ import type { ReplacementPolicyName, StepEvent } from '../../engine/index.ts';
 import { encodeShareState } from '../../ui/urlState.ts';
 import { LESSON_INDEX } from './lessonIndex.ts';
 import type { LessonMeta } from './lessonIndex.ts';
+import { SANDBOX_STEPS } from './sandboxLessons.tsx';
 import { EXECUTION_STEPS, STORAGE_STEPS } from './storageLessons.tsx';
 import { TRANSACTION_STEPS } from './transactionLessons.tsx';
 
@@ -445,6 +446,7 @@ export const PIPELINE_STEPS: Record<string, LessonStep[]> = {
 
 const STEPS: Readonly<Record<string, LessonStep[]>> = {
   ...PIPELINE_STEPS,
+  ...SANDBOX_STEPS,
   ...EXECUTION_STEPS,
   ...STORAGE_STEPS,
   ...TRANSACTION_STEPS,

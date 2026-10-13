@@ -3,15 +3,15 @@ import { Link, Navigate, useParams } from 'react-router-dom';
 import { DEFAULT_ENGINE_OPTIONS, runQuery } from '../engine/index.ts';
 import type { RunResult } from '../engine/index.ts';
 import {
-  CHALLENGES,
   challengeById,
   challengeDatabase,
   challengeDataset,
   challengeOptions,
   challengeStats,
 } from './challenges/challenges.tsx';
-import { SCRIPT_CHALLENGES, scriptChallengeById } from './challenges/scriptChallenges.tsx';
-import { SETTINGS_CHALLENGES, settingsChallengeById } from './challenges/settingsChallenges.tsx';
+import { CHALLENGE_ORDER as ORDER } from './challenges/groups.ts';
+import { scriptChallengeById } from './challenges/scriptChallenges.tsx';
+import { settingsChallengeById } from './challenges/settingsChallenges.tsx';
 import { markSolved, readSolved } from '../ui/challengeProgress.ts';
 import { PageHeader } from '../ui/PageHeader.tsx';
 import { SqlEditor } from '../ui/SqlEditor.tsx';
@@ -29,12 +29,6 @@ const ScriptChallengeView = lazy(() =>
 const SettingsChallengeView = lazy(() =>
   import('./challenges/SettingsChallengeView.tsx').then((m) => ({ default: m.SettingsChallengeView })),
 );
-
-/** The query challenges, the script ones, then the settings ones, as the index lists them: what "3 of 41" and "next" count over. */
-const ORDER: { id: string; title: string }[] = [...CHALLENGES, ...SCRIPT_CHALLENGES, ...SETTINGS_CHALLENGES].map((c) => ({
-  id: c.id,
-  title: c.title,
-}));
 
 /** One `/challenges/:id`: a query on a fixed engine config, a script on the schedule and log machines, or settings for a tool. */
 export function ChallengePage() {
@@ -117,6 +111,10 @@ function QueryChallengeView({ challengeId }: { challengeId: string | undefined }
           undefined,
         )}`
       : null;
+
+  // A tool that shows what the challenge is about, opened on the query that was just run — also after an error, which
+  // the Parser can show better than the message can.
+  const toolLink = run !== null ? (challenge.tool?.href(run.sql) ?? null) : null;
 
   return (
     <div className="mx-auto w-full max-w-2xl p-6 sm:p-8">
@@ -221,6 +219,11 @@ function QueryChallengeView({ challengeId }: { challengeId: string | undefined }
                 </Link>
               )}
             </>
+          )}
+          {toolLink && (
+            <Link to={toolLink} className={btnSecondary}>
+              {challenge.tool?.label}
+            </Link>
           )}
         </div>
       )}

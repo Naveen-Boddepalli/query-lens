@@ -28,6 +28,15 @@ const LEVEL_WORDS = {
 } as const;
 
 function Setup({ setup }: { setup: ScriptSetup }) {
+  if (setup.kind === 'locks') {
+    return (
+      <p className="text-label text-ink-dim">
+        Two transactions, <strong className="text-ink">T1</strong> and <strong className="text-ink">T2</strong>, and four
+        pages, 0 to 3. Each line is a lock request or a release, placed in the order written; a request that conflicts waits,
+        and a circle of waits is a deadlock.
+      </p>
+    );
+  }
   if (setup.kind === 'wal') {
     return (
       <p className="text-label text-ink-dim">
@@ -65,7 +74,19 @@ function Syntax({ setup }: { setup: ScriptSetup }) {
   return (
     <details className="text-label text-ink-dim">
       <summary className="cursor-pointer underline-offset-2 hover:text-ink hover:underline">What goes on a line</summary>
-      {setup.kind === 'wal' ? (
+      {setup.kind === 'locks' ? (
+        <ul className="mt-2 list-disc space-y-0.5 pl-5">
+          <li>
+            <code className="font-mono text-ink">T1 shared 0</code>, <code className="font-mono text-ink">T2 exclusive 3</code>{' '}
+            — ask for a shared or an exclusive lock on a page (<code className="font-mono text-ink">s</code> and{' '}
+            <code className="font-mono text-ink">x</code> will do)
+          </li>
+          <li>
+            <code className="font-mono text-ink">T1 release shared 0</code> — let a lock go; a waiter behind it is promoted
+          </li>
+          <li>The steps run in the order you write them. Blank lines and lines that start with <code className="font-mono text-ink">--</code> are skipped.</li>
+        </ul>
+      ) : setup.kind === 'wal' ? (
         <ul className="mt-2 list-disc space-y-0.5 pl-5">
           <li>
             <code className="font-mono text-ink">begin T1</code>, <code className="font-mono text-ink">commit T1</code>,{' '}
@@ -137,7 +158,7 @@ export function ScriptChallengeView({ challenge, index, total, next }: ScriptCha
       <div className="mt-4 space-y-3">
         <Setup setup={challenge.setup} />
         <label className="flex flex-col gap-1 text-label text-ink-dim">
-          {challenge.setup.kind === 'wal' ? 'Script — one step to a line' : 'Schedule — one step to a line'}
+          {challenge.setup.kind === 'wal' || challenge.setup.kind === 'locks' ? 'Script — one step to a line' : 'Schedule — one step to a line'}
           <textarea
             value={text}
             rows={rows}

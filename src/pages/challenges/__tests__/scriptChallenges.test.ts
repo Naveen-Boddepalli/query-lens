@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
+import { decodeLockSteps } from '../../../ui/lockScript.ts';
 import { decodeSchedule } from '../../../ui/scheduleUrl.ts';
 import { decodeWalSteps } from '../../../ui/walUrl.ts';
 import { CHALLENGES } from '../challenges.tsx';
 import { SCRIPT_CHALLENGES, scriptChallengeById } from '../scriptChallenges.tsx';
-import { CHECKED, parseSchedule, parseWal, runScript } from '../scriptRunner.ts';
+import { CHECKED, parseLocks, parseSchedule, parseWal, runScript } from '../scriptRunner.ts';
 
 const lines = (...l: string[]) => l.join('\n');
 const challenge = (id: string) => scriptChallengeById(id)!;
@@ -35,6 +36,15 @@ describe('script challenges', () => {
 
   // One known solution each — the check must accept it.
   const solutions: Record<string, string> = {
+    'one-page-deadlock': lines('T1 shared 0', 'T2 shared 0', 'T1 exclusive 0', 'T2 exclusive 0'),
+    'same-order-no-deadlock': lines(
+      'T1 exclusive 0',
+      'T1 exclusive 1',
+      'T2 exclusive 0',
+      'T1 release exclusive 0',
+      'T1 release exclusive 1',
+      'T2 exclusive 1',
+    ),
     'read-the-unreal': lines(
       'A: BEGIN',
       'A: UPDATE accounts SET balance = 0 WHERE id = 1',
@@ -128,7 +138,9 @@ describe('script challenges', () => {
       expect(r.tables.length, c.id).toBeGreaterThan(0);
       const url = new URL(r.toolHref!, 'https://x');
       expect(url.pathname.startsWith('/tools/'), c.id).toBe(true);
-      if (c.setup.kind === 'wal') {
+      if (c.setup.kind === 'locks') {
+        expect(decodeLockSteps(url.searchParams.get('s')), c.id).toEqual(parseLocks(script).steps);
+      } else if (c.setup.kind === 'wal') {
         expect(decodeWalSteps(url.searchParams.get('s')), c.id).toEqual(parseWal(script).steps);
       } else {
         expect(decodeSchedule(url.searchParams.get('s')), c.id).toEqual(parseSchedule(script).steps);
@@ -136,8 +148,98 @@ describe('script challenges', () => {
     }
   });
 
+  it('counts the pages a script asks for, not the ones it lets go of', () => {
+    // A release of a page that was never held does nothing; it is not a second page in the deadlock.
+    const script = lines('T1 shared 0', 'T2 shared 0', 'T1 exclusive 0', 'T2 exclusive 0', 'T1 release shared 3');
+    expect(passes('one-page-deadlock', script)).toBe(true);
+  });
+
+  it('reports the victim and what each step did for a lock script', () => {
+    const r = runScript(challenge('one-page-deadlock'), solutions['one-page-deadlock']!);
+    const fact = (label: string) => r.facts.find((f) => f.label === label)?.value;
+    expect(fact('deadlocks')).toBe('1');
+    expect(fact('victim')).toBe('T2');
+    expect(fact('aborted')).toBe('T2');
+    expect(fact('requests granted at once')).toBe('2');
+    expect(r.tables[0]!.rows).toHaveLength(4);
+  });
+
   describe('reject the near-misses', () => {
     const cheats: [string, string, string][] = [
+      [
+        'one-page-deadlock',
+        'the two-page circle',
+        lines('T1 exclusive 0', 'T2 exclusive 1', 'T1 exclusive 1', 'T2 exclusive 0'),
+      ],
+      [
+        'one-page-deadlock',
+        'a single page where two readers never ask to write',
+        lines('T1 shared 0', 'T2 shared 0', 'T1 shared 0', 'T2 shared 0'),
+      ],
+      [
+        'one-page-deadlock',
+        'a writer waiting behind a reader, which is a wait and no circle',
+        lines('T1 shared 0', 'T2 exclusive 0', 'T1 release shared 0'),
+      ],
+      [
+        'one-page-deadlock',
+        'a one-page deadlock and then a request for another page',
+        lines('T1 shared 0', 'T2 shared 0', 'T1 exclusive 0', 'T2 exclusive 0', 'T1 exclusive 2'),
+      ],
+      [
+        'same-order-no-deadlock',
+        'the opposite-order deadlock',
+        lines('T1 exclusive 0', 'T2 exclusive 1', 'T1 exclusive 1', 'T2 exclusive 0'),
+      ],
+      [
+        'same-order-no-deadlock',
+        'the same order with T2 still waiting at the end',
+        lines('T1 exclusive 0', 'T1 exclusive 1', 'T2 exclusive 0'),
+      ],
+      [
+        'same-order-no-deadlock',
+        'a deadlock that aborts T1 and leaves T2 holding both pages',
+        lines('T2 exclusive 1', 'T1 exclusive 0', 'T2 exclusive 0', 'T1 exclusive 1'),
+      ],
+      [
+        'same-order-no-deadlock',
+        'T2 holding only the page it was promoted into',
+        lines('T1 exclusive 0', 'T2 exclusive 0', 'T1 release exclusive 0'),
+      ],
+      [
+        'same-order-no-deadlock',
+        'T2 holding only the page it took first, and waiting for the other',
+        lines('T1 exclusive 0', 'T2 exclusive 1', 'T2 exclusive 0'),
+      ],
+      [
+        'same-order-no-deadlock',
+        'T2 ending with both pages, because T1 had let go before it asked',
+        lines('T1 exclusive 0', 'T1 release exclusive 0', 'T2 exclusive 0', 'T2 exclusive 1'),
+      ],
+      [
+        'same-order-no-deadlock',
+        'T2 holding both pages shared',
+        lines(
+          'T1 exclusive 0',
+          'T1 exclusive 1',
+          'T2 shared 0',
+          'T1 release exclusive 0',
+          'T1 release exclusive 1',
+          'T2 shared 1',
+        ),
+      ],
+      [
+        'same-order-no-deadlock',
+        'a wait ended by a deadlock that aborts T2, before T2 asks again',
+        lines(
+          'T1 shared 0',
+          'T2 shared 0',
+          'T1 exclusive 0',
+          'T2 exclusive 0',
+          'T1 release shared 0',
+          'T2 exclusive 1',
+        ),
+      ],
       [
         'read-the-unreal',
         'a dirty read that A then commits',
@@ -357,6 +459,20 @@ describe('parsing what the player wrote', () => {
     expect(parseWal('begin T1\nfrobnicate').problem).toMatch(/^Line 2: “frobnicate” is not a step/);
     expect(parseWal('').problem).toBe('Write at least one step.');
     expect(parseWal(Array.from({ length: 41 }, () => 'flush log').join('\n')).problem).toMatch(/at most 40 steps/);
+  });
+
+  it('reads the lock sandbox’s own words, and names the line that is not one', () => {
+    const p = parseLocks('-- readers\nT1 shared 0\n  t2 X 3 \nT1 unlock s 0');
+    expect(p.problem).toBeNull();
+    expect(p.steps).toEqual([
+      { op: 'request', transaction: 'T1', page: 0, mode: 'shared' },
+      { op: 'request', transaction: 'T2', page: 3, mode: 'exclusive' },
+      { op: 'release', transaction: 'T1', page: 0, mode: 'shared' },
+    ]);
+    expect(parseLocks('T1 shared 0\nT3 shared 0').problem).toMatch(/^Line 2: “T3 shared 0” is not a step/);
+    expect(parseLocks('T1 shared 4').problem).toMatch(/^Line 1:/);
+    expect(parseLocks('').problem).toBe('Write at least one step.');
+    expect(parseLocks(Array.from({ length: 41 }, () => 'T1 shared 0').join('\n')).problem).toMatch(/at most 40 steps/);
   });
 
   it('runs nothing when the text does not parse', () => {

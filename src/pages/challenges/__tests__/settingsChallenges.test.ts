@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { buildHeap, createSeedDatabase, DEFAULT_ENGINE_OPTIONS } from '../../../engine/index.ts';
+import { buildHeap, createSeedDatabase, DEFAULT_ENGINE_OPTIONS, OPTIMIZER_RULES, REPLACEMENT_POLICY_LABELS, REPLACEMENT_POLICY_NAMES } from '../../../engine/index.ts';
+import { parseReferenceScans, runBufferTrace } from '../../../engine/bufferTrace.ts';
+import { HERMITAGE_TESTS } from '../../../engine/hermitage.ts';
 import { COLUMNAR_LIMITS, demoColumns, planLayout } from '../../../ui/columnar.ts';
 import { planExternalSort, shuffledRange, SORT_LIMITS } from '../../../ui/externalSort.ts';
 import { demoKeys, HASH_JOIN_LIMITS, planHashJoin } from '../../../ui/hashJoin.ts';
@@ -31,10 +33,26 @@ describe('settings challenges', () => {
 
   it('cover every storage and execution tool', () => {
     expect([...new Set(SETTINGS_CHALLENGES.map((c) => c.tool))].sort()).toEqual(
-      ['columnar', 'hash-index', 'hash-join', 'join-order', 'latch-crabbing', 'lsm', 'page', 'sort', 'vector-index'].sort(),
+      [
+        'btree',
+        'buffer-pool',
+        'columnar',
+        'hash-index',
+        'hash-join',
+        'isolation',
+        'join-order',
+        'latch-crabbing',
+        'lsm',
+        'page',
+        'planner',
+        'sort',
+        'vector-index',
+      ].sort(),
     );
-    expect(SETTINGS_CHALLENGES.length).toBeGreaterThanOrEqual(8);
-    expect(SETTINGS_CHALLENGES.length).toBeLessThanOrEqual(12);
+    expect(SETTINGS_CHALLENGES.length).toBe(16);
+    expect(SETTINGS_CHALLENGES.filter((c) => c.group === 'transactions').map((c) => c.id)).toEqual([
+      'same-level-different-promise',
+    ]);
   });
 
   it('every control spans the range its tool accepts, and every starter is inside it', () => {
@@ -85,6 +103,12 @@ describe('settings challenges', () => {
         k: [VECTOR_LIMITS.minK, VECTOR_LIMITS.maxK],
         parameter: [1, VECTOR_LIMITS.maxPoints],
       },
+      // The buffer pool sandbox takes 2 to 8 frames (one more is also run, so the first challenge stops at 7), and a
+      // scan ring of 0 to 4; the B+Tree sandbox a fan-out of 3 to 6.
+      'bigger-pool-more-misses': { frames: [2, 7] },
+      'clock-is-not-lru': { frames: [2, 8] },
+      'scan-keeps-the-hot-set': { frames: [2, 8], ring: [0, 4] },
+      'third-level': { fanout: [3, 6], keys: [1, 200] },
     };
     for (const c of SETTINGS_CHALLENGES) {
       const want = ranges[c.id] ?? {};
@@ -98,6 +122,25 @@ describe('settings challenges', () => {
       const read = readValues(c, c.starter);
       expect(typeof read === 'string' ? read : 'ok', `${c.id} starter`).toBe('ok');
     }
+  });
+
+  it('offers exactly the policies, rules and anomalies the tools have', () => {
+    const options = (id: string, key: string) => {
+      const control = challenge(id).controls.find((c) => c.key === key)!;
+      if (control.kind !== 'select' && control.kind !== 'checks') throw new Error(`${id}.${key} has no options`);
+      return control.options;
+    };
+    for (const id of ['bigger-pool-more-misses', 'scan-keeps-the-hot-set']) {
+      expect(options(id, 'policy').map((o) => o.value), id).toEqual([...REPLACEMENT_POLICY_NAMES]);
+      for (const o of options(id, 'policy')) {
+        expect(o.label).toBe(REPLACEMENT_POLICY_LABELS[o.value as keyof typeof REPLACEMENT_POLICY_LABELS]);
+      }
+    }
+    expect(options('index-with-two-rules', 'rules').map((o) => o.value)).toEqual([...OPTIMIZER_RULES]);
+    expect(options('same-level-different-promise', 'anomaly').map((o) => o.label)).toEqual(
+      HERMITAGE_TESTS.map((t) => `${t.id} ${t.name}`),
+    );
+    expect(options('same-level-different-promise', 'anomaly').map((o) => o.value)).toEqual(HERMITAGE_TESTS.map((t) => t.id));
   });
 
   it('start from settings that run and do not pass', () => {
@@ -131,6 +174,18 @@ describe('settings challenges', () => {
     ['crabbing-saves-a-fifth', { fanout: 5, threads: 3, ops: 6 }],
     ['recall-for-a-quarter', { method: 'ivf', parameter: 2 }],
     ['recall-for-a-quarter', { method: 'hnsw', parameter: 20 }],
+    ['bigger-pool-more-misses', { policy: 'fifo' }],
+    ['bigger-pool-more-misses', { policy: 'second-chance' }],
+    ['clock-is-not-lru', { ref: '0 1 2 0 3 0 4 2 3 0 3 2', frames: 3 }],
+    ['clock-is-not-lru', { ref: '1 2 3 4 1 2 5 1 2 3 4 5', frames: 3 }],
+    ['scan-keeps-the-hot-set', { policy: 'lru-k' }],
+    ['scan-keeps-the-hot-set', { policy: 'lru', ring: 2 }],
+    ['scan-keeps-the-hot-set', { policy: 'lru', frames: 8, ring: 3 }],
+    ['index-with-two-rules', { rules: 'predicate-pushdown,index-selection' }],
+    ['third-level', { fanout: 3, keys: 10 }],
+    ['third-level', { fanout: 3, keys: 12 }],
+    ['same-level-different-promise', { anomaly: 'PMP' }],
+    ['same-level-different-promise', { anomaly: 'G2-item' }],
   ];
 
   it('has a solution wired for every challenge', () => {
@@ -182,6 +237,27 @@ describe('settings challenges', () => {
       ['recall-for-a-quarter', 'probing every cluster: dearer than brute force', { method: 'ivf', parameter: 20 }],
       ['recall-for-a-quarter', 'a beam of 64: complete, and 29% of the work', { method: 'hnsw', parameter: 64 }],
       ['recall-for-a-quarter', 'a small table', { n: 100, k: 10, method: 'ivf', parameter: 2 }],
+      ['bigger-pool-more-misses', 'LRU, which never does', {}],
+      ['bigger-pool-more-misses', 'FIFO on a string where a fourth frame helps', { policy: 'fifo', ref: '0 1 2 3 4 0 1 2 3 4', frames: 4 }],
+      ['bigger-pool-more-misses', 'a pool that already holds every page', { policy: 'fifo', ref: '0 1 2 0 1 2', frames: 3 }],
+      ['clock-is-not-lru', 'a loop, where both evict alike', {}],
+      ['clock-is-not-lru', 'a string with no evictions at all', { ref: '0 1 2', frames: 4 }],
+      ['scan-keeps-the-hot-set', 'LRU with no ring', {}],
+      ['scan-keeps-the-hot-set', '2Q, which a one-time scan still floods', { policy: 'two-q' }],
+      ['scan-keeps-the-hot-set', 'a ring of three in a pool of six', { policy: 'lru', ring: 3 }],
+      ['scan-keeps-the-hot-set', 'midpoint LRU, one hit short', { policy: 'midpoint' }],
+      ['index-with-two-rules', 'all seven', {}],
+      ['index-with-two-rules', 'the index rule alone', { rules: 'index-selection' }],
+      ['index-with-two-rules', 'pushdown alone', { rules: 'predicate-pushdown' }],
+      ['index-with-two-rules', 'a lookup, but with three rules on', { rules: 'constant-folding,predicate-pushdown,index-selection' }],
+      ['index-with-two-rules', 'no rules at all', { rules: '' }],
+      ['third-level', 'fan-out four, twelve keys: two levels', {}],
+      ['third-level', 'fan-out three, one key short', { fanout: 3, keys: 9 }],
+      ['third-level', 'three levels, but seventeen keys', { fanout: 4, keys: 17 }],
+      ['third-level', 'a wide page', { fanout: 6, keys: 12 }],
+      ['same-level-different-promise', 'write cycles, prevented by both', { anomaly: 'G0' }],
+      ['same-level-different-promise', 'anti-dependency cycles, allowed by both', { anomaly: 'G2' }],
+      ['same-level-different-promise', 'aborted reads, prevented by both', { anomaly: 'G1a' }],
     ];
     for (const [id, why, over] of misses) {
       it(`${id} rejects ${why}`, () => {
@@ -230,6 +306,12 @@ describe('settings challenges', () => {
       ['column-store-saving', { n: 500, page: 256, layout: 'PAX' }, '/tools/columnar', { n: '500', page: '256', layout: 'PAX' }],
       ['crabbing-saves-a-fifth', { fanout: 3, threads: 3, ops: 6 }, '/tools/latch-crabbing', { fanout: '3', threads: '3', ops: '6' }],
       ['recall-for-a-quarter', { method: 'ivf', parameter: 2 }, '/tools/vector-index', { n: '400', k: '20' }],
+      ['bigger-pool-more-misses', { policy: 'fifo' }, '/tools/buffer-pool', { frames: '3', policy: 'fifo', ref: '1 2 3 4 1 2 5 1 2 3 4 5' }],
+      ['clock-is-not-lru', { ref: '0 1 2 0 3 0 4 2 3 0 3 2', frames: 3 }, '/tools/buffer-pool', { policy: 'clock', frames: '3' }],
+      ['scan-keeps-the-hot-set', { policy: 'lru', ring: 2 }, '/tools/buffer-pool', { policy: 'lru', frames: '6', sr: '2' }],
+      ['index-with-two-rules', { rules: 'predicate-pushdown,index-selection' }, '/tools/planner', { idx: '1', rules: 'predicate-pushdown,index-selection' }],
+      ['third-level', { fanout: 3, keys: 10 }, '/tools/btree', { fanout: '3', keys: '1,2,3,4,5,6,7,8,9,10' }],
+      ['same-level-different-promise', { anomaly: 'PMP' }, '/tools/isolation', { c: 'locks.PMP.repeatable-read' }],
     ];
     for (const [id, over, path, want] of expectations) {
       const url = params(run(id, over).toolHref!);
@@ -342,6 +424,62 @@ describe('the numbers a player reads are the numbers the tool shows', () => {
     const r = run('recall-for-a-quarter', { method: 'ivf', parameter: 2 });
     expect(r.facts.find((f) => f.label === 'distance computations')!.value).toBe(ivf2.avgComputations.toFixed(1));
     expect(r.facts.find((f) => f.label === 'recall of the true 20')!.value).toBe(`${(ivf2.avgRecall * 100).toFixed(0)}%`);
+  });
+
+  it('buffer pool: the misses are the sandbox trace’s, and FIFO’s fourth frame costs one more', () => {
+    const misses = (ref: string, frames: number, policy: string) => {
+      const { refs, scans } = parseReferenceScans(ref);
+      const result = runBufferTrace(refs, { ...DEFAULT_ENGINE_OPTIONS, bufferFrames: frames, policy: policy as never }, scans);
+      return result.events.filter((e) => e.stage === 'buffer' && e.action === 'miss').length;
+    };
+    expect(misses('1 2 3 4 1 2 5 1 2 3 4 5', 3, 'fifo')).toBe(9);
+    expect(misses('1 2 3 4 1 2 5 1 2 3 4 5', 4, 'fifo')).toBe(10);
+    const r = run('bigger-pool-more-misses', { policy: 'fifo' });
+    expect(r.facts.find((f) => f.label === 'misses in 3 frames')!.value).toBe('9');
+    expect(r.facts.find((f) => f.label === 'in 4')!.value).toBe('10');
+    expect(r.facts.find((f) => f.label === 'difference')!.value).toBe('+1');
+  });
+
+  it('buffer pool: LRU and clock differ on the same string, and the table lists both victim sequences', () => {
+    const r = run('clock-is-not-lru', { ref: '0 1 2 0 3 0 4 2 3 0 3 2', frames: 3 });
+    expect(r.tables[0]!.rows).toEqual([
+      ['LRU', '1, 2, 3, 0, 4'],
+      ['Clock sweep', '1, 2, 0, 4'],
+    ]);
+    expect(r.facts.find((f) => f.label === 'misses, LRU / clock')!.value).toBe('8 / 7');
+  });
+
+  it('planner: two rules are the least that make the lookup, and no one rule does', () => {
+    const rules = [...OPTIMIZER_RULES];
+    for (const a of rules) {
+      expect(run('index-with-two-rules', { rules: a }).passed, a).toBe(false);
+      for (const b of rules) {
+        if (a >= b) continue;
+        const passed = run('index-with-two-rules', { rules: `${a},${b}` }).passed;
+        expect(passed, `${a}+${b}`).toBe(a === 'index-selection' && b === 'predicate-pushdown');
+      }
+    }
+  });
+
+  it('b+tree: the third level comes at 10, 17, 21 and 31 keys for fan-outs of 3 to 6, below what full pages would hold', () => {
+    const firstThird = (fanout: number) => {
+      for (let keys = 1; keys <= 200; keys += 1) {
+        const r = runSettings(challenge('third-level'), { fanout: String(fanout), keys: String(keys) });
+        if (r.facts.find((f) => f.label === 'levels')!.value === '3') return keys;
+      }
+      return -1;
+    };
+    expect([3, 4, 5, 6].map(firstThird)).toEqual([10, 17, 21, 31]);
+    // A full two-level tree holds (fan-out + 1) pages of fan-out keys: 12, 20, 30 and 42.
+    expect([3, 4, 5, 6].map((f) => (f + 1) * f)).toEqual([12, 20, 30, 42]);
+  });
+
+  it('isolation: at REPEATABLE READ the engines disagree on exactly the phantom and write skew', () => {
+    const differing = HERMITAGE_TESTS.filter((t) => run('same-level-different-promise', { anomaly: t.id }).passed).map((t) => t.id);
+    expect(differing).toEqual(['PMP', 'G2-item']);
+    const facts = run('same-level-different-promise', { anomaly: 'PMP' }).facts;
+    expect(facts.find((f) => f.label === 'with locks')!.value).toBe('happens');
+    expect(facts.find((f) => f.label === 'with snapshots')!.value).toBe('prevented');
   });
 
   it('vector: on 100 points no setting reaches the bar, for k of 10 or 20', () => {

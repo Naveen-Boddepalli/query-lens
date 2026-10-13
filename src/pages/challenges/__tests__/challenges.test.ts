@@ -7,6 +7,7 @@ import {
   challengeDataset,
   challengeOptions,
   challengeStats,
+  optionalClauses,
 } from '../challenges.tsx';
 import type { Challenge } from '../challenges.tsx';
 
@@ -47,6 +48,9 @@ describe('challenges', () => {
     'not-in-the-null': 'SELECT * FROM people WHERE id NOT IN (SELECT person_id FROM banned);',
     'keep-the-unmatched':
       'SELECT authors.name, posts.title FROM authors LEFT JOIN posts ON authors.id = posts.authorId WHERE posts.title IS NULL;',
+    'and-before-or': 'SELECT * FROM users WHERE (id = 1 OR id = 3 OR id = 4) AND age > 30;',
+    'six-clauses':
+      'SELECT DISTINCT age, COUNT(*) FROM users WHERE age > 20 GROUP BY age HAVING COUNT(*) >= 1 LIMIT 5 OFFSET 1;',
   };
 
   it('has a solution wired for every challenge', () => {
@@ -96,6 +100,19 @@ describe('challenges', () => {
       ['count-the-nulls', 'SELECT COUNT(*), COUNT(id) FROM contacts;'],
       ['not-in-the-null', 'SELECT * FROM people WHERE id NOT IN (SELECT person_id FROM banned WHERE person_id IS NOT NULL) AND id > 9;'],
       ['keep-the-unmatched', 'SELECT authors.name, posts.title FROM authors LEFT JOIN posts ON authors.id = posts.authorId WHERE posts.id = 999;'],
+      // The right two people, but not by way of an OR under an AND.
+      ['and-before-or', 'SELECT * FROM users WHERE id IN (3, 4) AND age > 30;'],
+      ['and-before-or', 'SELECT * FROM users WHERE id = 3 OR id = 4;'],
+      // Both operators, and the wrong people.
+      ['and-before-or', 'SELECT * FROM users WHERE (id = 1 OR id = 3) AND age > 20;'],
+      ['and-before-or', 'SELECT * FROM users WHERE (id = 3 OR id = 4 OR id = 5) AND age > 30;'],
+      ['and-before-or', 'SELECT * FROM users WHERE (id = 3 OR id = 5) AND age > 30;'],
+      // Five of the six that run together, each time a different one missing (OFFSET cannot stand without a LIMIT).
+      ['six-clauses', 'SELECT DISTINCT age, COUNT(*) FROM users WHERE age > 20 GROUP BY age HAVING COUNT(*) >= 1 LIMIT 5;'],
+      ['six-clauses', 'SELECT age, COUNT(*) FROM users WHERE age > 20 GROUP BY age HAVING COUNT(*) >= 1 LIMIT 5 OFFSET 1;'],
+      ['six-clauses', 'SELECT DISTINCT age, COUNT(*) FROM users GROUP BY age HAVING COUNT(*) >= 1 LIMIT 5 OFFSET 1;'],
+      ['six-clauses', 'SELECT DISTINCT age, COUNT(*) FROM users WHERE age > 20 GROUP BY age LIMIT 5 OFFSET 1;'],
+      ['six-clauses', 'SELECT DISTINCT age FROM users WHERE age > 20 ORDER BY age LIMIT 5 OFFSET 1;'],
     ];
     for (const [id, sql] of cheats) {
       it(`${id} rejects: ${sql}`, () => {
@@ -105,6 +122,53 @@ describe('challenges', () => {
         expect(c.check(r, sql)).toBe(false);
       });
     }
+  });
+
+  describe('the challenges about how a query is read', () => {
+    const solved = (id: string, sql: string) => {
+      const c = challengeById(id)!;
+      const r = runOn(c, sql);
+      return r.error === undefined && c.check(r, sql);
+    };
+
+    it('and-before-or takes the two people however the query names them, and any grouping that gets them', () => {
+      expect(solved('and-before-or', 'SELECT name FROM users WHERE (id = 3 OR id = 4) AND age > 30;')).toBe(true);
+      expect(solved('and-before-or', 'SELECT id FROM users WHERE id = 3 AND age > 30 OR id = 4 AND age > 30;')).toBe(true);
+    });
+
+    it('six-clauses refuses the combinations the engine does not run, which is why they never pass', () => {
+      const c = challengeById('six-clauses')!;
+      for (const sql of [
+        'SELECT DISTINCT age, COUNT(*) FROM users WHERE age > 20 GROUP BY age HAVING COUNT(*) >= 1 ORDER BY age LIMIT 5 OFFSET 1;',
+        'SELECT DISTINCT age FROM users JOIN orders ON users.id = orders.user_id WHERE age > 20 ORDER BY age LIMIT 5 OFFSET 1;',
+      ]) {
+        const r = runOn(c, sql);
+        expect(r.error, sql).toBeDefined();
+        expect(c.check(r, sql), sql).toBe(false);
+      }
+    });
+
+    it('counts the optional parts the parse tree shows', () => {
+      const count = (sql: string) => optionalClauses(runQuery(sql, DATASETS.users.make(), DEFAULT_ENGINE_OPTIONS).events);
+      expect(count('SELECT * FROM users')).toBe(0);
+      expect(count('SELECT DISTINCT age FROM users')).toBe(1);
+      expect(count('SELECT * FROM users WHERE age > 20 LIMIT 5')).toBe(2);
+      expect(count('SELECT * FROM users WHERE age > 20 LIMIT 5 OFFSET 1')).toBe(3);
+      expect(count('SELECT DISTINCT age FROM users WHERE age > 20 ORDER BY age LIMIT 5 OFFSET 1')).toBe(5);
+      expect(count(solutions['six-clauses']!)).toBe(6);
+    });
+
+    it('opens the tool on what was written, and leaves the link out when the tool cannot take it', () => {
+      const parser = challengeById('and-before-or')!.tool!;
+      const sql = "SELECT * FROM users WHERE name = 'a b' AND id = 1";
+      const url = new URL(parser.href(sql)!, 'https://x');
+      expect(url.pathname).toBe('/tools/parser');
+      expect(url.searchParams.get('src')).toBe(sql);
+      expect(parser.href('   ')).toBeNull();
+      expect(parser.href('x'.repeat(2000))).not.toBeNull();
+      expect(parser.href('x'.repeat(2001))).toBeNull();
+      expect(challengeById('six-clauses')!.tool!.href('anything')).toBe('/tools/grammar#rule-select');
+    });
   });
 
   describe('a challenge with its own database (hash-beats-loop)', () => {

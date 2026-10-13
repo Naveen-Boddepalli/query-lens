@@ -18,9 +18,13 @@ import { MAX_SCHEDULE_STEPS, runSchedule } from '../../engine/schedule.ts';
 import type { LockingOptions, ScheduleResult, ScheduleStep } from '../../engine/schedule.ts';
 import { createAccountsDatabase } from '../../engine/seed.ts';
 import { serialCheck, transactionsOf } from '../../engine/serialCheck.ts';
+import { formatLockStep, MAX_LOCK_STEPS, parseLockStep, runLockSteps } from '../../ui/lockScript.ts';
+import type { LockStep } from '../../ui/lockScript.ts';
+import { heldBy } from '../../ui/lockSimulation.ts';
 import { MAX_STATEMENT_LENGTH } from '../../ui/scheduleUrl.ts';
 import { SCHEDULE_COLUMNS, scheduleRows } from '../../ui/transactionTables.ts';
 import { recoveryRows } from '../../ui/walTables.ts';
+import { sandboxHref } from '../learn/sandboxScenarios.ts';
 import { scenarioHref } from '../learn/transactionScenarios.ts';
 import type { ScheduleLine } from '../learn/transactionScenarios.ts';
 import type { ChallengeOutcome, OutcomeTable } from './outcome.ts';
@@ -75,6 +79,27 @@ export function parseWal(text: string): Parsed<WalStep> {
   if (steps.length === 0) return { steps, problem: 'Write at least one step.' };
   if (steps.length > MAX_WAL_STEPS) {
     return { steps, problem: `A script is at most ${String(MAX_WAL_STEPS)} steps; this one has ${String(steps.length)}.` };
+  }
+  return { steps, problem: null };
+}
+
+const LOCK_FORMS = 'T1 shared 0 · T2 exclusive 1 · T1 release shared 0 (pages 0 to 3, transactions T1 and T2)';
+
+/** One step to a line, in the lock sandbox's words. Blank lines and lines starting `--` are skipped. */
+export function parseLocks(text: string): Parsed<LockStep> {
+  const steps: LockStep[] = [];
+  for (const [i, raw] of text.split(/\r?\n/).entries()) {
+    const line = raw.trim();
+    if (line === '' || line.startsWith('--')) continue;
+    const step = parseLockStep(line);
+    if (!step) {
+      return { steps, problem: `Line ${String(i + 1)}: “${line.slice(0, 40)}” is not a step. The steps are ${LOCK_FORMS}.` };
+    }
+    steps.push(step);
+  }
+  if (steps.length === 0) return { steps, problem: 'Write at least one step.' };
+  if (steps.length > MAX_LOCK_STEPS) {
+    return { steps, problem: `A script is at most ${String(MAX_LOCK_STEPS)} steps; this one has ${String(steps.length)}.` };
   }
   return { steps, problem: null };
 }
@@ -216,11 +241,30 @@ const WAL_CHECKS: Record<string, (run: WalRun) => boolean> = {
     run.steps.some((s) => s.error?.startsWith('No-steal') === true && s.step.op !== 'write-page'),
 };
 
+const LOCK_CHECKS: Record<string, (run: ReturnType<typeof runLockSteps>) => boolean> = {
+  // The lock table found a deadlock, and every request in the script was for one page.
+  'one-page-deadlock': (run) =>
+    run.entries.some((e) => e.kind === 'deadlock') &&
+    new Set(run.entries.filter((e) => e.step.op === 'request').map((e) => e.step.page)).size === 1,
+  // Someone waited, no one was aborted (a deadlock is the only way anyone is), and T2 ends holding both pages
+  // exclusively.
+  'same-order-no-deadlock': (run) => {
+    const held = heldBy(run.state, 'T2').filter((h) => h.mode === 'exclusive').map((h) => h.resource);
+    return (
+      run.entries.some((e) => e.kind === 'blocked') &&
+      run.state.aborted.length === 0 &&
+      held.includes(0) &&
+      held.includes(1)
+    );
+  },
+};
+
 /** Every challenge id that has a check, by kind — what the tests hold against the list in `scriptChallenges.tsx`. */
-export const CHECKED: Record<'schedule' | 'protocols' | 'wal', string[]> = {
+export const CHECKED: Record<'schedule' | 'protocols' | 'wal' | 'locks', string[]> = {
   schedule: Object.keys(SCHEDULE_CHECKS),
   protocols: Object.keys(PROTOCOL_CHECKS),
   wal: Object.keys(WAL_CHECKS),
+  locks: Object.keys(LOCK_CHECKS),
 };
 
 // — running —
@@ -248,6 +292,35 @@ const asText = (cell: ReactNode): string => (typeof cell === 'string' || typeof 
 
 export function runScript(challenge: ScriptChallenge, text: string): ScriptRun {
   const setup = challenge.setup;
+
+  if (setup.kind === 'locks') {
+    const parsed = parseLocks(text);
+    if (parsed.problem !== null) return { ...NOT_RUN, problem: parsed.problem };
+    const check = LOCK_CHECKS[challenge.id];
+    if (!check) throw new Error(`script challenge ${challenge.id} has no check`);
+    const run = runLockSteps(parsed.steps);
+    const count = (kind: string) => run.entries.filter((e) => e.kind === kind).length;
+    const deadlock = run.entries.find((e) => e.kind === 'deadlock');
+    return {
+      problem: null,
+      passed: check(run),
+      facts: [
+        { label: 'requests granted at once', value: String(count('granted')) },
+        { label: 'requests that had to wait', value: String(count('blocked') + count('deadlock')) },
+        { label: 'deadlocks', value: String(count('deadlock')) },
+        { label: 'aborted', value: run.state.aborted.length === 0 ? 'nobody' : run.state.aborted.join(', ') },
+        ...(deadlock?.victim ? [{ label: 'victim', value: deadlock.victim }] : []),
+      ],
+      tables: [
+        {
+          caption: 'What each step did',
+          columns: ['Step', 'You wrote', 'What happened'],
+          rows: run.entries.map((e, i) => [String(i + 1), formatLockStep(e.step), e.lines.join(' ')]),
+        },
+      ],
+      toolHref: sandboxHref({ tool: 'locks', steps: parsed.steps.map(formatLockStep) }),
+    };
+  }
 
   if (setup.kind === 'wal') {
     const parsed = parseWal(text);

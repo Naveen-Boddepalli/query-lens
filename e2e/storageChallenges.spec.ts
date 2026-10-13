@@ -26,7 +26,8 @@ test('the challenge index has a storage and execution group, counted with the re
   await page.goto('/challenges');
   const group = page.getByRole('region', { name: 'Storage and execution' });
   await expect(group).toBeVisible();
-  await expect(group.getByRole('listitem')).toHaveCount(IDS.length);
+  // These ten, and the five for the buffer pool, the planner and the B+Tree (`sandboxLearning.spec.ts`).
+  await expect(group.getByRole('listitem')).toHaveCount(IDS.length + 5);
   await expect(page.getByText(/^0 of \d+ solved$/)).toBeVisible();
   await group.getByRole('link', { name: /Sort in a single merge pass/ }).click();
   await expect(page).toHaveURL(/\/challenges\/one-merge-pass$/);

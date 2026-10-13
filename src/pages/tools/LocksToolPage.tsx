@@ -1,13 +1,16 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { heldBy, waitingBy } from '../../ui/lockSimulation.ts';
+import type { LockMode } from '../../ui/lockSimulation.ts';
 import {
-  emptyState,
-  heldBy,
-  release as releaseLock,
-  request as requestLock,
-  waitingBy,
-} from '../../ui/lockSimulation.ts';
-import type { LockMode, SimState } from '../../ui/lockSimulation.ts';
+  decodeLockSteps,
+  encodeLockSteps,
+  LOCK_PAGES,
+  LOCK_TRANSACTIONS,
+  MAX_LOCK_STEPS,
+  runLockSteps,
+} from '../../ui/lockScript.ts';
+import type { LockStep, LockTransaction } from '../../ui/lockScript.ts';
 import { PageHeader } from '../../ui/PageHeader.tsx';
 import {
   btnPrimary,
@@ -28,11 +31,15 @@ import {
  * driver; this page just applies one request or release at a time and
  * narrates what happened, the same shape `/tools/btree`'s insert/delete/find
  * already uses.
+ *
+ * What was done is a list of steps, not just where it ended: `lockScript.ts` folds the list over an empty lock
+ * table, and the list travels in the URL (`s`), so a visit can be sent and a lesson can open the sandbox on the
+ * situation it is about.
  */
 
-const TRANSACTIONS = ['T1', 'T2'] as const;
-type Transaction = (typeof TRANSACTIONS)[number];
-const RESOURCES = [0, 1, 2, 3];
+const TRANSACTIONS = LOCK_TRANSACTIONS;
+type Transaction = LockTransaction;
+const RESOURCES: readonly number[] = LOCK_PAGES;
 const MODES: LockMode[] = ['shared', 'exclusive'];
 
 interface LogEntry {
@@ -56,51 +63,62 @@ function toneFor(text: string): LogEntry['tone'] {
   return 'quiet';
 }
 
-const DEADLOCK_EXAMPLE: { transaction: Transaction; resource: number; mode: LockMode }[] = [
-  { transaction: 'T1', resource: 0, mode: 'exclusive' },
-  { transaction: 'T2', resource: 1, mode: 'exclusive' },
-  { transaction: 'T1', resource: 1, mode: 'exclusive' },
-  { transaction: 'T2', resource: 0, mode: 'exclusive' },
+const DEADLOCK_EXAMPLE: LockStep[] = [
+  { op: 'request', transaction: 'T1', page: 0, mode: 'exclusive' },
+  { op: 'request', transaction: 'T2', page: 1, mode: 'exclusive' },
+  { op: 'request', transaction: 'T1', page: 1, mode: 'exclusive' },
+  { op: 'request', transaction: 'T2', page: 0, mode: 'exclusive' },
 ];
 
+/** The steps in the link, or none. */
+function readInitialSteps(): LockStep[] {
+  const params = new URLSearchParams(typeof location === 'undefined' ? '' : location.search);
+  return decodeLockSteps(params.get('s')) ?? [];
+}
+
+const INITIAL_STEPS = readInitialSteps();
+
 export function LocksToolPage() {
-  const [state, setState] = useState<SimState>(emptyState());
-  const [log, setLog] = useState<LogEntry[]>([]);
+  const [steps, setSteps] = useState<LockStep[]>(INITIAL_STEPS);
   const [transaction, setTransaction] = useState<Transaction>('T1');
   const [resource, setResource] = useState(0);
   const [mode, setMode] = useState<LockMode>('shared');
 
-  function appendLog(lines: string[]) {
-    setLog((prev) => [...prev, ...lines.map((text, i) => ({ id: prev.length + i, text, tone: toneFor(text) }))]);
+  const run = useMemo(() => runLockSteps(steps), [steps]);
+  const state = run.state;
+  const log: LogEntry[] = useMemo(
+    () =>
+      run.entries
+        .flatMap((entry) => entry.lines)
+        .map((text, id) => ({ id, text, tone: toneFor(text) })),
+    [run],
+  );
+  const full = steps.length >= MAX_LOCK_STEPS;
+
+  useEffect(() => {
+    const next = `${location.pathname}${steps.length > 0 ? `?s=${encodeURIComponent(encodeLockSteps(steps))}` : ''}`;
+    if (next !== `${location.pathname}${location.search}`) history.replaceState(null, '', next);
+  }, [steps]);
+
+  function add(step: LockStep) {
+    if (full) return;
+    setSteps((prev) => [...prev, step]);
   }
 
   function runRequest() {
-    const outcome = requestLock(state, transaction, resource, mode);
-    setState(outcome.state);
-    appendLog(outcome.narration);
+    add({ op: 'request', transaction, page: resource, mode });
   }
 
-  function runRelease(t: string, r: number, m: LockMode) {
-    const outcome = releaseLock(state, t, r, m);
-    setState(outcome.state);
-    appendLog(outcome.narration);
+  function runRelease(t: Transaction, r: number, m: LockMode) {
+    add({ op: 'release', transaction: t, page: r, mode: m });
   }
 
   function runPreset() {
-    let s = emptyState();
-    const lines: LogEntry[] = [];
-    for (const step of DEADLOCK_EXAMPLE) {
-      const outcome = requestLock(s, step.transaction, step.resource, step.mode);
-      s = outcome.state;
-      for (const text of outcome.narration) lines.push({ id: lines.length, text, tone: toneFor(text) });
-    }
-    setState(s);
-    setLog(lines);
+    setSteps(DEADLOCK_EXAMPLE);
   }
 
   function reset() {
-    setState(emptyState());
-    setLog([]);
+    setSteps([]);
   }
 
   return (
@@ -167,7 +185,7 @@ export function LocksToolPage() {
           </div>
         </div>
 
-        <button type="button" onClick={runRequest} className={btnPrimary}>Request</button>
+        <button type="button" onClick={runRequest} disabled={full} className={btnPrimary}>Request</button>
 
         <span className="mx-1 h-6 w-px bg-edge" aria-hidden />
         <button type="button" onClick={runPreset} className={btnSecondary}>Deadlock example</button>

@@ -11,6 +11,7 @@ import {
   runQuery,
 } from '../../engine/index.ts';
 import type { ASTNode, Database, DatasetId, EngineOptions, RunResult, StepEvent } from '../../engine/index.ts';
+import { sandboxHref } from '../learn/sandboxScenarios.ts';
 
 /**
  * plan.md §22.4/§23.1: goal-shaped puzzles with a client-side check. Each
@@ -50,6 +51,12 @@ export interface Challenge {
    * so the player meets the belief by running into it rather than by reading it first.
    */
   misconception?: ReactNode;
+  /**
+   * A sandbox that shows what the challenge is about, opened on the player's own query — the Parser for a challenge
+   * about how a query is read, the Grammar diagram for one about what is allowed. `href` returns null when the tool
+   * cannot take the text (it takes a bounded source), and the link is then left out.
+   */
+  tool?: { label: string; href: (sql: string) => string | null };
 }
 
 /** A challenge's dataset, defaulted. Meaningless once `database` is set — `challengeDatabase` below is what actually runs. */
@@ -125,6 +132,36 @@ const whereExpr = (events: readonly StepEvent[]): ASTNode | undefined => {
 };
 
 const isColumn = (n: ASTNode | undefined, name: string): boolean => n?.kind === 'Column' && n.label === name;
+
+/**
+ * How many of a SELECT's optional parts the parse tree shows: DISTINCT, WHERE, GROUP BY, HAVING, ORDER BY, LIMIT and
+ * OFFSET. JOIN is the eighth, and cannot be one of the six that run together, so it is not counted here.
+ */
+export function optionalClauses(events: readonly StepEvent[]): number {
+  const ast = lastAst(events);
+  if (!ast) return 0;
+  const has = (match: (n: ASTNode) => boolean) => findNode(ast, match) !== undefined;
+  const limit = findNode(ast, (n) => n.kind === 'Limit');
+  return [
+    has((n) => n.kind === 'SelectList' && n.label === 'DISTINCT columns'),
+    has((n) => n.kind === 'Where'),
+    has((n) => n.kind === 'GroupBy'),
+    has((n) => n.kind === 'Having'),
+    has((n) => n.kind === 'OrderBy'),
+    limit !== undefined,
+    limit?.detail?.includes('OFFSET') === true,
+  ].filter(Boolean).length;
+}
+
+/** Who a result row is, whether the query kept the `id` column, the `name`, or both. */
+const personOf = (row: Record<string, unknown>): string | null => {
+  if (row['id'] === 3 || row['name'] === 'barbara') return 'barbara';
+  if (row['id'] === 4 || row['name'] === 'brendan') return 'brendan';
+  return null;
+};
+
+/** The longest source the Parser sandbox takes from its link. */
+const PARSER_SOURCE_LIMIT = 2000;
 
 /** A small table with a NULL in it, for the NULL-semantics challenges. */
 const contactsDatabase = (): Database => ({
@@ -610,6 +647,81 @@ export const CHALLENGES: Challenge[] = [
         A <code className="font-mono">LEFT JOIN</code> keeps the unmatched rows no matter what the{' '}
         <code className="font-mono">WHERE</code> says. A condition on the joined table drops them — and the way to keep
         exactly the unmatched rows is to test that table for NULL.
+      </>
+    ),
+  },
+  {
+    id: 'and-before-or',
+    title: 'Where the AND lands',
+    brief: (
+      <>
+        Return <strong>barbara and brendan</strong> — the users whose <code className="font-mono">id</code> is 1, 3 or 4{' '}
+        <em>and</em> who are over 30 — with a <code className="font-mono">WHERE</code> that uses both{' '}
+        <code className="font-mono">OR</code> and <code className="font-mono">AND</code>. The starter returns ada as
+        well; fix where the <code className="font-mono">AND</code> applies.
+      </>
+    ),
+    hint: (
+      <>
+        <code className="font-mono">AND</code> binds tighter than <code className="font-mono">OR</code>, so the starter
+        asks <code className="font-mono">age &gt; 30</code> of id 4 alone. Parentheses around the three ids make the{' '}
+        <code className="font-mono">OR</code> happen first and the <code className="font-mono">AND</code> cover them all.
+      </>
+    ),
+    starter: 'SELECT * FROM users WHERE id = 1 OR id = 3 OR id = 4 AND age > 30;',
+    check: (r) => {
+      const where = whereExpr(r.events);
+      const people = new Set(r.rows.map(personOf));
+      return (
+        !r.error &&
+        people.size === 2 &&
+        !people.has(null) &&
+        astHasKind(where, 'And') &&
+        astHasKind(where, 'Or')
+      );
+    },
+    tool: {
+      label: 'Read this query’s tree in the Parser →',
+      href: (sql) =>
+        sql.trim().length > 0 && sql.length <= PARSER_SOURCE_LIMIT ? sandboxHref({ tool: 'parser', src: sql }) : null,
+    },
+    misconception: (
+      <>
+        <code className="font-mono">AND</code> and <code className="font-mono">OR</code> are not read left to right.{' '}
+        <code className="font-mono">a OR b AND c</code> is <code className="font-mono">a OR (b AND c)</code>, so in the
+        starter ada got in through <code className="font-mono">id = 1</code> without ever being asked her age. The
+        parentheses are how you move the <code className="font-mono">AND</code>, and the tree shows where it landed.
+      </>
+    ),
+  },
+  {
+    id: 'six-clauses',
+    title: 'Six clauses in one SELECT',
+    brief: (
+      <>
+        A <code className="font-mono">SELECT</code> has eight optional parts: <code className="font-mono">DISTINCT</code>,{' '}
+        <code className="font-mono">JOIN</code>, <code className="font-mono">WHERE</code>,{' '}
+        <code className="font-mono">GROUP BY</code>, <code className="font-mono">HAVING</code>,{' '}
+        <code className="font-mono">ORDER BY</code>, <code className="font-mono">LIMIT</code> and{' '}
+        <code className="font-mono">OFFSET</code>. The grammar will read them in that order; the engine will not run them
+        all. Write one query that <strong>runs</strong> with six of them.
+      </>
+    ),
+    hint: (
+      <>
+        The engine refuses <code className="font-mono">ORDER BY</code> together with{' '}
+        <code className="font-mono">GROUP BY</code>, and either of them in a query with a{' '}
+        <code className="font-mono">JOIN</code> — the message says &ldquo;not supported yet&rdquo;. Count again without
+        the parts that cannot sit together.
+      </>
+    ),
+    starter: 'SELECT DISTINCT age FROM users WHERE age > 20 ORDER BY age LIMIT 5;',
+    check: (r) => !r.error && optionalClauses(r.events) >= 6,
+    tool: { label: 'See the select rule in the Grammar →', href: () => sandboxHref({ tool: 'grammar', rule: 'select' }) },
+    misconception: (
+      <>
+        The grammar diagram is what the parser can <em>read</em>, not what the engine will run. A query can be perfectly
+        well-formed and still be refused further down, and the message says which stage said no.
       </>
     ),
   },

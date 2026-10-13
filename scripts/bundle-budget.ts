@@ -207,6 +207,21 @@ const T = (name: string): string => `src/pages/tools/${name}.tsx`;
  *  - 2026-10-04, latch crabbing (§25.4 F5): a new route, /tools/latch-crabbing (163.5 kB measured + 3, rounded
  *    to 167). Unlike the standalone sandboxes it drives the REAL engine B+Tree (`engine/index/btree.ts`, the same
  *    code /tools/btree uses), so it pays the shared engine chunk the same way /tools/btree does (ceiling 167).
+ *  - 2026-10-13 (final), lessons and challenges for the remaining tools — the buffer pool, the parser, the grammar,
+ *    the planner and the lock table (`sandboxLessons.tsx`, five lessons), two script challenges for the lock sandbox,
+ *    six settings challenges, two query challenges, and the lock sandbox's script in its address (`lockScript.ts`).
+ *    /learn/:id 185 → 190 (measured 186.6 + 3, rounded up): the five lessons' steps are prose in the one chunk that
+ *    carries every lesson's, and the scenarios behind their links are plain data (`sandboxScenarios.ts`), so no tool
+ *    driver comes in. /challenges 181 → 186 (182.3 + 3) and /challenges/:id 301 → 306 (302.7 + 3): ten more briefs
+ *    in the list, and the groups module (`challenges/groups.ts`) the two pages now share. /tools/locks 117 → 121
+ *    (117.2 + 3): the script fold, its URL codec and the small amount of page that uses them; no engine in it. The
+ *    settings view is the real cost, 21 → 36 as an opt-in chunk (32.3 + 3): the six new challenges need the
+ *    buffer-pool trace, the planner's rule pipeline, the B+Tree and both isolation engines (the Hermitage suite)
+ *    to run what a player sets, and all of that is in the one chunk that is opened with a settings challenge —
+ *    none of it is in an index route. /learn and /progress gained about half a kB each, inside their ceilings
+ *    (they read the manifest, and the new lessons' titles and summaries are in it). Splitting the
+ *    runner's handlers by tool, so that a sort challenge does not fetch the isolation engines, is the next thing
+ *    to do if this chunk needs to shrink.
  *  - 2026-10-13 (last), challenges for the storage and execution tools (`settingsChallenges.tsx`, ten of them, and the
  *    runner and view behind them): /challenges 176 → 181 (177.2 kB measured + 3, rounded up; it was 173.0) and
  *    /challenges/:id 296 → 301 (297.3 + 3; it was 292.9) for the ten briefs, which are prose in the list. The drivers
@@ -334,15 +349,15 @@ export const ROUTES: readonly RouteBudget[] = [
   { route: '/stages', roots: ['src/ui/StagesLayout.tsx', P('StagesIndex')], kb: 169, note: 'the stage explainers, index' },
   { route: '/stages/:id', roots: ['src/ui/StagesLayout.tsx', P('StagePage')], kb: 184, note: 'one stage explainer' },
   { route: '/learn', roots: [P('LearnPage')], kb: 119, note: 'the lesson track' },
-  { route: '/learn/:id', roots: [P('LessonPage')], kb: 185, note: 'one lesson' },
+  { route: '/learn/:id', roots: [P('LessonPage')], kb: 190, note: 'one lesson' },
   { route: '/examples', roots: [P('ExamplesPage')], kb: 115, note: 'preset queries' },
   { route: '/gallery', roots: [P('GalleryPage')], kb: 169, note: 'named moments' },
   { route: '/compare', roots: [P('ComparePage')], kb: 179, note: 'index vs scan, policy vs policy, hash vs sort, join algorithms, B+Tree vs. LSM' },
   { route: '/trace', roots: [P('TracePage')], kb: 171, note: 'the trace inspector' },
   { route: '/progress', roots: [P('ProgressPage')], kb: 122, note: 'the progress dashboard' },
   { route: '/practice', roots: [P('PracticePage')], kb: 182, note: 'generated questions with engine-computed answers, and a Leitner schedule' },
-  { route: '/challenges', roots: [P('ChallengesPage')], kb: 181, note: 'challenge index' },
-  { route: '/challenges/:id', roots: [P('ChallengePage')], kb: 301, note: 'one challenge' },
+  { route: '/challenges', roots: [P('ChallengesPage')], kb: 186, note: 'challenge index' },
+  { route: '/challenges/:id', roots: [P('ChallengePage')], kb: 306, note: 'one challenge' },
   { route: '/settings', roots: [P('SettingsPage')], kb: 116, note: 'preferences' },
   { route: '/study', roots: [P('StudyPage')], kb: 122, note: 'the §9 study runner (unlisted); the instrument travels in the link, not the bundle (§25.4 A2)' },
   { route: '/assignments/new', roots: [P('AssignmentsNewPage')], kb: 170, note: 'assignment-link builder' },
@@ -353,7 +368,7 @@ export const ROUTES: readonly RouteBudget[] = [
   { route: '/tools/page', roots: [T('PageToolPage')], kb: 170, note: 'slotted-page inspector' },
   { route: '/tools/sort', roots: [T('SortToolPage')], kb: 118, note: 'external merge sort' },
   { route: '/tools/planner', roots: [T('PlannerToolPage')], kb: 172, note: 'planner sandbox' },
-  { route: '/tools/locks', roots: [T('LocksToolPage')], kb: 117, note: 'lock simulator' },
+  { route: '/tools/locks', roots: [T('LocksToolPage')], kb: 121, note: 'lock simulator' },
   { route: '/tools/isolation', roots: [T('IsolationToolPage')], kb: 181, note: 'the Hermitage isolation matrix (both engines, computed)' },
   { route: '/tools/recovery', roots: [T('RecoveryToolPage')], kb: 129, note: 'crash recovery: checkpoints, a crash, and ARIES analysis, redo and undo' },
   { route: '/tools/wal', roots: [T('WalToolPage')], kb: 129, note: 'write-ahead log: a pool, a disk, a log and the rule between them' },
@@ -386,7 +401,7 @@ export const OPT_IN: readonly { key: string; kb: number; note: string; after?: s
   { key: 'src/ui/WorkspaceDialog.tsx', kb: 6, after: 'src/pages/PlaygroundPage.tsx', note: 'the Workspaces dialog (§H7) — fetched only when Custom mode\'s Workspaces button is pressed' },
   { key: 'src/ui/DurabilityDialog.tsx', kb: 17, after: 'src/pages/PlaygroundPage.tsx', note: 'the Durability dialog (§25.4 E4): the write-ahead-log machine, crash and recovery — fetched only when the Playground\'s Durability button is pressed' },
   { key: 'src/pages/challenges/ScriptChallengeView.tsx', kb: 31, after: 'src/pages/ChallengePage.tsx', note: 'a transaction or durability challenge: the schedule runner, the protocol comparison and the log machine — fetched only when one of those challenges is opened' },
-  { key: 'src/pages/challenges/SettingsChallengeView.tsx', kb: 21, after: 'src/pages/ChallengePage.tsx', note: 'a storage or execution challenge: the sort, hash join, join-order, page, hash-index, LSM, columnar, latch and vector drivers — fetched only when one of those challenges is opened' },
+  { key: 'src/pages/challenges/SettingsChallengeView.tsx', kb: 36, after: 'src/pages/ChallengePage.tsx', note: 'a storage, execution or isolation challenge: the sort, hash join, join-order, page, hash-index, LSM, columnar, latch and vector drivers, the buffer-pool trace, the planner and the Hermitage suite — fetched only when one of those challenges is opened' },
 ];
 
 /* -------------------------------------------------------------------------- */

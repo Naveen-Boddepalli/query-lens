@@ -33,7 +33,7 @@ test('the learn track has a transactions and durability group, last', async ({ p
 
   // Numbered on from the groups before it.
   const section = page.getByRole('region', { name: 'Transactions and durability' });
-  await expect(section.getByRole('listitem')).toHaveCount(7);
+  await expect(section.getByRole('listitem')).toHaveCount(8);
   const first = await section.getByRole('listitem').first().innerText();
   expect(Number(/^\d+/.exec(first.trim())?.[0])).toBeGreaterThan(9);
   await section.getByRole('link', { name: /Let a dirty read happen/ }).click();
@@ -89,10 +89,10 @@ test('the challenge index has the two groups and a count over all of them', asyn
   await expect(page.getByRole('heading', { name: 'Queries', level: 2 })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Transactions and durability', level: 2 })).toBeVisible();
   const section = page.getByRole('region', { name: 'Transactions and durability' });
-  await expect(section.getByRole('listitem')).toHaveCount(13);
+  await expect(section.getByRole('listitem')).toHaveCount(16);
   await section.getByRole('link', { name: /Read a value that never existed/ }).click();
   await expect(page).toHaveURL(/\/challenges\/read-the-unreal$/);
-  await expect(page.getByText(/19 of \d+/)).toBeVisible();
+  await expect(page.getByText(/23 of \d+/)).toBeVisible();
 });
 
 test('a schedule challenge runs a script, says what each step did, and remembers the solve', async ({ page }) => {

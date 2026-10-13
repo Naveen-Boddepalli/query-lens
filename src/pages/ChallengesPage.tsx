@@ -1,39 +1,9 @@
 import { useState } from 'react';
-import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { CHALLENGES } from './challenges/challenges.tsx';
-import { SCRIPT_CHALLENGES } from './challenges/scriptChallenges.tsx';
-import { SETTINGS_CHALLENGES } from './challenges/settingsChallenges.tsx';
+import { CHALLENGE_GROUPS } from './challenges/groups.ts';
 import { clearSolved, readSolved } from '../ui/challengeProgress.ts';
 import { PageHeader } from '../ui/PageHeader.tsx';
 import { btnGhost, cardInteractive } from '../ui/primitives.ts';
-
-interface Entry {
-  id: string;
-  title: string;
-  brief: ReactNode;
-}
-
-const GROUPS: { id: string; title: string; about: string; entries: readonly Entry[] }[] = [
-  {
-    id: 'queries',
-    title: 'Queries',
-    about: 'Write a query that makes the engine do — or not do — something specific.',
-    entries: CHALLENGES,
-  },
-  {
-    id: 'transactions',
-    title: 'Transactions and durability',
-    about: 'Write a schedule of two sessions, or a script for the write-ahead log, and make the engine do it.',
-    entries: SCRIPT_CHALLENGES,
-  },
-  {
-    id: 'storage',
-    title: 'Storage and execution',
-    about: 'Set the knobs of a sort, a join, a page, an index or a tree, and make the numbers say what you claim.',
-    entries: SETTINGS_CHALLENGES,
-  },
-];
 
 /**
  * plan.md §22.4: goal-shaped puzzles. Each opens a small editor whose Run
@@ -42,7 +12,7 @@ const GROUPS: { id: string; title: string; about: string; entries: readonly Entr
  */
 export function ChallengesPage() {
   const [solved, setSolved] = useState<ReadonlySet<string>>(() => readSolved());
-  const all = GROUPS.flatMap((g) => g.entries);
+  const all = CHALLENGE_GROUPS.flatMap((g) => g.entries);
   const done = all.filter((c) => solved.has(c.id)).length;
 
   return (
@@ -68,7 +38,7 @@ export function ChallengesPage() {
         )}
       </div>
 
-      {GROUPS.map((group) => {
+      {CHALLENGE_GROUPS.map((group) => {
         const first = all.indexOf(group.entries[0]!);
         return (
           <section key={group.id} aria-labelledby={`challenges-${group.id}`} className="mt-8">

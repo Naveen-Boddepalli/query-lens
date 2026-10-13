@@ -62,13 +62,17 @@ the SQL pipeline never offers.
 
 **Check.** [Force an eviction](/challenges/eviction-storm), then [the dirty eviction](/challenges/dirty-eviction).
 The [policy comparison](/compare) finds the query where LRU and clock disagree. Then
-[find the smallest page that holds the rows](/challenges/tightest-page).
+[find the smallest page that holds the rows](/challenges/tightest-page), and replay a string in the
+[page-reference lesson](/learn/buffer-pool): [a bigger pool with more misses](/challenges/bigger-pool-more-misses),
+[a clock that is not LRU](/challenges/clock-is-not-lru) and
+[a scan that leaves the hot set alone](/challenges/scan-keeps-the-hot-set).
 
 ## Week 2 — Indexes
 
 **Watch.** [The B+Tree concept page](/docs/concepts/btree), then the [sandbox](/tools/btree): insert until a
 node splits, delete until it merges, and watch the invariants hold. In the Playground run a lookup and a range
-scan and read the *Index* panel; step through the [B+Tree split](/learn/btree-split) lesson. For the
+scan and read the *Index* panel; step through the [B+Tree split](/learn/btree-split) lesson, then
+[find where a tree gets its third level](/challenges/third-level). For the
 alternatives, the [hash-index lesson](/learn/hash-index) shows why a hash cannot scan a range, and the
 [LSM-tree lesson](/learn/lsm-tree) what writing to sorted files costs and buys.
 
@@ -115,7 +119,8 @@ In [Compare](/compare) run *Index vs. sequential scan*, then *Index build*. For 
 
 **Watch.** The [planner sandbox](/tools/planner): switch rewrite rules on and off and watch the plan change.
 In the Playground turn on *Show as → Relational algebra* on the plan, and run `EXPLAIN ANALYZE` — the
-estimated rows sit beside the actual ones. The [planner lesson](/learn/planner) walks a rewrite, and the
+estimated rows sit beside the actual ones. The [planner lesson](/learn/planner) walks a rewrite, the
+[rules lesson](/learn/planner-rules) shows why a rule needs its neighbour, and the
 [join-order lesson](/learn/join-order) the search over the order of four joins.
 
 **Explain.**
@@ -128,7 +133,11 @@ estimated rows sit beside the actual ones. The [planner lesson](/learn/planner) 
 - How does Selinger's search find a join order without pricing every order, and why does the order matter at all?
 
 **Check.** [Push the filter down](/challenges/push-it-down) and [two conditions, still a hit](/challenges/and-that-matches);
-then [pick the join order](/challenges/cheapest-order).
+then [get the lookup with two rules](/challenges/index-with-two-rules) and
+[pick the join order](/challenges/cheapest-order). Before the plan there is a tree: the
+[tokens-and-trees](/learn/tokens-and-trees) and [grammar](/learn/grammar-diagram) lessons read a query the way the
+parser does, and [where the AND lands](/challenges/and-before-or) and
+[six clauses in one SELECT](/challenges/six-clauses) ask what it makes of one.
 
 ## Week 5 — Transactions and recovery
 
@@ -139,7 +148,8 @@ which anomaly through — each cell a run, not a lookup. Then the log: in the [w
 the log-before-data rule off and see what a crash leaves behind, and in [crash recovery](/tools/recovery) read
 analysis, redo and undo pass by pass. The [log-first](/learn/log-first),
 [steal-and-force](/learn/steal-and-force) and [recovery](/learn/recovery) lessons walk those. The
-[lock simulator](/tools/locks) shows the lock table on its own, and the
+[lock simulator](/tools/locks) shows the lock table on its own, with a [lesson](/learn/lock-table) that ends
+in a deadlock on one page, and the
 [protocol comparison](/tools/concurrency) runs one schedule under five ways of keeping it correct.
 
 **Explain.**
@@ -161,7 +171,10 @@ analysis, redo and undo pass by pass. The [log-first](/learn/log-first),
 [make A the deadlock victim](/challenges/pick-the-victim),
 [commit what no order explains](/challenges/write-skew),
 [make recovery redo a commit](/challenges/redo-a-commit) and
-[start redo in the middle of the log](/challenges/start-redo-late).
+[start redo in the middle of the log](/challenges/start-redo-late). In the lock table,
+[deadlock on a single page](/challenges/one-page-deadlock) and
+[take the pages in the same order](/challenges/same-order-no-deadlock); and in the isolation matrix, find
+[one level with two promises](/challenges/same-level-different-promise).
 
 ## Week 6 — Put it together
 

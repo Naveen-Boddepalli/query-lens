@@ -82,7 +82,9 @@ function lessonsOf(group: LessonGroupId) {
   return ids.map((id) => LESSONS.find((l) => l.id === id)!);
 }
 
-const TRANSACTION_LESSONS = lessonsOf('transactions');
+// The lock-table lesson opens the group and is about the older locks sandbox: its links are `sandboxScenarios.ts`'s,
+// and `sandboxLessons.test.ts` holds them. The seven after it are about the schedule runner and the log.
+const TRANSACTION_LESSONS = lessonsOf('transactions').filter((l) => l.id !== 'lock-table');
 
 describe('the transaction lessons are wired into the track', () => {
   it('come last in the track, with unique ids', () => {

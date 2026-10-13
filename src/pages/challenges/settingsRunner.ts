@@ -11,14 +11,24 @@
 
 import {
   buildHeap,
+  buildPlan,
   costOfOrder,
   createJoinOrderDemoDatabase,
   createSeedDatabase,
+  createTree,
   DEFAULT_ENGINE_OPTIONS,
+  height,
+  insert,
   joinGraphFromAst,
+  OPTIMIZER_RULES,
+  optimize,
   parse,
   runJoinOrderDP,
+  validate,
 } from '../../engine/index.ts';
+import type { Plan, ReplacementPolicyName } from '../../engine/index.ts';
+import { parseReferenceScans, runBufferTrace } from '../../engine/bufferTrace.ts';
+import { HERMITAGE_TESTS, runHermitage } from '../../engine/hermitage.ts';
 import { demoColumns, planLayout } from '../../ui/columnar.ts';
 import type { Layout } from '../../ui/columnar.ts';
 import { planExternalSort, shuffledRange } from '../../ui/externalSort.ts';
@@ -38,6 +48,7 @@ import {
   recallAt,
   VECTOR_LIMITS,
 } from '../../ui/vectorIndex.ts';
+import { sandboxHref } from '../learn/sandboxScenarios.ts';
 import { storageHref } from '../learn/storageScenarios.ts';
 import type { ChallengeOutcome, OutcomeTable } from './outcome.ts';
 import type { SettingsChallenge } from './settingsChallenges.tsx';
@@ -117,6 +128,44 @@ function vectorAverage(n: number, k: number, method: 'ivf' | 'hnsw', parameter: 
   });
   return { computations: computations / queries.length, recall: recall / queries.length, centroids };
 }
+
+// — the buffer pool sandbox, as the tool runs it —
+
+/** The scan the `scan-keeps-the-hot-set` challenge asks about: a hot set, a 21-page scan, the hot set again. */
+const HOT_SET_SCAN = '0 1 2 3 0 1 2 3 0 1 2 3 10-30 0 1 2 3 0 1 2 3';
+
+function bufferRun(ref: string, frames: number, policy: string, scanRing = 0) {
+  const { refs, scans } = parseReferenceScans(ref);
+  const result = runBufferTrace(
+    refs,
+    { ...DEFAULT_ENGINE_OPTIONS, bufferFrames: frames, policy: policy as ReplacementPolicyName, readAhead: 0, scanRing },
+    scans,
+  );
+  let hits = 0;
+  let misses = 0;
+  const victims: number[] = [];
+  for (const e of result.events) {
+    if (e.stage !== 'buffer') continue;
+    if (e.action === 'hit') hits += 1;
+    else if (e.action === 'miss') misses += 1;
+    else if (e.action === 'evict') victims.push(e.victimPageId);
+  }
+  return { references: refs.length, hits, misses, victims };
+}
+
+/** Every operator of a plan, root first. */
+function operatorsOf(plan: Plan): string[] {
+  const out: string[] = [];
+  const walk = (node: Record<string, unknown>) => {
+    out.push(String(node.op));
+    for (const key of ['child', 'left', 'right']) if (node[key]) walk(node[key] as Record<string, unknown>);
+    if (Array.isArray(node.children)) for (const c of node.children) walk(c as Record<string, unknown>);
+  };
+  walk(plan);
+  return out;
+}
+
+const PLANNER_QUERY = 'SELECT name, email\nFROM users\nWHERE id = 5 AND age > 30';
 
 const HANDLERS: Record<string, (v: Values) => Verdict> = {
   'one-merge-pass': (v) => {
@@ -229,6 +278,132 @@ const HANDLERS: Record<string, (v: Values) => Verdict> = {
         { label: 'longest chain', value: String(p.maxChainLength) },
       ],
       toolHref: storageHref({ tool: 'hash-index', n, strategy, cap, init, seed: SEED }),
+    };
+  },
+
+  'bigger-pool-more-misses': (v) => {
+    const [ref, frames, policy] = [str(v, 'ref'), num(v, 'frames'), str(v, 'policy')];
+    const href = sandboxHref({ tool: 'buffer-pool', ref, frames, policy, ra: 0, sr: 0 });
+    const less = bufferRun(ref, frames, policy);
+    if (less.references === 0) {
+      return { passed: false, facts: [], problem: 'Write at least one page number.', toolHref: href };
+    }
+    const more = bufferRun(ref, frames + 1, policy);
+    return {
+      passed: more.misses > less.misses,
+      facts: [
+        { label: 'references', value: String(less.references) },
+        { label: `misses in ${String(frames)} frames`, value: String(less.misses) },
+        { label: `in ${String(frames + 1)}`, value: String(more.misses) },
+        { label: 'difference', value: `${more.misses >= less.misses ? '+' : ''}${String(more.misses - less.misses)}` },
+      ],
+      toolHref: href,
+    };
+  },
+
+  'clock-is-not-lru': (v) => {
+    const [ref, frames] = [str(v, 'ref'), num(v, 'frames')];
+    const href = sandboxHref({ tool: 'buffer-pool', ref, frames, policy: 'clock', ra: 0, sr: 0 });
+    const lru = bufferRun(ref, frames, 'lru');
+    if (lru.references === 0) return { passed: false, facts: [], problem: 'Write at least one page number.', toolHref: href };
+    const clock = bufferRun(ref, frames, 'clock');
+    const differ = JSON.stringify(lru.victims) !== JSON.stringify(clock.victims);
+    const at = lru.victims.findIndex((x, i) => x !== clock.victims[i]);
+    const list = (xs: number[]) => (xs.length === 0 ? 'none' : xs.join(', '));
+    return {
+      passed: differ,
+      facts: [
+        { label: 'references', value: String(lru.references) },
+        { label: 'misses, LRU / clock', value: `${String(lru.misses)} / ${String(clock.misses)}` },
+        { label: 'first different eviction', value: differ ? `the ${String(Math.max(at, 0) + 1)}th` : 'none' },
+      ],
+      tables: [
+        {
+          caption: 'The pages each policy evicted, in order',
+          columns: ['Policy', 'Evicted'],
+          rows: [
+            ['LRU', list(lru.victims)],
+            ['Clock sweep', list(clock.victims)],
+          ],
+        },
+      ],
+      toolHref: href,
+    };
+  },
+
+  'scan-keeps-the-hot-set': (v) => {
+    const [policy, frames, ring] = [str(v, 'policy'), num(v, 'frames'), num(v, 'ring')];
+    const r = bufferRun(HOT_SET_SCAN, frames, policy, ring);
+    return {
+      passed: r.hits >= 16,
+      facts: [
+        { label: 'references', value: String(r.references) },
+        { label: 'hits', value: String(r.hits) },
+        { label: 'misses', value: String(r.misses) },
+        { label: 'pages evicted', value: String(r.victims.length) },
+      ],
+      toolHref: sandboxHref({ tool: 'buffer-pool', ref: HOT_SET_SCAN, frames, policy, ra: 0, sr: ring }),
+    };
+  },
+
+  'index-with-two-rules': (v) => {
+    const rules = str(v, 'rules') === '' ? [] : str(v, 'rules').split(',');
+    const users = createSeedDatabase().tables.users!;
+    const parsed = parse(PLANNER_QUERY);
+    if (!parsed.ok) throw new Error('the planner challenge query must parse');
+    const canonical = buildPlan(parsed.ast);
+    const steps = optimize(
+      canonical,
+      users,
+      DEFAULT_ENGINE_OPTIONS.rowsPerPage,
+      { users },
+      new Set(rules.filter((r) => OPTIMIZER_RULES.includes(r))),
+    );
+    const final = steps.at(-1)?.plan ?? canonical;
+    const ops = operatorsOf(final);
+    return {
+      passed: ops.includes('IndexScan') && rules.length <= 2,
+      facts: [
+        { label: 'rules on', value: String(rules.length) },
+        { label: 'rules that fired', value: steps.length === 0 ? 'none' : steps.map((x) => x.rule).join(', ') },
+        { label: 'plan', value: ops.join(' → ') },
+      ],
+      toolHref: sandboxHref({ tool: 'planner', q: PLANNER_QUERY, idx: true, rules }),
+    };
+  },
+
+  'third-level': (v) => {
+    const [fanout, keys] = [num(v, 'fanout'), num(v, 'keys')];
+    const tree = createTree(fanout, 0);
+    for (let k = 1; k <= keys; k += 1) insert(tree, k, { pageId: Math.abs(k) >> 2, slot: Math.abs(k) & 3 });
+    const levels = height(tree);
+    const problems = validate(tree);
+    return {
+      passed: levels >= 3 && keys <= 12 && problems.length === 0,
+      facts: [
+        { label: 'keys', value: String(keys) },
+        { label: 'levels', value: String(levels) },
+        { label: 'pages', value: String(Object.keys(tree.nodes).length) },
+        { label: 'invariants', value: problems.length === 0 ? 'hold' : `${String(problems.length)} broken` },
+      ],
+      toolHref: `/tools/btree?keys=${Array.from({ length: keys }, (_, i) => i + 1).join(',')}&fanout=${String(fanout)}`,
+    };
+  },
+
+  'same-level-different-promise': (v) => {
+    const id = str(v, 'anomaly');
+    const test = HERMITAGE_TESTS.find((t) => t.id === id)!;
+    const locks = runHermitage(test, 'repeatable-read', 'locks').occurred;
+    const snapshots = runHermitage(test, 'repeatable-read', 'mvcc').occurred;
+    const word = (happens: boolean) => (happens ? 'happens' : 'prevented');
+    return {
+      passed: locks !== snapshots,
+      facts: [
+        { label: 'anomaly', value: `${test.id} ${test.name}` },
+        { label: 'with locks', value: word(locks) },
+        { label: 'with snapshots', value: word(snapshots) },
+      ],
+      toolHref: `/tools/isolation?c=locks.${test.id}.repeatable-read`,
     };
   },
 
@@ -351,6 +526,18 @@ export function readValues(challenge: SettingsChallenge, raw: Readonly<Record<st
     if (control.kind === 'select') {
       if (!control.options.some((o) => o.value === text)) return `Choose a value for ${control.label}.`;
       out[control.key] = text;
+      continue;
+    }
+    if (control.kind === 'text') {
+      if (text === '') return `${control.label} cannot be empty.`;
+      if (text.length > control.max) return `${control.label} is at most ${String(control.max)} characters.`;
+      out[control.key] = text;
+      continue;
+    }
+    if (control.kind === 'checks') {
+      const picked = text === '' ? [] : text.split(',');
+      if (!picked.every((p) => control.options.some((o) => o.value === p))) return `Choose ${control.label} from the list.`;
+      out[control.key] = picked.join(',');
       continue;
     }
     const value = Number(text);
