@@ -169,14 +169,15 @@ function PolicyCompare() {
   const [accessIndex, setAccessIndex] = useState(0);
   const [policyA, setPolicyA] = useState<ReplacementPolicyName>('lru');
   const [policyB, setPolicyB] = useState<ReplacementPolicyName>('clock');
+  const [readAhead, setReadAhead] = useState(0);
 
   const optionsA = useMemo<EngineOptions>(
-    () => ({ ...DEFAULT_ENGINE_OPTIONS, bufferFrames: FRAMES, policy: policyA }),
-    [policyA],
+    () => ({ ...DEFAULT_ENGINE_OPTIONS, bufferFrames: FRAMES, policy: policyA, readAhead }),
+    [policyA, readAhead],
   );
   const optionsB = useMemo<EngineOptions>(
-    () => ({ ...DEFAULT_ENGINE_OPTIONS, bufferFrames: FRAMES, policy: policyB }),
-    [policyB],
+    () => ({ ...DEFAULT_ENGINE_OPTIONS, bufferFrames: FRAMES, policy: policyB, readAhead }),
+    [policyB, readAhead],
   );
 
   const a = useMemo(() => runBufferTrace(refs, optionsA), [refs, optionsA]);
@@ -234,6 +235,20 @@ function PolicyCompare() {
         </label>
         <PolicyPicker id="policy-a" label="Left policy" value={policyA} onChange={setPolicyA} />
         <PolicyPicker id="policy-b" label="Right policy" value={policyB} onChange={setPolicyB} />
+        <label htmlFor="compare-read-ahead" className="flex flex-col gap-1 text-label text-ink-dim">
+          Read-ahead
+          <select
+            id="compare-read-ahead"
+            value={readAhead}
+            onChange={(e) => { setReadAhead(Number(e.target.value)); }}
+            className={inputField}
+          >
+            <option value={0}>off</option>
+            <option value={1}>1 page</option>
+            <option value={2}>2 pages</option>
+            <option value={4}>4 pages</option>
+          </select>
+        </label>
         <button type="button" onClick={run} className={btnPrimary}>
           Run
         </button>

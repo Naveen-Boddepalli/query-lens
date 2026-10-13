@@ -26,7 +26,8 @@ concept explanation.
   a frame, and may evict one, exactly as a miss does — shown as a `prefetch` step and counted as a
   disk read; the request that later arrives for that page is a hit. An access pattern that is not
   sequential prefetches nothing. The [standalone sandbox](/tools/buffer-pool) offers 1, 2 or 4 pages
-  (`ra` in its URL).
+  (`ra` in its URL), and so does the policy comparison in [Compare](/compare), which gives both policies the
+  same depth.
 - **A scan ring is off by default** (`scanRing`, a size), modelled on PostgreSQL's bulk-read strategy.
   With a size of *n*, a `SeqScan` of a table bigger than a quarter of the pool reads through its own
   ring of *n* frames: its first *n* misses take frames the ordinary way, and every page after that

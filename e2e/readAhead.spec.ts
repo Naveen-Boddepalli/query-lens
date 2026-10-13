@@ -18,3 +18,14 @@ test('the read-ahead control is in the URL, and off leaves no prefetches (plan.m
   await page.getByLabel('Scrub to step').press('End');
   await expect(page.locator('dt', { hasText: 'prefetched' })).toBeVisible();
 });
+
+test('/compare exposes read-ahead across replacement policies (plan.md §25.4 F7)', async ({ page }) => {
+  await page.goto('/compare');
+  await expect(page.getByLabel('Read-ahead')).toHaveValue('0');
+  await page.getByLabel('Reference string').fill('0 1 2 3 4 5');
+  await page.getByLabel('Read-ahead').selectOption('2');
+  await page.getByRole('button', { name: 'Run' }).click();
+  await page.getByLabel('Access index').fill('6');
+  const prefetched = page.locator('dt', { hasText: 'prefetched' });
+  await expect(prefetched.first()).toBeVisible();
+});
