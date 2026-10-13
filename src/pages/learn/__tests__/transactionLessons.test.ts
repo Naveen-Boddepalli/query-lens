@@ -76,8 +76,10 @@ function outcome(s: ConcurrencyScenario, id: ProtocolId) {
 }
 
 describe('the transaction lessons are wired into the track', () => {
-  it('come after the pipeline lessons, with unique ids', () => {
-    expect(LESSONS).toEqual([...PIPELINE_LESSONS, ...TRANSACTION_LESSONS]);
+  it('come last in the track, with unique ids', () => {
+    // The transactions group is last in the track; the lessons before it are checked in `storageLessons.test.ts`.
+    expect(LESSONS.slice(-TRANSACTION_LESSONS.length)).toEqual(TRANSACTION_LESSONS);
+    expect(LESSONS.slice(0, PIPELINE_LESSONS.length)).toEqual(PIPELINE_LESSONS);
     const ids = LESSONS.map((l) => l.id);
     expect(new Set(ids).size).toBe(ids.length);
     expect(TRANSACTION_LESSONS.length).toBe(7);

@@ -74,6 +74,33 @@ export const LATCH_LIMITS: LatchLimits = {
   maxOpsPerThread: 6,
 };
 
+/** The tree every demo workload starts from: twenty keys, ten apart. */
+export const DEMO_INITIAL_KEYS: readonly number[] = Array.from({ length: 20 }, (_, i) => (i + 1) * 10);
+
+/**
+ * The scripted workload the tool and its lesson share: each thread gets its own run of keys, drawn from a seeded
+ * generator over values not already in the starting tree, so inserts land in different leaves. The same seed always
+ * gives the same keys.
+ */
+export function demoScripts(threads: number, ops: number, seed: number): number[][] {
+  const taken = new Set(DEMO_INITIAL_KEYS);
+  let s = seed + 1;
+  const next = () => {
+    s = (s * 1103515245 + 12345) & 0x7fffffff;
+    return s;
+  };
+  return Array.from({ length: threads }, () => {
+    const keys: number[] = [];
+    while (keys.length < ops) {
+      const k = (next() % 990) + 1;
+      if (taken.has(k)) continue;
+      taken.add(k);
+      keys.push(k);
+    }
+    return keys;
+  });
+}
+
 /** A safe node for an insert: one more key still fits, so a split from below cannot propagate into it. */
 function isSafeForInsert(tree: BPlusTree, nodeId: string): boolean {
   const n: BTreeNode = tree.nodes[nodeId]!;

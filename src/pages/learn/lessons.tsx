@@ -6,6 +6,7 @@ import type { ReactNode } from 'react';
 import { createSeedDatabase, DEFAULT_ENGINE_OPTIONS, runQuery } from '../../engine/index.ts';
 import type { ReplacementPolicyName, StepEvent } from '../../engine/index.ts';
 import { encodeShareState } from '../../ui/urlState.ts';
+import { EXECUTION_LESSONS, STORAGE_LESSONS } from './storageLessons.tsx';
 import { TRANSACTION_LESSONS } from './transactionLessons.tsx';
 
 /**
@@ -493,8 +494,16 @@ export const PIPELINE_LESSONS: Lesson[] = [
   },
 ];
 
-/** The whole track, in order: the pipeline first, then transactions and durability (`transactionLessons.tsx`). */
-export const LESSONS: Lesson[] = [...PIPELINE_LESSONS, ...TRANSACTION_LESSONS];
+/**
+ * The whole track, in order: the pipeline (the nine above, then the sort, the hash join and the join order from
+ * `storageLessons.tsx`), the storage structures, then transactions and durability (`transactionLessons.tsx`).
+ */
+export const LESSONS: Lesson[] = [
+  ...PIPELINE_LESSONS,
+  ...EXECUTION_LESSONS,
+  ...STORAGE_LESSONS,
+  ...TRANSACTION_LESSONS,
+];
 
 export function lessonById(id: string | undefined): Lesson | undefined {
   return LESSONS.find((l) => l.id === id);

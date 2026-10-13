@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { LESSONS, PIPELINE_LESSONS } from './learn/lessons.tsx';
 import type { Lesson } from './learn/lessons.tsx';
+import { EXECUTION_LESSONS, STORAGE_LESSONS } from './learn/storageLessons.tsx';
 import { TRANSACTION_LESSONS } from './learn/transactionLessons.tsx';
 import { clearCompleted, readCompleted } from '../ui/learnProgress.ts';
 import { PageHeader } from '../ui/PageHeader.tsx';
@@ -11,8 +12,14 @@ const GROUPS: { id: string; title: string; about: string; lessons: Lesson[] }[] 
   {
     id: 'pipeline',
     title: 'The query pipeline',
-    about: 'From the text of a query to a row: the parser, the planner, the buffer pool and the B+Tree.',
-    lessons: PIPELINE_LESSONS,
+    about: 'From the text of a query to a row: the buffer pool, the B+Tree, the planner — and how a sort, a hash join and a join order spend pages.',
+    lessons: [...PIPELINE_LESSONS, ...EXECUTION_LESSONS],
+  },
+  {
+    id: 'storage',
+    title: 'Storage engines and access methods',
+    about: 'What a page really holds, and the structures that are alternatives to a heap and a B+Tree: hashing, LSM trees, columns, latches, vectors.',
+    lessons: STORAGE_LESSONS,
   },
   {
     id: 'transactions',

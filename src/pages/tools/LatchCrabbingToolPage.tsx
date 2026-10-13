@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { LATCH_LIMITS, planLatchCrabbing } from '../../ui/latchCrabbing.ts';
+import { DEMO_INITIAL_KEYS, LATCH_LIMITS, demoScripts, planLatchCrabbing } from '../../ui/latchCrabbing.ts';
 import type { LatchProtocol } from '../../ui/latchCrabbing.ts';
 import { PageHeader } from '../../ui/PageHeader.tsx';
 import { btnSecondary, inputField, panelSurface } from '../../ui/primitives.ts';
@@ -14,7 +14,6 @@ import { btnSecondary, inputField, panelSurface } from '../../ui/primitives.ts';
 
 const DEFAULTS = { fanout: 4, threads: 3, ops: 2, seed: 1 };
 const MAX_SEED = 999_999;
-const INITIAL_KEYS = Array.from({ length: 20 }, (_, i) => (i + 1) * 10);
 
 function clampInt(raw: string | null, lo: number, hi: number, fallback: number): number {
   if (raw === null || raw.trim() === '') return fallback;
@@ -34,29 +33,6 @@ function readInitial() {
 
 const INITIAL = readInitial();
 
-/**
- * The scripted workload: each thread gets its own run of keys, drawn from a seeded generator over values that are
- * not already in the starting tree, so inserts land in different leaves. The same seed always gives the same keys.
- */
-function scriptsFor(threads: number, ops: number, seed: number): number[][] {
-  const taken = new Set(INITIAL_KEYS);
-  let s = seed + 1;
-  const next = () => {
-    s = (s * 1103515245 + 12345) & 0x7fffffff;
-    return s;
-  };
-  return Array.from({ length: threads }, () => {
-    const keys: number[] = [];
-    while (keys.length < ops) {
-      const k = (next() % 990) + 1;
-      if (taken.has(k)) continue;
-      taken.add(k);
-      keys.push(k);
-    }
-    return keys;
-  });
-}
-
 export function LatchCrabbingToolPage() {
   const [fanout, setFanout] = useState(INITIAL.fanout);
   const [threads, setThreads] = useState(INITIAL.threads);
@@ -64,9 +40,9 @@ export function LatchCrabbingToolPage() {
   const [seed, setSeed] = useState(INITIAL.seed);
   const [protocol, setProtocol] = useState<LatchProtocol>('crabbing');
 
-  const scripts = useMemo(() => scriptsFor(threads, ops, seed), [threads, ops, seed]);
-  const naive = useMemo(() => planLatchCrabbing(INITIAL_KEYS, scripts, fanout, 'naive'), [scripts, fanout]);
-  const crab = useMemo(() => planLatchCrabbing(INITIAL_KEYS, scripts, fanout, 'crabbing'), [scripts, fanout]);
+  const scripts = useMemo(() => demoScripts(threads, ops, seed), [threads, ops, seed]);
+  const naive = useMemo(() => planLatchCrabbing(DEMO_INITIAL_KEYS, scripts, fanout, 'naive'), [scripts, fanout]);
+  const crab = useMemo(() => planLatchCrabbing(DEMO_INITIAL_KEYS, scripts, fanout, 'crabbing'), [scripts, fanout]);
   const shown = protocol === 'naive' ? naive : crab;
 
   useEffect(() => {

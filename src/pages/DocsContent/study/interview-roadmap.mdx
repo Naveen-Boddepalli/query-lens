@@ -46,7 +46,8 @@ fewer of them. Keep asking how many pages a thing reads.
 
 **Watch.** Run a point lookup and a full scan in the [Playground](/playground) and follow the *Buffer Pool*
 panel. The [first-query](/learn/first-query) and [eviction](/learn/eviction) lessons walk it. Open the
-[slotted-page inspector](/tools/page) and find where a row's bytes live. In the
+[slotted-page inspector](/tools/page) and find where a row's bytes live; the
+[page lesson](/learn/slotted-page) walks it. In the
 [pool sandbox](/tools/buffer-pool) run the same reference string under LRU and clock, then under the policies
 the SQL pipeline never offers.
 
@@ -66,7 +67,9 @@ The [policy comparison](/compare) finds the query where LRU and clock disagree.
 
 **Watch.** [The B+Tree concept page](/docs/concepts/btree), then the [sandbox](/tools/btree): insert until a
 node splits, delete until it merges, and watch the invariants hold. In the Playground run a lookup and a range
-scan and read the *Index* panel; step through the [B+Tree split](/learn/btree-split) lesson.
+scan and read the *Index* panel; step through the [B+Tree split](/learn/btree-split) lesson. For the
+alternatives, the [hash-index lesson](/learn/hash-index) shows why a hash cannot scan a range, and the
+[LSM-tree lesson](/learn/lsm-tree) what writing to sorted files costs and buys.
 
 **Explain.**
 
@@ -88,7 +91,8 @@ In [Compare](/compare) run *Index vs. sequential scan*, then *Index build*.
 
 **Watch.** The four join algorithms forced onto one query in [Compare → JOIN algorithms](/compare); the
 [external merge sort sandbox](/tools/sort), trading memory for passes; the
-[Grace hash join sandbox](/tools/hash-join), with partitions and spill.
+[Grace hash join sandbox](/tools/hash-join), with partitions and spill. The
+[external-sort](/learn/external-sort) and [hash-join](/learn/hash-join) lessons walk the two.
 
 **Explain.**
 
@@ -105,7 +109,8 @@ In [Compare](/compare) run *Index vs. sequential scan*, then *Index build*.
 
 **Watch.** The [planner sandbox](/tools/planner): switch rewrite rules on and off and watch the plan change.
 In the Playground turn on *Show as → Relational algebra* on the plan, and run `EXPLAIN ANALYZE` — the
-estimated rows sit beside the actual ones. The [planner lesson](/learn/planner) walks a rewrite.
+estimated rows sit beside the actual ones. The [planner lesson](/learn/planner) walks a rewrite, and the
+[join-order lesson](/learn/join-order) the search over the order of four joins.
 
 **Explain.**
 
@@ -114,7 +119,7 @@ estimated rows sit beside the actual ones. The [planner lesson](/learn/planner) 
 - How does the optimizer decide whether to use an index? What does it assume about selectivity?
 - Read an `EXPLAIN ANALYZE`: where do the estimates and the actuals disagree, and why?
 - Why can an optimizer choose an index and still lose? (Hint: heap pages per match.)
-- What would join *ordering* add, and why is the search space large?
+- How does Selinger's search find a join order without pricing every order, and why does the order matter at all?
 
 **Check.** [Push the filter down](/challenges/push-it-down) and [two conditions, still a hit](/challenges/and-that-matches).
 

@@ -207,6 +207,14 @@ const T = (name: string): string => `src/pages/tools/${name}.tsx`;
  *  - 2026-10-04, latch crabbing (§25.4 F5): a new route, /tools/latch-crabbing (163.5 kB measured + 3, rounded
  *    to 167). Unlike the standalone sandboxes it drives the REAL engine B+Tree (`engine/index/btree.ts`, the same
  *    code /tools/btree uses), so it pays the shared engine chunk the same way /tools/btree does (ceiling 167).
+ *  - 2026-10-13 (later), lessons for the sort, the hash join, the join order and the six storage structures
+ *    (`storageLessons.tsx`, nine lessons): /learn 179 → 185, /learn/:id 179 → 185 and /progress 181 → 187 (each
+ *    measured + 3, rounded up: 181.9, 181.6, 183.9). It is the same cost as the transaction lessons were, for the
+ *    same reason — `lessons.tsx` carries every lesson's steps, and its engine import for the Playground links, into
+ *    the routes that only list lessons — and the second time that has raised these three by about six kB. A lesson
+ *    index of ids, titles and summaries apart from the steps would at least take the engine chunk (about 50 kB gzip)
+ *    out of /learn; that is the next thing to do here, not another bump. The scenarios behind the new links are plain
+ *    data (`storageScenarios.ts`), so no tool driver comes into any of them.
  *  - 2026-10-13, lessons and challenges for the transaction and durability tools (§25.4, release checklist §2.4):
  *    seven lessons (`transactionLessons.tsx`) and thirteen challenges (`scriptChallenges.tsx`) are prose and data in
  *    the routes that list them, so /learn 173 → 179, /learn/:id 172 → 179, /progress 175 → 181, /challenges 171 →
@@ -304,13 +312,13 @@ export const ROUTES: readonly RouteBudget[] = [
   { route: '/playground', roots: [P('PlaygroundPage')], kb: 324, note: 'the Playground: the editor, every stage panel, the engine — the heaviest route, and the one most people land on' },
   { route: '/stages', roots: ['src/ui/StagesLayout.tsx', P('StagesIndex')], kb: 169, note: 'the stage explainers, index' },
   { route: '/stages/:id', roots: ['src/ui/StagesLayout.tsx', P('StagePage')], kb: 184, note: 'one stage explainer' },
-  { route: '/learn', roots: [P('LearnPage')], kb: 179, note: 'the lesson track' },
-  { route: '/learn/:id', roots: [P('LessonPage')], kb: 179, note: 'one lesson' },
+  { route: '/learn', roots: [P('LearnPage')], kb: 185, note: 'the lesson track' },
+  { route: '/learn/:id', roots: [P('LessonPage')], kb: 185, note: 'one lesson' },
   { route: '/examples', roots: [P('ExamplesPage')], kb: 115, note: 'preset queries' },
   { route: '/gallery', roots: [P('GalleryPage')], kb: 169, note: 'named moments' },
   { route: '/compare', roots: [P('ComparePage')], kb: 179, note: 'index vs scan, policy vs policy, hash vs sort, join algorithms, B+Tree vs. LSM' },
   { route: '/trace', roots: [P('TracePage')], kb: 171, note: 'the trace inspector' },
-  { route: '/progress', roots: [P('ProgressPage')], kb: 181, note: 'the progress dashboard' },
+  { route: '/progress', roots: [P('ProgressPage')], kb: 187, note: 'the progress dashboard' },
   { route: '/practice', roots: [P('PracticePage')], kb: 182, note: 'generated questions with engine-computed answers, and a Leitner schedule' },
   { route: '/challenges', roots: [P('ChallengesPage')], kb: 176, note: 'challenge index' },
   { route: '/challenges/:id', roots: [P('ChallengePage')], kb: 296, note: 'one challenge' },
