@@ -207,6 +207,16 @@ const T = (name: string): string => `src/pages/tools/${name}.tsx`;
  *  - 2026-10-04, latch crabbing (§25.4 F5): a new route, /tools/latch-crabbing (163.5 kB measured + 3, rounded
  *    to 167). Unlike the standalone sandboxes it drives the REAL engine B+Tree (`engine/index/btree.ts`, the same
  *    code /tools/btree uses), so it pays the shared engine chunk the same way /tools/btree does (ceiling 167).
+ *  - 2026-10-13 (split), the settings runner by tool (`challenges/settings/*.ts`, one checker module per tool, loaded
+ *    by `settingsRunner.ts` when a challenge of that tool is opened): the settings view's opt-in chunk 36 → 8 (4.6 kB
+ *    measured + 3, rounded up; it was 32.3 — the runner carried every tool's driver) and thirteen new opt-in rows, one
+ *    per tool, each what that tool's challenges fetch on top of the page and the view: 0.8 kB for the planner and the
+ *    join order up to 12.4 for the isolation matrix (the Hermitage suite on both engines), against 32.3 for every one
+ *    before. The rows overlap — each counts the shared chunks its tool needs (`settings/shared.ts`, the scenario
+ *    modules) — so they do not sum to anything; the set of chunks as a whole grew by 4 kB (603.0 → 607.0), which is
+ *    thirteen modules compressing separately. The view fetches its tool's module as it opens, so the first Run
+ *    does not wait for it. `OPT_IN`'s `after` may now name more than one chunk: a tool's checks are measured past
+ *    the page *and* the view.
  *  - 2026-10-13 (final), lessons and challenges for the remaining tools — the buffer pool, the parser, the grammar,
  *    the planner and the lock table (`sandboxLessons.tsx`, five lessons), two script challenges for the lock sandbox,
  *    six settings challenges, two query challenges, and the lock sandbox's script in its address (`lockScript.ts`).
@@ -392,16 +402,46 @@ export const ROUTES: readonly RouteBudget[] = [
 ];
 
 /**
+ * What a settings challenge fetches for its own tool, on top of the page and the view (`settingsRunner.ts` loads one
+ * module of `src/pages/challenges/settings/` per tool): [tool, kB ceiling, what is in it]. Each is measured + 3,
+ * rounded up, as the others are; the isolation matrix's is the only large one, which is the reason they are split.
+ */
+const SETTINGS_TOOL_CHECKS: readonly (readonly [string, number, string])[] = [
+  ['sort', 6, 'the external merge sort driver'],
+  ['hash-join', 6, 'the Grace hash join driver'],
+  ['join-order', 4, 'the join-order graph and the Selinger search'],
+  ['page', 5, 'the slotted-page layout'],
+  ['hash-index', 7, 'the extendible and linear hashing driver'],
+  ['lsm', 7, 'the LSM tree planner'],
+  ['columnar', 6, 'the row-and-column layout planner'],
+  ['latch-crabbing', 7, 'the latch-crabbing workload and planner'],
+  ['vector-index', 7, 'the brute-force, IVF and HNSW search'],
+  ['buffer-pool', 5, 'the buffer-pool trace and its policies'],
+  ['planner', 4, 'the planner’s rewrite-rule pipeline'],
+  ['btree', 5, 'the B+Tree insert and invariants'],
+  ['isolation', 16, 'the Hermitage suite on both isolation engines'],
+];
+
+/** What is already loaded when a settings challenge fetches its tool's checks: the page and the view. */
+const SETTINGS_AFTER = ['src/pages/ChallengePage.tsx', 'src/pages/challenges/SettingsChallengeView.tsx'] as const;
+
+/**
  * Lazy chunks loaded *on top of* a route only after an explicit opt-in, so they belong to no route's budget
  * but must still stay small: [manifest key, kB ceiling, why].
  */
-export const OPT_IN: readonly { key: string; kb: number; note: string; after?: string }[] = [
+export const OPT_IN: readonly { key: string; kb: number; note: string; after?: string | readonly string[] }[] = [
   { key: '_html-to-image', kb: 8, note: 'panel PNG export (§20.3) — fetched on the first click of Download PNG' },
   { key: 'src/perf/inp.ts', kb: 2, note: 'the opt-in INP recorder for the §9 study (§25.4 A6) — fetched only after a participant opts in' },
   { key: 'src/ui/WorkspaceDialog.tsx', kb: 6, after: 'src/pages/PlaygroundPage.tsx', note: 'the Workspaces dialog (§H7) — fetched only when Custom mode\'s Workspaces button is pressed' },
   { key: 'src/ui/DurabilityDialog.tsx', kb: 17, after: 'src/pages/PlaygroundPage.tsx', note: 'the Durability dialog (§25.4 E4): the write-ahead-log machine, crash and recovery — fetched only when the Playground\'s Durability button is pressed' },
   { key: 'src/pages/challenges/ScriptChallengeView.tsx', kb: 31, after: 'src/pages/ChallengePage.tsx', note: 'a transaction or durability challenge: the schedule runner, the protocol comparison and the log machine — fetched only when one of those challenges is opened' },
-  { key: 'src/pages/challenges/SettingsChallengeView.tsx', kb: 36, after: 'src/pages/ChallengePage.tsx', note: 'a storage, execution or isolation challenge: the sort, hash join, join-order, page, hash-index, LSM, columnar, latch and vector drivers, the buffer-pool trace, the planner and the Hermitage suite — fetched only when one of those challenges is opened' },
+  { key: 'src/pages/challenges/SettingsChallengeView.tsx', kb: 8, after: 'src/pages/ChallengePage.tsx', note: 'a storage, execution or isolation challenge: the form and the runner — no driver; each tool\'s own checks are the rows below, fetched when one of its challenges is opened' },
+  ...SETTINGS_TOOL_CHECKS.map(([tool, kb, what]) => ({
+    key: `src/pages/challenges/settings/${tool}.ts`,
+    kb,
+    after: SETTINGS_AFTER,
+    note: `the ${tool} challenges' checks: ${what} — fetched only when one of those challenges is opened`,
+  })),
 ];
 
 /* -------------------------------------------------------------------------- */
@@ -446,7 +486,8 @@ function main(): number {
     const files = [...closure(manifest, [o.key])];
     extras.push(...files);
     // Only what the opt-in adds beyond the entry (and the route it opens from, when it names one): its shared imports are already paid for.
-    const base = closure(manifest, o.after === undefined ? [ENTRY_KEY] : [ENTRY_KEY, o.after]);
+    const afters = o.after === undefined ? [] : typeof o.after === 'string' ? [o.after] : o.after;
+    const base = closure(manifest, [ENTRY_KEY, ...afters]);
     const own = files.filter((f) => !base.has(f));
     const kb = own.reduce((s, f) => s + size(f), 0);
     const over = kb > o.kb;

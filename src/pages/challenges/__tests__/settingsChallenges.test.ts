@@ -13,8 +13,8 @@ import { planVectorIndex, VECTOR_LIMITS } from '../../../ui/vectorIndex.ts';
 import { CHALLENGES } from '../challenges.tsx';
 import { SCRIPT_CHALLENGES } from '../scriptChallenges.tsx';
 import { SETTINGS_CHALLENGES, settingsChallengeById } from '../settingsChallenges.tsx';
-import type { Control } from '../settingsChallenges.tsx';
-import { CHECKED_SETTINGS, readValues, runSettings } from '../settingsRunner.ts';
+import type { Control, SettingsChallenge } from '../settingsChallenges.tsx';
+import { loadCheckers, readValues, runSettings, runWith, SETTINGS_TOOLS } from '../settingsRunner.ts';
 
 const challenge = (id: string) => settingsChallengeById(id)!;
 /** The challenge's starter, with some settings replaced. */
@@ -22,13 +22,43 @@ const given = (id: string, over: Record<string, string | number>) => ({
   ...challenge(id).starter,
   ...Object.fromEntries(Object.entries(over).map(([k, v]) => [k, String(v)])),
 });
-const run = (id: string, over: Record<string, string | number> = {}) => runSettings(challenge(id), given(id, over));
+
+/** Every tool's checks, loaded once — the modules the runner fetches one at a time when a challenge opens. */
+const CHECKERS = Object.fromEntries(await Promise.all(SETTINGS_TOOLS.map(async (t) => [t, await loadCheckers(t)] as const)));
+/** The run `runSettings` makes after its tool's module has loaded, so a test does not have to wait to read a number. */
+const runChallenge = (c: SettingsChallenge, raw: Readonly<Record<string, string>>) => runWith(CHECKERS[c.tool]!, c, raw);
+const run = (id: string, over: Record<string, string | number> = {}) => runChallenge(challenge(id), given(id, over));
 
 describe('settings challenges', () => {
   it('have ids that are unique across every challenge, and a check each', () => {
     const ids = [...CHALLENGES, ...SCRIPT_CHALLENGES, ...SETTINGS_CHALLENGES].map((c) => c.id);
     expect(new Set(ids).size).toBe(ids.length);
-    expect([...CHECKED_SETTINGS].sort()).toEqual(SETTINGS_CHALLENGES.map((c) => c.id).sort());
+    const checked = Object.values(CHECKERS).flatMap((m) => Object.keys(m));
+    expect(checked.sort()).toEqual(SETTINGS_CHALLENGES.map((c) => c.id).sort());
+  });
+
+  it('keep each check in the module of the tool its challenge is about, and no check in another’s', () => {
+    for (const tool of SETTINGS_TOOLS) {
+      const own = SETTINGS_CHALLENGES.filter((c) => c.tool === tool).map((c) => c.id);
+      expect(Object.keys(CHECKERS[tool]!).sort(), tool).toEqual(own.sort());
+      expect(own.length, `${tool} has no challenge`).toBeGreaterThan(0);
+    }
+  });
+
+  it('load a tool’s checks once, and the lazy path gives the answer the loaded one does', async () => {
+    expect(loadCheckers('sort')).toBe(loadCheckers('sort'));
+    for (const c of SETTINGS_CHALLENGES) {
+      expect(await runSettings(c, c.starter), c.id).toEqual(runChallenge(c, c.starter));
+    }
+  });
+
+  it('say so in words when a tool’s checks cannot be loaded, and ask again next time', async () => {
+    const broken = { ...challenge('one-merge-pass'), tool: 'not-a-tool' } as unknown as SettingsChallenge;
+    const r = await runSettings(broken, broken.starter);
+    expect(r.passed).toBe(false);
+    expect(r.problem).toMatch(/could not be loaded/);
+    expect(r.facts).toEqual([]);
+    expect((await runSettings(challenge('one-merge-pass'), challenge('one-merge-pass').starter)).problem).toBeNull();
   });
 
   it('cover every storage and execution tool', () => {
@@ -145,7 +175,7 @@ describe('settings challenges', () => {
 
   it('start from settings that run and do not pass', () => {
     for (const c of SETTINGS_CHALLENGES) {
-      const r = runSettings(c, c.starter);
+      const r = runChallenge(c, c.starter);
       expect(r.problem, `${c.id}: ${r.problem ?? ''}`).toBeNull();
       expect(r.passed, `${c.id} starter should not pass`).toBe(false);
       expect(r.facts.length, c.id).toBeGreaterThan(0);
@@ -464,7 +494,7 @@ describe('the numbers a player reads are the numbers the tool shows', () => {
   it('b+tree: the third level comes at 10, 17, 21 and 31 keys for fan-outs of 3 to 6, below what full pages would hold', () => {
     const firstThird = (fanout: number) => {
       for (let keys = 1; keys <= 200; keys += 1) {
-        const r = runSettings(challenge('third-level'), { fanout: String(fanout), keys: String(keys) });
+        const r = runChallenge(challenge('third-level'), { fanout: String(fanout), keys: String(keys) });
         if (r.facts.find((f) => f.label === 'levels')!.value === '3') return keys;
       }
       return -1;

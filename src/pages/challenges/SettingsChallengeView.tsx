@@ -1,16 +1,17 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { markSolved, readSolved } from '../../ui/challengeProgress.ts';
 import { btnPrimary, inputField } from '../../ui/primitives.ts';
 import { ChallengeHeader, ChallengeOutcomeView, SolvedPanel } from './ChallengeFrame.tsx';
 import type { ChallengeOutcome } from './outcome.ts';
 import type { SettingsChallenge } from './settingsChallenges.tsx';
-import { runSettings } from './settingsRunner.ts';
+import { loadCheckers, runSettings } from './settingsRunner.ts';
 
 /**
  * One settings challenge (`settingsChallenges.tsx`): the same few numbers the tool takes, in a form, run on the
  * tool's own driver and checked. A form rather than a text box because there is nothing to write — every control is
  * a number with a range or a choice from a short list — and a label and a number input is what a keyboard and a
- * screen reader already know. The loaded chunk is the drivers, which is why this view is opened lazily.
+ * screen reader already know. The tool's own driver is fetched when the challenge opens (and again, from the cache,
+ * on Run), so a sort challenge does not carry the isolation engines.
  */
 
 export interface SettingsChallengeViewProps {
@@ -25,13 +26,26 @@ export function SettingsChallengeView({ challenge, index, total, next }: Setting
   const [values, setValues] = useState<Record<string, string>>({ ...challenge.starter });
   const [run, setRun] = useState<ChallengeOutcome | null>(null);
   const [solved, setSolved] = useState(() => readSolved().has(challenge.id));
+  const [busy, setBusy] = useState(false);
 
-  function check() {
-    const outcome = runSettings(challenge, values);
-    setRun(outcome);
-    if (outcome.passed && !solved) {
-      markSolved(challenge.id);
-      setSolved(true);
+  // Fetch the tool's driver now, so that the first Run is not the one that waits for it. A failure here is silent:
+  // Run asks again and says so in words if it still cannot.
+  useEffect(() => {
+    loadCheckers(challenge.tool).catch(() => undefined);
+  }, [challenge.tool]);
+
+  async function check() {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const outcome = await runSettings(challenge, values);
+      setRun(outcome);
+      if (outcome.passed && !solved) {
+        markSolved(challenge.id);
+        setSolved(true);
+      }
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -51,7 +65,7 @@ export function SettingsChallengeView({ challenge, index, total, next }: Setting
         className="mt-4 space-y-3"
         onSubmit={(e) => {
           e.preventDefault();
-          check();
+          void check();
         }}
       >
         <p className="text-label text-ink-dim">
@@ -137,7 +151,7 @@ export function SettingsChallengeView({ challenge, index, total, next }: Setting
             );
           })}
         </div>
-        <button type="submit" className={btnPrimary}>
+        <button type="submit" aria-disabled={busy} className={btnPrimary}>
           Run &amp; check
         </button>
       </form>

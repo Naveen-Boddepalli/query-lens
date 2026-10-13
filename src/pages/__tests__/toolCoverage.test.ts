@@ -18,6 +18,11 @@ const TOOL_PATHS = [...indexSource.matchAll(/href: '(\/tools\/[a-z-]+)'/g)].map(
 
 const pathOf = (href: string) => new URL(href, 'https://x').pathname;
 
+// A settings challenge's link comes from running it, which loads its tool's checks.
+const settingsHrefs = new Map<string, string | null>(
+  await Promise.all(SETTINGS_CHALLENGES.map(async (c) => [c.id, (await runSettings(c, c.starter)).toolHref] as const)),
+);
+
 describe('every tool in the tools index', () => {
   it('is found by the pattern this test reads the index with', () => {
     expect(TOOL_PATHS.length).toBeGreaterThanOrEqual(20);
@@ -38,8 +43,7 @@ describe('every tool in the tools index', () => {
     if (href) challengeTools.add(pathOf(href));
   }
   for (const c of SETTINGS_CHALLENGES) {
-    const starter = Object.fromEntries(Object.entries(c.starter));
-    const href = runSettings(c, starter).toolHref;
+    const href = settingsHrefs.get(c.id);
     if (href) challengeTools.add(pathOf(href));
   }
 

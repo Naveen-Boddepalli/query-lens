@@ -7,8 +7,9 @@ import type { ReactNode } from 'react';
  * tool itself takes — and the check is a predicate over what the tool's own driver makes of them.
  *
  * This file is only the list, and imports nothing of any driver, for the reason `scriptChallenges.tsx` does not:
- * the challenge index should not carry eight drivers to list ten titles. The checks and the running are in
- * `settingsRunner.ts`, loaded when one of these is opened. A control's range is written here and held against the
+ * the challenge index should not carry eight drivers to list ten titles. The checks are one module per tool in
+ * `settings/`, and the reading and running in `settingsRunner.ts`; a challenge loads its own tool's module when it
+ * is opened, and no other. A control's range is written here and held against the
  * tool's own limits in `__tests__/settingsChallenges.test.ts` — a setting a tool does not accept opens it at its
  * default, so the ranges must not drift.
  */

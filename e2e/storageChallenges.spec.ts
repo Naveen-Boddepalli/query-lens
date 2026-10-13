@@ -120,3 +120,25 @@ test('the hash join shows the two costs one buffer page apart', async ({ page })
   await expect(page.getByText('✓ Solved.')).toBeVisible();
   await expect(page.getByRole('table', { name: /one buffer page apart/ })).toBeVisible();
 });
+
+test('a challenge fetches the checks of its own tool and no other tool’s', async ({ page }) => {
+  const scripts: string[] = [];
+  page.on('request', (r) => {
+    const m = /\/assets\/([^/]+)\.js$/.exec(new URL(r.url()).pathname);
+    if (m) scripts.push(m[1]!);
+  });
+
+  await page.goto('/challenges/one-merge-pass');
+  await expect(page.getByRole('button', { name: 'Run & check' })).toBeVisible();
+  await run(page);
+  await expect(page.getByText(/Not there yet/)).toBeVisible();
+  expect(scripts.some((s) => s.startsWith('sort-'))).toBe(true);
+  // The isolation matrix's engines are only for the isolation challenge.
+  expect(scripts.filter((s) => /^(hermitage|isolation)-/.test(s))).toEqual([]);
+
+  await page.goto('/challenges/same-level-different-promise');
+  await page.getByLabel('Anomaly').selectOption('PMP');
+  await run(page);
+  await expect(page.getByText('✓ Solved.')).toBeVisible();
+  expect(scripts.some((s) => s.startsWith('hermitage-'))).toBe(true);
+});
