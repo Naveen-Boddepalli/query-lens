@@ -86,6 +86,8 @@
 - ao send: requires `--session <id>` and `--message "<msg>"`. Positional args fail.
 - ao dashboard: command does not exist. Use `ao status` or `ao start` to open desktop app.
 - fs: macOS APFS is case-insensitive; task index is kept in `docs/PLAN.md` so root `plan.md` is never overwritten.
+- ao pr merge: requires GitHub PR metadata when untracked; use `gh pr merge <num> --repo SAM3114/query-lens --merge` as verified fallback.
+- ao review submit: pass JSON stdin with `runId`, `verdict` ('approved'/'changes_requested'), and `body` to record reviewer outcomes.
 - pnpm: requires `minimumReleaseAge: 0` override when adding packages (`pnpm install --config.minimumReleaseAge=0`).
 
 ## 8. Conventions
