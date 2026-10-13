@@ -125,7 +125,7 @@ test('a challenge fetches the checks of its own tool and no other tool’s', asy
   const scripts: string[] = [];
   page.on('request', (r) => {
     const m = /\/assets\/([^/]+)\.js$/.exec(new URL(r.url()).pathname);
-    if (m) scripts.push(m[1]!);
+    if (m) scripts.push(m[1]);
   });
 
   await page.goto('/challenges/one-merge-pass');
