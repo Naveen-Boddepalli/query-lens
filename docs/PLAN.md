@@ -4,7 +4,7 @@ Maintained by the orchestrator. Contracts live in `docs/tasks/<id>.md`.
 Status values: pending | running | pr_open | review | merged | failed
 
 ## Objective
-Design and elevate the frontend of QueryLens into an ultra-clean, high-density, developer-first database internals visualizer with cohesive "Obsidian & Electric Sapphire" theming, flawless keyboard and mobile accessibility, and complete feature integration.
+Design and elevate the frontend of QueryLens into an ultra-clean, professional, developer-first database internals visualizer with cohesive glassmorphic & soft-neumorphic theming (derived from Stitch design systems), seamless light/dark modes, classic restrained micro-interactions (no over-animation), and complete feature focus.
 
 ## Constraints
 - **Strict Backend Preservation**: Do NOT modify or disturb `src/engine/**` (parser, planner, optimizer, buffer pool, btree, locks, execution).
@@ -13,7 +13,7 @@ Design and elevate the frontend of QueryLens into an ultra-clean, high-density, 
 
 ## Acceptance Criteria
 - Full visual consistency across all routes (`/`, `/playground`, `/stages`, `/tools`, `/compare`, `/gallery`, `/examples`, `/learn`, `/docs`, `/settings`).
-- Complete dark and light theme fidelity using OKLCH semantic surface and accent tokens.
+- Complete dark and light theme fidelity using OKLCH semantic surface, glassmorphic backdrop filters, and soft-neumorphic depth.
 - 100% of the verification gate passing (1228+ tests, clean linter, bundle budget within thresholds).
 
 ## Tasks
@@ -32,3 +32,4 @@ Design and elevate the frontend of QueryLens into an ultra-clean, high-density, 
 ## Decisions log
 - 2026-10-13 Initialized docs/PLAN.md and bootstrapped GEMINI.md with verified verification gate and AO cheatsheet. Preserved root plan.md (QueryLens product plan) to avoid APFS case-collision.
 - 2026-10-13 Decomposed frontend redesign objective into 4 phases across 9 non-overlapping task contracts (T1-T9), isolating `src/engine/**` completely.
+- 2026-10-13 Selected Stitch-inspired base design: frosted glassmorphism, soft-neumorphic dual-shadows with inner hairline sheens, professional classic dev-tool styling without over-animation, supporting both light and dark themes.
