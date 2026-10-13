@@ -347,6 +347,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a `study` bundle row (5.4 kB gzip, its own lazy chunk), six Playwright tests, and STUDY.md §4.
 
 ### Changed
+- **`/learn` and `/progress` no longer load the lessons.** They list lessons from a small manifest (`src/pages/learn/lessonIndex.ts`: title, length, summary, group) and import neither the twenty-five lessons' steps nor the engine behind their Playground links. `/learn` drops from 182 to 116 kB gzip and `/progress` from 184 to 118. A lesson page still loads the steps, and the manifest is the one place a lesson's title and summary are written.
 - The custom database's working copy autosaves to IndexedDB instead of `localStorage`, so it is no longer capped at about 5 MB. A copy from the old key moves across once, the first time it loads.
 - **`DELETE` and `UPDATE` can find their rows by a range of an index.** `DELETE FROM users WHERE id > 40` walks the
   leaf chain instead of scanning the table (a write could only use an equality lookup before); the rows it touches

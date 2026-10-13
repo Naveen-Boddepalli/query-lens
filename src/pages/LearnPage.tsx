@@ -1,43 +1,22 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { LESSONS, PIPELINE_LESSONS } from './learn/lessons.tsx';
-import type { Lesson } from './learn/lessons.tsx';
-import { EXECUTION_LESSONS, STORAGE_LESSONS } from './learn/storageLessons.tsx';
-import { TRANSACTION_LESSONS } from './learn/transactionLessons.tsx';
+import { LESSON_GROUPS, LESSON_INDEX } from './learn/lessonIndex.ts';
 import { clearCompleted, readCompleted } from '../ui/learnProgress.ts';
 import { PageHeader } from '../ui/PageHeader.tsx';
 import { btnGhost, cardInteractive } from '../ui/primitives.ts';
-
-const GROUPS: { id: string; title: string; about: string; lessons: Lesson[] }[] = [
-  {
-    id: 'pipeline',
-    title: 'The query pipeline',
-    about: 'From the text of a query to a row: the buffer pool, the B+Tree, the planner — and how a sort, a hash join and a join order spend pages.',
-    lessons: [...PIPELINE_LESSONS, ...EXECUTION_LESSONS],
-  },
-  {
-    id: 'storage',
-    title: 'Storage engines and access methods',
-    about: 'What a page really holds, and the structures that are alternatives to a heap and a B+Tree: hashing, LSM trees, columns, latches, vectors.',
-    lessons: STORAGE_LESSONS,
-  },
-  {
-    id: 'transactions',
-    title: 'Transactions and durability',
-    about: 'Two sessions on one table, then a crash: locks, snapshots, the log and recovery.',
-    lessons: TRANSACTION_LESSONS,
-  },
-];
 
 /**
  * plan.md §21.3 `/learn`: the §17.2 manual tasks as an ordered track. The docs
  * (`/docs`) are the reference; this is the guided version — each lesson drives
  * the Playground to the step it describes and keeps a completion mark in
  * `localStorage` (a convenience only; see `learnProgress.ts`).
+ *
+ * It lists lessons from `learn/lessonIndex.ts` and imports none of their steps, so this route carries a few kB of
+ * titles rather than every lesson's prose and the engine.
  */
 export function LearnPage() {
   const [done, setDone] = useState<ReadonlySet<string>>(() => readCompleted());
-  const completeCount = LESSONS.filter((l) => done.has(l.id)).length;
+  const completeCount = LESSON_INDEX.filter((l) => done.has(l.id)).length;
 
   return (
     <div className="mx-auto w-full max-w-2xl p-6 sm:p-8">
@@ -49,7 +28,7 @@ export function LearnPage() {
 
       <div className="mt-6 flex items-center justify-between text-label text-ink-dim">
         <span className="tabular-nums">
-          {completeCount} of {LESSONS.length} complete
+          {completeCount} of {LESSON_INDEX.length} complete
         </span>
         {completeCount > 0 && (
           <button
@@ -62,9 +41,9 @@ export function LearnPage() {
         )}
       </div>
 
-      {GROUPS.map((group) => {
+      {LESSON_GROUPS.map((group) => {
         const lessons = group.lessons;
-        const first = LESSONS.indexOf(lessons[0]!);
+        const first = LESSON_INDEX.findIndex((l) => l.id === lessons[0]!.id);
         return (
           <section key={group.title} aria-labelledby={`track-${group.id}`} className="mt-8">
             <h2 id={`track-${group.id}`} className="text-heading font-semibold text-ink">

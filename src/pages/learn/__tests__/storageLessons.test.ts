@@ -25,7 +25,6 @@ import { DEMO_INITIAL_KEYS, demoScripts, LATCH_LIMITS, planLatchCrabbing } from 
 import { demoWrites as lsmWrites, LSM_LIMITS, planLsm } from '../../../ui/lsm.ts';
 import { layOutPage } from '../../../ui/slottedPage.ts';
 import { planVectorIndex, VECTOR_LIMITS } from '../../../ui/vectorIndex.ts';
-import { EXECUTION_LESSONS, STORAGE_LESSONS } from '../storageLessons.tsx';
 import { STORAGE_SCENARIOS, storageHref } from '../storageScenarios.ts';
 import type {
   HashIndexScenario,
@@ -35,14 +34,25 @@ import type {
   SortScenario,
   StorageScenario,
 } from '../storageScenarios.ts';
-import { LESSONS, PIPELINE_LESSONS } from '../lessons.tsx';
-import { TRANSACTION_LESSONS } from '../transactionLessons.tsx';
+import { LESSON_GROUPS } from '../lessonIndex.ts';
+import type { LessonGroupId } from '../lessonIndex.ts';
+import { LESSONS } from '../lessons.tsx';
 
 /**
  * A lesson quotes numbers, and a number a driver no longer produces is a lesson that has stopped being true. Every
  * scenario here is run on the tool's own driver and held to the figures its lesson states. The prose is copy; these
  * are not.
  */
+
+/** The lessons of one group of the track, with their steps, in track order. */
+function lessonsOf(group: LessonGroupId) {
+  const ids = LESSON_GROUPS.find((g) => g.id === group)!.lessons.map((m) => m.id);
+  return ids.map((id) => LESSONS.find((l) => l.id === id)!);
+}
+
+const EXECUTION_IDS = ['external-sort', 'hash-join', 'join-order'];
+const EXECUTION_LESSONS = EXECUTION_IDS.map((id) => LESSONS.find((l) => l.id === id)!);
+const STORAGE_LESSONS = lessonsOf('storage');
 
 const lsm = (s: LsmScenario) =>
   planLsm(lsmWrites(s.n, s.seed), {
@@ -61,11 +71,13 @@ const peak = (p: ReturnType<typeof planLatchCrabbing>) => Math.max(...p.threads.
 const count = <T>(items: readonly T[], test: (item: T) => boolean) => items.filter(test).length;
 
 describe('the storage and execution lessons are wired into the track', () => {
-  it('sit after the pipeline lessons and before the transactions, with unique ids', () => {
-    expect(LESSONS).toEqual([...PIPELINE_LESSONS, ...EXECUTION_LESSONS, ...STORAGE_LESSONS, ...TRANSACTION_LESSONS]);
+  it('sit in the pipeline group and a group of their own, before the transactions, with unique ids', () => {
+    expect(LESSON_GROUPS.map((g) => g.id)).toEqual(['pipeline', 'storage', 'transactions']);
+    expect(LESSONS).toEqual([...lessonsOf('pipeline'), ...lessonsOf('storage'), ...lessonsOf('transactions')]);
+    // The sort, the hash join and the join order close the pipeline group.
+    expect(lessonsOf('pipeline').slice(-3).map((l) => l.id)).toEqual(EXECUTION_IDS);
     const ids = LESSONS.map((l) => l.id);
     expect(new Set(ids).size).toBe(ids.length);
-    expect(EXECUTION_LESSONS.map((l) => l.id)).toEqual(['external-sort', 'hash-join', 'join-order']);
     expect(STORAGE_LESSONS.map((l) => l.id)).toEqual([
       'slotted-page',
       'hash-index',

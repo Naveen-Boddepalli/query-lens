@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { STAGES } from '../engine/index.ts';
-import { LESSONS } from './learn/lessons.tsx';
+// From `types.ts` itself, not the engine barrel: a constant is all this page needs, and the barrel brings `runQuery`.
+import { STAGES } from '../engine/types.ts';
+import { LESSON_INDEX } from './learn/lessonIndex.ts';
 import { clearCompleted, readCompleted } from '../ui/learnProgress.ts';
 import { CONFIDENCE_LABELS, CONFIDENCE_LEVELS, clearProgress, readProgress } from '../ui/progress.ts';
 import { PageHeader } from '../ui/PageHeader.tsx';
@@ -62,11 +63,11 @@ export function ProgressPage() {
             <div className="flex items-baseline justify-between">
               <h2 className="text-body font-semibold text-ink">Lessons complete</h2>
               <span className="font-mono tabular-nums text-ink-dim">
-                {lessons.size} / {LESSONS.length}
+                {lessons.size} / {LESSON_INDEX.length}
               </span>
             </div>
             <ul className="mt-2 flex flex-wrap gap-1.5">
-              {LESSONS.map((l) => (
+              {LESSON_INDEX.map((l) => (
                 <li
                   key={l.id}
                   className={`rounded-full border px-2 py-0.5 text-label ${

@@ -15,8 +15,9 @@ import type { IsolationLevel } from '../../../engine/transactionControl.ts';
 import { LOG_MAX_STEPS, appendStep, openLog, recordWrite } from '../../../ui/durableLog.ts';
 import { decodeSchedule } from '../../../ui/scheduleUrl.ts';
 import { decodeWalSteps } from '../../../ui/walUrl.ts';
-import { LESSONS, PIPELINE_LESSONS } from '../lessons.tsx';
-import { TRANSACTION_LESSONS } from '../transactionLessons.tsx';
+import { LESSON_GROUPS } from '../lessonIndex.ts';
+import type { LessonGroupId } from '../lessonIndex.ts';
+import { LESSONS } from '../lessons.tsx';
 import { SCENARIOS, scenarioHref } from '../transactionScenarios.ts';
 import type { ConcurrencyScenario, Scenario, ScheduleScenario, WalScenario } from '../transactionScenarios.ts';
 
@@ -75,11 +76,18 @@ function outcome(s: ConcurrencyScenario, id: ProtocolId) {
   return all.find((o) => o.protocol.id === id)!;
 }
 
+/** The lessons of one group of the track, with their steps, in track order. */
+function lessonsOf(group: LessonGroupId) {
+  const ids = LESSON_GROUPS.find((g) => g.id === group)!.lessons.map((m) => m.id);
+  return ids.map((id) => LESSONS.find((l) => l.id === id)!);
+}
+
+const TRANSACTION_LESSONS = lessonsOf('transactions');
+
 describe('the transaction lessons are wired into the track', () => {
   it('come last in the track, with unique ids', () => {
     // The transactions group is last in the track; the lessons before it are checked in `storageLessons.test.ts`.
     expect(LESSONS.slice(-TRANSACTION_LESSONS.length)).toEqual(TRANSACTION_LESSONS);
-    expect(LESSONS.slice(0, PIPELINE_LESSONS.length)).toEqual(PIPELINE_LESSONS);
     const ids = LESSONS.map((l) => l.id);
     expect(new Set(ids).size).toBe(ids.length);
     expect(TRANSACTION_LESSONS.length).toBe(7);
