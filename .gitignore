@@ -33,3 +33,9 @@ packages/cli/LICENSE
 
 # plan.md §H3: copied in by scripts/build-packages.ts at build time.
 packages/mcp/LICENSE
+
+# §9 pilot data (STUDY.md §4): the key holds the arm assignments and the participants' links, the codes hold their
+# answers, and scoring/ holds both — kept local, never committed.
+key.csv
+codes.txt
+scoring/
