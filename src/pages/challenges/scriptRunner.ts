@@ -23,24 +23,11 @@ import { SCHEDULE_COLUMNS, scheduleRows } from '../../ui/transactionTables.ts';
 import { recoveryRows } from '../../ui/walTables.ts';
 import { scenarioHref } from '../learn/transactionScenarios.ts';
 import type { ScheduleLine } from '../learn/transactionScenarios.ts';
+import type { ChallengeOutcome, OutcomeTable } from './outcome.ts';
 import type { ScriptChallenge } from './scriptChallenges.tsx';
 
-export interface ScriptTable {
-  caption: string;
-  columns: string[];
-  rows: string[][];
-}
-
-export interface ScriptRun {
-  /** Why the text could not be run at all: a line that is not a step, or too many of them. */
-  problem: string | null;
-  passed: boolean;
-  /** A few numbers about the run, labelled — what the page shows beside the verdict. */
-  facts: { label: string; value: string }[];
-  tables: ScriptTable[];
-  /** The tool that shows this very run in full. */
-  toolHref: string | null;
-}
+export type ScriptTable = OutcomeTable;
+export type ScriptRun = ChallengeOutcome;
 
 export interface Parsed<T> {
   steps: T[];

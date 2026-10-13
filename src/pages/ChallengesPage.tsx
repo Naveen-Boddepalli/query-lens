@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { CHALLENGES } from './challenges/challenges.tsx';
 import { SCRIPT_CHALLENGES } from './challenges/scriptChallenges.tsx';
+import { SETTINGS_CHALLENGES } from './challenges/settingsChallenges.tsx';
 import { clearSolved, readSolved } from '../ui/challengeProgress.ts';
 import { PageHeader } from '../ui/PageHeader.tsx';
 import { btnGhost, cardInteractive } from '../ui/primitives.ts';
@@ -26,6 +27,12 @@ const GROUPS: { id: string; title: string; about: string; entries: readonly Entr
     about: 'Write a schedule of two sessions, or a script for the write-ahead log, and make the engine do it.',
     entries: SCRIPT_CHALLENGES,
   },
+  {
+    id: 'storage',
+    title: 'Storage and execution',
+    about: 'Set the knobs of a sort, a join, a page, an index or a tree, and make the numbers say what you claim.',
+    entries: SETTINGS_CHALLENGES,
+  },
 ];
 
 /**
@@ -41,8 +48,8 @@ export function ChallengesPage() {
   return (
     <div className="mx-auto w-full max-w-2xl p-6 sm:p-8">
       <PageHeader title="Challenges">
-        Short, goal-shaped puzzles. Write a query — or, for transactions and durability, a schedule or a log script — run
-        it, and the check tells you whether you hit the goal. The trace shows you why. Progress is kept in this browser
+        Short, goal-shaped puzzles. Write a query — or a schedule or a log script, or set the knobs of a tool — run it,
+        and the check tells you whether you hit the goal. The trace shows you why. Progress is kept in this browser
         only.
       </PageHeader>
 

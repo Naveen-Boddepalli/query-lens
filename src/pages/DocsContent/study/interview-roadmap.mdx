@@ -61,7 +61,8 @@ the SQL pipeline never offers.
 - Why can a page not be evicted while it is pinned?
 
 **Check.** [Force an eviction](/challenges/eviction-storm), then [the dirty eviction](/challenges/dirty-eviction).
-The [policy comparison](/compare) finds the query where LRU and clock disagree.
+The [policy comparison](/compare) finds the query where LRU and clock disagree. Then
+[find the smallest page that holds the rows](/challenges/tightest-page).
 
 ## Week 2 — Indexes
 
@@ -85,7 +86,10 @@ alternatives, the [hash-index lesson](/learn/hash-index) shows why a hash cannot
 
 **Check.** [Make the planner use the index](/challenges/use-the-index), [a lookup on the big table](/challenges/deep-descent),
 [the range leap](/challenges/range-leap), and [the selective end of a skew](/challenges/needle-in-the-skew).
-In [Compare](/compare) run *Index vs. sequential scan*, then *Index build*.
+In [Compare](/compare) run *Index vs. sequential scan*, then *Index build*. For the alternatives,
+[split a bucket that did not overflow](/challenges/split-the-other-bucket),
+[get cheap writes and cheap reads](/challenges/cheap-writes-cheap-reads) and
+[write less than you were asked to](/challenges/write-amp-below-one).
 
 ## Week 3 — Joins, sorting and aggregation
 
@@ -103,7 +107,9 @@ In [Compare](/compare) run *Index vs. sequential scan*, then *Index build*.
 - What does the Volcano (iterator) model mean, and what does it cost per row?
 - Why does a `LIMIT` above a hash-based `DISTINCT` stop early but not above a sort-based one?
 
-**Check.** [Hash beats loop](/challenges/hash-beats-loop) and [the sort spill](/challenges/sort-spill).
+**Check.** [Hash beats loop](/challenges/hash-beats-loop) and [the sort spill](/challenges/sort-spill); then
+[sort in a single merge pass](/challenges/one-merge-pass) and
+[give a join more memory and make it slower](/challenges/more-memory-more-io).
 
 ## Week 4 — The optimizer
 
@@ -121,7 +127,8 @@ estimated rows sit beside the actual ones. The [planner lesson](/learn/planner) 
 - Why can an optimizer choose an index and still lose? (Hint: heap pages per match.)
 - How does Selinger's search find a join order without pricing every order, and why does the order matter at all?
 
-**Check.** [Push the filter down](/challenges/push-it-down) and [two conditions, still a hit](/challenges/and-that-matches).
+**Check.** [Push the filter down](/challenges/push-it-down) and [two conditions, still a hit](/challenges/and-that-matches);
+then [pick the join order](/challenges/cheapest-order).
 
 ## Week 5 — Transactions and recovery
 

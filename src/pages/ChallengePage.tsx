@@ -11,6 +11,7 @@ import {
   challengeStats,
 } from './challenges/challenges.tsx';
 import { SCRIPT_CHALLENGES, scriptChallengeById } from './challenges/scriptChallenges.tsx';
+import { SETTINGS_CHALLENGES, settingsChallengeById } from './challenges/settingsChallenges.tsx';
 import { markSolved, readSolved } from '../ui/challengeProgress.ts';
 import { PageHeader } from '../ui/PageHeader.tsx';
 import { SqlEditor } from '../ui/SqlEditor.tsx';
@@ -23,16 +24,36 @@ import { btnPrimary, btnSecondary, card, panelSurface } from '../ui/primitives.t
 const ScriptChallengeView = lazy(() =>
   import('./challenges/ScriptChallengeView.tsx').then((m) => ({ default: m.ScriptChallengeView })),
 );
+// The settings challenges run the storage and execution drivers (the sort, the LSM tree, the vector index …), which
+// nothing else on this page needs, so their view is loaded when one is opened as well.
+const SettingsChallengeView = lazy(() =>
+  import('./challenges/SettingsChallengeView.tsx').then((m) => ({ default: m.SettingsChallengeView })),
+);
 
-/** The query challenges and then the script ones, as the index lists them: what "3 of 31" and "next" count over. */
-const ORDER: { id: string; title: string }[] = [...CHALLENGES, ...SCRIPT_CHALLENGES].map((c) => ({
+/** The query challenges, the script ones, then the settings ones, as the index lists them: what "3 of 41" and "next" count over. */
+const ORDER: { id: string; title: string }[] = [...CHALLENGES, ...SCRIPT_CHALLENGES, ...SETTINGS_CHALLENGES].map((c) => ({
   id: c.id,
   title: c.title,
 }));
 
-/** One `/challenges/:id`: a query run on a fixed engine config, or a script run on the schedule and log machines. */
+/** One `/challenges/:id`: a query on a fixed engine config, a script on the schedule and log machines, or settings for a tool. */
 export function ChallengePage() {
   const { challengeId } = useParams();
+  const settings = settingsChallengeById(challengeId);
+  if (settings) {
+    const index = ORDER.findIndex((c) => c.id === settings.id);
+    return (
+      <Suspense fallback={<div className="flex-1" aria-hidden />}>
+        <SettingsChallengeView
+          key={settings.id}
+          challenge={settings}
+          index={index}
+          total={ORDER.length}
+          next={ORDER[index + 1] ?? null}
+        />
+      </Suspense>
+    );
+  }
   const script = scriptChallengeById(challengeId);
   if (script) {
     const index = ORDER.findIndex((c) => c.id === script.id);
@@ -156,7 +177,7 @@ function QueryChallengeView({ challengeId }: { challengeId: string | undefined }
               <div
                 className={`rounded-xl border px-4 py-3 ${
                   passed
-                    ? 'border-hit/50 bg-hit/10 text-hit'
+                    ? 'border-hit/50 bg-hit/10 text-ink'
                     : 'border-edge bg-surface-2 text-ink-dim'
                 }`}
               >

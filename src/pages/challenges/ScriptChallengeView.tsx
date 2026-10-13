@@ -1,13 +1,10 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
-import { DataTable } from '../../ui/DataView.tsx';
-import type { TableColumn } from '../../ui/DataView.tsx';
 import { markSolved, readSolved } from '../../ui/challengeProgress.ts';
-import { PageHeader } from '../../ui/PageHeader.tsx';
-import { btnPrimary, btnSecondary, card, inputField, panelSurface } from '../../ui/primitives.ts';
+import { btnPrimary, inputField } from '../../ui/primitives.ts';
+import { ChallengeHeader, ChallengeOutcomeView, SolvedPanel } from './ChallengeFrame.tsx';
+import type { ChallengeOutcome } from './outcome.ts';
 import type { ScriptChallenge, ScriptSetup } from './scriptChallenges.tsx';
 import { runScript } from './scriptRunner.ts';
-import type { ScriptRun } from './scriptRunner.ts';
 
 /**
  * One transaction or durability challenge (`scriptChallenges.tsx`): a script in a plain text box, one step to a line,
@@ -103,11 +100,6 @@ function Syntax({ setup }: { setup: ScriptSetup }) {
   );
 }
 
-function Table({ table }: { table: ScriptRun['tables'][number] }) {
-  const columns: TableColumn<string[]>[] = table.columns.map((header, i) => ({ header, cell: (row) => row[i] }));
-  return <DataTable caption={table.caption} columns={columns} rows={table.rows} keyOf={(_, i) => String(i)} />;
-}
-
 export interface ScriptChallengeViewProps {
   challenge: ScriptChallenge;
   /** Zero-based place in the whole list of challenges, and how many there are. */
@@ -118,8 +110,7 @@ export interface ScriptChallengeViewProps {
 
 export function ScriptChallengeView({ challenge, index, total, next }: ScriptChallengeViewProps) {
   const [text, setText] = useState(challenge.starter);
-  const [run, setRun] = useState<ScriptRun | null>(null);
-  const [showHint, setShowHint] = useState(false);
+  const [run, setRun] = useState<ChallengeOutcome | null>(null);
   const [solved, setSolved] = useState(() => readSolved().has(challenge.id));
 
   function check() {
@@ -135,32 +126,13 @@ export function ScriptChallengeView({ challenge, index, total, next }: ScriptCha
 
   return (
     <div className="mx-auto w-full max-w-2xl p-6 sm:p-8">
-      <p className="text-label text-ink-dim">
-        <Link to="/challenges" className="underline underline-offset-2 hover:text-ink">
-          Challenges
-        </Link>
-        {' · '}
-        {index + 1} of {total}
-      </p>
-      <PageHeader title={challenge.title} className="mt-2">
-        {challenge.brief}
-      </PageHeader>
-
-      <div className="mt-4">
-        <button
-          type="button"
-          onClick={() => { setShowHint((v) => !v); }}
-          aria-expanded={showHint}
-          className="text-label text-ink-dim underline-offset-2 hover:text-ink hover:underline"
-        >
-          {showHint ? 'Hide hint' : 'Show hint'}
-        </button>
-        {showHint && (
-          <p className="mt-1 rounded-lg border border-edge bg-surface-2 px-3 py-2 text-label text-ink-dim">
-            {challenge.hint}
-          </p>
-        )}
-      </div>
+      <ChallengeHeader
+        index={index}
+        total={total}
+        title={challenge.title}
+        brief={challenge.brief}
+        hint={challenge.hint}
+      />
 
       <div className="mt-4 space-y-3">
         <Setup setup={challenge.setup} />
@@ -188,71 +160,9 @@ export function ScriptChallengeView({ challenge, index, total, next }: ScriptCha
         </button>
       </div>
 
-      {run && (
-        <div className="mt-4 space-y-3">
-          {run.problem !== null ? (
-            <p className="rounded-lg border border-evict/40 bg-evict/10 px-3 py-2 text-label text-evict" role="alert">
-              {run.problem}
-            </p>
-          ) : (
-            <>
-              <div
-                role="status"
-                className={`rounded-xl border px-4 py-3 ${
-                  run.passed ? 'border-hit/50 bg-hit/10 text-hit' : 'border-edge bg-surface-2 text-ink-dim'
-                }`}
-              >
-                {run.passed ? '✓ Solved.' : 'Not there yet — read what each step did.'}
-              </div>
+      <ChallengeOutcomeView outcome={run} notYet="read what each step did." />
 
-              {run.facts.length > 0 && (
-                <dl className={`flex flex-wrap gap-x-5 gap-y-1 ${panelSurface} p-3 text-label`}>
-                  {run.facts.map((f) => (
-                    <div key={f.label}>
-                      <dt className="text-ink-dim">{f.label}</dt>
-                      <dd className="font-mono text-ink">{f.value}</dd>
-                    </div>
-                  ))}
-                </dl>
-              )}
-
-              {run.tables.map((t) => (
-                <Table key={t.caption} table={t} />
-              ))}
-
-              {run.toolHref && (
-                <Link to={run.toolHref} className={btnSecondary}>
-                  Open this run in its tool →
-                </Link>
-              )}
-            </>
-          )}
-        </div>
-      )}
-
-      {solved && (
-        <div className={`mt-6 ${card}`}>
-          <p className="text-body text-ink">Nice.</p>
-          <p className="mt-2 text-label leading-relaxed text-ink-dim">
-            <span className="text-ink">The belief this checks:</span> {challenge.misconception}
-          </p>
-          {next ? (
-            <Link
-              to={`/challenges/${next.id}`}
-              className="mt-1 inline-block text-label text-ink-dim underline-offset-2 hover:text-ink hover:underline"
-            >
-              Next: {next.title} →
-            </Link>
-          ) : (
-            <Link
-              to="/challenges"
-              className="mt-1 inline-block text-label text-ink-dim underline-offset-2 hover:text-ink hover:underline"
-            >
-              That is all of them — back to the list
-            </Link>
-          )}
-        </div>
-      )}
+      {solved && <SolvedPanel misconception={challenge.misconception} next={next} />}
     </div>
   );
 }

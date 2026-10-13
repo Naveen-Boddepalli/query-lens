@@ -207,6 +207,18 @@ const T = (name: string): string => `src/pages/tools/${name}.tsx`;
  *  - 2026-10-04, latch crabbing (§25.4 F5): a new route, /tools/latch-crabbing (163.5 kB measured + 3, rounded
  *    to 167). Unlike the standalone sandboxes it drives the REAL engine B+Tree (`engine/index/btree.ts`, the same
  *    code /tools/btree uses), so it pays the shared engine chunk the same way /tools/btree does (ceiling 167).
+ *  - 2026-10-13 (last), challenges for the storage and execution tools (`settingsChallenges.tsx`, ten of them, and the
+ *    runner and view behind them): /challenges 176 → 181 (177.2 kB measured + 3, rounded up; it was 173.0) and
+ *    /challenges/:id 296 → 301 (297.3 + 3; it was 292.9) for the ten briefs, which are prose in the list. The drivers
+ *    are not in either: `settingsRunner.ts` and `SettingsChallengeView` are a new opt-in chunk (18.0 kB measured + 3,
+ *    rounded to 21), opened with one of these challenges. Two knock-on costs, both small and both ceilings that were
+ *    sitting within 0.1 kB: a driver that a tool's page and a lazy runner both import is now a chunk of its own
+ *    (`/tools/hash-index` 117.9 → 118.4, ceiling 118 → 122; the other tools gained less and stayed inside), and
+ *    the eight modules that became chunks of their own (the six drivers, `slottedPage` and `storageScenarios`) add
+ *    their names to the dependency map the entry carries (87 → 95 names; 23.3 → 23.4 kB), which put /docs and the
+ *    three essays that share its chunk from 170.0 to 170.1, ceiling 170 → 174. The shared challenge frame
+ *    (`ChallengeFrame.tsx`) was taken out of the script view for the new view to use, which is why that opt-in chunk
+ *    reads 28.0 now, against 27.4: the frame is counted in each.
  *  - 2026-10-13 (latest), the lesson index apart from the lesson steps (`learn/lessonIndex.ts`): /learn 185 → 119
  *    (115.9 kB measured + 3, rounded up; it was 181.9) and /progress 187 → 122 (118.3 + 3; it was 183.9). Both only
  *    *list* lessons, so both now read titles, lengths and summaries from the manifest and import neither the lessons'
@@ -329,8 +341,8 @@ export const ROUTES: readonly RouteBudget[] = [
   { route: '/trace', roots: [P('TracePage')], kb: 171, note: 'the trace inspector' },
   { route: '/progress', roots: [P('ProgressPage')], kb: 122, note: 'the progress dashboard' },
   { route: '/practice', roots: [P('PracticePage')], kb: 182, note: 'generated questions with engine-computed answers, and a Leitner schedule' },
-  { route: '/challenges', roots: [P('ChallengesPage')], kb: 176, note: 'challenge index' },
-  { route: '/challenges/:id', roots: [P('ChallengePage')], kb: 296, note: 'one challenge' },
+  { route: '/challenges', roots: [P('ChallengesPage')], kb: 181, note: 'challenge index' },
+  { route: '/challenges/:id', roots: [P('ChallengePage')], kb: 301, note: 'one challenge' },
   { route: '/settings', roots: [P('SettingsPage')], kb: 116, note: 'preferences' },
   { route: '/study', roots: [P('StudyPage')], kb: 122, note: 'the §9 study runner (unlisted); the instrument travels in the link, not the bundle (§25.4 A2)' },
   { route: '/assignments/new', roots: [P('AssignmentsNewPage')], kb: 170, note: 'assignment-link builder' },
@@ -351,15 +363,15 @@ export const ROUTES: readonly RouteBudget[] = [
   { route: '/tools/hash-join', roots: [T('HashJoinToolPage')], kb: 118, note: 'Grace hash join' },
   { route: '/tools/join-order', roots: [T('JoinOrderToolPage')], kb: 168, note: 'Selinger join-order search over the subset lattice' },
   { route: '/tools/lsm', roots: [T('LsmToolPage')], kb: 121, note: 'log-structured merge-tree sandbox' },
-  { route: '/tools/hash-index', roots: [T('HashIndexToolPage')], kb: 118, note: 'extendible and linear hashing sandbox' },
+  { route: '/tools/hash-index', roots: [T('HashIndexToolPage')], kb: 122, note: 'extendible and linear hashing sandbox' },
   { route: '/tools/columnar', roots: [T('ColumnarToolPage')], kb: 118, note: 'NSM/DSM/PAX row vs. column storage sandbox' },
   { route: '/tools/vector-index', roots: [T('VectorIndexToolPage')], kb: 118, note: 'brute force vs. IVF vs. HNSW vector search' },
   { route: '/tools/latch-crabbing', roots: [T('LatchCrabbingToolPage')], kb: 170, note: 'latch crabbing: naive vs. lock coupling on a scripted B+Tree workload' },
-  { route: '/docs', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 170, note: 'the docs shell and every prose page (one shared chunk)' },
+  { route: '/docs', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 174, note: 'the docs shell and every prose page (one shared chunk)' },
   { route: '/docs/concepts/btree', roots: ['src/ui/DocsLayout.tsx', 'src/pages/DocsContent/concepts/btree.mdx'], kb: 177, note: 'a concept page with a live B+Tree widget' },
-  { route: '/docs/essays/index-write-tax', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 170, note: 'an essay: prose, with links into the B+Tree sandbox (plan.md §25.4 H2)' },
-  { route: '/docs/essays/repeatable-read', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 170, note: 'an essay: prose, with links into the isolation matrix and the schedule tool (plan.md §25.4 H2)' },
-  { route: '/docs/essays/scan-resistance', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 170, note: 'an essay: prose, with links into the buffer-pool sandbox under LRU and LRU-2 (plan.md §25.4 H2)' },
+  { route: '/docs/essays/index-write-tax', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 174, note: 'an essay: prose, with links into the B+Tree sandbox (plan.md §25.4 H2)' },
+  { route: '/docs/essays/repeatable-read', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 174, note: 'an essay: prose, with links into the isolation matrix and the schedule tool (plan.md §25.4 H2)' },
+  { route: '/docs/essays/scan-resistance', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 174, note: 'an essay: prose, with links into the buffer-pool sandbox under LRU and LRU-2 (plan.md §25.4 H2)' },
   { route: '/docs/concepts/buffer-pool', roots: ['src/ui/DocsLayout.tsx', 'src/pages/DocsContent/concepts/buffer-pool.mdx'], kb: 175, note: 'a concept page with a live buffer-pool widget' },
   { route: '/* (404)', roots: [P('NotFoundPage')], kb: 114, note: 'the not-found page' },
 ];
@@ -374,6 +386,7 @@ export const OPT_IN: readonly { key: string; kb: number; note: string; after?: s
   { key: 'src/ui/WorkspaceDialog.tsx', kb: 6, after: 'src/pages/PlaygroundPage.tsx', note: 'the Workspaces dialog (§H7) — fetched only when Custom mode\'s Workspaces button is pressed' },
   { key: 'src/ui/DurabilityDialog.tsx', kb: 17, after: 'src/pages/PlaygroundPage.tsx', note: 'the Durability dialog (§25.4 E4): the write-ahead-log machine, crash and recovery — fetched only when the Playground\'s Durability button is pressed' },
   { key: 'src/pages/challenges/ScriptChallengeView.tsx', kb: 31, after: 'src/pages/ChallengePage.tsx', note: 'a transaction or durability challenge: the schedule runner, the protocol comparison and the log machine — fetched only when one of those challenges is opened' },
+  { key: 'src/pages/challenges/SettingsChallengeView.tsx', kb: 21, after: 'src/pages/ChallengePage.tsx', note: 'a storage or execution challenge: the sort, hash join, join-order, page, hash-index, LSM, columnar, latch and vector drivers — fetched only when one of those challenges is opened' },
 ];
 
 /* -------------------------------------------------------------------------- */
