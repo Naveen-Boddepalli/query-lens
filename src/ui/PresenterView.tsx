@@ -22,15 +22,16 @@ export interface PresenterViewProps {
   onExit: () => void;
 }
 
-/**
- * plan.md §22.5 / §17.2: the room-facing surface. A full-viewport view of the
- * current stage — big diagram, big narration, big transport — over a plain
- * ground, keyboard-driven (Space, ←/→, Esc). Prediction is suppressed by the
- * caller: a prompt card mid-demo stops the room, not helps it.
- *
- * It is an overlay, not a route, so it shares the Playground's live `playback`
- * and trace rather than re-deriving them; `?present=1` re-opens it on load.
- */
+const presBtn =
+  'rounded-full border px-2.5 py-0.5 text-label font-medium select-none transition-all border-edge text-ink-dim hover:border-ink-dim/50 hover:text-ink active:scale-95';
+
+const kbdCls =
+  'rounded border border-edge bg-surface-3 px-1.5 py-0.5 font-mono text-micro text-ink shadow-neu-rest';
+
+const card = 'rounded-xl border border-edge bg-surface-2/80 shadow-neu-rest backdrop-blur-md';
+
+const Kbd = ({ children }: { children: React.ReactNode }) => <kbd className={kbdCls}>{children}</kbd>;
+
 export function PresenterView({
   playback,
   length,
@@ -56,11 +57,8 @@ export function PresenterView({
         onExit();
         return;
       }
-      // A light focus trap: keep Tab inside the dialog.
       if (e.key === 'Tab' && dialogRef.current) {
-        const focusable = dialogRef.current.querySelectorAll<HTMLElement>(
-          'button, [href], input, select, [tabindex]:not([tabindex="-1"])',
-        );
+        const focusable = dialogRef.current.querySelectorAll<HTMLElement>('button, input, select');
         if (focusable.length === 0) return;
         const first = focusable[0]!;
         const last = focusable[focusable.length - 1]!;
@@ -88,8 +86,7 @@ export function PresenterView({
       if (document.fullscreenElement) void document.exitFullscreen();
       else void document.documentElement.requestFullscreen();
     } catch {
-      // Fullscreen can be blocked by policy; the overlay already fills the
-      // viewport, so this is a nicety, not a requirement.
+      // Ignored if fullscreen blocked
     }
   }
 
@@ -99,38 +96,29 @@ export function PresenterView({
       role="dialog"
       aria-modal="true"
       aria-label="Presenter view"
-      className="fixed inset-0 z-50 flex flex-col gap-4 bg-surface p-4 sm:p-8"
+      className="fixed inset-0 z-50 flex flex-col gap-4 bg-surface/95 p-4 backdrop-blur-xl sm:p-6"
     >
-      <header className="flex flex-wrap items-center gap-3">
-        <span className="text-label tracking-[0.12em] text-ink-dim uppercase">Presenter</span>
+      <header className={`flex flex-wrap items-center gap-3 p-3 ${card}`}>
+        <span className="text-micro font-semibold tracking-[0.14em] text-accent uppercase">Presenter</span>
         <span className="font-mono text-body tabular-nums text-ink-dim">
           step {playback.step} / {length}
         </span>
         <div className="ml-auto flex items-center gap-2">
           {document.fullscreenEnabled && (
-            <button
-              type="button"
-              onClick={toggleFullscreen}
-              className="rounded-full border border-edge bg-surface-2 px-3 py-1 text-label text-ink-dim shadow-e1 transition hover:border-ink-dim/50 hover:text-ink"
-            >
+            <button type="button" onClick={toggleFullscreen} className={presBtn}>
               {isFullscreen ? 'Exit full screen' : 'Full screen'}
             </button>
           )}
-          <button
-            ref={exitRef}
-            type="button"
-            onClick={onExit}
-            className="rounded-full border border-edge bg-surface-2 px-3 py-1 text-label text-ink-dim shadow-e1 transition hover:border-ink-dim/50 hover:text-ink"
-          >
+          <button ref={exitRef} type="button" onClick={onExit} className={presBtn}>
             Exit presenter (Esc)
           </button>
         </div>
       </header>
 
       {/* Read-only here: pinning a stage is an authoring action, not a demo one. */}
-      <PipelineTracker current={currentStage} visited={visited} selected={null} onSelect={() => undefined} />
+      <PipelineTracker current={currentStage} visited={visited} selected={null} onSelect={() => {}} />
 
-      <div className="min-h-0 flex-1 overflow-hidden rounded-xl border border-edge bg-surface-2 p-4 shadow-e2 sm:p-6">
+      <div className={`min-h-0 flex-1 overflow-hidden p-4 sm:p-6 ${card}`}>
         {activeStage ? (
           <ErrorBoundary variant="panel" label={STAGE_META[activeStage].title} resetKey={activeStage}>
             <StageDetail stage={activeStage} state={state} policy={policy} activeSpan={activeSpan} />
@@ -141,7 +129,7 @@ export function PresenterView({
       </div>
 
       <p
-        className="text-heading leading-snug text-ink"
+        className={`ql-sheen p-3.5 text-heading font-medium leading-snug text-ink ${card}`}
         aria-live="polite"
         aria-atomic="true"
       >
@@ -149,13 +137,10 @@ export function PresenterView({
         {narration}
       </p>
 
-      <div className="rounded-xl border border-edge bg-surface-2 p-3 shadow-e1">
+      <div className={`p-3 ${card}`}>
         <PlaybackControls playback={playback} length={length} maxStep={maxStep} />
-        <p className="mt-2 text-label text-ink-dim">
-          <kbd className="rounded border border-edge px-1">Space</kbd> play/pause ·{' '}
-          <kbd className="rounded border border-edge px-1">←</kbd>
-          <kbd className="rounded border border-edge px-1">→</kbd> step ·{' '}
-          <kbd className="rounded border border-edge px-1">Esc</kbd> exit. Prediction is off here.
+        <p className="mt-2 text-label text-ink-dim/80">
+          <Kbd>Space</Kbd> play/pause · <Kbd>Left</Kbd> <Kbd>Right</Kbd> step · <Kbd>Esc</Kbd> exit
         </p>
       </div>
     </div>

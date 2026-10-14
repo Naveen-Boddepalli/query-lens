@@ -64,6 +64,8 @@ function findTarget(key: string): Element | null {
   return document.querySelector(`[data-tour="${key}"]`);
 }
 
+const tourCard = 'rounded-xl border border-edge bg-surface-2/80 shadow-neu-rest backdrop-blur-md ql-sheen outline-none';
+
 export function PlaygroundTour({ onClose }: { onClose: () => void }) {
   const reduced = useReducedMotion();
   return reduced ? <StaticTour onClose={onClose} /> : <SpotlightTour onClose={onClose} />;
@@ -169,7 +171,7 @@ function SpotlightTour({ onClose }: { onClose: () => void }) {
             left: rect.left - 6,
             width: rect.width + 12,
             height: rect.height + 12,
-            boxShadow: '0 0 0 100vmax rgba(2, 6, 12, 0.64)',
+            boxShadow: '0 0 0 100vmax rgba(2,6,12,0.64)',
           }}
         />
       )}
@@ -177,7 +179,7 @@ function SpotlightTour({ onClose }: { onClose: () => void }) {
       <div
         ref={cardRef}
         tabIndex={-1}
-        className={`fixed left-1/2 w-[min(23rem,calc(100vw-2rem))] -translate-x-1/2 rounded-xl border border-edge bg-surface-2 p-4 shadow-e3 outline-none ${
+        className={`fixed left-1/2 w-[min(23rem,calc(100vw-2rem))] -translate-x-1/2 p-4 ${tourCard} ${
           cardAtTop ? 'top-6' : 'bottom-6'
         }`}
       >
@@ -197,13 +199,13 @@ function SpotlightTour({ onClose }: { onClose: () => void }) {
           </button>
           <div className="flex gap-2">
             {i > 0 && (
-              <button type="button" onClick={() => { setI((n) => n - 1); }} className={btnSecondary}>
+              <button type="button" onClick={() => setI((n) => n - 1)} className={btnSecondary}>
                 Back
               </button>
             )}
             <button
               type="button"
-              onClick={() => { if (last) onClose(); else setI((n) => n + 1); }}
+              onClick={last ? onClose : () => setI((n) => n + 1)}
               className={btnPrimary}
             >
               {last ? 'Done' : 'Next'}
@@ -228,14 +230,14 @@ function StaticTour({ onClose }: { onClose: () => void }) {
   }, [onClose]);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(2,6,12,0.64)] p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(2,6,12,0.64)] p-4 backdrop-blur-sm">
       <div
         ref={ref}
         tabIndex={-1}
         role="dialog"
         aria-modal="true"
         aria-label="Playground tour"
-        className="w-full max-w-md rounded-xl border border-edge bg-surface-2 p-5 shadow-e3 outline-none"
+        className={`w-full max-w-md p-5 ${tourCard}`}
       >
         <h2 className="text-heading font-semibold text-ink">A 60-second tour</h2>
         <p className="mt-1 text-label text-ink-dim">Five parts of the Playground, in order.</p>

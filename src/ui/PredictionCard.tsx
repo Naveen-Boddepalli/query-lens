@@ -3,61 +3,67 @@ import type { PredictionPrompt } from '../engine/index.ts';
 
 export interface PredictionCardProps {
   prompt: PredictionPrompt;
-  /** The answer already given, if this prompt has been answered. */
   answer: string | undefined;
   onAnswer: (optionId: string) => void;
   onSkip: () => void;
-  /** False in assignment mode (plan.md §20.5): answering is the only way past. */
   canSkip?: boolean;
 }
 
-/**
- * Commit before the reveal. This is the one feature RESEARCH.md §1 argues the
- * evidence actually supports: a wrong guess you have committed to teaches more
- * than a correct animation you watched.
- */
-export function PredictionCard({ prompt, answer, onAnswer, onSkip, canSkip = true }: PredictionCardProps) {
+const Icon = ({ ok }: { ok: boolean }) => (
+  <span aria-hidden="true" className={`text-label font-bold ${ok ? 'text-hit' : 'text-evict'}`}>
+    {ok ? '✓' : '✗'}
+  </span>
+);
+
+const card = 'rounded-xl border border-edge bg-surface-2/80 shadow-neu-rest backdrop-blur-md';
+const kbdCls = 'rounded border border-edge bg-surface-3 px-1.5 py-0.5 font-mono text-micro text-ink shadow-neu-rest';
+
+export function PredictionCard({
+  prompt,
+  answer,
+  onAnswer,
+  onSkip,
+  canSkip = true,
+}: PredictionCardProps) {
   const [hovered, setHovered] = useState<string | null>(null);
   const answered = answer !== undefined;
   const correct = answer === prompt.correctOptionId;
 
   return (
-    // Not a live region: the card mounts fresh on each gated step, and a
-    // screen reader does not announce a region that was not already there.
-    // The Playground's permanently-mounted narration `<p>` speaks the question
-    // and then the verdict instead (plan.md §22.6).
-    <section className="ql-sheen rounded-xl border border-accent/50 bg-accent/[0.07] p-3 shadow-e2">
-      <div className="mb-2 flex items-baseline gap-2">
-        <span className="inline-flex items-center gap-1.5 rounded-full border border-accent/60 bg-accent-soft px-2.5 py-0.5 text-label font-medium tracking-[0.12em] text-accent uppercase">
-          <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-accent-strong shadow-[0_0_8px_var(--color-accent)]" />
+    <section className={`ql-sheen p-4 ${card}`}>
+      <div className="mb-2.5 flex items-center gap-2">
+        <span className="inline-flex items-center gap-1.5 rounded-full border border-accent/60 bg-accent-soft px-3 py-0.5 text-micro font-semibold tracking-[0.14em] text-accent uppercase shadow-glow">
+          <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-accent-strong shadow-glow animate-pulse" />
           predict
         </span>
         {!answered && canSkip && (
           <button
             type="button"
             onClick={onSkip}
-            className="ml-auto text-label text-ink-dim underline-offset-2 hover:text-ink hover:underline"
+            className="ml-auto text-label text-ink-dim underline-offset-2 transition-colors hover:text-ink hover:underline"
           >
             skip
           </button>
         )}
         {!answered && !canSkip && (
-          <span className="ml-auto text-label text-ink-dim">answer to continue</span>
+          <span className="ml-auto text-label text-ink-dim/80">answer to continue</span>
         )}
       </div>
 
-      <p className="text-body leading-relaxed">{prompt.question}</p>
+      <p className="text-body font-medium leading-relaxed text-ink">{prompt.question}</p>
 
-      <ul className="mt-3 space-y-1.5">
+      <ul className="mt-3.5 space-y-1.5">
         {prompt.options.map((option) => {
           const isCorrect = option.id === prompt.correctOptionId;
           const isChosen = option.id === answer;
 
-          let tone = 'border-edge bg-surface-3 shadow-e1 hover:border-accent/70 hover:bg-surface-4';
+          let tone = 'border-edge bg-surface-3 hover:border-accent/70 hover:bg-surface-4';
           if (answered) {
-            if (isCorrect) tone = 'border-hit bg-hit/15 text-hit shadow-e1';
-            else if (isChosen) tone = 'border-evict bg-evict/15 text-evict shadow-e1';
-            else tone = 'border-edge/50 bg-transparent text-ink-dim/60';
+            tone = isCorrect
+              ? 'border-hit bg-hit/15 text-hit'
+              : isChosen
+                ? 'border-evict bg-evict/15 text-evict'
+                : 'border-edge/50 bg-transparent text-ink-dim/60';
           }
 
           return (
@@ -65,21 +71,25 @@ export function PredictionCard({ prompt, answer, onAnswer, onSkip, canSkip = tru
               <button
                 type="button"
                 disabled={answered}
-                onClick={() => { onAnswer(option.id); }}
-                onMouseEnter={() => { setHovered(option.id); }}
-                onMouseLeave={() => { setHovered(null); }}
-                className={[
-                  'w-full rounded-lg border px-2.5 py-1.5 text-left font-mono text-label transition',
-                  tone,
-                  !answered && hovered === option.id ? 'bg-surface-4' : '',
-                  answered ? 'cursor-default' : 'cursor-pointer',
-                ].join(' ')}
+                onClick={() => onAnswer(option.id)}
+                onMouseEnter={() => setHovered(option.id)}
+                onMouseLeave={() => setHovered(null)}
+                className={`flex w-full items-center justify-between gap-3 rounded-lg border px-2.5 py-1.5 text-left font-mono text-label transition select-none shadow-e1 ${tone} ${
+                  !answered && hovered === option.id ? 'bg-surface-4' : ''
+                } ${answered ? 'cursor-default' : 'cursor-pointer active:scale-[0.99] active:shadow-neu-pressed'}`}
               >
-                <span className="flex items-baseline justify-between gap-2">
+                <span className="flex items-center gap-2">
+                  <span
+                    aria-hidden="true"
+                    className={`h-2 w-2 rounded-full transition-colors ${
+                      answered
+                        ? isCorrect ? 'bg-hit' : isChosen ? 'bg-evict' : 'bg-transparent'
+                        : hovered === option.id ? 'bg-accent' : 'bg-edge'
+                    }`}
+                  />
                   <span>{option.label}</span>
-                  {answered && isCorrect && <span aria-hidden>✓</span>}
-                  {answered && isChosen && !isCorrect && <span aria-hidden>✗</span>}
                 </span>
+                {answered && (isCorrect || isChosen) && <Icon ok={isCorrect} />}
               </button>
             </li>
           );
@@ -87,13 +97,13 @@ export function PredictionCard({ prompt, answer, onAnswer, onSkip, canSkip = tru
       </ul>
 
       {answered && (
-        <div className="mt-3 space-y-1.5">
-          <p className={`text-label font-medium ${correct ? 'text-hit' : 'text-evict'}`}>
+        <div className={`mt-3 space-y-1.5 p-3 ${card}`}>
+          <p className={`text-label font-semibold ${correct ? 'text-hit' : 'text-evict'}`}>
             {correct ? 'Right.' : 'Not quite.'}
           </p>
           <p className="text-label leading-relaxed text-ink-dim">{prompt.explanation}</p>
           <p className="text-label text-ink-dim/80">
-            Press <kbd className="rounded border border-edge px-1">→</kbd> to see it happen.
+            Press <kbd className={kbdCls}>Right</kbd> to see it happen.
           </p>
         </div>
       )}
