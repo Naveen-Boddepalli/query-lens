@@ -1,3 +1,4 @@
+import type { JSX } from 'react';
 import type { ThemeChoice, ThemeState } from './theme.ts';
 
 /**
@@ -10,11 +11,39 @@ import type { ThemeChoice, ThemeState } from './theme.ts';
  *
  * A radiogroup rather than buttons: these are three values of one setting, and
  * a screen reader should hear which is current, not three unrelated controls.
+ * Zero emojis directive: uses clean monochrome SVG icons with technical precision.
  */
-const OPTIONS: { value: ThemeChoice; label: string; glyph: string; title: string }[] = [
-  { value: 'system', label: 'System', glyph: '◐', title: 'Follow the system setting' },
-  { value: 'light', label: 'Light', glyph: '☀', title: 'Always light' },
-  { value: 'dark', label: 'Dark', glyph: '☾', title: 'Always dark' },
+
+function SystemIcon(): JSX.Element {
+  return (
+    <svg className="h-3.5 w-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+      <circle cx="8" cy="8" r="6" />
+      <path d="M8 2a6 6 0 0 1 0 12V2z" fill="currentColor" />
+    </svg>
+  );
+}
+
+function SunIcon(): JSX.Element {
+  return (
+    <svg className="h-3.5 w-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true">
+      <circle cx="8" cy="8" r="3" />
+      <path d="M8 1.5v1.5M8 13v1.5M1.5 8h1.5M13 8h1.5M3.4 3.4l1.06 1.06M11.54 11.54l1.06 1.06M3.4 12.6l1.06-1.06M11.54 4.46l1.06-1.06" />
+    </svg>
+  );
+}
+
+function MoonIcon(): JSX.Element {
+  return (
+    <svg className="h-3.5 w-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M13.5 9.2A6 6 0 1 1 6.8 2.5a4.7 4.7 0 0 0 6.7 6.7z" />
+    </svg>
+  );
+}
+
+const OPTIONS: { value: ThemeChoice; label: string; icon: () => JSX.Element; title: string }[] = [
+  { value: 'system', label: 'System', icon: SystemIcon, title: 'Follow the system setting' },
+  { value: 'light', label: 'Light', icon: SunIcon, title: 'Always light' },
+  { value: 'dark', label: 'Dark', icon: MoonIcon, title: 'Always dark' },
 ];
 
 export function ThemeToggle({ choice, setChoice }: Pick<ThemeState, 'choice' | 'setChoice'>) {
@@ -22,10 +51,11 @@ export function ThemeToggle({ choice, setChoice }: Pick<ThemeState, 'choice' | '
     <div
       role="radiogroup"
       aria-label="Colour theme"
-      className="flex items-center gap-0.5 rounded-full border border-edge bg-surface-2 p-0.5 shadow-e1"
+      className="flex items-center gap-0.5 rounded-full border border-edge bg-surface-2/80 p-0.5 shadow-neu-track backdrop-blur-sm"
     >
       {OPTIONS.map((option) => {
         const selected = choice === option.value;
+        const Icon = option.icon;
         return (
           <button
             key={option.value}
@@ -37,13 +67,14 @@ export function ThemeToggle({ choice, setChoice }: Pick<ThemeState, 'choice' | '
             className={[
               // 24px minimum on both axes: WCAG 2.2 SC 2.5.8, the same rule
               // that set the scrubber's size (plan.md §15.1 item 8).
-              'flex h-6 min-w-7 items-center justify-center rounded-full px-1 text-label transition',
+              'flex h-6 min-w-7 items-center justify-center rounded-full px-1.5 text-label select-none ' +
+              'transition duration-150 ease-out active:translate-y-px active:scale-[0.97]',
               selected
-                ? 'bg-accent-soft text-ink shadow-e1'
-                : 'text-ink-dim hover:bg-surface-3 hover:text-ink',
+                ? 'border border-accent/40 bg-accent-soft text-ink shadow-neu-rest backdrop-blur-sm'
+                : 'border border-transparent text-ink-dim hover:bg-surface-3/80 hover:text-ink hover:shadow-neu-rest',
             ].join(' ')}
           >
-            <span aria-hidden>{option.glyph}</span>
+            <Icon />
             <span className="sr-only">{option.label}</span>
           </button>
         );
@@ -51,3 +82,4 @@ export function ThemeToggle({ choice, setChoice }: Pick<ThemeState, 'choice' | '
     </div>
   );
 }
+
