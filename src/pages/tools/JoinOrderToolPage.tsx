@@ -97,7 +97,7 @@ export function JoinOrderToolPage() {
 
       <div className={`${panelSurface} p-4`}>
         <p className="mb-2 text-label font-medium text-ink-dim">the demo query</p>
-        <pre className="overflow-x-auto whitespace-pre rounded-lg bg-surface-3 p-3 font-mono text-label text-ink">
+        <pre className="rounded-lg bg-surface-3 p-3 font-mono text-label break-words whitespace-pre-wrap text-ink">
           {DEMO_SQL}
         </pre>
       </div>

@@ -168,7 +168,7 @@ export function PlannerToolPage() {
           />
           <code className="font-mono text-ink">id</code> index
         </label>
-        <span className="text-ink-dim/60">rules:</span>
+        <span className="text-ink-dim">rules:</span>
         {OPTIMIZER_RULES.map((name) => (
           <label key={name} className="flex items-center gap-2 text-ink-dim">
             <input

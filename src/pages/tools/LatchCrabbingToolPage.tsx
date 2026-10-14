@@ -3,6 +3,7 @@ import { DEMO_INITIAL_KEYS, LATCH_LIMITS, demoScripts, planLatchCrabbing } from 
 import type { LatchProtocol } from '../../ui/latchCrabbing.ts';
 import { PageHeader } from '../../ui/PageHeader.tsx';
 import { btnSecondary, inputField, panelSurface } from '../../ui/primitives.ts';
+import { ScrollRegion } from '../../ui/ScrollRegion.tsx';
 
 /**
  * The latch-crabbing standalone (plan.md §25.4 F5 `/tools/latch-crabbing`). Its driver, `src/ui/latchCrabbing.ts`,
@@ -151,7 +152,8 @@ export function LatchCrabbingToolPage() {
         ))}
       </div>
 
-      <div className={`${panelSurface} overflow-x-auto p-3`}>
+      <div className={`${panelSurface} p-3`}>
+        <ScrollRegion label="Latch actions, in tick order" className="overflow-x-auto">
         <table className="w-full text-label">
           <thead>
             <tr className="text-left text-ink-dim">
@@ -177,6 +179,7 @@ export function LatchCrabbingToolPage() {
             ))}
           </tbody>
         </table>
+        </ScrollRegion>
         {shown.timeline.length > 60 && (
           <p className="pt-2 text-label text-ink-dim">Showing the first 60 of {shown.timeline.length} actions.</p>
         )}

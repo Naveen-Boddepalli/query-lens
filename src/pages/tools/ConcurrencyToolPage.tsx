@@ -9,6 +9,7 @@ import { decodeSchedule, encodeSchedule, SESSIONS } from '../../ui/scheduleUrl.t
 import { DataView } from '../../ui/DataView.tsx';
 import { StepList } from '../../ui/ScheduleStepList.tsx';
 import { SCHEDULE_COLUMNS, scheduleRows } from '../../ui/transactionTables.ts';
+import { ScrollRegion } from '../../ui/ScrollRegion.tsx';
 
 /**
  * plan.md §25.4 D6: one schedule, run under every concurrency-control protocol the schedule runner implements. The
@@ -286,7 +287,7 @@ export function ConcurrencyToolPage() {
           Counted off the runs below. A statement outside a transaction is one of its own. Choose a row to see its rule,
           its verdict, and the run itself.
         </p>
-        <div className="overflow-x-auto">
+        <ScrollRegion label="The same schedule under each concurrency-control protocol" className="overflow-x-auto">
           <table className="w-full min-w-[44rem] text-left text-label">
             <caption className="sr-only">The same schedule under each concurrency-control protocol</caption>
             <thead>
@@ -335,7 +336,7 @@ export function ConcurrencyToolPage() {
               })}
             </tbody>
           </table>
-        </div>
+        </ScrollRegion>
       </div>
 
       <div className={`${panelSurface} p-4`} role="region" aria-label={`The run under ${selected.protocol.label}`}>

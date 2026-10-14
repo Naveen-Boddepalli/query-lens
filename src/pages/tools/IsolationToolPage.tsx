@@ -16,6 +16,7 @@ import { DataView } from '../../ui/DataView.tsx';
 import { StepList } from '../../ui/ScheduleStepList.tsx';
 import { MATRIX_COLUMNS, matrixRows } from '../../ui/isolationTable.ts';
 import { SCHEDULE_COLUMNS, scheduleRows } from '../../ui/transactionTables.ts';
+import { ScrollRegion } from '../../ui/ScrollRegion.tsx';
 
 /**
  * plan.md §25.4 D5: the ten Hermitage anomalies at four isolation levels, on both engines. Nothing here is a lookup:
@@ -107,7 +108,7 @@ export function IsolationToolPage() {
             <p className="mb-2 text-label text-ink-dim">
               {engine.blurb} Compared with {engine.reference}.
             </p>
-            <div className="overflow-x-auto">
+            <ScrollRegion label={`Which anomalies can occur, by isolation level, under ${engine.title}`} className="overflow-x-auto">
               <table className="w-full min-w-[34rem] text-left text-label">
                 <caption className="sr-only">
                   Which anomalies can occur, by isolation level, under {engine.title}
@@ -156,7 +157,7 @@ export function IsolationToolPage() {
                   ))}
                 </tbody>
               </table>
-            </div>
+            </ScrollRegion>
           </div>
         ))}
         </div>

@@ -83,6 +83,25 @@ const serviceWorkerPlugin = {
   },
 };
 
+/**
+ * A fenced code block can be wider than its column, and then it scrolls, and a box that scrolls has to be reachable
+ * from the keyboard (WCAG 2.1.1; axe's `scrollable-region-focusable`) — a block of text has nothing focusable inside
+ * it. This gives every `<pre>` of the docs a tab stop, at build time, so no page has to remember to.
+ */
+interface HastNode {
+  type: string;
+  tagName?: string;
+  properties?: Record<string, unknown>;
+  children?: HastNode[];
+}
+function rehypeFocusablePre() {
+  const walk = (node: HastNode): void => {
+    if (node.type === 'element' && node.tagName === 'pre') node.properties = { ...node.properties, tabIndex: 0 };
+    for (const child of node.children ?? []) walk(child);
+  };
+  return (tree: HastNode) => { walk(tree); };
+}
+
 export default defineConfig({
   plugins: [
     // `rehype-slug` gives every rendered heading a stable `id` (kebab-cased
@@ -111,7 +130,7 @@ export default defineConfig({
     // text rather than a table.
     { enforce: 'pre', ...mdx({
       remarkPlugins: [remarkFrontmatter, remarkMdxFrontmatter, remarkGfm],
-      rehypePlugins: [rehypeSlug],
+      rehypePlugins: [rehypeSlug, rehypeFocusablePre],
     }) },
     react(),
     tailwindcss(),

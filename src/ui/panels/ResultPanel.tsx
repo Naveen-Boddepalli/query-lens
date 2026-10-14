@@ -1,4 +1,5 @@
 import type { Row } from '../../engine/index.ts';
+import { ScrollRegion } from '../ScrollRegion.tsx';
 
 export function ResultPanel({ rows }: { rows: Row[] }) {
   if (rows.length === 0) {
@@ -9,7 +10,7 @@ export function ResultPanel({ rows }: { rows: Row[] }) {
   return (
     // Scrolls inside the fixed-height stage panel: a result set can be any
     // size, and the playback controls below must not move to accommodate it.
-    <div className="h-full overflow-auto rounded-xl border border-edge shadow-e1">
+    <ScrollRegion label="Query result" className="h-full overflow-auto rounded-xl border border-edge shadow-e1">
       <table className="w-full border-collapse text-left font-mono text-label">
         <thead>
           {/* Sticky + blurred, so the columns stay readable while scrolling a
@@ -43,6 +44,6 @@ export function ResultPanel({ rows }: { rows: Row[] }) {
           ))}
         </tbody>
       </table>
-    </div>
+    </ScrollRegion>
   );
 }

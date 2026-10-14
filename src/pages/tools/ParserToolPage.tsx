@@ -91,7 +91,7 @@ function MarkedSource({ src, from, to }: { src: string; from: number; to: number
   const a = Math.max(0, Math.min(from, src.length));
   const b = Math.max(a, Math.min(to, src.length));
   return (
-    <pre className="overflow-x-auto rounded-lg border border-edge bg-surface-3 p-2.5 font-mono text-label text-ink-dim">
+    <pre className="rounded-lg border border-edge bg-surface-3 p-2.5 font-mono text-label break-words whitespace-pre-wrap text-ink-dim">
       {src.slice(0, a)}
       <span style={WAVY} className="text-ink">
         {src.slice(a, b) || '␣'}

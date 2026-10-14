@@ -31,7 +31,7 @@ export function ExamplesPage() {
                 →
               </span>
             </div>
-            <pre className="mt-2 overflow-x-auto font-mono text-code text-accent">{example.sql}</pre>
+            <pre className="mt-2 font-mono text-code break-words whitespace-pre-wrap text-accent">{example.sql}</pre>
             <p className="mt-2 text-label text-ink-dim">{example.description}</p>
           </a>
         ))}

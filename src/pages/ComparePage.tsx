@@ -40,6 +40,7 @@ import {
   segOff,
   segOn,
 } from '../ui/primitives.ts';
+import { ScrollRegion } from '../ui/ScrollRegion.tsx';
 
 /**
  * plan.md §13's comparison view, in four modes:
@@ -1387,7 +1388,7 @@ function VectorizeCompare() {
             <span className="font-mono">{totals.batched}</span> — <span className="font-mono">{ratio.toFixed(1)}×</span> fewer.
           </p>
 
-          <div className={`${panelSurface} overflow-x-auto p-3`}>
+          <ScrollRegion label="Calls to next(), operator by operator" className={`${panelSurface} overflow-x-auto p-3`}>
             <table className="w-full text-label">
               <thead>
                 <tr className="text-left text-ink-dim">
@@ -1408,7 +1409,7 @@ function VectorizeCompare() {
                 ))}
               </tbody>
             </table>
-          </div>
+          </ScrollRegion>
         </>
       )}
     </>

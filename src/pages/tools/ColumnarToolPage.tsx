@@ -167,6 +167,7 @@ export function ColumnarToolPage() {
             <div key={plan.name} className="flex flex-wrap items-center gap-3 rounded-lg border border-edge bg-surface-3 p-2">
               <span className="w-40 shrink-0 font-mono text-label text-ink">{plan.name}</span>
               <select
+                aria-label={`Encoding for ${plan.name}`}
                 value={plan.encoding}
                 onChange={(e) => { setEncodingOverrides((prev) => ({ ...prev, [plan.name]: e.target.value as Encoding })); }}
                 className={`${inputField} w-40`}

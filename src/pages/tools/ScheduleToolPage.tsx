@@ -23,6 +23,7 @@ import {
   segOff,
   segOn,
 } from '../../ui/primitives.ts';
+import { ScrollRegion } from '../../ui/ScrollRegion.tsx';
 
 /**
  * plan.md §25.4 D1, D2: two sessions, one database, and an interleaving you choose. With *no locking* a statement
@@ -254,7 +255,7 @@ const PHASE_LABEL: Record<ScheduleStepResult['phase'], string | null> = {
 function RowsTable({ caption, columns, rows }: { caption: string; columns: string[]; rows: Row[] }) {
   if (rows.length === 0) return <p className="text-label text-ink-dim">{caption}: no rows.</p>;
   return (
-    <div className="overflow-x-auto">
+    <ScrollRegion label={caption} className="overflow-x-auto">
       <table className="w-full text-left text-label tabular-nums">
         <caption className="sr-only">{caption}</caption>
         <thead>
@@ -274,7 +275,7 @@ function RowsTable({ caption, columns, rows }: { caption: string; columns: strin
           ))}
         </tbody>
       </table>
-    </div>
+    </ScrollRegion>
   );
 }
 
@@ -290,7 +291,7 @@ function VersionTable({ versions, columns, caption }: { versions: VersionRow[]; 
   const shown = versions.filter((v) => changed.has(v.rid));
   if (shown.length === 0) return <p className="text-label text-ink-dim">{caption}: every row is still its original version.</p>;
   return (
-    <div className="overflow-x-auto">
+    <ScrollRegion label={caption} className="overflow-x-auto">
       <table className="w-full text-left text-label tabular-nums">
         <caption className="sr-only">{caption}</caption>
         <thead>
@@ -316,7 +317,7 @@ function VersionTable({ versions, columns, caption }: { versions: VersionRow[]; 
           ))}
         </tbody>
       </table>
-    </div>
+    </ScrollRegion>
   );
 }
 

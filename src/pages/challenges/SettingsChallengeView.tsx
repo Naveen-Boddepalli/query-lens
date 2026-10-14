@@ -94,7 +94,7 @@ export function SettingsChallengeView({ challenge, index, total, next }: Setting
                             else next.delete(o.value);
                             set(control.options.filter((x) => next.has(x.value)).map((x) => x.value).join(','));
                           }}
-                          className="accent-[var(--color-accent)]"
+                          className="h-6 w-6 accent-[var(--color-accent)]"
                         />
                         {o.label}
                       </label>

@@ -4,6 +4,7 @@ import { buildHeap, createSeedDatabase, DEFAULT_ENGINE_OPTIONS } from '../../eng
 import { layOutPage } from '../../ui/slottedPage.ts';
 import { PageHeader } from '../../ui/PageHeader.tsx';
 import { inputField, panelSurface } from '../../ui/primitives.ts';
+import { ScrollRegion } from '../../ui/ScrollRegion.tsx';
 
 /**
  * The storage-course standalone (plan.md §22.3): one heap page, laid out to the
@@ -210,7 +211,7 @@ export function PageToolPage() {
         </p>
       </div>
 
-      <div className={`${panelSurface} overflow-auto p-0`}>
+      <ScrollRegion label="The slots and tuples of the page" className={`${panelSurface} overflow-auto p-0`}>
         <table className="w-full border-collapse text-left font-mono text-label">
           <thead>
             <tr className="border-b border-edge bg-surface-2 text-ink-dim">
@@ -258,7 +259,7 @@ export function PageToolPage() {
             })}
           </tbody>
         </table>
-      </div>
+      </ScrollRegion>
 
       <p className="text-label leading-relaxed text-ink-dim">
         Every stage that reads a row goes through a page like this — see it in motion in the{' '}

@@ -14,8 +14,19 @@ rules at levels A and AA. The scan runs in the project's test suite (`e2e/audit.
 covers the landing page, the playground, every tool and comparison, every docs page, the not-found page, and one
 stage, three lessons and eight challenge pages standing for their kinds — two query challenges (one with a link to a
 tool), and the views that differ: a schedule, a log script, a lock script, and the forms of settings for a tool, with
-numbers, a text box and a list, or a set of check boxes. The last run found no violations on any of them.
+numbers, a text box and a list, or a set of check boxes. Each is scanned in the light and the dark palette, at a
+laptop width and at 360 px, because a palette has its own contrasts and a table that fits a laptop scrolls on a
+phone. A second scan opens thirty-four of them and uses their controls — presses Run, shows each chart as a table,
+chooses each radio button and tab in turn — and scans after each, because most of what a person sees is one click
+later than the page as it opens (`e2e/auditStates.spec.ts`). The last run found no violations on any of them.
 The other stage, lesson and challenge pages are built from the same components, but they are not scanned one by one.
+
+Two limits of the scan itself are worth knowing. axe reports some contrast checks as *incomplete* rather than failed
+— over text on a gradient, over a pseudo-element, or a single symbol — and those are not asserted either way. And an
+earlier version of this scan waited for the page's outer shell rather than its content, so for some routes it passed
+for the wrong reason; it now waits for the page's own first heading. Running it that way found ten real failures,
+all fixed: seven tables and code blocks that scrolled without being reachable from the keyboard, a drop-down with no
+name, a label at 2.9:1 contrast, and check boxes under the minimum target size.
 
 Automated scanning catches only part of WCAG: a pass means no *detectable* violation, not that a page is accessible.
 

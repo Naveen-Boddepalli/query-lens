@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { planVectorIndex, queryPoints, exactTopK, VECTOR_LIMITS, buildIvf, buildHnsw, ivfSearch, hnswSearch, recallAt } from '../../ui/vectorIndex.ts';
 import { PageHeader } from '../../ui/PageHeader.tsx';
 import { btnSecondary, inputField, panelSurface } from '../../ui/primitives.ts';
+import { ScrollRegion } from '../../ui/ScrollRegion.tsx';
 
 /**
  * The vector-index standalone (plan.md §25.4 F6 `/tools/vector-index`). Brute force, IVF and HNSW answer the same
@@ -110,7 +111,7 @@ export function VectorIndexToolPage() {
 
       <div className={`${panelSurface} flex flex-col gap-3 p-4`}>
         <h3 className="text-body font-semibold text-ink">Cost and recall, averaged over {VECTOR_LIMITS.queries} queries</h3>
-        <div className="overflow-x-auto">
+        <ScrollRegion label="Cost and recall by method" className="overflow-x-auto">
           <table className="w-full text-label">
             <thead>
               <tr className="text-left text-ink-dim">
@@ -136,7 +137,7 @@ export function VectorIndexToolPage() {
               ))}
             </tbody>
           </table>
-        </div>
+        </ScrollRegion>
         <p className="text-label text-ink-dim">
           Brute force always finds everything but reads every point. Which approximate method is cheaper for a given
           recall depends on the size: at 200 points HNSW reaches full recall for fewer distances than IVF, and at 400

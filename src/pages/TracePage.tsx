@@ -20,6 +20,7 @@ import {
   segOff,
   segOn,
 } from '../ui/primitives.ts';
+import { ScrollRegion } from '../ui/ScrollRegion.tsx';
 
 /**
  * plan.md §21.3, "Explore": the raw `StepEvent[]` for a query as a filterable
@@ -318,7 +319,7 @@ export function TracePage() {
                 {result.rows.length > 0 && ` · query returned ${result.rows.length} row${result.rows.length === 1 ? '' : 's'}`}
               </p>
 
-              <div className={`${panelSurface} min-h-0 flex-1 overflow-auto p-0`}>
+              <ScrollRegion label="Trace events" className={`${panelSurface} min-h-0 flex-1 overflow-auto p-0`}>
                 <table className="w-full border-collapse text-label">
                   <thead className="sticky top-0 z-10 bg-surface-2 text-ink-dim">
                     <tr className="border-b border-edge text-left">
@@ -347,7 +348,7 @@ export function TracePage() {
                     ))}
                   </tbody>
                 </table>
-              </div>
+              </ScrollRegion>
             </>
           ) : (
             <>
@@ -443,7 +444,7 @@ function FragmentRow({
       {open && (
         <tr className="border-b border-edge bg-surface-3/40">
           <td colSpan={4} className="px-3 py-2">
-            <pre className="overflow-x-auto font-mono text-label text-ink-dim">
+            <pre className="font-mono text-label break-words whitespace-pre-wrap text-ink-dim">
               {JSON.stringify(event, null, 2)}
             </pre>
           </td>
