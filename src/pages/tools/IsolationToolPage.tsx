@@ -19,7 +19,7 @@ import { SCHEDULE_COLUMNS, scheduleRows } from '../../ui/transactionTables.ts';
 import { ScrollRegion } from '../../ui/ScrollRegion.tsx';
 
 /**
- * plan.md §25.4 D5: the ten Hermitage anomalies at four isolation levels, on both engines. Nothing here is a lookup:
+ * plan.md §25.4 D5: the ten Hermitage anomalies at four isolation levels, on three engines. Nothing here is a lookup:
  * each cell is a schedule that was run, judged by what its transactions saw and wrote, and every cell opens the
  * schedule that produced it. The published results sit beside the computed ones, and a cell outlined differently
  * says where the two part company.
@@ -38,6 +38,13 @@ const ENGINES: { kind: EngineKind; title: string; blurb: string; reference: stri
     blurb: 'Readers take no lock. REPEATABLE READ is snapshot isolation; SERIALIZABLE checks reads at commit.',
     reference: 'PostgreSQL',
   },
+  {
+    kind: 'innodb',
+    title: 'InnoDB (MySQL)',
+    blurb:
+      'READ COMMITTED is a snapshot for each statement. REPEATABLE READ is one snapshot for plain reads and the latest committed row for writes, so a lost update gets through. SERIALIZABLE turns every read into a locking read. MySQL published only some of these cells; the rest are marked.',
+    reference: 'MySQL 5.6, the cells its page ran',
+  },
 ];
 
 interface Selected {
@@ -49,7 +56,7 @@ interface Selected {
 function readCell(raw: string | null): Selected | null {
   if (raw === null) return null;
   const [engine, test, level] = raw.split('.');
-  if (engine !== 'locks' && engine !== 'mvcc') return null;
+  if (engine !== 'locks' && engine !== 'mvcc' && engine !== 'innodb') return null;
   const found = HERMITAGE_TESTS.find((t) => t.id === test);
   const lvl = HERMITAGE_LEVELS.find((l) => l === level);
   return found && lvl ? { engine, test: found.id, level: lvl } : null;
@@ -57,7 +64,7 @@ function readCell(raw: string | null): Selected | null {
 
 export function IsolationToolPage() {
   const matrices = useMemo(
-    () => ({ locks: hermitageMatrix('locks'), mvcc: hermitageMatrix('mvcc') }),
+    () => ({ locks: hermitageMatrix('locks'), mvcc: hermitageMatrix('mvcc'), innodb: hermitageMatrix('innodb') }),
     [],
   );
   const [selected, setSelected] = useState<Selected>(() => {
@@ -85,10 +92,10 @@ export function IsolationToolPage() {
     <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-4 p-6 sm:p-8">
       <PageHeader title="Isolation matrix">
         Ten anomalies from the Hermitage suite, each a fixed schedule of three transactions, run at four isolation
-        levels on two engines (plan.md §25.4 D5). A <strong>—</strong> means the anomaly <em>happened</em> in that
+        levels on three engines (plan.md §25.4 D5). A <strong>—</strong> means the anomaly <em>happened</em> in that
         schedule at that level; a <strong>✓</strong> means it did not. Every cell was computed by running the schedule
         and checking what its transactions saw and wrote, and opens the run. The tables are held against what
-        PostgreSQL and SQL Server publish; the{' '}
+        PostgreSQL, SQL Server and MySQL publish — for MySQL only the cells its page ran; the{' '}
         <Link to="/tools/schedule" className="underline underline-offset-2 hover:text-ink">
           transaction schedules
         </Link>{' '}
@@ -96,7 +103,7 @@ export function IsolationToolPage() {
       </PageHeader>
 
       <DataView
-        caption="Every anomaly at every isolation level on both engines, with the published result beside each"
+        caption="Every anomaly at every isolation level on all three engines, with the published result beside each"
         columns={MATRIX_COLUMNS}
         rows={matrixRows(matrices)}
         keyOf={(r, i) => `${String(i)}-${r.anomaly}`}
@@ -131,7 +138,8 @@ export function IsolationToolPage() {
                       </th>
                       {HERMITAGE_LEVELS.map((level) => {
                         const c = matrices[engine.kind].find((x) => x.test === t.id && x.level === level)!;
-                        const differs = c.occurred !== DOCUMENTED[engine.kind][level][t.id];
+                        const published = DOCUMENTED[engine.kind][level][t.id];
+                        const differs = published !== null && c.occurred !== published;
                         const isSelected =
                           selected.engine === engine.kind && selected.test === t.id && selected.level === level;
                         return (
@@ -142,7 +150,9 @@ export function IsolationToolPage() {
                               aria-pressed={isSelected}
                               aria-label={`${t.id} at ${HERMITAGE_LEVEL_LABELS[level]}, ${engine.title}: ${
                                 c.occurred ? 'can occur' : 'prevented'
-                              }${differs ? ', differs from the published result' : ''}`}
+                              }${differs ? ', differs from the published result' : ''}${
+                                published === null ? ', no published result' : ''
+                              }`}
                               className={`w-full rounded-md border px-2 py-1 font-mono ${
                                 isSelected ? 'border-accent' : differs ? 'border-dashed border-ink-dim' : 'border-edge'
                               } ${c.occurred ? 'text-evict' : 'text-hit'}`}
@@ -171,9 +181,15 @@ export function IsolationToolPage() {
           </h2>
           <p className="mt-1 text-label text-ink-dim">{test.means}</p>
           <p className="mt-2 text-label text-ink" role="status">
-            {cell.occurred ? 'It happened.' : 'It did not happen.'} The published result is that it{' '}
-            {documented ? 'can occur' : 'is prevented'} at this level
-            {cell.occurred === documented ? ', which agrees.' : '.'}
+            {cell.occurred ? 'It happened.' : 'It did not happen.'}{' '}
+            {documented === null ? (
+              'Nothing was published for this cell, so it is not held against a result.'
+            ) : (
+              <>
+                The published result is that it {documented ? 'can occur' : 'is prevented'} at this level
+                {cell.occurred === documented ? ', which agrees.' : '.'}
+              </>
+            )}
           </p>
           {known && <p className="mt-1 text-label text-ink-dim">{known.why}</p>}
           <div className="mt-3">

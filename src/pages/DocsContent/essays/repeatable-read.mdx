@@ -61,7 +61,8 @@ One session reads the accounts over 50 twice; another inserts an account of 100 
 
 - **These are two small engines, not two products.** PostgreSQL's `REPEATABLE READ` is snapshot isolation, and SQL
   Server's is locking, which is why the same name behaves differently between them. MySQL's InnoDB is a hybrid of the
-  two that neither QueryLens engine models, so it is not in the matrix.
+  two — a snapshot for plain reads, the latest committed row for writes — and the matrix has a third column for it,
+  built from the two engines level by level; MySQL published only some of its cells, and the others carry no claim.
 - **The standard's wording is why this happens.** SQL defines each level by which anomalies it must not allow, and
   names only a few. An engine may prevent more than a level requires, and different engines prevent different extras.
 - **The `SERIALIZABLE` of the snapshot engine is not PostgreSQL's.** It checks everything a transaction read, which

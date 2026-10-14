@@ -9,6 +9,11 @@
  * The rule is PostgreSQL's, in its simplest form. A version is visible to a snapshot when the transaction that
  * created it was committed when the snapshot was taken (or is the reader itself), and the transaction that removed it
  * was not — or the reader itself did not remove it.
+ *
+ * One addition, for writers that go on top of a row they cannot see the newest version of (InnoDB's current read,
+ * `LockingOptions.currentWrites`): a reader that has written a row sees *its own* version of that row and no other,
+ * because the version it replaced may still look visible to its snapshot, and the row would otherwise appear twice.
+ * Where a writer is refused when the row has changed — the default — this changes nothing.
  */
 
 import type { Database, Row } from './types.ts';
@@ -43,9 +48,16 @@ export function viewOf(
   self: number,
 ): Database {
   const tables: Database['tables'] = {};
+  // The rows the reader has itself written: for those, what it wrote is the row.
+  const written = new Set<number>();
+  for (const v of versions) if (v.xmin === self || v.xmax === self) written.add(v.rid);
   for (const [name, table] of Object.entries(template.tables)) {
     const rows = versions
-      .filter((v) => v.table === name && isVisible(v, committed, self))
+      .filter((v) => {
+        if (v.table !== name) return false;
+        if (!written.has(v.rid)) return isVisible(v, committed, self);
+        return v.xmin === self && (v.xmax === null || (v.xmax !== self && !committed.has(v.xmax)));
+      })
       .sort((a, b) => a.order - b.order)
       .map((v) => v.row);
     tables[name] = { ...table, rows };

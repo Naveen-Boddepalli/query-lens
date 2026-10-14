@@ -53,25 +53,37 @@ describe('a schedule as rows', () => {
 });
 
 describe('the isolation matrix as rows', () => {
-  const rows = matrixRows({ locks: hermitageMatrix('locks'), mvcc: hermitageMatrix('mvcc') });
+  const rows = matrixRows({
+    locks: hermitageMatrix('locks'),
+    mvcc: hermitageMatrix('mvcc'),
+    innodb: hermitageMatrix('innodb'),
+  });
 
-  it('is one row for each of the ten anomalies at each of four levels on each of two engines', () => {
-    expect(rows).toHaveLength(10 * 4 * 2);
+  it('is one row for each of the ten anomalies at each of four levels on each of three engines', () => {
+    expect(rows).toHaveLength(10 * 4 * 3);
     expect(new Set(rows.map((r) => r.anomaly)).size).toBe(10);
-    expect(new Set(rows.map((r) => r.engine)).size).toBe(2);
+    expect(new Set(rows.map((r) => r.engine)).size).toBe(3);
     expect(new Set(rows.map((r) => r.level)).size).toBe(4);
   });
 
-  it('agrees with the published results everywhere but the one cell that is declared', () => {
-    const different = rows.filter((r) => r.agrees !== 'yes');
-    expect(different).toHaveLength(1);
-    expect(different[0]!.agrees).toMatch(/^no — /);
-    expect(different[0]!.anomaly).toContain('OTV');
+  it('agrees with the published results everywhere but the two cells that are declared, and says where nothing was published', () => {
+    const different = rows.filter((r) => r.agrees !== 'yes' && r.agrees !== 'not published');
+    expect(different).toHaveLength(2);
+    for (const r of different) {
+      expect(r.agrees).toMatch(/^no — /);
+      expect(r.anomaly).toContain('OTV');
+      expect(r.level).toBe('READ UNCOMMITTED');
+    }
+    expect(different.map((r) => r.engine).sort()).toEqual(['InnoDB (MySQL)', 'Two-phase locking']);
+    // MySQL's page ran 19 of the 40 cells; the other 21 carry no claim either way.
+    const innodb = rows.filter((r) => r.engine === 'InnoDB (MySQL)');
+    expect(innodb.filter((r) => r.published === 'not published')).toHaveLength(21);
   });
 
   it('reads the same as the matrix: write skew at repeatable read, by engine', () => {
     const skew = rows.filter((r) => r.anomaly.startsWith('G2-item') && r.level === 'REPEATABLE READ');
     expect(skew.map((r) => `${r.engine}: ${r.happens}`).sort()).toEqual([
+      'InnoDB (MySQL): happens',
       'Two-phase locking: prevented',
       'Versions and snapshots: happens',
     ]);

@@ -184,7 +184,8 @@ describe('lesson: read the isolation matrix', () => {
     }
     expect(cells).toBe(80);
     expect(disagree).toBe(1);
-    expect(KNOWN_DIFFERENCES).toHaveLength(1);
+    // The lesson is about the two engines it names; the matrix's third, InnoDB, has a difference of its own.
+    expect(KNOWN_DIFFERENCES.filter((d) => d.engine !== 'innodb')).toHaveLength(1);
   });
 
   it('at READ COMMITTED the second read is 50 and is flagged; at REPEATABLE READ B waits and A reads 100 twice', () => {

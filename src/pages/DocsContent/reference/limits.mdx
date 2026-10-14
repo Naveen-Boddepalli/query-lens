@@ -285,11 +285,14 @@ index entries of the rows it touches.
 - **The [isolation matrix](/tools/isolation)** runs ten anomalies from the Hermitage suite — dirty writes,
   aborted and intermediate reads, circular information flow, observed-transaction-vanishes,
   predicate-many-preceders, lost update, read skew, and write skew on an item and on a predicate — at the four
-  levels on both engines. Each cell is a three-transaction schedule that was *run*, and the anomaly is judged by
-  what its transactions saw and wrote. The results are held, in a test, against what PostgreSQL (for versions)
-  and SQL Server's locking levels (for locks) publish: 79 of 80 cells agree, and the one that does not —
-  `OTV` at `READ UNCOMMITTED` — is marked and explained on the page. MySQL/InnoDB's `REPEATABLE READ` is a
-  hybrid of locks and snapshots that neither engine models, so it is not held against either.
+  levels on three engines: locks, snapshots, and InnoDB, which is built from the other two level by level — and,
+  at `REPEATABLE READ`, lets a write work from the latest committed row where PostgreSQL's refuses it. Each cell is
+  a three-transaction schedule that was *run*, and the anomaly is judged by what its transactions saw and wrote.
+  The results are held, in a test, against what PostgreSQL (for versions), SQL Server's locking levels (for locks)
+  and MySQL (for InnoDB) publish: 79 of 80 cells agree for the first two, and the one that does not — `OTV` at
+  `READ UNCOMMITTED` — is marked and explained on the page, as is the same cell for InnoDB. MySQL's page ran only
+  19 of the 40 cells, and `PMP` and `G-single` in read and write variants of which the matrix runs the read ones;
+  the other 21 are computed and carry no claim.
 - **Two protocols never wait** (plan.md §25.4 D6), for comparing against locks and snapshots. **Basic timestamp
   ordering** gives each transaction a timestamp when it begins, and each row remembers the newest timestamp that
   read it and the newest that wrote it; an operation that arrives after a *younger* transaction has already read

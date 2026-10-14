@@ -40,7 +40,21 @@ export function createHermitageDatabase(): Database {
 }
 
 export type AnomalyId = 'G0' | 'G1a' | 'G1b' | 'G1c' | 'OTV' | 'PMP' | 'P4' | 'G-single' | 'G2-item' | 'G2';
-export type EngineKind = 'locks' | 'mvcc';
+export type EngineKind = 'locks' | 'mvcc' | 'innodb';
+
+/**
+ * MySQL's InnoDB is neither engine alone, and what it is depends on the level: `READ UNCOMMITTED` reads the latest
+ * version whatever its state, so it is the locking engine's dirty reads with write locks; `READ COMMITTED` is a
+ * snapshot for each statement; `REPEATABLE READ` is a snapshot for the transaction for plain reads and a current read
+ * for writes (`currentWrites`), which is how it differs from PostgreSQL's; and at `SERIALIZABLE` a plain read becomes a
+ * locking one, so it is the locking engine again.
+ */
+const INNODB_AT: Record<IsolationLevel, { mvcc: boolean; currentWrites?: boolean }> = {
+  'read-uncommitted': { mvcc: false },
+  'read-committed': { mvcc: true },
+  'repeatable-read': { mvcc: true, currentWrites: true },
+  serializable: { mvcc: false },
+};
 
 export interface HermitageTest {
   id: AnomalyId;
@@ -286,10 +300,12 @@ export interface MatrixCell {
 
 /** Runs one schedule at one level on one engine. */
 export function runHermitage(test: HermitageTest, level: IsolationLevel, engine: EngineKind): MatrixCell {
+  const how = engine === 'innodb' ? INNODB_AT[level] : { mvcc: engine === 'mvcc' };
   const result = runSchedule(test.steps, createHermitageDatabase(), undefined, {
     granularity: 'row',
     isolation: level,
-    ...(engine === 'mvcc' ? { mvcc: true } : {}),
+    ...(how.mvcc ? { mvcc: true } : {}),
+    ...('currentWrites' in how && how.currentWrites ? { currentWrites: true } : {}),
   });
   return { test: test.id, level, engine, occurred: test.occurred(result), result };
 }
@@ -300,16 +316,23 @@ export function hermitageMatrix(engine: EngineKind): MatrixCell[] {
 }
 
 /**
- * What the Hermitage project published, `true` where the anomaly *can occur*. PostgreSQL's is the reference for the
- * versions engine: its READ UNCOMMITTED is READ COMMITTED, and its REPEATABLE READ is snapshot isolation. SQL Server's
- * locking levels are the reference for the locks engine. (MySQL/InnoDB's REPEATABLE READ is a hybrid of locks and
- * snapshots that neither engine here models, so it is not held against either.)
+ * What the Hermitage project published: `true` where the anomaly *can occur*, `false` where it is prevented, and
+ * `null` where nothing was published for that cell. PostgreSQL's is the reference for the versions engine: its READ
+ * UNCOMMITTED is READ COMMITTED, and its REPEATABLE READ is snapshot isolation. SQL Server's locking levels are the
+ * reference for the locks engine. MySQL's InnoDB is the third column, `innodb`, and its published results are
+ * *partial*: its page runs most anomalies at some of the levels, not all, and each of `PMP` and `G-single` in a read
+ * predicate and a write predicate variant — the matrix's schedules are the read variants, which is what is recorded
+ * here.
  */
-export const DOCUMENTED: Record<EngineKind, Record<IsolationLevel, Record<AnomalyId, boolean>>> = (() => {
-  const row = (...occur: AnomalyId[]): Record<AnomalyId, boolean> => {
-    const all: AnomalyId[] = ['G0', 'G1a', 'G1b', 'G1c', 'OTV', 'PMP', 'P4', 'G-single', 'G2-item', 'G2'];
-    return Object.fromEntries(all.map((id) => [id, occur.includes(id)])) as Record<AnomalyId, boolean>;
-  };
+export type Published = boolean | null;
+
+export const DOCUMENTED: Record<EngineKind, Record<IsolationLevel, Record<AnomalyId, Published>>> = (() => {
+  const all: AnomalyId[] = ['G0', 'G1a', 'G1b', 'G1c', 'OTV', 'PMP', 'P4', 'G-single', 'G2-item', 'G2'];
+  const row = (...occur: AnomalyId[]): Record<AnomalyId, Published> =>
+    Object.fromEntries(all.map((id) => [id, occur.includes(id)])) as Record<AnomalyId, Published>;
+  /** Only the cells a page published; every other is `null`. */
+  const partial = (known: Partial<Record<AnomalyId, boolean>>): Record<AnomalyId, Published> =>
+    Object.fromEntries(all.map((id) => [id, known[id] ?? null])) as Record<AnomalyId, Published>;
   const postgresRC = row('PMP', 'P4', 'G-single', 'G2-item', 'G2');
   return {
     mvcc: {
@@ -324,6 +347,15 @@ export const DOCUMENTED: Record<EngineKind, Record<IsolationLevel, Record<Anomal
       'repeatable-read': row('PMP', 'G2'),
       serializable: row(),
     },
+    // MySQL 5.6.21, InnoDB (Hermitage's mysql.md).
+    innodb: {
+      'read-uncommitted': partial({ G0: false, G1a: true, G1b: true, G1c: true, OTV: true }),
+      'read-committed': partial({ G1a: false, G1b: false, G1c: false, OTV: false, PMP: true, 'G-single': true }),
+      // Read predicates and read-only skew are prevented by the snapshot; a lost update and both write skews are not.
+      'repeatable-read': partial({ PMP: false, P4: true, 'G-single': false, 'G2-item': true, G2: true }),
+      // PMP and G-single are published here only for their write-predicate variants, which the matrix does not run.
+      serializable: partial({ P4: false, 'G2-item': false, G2: false }),
+    },
   };
 })();
 
@@ -332,6 +364,15 @@ export const DOCUMENTED: Record<EngineKind, Record<IsolationLevel, Record<Anomal
  * difference not listed, so this is the whole of the gap, not a sample of it.
  */
 export const KNOWN_DIFFERENCES: { engine: EngineKind; level: IsolationLevel; test: AnomalyId; why: string }[] = [
+  {
+    engine: 'innodb',
+    level: 'read-uncommitted',
+    test: 'OTV',
+    why:
+      'MySQL’s page marks OTV as able to occur at READ UNCOMMITTED, where a reader sees whatever is latest. In this ' +
+      'schedule T2 commits, and T3 reads 12 and 19 and then 12 and 18 — the same consistent values the locking engine ' +
+      'gives above — so the anomaly is not exhibited here, though a dirty reader can in principle observe it.',
+  },
   {
     engine: 'locks',
     level: 'read-uncommitted',

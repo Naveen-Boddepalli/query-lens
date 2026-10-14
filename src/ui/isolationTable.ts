@@ -26,13 +26,17 @@ export interface MatrixRow {
 const ENGINE_TITLE: Record<EngineKind, string> = {
   locks: 'Two-phase locking',
   mvcc: 'Versions and snapshots',
+  innodb: 'InnoDB (MySQL)',
 };
 
-/** Every cell of both matrices, anomaly by anomaly, with what the published results say and whether they agree. */
+/**
+ * Every cell of every matrix, anomaly by anomaly, with what the published results say and whether they agree. A cell
+ * nothing was published for says so, and is not held against the engine.
+ */
 export function matrixRows(matrices: Record<EngineKind, readonly MatrixCell[]>): MatrixRow[] {
   const rows: MatrixRow[] = [];
   for (const test of HERMITAGE_TESTS) {
-    for (const engine of ['locks', 'mvcc'] as const) {
+    for (const engine of ['locks', 'mvcc', 'innodb'] as const) {
       for (const level of HERMITAGE_LEVELS) {
         const cell = matrices[engine].find((c) => c.test === test.id && c.level === level)!;
         const documented = DOCUMENTED[engine][level][test.id];
@@ -42,8 +46,15 @@ export function matrixRows(matrices: Record<EngineKind, readonly MatrixCell[]>):
           level: HERMITAGE_LEVEL_LABELS[level],
           engine: ENGINE_TITLE[engine],
           happens: cell.occurred ? 'happens' : 'prevented',
-          published: documented ? 'can occur' : 'prevented',
-          agrees: cell.occurred === documented ? 'yes' : known ? `no — ${known.why}` : 'no',
+          published: documented === null ? 'not published' : documented ? 'can occur' : 'prevented',
+          agrees:
+            documented === null
+              ? 'not published'
+              : cell.occurred === documented
+                ? 'yes'
+                : known
+                  ? `no — ${known.why}`
+                  : 'no',
         });
       }
     }

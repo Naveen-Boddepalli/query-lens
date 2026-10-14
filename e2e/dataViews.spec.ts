@@ -54,11 +54,11 @@ test('the schedule tool shows its lanes as a table, one row for each thing that 
   await expect(table).toHaveCount(0);
 });
 
-test('the isolation matrix is one row for each of its eighty cells', async ({ page }) => {
+test('the isolation matrix is one row for each of its hundred and twenty cells', async ({ page }) => {
   await page.goto('/tools/isolation');
   await toggle(page).click();
   const table = page.getByRole('table', { name: /Every anomaly at every isolation level/ });
-  await expect(table.getByRole('row')).toHaveCount(81);
+  await expect(table.getByRole('row')).toHaveCount(121);
   await expect(table.getByRole('row', { name: /G2-item Write skew REPEATABLE READ Versions and snapshots/ })).toContainText(
     'happens',
   );

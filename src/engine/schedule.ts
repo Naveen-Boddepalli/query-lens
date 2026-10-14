@@ -73,6 +73,13 @@ export interface LockingOptions {
    */
   mvcc?: boolean;
   /**
+   * Under MVCC, a write works from the **latest committed** version of the row, not from the transaction's snapshot,
+   * and a row that changed since the snapshot is not a conflict: the write waits for the row's lock and then goes on
+   * top of it. That is InnoDB's `REPEATABLE READ`, which is a snapshot for plain reads and a *current read* for
+   * `UPDATE` and `DELETE`, and so — unlike PostgreSQL's — lets a lost update happen. Default off: first committer wins.
+   */
+  currentWrites?: boolean;
+  /**
    * A protocol that takes no locks at all (plan.md §25.4 D6), for comparing against the two above. `timestamp` is basic
    * timestamp ordering: each transaction gets a timestamp when it begins, each row remembers the newest timestamp
    * that read and wrote it, and an operation that arrives too late for the order the timestamps give is aborted on
@@ -408,6 +415,9 @@ export function runSchedule(
   const optimistic = locking?.protocol === 'optimistic';
   const timestamped = locking?.protocol === 'timestamp';
   const mvcc = locking?.mvcc === true || optimistic;
+  const currentWrites = mvcc && !optimistic && locking?.currentWrites === true;
+  /** Whether a statement writes: the three that do are the ones a current read applies to. */
+  const writesRows = (text: string): boolean => /^\s*(update|delete|insert)\b/i.test(text);
   const rowLevel = mvcc || timestamped || locking?.granularity === 'row';
   // Timestamp ordering: the newest timestamp that read and that wrote each row, by row identity.
   const stamps = new Map<number, { read: number; write: number }>();
@@ -1031,11 +1041,13 @@ export function runSchedule(
     // An ordinary statement. What it *sees* is the shared database as it stands — or, under MVCC, the versions its
     // snapshot can see, whatever else is going on.
     const isolation = txn?.isolation ?? defaultIsolation;
+    // InnoDB's current read: a write at REPEATABLE READ sees what is committed now, whatever the snapshot says.
+    const currentRead = currentWrites && txn !== undefined && isolation === 'repeatable-read' && writesRows(sql);
     const viewNow = (): Database =>
       optimistic && txn?.workspace
         ? workspaceView(txn)
         : mvcc
-          ? viewOf(template, store, snapshotFor(txn, isolation), txn?.xid ?? -1)
+          ? viewOf(template, store, currentRead ? new Set(committedXids) : snapshotFor(txn, isolation), txn?.xid ?? -1)
           : current;
     const view = viewNow();
     const run = runQuery(sql, view, options);
@@ -1183,7 +1195,8 @@ export function runSchedule(
       }
 
       // First committer wins: under a snapshot, a row this statement can still see may already have been replaced by a
-      // transaction that committed after the snapshot was taken. Writing over it would lose that change.
+      // transaction that committed after the snapshot was taken. Writing over it would lose that change. (A current
+      // read sees only latest versions, so it finds nothing here: that is what lets it write on top.)
       if (mvcc && !optimistic) {
         const stale = entries.find((entry) => {
           if (entry.kind === 'insert') return false;
