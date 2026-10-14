@@ -369,8 +369,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   descriptor, which the site's `<title>` and `og:title` already did.
 - The README's CI badge pointed at the old `QueryLens` repository name; it now points at `query-lens`.
 - Vitest also runs tests under `scripts/` and `oracle/`; `oracle/` joins `tsconfig.node.json`.
+- **Dependency updates** (Dependabot #4, #10): `react`/`react-dom` 19.2.8 → 19.3.0 (with their `@types`),
+  `vite` 8.2.2 → 8.3.0, `vitest` 5.0.0 → 5.0.1, `jsdom` 30.0.1 → 30.1.0, `eslint-plugin-react-refresh`
+  0.5.6 → 0.5.7. Typecheck, lint, all unit tests, the CLI smoke steps and all 85 Playwright tests pass
+  unchanged. React 19.3.0 is materially larger (`react-dom-client.production.js` +17% unminified;
+  the `react` chunk went 54.2 → 62.5 kB gzip), which tripped the bundle budget on `main` — the
+  `react` ceiling is raised 62 → 63 kB in `scripts/bundle-budget.ts`, with the measurement recorded
+  beside it. Total is 392.2 of 424 kB.
 
 ### Fixed
+- **The 60-second tour's spotlight pointed at the wrong region, and the page scrolled to the bottom
+  behind it.** `index.css` sets `scroll-behavior: smooth` on `<html>`, which `scrollIntoView` honours,
+  so the tour read the target's rect while the scroll was still in flight and parked the spotlight where
+  the target *used to be*; nothing re-measured it afterwards. It also centred every target
+  unconditionally, which on desktop dragged the window down into the footer for regions that were
+  already on screen. The tour now scrolls only when the target is not wholly in view, does it instantly
+  (`behavior: 'instant'`), and keeps the spotlight on its target through scrolls, resizes and layout
+  shifts (it glides on a step change but snaps while the page moves, so it never trails the content).
+  Adds an e2e test at a phone viewport that asserts, for all five steps, that the spotlight's box is the
+  target's box.
 - **The route audit was sometimes scanning a loading screen, and ten real accessibility failures were behind it.** The scan waited for the page's outer shell, which is on screen before a lazy route's own content, so for some routes it passed for the wrong reason (and failed on the runs where the page was quick). It now waits for the network to settle and the page's first heading. Scanning properly, in both themes and at 360 px, found: the tables and code blocks of `/tools/page`, `/tools/latch-crabbing`, `/tools/vector-index`, `/tools/join-order`, `/examples`, `/docs/reference/sql` and `/docs/reference/url-parameters` that scroll but could not be reached from the keyboard (tables are now labelled, focusable regions, long code wraps, and a docs code block is a tab stop); an unnamed drop-down for a column's encoding on `/tools/columnar`; the planner's `rules:` label at a contrast of 2.9:1; and the check boxes of a challenge at 13 px, under the 24 px minimum target.
 - **The “Solved” banner on a challenge page had too little contrast in the light theme** (4.28:1, against the 4.5:1 WCAG AA asks of body text). Found by running axe over a *solved* result, which nothing had done before; the banner's text is now the ordinary ink colour on the green border and tint, on the query, schedule, log and settings challenge pages alike.
 - **Read-ahead in a query no longer reads past the heap into the index's pages.** A scan's last heap page prefetched the pages numbered after it, which are index pages, so `SELECT * FROM users` with read-ahead on read 14 pages for a 12-page heap. A sequential scan now says where its pages end and nothing reads ahead beyond that; a query that names no extent reads nothing ahead. Nothing in the app turned read-ahead on for a query, so no one saw it.

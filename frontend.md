@@ -54,9 +54,9 @@ It is a **learning tool**, not a production database. The user types SQL (`SELEC
 
 | Technology | Version | Purpose |
 |---|---|---|
-| React | 19.2.8 | UI framework |
+| React | 19.3.0 | UI framework |
 | TypeScript | 6.0.3 | Language |
-| Vite | 8.2.2 | Build tool & dev server |
+| Vite | 8.3.0 | Build tool & dev server |
 | Tailwind CSS | 4.3.3 | Utility-first styling (with `@tailwindcss/vite` plugin) |
 | React Router DOM | 7.18.3 | Client-side routing (BrowserRouter) |
 
@@ -80,7 +80,7 @@ It is a **learning tool**, not a production database. The user types SQL (`SELEC
 |---|---|
 | pnpm 11.1.2 | Package manager (monorepo-capable) |
 | Node ≥ 22.13.0 | Runtime |
-| Vitest 5.0.0 | Unit testing (jsdom environment) |
+| Vitest 5.0.1 | Unit testing (jsdom environment) |
 | Playwright 1.63.0 | End-to-end testing |
 | ESLint 10 | Linting (with `jsx-a11y`, `react-hooks`, `react-refresh` plugins) |
 | `fast-check` 4.9.0 | Property-based testing |
@@ -1115,7 +1115,7 @@ Every page is `React.lazy()` — no page loads until navigated to. Chunks are co
 |---|---|
 | `codemirror` | 128 kB |
 | `flow` | 70 kB |
-| `react` | 62 kB |
+| `react` | 63 kB |
 | `entry` | 24 kB |
 | `trace-ui` | 56 kB |
 | `routes` | 12 kB |

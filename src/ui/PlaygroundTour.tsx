@@ -51,11 +51,17 @@ const STEPS: readonly TourStep[] = [
   },
 ];
 
-function targetRect(key: string): DOMRect | null {
-  const el = document.querySelector(`[data-tour="${key}"]`);
-  if (!el) return null;
-  el.scrollIntoView({ block: 'center', inline: 'nearest' });
-  return el.getBoundingClientRect();
+interface Spot {
+  top: number;
+  left: number;
+  width: number;
+  height: number;
+  /** Animate to this rect (a step change) rather than snap to it (a page scroll). */
+  glide: boolean;
+}
+
+function findTarget(key: string): Element | null {
+  return document.querySelector(`[data-tour="${key}"]`);
 }
 
 export function PlaygroundTour({ onClose }: { onClose: () => void }) {
@@ -65,7 +71,7 @@ export function PlaygroundTour({ onClose }: { onClose: () => void }) {
 
 function SpotlightTour({ onClose }: { onClose: () => void }) {
   const [i, setI] = useState(0);
-  const [rect, setRect] = useState<DOMRect | null>(null);
+  const [rect, setRect] = useState<Spot | null>(null);
   const cardRef = useRef<HTMLDivElement>(null);
   const restoreFocus = useRef<HTMLElement | null>(null);
 
@@ -73,10 +79,55 @@ function SpotlightTour({ onClose }: { onClose: () => void }) {
   const step = STEPS[i]!;
 
   useLayoutEffect(() => {
-    const measure = () => { setRect(targetRect(step.target)); };
-    measure();
-    window.addEventListener('resize', measure);
-    return () => { window.removeEventListener('resize', measure); };
+    const measure = (glide: boolean) => {
+      const r = findTarget(step.target)?.getBoundingClientRect();
+      if (!r) { setRect(null); return; }
+      // Unchanged geometry keeps the old object, so the scroll event that our
+      // own `scrollIntoView` below fires does not re-render or cut a glide short.
+      setRect((prev) =>
+        prev && prev.top === r.top && prev.left === r.left && prev.width === r.width && prev.height === r.height
+          ? prev
+          : { top: r.top, left: r.left, width: r.width, height: r.height, glide },
+      );
+    };
+
+    // Only scroll when the target is not already wholly on screen. Centring it
+    // regardless drags the window down into the footer for regions that were
+    // in view all along (the shell is exactly one viewport tall on desktop).
+    //
+    // `behavior: 'instant'` is load-bearing: index.css sets `scroll-behavior:
+    // smooth` on <html>, which `scrollIntoView` honours by default. The scroll
+    // is then still in flight when the rect is read below, so the spotlight
+    // lands where the target *was* and the page scrolls out from under it.
+    const first = findTarget(step.target);
+    if (first) {
+      const r = first.getBoundingClientRect();
+      const onScreen =
+        r.top >= 0 && r.left >= 0 && r.bottom <= window.innerHeight && r.right <= window.innerWidth;
+      if (!onScreen) first.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' });
+    }
+    measure(true);
+
+    // The overlay is `fixed`, so anything that moves the target afterwards — a
+    // resize, the page (or the Playground's own scrolling panel) being scrolled
+    // behind the dim, a layout shift — has to move the spotlight with it, and
+    // without lagging a 180ms glide behind the content. `scroll` does not
+    // bubble, so it is caught in the capture phase.
+    let frame = 0;
+    const remeasure = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => { measure(false); });
+    };
+    window.addEventListener('resize', remeasure);
+    window.addEventListener('scroll', remeasure, true);
+    const observer = new ResizeObserver(remeasure);
+    if (first) observer.observe(first);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener('resize', remeasure);
+      window.removeEventListener('scroll', remeasure, true);
+      observer.disconnect();
+    };
   }, [step.target]);
 
   useEffect(() => {
@@ -109,7 +160,10 @@ function SpotlightTour({ onClose }: { onClose: () => void }) {
       {rect && (
         <div
           aria-hidden
-          className="pointer-events-none fixed rounded-xl ring-2 ring-accent transition-[top,left,width,height] duration-[var(--dur-base)]"
+          data-tour-spotlight={step.target}
+          className={`pointer-events-none fixed rounded-xl ring-2 ring-accent ${
+            rect.glide ? 'transition-[top,left,width,height] duration-[var(--dur-base)]' : ''
+          }`}
           style={{
             top: rect.top - 6,
             left: rect.left - 6,
