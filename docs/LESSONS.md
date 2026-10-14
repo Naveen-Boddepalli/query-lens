@@ -4,6 +4,7 @@ Maintained by the orchestrator only. Newest first. Keep under ~100 entries.
 Format: `- [YYYY-MM-DD][T<id>][area] Symptom → Cause → Fix/Rule.`
 Mark entries `(promoted)` once they are copied into GEMINI.md §7.
 
+- [2026-10-14][T3][budget] Inlining SVG icons across hero and landing cards pushes routes chunk group past 12.0 kB ceiling → Encapsulate shared vector line paths in a common StageIcon component to leverage gzip LZ77 backreferences and satisfy React Fast Refresh without eslint-disable.
 - [2026-10-14][T2][ui] Calling setState in useEffect keyed on pathname to close mobile drawer → Cascading re-render warning from React 19 / ESLint react-hooks/set-state-in-effect → Adjust state during render comparing previous to current pathname.
 - [2026-10-14][T2][budget] Tight 24 kB ceiling on entry chunk (index-*.js) → Deduplicate shared inline components and trim redundant SVG elements to maintain bundle headroom (passed at 23.5 kB / 24 kB limit).
 - [2026-10-14][T1][ui] Unicode emoji glyphs in UI controls render with inconsistent OS fonts and color slop → Emoji font substitutions degrade technical precision and violate zero-emoji directive → Replace with clean, monochrome inline SVG vector line icons with explicit aria-hidden attributes and sr-only labels.
