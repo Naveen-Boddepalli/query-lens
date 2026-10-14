@@ -22,7 +22,7 @@ Design and elevate the frontend of QueryLens into an ultra-clean, professional, 
 | R1 | 0 | Design Research: Glassmorphism & Neumorphism for DevTools | none | `docs/research/glass-neumorphic-system.md` | query-lens-3 | #1 | merged | 1 |
 | R2 | 0 | Design Research: Database Internals Visualizers & High-Density UI | none | `docs/research/database-internals-ui.md` | query-lens-4 | #3 | merged | 1 |
 | R3 | 0 | Design Research: Interactive Learning & Step-Debugger UX | none | `docs/research/interactive-learning-ux.md` | query-lens-5 | #2 | merged | 1 |
-| T1 | 1 | Design Tokens, Typography & Primitive Controls | R1 | `src/index.css`, `src/ui/primitives.ts`, `src/ui/theme.ts`, `src/ui/ThemeContext.tsx`, `src/ui/ThemeToggle.tsx` | query-lens-6 | - | running | 1 |
+| T1 | 1 | Design Tokens, Typography & Primitive Controls | R1 | `src/index.css`, `src/ui/primitives.ts`, `src/ui/theme.ts`, `src/ui/ThemeContext.tsx`, `src/ui/ThemeToggle.tsx` | query-lens-6 | #4 | merged | 1 |
 | T2 | 1 | Navigation, Layout Shell & Global Chrome | T1 | `src/ui/TopNav.tsx`, `src/ui/Footer.tsx`, `src/ui/Layout.tsx`, `src/ui/Logo.tsx`, `src/ui/PageHeader.tsx` | - | - | pending | 0 |
 | T3 | 2 | Modern Landing Page & Interactive Hero | T2 | `src/pages/LandingPage.tsx`, `src/ui/Hero.tsx` | - | - | pending | 0 |
 | T4 | 2 | Playground Layout & Playback Controls | T2, R2 | `src/pages/PlaygroundPage.tsx`, `src/ui/PipelineTracker.tsx`, `src/ui/PlaybackControls.tsx`, `src/ui/PredictionCard.tsx`, `src/ui/PresenterView.tsx`, `src/ui/PlaygroundTour.tsx` | - | - | pending | 0 |
@@ -38,3 +38,4 @@ Design and elevate the frontend of QueryLens into an ultra-clean, professional, 
 - 2026-10-14 Recreated Stitch project `QueryLens - Tactile Glass Studio` (ID: 12661379354391736788), generated design system `Tactile Glass` (asset: 5f1d6e6bf4c24f8c9b38c901686c4ed0). Overhauled screen into calm, zero-emoji, tabbed developer workbench (screen: fe971626ee3e42fe8ac3b64da530e561).
 - 2026-10-13 Added Phase 0 (R1, R2, R3) for extensive parallel design research across glassmorphic/neumorphic tokens, database visualizer UI patterns, and interactive educational step-debuggers.
 - 2026-10-13 Merged Phase 0 research tasks R1 (PR #1), R2 (PR #3), and R3 (PR #2). Full verification gate green on main. Ready for Phase 1 dispatch (T1).
+- 2026-10-14 Merged T1 (PR #4): core OKLCH design tokens, tactile glassmorphism, soft neumorphic elevation, zero-emoji ThemeToggle SVG icons. Full verification gate green on main. Ready for T2.

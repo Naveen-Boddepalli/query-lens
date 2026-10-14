@@ -4,6 +4,7 @@ Maintained by the orchestrator only. Newest first. Keep under ~100 entries.
 Format: `- [YYYY-MM-DD][T<id>][area] Symptom → Cause → Fix/Rule.`
 Mark entries `(promoted)` once they are copied into GEMINI.md §7.
 
+- [2026-10-14][T1][ui] Unicode emoji glyphs in UI controls render with inconsistent OS fonts and color slop → Emoji font substitutions degrade technical precision and violate zero-emoji directive → Replace with clean, monochrome inline SVG vector line icons with explicit aria-hidden attributes and sr-only labels.
 - [2026-10-13][R1-R3][ao] `ao pr merge <num>` returns INVALID_PR (URL and expected head SHA required) when provider link is untracked → CLI requires GitHub PR metadata → Use `gh pr merge <num> --repo SAM3114/query-lens --merge` as verified fallback. (promoted)
 - [2026-10-13][R1-R3][ao] Native code review submit via `ao review submit --session <id> --reviews -` → Takes stdin JSON with `runId`, `verdict`, and `body` → Submits machine-readable status `approved` or `changes_requested`. (promoted)
 - [2026-10-13][bootstrap][fs] Writing to root PLAN.md on macOS APFS overwrites existing 3000-line plan.md → APFS is case-insensitive by default → Keep product plan.md safe and store task plan in docs/PLAN.md. (promoted)
