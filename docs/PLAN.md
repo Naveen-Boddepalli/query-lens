@@ -24,8 +24,8 @@ Design and elevate the frontend of QueryLens into an ultra-clean, professional, 
 | R3 | 0 | Design Research: Interactive Learning & Step-Debugger UX | none | `docs/research/interactive-learning-ux.md` | query-lens-5 | #2 | merged | 1 |
 | T1 | 1 | Design Tokens, Typography & Primitive Controls | R1 | `src/index.css`, `src/ui/primitives.ts`, `src/ui/theme.ts`, `src/ui/ThemeContext.tsx`, `src/ui/ThemeToggle.tsx` | query-lens-6 | #4 | merged | 1 |
 | T2 | 1 | Navigation, Layout Shell & Global Chrome | T1 | `src/ui/TopNav.tsx`, `src/ui/Footer.tsx`, `src/ui/Layout.tsx`, `src/ui/Logo.tsx`, `src/ui/PageHeader.tsx` | query-lens-7 | #5 | merged | 1 |
-| T3 | 2 | Modern Landing Page & Interactive Hero | T2 | `src/pages/LandingPage.tsx`, `src/ui/Hero.tsx` | query-lens-8 | - | running | 1 |
-| T4 | 2 | Playground Layout & Playback Controls | T2, R2 | `src/pages/PlaygroundPage.tsx`, `src/ui/PipelineTracker.tsx`, `src/ui/PlaybackControls.tsx`, `src/ui/PredictionCard.tsx`, `src/ui/PresenterView.tsx`, `src/ui/PlaygroundTour.tsx` | query-lens-9 | - | running | 1 |
+| T3 | 2 | Modern Landing Page & Interactive Hero | T2 | `src/pages/LandingPage.tsx`, `src/ui/Hero.tsx` | query-lens-8 | - | paused | 1 |
+| T4 | 2 | Playground Layout & Playback Controls | T2, R2 | `src/pages/PlaygroundPage.tsx`, `src/ui/PipelineTracker.tsx`, `src/ui/PlaybackControls.tsx`, `src/ui/PredictionCard.tsx`, `src/ui/PresenterView.tsx`, `src/ui/PlaygroundTour.tsx` | query-lens-9 | - | paused | 1 |
 | T5 | 2 | Database Visualizer Panels & Diagram Theming | T4 | `src/ui/panels/**`, `src/ui/DataEditor.tsx`, `src/ui/SchemaEditor.tsx`, `src/ui/SqlEditor.tsx`, `src/ui/TraceWorksheet.tsx` | - | - | pending | 0 |
 | T6 | 3 | Standalone Tools Suite & Sandboxes | T2, R2 | `src/pages/tools/**`, `src/pages/ToolsIndexPage.tsx` | - | - | pending | 0 |
 | T7 | 3 | Comparison Engine, Gallery & Example Library | T2 | `src/pages/ComparePage.tsx`, `src/pages/GalleryPage.tsx`, `src/pages/ExamplesPage.tsx` | - | - | pending | 0 |
@@ -40,3 +40,4 @@ Design and elevate the frontend of QueryLens into an ultra-clean, professional, 
 - 2026-10-13 Merged Phase 0 research tasks R1 (PR #1), R2 (PR #3), and R3 (PR #2). Full verification gate green on main. Ready for Phase 1 dispatch (T1).
 - 2026-10-14 Merged T1 (PR #4): core OKLCH design tokens, tactile glassmorphism, soft neumorphic elevation, zero-emoji ThemeToggle SVG icons. Full verification gate green on main. Ready for T2.
 - 2026-10-14 Merged T2 (PR #5): Navigation header, layout shell, logo, page header, and footer upgraded with tactile glassmorphism, zero emojis, and verified bundle budget. Gate green on main. Phase 1 complete. Ready for Phase 2 (T3, T4).
+- 2026-10-14 Paused active Phase 2 workers (T3 query-lens-8, T4 query-lens-9) via ao session exit-agent on user request. Worktrees, staged files, and session states safely preserved.
