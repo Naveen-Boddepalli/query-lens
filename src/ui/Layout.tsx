@@ -36,7 +36,7 @@ export function Layout() {
   const showHint = pathname === '/playground' && search === '';
 
   return (
-    <div className="flex min-h-dvh flex-col">
+    <div className="relative flex min-h-dvh flex-col bg-surface text-ink antialiased selection:bg-accent-soft selection:text-ink">
       <div
         data-app-shell
         className={[
