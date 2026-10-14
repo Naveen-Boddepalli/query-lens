@@ -2254,13 +2254,13 @@ URL-state schema. None needs a backend.
 | Full text transcript | **Done, v13** (`/trace` Transcript view + print stylesheet) | v1 | — |
 | Non-colour hue encoding | **Done, v13** (glyph channel on B+Tree nodes + buffer moods/stats) | v1 | — |
 | Cost-based optimizer | **Done, v14** (`planner/cost.ts` — `~N rows` + heuristic on every plan/optimize node and in `/tools/planner`, estimate-vs-actual in the result narration; `__tests__/cost.test.ts`) | v1 | — |
-| More optimizer rules | **`constant-folding` done (v14)** | v1 | Projection pushdown out of scope (no real I/O to save in a row-oriented heap) — **re-opened by §25.4 F3**, whose columnar `ColumnScan` gives it something to save; `OR`→`IN` needs `OR` in the grammar first — **`OR` lands in §25.4 B1** |
+| More optimizer rules | **`constant-folding` done (v14)** | v1 | Projection pushdown out of scope (no real I/O to save in a row-oriented heap) — was re-opened by §25.4 F3, which **decided not to build a `ColumnScan`** (2026-10-05), so it has nothing to save and stays out; `OR`→`IN` needs `OR` in the grammar first — **`OR` lands in §25.4 B1** |
 | In-app `EXPLAIN` | **Done, v14** (**Copy as EXPLAIN** on the result stage — `explainToText`, estimate next to actual per operator) | v1 | — |
 | `ORDER BY` / `LIMIT` + external sort | **Done, v14** (`Limit` — a real Volcano short-circuit; `Sort` — `exec/sort.ts`, a real external merge sort spilling through the actual buffer pool, `BufferPool.write()`) | v1 | — |
 | Aggregates / `GROUP BY` | **Done, v14** — hash aggregate, sort aggregate, and the `/compare` mode naming both | v1 | — |
 | Write path (`INSERT`/`UPDATE`/`DELETE`) | **Done, v14** (all three statements — `exec/delete.ts`, `exec/insert.ts`, `exec/update.ts`; `BufferPool.markDirty()`/`write()`) | v1 | — |
 | Composite / covering indexes | **Index-only scan done (v14); a second candidate index, chosen by selectivity, done (v15)** | v1 | Non-unique indexes (B3a), composite/leftmost-prefix (B3b), `UNIQUE` (B3c), bulk-load (B3d) and clustered (B3e): **done, v2.0 — §25.4 B3 complete** |
-| JOIN + join-algorithm compare | **All three algorithms and predicate pushdown into a `Join` done (v14–v15)**, plus `/compare`'s join mode naming all three | v1 | Join order: **planned, v2.1 (§25.4 C3–C4)** — needs the multi-join grammar. An index nested-loop join is **done, v2.0 (B4)** |
+| JOIN + join-algorithm compare | **All three algorithms and predicate pushdown into a `Join` done (v14–v15)**, plus `/compare`'s join mode naming all three | v1 | Join order: **built, v2.1 (§25.4 C3–C4)** — multi-join grammar, then Selinger's search. An index nested-loop join is **done, v2.0 (B4)** |
 | Multi-table schema editor | **Done, v14** (`SchemaEditor.tsx` + `customDatabase.ts` — a fourth "Custom" data chip in the Playground, local-only via `localStorage`, not the URL or a trace file) | v1 | Column rename after creation, still out of scope |
 | CSV / paste import | **Done, v13** (`parseCsv.ts` + an Import CSV panel in the seed editor) | v1 | — |
 | Preset dataset library | **Done, v13** (`datasets.ts` + `datasetCatalogue.ts` — `users` / `orders` / `logins`, a `Data:` chip row, a `t=` share key; `lineitem` dropped as JOIN-free filler) | v1 (with §19.2) | — |
@@ -2275,13 +2275,13 @@ URL-state schema. None needs a backend.
 | Assignment sets | **Done, v13** (`assignmentSet.ts` + a set panel on `/assignments/new` — Markdown worksheet + JSON) | v1 | — |
 | Presenter mode | **Done, v13** (`PresenterView.tsx` — `?present=1` overlay on the Playground) | v1 | — |
 | Print stylesheet | **Done, v13** (`TraceWorksheet.tsx` + a **Print** link on the Playground; the `[data-print]` `@media print` hook also covers `/trace` and docs) | v1–v2 | — |
-| In-app quiz / self-check | **Planned, v2.5 (§25.4 G4) — as *generated* questions**, disjoint from the study's fixed bank | post-§9 | The §9 study has run (contamination) |
+| In-app quiz / self-check | **Built, 2026-10-10 (§25.4 G4, `/practice`) — as *generated* questions**, disjoint from the study's fixed bank | post-§9 | — |
 | Enforced concurrency + deadlocks | **Done (v14)**, as `/tools/locks`'s own driver (`src/ui/lockSimulation.ts`) | v1–v2 | — |
 | `npx querylens` CLI | **Built, v13; unpublished** (`bin/querylens.ts` — query + `--policy` / `--dataset` / `--json`, pure render + arg-parse unit-tested; `npm publish` is the deliberate remaining step) — **publish planned, v2.0 (§25.4 H3)**, with an MCP wrapper (H4) | v1–v2 | — |
-| `@querylens/engine` package | **Planned, v2.0 (§25.4 H3), as 0.x** — the trigger is met: the site and the CLI already are two consumers | v2 | npm-scope decision |
+| `@querylens/engine` package | **Built, unpublished (§25.4 H3, 2026-10-05), as 0.x** — the trigger was met: the site and the CLI already are two consumers | v2 | The npm organisation exists |
 | Operator / stage plugin seam | Deferred | v2+ | The package and CLI find users |
-| MVCC / snapshot isolation | **Planned, v2.2 (§25.4 D) — gated** | v2 | §25.6 checkpoint on the §9 result |
-| WAL / crash recovery | **Planned, v2.3 (§25.4 E) — gated** | v2 | 2.2 shipped |
+| MVCC / snapshot isolation | **Built, 2026-10-10 (§25.4 D4)** — after the §9 pilot cleared the gate | v2 | — |
+| WAL / crash recovery | **Built, 2026-10-10 (§25.4 E1–E4)** | v2 | — |
 | B+Tree copy-as-Mermaid | Maybe | v1+ | A `classDiagram` layout proves acceptable |
 | `@querylens/embed` | **Superseded by iframe embeds + essays, v2.5 (§25.4 H2)**; a package stays deferred | v2 | Verify CSP on a preview deploy first |
 | i18n | **Conditional, v2.5 (§25.4 H5)** | v2 | A maintainer commits to a locale |
@@ -2756,16 +2756,16 @@ other items depends on the result, so they proceed in parallel; only 2.2 waits.
 | Multi-join (C3, slice b) | **Built, 2026-09-29** — left-deep chains of any length, per-step algorithm fallback, a real chain-position parse check | now | — |
 | `IN (subquery)` (C3, slice c) | **Built, 2026-09-29, closing C3** — always uncorrelated, resolved once via its own sub-run before planning, no new Plan node needed | now | — |
 | DP join order (C4) | **Built, 2026-09-29** — visualization-only, `/tools/join-order` + a Playground note; a real query still always runs in the order written | now | — |
-| Cost-based choice (C5–C6) | **Planned, 2.1** | after C4 | — |
-| Transactions: locks, isolation, MVCC (D) | **Planned, 2.2 — gated** | after 2.1 | §25.6 checkpoint |
-| WAL / ARIES recovery (E) | **Planned, 2.3 — gated** | after 2.2 | 2.2 shipped |
-| LSM, hash index, columnar, vectorized, latch crabbing, vector index (F) | **Planned, 2.4** | independent | Q6; one per release until a signal |
+| Cost-based choice (C5–C6) | **C5 built, 2026-09-30** (index vs. scan, join algorithm and join order chosen by cost, each with a "Why not?"); **C6 slice 1 built, 2026-10-01** (the 3,000-row `transactions` dataset) — the Web Worker and focus+context tree rendering are **deferred by decision**, because neither trigger has fired | now | Main-thread jank, an unreadable tree, or a dataset past 10,000 rows |
+| Transactions: locks, isolation, MVCC (D) | **Built, 2026-10-10 (D1–D6)** — schedules, enforced locks, isolation by locking, versions and snapshots, the Hermitage matrix, the concurrency-control compare; the gate was cleared by the §9 pilot | now | — |
+| WAL / ARIES recovery (E) | **Built, 2026-10-10 (E1–E4)** — the log and the log-before-data rule, steal/force, checkpoints and ARIES, recovery from the Playground's own writes | now | — |
+| LSM, hash index, columnar, vectorized, latch crabbing, vector index (F) | **Built, 2026-10-01 to 2026-10-14 (F1–F7)** — a `ColumnScan` operator was **declined by decision** (2026-10-05); optimistic lock coupling, F5's optional half, was added 2026-10-14 | now | — |
 | F7 scan-resistant ring buffer | **Built, 2026-10-10:** `SeqScan` brackets a scan with `pool.beginScan`/`endScan`; `scanRing` is off by default; a range in the sandbox's reference string is a marked scan. | 2026-10-10 | — |
-| Generated quiz (G4) | **Planned, 2.5** | after §9 | The study has run |
-| Confidence ratings (G2) | **Planned, 2.5** | any | Verify the literature first |
-| PWA / offline (H1) | **Planned, 2.5** | any | Preview-deploy check |
-| Embeds + essays (H2) | **Planned, 2.5** | any | — (§20.3's "named author" trigger superseded: the launch needs them) |
-| Publish CLI + `@querylens/engine` (H3) | **Planned, 2.0 — scope decided:** org `querylens`; CLI unscoped | after the org exists | You create the org + enable trusted publishing |
+| Generated quiz (G4) | **Built, 2026-10-10** — `/practice`, generated questions answered by the engine they are about, disjoint from the study's bank | now | — |
+| Confidence ratings (G2) | **Built, 2026-10-04** — optional "How sure?" chips recorded with each prediction | now | — |
+| PWA / offline (H1) | **Built, 2026-10-04, verified locally** | now | The preview-deploy check, and offline on a real device (yours) |
+| Embeds + essays (H2) | **Essays built, 2026-10-04; in-page embeds not built, by decision** (the CSP rule cannot be overridden per path) | now | A preview deploy shows a narrower `frame-ancestors` is possible |
+| Publish CLI + `@querylens/engine` (H3) | **Code side built, 2026-10-05; scope decided:** org `querylens`; CLI unscoped. Publishing waits for the organisation | after the org exists | You create the org + enable trusted publishing |
 | MCP server + `llms.txt` (H4) | **Built, 2026-09-28** — the server and `llms.txt` do not need the npm organisation; only *publishing* `@querylens/mcp` does, same as the CLI | now | — |
 | i18n (H5) | **Conditional** | — | A named locale maintainer |
 | In-app LLM explainer | **Declined for v2** | post-§9 | Kill criteria in §25.6 |
