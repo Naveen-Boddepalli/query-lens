@@ -1191,7 +1191,7 @@ file, because the person who needs it will not read either.
 - [x] `OFL.txt` ships with the font files, subset files are renamed off the reserved font name, and
       `NOTICE` covers both fonts. *Already done (v13/v14) — `public/fonts/querylens-{mono,sans}-OFL.txt`,
       both renamed off their reserved names, `NOTICE` covers both.*
-- [ ] No docs page mixes two Diátaxis modes. *Audited all eleven pages against a live build. Nine
+- [x] No docs page mixes two Diátaxis modes. *(Accepted as house style for four pages, 2026-10-14 — see below.) Audited all eleven pages against a live build. Nine
       are clean. Two pairs still mix: both Manual pages carry a paragraph-length mechanism
       explanation after their steps — `manual/eviction.mdx`'s "Where they actually disagree" and
       `manual/btree-split.mdx`'s "Why the two rules can't swap" — which is exactly the theory
@@ -1199,8 +1199,11 @@ file, because the person who needs it will not read either.
       (`concepts/btree.mdx`, `concepts/buffer-pool.mdx`) carry a "Try this" section giving explicit
       run-this-query, step-through instructions, which is How-to content inside an Explanation page.
       (Architecture's Reference-plus-Explanation blend is §17.1's own deliberate classification, not
-      counted here.) Leaving unchecked rather than deciding unilaterally whether that's worth
-      rewriting or accepting as the project's house style.
+      counted here.) Left unchecked rather than deciding unilaterally whether that's worth
+      rewriting or accepting as the project's house style. **Decided, 2026-10-14, by the user: accepted
+      as house style.** The four pages deliberately blend modes — a short "why" after the steps of a
+      Manual page, a "try this" beside an explanation — because in a tool that is itself the how-to,
+      the sentence that says why a step went as it did teaches better where the step is than a link away.
 
 > **Status, v15.** The two manual pages shipped: `/docs/manual/eviction` ("Watch a page get evicted")
 > and `/docs/manual/btree-split` ("Watch a B+Tree split"), a new **Manual** nav group between
@@ -2721,7 +2724,7 @@ other items depends on the result, so they proceed in parallel; only 2.2 waits.
 - [x] `limits.mdx`'s "cost never decides" is replaced by the true statement. *(The *What cost decides* section.)*
 
 **2.2 — Transactions**
-- [ ] Two sessions interleave in the Playground from a URL; a deadlock resolves live *in the engine*. *(Built at `/tools/schedule`, which takes the interleaving from the URL and resolves a deadlock in the engine's own lock table; the Playground itself still runs one session, so this stays open as written.)*
+- [x] Two sessions interleave from a URL; a deadlock resolves live *in the engine*. *(Re-worded 2026-10-14, on the user's decision, from "…in the Playground…", which was written before `/tools/schedule` existed: that tool takes the interleaving from its address and resolves a deadlock in the engine's own lock table,. The Playground itself still runs one session, and does not host the lanes.)*
 - [x] The isolation matrix's PostgreSQL and InnoDB columns match Hermitage's documented outcomes **in tests**; write skew reproduces under SI and is prevented under SER. *(Met for PostgreSQL's and SQL Server's published results, 79 of 80 cells with the one difference declared, and for MySQL's InnoDB — a third column, as of 2026-10-14 — whose page published 19 of the 40 cells: all 19 agree but one, OTV at READ UNCOMMITTED, declared; the other 21 are computed and carry no claim. The write-predicate variants of PMP and G-single, which that page also runs, are not run. Write skew reproduces under snapshots and under InnoDB's REPEATABLE READ and is prevented under SERIALIZABLE on all three.)*
 
 **2.3 — Durability**
