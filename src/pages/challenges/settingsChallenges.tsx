@@ -426,6 +426,41 @@ export const SETTINGS_CHALLENGES: SettingsChallenge[] = [
     ),
   },
   {
+    id: 'win-despite-restarts',
+    title: 'Win despite the restarts',
+    group: 'storage',
+    tool: 'latch-crabbing',
+    brief: (
+      <>
+        Optimistic lock coupling latches nothing on the way down, and pays for it with a restart whenever another thread
+        got to a page first. Choose a fan-out, a number of threads and inserts per thread so that it finishes{' '}
+        <strong>in fewer ticks than lock crabbing</strong> on the same inserts — while <strong>at least four of them
+        restart</strong>.
+      </>
+    ),
+    hint: (
+      <>
+        A restart repeats a whole descent, so it needs something to save: waiting. Where threads would queue behind
+        one another, skipping the latches on the way down pays for several restarts. Where they hardly meet, it does
+        not.
+      </>
+    ),
+    needs: 'optimistic coupling finishing in fewer ticks than crabbing, with at least 4 inserts restarted',
+    controls: [
+      { kind: 'number', key: 'fanout', label: 'Keys per page', min: 3, max: 6 },
+      { kind: 'number', key: 'threads', label: 'Threads', min: 2, max: 4 },
+      { kind: 'number', key: 'ops', label: 'Inserts per thread', min: 1, max: 6 },
+    ],
+    starter: { fanout: '4', threads: '2', ops: '1' },
+    misconception: (
+      <>
+        Optimistic means never waiting, so it must win. It swaps waiting for restarts, and a restart is the whole
+        descent again: with two threads that hardly meet, crabbing finishes first. It is a bet that conflicts are rare
+        or cheap, and it pays where the queue behind a latch would have been longer than the restarts.
+      </>
+    ),
+  },
+  {
     id: 'recall-for-a-quarter',
     title: 'Beat brute force by four to one',
     group: 'storage',

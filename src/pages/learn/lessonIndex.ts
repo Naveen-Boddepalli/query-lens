@@ -162,8 +162,9 @@ export const LESSON_GROUPS: readonly LessonGroup[] = [
       {
         id: 'latch-crabbing',
         title: 'Let go early: latch crabbing',
-        minutes: 4,
-        summary: 'Many threads inserting into one B+Tree: hold the whole path, or release each page as soon as it is safe.',
+        minutes: 5,
+        summary:
+          'Many threads inserting into one B+Tree: hold the whole path, release each page as soon as it is safe, or latch nothing until the write.',
       },
       {
         id: 'vector-index',

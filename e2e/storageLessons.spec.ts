@@ -75,3 +75,19 @@ test('the sort step opens the merge sort on the sixteen pages the lesson counts'
   await expect(page).toHaveURL(/\/tools\/sort\?.*mem=3/);
   await expect(page.getByText('128').first()).toBeVisible();
 });
+
+test('the optimistic step opens the latch tool on its timeline, with the restarts it counted and why', async ({ page }) => {
+  await page.goto('/learn/latch-crabbing');
+  await page.getByRole('link', { name: /Open the optimistic timeline/ }).click();
+  await expect(page).toHaveURL(/\/tools\/latch-crabbing\?.*timeline=optimistic/);
+  await expect(page.getByRole('radio', { name: 'Optimistic timeline' })).toHaveAttribute('aria-checked', 'true');
+
+  // Eight of the twenty-four inserts restarted, and the table says what it was that sent each back to the root.
+  const restarted = page.getByText('inserts restarted', { exact: true });
+  await expect(restarted.locator('..').getByText('8', { exact: true })).toBeVisible();
+  await expect(page.getByRole('cell', { name: /restart — the page was held/ }).first()).toBeVisible();
+
+  // The other two timelines are one click away, and the choice rides in the address.
+  await page.getByRole('radio', { name: 'Naive timeline' }).click();
+  await expect(page).toHaveURL(/timeline=naive/);
+});

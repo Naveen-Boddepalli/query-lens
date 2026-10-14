@@ -17,6 +17,7 @@ const IDS = [
   'write-amp-below-one',
   'column-store-saving',
   'crabbing-saves-a-fifth',
+  'win-despite-restarts',
   'recall-for-a-quarter',
 ] as const;
 

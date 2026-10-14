@@ -367,6 +367,37 @@ export const STORAGE_STEPS: Record<string, LessonStep[]> = {
         </>
       ),
     },
+    {
+      heading: 'Optimistic: read first, latch only to write',
+      body: (
+        <>
+          Optimistic lock coupling takes no latch on the way down. A thread reads each page and remembers its version,
+          and after each step checks that the page above has not changed; only then does it latch the pages it will
+          change, usually the leaf alone. If a page it read has changed since, or the page it wants is held, the insert{' '}
+          <em>restarts</em> from the root. The same 24 inserts finish in <strong>78</strong> ticks with{' '}
+          <strong>18</strong> blocked, against crabbing’s 148, and 8 of them restarted.
+        </>
+      ),
+      link: to('latchCrowdedOptimistic', 'Open the optimistic timeline'),
+    },
+    {
+      heading: 'A restart costs a whole descent',
+      body: (
+        <>
+          The bet is that two inserts rarely meet. When they do not, nothing waits; when they do, the loser pays for
+          the path again. Two threads of two inserts at five keys to a page: <strong>19</strong> ticks against
+          crabbing’s 15, for one restart. Optimism pays where threads would otherwise queue — six keys to a page, four
+          threads, six inserts each: <strong>59</strong> ticks against <strong>72</strong>, for ten restarts.
+        </>
+      ),
+      link: to('latchQuiet', 'Open it with two threads'),
+      tryThis: (
+        <>
+          Raise the threads to 4 and the inserts to 6 and read the optimistic column against the crabbing one again: the
+          restarts grow, and the ticks it saves by not waiting grow faster.
+        </>
+      ),
+    },
   ],
   'vector-index': [
     {

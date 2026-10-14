@@ -64,7 +64,7 @@ const lsm = (s: LsmScenario) =>
     bitsPerKey: s.bits,
   });
 
-const latch = (s: LatchScenario, protocol: 'naive' | 'crabbing', fanout = s.fanout) =>
+const latch = (s: LatchScenario, protocol: 'naive' | 'crabbing' | 'optimistic', fanout = s.fanout) =>
   planLatchCrabbing(DEMO_INITIAL_KEYS, demoScripts(s.threads, s.ops, s.seed), fanout, protocol);
 
 const peak = (p: ReturnType<typeof planLatchCrabbing>) => Math.max(...p.threads.map((t) => t.peakLatches));
@@ -139,6 +139,8 @@ describe('the storage and execution lessons are wired into the track', () => {
           expect(within(s.fanout, LATCH_LIMITS.minFanout, LATCH_LIMITS.maxFanout)).toBe(true);
           expect(within(s.threads, LATCH_LIMITS.minThreads, LATCH_LIMITS.maxThreads)).toBe(true);
           expect(within(s.ops, LATCH_LIMITS.minOpsPerThread, LATCH_LIMITS.maxOpsPerThread)).toBe(true);
+          // The tool reads `timeline` by these three names and falls back to crabbing for any other.
+          expect([undefined, 'naive', 'crabbing', 'optimistic']).toContain(s.timeline);
           break;
         case 'vector-index':
           expect(within(s.n, VECTOR_LIMITS.minPoints, VECTOR_LIMITS.maxPoints)).toBe(true);
@@ -408,6 +410,25 @@ describe('lesson: latch crabbing', () => {
     const saved = (fanout: number) => latch(s, 'naive', fanout).ticks - latch(s, 'crabbing', fanout).ticks;
     expect([saved(6), saved(4), saved(3)]).toEqual([15, 22, 27]);
     expect(peak(latch(s, 'crabbing', 3))).toBe(3);
+  });
+
+  it('optimistic, on the crowded workload: 78 ticks, 18 blocked and 8 restarts, against crabbing’s 82 and 148', () => {
+    const s = STORAGE_SCENARIOS.latchCrowdedOptimistic;
+    const [c, o] = [latch(s, 'crabbing'), latch(s, 'optimistic')];
+    expect([c.ticks, c.totalBlockedTicks]).toEqual([82, 148]);
+    expect([o.ticks, o.totalBlockedTicks, o.totalRestarts]).toEqual([78, 18, 8]);
+    expect(o.treeProblems).toEqual([]);
+    expect(o.finalKeyCount).toBe(c.finalKeyCount);
+    expect(s.timeline).toBe('optimistic');
+  });
+
+  it('a restart costs a descent: 19 ticks against 15 with two threads at fan-out 5, then 59 against 72 with four at fan-out 6', () => {
+    const quiet = STORAGE_SCENARIOS.latchQuiet;
+    const [qc, qo] = [latch(quiet, 'crabbing'), latch(quiet, 'optimistic')];
+    expect([qc.ticks, qo.ticks, qo.totalRestarts, qo.totalBlockedTicks]).toEqual([15, 19, 1, 0]);
+    const wide = STORAGE_SCENARIOS.latchWide;
+    const [wc, wo] = [latch(wide, 'crabbing'), latch(wide, 'optimistic')];
+    expect([wc.ticks, wo.ticks, wo.totalRestarts]).toEqual([72, 59, 10]);
   });
 });
 

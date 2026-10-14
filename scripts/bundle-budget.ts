@@ -391,7 +391,7 @@ export const ROUTES: readonly RouteBudget[] = [
   { route: '/tools/hash-index', roots: [T('HashIndexToolPage')], kb: 122, note: 'extendible and linear hashing sandbox' },
   { route: '/tools/columnar', roots: [T('ColumnarToolPage')], kb: 118, note: 'NSM/DSM/PAX row vs. column storage sandbox' },
   { route: '/tools/vector-index', roots: [T('VectorIndexToolPage')], kb: 118, note: 'brute force vs. IVF vs. HNSW vector search' },
-  { route: '/tools/latch-crabbing', roots: [T('LatchCrabbingToolPage')], kb: 170, note: 'latch crabbing: naive vs. lock coupling on a scripted B+Tree workload' },
+  { route: '/tools/latch-crabbing', roots: [T('LatchCrabbingToolPage')], kb: 170, note: 'latch crabbing: naive vs. lock coupling vs. optimistic coupling on a scripted B+Tree workload' },
   { route: '/docs', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 174, note: 'the docs shell and every prose page (one shared chunk)' },
   { route: '/docs/concepts/btree', roots: ['src/ui/DocsLayout.tsx', 'src/pages/DocsContent/concepts/btree.mdx'], kb: 177, note: 'a concept page with a live B+Tree widget' },
   { route: '/docs/essays/index-write-tax', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 174, note: 'an essay: prose, with links into the B+Tree sandbox (plan.md §25.4 H2)' },

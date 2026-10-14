@@ -79,7 +79,7 @@ describe('settings challenges', () => {
         'vector-index',
       ].sort(),
     );
-    expect(SETTINGS_CHALLENGES.length).toBe(16);
+    expect(SETTINGS_CHALLENGES.length).toBe(17);
     expect(SETTINGS_CHALLENGES.filter((c) => c.group === 'transactions').map((c) => c.id)).toEqual([
       'same-level-different-promise',
     ]);
@@ -124,6 +124,11 @@ describe('settings challenges', () => {
         page: [COLUMNAR_LIMITS.minPageSize, COLUMNAR_LIMITS.maxPageSize],
       },
       'crabbing-saves-a-fifth': {
+        fanout: [LATCH_LIMITS.minFanout, LATCH_LIMITS.maxFanout],
+        threads: [LATCH_LIMITS.minThreads, LATCH_LIMITS.maxThreads],
+        ops: [LATCH_LIMITS.minOpsPerThread, LATCH_LIMITS.maxOpsPerThread],
+      },
+      'win-despite-restarts': {
         fanout: [LATCH_LIMITS.minFanout, LATCH_LIMITS.maxFanout],
         threads: [LATCH_LIMITS.minThreads, LATCH_LIMITS.maxThreads],
         ops: [LATCH_LIMITS.minOpsPerThread, LATCH_LIMITS.maxOpsPerThread],
@@ -202,6 +207,10 @@ describe('settings challenges', () => {
     ['column-store-saving', { n: 200, page: 64, layout: 'PAX' }],
     ['crabbing-saves-a-fifth', { fanout: 3, threads: 3, ops: 6 }],
     ['crabbing-saves-a-fifth', { fanout: 5, threads: 3, ops: 6 }],
+    ['win-despite-restarts', { fanout: 6, threads: 4, ops: 6 }],
+    ['win-despite-restarts', { fanout: 4, threads: 4, ops: 4 }],
+    // Exactly four restarts, the fewest that count.
+    ['win-despite-restarts', { fanout: 6, threads: 3, ops: 4 }],
     ['recall-for-a-quarter', { method: 'ivf', parameter: 2 }],
     ['recall-for-a-quarter', { method: 'hnsw', parameter: 20 }],
     ['bigger-pool-more-misses', { policy: 'fifo' }],
@@ -263,6 +272,11 @@ describe('settings challenges', () => {
       ['crabbing-saves-a-fifth', 'two threads, six keys to a page', {}],
       ['crabbing-saves-a-fifth', 'a busy, wide tree: 17%', { fanout: 6, threads: 4, ops: 6 }],
       ['crabbing-saves-a-fifth', 'a busy tree, a fan-out of four: 17%', { fanout: 4, threads: 4, ops: 4 }],
+      ['win-despite-restarts', 'two threads, one insert each: a tie at 10 ticks', {}],
+      ['win-despite-restarts', 'two threads on wide pages: a restart costs more than it saves', { fanout: 5, threads: 2, ops: 2 }],
+      ['win-despite-restarts', 'faster, but one restart', { fanout: 4, threads: 3, ops: 2 }],
+      ['win-despite-restarts', 'faster, but three restarts', { fanout: 5, threads: 3, ops: 6 }],
+      ['win-despite-restarts', 'four restarts and not a tick faster: 29 and 29', { fanout: 6, threads: 3, ops: 3 }],
       ['recall-for-a-quarter', 'probing one cluster: cheap and 74% recall', {}],
       ['recall-for-a-quarter', 'probing every cluster: dearer than brute force', { method: 'ivf', parameter: 20 }],
       ['recall-for-a-quarter', 'a beam of 64: complete, and 29% of the work', { method: 'hnsw', parameter: 64 }],
@@ -335,6 +349,7 @@ describe('settings challenges', () => {
       ['write-amp-below-one', { n: 20, mem: 8, trigger: 6 }, '/tools/lsm', { n: '20', mem: '8', trigger: '6' }],
       ['column-store-saving', { n: 500, page: 256, layout: 'PAX' }, '/tools/columnar', { n: '500', page: '256', layout: 'PAX' }],
       ['crabbing-saves-a-fifth', { fanout: 3, threads: 3, ops: 6 }, '/tools/latch-crabbing', { fanout: '3', threads: '3', ops: '6' }],
+      ['win-despite-restarts', { fanout: 6, threads: 4, ops: 6 }, '/tools/latch-crabbing', { fanout: '6', threads: '4', ops: '6', timeline: 'optimistic' }],
       ['recall-for-a-quarter', { method: 'ivf', parameter: 2 }, '/tools/vector-index', { n: '400', k: '20' }],
       ['bigger-pool-more-misses', { policy: 'fifo' }, '/tools/buffer-pool', { frames: '3', policy: 'fifo', ref: '1 2 3 4 1 2 5 1 2 3 4 5' }],
       ['clock-is-not-lru', { ref: '0 1 2 0 3 0 4 2 3 0 3 2', frames: 3 }, '/tools/buffer-pool', { policy: 'clock', frames: '3' }],

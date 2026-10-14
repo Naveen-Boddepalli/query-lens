@@ -138,7 +138,7 @@ const TOOLS = [
     title: 'Latch crabbing',
     href: '/tools/latch-crabbing',
     description:
-      'How concurrent threads can safely descend one B+Tree while inserting. Naive latching holds every page on the path and funnels every thread through the root; lock coupling releases each ancestor as soon as the child below it is safe. Same scripted workload, both protocols, side by side.',
+      'How concurrent threads can safely descend one B+Tree while inserting. Naive latching holds every page on the path and funnels every thread through the root; lock coupling releases each ancestor as soon as the child below it is safe; optimistic coupling latches nothing on the way down and starts again when another thread got there first. Same scripted workload, all three protocols, side by side.',
     available: true,
   },
   {

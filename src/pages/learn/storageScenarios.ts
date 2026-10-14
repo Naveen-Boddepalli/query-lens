@@ -43,6 +43,8 @@ export interface LatchScenario {
   threads: number;
   ops: number;
   seed: number;
+  /** Which protocol's timeline the tool opens on; crabbing when left out. */
+  timeline?: 'naive' | 'crabbing' | 'optimistic';
 }
 
 export interface VectorScenario {
@@ -118,6 +120,8 @@ export const STORAGE_SCENARIOS = {
   // — Latch crabbing —
   latchCrowded: { tool: 'latch-crabbing', fanout: 4, threads: 4, ops: 6, seed: 1 },
   latchWide: { tool: 'latch-crabbing', fanout: 6, threads: 4, ops: 6, seed: 1 },
+  latchCrowdedOptimistic: { tool: 'latch-crabbing', fanout: 4, threads: 4, ops: 6, seed: 1, timeline: 'optimistic' },
+  latchQuiet: { tool: 'latch-crabbing', fanout: 5, threads: 2, ops: 2, seed: 1, timeline: 'optimistic' },
 
   // — Nearest neighbours —
   vectorBig: { tool: 'vector-index', n: 400, k: 20, seed: 1 },
@@ -170,6 +174,7 @@ export function storageHref(scenario: StorageScenario): string {
       p.set('threads', String(scenario.threads));
       p.set('ops', String(scenario.ops));
       p.set('seed', String(scenario.seed));
+      if (scenario.timeline !== undefined) p.set('timeline', scenario.timeline);
       break;
     case 'vector-index':
       p.set('n', String(scenario.n));
