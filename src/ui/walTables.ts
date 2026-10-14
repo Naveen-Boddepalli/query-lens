@@ -158,3 +158,30 @@ export function recoveryRows(report: RecoveryReport): RecoveryRow[] {
   }
   return rows.map((r, i) => ({ n: i + 1, ...r }));
 }
+
+export interface RecoveryStage {
+  pass: RecoveryRow['pass'];
+  /** How many rows the pass has — what it found or did. */
+  steps: number;
+  /**
+   * Where a walk through the rows stands with this pass: `done` once all its rows have been taken, `current` while
+   * some have, `pending` before the first, and `empty` for a pass that had nothing to find or do (no undo, say).
+   */
+  state: 'pending' | 'current' | 'done' | 'empty';
+}
+
+/**
+ * Recovery as a trace in three stages — analysis, redo, undo — in the order the machine ran them, and where a walk
+ * through it has got to after `at` of its rows. The rows are already in that order, so this is only the strip above
+ * them: which stage the step just taken belongs to, and which are behind and ahead.
+ */
+export function recoveryStages(rows: readonly RecoveryRow[], at: number): RecoveryStage[] {
+  const passes: RecoveryRow['pass'][] = ['Analysis', 'Redo', 'Undo'];
+  return passes.map((pass) => {
+    const first = rows.findIndex((r) => r.pass === pass);
+    const steps = rows.filter((r) => r.pass === pass).length;
+    if (steps === 0) return { pass, steps, state: 'empty' };
+    const end = first + steps;
+    return { pass, steps, state: at >= end ? 'done' : at > first ? 'current' : 'pending' };
+  });
+}

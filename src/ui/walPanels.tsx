@@ -1,9 +1,10 @@
+import { useState } from 'react';
 import type { ReactNode } from 'react';
 import { cellText, cellsText, describeRecord } from '../engine/recovery/wal.ts';
 import type { CrashImage, LogRecord, RecoveryReport, WalEffect, WalState } from '../engine/recovery/wal.ts';
 import { DataView } from './DataView.tsx';
 import { card } from './primitives.ts';
-import { effectRows, recoveryRows } from './walTables.ts';
+import { effectRows, recoveryRows, recoveryStages } from './walTables.ts';
 
 /** The panels the write-ahead-log and recovery pages share: the effects of a step, the log, the pool and the disk. */
 
@@ -285,11 +286,103 @@ export function EffectsList({ effects }: { effects: WalEffect[] }) {
   );
 }
 
+/**
+ * Recovery as a trace: the three passes as a strip of stages, and a slider that walks the rows in the order the
+ * machine took them, saying what the step just taken was. Nothing here is computed again — the rows are the table
+ * view's own — it is only a way to take the report one thing at a time.
+ */
+function RecoveryStepper({
+  rows,
+  at,
+  onChange,
+}: {
+  rows: ReturnType<typeof recoveryRows>;
+  at: number;
+  onChange: (at: number) => void;
+}) {
+  const stages = recoveryStages(rows, at);
+  const row = at > 0 ? rows[at - 1] : undefined;
+  return (
+    <div className={`${card} mb-3`}>
+      <ol className="flex flex-wrap items-center gap-2" aria-label="The stages of recovery">
+        {stages.map((s, i) => (
+          <li
+            key={s.pass}
+            aria-current={s.state === 'current' ? 'step' : undefined}
+            className={`rounded-lg border px-3 py-1 text-label ${
+              s.state === 'current'
+                ? 'border-accent bg-accent/15 text-ink'
+                : s.state === 'done'
+                  ? 'border-hit/50 text-ink'
+                  : 'border-edge text-ink-dim'
+            }`}
+          >
+            {i + 1}. {s.pass}{' '}
+            <span className="tabular-nums text-ink-dim">
+              {s.state === 'empty' ? '— nothing to do' : `· ${String(s.steps)} ${s.steps === 1 ? 'step' : 'steps'}`}
+            </span>
+            {s.state === 'done' && <span className="sr-only"> (finished)</span>}
+          </li>
+        ))}
+      </ol>
+      <div className="mt-3 flex flex-wrap items-center gap-3 text-label text-ink-dim">
+        <button
+          type="button"
+          onClick={() => { onChange(Math.max(0, at - 1)); }}
+          disabled={at === 0}
+          className="rounded-lg border border-edge px-2 py-1 text-ink enabled:hover:border-ink-dim/50 disabled:opacity-50"
+        >
+          ◀ back
+        </button>
+        <label className="flex min-w-48 flex-1 items-center gap-2">
+          <span className="shrink-0">Step through recovery</span>
+          <input
+            type="range"
+            min={0}
+            max={rows.length}
+            value={at}
+            onChange={(e) => { onChange(Number(e.target.value)); }}
+            className="flex-1 accent-[var(--color-accent)]"
+          />
+        </label>
+        <button
+          type="button"
+          onClick={() => { onChange(Math.min(rows.length, at + 1)); }}
+          disabled={at >= rows.length}
+          className="rounded-lg border border-edge px-2 py-1 text-ink enabled:hover:border-ink-dim/50 disabled:opacity-50"
+        >
+          forward ▶
+        </button>
+        <span className="tabular-nums text-ink">
+          step {at} / {rows.length}
+        </span>
+      </div>
+      <p className="mt-2 text-label text-ink" role="status">
+        {row === undefined
+          ? 'Before the first step: nothing has been examined yet.'
+          : `${row.pass}, LSN ${row.lsn} — ${row.subject}: ${row.action}. ${row.why}.`}
+      </p>
+    </div>
+  );
+}
+
 /** The three passes of a restart, one panel each: what analysis rebuilt, what redo did and skipped, what undo wrote. */
 export function RecoveryPanels({ report }: { report: RecoveryReport }) {
   const a = report.analysis;
   const redone = report.redo.filter((r) => r.action === 'redo').length;
   const undone = report.undo.filter((r) => r.action === 'undo').length;
+  const rows = recoveryRows(report);
+  // The walk starts at the end, where the panels have always been: everything is shown until someone steps back. A
+  // new report puts it back there.
+  const [seen, setSeen] = useState(report);
+  const [at, setAt] = useState(rows.length);
+  if (seen !== report) {
+    setSeen(report);
+    setAt(rows.length);
+  }
+  const current = at > 0 ? rows[at - 1] : undefined;
+  const marked = (pass: 'Redo' | 'Undo', lsn: number) =>
+    current?.pass === pass && current.lsn === String(lsn) ? ' rounded bg-accent/15 px-1 ring-1 ring-accent' : '';
   return (
     <DataView
       caption="The three passes of recovery, one row for each thing found or done"
@@ -303,6 +396,7 @@ export function RecoveryPanels({ report }: { report: RecoveryReport }) {
         { header: 'Why', cell: (r) => r.why },
       ]}
     >
+      <RecoveryStepper rows={rows} at={at} onChange={setAt} />
       <div className="grid grid-cols-1 gap-3 md:grid-cols-3" role="region" aria-label="The three passes of recovery">
         <div className={card}>
           <h3 className="mb-1 text-body font-semibold text-ink">1. Analysis</h3>
@@ -378,7 +472,7 @@ export function RecoveryPanels({ report }: { report: RecoveryReport }) {
           ) : (
             <ul className="flex flex-col gap-1 text-label">
               {report.redo.map((r) => (
-                <li key={r.lsn} className={r.action === 'redo' ? 'text-ink' : 'text-ink-dim'}>
+                <li key={r.lsn} className={`${r.action === 'redo' ? 'text-ink' : 'text-ink-dim'}${marked('Redo', r.lsn)}`}>
                   <span className="font-mono">LSN {r.lsn}</span> ({r.key}, page {r.page}) —{' '}
                   <strong>{r.action === 'redo' ? 'redo' : 'skip'}</strong>: {r.reason}
                 </li>
@@ -403,7 +497,7 @@ export function RecoveryPanels({ report }: { report: RecoveryReport }) {
           ) : (
             <ul className="flex flex-col gap-1 text-label">
               {report.undo.map((u, i) => (
-                <li key={i} className={u.action === 'undo' ? 'text-ink' : 'text-ink-dim'}>
+                <li key={i} className={`${u.action === 'undo' ? 'text-ink' : 'text-ink-dim'}${marked('Undo', u.lsn)}`}>
                   <span className="font-mono">LSN {u.lsn}</span> ({u.txn}) — <strong>{u.action}</strong>: {u.detail}
                   {u.clr !== null && (
                     <>

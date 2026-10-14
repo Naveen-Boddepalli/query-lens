@@ -50,3 +50,31 @@ test('the script travels in the link', async ({ page }) => {
   await page.reload();
   await expect(page.getByRole('button', { name: 'Both at once' })).toHaveAttribute('aria-pressed', 'true');
 });
+
+test('recovery is a trace in three stages, and a slider walks the passes in the order they ran', async ({ page }) => {
+  await page.goto('/tools/recovery');
+  await page.getByRole('button', { name: 'Both at once' }).click();
+  const stages = page.getByRole('list', { name: 'The stages of recovery' });
+  await expect(stages.getByRole('listitem')).toHaveCount(3);
+  await expect(stages).toContainText('1. Analysis');
+  await expect(stages).toContainText('3. Undo');
+
+  // It rests at the end, with every stage done and the passes below as they have always been.
+  const slider = page.getByLabel('Step through recovery');
+  await expect(stages.getByRole('listitem').nth(2)).toContainText('(finished)');
+
+  // Back to before the first step: nothing is examined, and no stage is current.
+  await slider.press('Home');
+  await expect(page.getByRole('status').filter({ hasText: 'Before the first step' })).toBeVisible();
+  await expect(stages.locator('[aria-current="step"]')).toHaveCount(0);
+
+  // One step in is analysis's first row; the stage it belongs to is the current one.
+  await slider.press('ArrowRight');
+  await expect(stages.locator('[aria-current="step"]')).toContainText('Analysis');
+  await expect(page.getByRole('status').filter({ hasText: /^Analysis, LSN/ })).toBeVisible();
+
+  // At the end again, the last thing narrated is an undo, and the row it names is marked in the panel.
+  await slider.press('End');
+  await expect(page.getByRole('status').filter({ hasText: /^Undo, LSN/ })).toBeVisible();
+});
+

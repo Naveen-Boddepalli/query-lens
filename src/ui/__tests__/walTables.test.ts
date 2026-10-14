@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { parseWalStep, runWal } from '../../engine/recovery/wal.ts';
 import type { WalStep } from '../../engine/recovery/wal.ts';
-import { effectRows, recoveryRows } from '../walTables.ts';
+import { effectRows, recoveryRows, recoveryStages } from '../walTables.ts';
 
 const script = (...lines: string[]): WalStep[] =>
   lines.map((l) => {
@@ -78,3 +78,46 @@ describe('a recovery as rows', () => {
     expect(undone.every((r) => /logged as LSN \d+/.test(r.why))).toBe(true);
   });
 });
+
+describe('recovery as three stages', () => {
+  const report = runWal(
+    script('begin T1', 'begin T2', 'set T1 a = 1', 'set T2 c = 2', 'commit T1', 'write page 2', 'crash', 'recover'),
+  ).steps.at(-1)!.recovery!;
+  const rows = recoveryRows(report);
+  const state = (at: number) => recoveryStages(rows, at).map((s) => `${s.pass}:${s.state}`);
+  const count = (pass: string) => rows.filter((r) => r.pass === pass).length;
+
+  it('has the three passes, in the order the machine took them, each with the rows it has', () => {
+    const stages = recoveryStages(rows, 0);
+    expect(stages.map((s) => s.pass)).toEqual(['Analysis', 'Redo', 'Undo']);
+    expect(stages.map((s) => s.steps)).toEqual([count('Analysis'), count('Redo'), count('Undo')]);
+    expect(rows.map((r) => r.pass)).toEqual([...rows.map((r) => r.pass)].sort((a, b) => ['Analysis', 'Redo', 'Undo'].indexOf(a) - ['Analysis', 'Redo', 'Undo'].indexOf(b)));
+  });
+
+  it('is all pending before the first step and all done after the last', () => {
+    expect(state(0)).toEqual(['Analysis:pending', 'Redo:pending', 'Undo:pending']);
+    expect(state(rows.length)).toEqual(['Analysis:done', 'Redo:done', 'Undo:done']);
+  });
+
+  it('moves from one stage to the next on the row that begins it, and not before', () => {
+    const analysis = count('Analysis');
+    const redo = count('Redo');
+    expect(state(1)[0]).toBe('Analysis:current');
+    expect(state(analysis - 1)).toEqual(['Analysis:current', 'Redo:pending', 'Undo:pending']);
+    // With the last analysis row taken the pass is finished, and nothing of redo has been.
+    expect(state(analysis)).toEqual(['Analysis:done', 'Redo:pending', 'Undo:pending']);
+    expect(state(analysis + 1)).toEqual(['Analysis:done', 'Redo:current', 'Undo:pending']);
+    expect(state(analysis + redo)).toEqual(['Analysis:done', 'Redo:done', 'Undo:pending']);
+    expect(state(analysis + redo + 1)).toEqual(['Analysis:done', 'Redo:done', 'Undo:current']);
+  });
+
+  it('calls a pass with nothing to do empty, from the first step to the last', () => {
+    const clean = runWal(script('begin T1', 'set T1 a = 1', 'commit T1', 'crash', 'recover')).steps.at(-1)!.recovery!;
+    const rows2 = recoveryRows(clean);
+    expect(rows2.some((r) => r.pass === 'Undo')).toBe(false);
+    for (const at of [0, 1, rows2.length]) {
+      expect(recoveryStages(rows2, at).find((s) => s.pass === 'Undo')).toMatchObject({ state: 'empty', steps: 0 });
+    }
+  });
+});
+

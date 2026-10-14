@@ -207,6 +207,10 @@ const T = (name: string): string => `src/pages/tools/${name}.tsx`;
  *  - 2026-10-04, latch crabbing (§25.4 F5): a new route, /tools/latch-crabbing (163.5 kB measured + 3, rounded
  *    to 167). Unlike the standalone sandboxes it drives the REAL engine B+Tree (`engine/index/btree.ts`, the same
  *    code /tools/btree uses), so it pays the shared engine chunk the same way /tools/btree does (ceiling 167).
+ *  - 2026-10-14, recovery as a trace in three stages (`RecoveryStepper` in `walPanels.tsx`, `recoveryStages` in
+ *    `walTables.ts`): /tools/recovery 129 → 133 (measured 129.5 + 3, rounded up; it was 128.7) and /tools/wal
+ *    129 → 133 (129.6 + 3; it was 128.8). Both import `walPanels.tsx`, which grew a stage strip, a slider and the
+ *    sentence for a step — 0.8 kB gzip. The Durability dialog shares the panels and is 15.7 of 17.
  *  - 2026-10-13 (split), the settings runner by tool (`challenges/settings/*.ts`, one checker module per tool, loaded
  *    by `settingsRunner.ts` when a challenge of that tool is opened): the settings view's opt-in chunk 36 → 8 (4.6 kB
  *    measured + 3, rounded up; it was 32.3 — the runner carried every tool's driver) and thirteen new opt-in rows, one
@@ -380,8 +384,8 @@ export const ROUTES: readonly RouteBudget[] = [
   { route: '/tools/planner', roots: [T('PlannerToolPage')], kb: 172, note: 'planner sandbox' },
   { route: '/tools/locks', roots: [T('LocksToolPage')], kb: 121, note: 'lock simulator' },
   { route: '/tools/isolation', roots: [T('IsolationToolPage')], kb: 181, note: 'the Hermitage isolation matrix (both engines, computed)' },
-  { route: '/tools/recovery', roots: [T('RecoveryToolPage')], kb: 129, note: 'crash recovery: checkpoints, a crash, and ARIES analysis, redo and undo' },
-  { route: '/tools/wal', roots: [T('WalToolPage')], kb: 129, note: 'write-ahead log: a pool, a disk, a log and the rule between them' },
+  { route: '/tools/recovery', roots: [T('RecoveryToolPage')], kb: 133, note: 'crash recovery: checkpoints, a crash, and ARIES analysis, redo and undo' },
+  { route: '/tools/wal', roots: [T('WalToolPage')], kb: 133, note: 'write-ahead log: a pool, a disk, a log and the rule between them' },
   { route: '/tools/concurrency', roots: [T('ConcurrencyToolPage')], kb: 182, note: 'one schedule under five concurrency-control protocols, each really run' },
   { route: '/tools/schedule', roots: [T('ScheduleToolPage')], kb: 185, note: 'transaction schedules (the engine, a shared database, two sessions)' },
   { route: '/tools/grammar', roots: [T('GrammarToolPage')], kb: 116, note: 'the SQL grammar diagram' },
