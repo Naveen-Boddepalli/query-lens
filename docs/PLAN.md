@@ -23,7 +23,7 @@ Design and elevate the frontend of QueryLens into an ultra-clean, professional, 
 | R2 | 0 | Design Research: Database Internals Visualizers & High-Density UI | none | `docs/research/database-internals-ui.md` | query-lens-4 | #3 | merged | 1 |
 | R3 | 0 | Design Research: Interactive Learning & Step-Debugger UX | none | `docs/research/interactive-learning-ux.md` | query-lens-5 | #2 | merged | 1 |
 | T1 | 1 | Design Tokens, Typography & Primitive Controls | R1 | `src/index.css`, `src/ui/primitives.ts`, `src/ui/theme.ts`, `src/ui/ThemeContext.tsx`, `src/ui/ThemeToggle.tsx` | query-lens-6 | #4 | merged | 1 |
-| T2 | 1 | Navigation, Layout Shell & Global Chrome | T1 | `src/ui/TopNav.tsx`, `src/ui/Footer.tsx`, `src/ui/Layout.tsx`, `src/ui/Logo.tsx`, `src/ui/PageHeader.tsx` | - | - | pending | 0 |
+| T2 | 1 | Navigation, Layout Shell & Global Chrome | T1 | `src/ui/TopNav.tsx`, `src/ui/Footer.tsx`, `src/ui/Layout.tsx`, `src/ui/Logo.tsx`, `src/ui/PageHeader.tsx` | query-lens-7 | - | running | 1 |
 | T3 | 2 | Modern Landing Page & Interactive Hero | T2 | `src/pages/LandingPage.tsx`, `src/ui/Hero.tsx` | - | - | pending | 0 |
 | T4 | 2 | Playground Layout & Playback Controls | T2, R2 | `src/pages/PlaygroundPage.tsx`, `src/ui/PipelineTracker.tsx`, `src/ui/PlaybackControls.tsx`, `src/ui/PredictionCard.tsx`, `src/ui/PresenterView.tsx`, `src/ui/PlaygroundTour.tsx` | - | - | pending | 0 |
 | T5 | 2 | Database Visualizer Panels & Diagram Theming | T4 | `src/ui/panels/**`, `src/ui/DataEditor.tsx`, `src/ui/SchemaEditor.tsx`, `src/ui/SqlEditor.tsx`, `src/ui/TraceWorksheet.tsx` | - | - | pending | 0 |
