@@ -4,7 +4,7 @@
    `.tsx`, but nothing here is a React component to hot-reload. */
 import type { ReactNode } from 'react';
 import { createSeedDatabase, DEFAULT_ENGINE_OPTIONS, runQuery } from '../../engine/index.ts';
-import type { ReplacementPolicyName, StepEvent } from '../../engine/index.ts';
+import type { PredictionPrompt, ReplacementPolicyName, StepEvent } from '../../engine/index.ts';
 import { encodeShareState } from '../../ui/urlState.ts';
 
 /**
@@ -20,6 +20,9 @@ const SEED = createSeedDatabase();
 
 const POINT_LOOKUP = 'SELECT *\nFROM users\nWHERE id = 5;';
 const SEQ_SCAN = 'SELECT *\nFROM users\nWHERE age > 30;';
+
+export type LessonDifficulty = 'Beginner' | 'Intermediate' | 'Advanced';
+export type LessonCategory = 'Foundations' | 'Storage' | 'Optimizer' | 'Workflows';
 
 interface OpenSpec {
   sql: string;
@@ -39,12 +42,15 @@ export interface LessonStep {
    *  a `/tools/*` sandbox, the docs — so it cannot carry a stale step number. */
   link?: { href: string; label: string };
   tryThis?: ReactNode;
+  checkpointPrediction?: PredictionPrompt;
 }
 
 export interface Lesson {
   id: string;
   title: string;
   minutes: number;
+  difficulty: LessonDifficulty;
+  category: LessonCategory;
   summary: string;
   steps: LessonStep[];
 }
@@ -74,6 +80,8 @@ export const LESSONS: Lesson[] = [
     id: 'first-query',
     title: 'Run your first query',
     minutes: 2,
+    difficulty: 'Beginner',
+    category: 'Foundations',
     summary: 'The whole path, end to end, in one query — parse, plan, execute, result.',
     steps: [
       {
@@ -102,6 +110,15 @@ export const LESSONS: Lesson[] = [
         heading: 'Read the result',
         body: 'The last step hands back the rows. One row, because `id` is unique — but the buffer pool and the B+Tree still did real work to find it.',
         open: { sql: POINT_LOOKUP, find: END, label: 'Jump to the result' },
+        checkpointPrediction: {
+          question: 'If WHERE id = 999 is queried, does the engine still search the index?',
+          options: [
+            { id: 'yes', label: 'Yes: descends B+Tree to confirm key absence' },
+            { id: 'no', label: 'No: skips traversal' },
+          ],
+          correctOptionId: 'yes',
+          explanation: 'The B+Tree index must be traversed from root to leaf to verify whether the key exists.',
+        },
         tryThis: (
           <>
             Change <code className="font-mono">id = 5</code> to <code className="font-mono">id = 999</code>{' '}
@@ -116,6 +133,8 @@ export const LESSONS: Lesson[] = [
     id: 'one-row',
     title: 'Follow one row from disk to result',
     minutes: 5,
+    difficulty: 'Beginner',
+    category: 'Foundations',
     summary: 'The spine of the whole tool: one row, crossing every stage once.',
     steps: [
       {
@@ -140,6 +159,15 @@ export const LESSONS: Lesson[] = [
           sql: POINT_LOOKUP,
           find: (e) => at(e, (x) => x.stage === 'optimize'),
           label: 'Jump to the optimiser rewrite',
+        },
+        checkpointPrediction: {
+          question: 'Why does the optimizer turn SELECT * FROM users WHERE id = 5 into an IndexScan?',
+          options: [
+            { id: 'rule', label: 'id has a B+Tree index and the predicate is an equality on it' },
+            { id: 'rows', label: 'The table has fewer than 100 rows' },
+          ],
+          correctOptionId: 'rule',
+          explanation: 'The index-selection rule looks for equality predicates matching an indexed column, replacing a sequential table scan with a logarithmic tree descent.',
         },
       },
       {
@@ -169,6 +197,8 @@ export const LESSONS: Lesson[] = [
     id: 'eviction',
     title: 'Watch a page get evicted',
     minutes: 4,
+    difficulty: 'Intermediate',
+    category: 'Storage',
     summary: 'Fill the pool, then see LRU and clock sweep pick different victims.',
     steps: [
       {
@@ -185,6 +215,15 @@ export const LESSONS: Lesson[] = [
           predictOn: true,
           find: (e) => at(e, (x) => x.stage === 'buffer' && x.action === 'evict'),
           label: 'Jump to the first eviction (LRU)',
+        },
+        checkpointPrediction: {
+          question: 'Why does a 12-page table scan with 8 frames force evictions?',
+          options: [
+            { id: 'overflow', label: 'Working set pages exceed available buffer frames' },
+            { id: 'timeout', label: 'Frames expire by elapsed timer' },
+          ],
+          correctOptionId: 'overflow',
+          explanation: 'When active working set exceeds frame capacity, the engine must evict victim pages.',
         },
       },
       {
@@ -216,6 +255,8 @@ export const LESSONS: Lesson[] = [
     id: 'btree-split',
     title: 'Watch a B+Tree split',
     minutes: 4,
+    difficulty: 'Intermediate',
+    category: 'Storage',
     summary: 'Fill a leaf, add one key, and watch the tree grow a level — a copy-up, then a push-up.',
     steps: [
       {
@@ -241,6 +282,15 @@ export const LESSONS: Lesson[] = [
             pointer can hang.
           </>
         ),
+        checkpointPrediction: {
+          question: 'When a full B+Tree leaf overflows and splits, where does the separator key go?',
+          options: [
+            { id: 'copied', label: 'Copied up into the parent while remaining in the leaf' },
+            { id: 'moved', label: 'Moved completely out of the leaf' },
+          ],
+          correctOptionId: 'copied',
+          explanation: 'In B+Trees, all record pointers remain in leaves, so split keys are copied up.',
+        },
       },
       {
         heading: 'Go deeper: an internal split',
@@ -270,6 +320,8 @@ export const LESSONS: Lesson[] = [
     id: 'planner',
     title: 'Make the planner change its mind',
     minutes: 3,
+    difficulty: 'Intermediate',
+    category: 'Optimizer',
     summary: 'One predicate becomes an index lookup; another cannot. See why.',
     steps: [
       {
@@ -301,6 +353,15 @@ export const LESSONS: Lesson[] = [
           find: (e) => at(e, (x) => x.stage === 'optimize'),
           label: 'Jump to the pushdown rewrite',
         },
+        checkpointPrediction: {
+          question: 'Will WHERE age > 30 trigger index selection on users?',
+          options: [
+            { id: 'no', label: 'No: age column is not indexed' },
+            { id: 'yes', label: 'Yes: index is generated automatically' },
+          ],
+          correctOptionId: 'no',
+          explanation: 'Index selection requires an existing index on the predicate column.',
+        },
         tryThis: (
           <>
             Try <code className="font-mono">WHERE id &gt; 5</code> — a range on the{' '}
@@ -315,6 +376,8 @@ export const LESSONS: Lesson[] = [
     id: 'edit-data',
     title: 'Edit the seed data',
     minutes: 3,
+    difficulty: 'Beginner',
+    category: 'Foundations',
     summary: 'Change the rows and watch which parts of the trace change — and which do not.',
     steps: [
       {
@@ -361,6 +424,8 @@ export const LESSONS: Lesson[] = [
     id: 'predict',
     title: 'Predict before you look',
     minutes: 3,
+    difficulty: 'Intermediate',
+    category: 'Workflows',
     summary: 'Commit to an answer before each reveal — the one habit the evidence backs.',
     steps: [
       {
@@ -377,6 +442,15 @@ export const LESSONS: Lesson[] = [
           predictOn: true,
           find: (e) => at(e, (x) => x.predictable !== undefined),
           label: 'Open a step that asks you to predict',
+        },
+        checkpointPrediction: {
+          question: 'Why commit to a prediction before the step reveal?',
+          options: [
+            { id: 'active', label: 'Commitment stimulates deeper mental models' },
+            { id: 'speed', label: 'It makes the query execute in fewer cycles' },
+          ],
+          correctOptionId: 'active',
+          explanation: 'Active cognitive commitment before revelation stimulates deeper retention.',
         },
       },
       {
@@ -412,6 +486,8 @@ export const LESSONS: Lesson[] = [
     id: 'share',
     title: 'Share a moment',
     minutes: 2,
+    difficulty: 'Beginner',
+    category: 'Workflows',
     summary: 'The URL is the save file: a query, a dataset and a step, reproducible from a link.',
     steps: [
       {
@@ -456,6 +532,8 @@ export const LESSONS: Lesson[] = [
     id: 'errors',
     title: 'When something goes wrong',
     minutes: 2,
+    difficulty: 'Advanced',
+    category: 'Workflows',
     summary: 'A panel that breaks does not lose your trace — and the report writes itself.',
     steps: [
       {

@@ -115,4 +115,26 @@ describe('challenges', () => {
       expect(dirtyEviction.check(r, sql)).toBe(false);
     });
   });
+
+  describe('difficulty, category, and requirements', () => {
+    const validDifficulties = new Set(['Warm-up', 'Intermediate', 'Advanced']);
+    const validCategories = new Set(['Indexing', 'Buffer Pool', 'Query Planning', 'Storage & Execution']);
+
+    it('every challenge has valid difficulty and category metadata', () => {
+      for (const c of CHALLENGES) {
+        expect(validDifficulties.has(c.difficulty), `${c.id} invalid difficulty`).toBe(true);
+        expect(validCategories.has(c.category), `${c.id} invalid category`).toBe(true);
+      }
+    });
+
+    it('every challenge has at least 2 structured requirements', () => {
+      for (const c of CHALLENGES) {
+        expect(c.requirements, `${c.id} missing requirements`).toBeTruthy();
+        expect(c.requirements.length).toBeGreaterThanOrEqual(2);
+        for (const req of c.requirements) {
+          expect(req.length).toBeGreaterThan(0);
+        }
+      }
+    });
+  });
 });
