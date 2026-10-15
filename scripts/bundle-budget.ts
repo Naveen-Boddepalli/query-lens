@@ -130,11 +130,11 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
   // The `/learn` guided track (plan.md §21.3): the index, one lesson page, the
   // localStorage progress helper, and `lessons.tsx` — the lesson prose plus the
   // link-builder that computes each step from a real engine run. Lazy; loads
-  // only when someone visits `/learn`.
-  { name: 'learn', test: /^(LearnPage|LessonPage|ProgressPage|learnProgress|progress|lessons)-/, kb: 10, note: 'the /learn track (index, lesson page, nine lessons) plus the /progress dashboard, which shares the lesson list' },
+  // only when someone visits `/learn`. Raised 10 → 15 for Phase 4 interactive learning track & curriculum overhaul.
+  { name: 'learn', test: /^(LearnPage|LessonPage|ProgressPage|learnProgress|progress|lessons)-/, kb: 15, note: 'the /learn track (index, lesson page, nine lessons) plus the /progress dashboard, which shares the lesson list' },
   // The `/challenges` puzzles (plan.md §22.4): the index, one challenge page,
-  // the pure check list, and the localStorage solved-set. Lazy.
-  { name: 'challenges', test: /^(ChallengesPage|ChallengePage|challenges|challengeProgress)-/, kb: 8, note: '/challenges — index, challenge page, the check list, and solved-set storage (plan.md §22.4)' },
+  // the pure check list, and the localStorage solved-set. Lazy. Raised 8 → 10 for Phase 4 interactive challenges & solver overhaul.
+  { name: 'challenges', test: /^(ChallengesPage|ChallengePage|challenges|challengeProgress)-/, kb: 10, note: '/challenges — index, challenge page, the check list, and solved-set storage (plan.md §22.4)' },
   // The §9 study kit's runner, `/study` (plan.md §25.4 A2): the page plus the
   // pure protocol underneath it (pack/result codecs, the session state machine).
   // Its own row rather than a share of a group — §25.5 rule 2: a new route is
@@ -334,7 +334,7 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
  * pages rewritten to describe the current engine instead of v0. `docs`
  * 18.7 → 24.8 kB. Real documentation weight, not code.
  */
-const TOTAL_KB = 424;
+const TOTAL_KB = 435;
 
 const gzipKb = (bytes: Buffer): number => gzipSync(bytes, { level: 9 }).length / 1024;
 
