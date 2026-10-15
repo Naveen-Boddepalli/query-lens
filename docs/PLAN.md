@@ -26,7 +26,7 @@ Design and elevate the frontend of QueryLens into an ultra-clean, professional, 
 | T2 | 1 | Navigation, Layout Shell & Global Chrome | T1 | `src/ui/TopNav.tsx`, `src/ui/Footer.tsx`, `src/ui/Layout.tsx`, `src/ui/Logo.tsx`, `src/ui/PageHeader.tsx` | query-lens-7 | #5 | merged | 1 |
 | T3 | 2 | Modern Landing Page & Interactive Hero | T2 | `src/pages/LandingPage.tsx`, `src/ui/Hero.tsx` | query-lens-8 | #6 | merged | 1 |
 | T4 | 2 | Playground Layout & Playback Controls | T2, R2 | `src/pages/PlaygroundPage.tsx`, `src/ui/PipelineTracker.tsx`, `src/ui/PlaybackControls.tsx`, `src/ui/PredictionCard.tsx`, `src/ui/PresenterView.tsx`, `src/ui/PlaygroundTour.tsx` | query-lens-10 | #7 | merged | 2 |
-| T5 | 2 | Database Visualizer Panels & Diagram Theming | T4 | `src/ui/panels/**`, `src/ui/DataEditor.tsx`, `src/ui/SchemaEditor.tsx`, `src/ui/SqlEditor.tsx`, `src/ui/TraceWorksheet.tsx` | - | - | pending | 0 |
+| T5 | 2 | Database Visualizer Panels & Diagram Theming | T4 | `src/ui/panels/**`, `src/ui/DataEditor.tsx`, `src/ui/SchemaEditor.tsx`, `src/ui/SqlEditor.tsx`, `src/ui/TraceWorksheet.tsx` | - | - | running | 1 |
 | T6 | 3 | Standalone Tools Suite & Sandboxes | T2, R2 | `src/pages/tools/**`, `src/pages/ToolsIndexPage.tsx` | - | - | pending | 0 |
 | T7 | 3 | Comparison Engine, Gallery & Example Library | T2 | `src/pages/ComparePage.tsx`, `src/pages/GalleryPage.tsx`, `src/pages/ExamplesPage.tsx` | - | - | pending | 0 |
 | T8 | 4 | Learn Curriculum, Challenges & Progress Dashboard | T2, R3 | `src/pages/LearnPage.tsx`, `src/pages/LessonPage.tsx`, `src/pages/ChallengesPage.tsx`, `src/pages/ChallengePage.tsx`, `src/pages/ProgressPage.tsx`, `src/pages/learn/**`, `src/pages/challenges/**` | - | - | pending | 0 |
