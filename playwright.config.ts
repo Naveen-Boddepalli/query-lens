@@ -15,8 +15,13 @@ export default defineConfig({
   testDir: './e2e',
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
+  // In CI a failure is retried once, which records a trace of the retry (`trace` below) — and a test that then
+  // passes is *flaky*, which fails the build rather than going green unnoticed. A flake here has been a real race
+  // more than once: the tour's hand-off ignored a click about one run in twenty-five, hidden by this very retry.
   retries: process.env.CI ? 1 : 0,
-  reporter: process.env.CI ? 'github' : 'list',
+  failOnFlakyTests: !!process.env.CI,
+  // `github` annotates the PR; `html` writes `playwright-report/`, the folder CI uploads on failure, traces included.
+  reporter: process.env.CI ? [['github'], ['html', { open: 'never' }]] : 'list',
 
   use: {
     baseURL: 'http://localhost:4173',

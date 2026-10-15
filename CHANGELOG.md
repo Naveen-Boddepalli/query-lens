@@ -354,6 +354,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a `study` bundle row (5.4 kB gzip, its own lazy chunk), six Playwright tests, and STUDY.md §4.
 
 ### Changed
+- **A flaky end-to-end test now fails CI instead of passing on its retry.** CI retries a failed Playwright test
+  once; a test that then passed went green unnoticed, which is how the tour's hand-off race (*Fixed*, below) hid
+  for a run in twenty-five. `failOnFlakyTests` is on in CI, and the job writes an HTML report beside the GitHub
+  annotations, so the `playwright-report/` it already uploads on failure exists, with the retry's trace in it
+  (with only the `github` reporter that folder was never written). Checked with a deliberately flaky test under
+  `CI=1`: the run fails and says "1 flaky"; with the option off it passes.
 - **The SQLite oracle now checks outer joins, join chains and subqueries.** Its generators built only a single
   inner `t JOIN u`; they now also build `LEFT JOIN`, two-step chains over a third table `w` (each step inner or
   left, either side of the `ON` first), `[NOT] IN (SELECT col FROM … [WHERE …])` as a predicate anywhere a WHERE

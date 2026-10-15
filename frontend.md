@@ -1206,6 +1206,9 @@ pnpm test:e2e    # playwright test (requires built dist/)
 - Runs against **`dist/`** (production build).
 - Requires: `pnpm exec playwright install chromium`
 - Config: `playwright.config.ts`
+- In CI a failed test is retried once, recording a trace; one that passes only on its retry is **flaky** and fails
+  the build (`failOnFlakyTests`) instead of going green unnoticed. The HTML report, traces included, is uploaded
+  when the job fails.
 - Includes:
   - Smoke: load → run → step → result, shared links, data editor, theming, axe in both palettes.
   - Regressions: panel tracking, zoom, overflow, gating, history, console silence.
@@ -1291,7 +1294,7 @@ Runs on every PR and push to `main`. All GitHub Actions are **pinned to immutabl
 | `unit-test` | `pnpm test` (`vitest run`) |
 | `build-and-budget` | `pnpm build` + `pnpm budget` |
 | `cli-test` | CLI `--help`, query execution, `--policy clock`, `--json` |
-| `e2e-test` | Playwright + axe a11y audit. Uploads report on failure |
+| `e2e-test` | Playwright + axe a11y audit; a flaky test fails it. Uploads the HTML report (with traces) on failure |
 | `ci-gate` | Required status check gating PR merges |
 
 ### Dependabot (`.github/dependabot.yml`)
