@@ -4,6 +4,7 @@ Maintained by the orchestrator only. Newest first. Keep under ~100 entries.
 Format: `- [YYYY-MM-DD][T<id>][area] Symptom → Cause → Fix/Rule.`
 Mark entries `(promoted)` once they are copied into GEMINI.md §7.
 
+- [2026-10-15][T5][ui] Replacing emoji status icons in high-density visualizer panels (e.g. buffer frame indicators, btree node badges) → Inconsistent rendering across platforms and color slop → Replace with discrete, monochrome SVG line vectors and structured text chips (HAND, HIT, READ, WRITE, EVICTED).
 - [2026-10-15][T4][budget] Tight 56.0 kB gzip ceiling on trace-ui chunk group → Micro-variations in Tailwind class ordering and JSX button handlers prevent gzip LZ77 dictionary reuse → Standardize class order constants across glassmorphic cards and hoist common SVG path strings to fit within budget (55.97 kB / 56.0 kB limit).
 - [2026-10-15][T4][budget] Merged upstream changes in sibling chunk groups (routes) cause budget gate failure in worker rebase → Bundle budget scripts are outside worker scope → Orchestrator must adjust chunk group ceiling (routes 12 -> 13 kB) on base branch to account for multi-feature redesign weight.
 - [2026-10-14][T3][budget] Inlining SVG icons across hero and landing cards pushes routes chunk group past 12.0 kB ceiling → Encapsulate shared vector line paths in a common StageIcon component to leverage gzip LZ77 backreferences and satisfy React Fast Refresh without eslint-disable.
