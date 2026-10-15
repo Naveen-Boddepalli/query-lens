@@ -4,6 +4,8 @@ Maintained by the orchestrator only. Newest first. Keep under ~100 entries.
 Format: `- [YYYY-MM-DD][T<id>][area] Symptom → Cause → Fix/Rule.`
 Mark entries `(promoted)` once they are copied into GEMINI.md §7.
 
+- [2026-10-15][T4][budget] Tight 56.0 kB gzip ceiling on trace-ui chunk group → Micro-variations in Tailwind class ordering and JSX button handlers prevent gzip LZ77 dictionary reuse → Standardize class order constants across glassmorphic cards and hoist common SVG path strings to fit within budget (55.97 kB / 56.0 kB limit).
+- [2026-10-15][T4][budget] Merged upstream changes in sibling chunk groups (routes) cause budget gate failure in worker rebase → Bundle budget scripts are outside worker scope → Orchestrator must adjust chunk group ceiling (routes 12 -> 13 kB) on base branch to account for multi-feature redesign weight.
 - [2026-10-14][T3][budget] Inlining SVG icons across hero and landing cards pushes routes chunk group past 12.0 kB ceiling → Encapsulate shared vector line paths in a common StageIcon component to leverage gzip LZ77 backreferences and satisfy React Fast Refresh without eslint-disable.
 - [2026-10-14][T2][ui] Calling setState in useEffect keyed on pathname to close mobile drawer → Cascading re-render warning from React 19 / ESLint react-hooks/set-state-in-effect → Adjust state during render comparing previous to current pathname.
 - [2026-10-14][T2][budget] Tight 24 kB ceiling on entry chunk (index-*.js) → Deduplicate shared inline components and trim redundant SVG elements to maintain bundle headroom (passed at 23.5 kB / 24 kB limit).
