@@ -27,8 +27,8 @@ Design and elevate the frontend of QueryLens into an ultra-clean, professional, 
 | T3 | 2 | Modern Landing Page & Interactive Hero | T2 | `src/pages/LandingPage.tsx`, `src/ui/Hero.tsx` | query-lens-8 | #6 | merged | 1 |
 | T4 | 2 | Playground Layout & Playback Controls | T2, R2 | `src/pages/PlaygroundPage.tsx`, `src/ui/PipelineTracker.tsx`, `src/ui/PlaybackControls.tsx`, `src/ui/PredictionCard.tsx`, `src/ui/PresenterView.tsx`, `src/ui/PlaygroundTour.tsx` | query-lens-10 | #7 | merged | 2 |
 | T5 | 2 | Database Visualizer Panels & Diagram Theming | T4 | `src/ui/panels/**`, `src/ui/DataEditor.tsx`, `src/ui/SchemaEditor.tsx`, `src/ui/SqlEditor.tsx`, `src/ui/TraceWorksheet.tsx` | query-lens-11 | #8 | merged | 1 |
-| T6 | 3 | Standalone Tools Suite & Sandboxes | T2, R2 | `src/pages/tools/**`, `src/pages/ToolsIndexPage.tsx` | - | - | running | 1 |
-| T7 | 3 | Comparison Engine, Gallery & Example Library | T2 | `src/pages/ComparePage.tsx`, `src/pages/GalleryPage.tsx`, `src/pages/ExamplesPage.tsx` | - | - | running | 1 |
+| T6 | 3 | Standalone Tools Suite & Sandboxes | T2, R2 | `src/pages/tools/**`, `src/pages/ToolsIndexPage.tsx` | query-lens-12 | - | running | 1 |
+| T7 | 3 | Comparison Engine, Gallery & Example Library | T2 | `src/pages/ComparePage.tsx`, `src/pages/GalleryPage.tsx`, `src/pages/ExamplesPage.tsx` | query-lens-13 | - | running | 1 |
 | T8 | 4 | Learn Curriculum, Challenges & Progress Dashboard | T2, R3 | `src/pages/LearnPage.tsx`, `src/pages/LessonPage.tsx`, `src/pages/ChallengesPage.tsx`, `src/pages/ChallengePage.tsx`, `src/pages/ProgressPage.tsx`, `src/pages/learn/**`, `src/pages/challenges/**` | - | - | pending | 0 |
 | T9 | 4 | Documentation, Settings & Utility Views | T2 | `src/ui/DocsLayout.tsx`, `src/ui/DocsComponents.tsx`, `src/ui/Sidebar.tsx`, `src/ui/StagesLayout.tsx`, `src/pages/StagesIndex.tsx`, `src/pages/StagePage.tsx`, `src/pages/SettingsPage.tsx`, `src/pages/TracePage.tsx`, `src/pages/AssignmentsNewPage.tsx`, `src/pages/NotFoundPage.tsx` | - | - | pending | 0 |
 
