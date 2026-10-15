@@ -3,8 +3,8 @@
    and a link-builder. The lesson prose carries JSX, which is why the file is
    `.tsx`, but nothing here is a React component to hot-reload. */
 import type { ReactNode } from 'react';
-import { createSeedDatabase, DEFAULT_ENGINE_OPTIONS, runQuery } from '../../engine/index.ts';
-import type { ReplacementPolicyName, StepEvent } from '../../engine/index.ts';
+import { createSeedDatabase, DATASETS, DEFAULT_ENGINE_OPTIONS, runQuery } from '../../engine/index.ts';
+import type { DatasetId, ReplacementPolicyName, StepEvent } from '../../engine/index.ts';
 import { encodeShareState } from '../../ui/urlState.ts';
 import { LESSON_INDEX } from './lessonIndex.ts';
 import type { LessonMeta } from './lessonIndex.ts';
@@ -33,6 +33,8 @@ const SEQ_SCAN = 'SELECT *\nFROM users\nWHERE age > 30;';
 
 interface OpenSpec {
   sql: string;
+  /** The preset table the step opens on — `users`, the seed, unless it says otherwise. */
+  dataset?: DatasetId;
   policy?: ReplacementPolicyName;
   predictOn?: boolean;
   /** Returns the 0-based event index to land *after*; `at` adds 1. */
@@ -66,10 +68,11 @@ const END = (events: readonly StepEvent[]) => events.length;
 /** `/playground?…` for an `OpenSpec`, with the step computed from a real run. */
 export function stepLink(spec: OpenSpec): { href: string; label: string } {
   const policy = spec.policy ?? 'lru';
-  const result = runQuery(spec.sql, SEED, { ...DEFAULT_ENGINE_OPTIONS, policy });
+  const db = spec.dataset ? DATASETS[spec.dataset].make() : SEED;
+  const result = runQuery(spec.sql, db, { ...DEFAULT_ENGINE_OPTIONS, policy });
   const step = spec.find(result.events);
   const query = encodeShareState(
-    { sql: spec.sql, policy, predictOn: spec.predictOn ?? false, step },
+    { sql: spec.sql, policy, predictOn: spec.predictOn ?? false, step, ...(spec.dataset ? { dataset: spec.dataset } : {}) },
     undefined,
   );
   return { href: `/playground?${query}`, label: spec.label ?? 'Open this in the Playground' };
@@ -409,6 +412,87 @@ export const PIPELINE_STEPS: Record<string, LessonStep[]> = {
           saves the same moment as a file that <strong>Load trace</strong> restores.
         </>
       ),
+    },
+  ],
+  // plan.md §26 Feature 3 — on `customers`, the one preset with NULLs. Every step lands on its result.
+  nulls: [
+    {
+      heading: 'Equal to nothing',
+      body: (
+        <>
+          Five customers have no city on record. Ask for them with{' '}
+          <code className="font-mono">WHERE city = NULL</code> and the result is empty: a comparison with NULL is not
+          false but <em>unknown</em>, and a WHERE clause keeps only rows that are true. NULL is not a value that can
+          be equal to anything — not even another NULL.
+        </>
+      ),
+      open: { sql: 'SELECT *\nFROM customers\nWHERE city = NULL;', dataset: 'customers', find: END, label: 'Run = NULL' },
+      tryThis: (
+        <>
+          Change <code className="font-mono">= NULL</code> to <code className="font-mono">IS NULL</code> — the one test
+          that is never unknown — and the five appear.
+        </>
+      ),
+    },
+    {
+      heading: 'Not equal is not the rest',
+      body: (
+        <>
+          Four customers live in Paris and <code className="font-mono">city &lt;&gt; 'Paris'</code> returns eleven. Four
+          and eleven is fifteen, not twenty: for a customer with no city, <code className="font-mono">&lt;&gt;</code>{' '}
+          is unknown too, so they fall out of both answers. The rest of the table is{' '}
+          <code className="font-mono">city &lt;&gt; 'Paris' OR city IS NULL</code>.
+        </>
+      ),
+      open: { sql: "SELECT *\nFROM customers\nWHERE city <> 'Paris';", dataset: 'customers', find: END, label: 'Run <> Paris' },
+      tryThis: (
+        <>
+          The <a href="/challenges/not-paris-either" className="underline underline-offset-2">Everyone not in Paris</a>{' '}
+          challenge asks for exactly the rest.
+        </>
+      ),
+    },
+    {
+      heading: 'Aggregates skip what is missing',
+      body: (
+        <>
+          <code className="font-mono">COUNT(*)</code> counts rows: twenty. <code className="font-mono">COUNT(discount)</code>{' '}
+          counts values: thirteen — lea's discount of 0 is one of them, because 0 is a value and NULL is not.{' '}
+          <code className="font-mono">AVG(discount)</code> divides by those thirteen, not by twenty, so it is the
+          average of the discounts on record, not of every customer.
+        </>
+      ),
+      open: { sql: 'SELECT COUNT(*), COUNT(discount), AVG(discount)\nFROM customers;', dataset: 'customers', find: END, label: 'Run the aggregates' },
+    },
+    {
+      heading: 'NOT IN meets a NULL',
+      body: (
+        <>
+          Who referred nobody? <code className="font-mono">id NOT IN (SELECT referrer FROM customers)</code> should
+          name the eleven, and returns no one. Eight customers came on their own, so the list holds a NULL, and{' '}
+          <code className="font-mono">x NOT IN (…, NULL)</code> asks whether <code className="font-mono">x &lt;&gt; NULL</code>{' '}
+          — unknown, for every x. The other way round, an <em>empty</em> list is different: nothing is in it, so{' '}
+          <code className="font-mono">NOT IN</code> is true for every row, a NULL one included.
+        </>
+      ),
+      open: { sql: 'SELECT name\nFROM customers\nWHERE id NOT IN (SELECT referrer FROM customers);', dataset: 'customers', find: END, label: 'Run NOT IN' },
+      tryThis: (
+        <>
+          Add <code className="font-mono">WHERE referrer IS NOT NULL</code> inside the subquery, and the eleven come back.
+        </>
+      ),
+    },
+    {
+      heading: 'Where NULLs sort and group',
+      body: (
+        <>
+          Sorted ascending, NULLs come last; descending, first — PostgreSQL's rule, which QueryLens follows. And{' '}
+          <code className="font-mono">GROUP BY city</code> puts every customer with no city in one group: for
+          grouping (and for <code className="font-mono">DISTINCT</code>) NULLs count as equal, though no comparison
+          says they are.
+        </>
+      ),
+      open: { sql: 'SELECT city, COUNT(*)\nFROM customers\nGROUP BY city\nORDER BY city;', dataset: 'customers', find: END, label: 'Group by city' },
     },
   ],
   'errors': [

@@ -9,11 +9,11 @@ been done.
 
 ## Checked automatically
 
-Sixty-seven routes are scanned with [axe-core](https://github.com/dequelabs/axe-core) against the WCAG 2.0, 2.1 and 2.2
+Sixty-nine routes are scanned with [axe-core](https://github.com/dequelabs/axe-core) against the WCAG 2.0, 2.1 and 2.2
 rules at levels A and AA. The scan runs in the project's test suite (`e2e/audit.spec.ts`), with reduced motion on. It
 covers the landing page, the playground, every tool and comparison, every docs page, the not-found page, and one
-stage, three lessons and eight challenge pages standing for their kinds — two query challenges (one with a link to a
-tool), and the views that differ: a schedule, a log script, a lock script, and the forms of settings for a tool, with
+stage, four lessons and nine challenge pages standing for their kinds — three query challenges (one with a link to a
+tool, one on the preset with NULLs), and the views that differ: a schedule, a log script, a lock script, and the forms of settings for a tool, with
 numbers, a text box and a list, or a set of check boxes. Each is scanned in the light and the dark palette, at a
 laptop width and at 360 px, because a palette has its own contrasts and a table that fits a laptop scrolls on a
 phone. A second scan opens thirty-four of them and uses their controls — presses Run, shows each chart as a table,
@@ -31,7 +31,7 @@ name, a label at 2.9:1 contrast, and check boxes under the minimum target size.
 One thing axe cannot see is whether each page has its own title (WCAG 2.4.2, *Page Titled*): the app's HTML has a
 `<title>`, so a page that never set its own still passed while every tab, history entry and bookmark read the same.
 Every page now names itself — *Crash recovery · Tools · QueryLens* — and `e2e/titles.spec.ts` opens the same
-sixty-seven routes and fails if any keeps the default or shares a title with another.
+routes and fails if any keeps the default or shares a title with another.
 
 Automated scanning catches only part of WCAG: a pass means no *detectable* violation, not that a page is accessible.
 

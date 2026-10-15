@@ -46,6 +46,7 @@ describe('challenges', () => {
     'equals-null': 'SELECT * FROM contacts WHERE email IS NULL;',
     'count-the-nulls': 'SELECT COUNT(*), COUNT(email) FROM contacts;',
     'not-in-the-null': 'SELECT * FROM people WHERE id NOT IN (SELECT person_id FROM banned);',
+    'not-paris-either': "SELECT * FROM customers WHERE city <> 'Paris' OR city IS NULL;",
     'keep-the-unmatched':
       'SELECT authors.name, posts.title FROM authors LEFT JOIN posts ON authors.id = posts.authorId WHERE posts.title IS NULL;',
     'and-before-or': 'SELECT * FROM users WHERE (id = 1 OR id = 3 OR id = 4) AND age > 30;',
@@ -99,6 +100,13 @@ describe('challenges', () => {
       ['equals-null', 'SELECT * FROM contacts WHERE id = 2;'],
       ['count-the-nulls', 'SELECT COUNT(*), COUNT(id) FROM contacts;'],
       ['not-in-the-null', 'SELECT * FROM people WHERE id NOT IN (SELECT person_id FROM banned WHERE person_id IS NOT NULL) AND id > 9;'],
+      // Each loses the five customers with no city, or keeps Paris, or is the wrong slice.
+      ['not-paris-either', "SELECT * FROM customers WHERE city <> 'Paris';"],
+      ['not-paris-either', "SELECT * FROM customers WHERE NOT (city = 'Paris');"],
+      ['not-paris-either', "SELECT * FROM customers WHERE city NOT IN ('Paris');"],
+      ['not-paris-either', 'SELECT * FROM customers WHERE city IS NULL;'],
+      ['not-paris-either', 'SELECT * FROM customers;'],
+      ['not-paris-either', 'SELECT city FROM customers WHERE city <> \'Paris\' OR city IS NULL;'],
       ['keep-the-unmatched', 'SELECT authors.name, posts.title FROM authors LEFT JOIN posts ON authors.id = posts.authorId WHERE posts.id = 999;'],
       // The right two people, but not by way of an OR under an AND.
       ['and-before-or', 'SELECT * FROM users WHERE id IN (3, 4) AND age > 30;'],
@@ -131,6 +139,11 @@ describe('challenges', () => {
       const r = runOn(c, sql);
       return r.error === undefined && c.check(r, sql);
     };
+
+    it('not-paris-either takes the right customers however the query finds them, by id or by name', () => {
+      expect(solved('not-paris-either', "SELECT id FROM customers WHERE id NOT IN (SELECT id FROM customers WHERE city = 'Paris');")).toBe(true);
+      expect(solved('not-paris-either', "SELECT name FROM customers WHERE city IS NULL OR city <> 'Paris';")).toBe(true);
+    });
 
     it('and-before-or takes the two people however the query names them, and any grouping that gets them', () => {
       expect(solved('and-before-or', 'SELECT name FROM users WHERE (id = 3 OR id = 4) AND age > 30;')).toBe(true);

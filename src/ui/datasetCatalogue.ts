@@ -49,7 +49,7 @@ export const DATASET_CATALOGUE: Record<DatasetId, DatasetCatalogueEntry> = {
   },
   employees: {
     label: 'employees',
-    blurb: '200 rows — department and office are perfectly correlated, so an AND of both badly underestimates.',
+    blurb: '250 rows — department and office are perfectly correlated, so an AND of both badly underestimates.',
     starterSql: "EXPLAIN ANALYZE\nSELECT *\nFROM employees\nWHERE department = 'engineering' AND office = 'building-1';",
     presets: [
       {
@@ -72,6 +72,18 @@ export const DATASET_CATALOGUE: Record<DatasetId, DatasetCatalogueEntry> = {
         label: 'EXPLAIN ANALYZE',
         sql: 'EXPLAIN ANALYZE\nSELECT *\nFROM transactions\nWHERE amount > 4500;',
       },
+    ],
+  },
+  // plan.md §26 Feature 3: the one preset with NULLs, so three-valued logic shows without editing any rows.
+  customers: {
+    label: 'customers',
+    blurb: '20 rows, some with no city, no referrer or no discount on record — NULLs, so SQL’s third truth value shows.',
+    starterSql: 'SELECT *\nFROM customers\nWHERE city IS NULL;',
+    presets: [
+      { label: 'IS NULL', sql: 'SELECT *\nFROM customers\nWHERE city IS NULL;' },
+      { label: '= NULL finds nothing', sql: 'SELECT *\nFROM customers\nWHERE city = NULL;' },
+      { label: 'Aggregates skip NULLs', sql: 'SELECT COUNT(*), COUNT(discount), AVG(discount)\nFROM customers;' },
+      { label: 'NOT IN meets a NULL', sql: 'SELECT name\nFROM customers\nWHERE id NOT IN (SELECT referrer FROM customers);' },
     ],
   },
 };

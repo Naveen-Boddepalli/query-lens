@@ -621,6 +621,42 @@ export const CHALLENGES: Challenge[] = [
     ),
   },
   {
+    // plan.md §26 Feature 3 — on `customers`, the preset with NULLs.
+    id: 'not-paris-either',
+    title: 'Everyone not in Paris',
+    brief: (
+      <>
+        Return every customer who does not live in Paris — including the ones whose city is not on record. A customer
+        with no known city is not known to live in Paris either.
+      </>
+    ),
+    hint: (
+      <>
+        <code className="font-mono">city &lt;&gt; 'Paris'</code> is unknown when the city is NULL, so those rows fall
+        out. Count the result against the table: Paris has four customers, and there are twenty.
+      </>
+    ),
+    starter: "SELECT * FROM customers WHERE city <> 'Paris';",
+    dataset: 'customers',
+    // The exact set of customers — by whatever query (`<> … OR IS NULL`, or `id NOT IN (SELECT id … WHERE city =
+    // 'Paris')`), told apart by `id` or by `name`, which is unique here, whichever the query selected.
+    check: (r) => {
+      const key = r.rows.every((row) => 'id' in row) ? 'id' : r.rows.every((row) => 'name' in row) ? 'name' : null;
+      if (r.error || key === null) return false;
+      const want = DATASETS.customers.make().tables.customers!.rows.filter((row) => row['city'] !== 'Paris').map((row) => row[key]);
+      const got = r.rows.map((row) => row[key]);
+      return got.length === want.length && want.every((v) => got.includes(v));
+    },
+    misconception: (
+      <>
+        <code className="font-mono">city &lt;&gt; 'Paris'</code> means &ldquo;everyone else&rdquo;. It means everyone
+        whose city is <em>known</em> to be something else: for a NULL city the comparison is unknown, and a WHERE clause
+        keeps only what is true. <code className="font-mono">city = 'Paris'</code> and{' '}
+        <code className="font-mono">city &lt;&gt; 'Paris'</code> together still leave out every NULL.
+      </>
+    ),
+  },
+  {
     id: 'keep-the-unmatched',
     title: 'Keep the authors who have no posts',
     brief: (

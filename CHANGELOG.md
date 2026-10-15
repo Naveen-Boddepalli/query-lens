@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **A preset with NULLs: `customers`, with a lesson and a challenge** (plan.md §26, Feature 3). No preset row held
+  a NULL, so three-valued logic only showed after editing data — which is how `NULL NOT IN (∅)` stayed wrong until
+  the oracle found it. `customers` is 20 hand-placed rows with no city for five, no referrer for eight and no
+  discount for seven (and a discount of 0 for one). Its presets: `IS NULL`, `= NULL` finding nothing, `COUNT` and
+  `AVG` skipping NULLs, and `NOT IN` meeting the NULL among the referrers and returning no one. The lesson *NULL is
+  not a value* (`/learn/nulls`, five steps, each opening the Playground on `customers`, its numbers held by tests)
+  and the challenge *Everyone not in Paris* (`/challenges/not-paris-either`: `city <> 'Paris'` loses the five with
+  no city). The `employees` blurb said 200 rows; it has 250.
 - **All eight replacement policies in the Playground** (plan.md §26, Feature 2). The *Eviction* picker, a shared
   link's `p=`, a saved default in Settings, a downloaded trace file and an assignment link now take FIFO,
   second-chance, optimal, midpoint LRU, LRU-2 and 2Q as well as LRU and clock sweep — the eviction narration

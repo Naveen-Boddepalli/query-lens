@@ -1461,6 +1461,23 @@ test('the preset dataset chips swap the table, the query and the URL', async ({ 
   await expect.poll(() => page.url()).not.toContain('t=');
 });
 
+test('the customers preset has NULLs: IS NULL finds five, = NULL none, and NOT IN meets a NULL (plan.md §26 Feature 3)', async ({ page }) => {
+  await page.goto('/playground');
+  await page.getByRole('button', { name: 'customers', exact: true }).click();
+  await expect(page.getByLabel('SQL query')).toContainText('city IS NULL');
+  await expect(page.getByText(/20 rows, some with no city/)).toBeVisible();
+  await expect.poll(() => page.url()).toContain('t=customers');
+
+  const result = async (preset: string, rows: string) => {
+    await page.getByRole('button', { name: preset }).click();
+    await page.getByLabel('Scrub to step').press('End');
+    await expect(page.getByText(rows).first()).toBeVisible();
+  };
+  await result('IS NULL', '5 rows returned');
+  await result('= NULL finds nothing', '0 rows returned');
+  await result('NOT IN meets a NULL', '0 rows returned');
+});
+
 test('a link that names a dataset reopens on it, in the Playground and the inspector', async ({
   page,
 }) => {

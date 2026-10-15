@@ -87,6 +87,12 @@ export const LESSON_GROUPS: readonly LessonGroup[] = [
         summary: 'A panel that breaks does not lose your trace — and the report writes itself.',
       },
       {
+        id: 'nulls',
+        title: 'NULL is not a value',
+        minutes: 5,
+        summary: 'A missing value is UNKNOWN, not false — and = NULL, <>, COUNT, AVG and NOT IN each show it a different way.',
+      },
+      {
         id: 'tokens-and-trees',
         title: 'From text to tokens to a tree',
         minutes: 3,

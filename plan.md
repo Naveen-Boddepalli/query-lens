@@ -2851,6 +2851,21 @@ bug found on the way, older than this feature:** `SELECT name FROM users HAVING 
 means (an ungrouped column, a missing table name, DISTINCT sorting by an unselected column), never which clauses it
 has. The *every-clause* challenge stays on its one-table database and asks for all seven parts that has.
 
+### Feature 3 — a preset with NULLs (built, 2026-10-15)
+
+No preset row held a NULL, so the Playground never showed three-valued logic on its own — and `NULL NOT IN (∅)`
+stayed wrong until the oracle's generated NULLs found it (§26's first fix). `customers` (`src/engine/datasets.ts`)
+is 20 rows written out so each NULL is placed on purpose: five with no `city` (so `= 'Paris'` and `<> 'Paris'`
+together miss five), eight with no `referrer` (so "who referred nobody", `id NOT IN (SELECT referrer …)`, returns
+no one), seven with no `discount` and one with 0 (so `COUNT(discount)` counts the 0 and `AVG` divides by 13, not
+20). A new dataset rather than NULLs in an old one, because every pinned number in the lessons, challenges and e2e
+tests on the old ones would have moved. The lesson *NULL is not a value* sits with the Playground lessons, after
+*errors*; `stepLink` gained a `dataset` so a step can open on a preset other than `users`, and a test re-runs each
+of its links on `customers` and holds the numbers its prose quotes. The challenge *Everyone not in Paris* checks the
+exact set of customers, by `id` or `name`, so any correct query passes (`<> … OR IS NULL`, or `NOT IN` a subquery
+of Paris's ids) and `<>`, `NOT (=)` and `NOT IN ('Paris')` do not; a mutation that drops the NULL-city customers
+from the expected set fails six tests. A test also holds that `customers` is the only preset with any NULL.
+
 ### Feature 2 — every replacement policy in the Playground (built, 2026-10-15)
 
 The engine had eight policies; the Playground's *Eviction* picker, its `p=` parameter, a saved default, a trace

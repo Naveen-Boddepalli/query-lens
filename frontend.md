@@ -120,7 +120,7 @@ QueryLens/
 │   │   ├── trace.ts            # Trace builder (step event collector)
 │   │   ├── viewState.ts        # Event → ViewState reducer (what the UI renders)
 │   │   ├── seed.ts             # Default seed database (48-row users table)
-│   │   ├── datasets.ts         # Preset datasets: users, orders, logins, employees, transactions
+│   │   ├── datasets.ts         # Preset datasets: users, orders, logins, employees, transactions, customers
 │   │   ├── predict.ts          # Prediction prompt generation
 │   │   ├── bufferTrace.ts      # Standalone buffer-pool trace runner
 │   │   ├── parser/             # SQL tokenizer + recursive-descent parser → AST
@@ -339,7 +339,7 @@ The address bar is the **only persistence layer**. A shareable URL encodes:
 | Eviction policy | `p` | `lru`, `clock`, `fifo`, `second-chance`, `optimal`, `midpoint`, `lru-k` or `two-q` |
 | Predict mode | `x` | `0` or `1` |
 | Step position | `s` | Integer step number |
-| Dataset | `t` | `users`, `orders`, `logins`, `employees` or `transactions` |
+| Dataset | `t` | `users`, `orders`, `logins`, `employees`, `transactions` or `customers` |
 | Edited rows | `d` | JSON-encoded row arrays (only if modified) |
 | Assignment lock | `l` | `1` = assignment mode |
 
@@ -607,7 +607,7 @@ The root layout rendered by `<Route element={<Layout />}>`.
 The **core experience**. Two-column layout on desktop:
 
 **Left column (authoring):**
-- Dataset selector chips (`users`, `orders`, `logins`, `employees`, `transactions`, `Custom`).
+- Dataset selector chips (`users`, `orders`, `logins`, `employees`, `transactions`, `customers`, `Custom`).
 - Preset query chips ("Point lookup", "Sequential scan", etc.).
 - `SqlEditor` — CodeMirror with SQL highlighting, autocomplete, error squiggles.
 - **Run** button + **Edit data** button + **Eviction policy** select (all eight: LRU, Clock sweep, FIFO, Second-chance, Optimal, Midpoint LRU, LRU-2, 2Q).
@@ -824,6 +824,9 @@ createTraceProjector(events, options): TraceProjector
 | `users` | `users` | 48 | `id` | Baseline: 12-page scan vs 8 buffer frames |
 | `orders` | `orders` | 120 | `id` | Deeper B+Tree, harder eviction |
 | `logins` | `logins` | 80 | `id` | 8:1 skew on `status` — selectivity contrast |
+| `employees` | `employees` | 250 | `id` | `department` and `office` perfectly correlated — a badly underestimated `AND` |
+| `transactions` | `transactions` | 3,000 | `id` | Tallest B+Tree (height 7), a scan that evicts hard |
+| `customers` | `customers` | 20 | `id` | NULLs in `city`, `referrer` and `discount` — three-valued logic |
 
 ---
 
@@ -1447,7 +1450,7 @@ Runs on every PR and push to `main`. All GitHub Actions are **pinned to immutabl
 | `trace.ts` | Trace builder — collects StepEvents during pipeline execution |
 | `viewState.ts` | Pure event→state reducer + `TraceProjector` (incremental folder) |
 | `seed.ts` | Default 48-row users table |
-| `datasets.ts` | Preset dataset definitions (users, orders, logins, employees, transactions) |
+| `datasets.ts` | Preset dataset definitions (users, orders, logins, employees, transactions, customers) |
 | `predict.ts` | Prediction prompt generation for each stage |
 | `bufferTrace.ts` | Standalone buffer trace runner (for Compare + Tools) |
 | `parser/tokenizer.ts` | SQL tokenizer |

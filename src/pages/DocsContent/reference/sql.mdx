@@ -293,8 +293,9 @@ Every query runs against one table at a time (more, for a chain of `JOIN`s). The
 columns `id`, `name`, `email`, `age` (48 rows); the **Data** chips above the editor also load `orders`
 (120 rows — a deeper index and a heavier scan), `logins` (a lopsided `status` column, for selectivity),
 `employees` (250 rows whose `department` and `office` are perfectly correlated, so the optimizer's estimate
-for both together is badly off) and `transactions` (3,000 rows — the tallest B+Tree of the presets, and a
-scan that evicts hard). Rows are editable from the app (**Edit data**), and both the choice of dataset and
+for both together is badly off), `transactions` (3,000 rows — the tallest B+Tree of the presets, and a
+scan that evicts hard) and `customers` (20 rows with NULLs in `city`, `referrer` and `discount` — the one
+preset where three-valued logic shows; the [NULL lesson](/learn/nulls) walks it). Rows are editable from the app (**Edit data**), and both the choice of dataset and
 any edits travel with a shareable link — see [URL parameters](/docs/reference/url-parameters).
 
 The **Custom** data chip lets you build your own multi-table database in the browser — add a

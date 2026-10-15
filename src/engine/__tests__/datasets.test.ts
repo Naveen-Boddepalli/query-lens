@@ -93,6 +93,17 @@ describe('preset datasets', () => {
     expect(range.rows).toHaveLength(21);
   });
 
+  it('customers is the one preset with NULLs, in city, referrer and discount (plan.md §26 Feature 3)', () => {
+    const nullColumns = (id: (typeof DATASET_IDS)[number]) => {
+      const table = DATASETS[id].make().tables[DATASETS[id].table]!;
+      return table.columns.filter((c) => table.rows.some((r) => r[c] === null));
+    };
+    expect(nullColumns('customers')).toEqual(['city', 'referrer', 'discount']);
+    for (const id of DATASET_IDS.filter((d) => d !== 'customers')) expect(nullColumns(id), id).toEqual([]);
+    // A 0 discount beside the NULLs, so COUNT(discount) can be seen to count a 0 and not a NULL.
+    expect(DATASETS.customers.make().tables.customers!.rows.some((r) => r['discount'] === 0)).toBe(true);
+  });
+
   it('isDatasetId is a total guard', () => {
     expect(isDatasetId('users')).toBe(true);
     expect(isDatasetId('lineitem')).toBe(false);
