@@ -214,8 +214,11 @@ describe('computed columns', () => {
         b: { name: 'b', columns: ['aid', 'w'], rows: [{ aid: 1, w: 3 }, { aid: 2, w: 4 }] },
       },
     };
-    const r = runQuery('SELECT a.id, a.v + b.w AS total FROM a JOIN b ON a.id = b.aid ORDER BY a.id', joined);
-    expect(r.error?.message).toMatch(/ORDER BY/); // ORDER BY + JOIN is a separate, older limit
+    const r = runQuery('SELECT a.id, a.v + b.w AS total FROM a JOIN b ON a.id = b.aid ORDER BY a.id DESC', joined);
+    expect(r.rows).toEqual([
+      { 'a.id': 2, total: 24 },
+      { 'a.id': 1, total: 13 },
+    ]);
     expect(runQuery('SELECT a.id, a.v + b.w AS total FROM a JOIN b ON a.id = b.aid', joined).rows).toEqual([
       { 'a.id': 1, total: 13 },
       { 'a.id': 2, total: 24 },

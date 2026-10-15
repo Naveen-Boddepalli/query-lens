@@ -137,7 +137,8 @@ concept explanation.
   only recognises `Project → … → Filter → Join → two bare scans`, so a chain of two or more `JOIN`s
   leaves the whole `WHERE` clause as a residual filter above the chain for now, correct either way, just
   not yet narrowed into any one step's own scan.
-- Cannot combine with `GROUP BY`, `ORDER BY`, or an aggregate in the SELECT list.
+- `ORDER BY` sorts the joined rows, in a `Sort` above the whole chain that spills to scratch pages past every joined
+  table's heap. Cannot combine with `GROUP BY` or an aggregate in the SELECT list yet.
 - **A chain of two or more plain inner `JOIN`s actually runs in whichever left-deep order costs least**
   (plan.md §25.4 C5 slice 3), not necessarily the order it was written in — a Selinger-style dynamic-
   programming search over the *subset lattice* (plan.md §25.4 C4) finds it, the plan-stage narration says

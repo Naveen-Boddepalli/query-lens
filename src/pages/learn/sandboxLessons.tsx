@@ -158,8 +158,8 @@ export const SANDBOX_STEPS: Record<string, LessonStep[]> = {
       body: (
         <>
           The diagram is what the parser can <em>read</em>. The engine refuses some combinations it reads without
-          complaint: {code('GROUP BY')} or {code('ORDER BY')} in a query with a {code('JOIN')}. Of the eight optional
-          parts of a {code('SELECT')} the most that run together are seven — all but {code('JOIN')}.
+          complaint: {code('GROUP BY')} in a query with a {code('JOIN')}. Of the eight optional parts of a{' '}
+          {code('SELECT')} the most that run together are seven — all but {code('JOIN')}.
         </>
       ),
       link: to('grammarSelect', 'Open the select rule'),

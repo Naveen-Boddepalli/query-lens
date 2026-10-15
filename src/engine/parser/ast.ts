@@ -135,9 +135,8 @@ export interface InSubquery {
 /**
  * `[INNER | LEFT [OUTER]] JOIN table ON t1.col = t2.col` (plan.md §22.2, `LEFT` since §25.4 C3). `on` is always a
  * single equality between one qualified column from each side — checked at parse time (`checkJoinOn`), so the
- * planner never has to. `RIGHT`/`FULL`/`CROSS` stay out of scope. JOIN does not combine with `GROUP BY`, `ORDER BY`
- * or an aggregate SELECT item — each checked at parse time too, the same way `GROUP BY`/`ORDER BY` already exclude
- * each other.
+ * planner never has to. `RIGHT`/`FULL`/`CROSS` stay out of scope. `ORDER BY` sorts the joined rows (plan.md §26
+ * Feature 1, slice b); JOIN does not combine with `GROUP BY` or an aggregate SELECT item yet — checked at parse time.
  *
  * A `SelectStatement` may chain several of these (plan.md §25.4 C3 slice b), left-deep: `FROM a JOIN b ON … JOIN c
  * ON …` joins `c` to whatever `a ⋈ b` produced, never to `a` and `b` independently. Each one's `on` names the table
@@ -201,8 +200,13 @@ export interface LimitClause {
 }
 
 export interface OrderByClause {
-  /** The row key the Sort reads: a column's name, or an aggregate's canonical text (`SUM(amount)`). */
+  /**
+   * The row key the Sort reads: a column's name — `table.column` in a query with a `JOIN`, whose rows are keyed
+   * that way (plan.md §26 Feature 1, slice b) — or an aggregate's canonical text (`SUM(amount)`).
+   */
   column: string;
+  /** The table a qualified column names; set exactly when the query has a `JOIN`. */
+  table?: string;
   direction: 'asc' | 'desc';
   /**
    * `ORDER BY COUNT(*) DESC` (plan.md §26 Feature 1, slice a): the aggregate, when the key is one. The aggregate

@@ -245,9 +245,8 @@ export function findSortDistinct(plan: Plan): Extract<Plan, { op: 'SortDistinct'
  * Every `Join` node in `plan`, in source order — the first `JOIN` clause first, the last (outermost in the tree,
  * plan.md §25.4 C3 slice b) last. `childOf` stops at a `Join` (it has `left`/`right`, not `child`), so finding more
  * than the outermost one means recursing into `left` on purpose: a left-deep chain's `right` side is always a base
- * table's own scan or probe, never itself a `Join`, so only `left` is ever worth walking further into. `ORDER
- * BY`/`GROUP BY` still can't combine with `JOIN` at all, so this and `findSort`/`findSortAggregate` never both find something
- * on the same plan.
+ * table's own scan or probe, never itself a `Join`, so only `left` is ever worth walking further into. A `Sort` (plan.md
+ * §26 Feature 1) always sits above the whole chain, so `findSort` finds it on the way down and this never meets it.
  */
 export function joinsIn(plan: Plan): Extract<Plan, { op: 'Join' }>[] {
   let node: Plan | undefined = plan;

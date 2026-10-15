@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`ORDER BY` with `JOIN`** (plan.md §26, Feature 1 slice b). A query with a `JOIN` — a chain, `LEFT` steps
+  included — can sort its rows by a qualified column: `SELECT authors.name, posts.title FROM authors LEFT JOIN
+  posts ON authors.id = posts.authorId ORDER BY posts.title DESC` puts the author with no posts first, NULL
+  descending as PostgreSQL does. The Sort sits above the whole chain, under the Project, whichever algorithm joins
+  it; an unqualified or unknown key is refused the way any other column in a join query is. The SQLite oracle
+  sorts its generated joins under every algorithm.
 - **`ORDER BY` with `GROUP BY`** (plan.md §26, Feature 1 slice a). A query that groups can now sort its groups, by a
   grouped column or an aggregate — selected or not: `SELECT account FROM transactions GROUP BY account ORDER BY
   SUM(amount) DESC LIMIT 5` is the five biggest accounts. The plan puts the `Sort` above the aggregate and its
@@ -399,6 +405,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   beside it. Total is 392.2 of 424 kB.
 
 ### Fixed
+- **A sort's scratch pages could run past the buffer pool unseen.** The block of page ids reserved for a sort
+  after a `JOIN` was sized for at most 20,000 rows, and the pool ignores a read or write past its last page, so a
+  sort over a bigger join — a sort-based `DISTINCT`, then — gave the right rows with buffer counts that left out
+  much of its spill (a 25,600-row sort lost about 35,000 events). The cap is gone; a block is only a range of ids.
+  Separately, a `LEFT JOIN` onto an empty table reserved room for no rows in the step after it, though it still
+  passes every row through padded, so a `sort-merge` step there sorted both its sides into the same page ids.
 - **Docs the merge from `main` left behind.** `frontend.md` still described the per-chunk-group budget (a `react`
   ceiling of 63 kB, a 424 kB total) that the per-route budget replaced; it now says what `pnpm budget` checks. A
   comment in `scripts/bundle-budget.ts` had lost the end of a sentence in the merge, and gave the `react` chunk's

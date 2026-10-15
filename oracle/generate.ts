@@ -648,16 +648,24 @@ export function joinArb(t: TableSpec, u: TableSpec, w: TableSpec, pool: Pool, su
         computed: fc.oneof({ weight: 3, arbitrary: fc.constant<{ e: Arith; alias: string }[]>([]) }, { weight: 1, arbitrary: computedArb(all) }),
         distinct: fc.integer({ min: 0, max: 3 }).map((x) => x === 0),
         where: whereArb(all, pool, 2, subs),
+        // ORDER BY over the joined rows (plan.md §26 Feature 1, slice b): any column of any table in the chain —
+        // a LEFT JOIN's NULL padding included, which is where NULL placement shows.
+        order: fc.option(fc.record({ ref: fc.constantFrom(...all), dir: fc.constantFrom<'asc' | 'desc'>('asc', 'desc') }), {
+          nil: undefined,
+          freq: 2,
+        }),
         page: pageArb,
       })
-      .map(({ proj, computed, distinct, where, page }): Query => ({
+      .map(({ proj, computed, distinct, where, order, page }): Query => ({
         kind: 'join',
         ...(distinct ? { distinct } : {}),
         left: t.name,
         joins,
-        proj,
+        // SELECT DISTINCT may only sort by a column it selects (PostgreSQL's rule, which QueryLens enforces).
+        proj: distinct && order && !proj.some((r) => r.name === order.ref.name && r.table === order.ref.table) ? [...proj, order.ref] : proj,
         ...(computed.length > 0 ? { computed } : {}),
         where,
+        ...(order ? { order } : {}),
         ...page,
       }));
   });

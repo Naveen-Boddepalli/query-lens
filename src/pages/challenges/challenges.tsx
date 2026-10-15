@@ -709,8 +709,8 @@ export const CHALLENGES: Challenge[] = [
     ),
     hint: (
       <>
-        The engine refuses <code className="font-mono">GROUP BY</code> or <code className="font-mono">ORDER BY</code>{' '}
-        in a query with a <code className="font-mono">JOIN</code> — the message says &ldquo;not supported yet&rdquo;.
+        The engine refuses <code className="font-mono">GROUP BY</code> in a query with a{' '}
+        <code className="font-mono">JOIN</code> — the message says &ldquo;not supported yet&rdquo;.
         Count again without the part that cannot sit with the others. In a query that groups, ORDER BY sorts the
         groups: name a grouped column, or an aggregate.
       </>

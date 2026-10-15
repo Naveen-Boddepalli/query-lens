@@ -170,6 +170,8 @@ export type Query =
       proj: Ref[];
       computed?: { e: Arith; alias: string }[];
       where: Pred[];
+      /** `ORDER BY t.col` over the joined rows (plan.md §26 Feature 1, slice b) — any column of any table in the chain. */
+      order?: OrderSpec;
       limit?: number;
       offset?: number;
     }
@@ -258,6 +260,7 @@ const renderAgg = (a: AggItem): string => `${a.fn}(${a.arg === '*' ? '*' : rende
 export function orderKeyOf(q: ReadQuery): string | null {
   if (q.kind === 'select') return q.order ? renderRef(q.order.ref) : null;
   if (q.kind === 'aggregate' && q.order) return q.order.by.k === 'col' ? renderRef(q.order.by.ref) : renderAgg(q.order.by.agg);
+  if (q.kind === 'join' && q.order) return renderRef(q.order.ref);
   return null;
 }
 
@@ -315,7 +318,8 @@ export function renderQuery(q: Query, dialect: Dialect = 'querylens'): string {
       const steps = q.joins
         .map((j) => ` ${j.type === 'left' ? 'LEFT ' : ''}JOIN ${j.table} ON ${renderRef(j.on.l)} = ${renderRef(j.on.r)}`)
         .join('');
-      return `SELECT ${q.distinct ? 'DISTINCT ' : ''}${[...q.proj.map(renderRef), ...renderComputed(q.computed)].join(', ')} FROM ${q.left}${steps}${renderWhere(q.where)}${page(q.limit, q.offset)}`;
+      const order = q.order ? renderOrder(renderRef(q.order.ref), q.order.dir, dialect) : '';
+      return `SELECT ${q.distinct ? 'DISTINCT ' : ''}${[...q.proj.map(renderRef), ...renderComputed(q.computed)].join(', ')} FROM ${q.left}${steps}${renderWhere(q.where)}${order}${page(q.limit, q.offset)}`;
     }
     case 'insert': {
       const cols = q.columns ? ` (${q.columns.join(', ')})` : '';

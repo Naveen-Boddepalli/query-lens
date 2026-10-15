@@ -385,7 +385,8 @@ export function runQuery(
   // independently — placed in chain order (the innermost join's scratch first, mirroring the order joins actually
   // execute in) right after every table's heap and any probe index. A single join's worst-case left input is just
   // the FROM table itself (`table.rows.length`, unchanged from before chains existed); a later step's worst case is
-  // the product of every earlier table's row count, since no join can ever produce more rows than that.
+  // the product of every earlier table's row count, since no join can ever produce more rows than that — counting an
+  // empty table as one row, because a LEFT JOIN onto it still passes every left row through, NULL-padded.
   const sortMergeBases = new Map<Plan, { leftBase: number; rightBase: number }>();
   let worstCaseLeftRows = table.rows.length;
   for (const j of joinsIn(plan)) {
@@ -399,19 +400,20 @@ export function runQuery(
       pageBase += rightSize;
       sortMergeBases.set(j, { leftBase, rightBase });
     }
-    worstCaseLeftRows *= jTable.rows.length;
+    worstCaseLeftRows *= Math.max(1, jTable.rows.length);
   }
 
   // Every other sort the plan runs gets its own block of scratch page ids after those, in the order the sorts run —
   // a SortAggregate's own sort, then ORDER BY's Sort above it (plan.md §26 Feature 1), then a sort-based DISTINCT
   // above the projection (plan.md §25.4 B2) — so no two sorts ever share a page id. Each is sized for the most rows
   // that can reach it: the whole table (a WHERE clause can only shrink it), or after a JOIN every joined table's
-  // product (capped — these are teaching-sized tables). With one sort and no join this is exactly the block each
-  // sort always had, starting where the heap and its indexes end.
-  const worstCaseRows =
-    joins.length > 0
-      ? Math.min(joins.reduce((product, j) => product * joinTables[j.table.name]!.rows.length, table.rows.length), 20_000)
-      : table.rows.length;
+  // product (an empty one counted as one row, for a LEFT JOIN's padding). Not capped: a block is only a range of ids,
+  // and the pool does not count a read or write past its last page — a cap once let a big join's sort spill there
+  // unseen. With one sort and no join this is exactly the block each sort always had, after the heap and indexes.
+  const worstCaseRows = joins.reduce(
+    (product, j) => product * Math.max(1, joinTables[j.table.name]!.rows.length),
+    table.rows.length,
+  );
   const spillFor = (present: boolean) =>
     present ? sortTempPageCount(worstCaseRows, options.rowsPerPage, options.bufferFrames) : 0;
   const aggregateSortBase = pageBase;
@@ -487,7 +489,10 @@ function referencedColumns(ast: Exclude<Statement, { kind: 'explain' }>): Column
   // An aggregate key (`SUM(amount)`) is not a column; the column it reads is.
   if (ast.kind === 'select' && ast.orderBy?.aggregate) {
     if (ast.orderBy.aggregate.arg.kind === 'column') push(ast.orderBy.aggregate.arg);
-  } else if (ast.kind === 'select' && ast.orderBy) refs.push({ name: ast.orderBy.column, span: ast.orderBy.span });
+  } else if (ast.kind === 'select' && ast.orderBy) {
+    const { column, table, span } = ast.orderBy;
+    refs.push(table === undefined ? { name: column, span } : { name: column.slice(table.length + 1), table, span });
+  }
   if (ast.kind === 'insert' && ast.columns) refs.push(...ast.columns.names);
   if (ast.kind === 'update') {
     refs.push(...ast.set.assignments.map((a) => ({ name: a.column, span: a.columnSpan })));

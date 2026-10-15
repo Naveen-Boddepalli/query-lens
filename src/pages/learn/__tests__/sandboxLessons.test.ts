@@ -234,7 +234,7 @@ describe('lesson: read the grammar diagram', () => {
     expect(calls('expr')).toEqual(['orExpr']);
   });
 
-  it('the engine refuses what the diagram allows: GROUP BY or ORDER BY with a JOIN; seven clauses is the most', () => {
+  it('the engine refuses what the diagram allows: GROUP BY with a JOIN; seven clauses is the most', () => {
     const db = createSeedDatabase();
     const msg = (sql: string, database = db) => runQuery(sql, database, DEFAULT_ENGINE_OPTIONS).error?.message;
     const demo = createJoinDemoDatabase();
@@ -242,7 +242,7 @@ describe('lesson: read the grammar diagram', () => {
     expect(msg(`SELECT authors.name, COUNT(*) ${join} GROUP BY authors.name`, demo)).toBe(
       'GROUP BY is not supported yet in a query with JOIN.',
     );
-    expect(msg(`SELECT * ${join} ORDER BY posts.id`, demo)).toBe('ORDER BY is not supported yet in a query with JOIN.');
+    expect(msg(`SELECT * ${join} ORDER BY posts.id`, demo)).toBeUndefined();
     const seven =
       'SELECT DISTINCT age FROM users WHERE age > 0 GROUP BY age HAVING COUNT(*) > 0 ORDER BY age LIMIT 3 OFFSET 1';
     expect(msg(seven)).toBeUndefined();

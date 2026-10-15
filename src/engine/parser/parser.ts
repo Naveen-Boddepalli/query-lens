@@ -429,14 +429,17 @@ function checkHavingValidity(
  * The key after `ORDER BY`: a column, or — in a query that groups — an aggregate call (plan.md §26 Feature 1,
  * slice a). Grouping turns the rows into groups before the Sort sees them, so there it may only name what a group
  * has one value of: a grouped column, or an aggregate (selected or not; the aggregate computes it either way).
- * Without grouping an aggregate has no group to be computed over, and is refused.
+ * Without grouping an aggregate has no group to be computed over, and is refused. In a query with a `JOIN` (slice
+ * b) the column is qualified like every other — a joined row is keyed `table.column`, which is what `column` is.
  */
 function parseOrderKey(
   c: Cursor,
   select: SelectList,
   groupBy: GroupByClause | undefined,
   having: Expr | undefined,
-): { column: string; aggregate?: Extract<Expr, { kind: 'aggregate' }>; span: Span } {
+  joins: JoinClause[],
+  from: TableRef,
+): { column: string; table?: string; aggregate?: Extract<Expr, { kind: 'aggregate' }>; span: Span } {
   const token = c.peek();
   const grouping =
     groupBy !== undefined ||
@@ -460,18 +463,21 @@ function parseOrderKey(
     return { column: aggregateKeyOf(aggregate.fn, arg), aggregate, span };
   }
 
-  const col = c.expectIdentifier('a column name to sort by');
-  const span = { from: col.from, to: col.to };
-  if (grouping && !(groupBy?.columns.some((g) => g.name === col.value) ?? false)) {
+  const first = c.expectIdentifier('a column name to sort by');
+  const ref = parseQualifiedColumnTail(c, first);
+  const span = { from: ref.from, to: ref.to };
+  checkColumnQualifier({ name: ref.name, ...(ref.table === undefined ? {} : { table: ref.table }), span }, joins, from);
+  const column = ref.table === undefined ? ref.name : `${ref.table}.${ref.name}`;
+  if (grouping && !(groupBy?.columns.some((g) => g.name === column) ?? false)) {
     throw new ParseError(
-      `\`${col.value}\` is not aggregated and is not in the GROUP BY list.`,
+      `\`${column}\` is not aggregated and is not in the GROUP BY list.`,
       span,
       groupBy
         ? 'ORDER BY sorts the groups, so it may name a grouped column or an aggregate like COUNT(*) — not a plain column.'
         : 'Without a GROUP BY the whole table is one group, so ORDER BY can only name an aggregate.',
     );
   }
-  return { column: col.value, span };
+  return { column, ...(ref.table === undefined ? {} : { table: ref.table }), span };
 }
 
 function parseTableRef(c: Cursor): TableRef {
@@ -611,34 +617,42 @@ function checkJoinValidity(
     }
   }
 
+  for (const ref of collectColumnRefs(select, where)) checkColumnQualifier(ref, joins, from);
+}
+
+/**
+ * A column reference's table name, against the tables the query knows: required once there is a `JOIN` (so no
+ * reference is ambiguous), refused without one (a single-table row is never qualified), and always one of the
+ * query's own tables. Shared by the SELECT list, `WHERE` and `ORDER BY`.
+ */
+function checkColumnQualifier(ref: { name: string; table?: string; span: Span }, joins: JoinClause[], from: TableRef): void {
+  const hasJoin = joins.length > 0;
   const known = [from.name, ...joins.map((j) => j.table.name)];
   const knownSet = new Set(known);
-  for (const ref of collectColumnRefs(select, where)) {
-    if (hasJoin && ref.table === undefined) {
-      throw new ParseError(
-        `\`${ref.name}\` needs a table name now that this query joins ${String(known.length)} tables.`,
-        ref.span,
-        `Write ${known.map((t) => `\`${t}.${ref.name}\``).join(' or ')}, whichever table it is actually on.`,
-      );
-    }
-    if (!hasJoin && ref.table !== undefined) {
-      // A single-table query's rows are never qualified — `authors.id` would
-      // look up a key that does not exist, since the row is just `{id, ...}`.
-      // Rather than special-case a self-qualification that happens to name
-      // the one table right, v0 asks for the plain name instead.
-      throw new ParseError(
-        `\`${ref.table}.${ref.name}\` does not need a table name — this query only has one table.`,
-        ref.span,
-        `Write \`${ref.name}\` on its own.`,
-      );
-    }
-    if (hasJoin && ref.table !== undefined && !knownSet.has(ref.table)) {
-      throw new ParseError(
-        `There is no table called \`${ref.table}\` in this query.`,
-        ref.span,
-        `This query only knows about ${known.map((t) => `\`${t}\``).join(', ')}.`,
-      );
-    }
+  if (hasJoin && ref.table === undefined) {
+    throw new ParseError(
+      `\`${ref.name}\` needs a table name now that this query joins ${String(known.length)} tables.`,
+      ref.span,
+      `Write ${known.map((t) => `\`${t}.${ref.name}\``).join(' or ')}, whichever table it is actually on.`,
+    );
+  }
+  if (!hasJoin && ref.table !== undefined) {
+    // A single-table query's rows are never qualified — `authors.id` would
+    // look up a key that does not exist, since the row is just `{id, ...}`.
+    // Rather than special-case a self-qualification that happens to name
+    // the one table right, v0 asks for the plain name instead.
+    throw new ParseError(
+      `\`${ref.table}.${ref.name}\` does not need a table name — this query only has one table.`,
+      ref.span,
+      `Write \`${ref.name}\` on its own.`,
+    );
+  }
+  if (hasJoin && ref.table !== undefined && !knownSet.has(ref.table)) {
+    throw new ParseError(
+      `There is no table called \`${ref.table}\` in this query.`,
+      ref.span,
+      `This query only knows about ${known.map((t) => `\`${t}\``).join(', ')}.`,
+    );
   }
 }
 
@@ -1179,16 +1193,9 @@ function parseSelectBody(c: Cursor): SelectStatement {
 
   let orderBy: SelectStatement['orderBy'];
   if (c.peek().type === 'keyword' && c.peek().upper === 'ORDER') {
-    if (hasJoin) {
-      throw new ParseError(
-        'ORDER BY is not supported yet in a query with JOIN.',
-        c.peek(),
-        'JOIN queries return plain rows for now — sort the result in a later version.',
-      );
-    }
     const orderToken = c.next();
     c.expectKeyword('BY', 'after ORDER');
-    const key = parseOrderKey(c, select, groupBy, having);
+    const key = parseOrderKey(c, select, groupBy, having, joins, from);
     // SELECT DISTINCT returns each row once, so a row has no single value of a column that is not in the list
     // to sort it by — PostgreSQL's rule, and the only one that keeps DISTINCT's answer well defined.
     if (distinct && select.kind === 'columns' && !select.items.some((item) => selectItemKey(item) === key.column)) {
@@ -1210,6 +1217,7 @@ function parseSelectBody(c: Cursor): SelectStatement {
     orderBy = {
       column: key.column,
       direction,
+      ...(key.table === undefined ? {} : { table: key.table }),
       ...(key.aggregate ? { aggregate: key.aggregate } : {}),
       span: { from: orderToken.from, to: end },
     };

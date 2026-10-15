@@ -2815,8 +2815,8 @@ the full gate and an oracle extension:
 | Slice | What | Status |
 |---|---|---|
 | a | `ORDER BY` above an aggregate: a grouped column or an aggregate — selected or not (`aggregateSpecsOf` computes it) — sorted after `HAVING`. A sort aggregate and the `Sort` above it spill to separate scratch blocks. | **Built, 2026-10-15** |
-| b | `ORDER BY` above a `JOIN`, by a qualified column; the Sort's scratch block moves past every joined heap. | Next |
-| c | `GROUP BY`, `HAVING` and aggregates above a `JOIN`. | After b |
+| b | `ORDER BY` above a `JOIN`, by a qualified column; the Sort's scratch block moves past every joined heap. | **Built, 2026-10-15** |
+| c | `GROUP BY`, `HAVING` and aggregates above a `JOIN`. | Next |
 
 **Slice a, checked by:** unit tests (the plan shape, a crafted table whose groups arrive in the opposite order to
 the answer — an earlier seed-data version let a missing aggregate pass unnoticed — NULL groups, HAVING, the
@@ -2826,6 +2826,17 @@ combinations). A Sort that cannot read an aggregate's key fails three oracle sui
 order when the sort key is not selected — only the rows — which is what the crafted unit test is for. The
 `every-clause` challenge (was `six-clauses`, never released) now asks for seven clauses; the grammar diagram lets
 `ORDER BY` take an aggregate call.
+
+**Slice b, checked by:** the same ordered answer from all five join algorithms on a `LEFT JOIN` (NULL padding first
+descending), the plan shape, the qualifier refusals and DISTINCT's rule; and the oracle, which now draws an `ORDER
+BY` on any column of any table in a generated join (coverage: every algorithm, and LEFT steps). A Sort that cannot
+read a joined key fails three oracle suites. **Two scratch-page bugs found on the way**, both fixed and pinned: the
+reservation for a sort after a join was capped at 20,000 rows, and the pool silently ignores ids past its end, so a
+bigger sort's merge passes went uncounted (a test counts every pass's writes — and caught the cap only once it
+counted every pass, not the first); and a `LEFT JOIN` onto an empty table reserved nothing for the padded rows the
+next `sort-merge` step sorts, so its two sides shared page ids (a test checks four sorts' pages are disjoint).
+The course map's SQL row, stale since C3 (it said "one JOIN" and listed outer joins and subqueries as missing), is
+corrected.
 
 ---
 
