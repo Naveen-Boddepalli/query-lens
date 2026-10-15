@@ -137,11 +137,16 @@ export function createBufferPool(
   options: EngineOptions,
   emit: Emit,
   /**
-   * The full page-reference string, when the caller has one (`runBufferTrace`
-   * does; `runQuery` does not — its page accesses emerge from execution). Only
-   * the `optimal` policy reads it; every other policy ignores it.
+   * The full page-reference string, when the caller has one: `runBufferTrace` is handed it, and `runQuery`
+   * records it for the `optimal` policy by running the query once first (plan.md §26 Feature 2) — a query's
+   * page reads come from its plan, so they are the same under any policy. Only `optimal` reads it.
    */
   lookahead?: readonly number[],
+  /**
+   * Where `lookahead` came from. A sandbox's reference string is all one page space, so read-ahead may follow it
+   * anywhere; a query's is only its record of demand reads, and read-ahead stays inside a scan's own pages there.
+   */
+  lookaheadFrom: 'reference-string' | 'query' = 'reference-string',
 ): BufferPool {
   const state = emptyState(options.bufferFrames);
   if (lookahead !== undefined) state.lookahead = lookahead;
@@ -327,7 +332,7 @@ export function createBufferPool(
     const result = resolve(pageId, ring);
     // A reference string (`lookahead` given) is all one page space and reads ahead through it; a query reads ahead only
     // for a scan that has said where its pages end, or it would prefetch the index pages that follow the heap's.
-    const mayReadAhead = lookahead !== undefined || until !== undefined;
+    const mayReadAhead = (lookahead !== undefined && lookaheadFrom === 'reference-string') || until !== undefined;
     if (result && sequential && mayReadAhead) readAheadFrom(pageId, ring, until);
     return result;
   }

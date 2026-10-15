@@ -27,8 +27,8 @@ No. QueryLens is a **simplified educational model** — a self-built toy engine 
 would run in production, and it does not aim to be. Every number the app shows is true to its own
 engine, not to any specific real one.
 
-Concretely, that means things like: a single global B+Tree index with a fixed fan-out, exactly two
-eviction policies (LRU and clock sweep) rather than a real system's tuning knobs, and a lock manager
+Concretely, that means things like: a single global B+Tree index with a fixed fan-out, a choice of
+eight textbook eviction policies rather than a real system's tuning knobs, and a lock manager
 that draws page-level locks on screen but never actually blocks a second query — because QueryLens
 only ever runs one. See [Engine limits](/docs/reference/limits) for the specific numbers, and each
 [Concepts](/docs/concepts/buffer-pool) page for where that particular piece diverges from a real engine

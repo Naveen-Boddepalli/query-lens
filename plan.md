@@ -2851,6 +2851,23 @@ bug found on the way, older than this feature:** `SELECT name FROM users HAVING 
 means (an ungrouped column, a missing table name, DISTINCT sorting by an unselected column), never which clauses it
 has. The *every-clause* challenge stays on its one-table database and asks for all seven parts that has.
 
+### Feature 2 — every replacement policy in the Playground (built, 2026-10-15)
+
+The engine had eight policies; the Playground's *Eviction* picker, its `p=` parameter, a saved default, a trace
+file and an assignment link took two. The narration and the buffer panel already explained all eight, so the
+picker, the URL codec, Settings, the trace-file reader and the assignment builder now take any of them (one guard,
+`isReplacementPolicyName`, beside the names and labels in `engine/types.ts`, which UI code imports without pulling
+in the engine). **Checking the narration found the one policy that could not honestly run in a query:** optimal
+needs the future, a query had none, and it acted as FIFO while narrating Bélády's choice — through `/compare`,
+`/trace`, the CLI and the MCP server too. `runQuery` now rehearses a statement under FIFO to record its demand
+reads (the same under every policy, since the plan decides them — tested for all eight), then runs it with that
+record as the future; the pool keeps read-ahead to a scan's own pages for a query's record (`lookaheadFrom:
+'query'`), unlike a sandbox's reference string. Checked by: the rehearsal's premise, optimal never missing more
+than any policy and fewer than FIFO on a sorted scan (63 vs 75), the database untouched by the rehearsal, the
+read-ahead tests under optimal, every policy round-tripping through a link and a trace file, and an e2e that picks
+2Q and optimal in the Playground. Turning the rehearsal off, or letting a query's record widen read-ahead, each
+fails a test.
+
 ---
 
 ## Appendix: Development Changelog

@@ -122,9 +122,10 @@ either notation; the colours follow the physical operator in both, so switching 
 Both are covered in depth, with a live embedded widget each, in [Concepts](/docs/concepts/btree)
 — this section is the short version for someone comparing the code against the idea.
 
-The buffer pool is a fixed set of frames (8 in the Playground) behind one interface with six
-implementations (LRU and clock sweep in the pipeline; FIFO, second-chance, optimal and midpoint
-LRU in the [standalone sandbox](/tools/buffer-pool)). The B+Tree is real: internal nodes hold only
+The buffer pool is a fixed set of frames (8 in the Playground) behind one interface with eight
+implementations — LRU, clock sweep, FIFO, second-chance, optimal, midpoint LRU, LRU-2 and 2Q — every one
+of them available to a query and to the [standalone sandbox](/tools/buffer-pool). Optimal needs the future,
+so a query under it is run once first to record the pages it reads, in order; that record is the future. The B+Tree is real: internal nodes hold only
 separator keys, leaves hold the actual keys and are chained left-to-right, and a leaf split copies
 its separator up while staying in the leaf, while an internal split pushes its middle key up and
 removes it — the one rule [`validate()`](https://github.com/Naveen-Boddepalli/query-lens/blob/main/src/engine/index/validate.ts)

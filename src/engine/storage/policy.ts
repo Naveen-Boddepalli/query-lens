@@ -425,26 +425,5 @@ export function policyFor(name: ReplacementPolicyName): ReplacementPolicy {
   return POLICIES[name];
 }
 
-/** Display order for policy pickers. */
-export const REPLACEMENT_POLICY_NAMES = [
-  'lru',
-  'clock',
-  'fifo',
-  'second-chance',
-  'optimal',
-  'midpoint',
-  'lru-k',
-  'two-q',
-] as const satisfies readonly ReplacementPolicyName[];
-
-/** Short label for each policy, for `<select>`s and column headers. */
-export const REPLACEMENT_POLICY_LABELS: Record<ReplacementPolicyName, string> = {
-  lru: 'LRU',
-  clock: 'Clock sweep',
-  fifo: 'FIFO',
-  'second-chance': 'Second-chance',
-  optimal: 'Optimal (Bélády)',
-  midpoint: 'Midpoint LRU (InnoDB)',
-  'lru-k': 'LRU-2 (scan-resistant)',
-  'two-q': '2Q (scan-resistant)',
-};
+// The picker order and labels live beside the type in `../types.ts`, which UI code can import without the engine.
+export { REPLACEMENT_POLICY_LABELS, REPLACEMENT_POLICY_NAMES } from '../types.ts';

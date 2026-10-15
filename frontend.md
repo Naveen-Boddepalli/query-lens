@@ -336,7 +336,7 @@ The address bar is the **only persistence layer**. A shareable URL encodes:
 | Parameter | Key | Description |
 |---|---|---|
 | SQL query | `q` | The SQL text |
-| Eviction policy | `p` | `lru` or `clock` |
+| Eviction policy | `p` | `lru`, `clock`, `fifo`, `second-chance`, `optimal`, `midpoint`, `lru-k` or `two-q` |
 | Predict mode | `x` | `0` or `1` |
 | Step position | `s` | Integer step number |
 | Dataset | `t` | `users`, `orders`, `logins`, `employees` or `transactions` |
@@ -610,7 +610,7 @@ The **core experience**. Two-column layout on desktop:
 - Dataset selector chips (`users`, `orders`, `logins`, `employees`, `transactions`, `Custom`).
 - Preset query chips ("Point lookup", "Sequential scan", etc.).
 - `SqlEditor` — CodeMirror with SQL highlighting, autocomplete, error squiggles.
-- **Run** button + **Edit data** button + **Eviction policy** select (LRU / Clock sweep).
+- **Run** button + **Edit data** button + **Eviction policy** select (all eight: LRU, Clock sweep, FIFO, Second-chance, Optimal, Midpoint LRU, LRU-2, 2Q).
 - Trace info line ("33 steps in this trace · showing step 12").
 - Action links: Copy link, Download trace, Load trace, Present, Tour, Print.
 - Predict-on checkbox (or assignment mode notice).

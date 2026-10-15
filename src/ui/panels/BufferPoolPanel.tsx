@@ -107,7 +107,8 @@ const POLICY_NOTE: Record<ReplacementPolicyName, ReactNode> = {
       <span className="text-ink">Optimal</span> evicts the page whose next use is farthest in the
       future — a page never used again first. No real system can run it, because it needs the
       whole future access pattern, but it is the fewest-misses bound every policy above is
-      measured against.
+      measured against. Here it knows the future honestly: a query is run once first to record the
+      pages it reads, in order, and evicts by that record.
     </>
   ),
   midpoint: (

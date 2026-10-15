@@ -352,6 +352,35 @@ export type ReplacementPolicyName =
   | 'lru-k'
   | 'two-q';
 
+/** Display order for policy pickers — here rather than beside the policies, so UI code can import it without the engine. */
+export const REPLACEMENT_POLICY_NAMES = [
+  'lru',
+  'clock',
+  'fifo',
+  'second-chance',
+  'optimal',
+  'midpoint',
+  'lru-k',
+  'two-q',
+] as const satisfies readonly ReplacementPolicyName[];
+
+/** Short label for each policy, for `<select>`s and column headers. */
+export const REPLACEMENT_POLICY_LABELS: Record<ReplacementPolicyName, string> = {
+  lru: 'LRU',
+  clock: 'Clock sweep',
+  fifo: 'FIFO',
+  'second-chance': 'Second-chance',
+  optimal: 'Optimal (Bélády)',
+  midpoint: 'Midpoint LRU (InnoDB)',
+  'lru-k': 'LRU-2 (scan-resistant)',
+  'two-q': '2Q (scan-resistant)',
+};
+
+/** Whether `value` names a policy — for anything read from a URL, a stored preference or a file. */
+export function isReplacementPolicyName(value: unknown): value is ReplacementPolicyName {
+  return typeof value === 'string' && (REPLACEMENT_POLICY_NAMES as readonly string[]).includes(value);
+}
+
 export interface Database {
   tables: Record<string, Table>;
 }

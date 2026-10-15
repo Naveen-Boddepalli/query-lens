@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { REPLACEMENT_POLICY_LABELS, REPLACEMENT_POLICY_NAMES } from '../engine/types.ts';
 import type { ReplacementPolicyName } from '../engine/index.ts';
 import {
   readDefaultPolicy,
@@ -53,13 +54,10 @@ export function SettingsPage() {
           Which replacement policy the buffer pool uses when a query does not specify one.
         </p>
         <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Default eviction policy">
-          {(
-            [
-              { value: 'default', label: 'Engine default (LRU)' },
-              { value: 'lru', label: 'LRU' },
-              { value: 'clock', label: 'Clock sweep' },
-            ] as const
-          ).map((opt) => (
+          {[
+            { value: 'default' as const, label: 'Engine default (LRU)' },
+            ...REPLACEMENT_POLICY_NAMES.map((name) => ({ value: name, label: REPLACEMENT_POLICY_LABELS[name] })),
+          ].map((opt) => (
             <button
               key={opt.value}
               type="button"

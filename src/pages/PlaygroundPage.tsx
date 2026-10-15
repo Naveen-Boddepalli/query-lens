@@ -5,6 +5,8 @@ import {
   DATASET_IDS,
   DATASETS,
   DEFAULT_ENGINE_OPTIONS,
+  REPLACEMENT_POLICY_LABELS,
+  REPLACEMENT_POLICY_NAMES,
   runQuery,
 } from '../engine/index.ts';
 import type {
@@ -658,8 +660,11 @@ export function PlaygroundPage() {
                 value={policy}
                 onChange={(e) => { setPolicy(e.target.value as ReplacementPolicyName); }}
               >
-                <option value="lru">LRU</option>
-                <option value="clock">Clock sweep</option>
+                {REPLACEMENT_POLICY_NAMES.map((name) => (
+                  <option key={name} value={name}>
+                    {REPLACEMENT_POLICY_LABELS[name]}
+                  </option>
+                ))}
               </select>
             </label>
           </div>

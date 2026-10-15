@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **All eight replacement policies in the Playground** (plan.md §26, Feature 2). The *Eviction* picker, a shared
+  link's `p=`, a saved default in Settings, a downloaded trace file and an assignment link now take FIFO,
+  second-chance, optimal, midpoint LRU, LRU-2 and 2Q as well as LRU and clock sweep — the eviction narration
+  and the buffer panel's note already explained each one.
 - **`GROUP BY`, `HAVING` and aggregates over a `JOIN`** (plan.md §26, Feature 1 slice c — the last refusal between
   clauses the engine already had). `SELECT authors.name, COUNT(posts.id) FROM authors LEFT JOIN posts ON authors.id
   = posts.authorId GROUP BY authors.name ORDER BY COUNT(posts.id) DESC` counts each author's posts, zero for one
@@ -413,6 +417,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   beside it. Total is 392.2 of 424 kB.
 
 ### Fixed
+- **A query under the optimal policy behaved as FIFO, while its narration said otherwise.** Bélády's policy evicts
+  the page whose next use is farthest away, so it needs the future; the sandbox is handed a reference string, but a
+  query had none, and the policy fell back to evicting the oldest page — with every eviction still narrated as "its
+  next use is farthest away". `/compare`, `/trace`, the CLI and the MCP server all offered it. A query under
+  optimal is now run twice: once to record the pages it reads, in order (a query's reads come from its plan, so they
+  are the same under any policy — a test holds this for all eight), and once for real, evicting by that record. On
+  `SELECT * FROM orders WHERE total > 500 ORDER BY total` with four frames it misses 63 times; every other policy,
+  and optimal before, 75. Read-ahead keeps to a scan's own pages under it, as under any other policy.
 - **`SELECT name FROM users HAVING COUNT(*) > 1` answered with one row holding `name: null`.** `HAVING` with no
   `GROUP BY` makes the whole table one group, so a plain column beside it has no one value; the check that refuses
   `SELECT name, COUNT(*) FROM users` only looked at the SELECT list's own aggregates, not `HAVING`'s. It is now

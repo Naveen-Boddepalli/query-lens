@@ -16,9 +16,12 @@ concept explanation.
 - **Eight replacement policies**, all implemented in the engine itself: LRU, clock sweep, FIFO,
   second-chance, optimal (unbuildable for real; the fewest-misses bound the others are measured
   against), midpoint LRU (what InnoDB does), and the two scan-resistant ones, LRU-2 and 2Q. The
-  Playground's *Eviction* picker offers LRU and clock sweep; [Trace](/trace), [Compare](/compare) and
-  the [standalone sandbox](/tools/buffer-pool) offer all eight, and a trace run under any of them is
-  the same engine's own run. See [The buffer pool](/docs/concepts/buffer-pool).
+  Playground's *Eviction* picker, [Trace](/trace), [Compare](/compare) and the
+  [standalone sandbox](/tools/buffer-pool) all offer all eight, and a trace run under any of them is
+  the same engine's own run. A query under optimal is **run twice**: once to record the pages it reads,
+  in order — a query's reads come from its plan, so they are the same under any policy — and once for
+  real, evicting by that record. (Before, a query under optimal quietly behaved as FIFO.) See
+  [The buffer pool](/docs/concepts/buffer-pool).
 - Clock sweep's per-frame usage counter caps at **5**.
 - **Sequential read-ahead is off by default** (`readAhead`, a depth). With a depth of *n*, a request
   for page *p* that follows a request for *p − 1* has the pool read up to *n* of the pages after *p*

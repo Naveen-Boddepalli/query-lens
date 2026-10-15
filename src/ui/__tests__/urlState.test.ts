@@ -114,6 +114,14 @@ describe('share state', () => {
       expect(readShareState('p=drop-tables', COLUMNS).policy).toBeUndefined();
     });
 
+    it.each(['lru', 'clock', 'fifo', 'second-chance', 'optimal', 'midpoint', 'lru-k', 'two-q'] as const)(
+      'round-trips the %s policy',
+      (policy) => {
+        const search = encodeShareState({ sql: 'SELECT * FROM users;', policy, predictOn: true, step: 0 }, TABLE);
+        expect(readShareState(search, COLUMNS).policy).toBe(policy);
+      },
+    );
+
     it.each(['-1', '1e9', 'NaN', '1.5', '999999999'])('ignores step %s', (step) => {
       expect(readShareState(`s=${step}`, COLUMNS).step).toBeUndefined();
     });

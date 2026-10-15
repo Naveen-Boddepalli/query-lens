@@ -64,8 +64,9 @@ describe('sequential read-ahead (plan.md §25.4 F7, decided 2026-10-05)', () => 
   it('a query reads ahead inside the heap and no further: it never prefetches an index page', () => {
     const db = createSeedDatabase();
     const heapPages = Math.ceil(db.tables.users!.rows.length / DEFAULT_ENGINE_OPTIONS.rowsPerPage);
-    for (const readAhead of [1, 2, 4]) {
-      const result = runQuery('SELECT * FROM users', db, { ...DEFAULT_ENGINE_OPTIONS, readAhead });
+    // Under `optimal` too, whose rehearsed future (plan.md §26 Feature 2) is a record of demand reads, not a page space.
+    for (const [policy, readAhead] of (['lru', 'optimal'] as const).flatMap((p) => [1, 2, 4].map((n) => [p, n] as const))) {
+      const result = runQuery('SELECT * FROM users', db, { ...DEFAULT_ENGINE_OPTIONS, policy, readAhead });
       const touched = result.events.flatMap((e) =>
         e.stage === 'buffer' && (e.action === 'load' || e.action === 'prefetch') ? [e.pageId] : [],
       );
@@ -78,8 +79,8 @@ describe('sequential read-ahead (plan.md §25.4 F7, decided 2026-10-05)', () => 
     // A range through the index visits consecutive heap pages, one request after another: sequential in page numbers,
     // not a scan of the heap, and not something the pool may read ahead through (the pages after the last are the
     // index's).
-    for (const sql of ['SELECT * FROM users WHERE id = 5', 'SELECT * FROM users WHERE id BETWEEN 3 AND 9']) {
-      const result = runQuery(sql, createSeedDatabase(), { ...DEFAULT_ENGINE_OPTIONS, readAhead: 4 });
+    for (const [sql, policy] of ['SELECT * FROM users WHERE id = 5', 'SELECT * FROM users WHERE id BETWEEN 3 AND 9'].flatMap((q) => (['lru', 'optimal'] as const).map((p) => [q, p] as const))) {
+      const result = runQuery(sql, createSeedDatabase(), { ...DEFAULT_ENGINE_OPTIONS, policy, readAhead: 4 });
       expect(result.error).toBeUndefined();
       expect(result.events.some((e) => e.stage === 'buffer' && e.action === 'prefetch')).toBe(false);
     }

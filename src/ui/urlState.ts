@@ -1,4 +1,5 @@
 import { DEFAULT_DATASET, isDatasetId } from '../engine/index.ts';
+import { isReplacementPolicyName } from '../engine/types.ts';
 import type { DatasetId, ReplacementPolicyName, Row, SqlValue, Table } from '../engine/index.ts';
 
 /**
@@ -117,7 +118,7 @@ export function readShareState(
   if (sql !== null && sql.length > 0 && sql.length <= MAX_SQL) state.sql = sql;
 
   const policy = params.get(PARAM.policy);
-  if (policy === 'lru' || policy === 'clock') state.policy = policy;
+  if (isReplacementPolicyName(policy)) state.policy = policy;
 
   const predict = params.get(PARAM.predict);
   if (predict === '0' || predict === '1') state.predictOn = predict === '1';

@@ -53,6 +53,7 @@ export {
   REPLACEMENT_POLICY_NAMES,
   USAGE_COUNT_CAP,
 } from './storage/index.ts';
+export { isReplacementPolicyName } from './types.ts';
 export type { BufferPool, Frame as BufferPoolFrame, Heap, Page } from './storage/index.ts';
 export {
   allKeys,

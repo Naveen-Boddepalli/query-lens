@@ -37,7 +37,7 @@ test('the buffer-pool sandbox steps a typed reference string', async ({ page }) 
   await expect(page.getByText('✕ evicted')).toBeVisible();
 });
 
-test('the buffer-pool sandbox runs a policy the SQL pipeline never offers', async ({ page }) => {
+test('the buffer-pool sandbox runs any policy over a reference string typed in', async ({ page }) => {
   await page.goto('/tools/buffer-pool');
   // Five distinct pages, four frames: page 0 is loaded first and then made the
   // hottest page — FIFO evicts it anyway when page 4 arrives.
@@ -52,6 +52,25 @@ test('the buffer-pool sandbox runs a policy the SQL pipeline never offers', asyn
   }
   await expect(page.getByText(/page 0 is evicted from frame.*FIFO/)).toBeVisible();
   await expect(page).toHaveURL(/policy=fifo/);
+});
+
+test('the Playground runs a query under any of the eight policies, and the link and a reload keep it', async ({ page }) => {
+  await page.goto('/playground?q=SELECT+*+FROM+orders+WHERE+total+%3E+500+ORDER+BY+total&t=orders&x=0');
+  const eviction = page.getByLabel('Eviction');
+  await expect(eviction.locator('option')).toHaveCount(8);
+
+  await eviction.selectOption('two-q');
+  await expect(page).toHaveURL(/p=two-q/);
+  // The buffer panel's note is the policy's own.
+  await page.getByRole('button', { name: 'Buffer Pool' }).first().click();
+  await expect(page.getByText(/keeps a page read only once in a small FIFO/)).toBeVisible();
+
+  // Bélády's optimal needs the future: the query is run once first to record its page reads, and the note says so.
+  await eviction.selectOption('optimal');
+  await expect(page).toHaveURL(/p=optimal/);
+  await expect(page.getByText(/a query is run once first to record the\s+pages it reads/)).toBeVisible();
+  await page.reload();
+  await expect(page.getByLabel('Eviction')).toHaveValue('optimal');
 });
 
 test('midpoint LRU keeps the hot set where plain LRU flushes it', async ({ page }) => {

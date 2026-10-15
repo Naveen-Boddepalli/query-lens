@@ -70,6 +70,11 @@ function uniqueError(violation: UniqueViolation, heap: Heap, span: { from: numbe
  */
 export interface RunHooks {
   afterWrite?: (indexes: Record<string, BPlusTree>) => void;
+  /**
+   * The pages this statement reads, in order — the future the `optimal` policy evicts by. `runQuery` records it
+   * itself, by running the statement once first; a caller never needs to pass it.
+   */
+  rehearsedReferences?: readonly number[];
 }
 
 /**
@@ -108,7 +113,22 @@ export function runQuery(
   options: EngineOptions = DEFAULT_ENGINE_OPTIONS,
   hooks: RunHooks = {},
 ): RunResult {
+  // Bélády's optimal policy (plan.md §26 Feature 2) evicts the page whose next use is farthest away, so it needs the
+  // future. A query's page reads are decided by its plan, not by the pool — the same query reads the same pages in
+  // the same order under any policy — so run it once (as FIFO) to record them, then run it for real with that record
+  // as the future. Without it `optimal` would quietly act as FIFO while its narration claimed otherwise. Nothing here
+  // changes `db` (a write's new rows are returned, not stored), so the rehearsal leaves nothing behind.
+  if (options.policy === 'optimal' && hooks.rehearsedReferences === undefined) {
+    const rehearsal = runQuery(sql, db, { ...options, policy: 'fifo' });
+    const references = rehearsal.events.flatMap((e) =>
+      e.stage === 'buffer' && (e.action === 'hit' || e.action === 'miss') ? [e.pageId] : [],
+    );
+    return runQuery(sql, db, options, { ...hooks, rehearsedReferences: references });
+  }
+
   const { emit, drain } = createTracer();
+  const poolFor = (pageCount: number) =>
+    createBufferPool(pageCount, options, emit, hooks.rehearsedReferences, 'query');
 
   // `BEGIN`, `COMMIT` and `ROLLBACK` mean nothing to a single statement: say where they do (plan.md §25.4 D1).
   if (controlKindOf(sql) !== null) {
@@ -235,7 +255,7 @@ export function runQuery(
 
     const lastPage = heap.pages[heap.pages.length - 1]!;
     const insertNeedsNewPage = lastPage.rows.length >= options.rowsPerPage;
-    const pool = createBufferPool(pageCountFor(heap, trees) + (insertNeedsNewPage ? 1 : 0), options, emit);
+    const pool = poolFor(pageCountFor(heap, trees) + (insertNeedsNewPage ? 1 : 0));
 
     let inserted: Row;
     try {
@@ -275,7 +295,7 @@ export function runQuery(
     if (!resolved.ok) return { events: drain(), rows: [], error: resolved.error };
     const deleteAst = resolved.value;
     const plan = emitDeletePlanEvents(emit, deleteAst, table, options.rowsPerPage);
-    const pool = createBufferPool(pageCountFor(heap, trees), options, emit);
+    const pool = poolFor(pageCountFor(heap, trees));
 
     const { deleted } = executeDelete(plan, { emit, pool, locks, heap, trees, table, options });
     hooks.afterWrite?.(trees);
@@ -306,7 +326,7 @@ export function runQuery(
     if (!resolved.ok) return { events: drain(), rows: [], error: resolved.error };
     const updateAst = resolved.value;
     const plan = emitUpdatePlanEvents(emit, updateAst, table, options.rowsPerPage);
-    const pool = createBufferPool(pageCountFor(heap, trees), options, emit);
+    const pool = poolFor(pageCountFor(heap, trees));
 
     let changed: ReturnType<typeof executeUpdate>;
     try {
@@ -419,7 +439,7 @@ export function runQuery(
   const aggregateSortBase = pageBase;
   const sortBase = aggregateSortBase + spillFor(findSortAggregate(plan) !== null);
   const distinctBase = sortBase + spillFor(findSort(plan) !== null);
-  const pool = createBufferPool(distinctBase + spillFor(findSortDistinct(plan) !== null), options, emit);
+  const pool = poolFor(distinctBase + spillFor(findSortDistinct(plan) !== null));
 
   const rows = execute(plan, {
     emit,
