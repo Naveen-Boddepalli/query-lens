@@ -148,7 +148,7 @@ export function DataEditor({ table, onApply, onReset, onClose }: DataEditorProps
       // Clicking the backdrop targets the dialog itself; anything inside it
       // targets a child. Cheap dismissal without a second overlay element.
       onClick={(e) => { if (e.target === dialog.current) close(); }}
-      className="max-h-[85dvh] w-[min(48rem,calc(100vw-2rem))] overflow-hidden rounded-2xl border border-edge bg-surface p-0 text-ink shadow-e3 backdrop:bg-black/70 backdrop:backdrop-blur-sm"
+      className="ql-sheen max-h-[85dvh] w-[min(48rem,calc(100vw-2rem))] overflow-hidden rounded-2xl border border-edge bg-surface p-0 text-ink shadow-e3 backdrop:bg-black/70 backdrop:backdrop-blur-sm"
     >
       <div className="flex max-h-[85dvh] flex-col">
         <header className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-edge bg-surface-2/40 px-4 py-3">
@@ -248,7 +248,7 @@ export function DataEditor({ table, onApply, onReset, onClose }: DataEditorProps
             title="Undo"
             className={`${btnGhost} disabled:cursor-not-allowed disabled:opacity-40`}
           >
-            ↶ Undo
+            Undo
           </button>
           <button
             type="button"
@@ -258,7 +258,7 @@ export function DataEditor({ table, onApply, onReset, onClose }: DataEditorProps
             title="Redo"
             className={`${btnGhost} disabled:cursor-not-allowed disabled:opacity-40`}
           >
-            ↷ Redo
+            Redo
           </button>
           <button type="button" onClick={addRow} className={btnSecondary}>
             + Add row
