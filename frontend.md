@@ -120,7 +120,7 @@ QueryLens/
 │   │   ├── trace.ts            # Trace builder (step event collector)
 │   │   ├── viewState.ts        # Event → ViewState reducer (what the UI renders)
 │   │   ├── seed.ts             # Default seed database (48-row users table)
-│   │   ├── datasets.ts         # Preset datasets: users, orders, logins
+│   │   ├── datasets.ts         # Preset datasets: users, orders, logins, employees, transactions
 │   │   ├── predict.ts          # Prediction prompt generation
 │   │   ├── bufferTrace.ts      # Standalone buffer-pool trace runner
 │   │   ├── parser/             # SQL tokenizer + recursive-descent parser → AST
@@ -339,7 +339,7 @@ The address bar is the **only persistence layer**. A shareable URL encodes:
 | Eviction policy | `p` | `lru` or `clock` |
 | Predict mode | `x` | `0` or `1` |
 | Step position | `s` | Integer step number |
-| Dataset | `t` | `users`, `orders`, or `logins` |
+| Dataset | `t` | `users`, `orders`, `logins`, `employees` or `transactions` |
 | Edited rows | `d` | JSON-encoded row arrays (only if modified) |
 | Assignment lock | `l` | `1` = assignment mode |
 
@@ -607,7 +607,7 @@ The root layout rendered by `<Route element={<Layout />}>`.
 The **core experience**. Two-column layout on desktop:
 
 **Left column (authoring):**
-- Dataset selector chips (`users`, `orders`, `logins`, `Custom`).
+- Dataset selector chips (`users`, `orders`, `logins`, `employees`, `transactions`, `Custom`).
 - Preset query chips ("Point lookup", "Sequential scan", etc.).
 - `SqlEditor` — CodeMirror with SQL highlighting, autocomplete, error squiggles.
 - **Run** button + **Edit data** button + **Eviction policy** select (LRU / Clock sweep).
@@ -1109,24 +1109,19 @@ Every page is `React.lazy()` — no page loads until navigated to. Chunks are co
 
 ### Bundle Budget
 
-`scripts/bundle-budget.ts` enforces gzip size limits per chunk. Runs in CI after every build.
+`scripts/bundle-budget.ts` prices what a visitor downloads, and fails CI when something passes its ceiling. Runs
+after every build (plan.md §25.4 H8 replaced the older per-chunk-group ceilings and their one total).
 
-| Chunk | Gzip Ceiling |
-|---|---|
-| `codemirror` | 128 kB |
-| `flow` | 70 kB |
-| `react` | 63 kB |
-| `entry` | 24 kB |
-| `trace-ui` | 56 kB |
-| `routes` | 12 kB |
-| `standalone-tools` | 43 kB |
-| `learn` | 10 kB |
-| `challenges` | 8 kB |
-| `html-to-image` | 8 kB |
-| `docs` | 27 kB |
-| `css` | 20 kB |
-| `runtime` | 2 kB |
-| **Total** | **424 kB** |
+- **Every route has its own ceiling**: the entry chunk, the route's lazy chunk and every static dependency of
+  either, read from Vite's manifest (`dist/.vite/manifest.json`) — the graph the browser walks. A new tool is its
+  own lazy chunk with its own row, so it cannot grow a shared ceiling to fit.
+- **The entry chunk** — the shell every route loads first — has its own ceiling (24 kB).
+- **Opt-in chunks**, fetched only on a click (PNG export, the Durability dialog, a challenge's checks), are priced
+  on their own, measured past what their page already loaded.
+- **Nothing hides outside the budget**: a chunk over 0.5 kB that no route and no opt-in reaches fails the check.
+- Sizes are gzip at level 9, in KiB; Vite's build output prints slightly larger figures for the same files (the
+  `react` chunk is 62.5 kB here and 64.8 kB there). Ceilings sit about 3 kB over the measured size, and raising
+  one is a diff with a dated comment saying why.
 
 ### Caching
 
@@ -1219,7 +1214,8 @@ pnpm test:e2e    # playwright test (requires built dist/)
 pnpm budget      # run after pnpm build
 ```
 
-Gzip ceiling per chunk and overall. Fails CI if bundle grows past limits.
+A gzip ceiling per route, for the entry chunk and for each opt-in chunk; fails CI if one is passed, or if a chunk
+is reached by no route at all (see §14, *Bundle Budget*).
 
 ---
 
@@ -1274,7 +1270,7 @@ pnpm trace "SELECT * FROM orders" --dataset orders
 | `build-fonts.py` | `python scripts/build-fonts.py` | Downloads, subsets, and renames IBM Plex Sans → "QueryLens Sans" (OFL compliance). Emits `.woff2` to `public/fonts/` |
 | `build-icons.py` | `python scripts/build-icons.py` | Renders `public/apple-touch-icon.png` (180×180) from favicon SVG |
 | `build-og.ts` | `pnpm og` | Captures OG image via Playwright from a real running trace (step 91, buffer eviction moment) |
-| `bundle-budget.ts` | `pnpm budget` | Enforces per-chunk gzip ceilings (fails CI if exceeded) |
+| `bundle-budget.ts` | `pnpm budget` | Enforces per-route gzip ceilings (fails CI if exceeded) |
 | `record.ts` | `pnpm record` | Records step-by-step videos (`.webm` + `.gif`) via Playwright + ffmpeg |
 
 ---
@@ -1451,7 +1447,7 @@ Runs on every PR and push to `main`. All GitHub Actions are **pinned to immutabl
 | `trace.ts` | Trace builder — collects StepEvents during pipeline execution |
 | `viewState.ts` | Pure event→state reducer + `TraceProjector` (incremental folder) |
 | `seed.ts` | Default 48-row users table |
-| `datasets.ts` | Preset dataset definitions (users, orders, logins) |
+| `datasets.ts` | Preset dataset definitions (users, orders, logins, employees, transactions) |
 | `predict.ts` | Prediction prompt generation for each stage |
 | `bufferTrace.ts` | Standalone buffer trace runner (for Compare + Tools) |
 | `parser/tokenizer.ts` | SQL tokenizer |

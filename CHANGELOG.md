@@ -391,6 +391,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   beside it. Total is 392.2 of 424 kB.
 
 ### Fixed
+- **Docs the merge from `main` left behind.** `frontend.md` still described the per-chunk-group budget (a `react`
+  ceiling of 63 kB, a 424 kB total) that the per-route budget replaced; it now says what `pnpm budget` checks. A
+  comment in `scripts/bundle-budget.ts` had lost the end of a sentence in the merge, and gave the `react` chunk's
+  growth as 54.2 → 64.8 kB, mixing the script's own measure (gzip level 9, in KiB: 62.5) with Vite's printout
+  (64.8). The URL-parameter reference and `frontend.md` listed three preset datasets for `t=`; there are five.
 - **Every page had the same browser title.** All sixty-seven routes kept `index.html`'s *QueryLens — watch a SQL
   query become a B+Tree traversal*, so tabs, history and bookmarks could not tell them apart and a screen reader
   announced the same name on every page (WCAG 2.4.2, *Page Titled*; axe does not flag it, because a `<title>`

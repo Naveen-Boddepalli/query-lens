@@ -353,10 +353,12 @@ const T = (name: string): string => `src/pages/tools/${name}.tsx`;
  *  - 2026-10-02, row vs. column storage (§25.4 F3, standalone sandbox slice): a new route, /tools/columnar
  *    (114.9 kB measured + 3, rounded to 118) — a self-contained `src/ui/columnar.ts` driver, same family as
  *    `/tools/lsm`'s and `/tools/hash-index`'s, so it does not touch the shared engine chunk and no other route
- *    moved. F3's own real `ColumnScan` operator + projection-pushdown wiring (a genuine engine change) is a
- *  - 2026-10-14, React 19.3.0 and React Router Dom 7.18.4 merged from main (Dependabot #4, #10, #13): React grew
- *    from 54.2 to 64.8 kB gzip, which is paid by the entry closure every route loads. Route ceilings updated
- *    (each measured + 3, rounded up).
+ *    moved. F3's own real `ColumnScan` operator + projection-pushdown wiring (a genuine engine change) was to be a
+ *    separate, later slice of the same item; it was declined by decision on 2026-10-05 (plan.md §25.4 F3).
+ *  - 2026-10-14, React 19.3.0 and React Router Dom 7.18.4 merged from main (Dependabot #4, #10, #13): the `react`
+ *    chunk (react, react-dom, scheduler) grew from 54.2 to 62.5 kB as this script counts it — gzip level 9, in KiB;
+ *    Vite's build output prints the same file as 64.8 kB — and every route pays it through the entry closure. Route
+ *    ceilings updated (each measured + 3, rounded up).
  */
 export const ROUTES: readonly RouteBudget[] = [
   { route: '/', roots: [P('LandingPage')], kb: 178, note: 'the landing page' },
