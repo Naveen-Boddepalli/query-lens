@@ -1,7 +1,9 @@
 import { Link } from 'react-router-dom';
+import { useDocumentTitle } from '../ui/documentTitle.ts';
 import { btnPrimary, btnGhost } from '../ui/primitives.ts';
 
 export function NotFoundPage() {
+  useDocumentTitle('Page not found');
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-4 p-8 text-center">
       <p

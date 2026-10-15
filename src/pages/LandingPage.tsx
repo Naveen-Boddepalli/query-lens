@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import { Hero } from '../ui/Hero.tsx';
+import { useDefaultDocumentTitle } from '../ui/documentTitle.ts';
 
 /**
  * The landing hub (`/`): the hero, a short account of what the engine is, how
@@ -36,6 +37,7 @@ const STEPS = [
 ];
 
 export function LandingPage() {
+  useDefaultDocumentTitle();
   return (
     <div className="flex min-w-0 flex-1 flex-col">
       <Hero />

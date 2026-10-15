@@ -28,6 +28,11 @@ for the wrong reason; it now waits for the page's own first heading. Running it 
 all fixed: seven tables and code blocks that scrolled without being reachable from the keyboard, a drop-down with no
 name, a label at 2.9:1 contrast, and check boxes under the minimum target size.
 
+One thing axe cannot see is whether each page has its own title (WCAG 2.4.2, *Page Titled*): the app's HTML has a
+`<title>`, so a page that never set its own still passed while every tab, history entry and bookmark read the same.
+Every page now names itself — *Crash recovery · Tools · QueryLens* — and `e2e/titles.spec.ts` opens the same
+sixty-seven routes and fails if any keeps the default or shares a title with another.
+
 Automated scanning catches only part of WCAG: a pass means no *detectable* violation, not that a page is accessible.
 
 ## Checked by hand, in the browser

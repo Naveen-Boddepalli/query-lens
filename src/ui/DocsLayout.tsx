@@ -1,6 +1,7 @@
 import { Suspense } from 'react';
-import { NavLink, Outlet } from 'react-router-dom';
+import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { DOCS_NAV } from '../docsNav.ts';
+import { useDocumentTitle } from './documentTitle.ts';
 
 const itemClass = ({ isActive }: { isActive: boolean }) =>
   [
@@ -10,7 +11,15 @@ const itemClass = ({ isActive }: { isActive: boolean }) =>
       : 'border-transparent text-ink-dim hover:border-edge hover:bg-surface-3 hover:text-ink',
   ].join(' ');
 
+/** The sidebar's label for a docs page names its tab; `/docs` itself is just "Docs". */
+function docsPageTitle(pathname: string): string {
+  const path = pathname.replace(/\/+$/, '');
+  if (path === '/docs') return 'Docs';
+  return DOCS_NAV.flatMap((group) => group.items).find((item) => item.to === path)?.label ?? 'Docs';
+}
+
 export function DocsLayout() {
+  useDocumentTitle(docsPageTitle(useLocation().pathname));
   return (
     <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
       <aside className="sidebar-nav w-60 shrink-0 overflow-y-auto border-r border-edge bg-surface-2/40 p-4">

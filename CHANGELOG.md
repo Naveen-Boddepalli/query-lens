@@ -391,6 +391,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   beside it. Total is 392.2 of 424 kB.
 
 ### Fixed
+- **Every page had the same browser title.** All sixty-seven routes kept `index.html`'s *QueryLens — watch a SQL
+  query become a B+Tree traversal*, so tabs, history and bookmarks could not tell them apart and a screen reader
+  announced the same name on every page (WCAG 2.4.2, *Page Titled*; axe does not flag it, because a `<title>`
+  exists). Each page now names itself, then its section, then the site: *Crash recovery · Tools · QueryLens*,
+  *FAQ · Docs · QueryLens*. `PageHeader` sets it from the heading it already shows (`src/ui/documentTitle.ts`);
+  the docs use their sidebar label, and the landing page keeps the original. `e2e/titles.spec.ts` walks every
+  audited route and fails on a default or a repeated title.
 - **"Take the 60-second tour" was sometimes ignored, and a tour once taken could open again by itself.** The
   first-visit hint and the Playground hand the request over with a window event and a `sessionStorage` flag. The
   Playground read the flag while it rendered and started listening for the event only after it had committed, so

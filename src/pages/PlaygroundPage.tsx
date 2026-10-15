@@ -34,6 +34,7 @@ import { PredictionCard } from '../ui/PredictionCard.tsx';
 import { PresenterView } from '../ui/PresenterView.tsx';
 import { PlaygroundTour } from '../ui/PlaygroundTour.tsx';
 import { TraceWorksheet } from '../ui/TraceWorksheet.tsx';
+import { useDocumentTitle } from '../ui/documentTitle.ts';
 import { hasPendingTour, listenForTour } from '../ui/firstVisit.ts';
 import { ShortcutHints } from '../ui/ShortcutHints.tsx';
 import { WhyNotNote } from '../ui/WhyNotNote.tsx';
@@ -123,6 +124,7 @@ const DurabilityDialog = lazy(() =>
 );
 
 export function PlaygroundPage() {
+  useDocumentTitle('Playground');
   const [sql, setSql] = useState(START.sql);
   const [policy, setPolicy] = useState<ReplacementPolicyName>(START.policy);
   const [pinnedStage, setPinnedStage] = useState<Stage | null>(null);

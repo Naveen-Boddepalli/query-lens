@@ -4,6 +4,7 @@ import { BUILD_SHA } from '../buildInfo.ts';
 import { clearPerf, setOptIn, summarisePerf } from '../perf/inp.ts';
 import type { PerfSummary } from '../perf/inp.ts';
 import { CopyButton } from '../ui/CopyButton.tsx';
+import { useDocumentTitle } from '../ui/documentTitle.ts';
 import { PageHeader } from '../ui/PageHeader.tsx';
 import { btnPrimary, btnSecondary, card, inputField } from '../ui/primitives.ts';
 import { parseBlocks, parseInline } from '../study/blocks.ts';
@@ -36,6 +37,8 @@ export function StudyPage() {
   const { hash } = useLocation();
   const navigate = useNavigate();
   const [load, setLoad] = useState<Load>({ kind: 'loading' });
+  // Every phase's tab says the same thing; a heading can be an error message, which a tab should not repeat.
+  useDocumentTitle('Study session');
 
   // A research page must not be indexed, whatever robots.txt says.
   useEffect(() => {
@@ -101,7 +104,7 @@ export function StudyPage() {
 
   return (
     <div className={shell}>
-      <PageHeader eyebrow="Study session" title={load.kind === 'error' ? 'This link did not work' : 'Nothing to do here'}>
+      <PageHeader eyebrow="Study session" title={load.kind === 'error' ? 'This link did not work' : 'Nothing to do here'} documentTitle="Study session">
         {load.kind === 'error'
           ? load.message
           : 'This page runs a short research session for people who were sent a personal study link. If you have one, open it again — the link contains everything this page needs.'}
@@ -195,7 +198,7 @@ function Runner({ pack, initial, onCleared }: { pack: StudyPack; initial: Sessio
   }, [session]);
 
   const header = (title: string, lede?: string) => (
-    <PageHeader eyebrow="Study session" title={title}>{lede}</PageHeader>
+    <PageHeader eyebrow="Study session" title={title} documentTitle="Study session">{lede}</PageHeader>
   );
 
   if (session.phase === 'consent') {

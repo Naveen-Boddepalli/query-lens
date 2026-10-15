@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { useDocumentTitle } from './documentTitle.ts';
 import { eyebrow as eyebrowClass } from './primitives.ts';
 
 /**
@@ -9,20 +10,26 @@ import { eyebrow as eyebrowClass } from './primitives.ts';
  *
  * The title level defaults to `h2` because `TopNav`'s wordmark is the page's
  * `h1`; pass `as="h1"` where a route genuinely owns the top of the document.
+ *
+ * The title also names the browser tab (`documentTitle.ts`) — or `documentTitle`
+ * does, where the heading says something a tab should not (an error message).
  */
 export function PageHeader({
   eyebrow,
   title,
+  documentTitle,
   as: Tag = 'h2',
   children,
   className = '',
 }: {
   eyebrow?: string;
-  title: ReactNode;
+  title: string;
+  documentTitle?: string;
   as?: 'h1' | 'h2';
   children?: ReactNode;
   className?: string;
 }) {
+  useDocumentTitle(documentTitle ?? title);
   return (
     <div className={className}>
       {eyebrow && <p className={`mb-2 ${eyebrowClass}`}>{eyebrow}</p>}
