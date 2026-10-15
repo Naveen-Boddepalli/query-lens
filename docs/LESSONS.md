@@ -4,6 +4,7 @@ Maintained by the orchestrator only. Newest first. Keep under ~100 entries.
 Format: `- [YYYY-MM-DD][T<id>][area] Symptom → Cause → Fix/Rule.`
 Mark entries `(promoted)` once they are copied into GEMINI.md §7.
 
+- [2026-10-15][T8][pedagogy] Embedding live database visualizers across all lessons and challenges adds pedagogical weight → Consolidate state management, hoist shared visualizer wrappers, and size chunk ceilings to accommodate complete interactive curriculum depth without compromising client-side performance.
 - [2026-10-15][T9][bundle/budget] Expanding nested interactive tree renderers in standalone utility routes (e.g. JSON tree inspection in TracePage) can unintentionally inflate the standalone-tools bundle chunk group → Keep recursive node structures and action handlers lightweight with minimal JSX wrapper overhead to fit within the 49.0 kB ceiling (passed at 48.9 kB).
 - [2026-10-15][T7][bundle/routes] Routes packaged into the shared routes chunk (e.g., ExamplesPage) must avoid importing syntax tokenizers or heavy editor components; a targeted regex sanitizer + dangerouslySetInnerHTML highlighter keeps the gzip footprint under 2 kB and prevents dragging heavy parser runtimes into entry navigations.
 - [2026-10-15][T6][budget] Repetitive multi-line JSX markup for metric cards and toolbars across 9 lazy sandbox route chunks inflates cumulative bundle category (standalone-tools) → Consolidate metric definitions into compact tuple mapping arrays rendered in-place to stay safely within the 46.0 kB gzip ceiling (passed at 45.9 kB).
