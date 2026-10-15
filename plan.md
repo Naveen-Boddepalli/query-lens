@@ -2715,7 +2715,7 @@ other items depends on the result, so they proceed in parallel; only 2.2 waits.
 - [x] The study kit is live *(built 2026-09-24; automated tests pass on desktop and a phone-width run was checked by hand)* and at least one **real participant** has completed it end to end on a phone *and* a laptop. *(Pilot completed 2026-10-10: P01 on laptop, P03 on mobile, collated into `scoring/`. That folder, `key.csv` and `codes.txt` are kept local, not committed: they hold the arm assignments and the links, which `STUDY.md` §4 keeps private. The devices are not in the recorded results — the opt-in timing that would record them was off.)*
 - [x] A homework-shaped query using `OR`, `IN`, `LIKE`, `DISTINCT`, `HAVING` and a **non-unique** indexed column runs and narrates end to end; `sql.mdx`, `limits.mdx` and `/tools/grammar` all agree. *(Held by `homework.test.ts` against a plain computation of the same rows; the grammar page's own test checks it against the parser.)*
 - [x] `limits.mdx` no longer says "unique key" or that a join never uses an index. *(Rewritten 2026-10-10; the only "unique key" left is the optimistic-validation rule that refuses a key another transaction took.)*
-- [ ] Name decided and recorded *(done: keep, with descriptor)*; custom domain live; the launch post published; CLI, engine and MCP on npm. *(Checked 2026-10-14. Done: the name, with its descriptor. Open, and yours: the domain (`querylens.org` is recommended and unbought), the launch post, and the npm organisation `querylens` with trusted publishing enabled. The CLI, `@querylens/engine` and `@querylens/mcp` build, pack, install and run from tarballs, and the tag-triggered workflow is written; publishing waits for the organisation.)*
+- [ ] Name decided and recorded *(done: keep, with descriptor)*; custom domain live; the launch post published; CLI, engine and MCP on npm. *(2.0.0-rc.1 was cut 2026-10-15 with this item open — the owner's decision; 2.0.0 waits on it.)* *(Checked 2026-10-14. Done: the name, with its descriptor. Open, and yours: the domain (`querylens.org` is recommended and unbought), the launch post, and the npm organisation `querylens` with trusted publishing enabled. The CLI, `@querylens/engine` and `@querylens/mcp` build, pack, install and run from tarballs, and the tag-triggered workflow is written; publishing waits for the organisation.)*
 - [x] Per-route budgets replace the single sum. *(H8, built 2026-09-25; every route and tool has a row in `scripts/bundle-budget.ts`.)*
 
 **2.1 — The optimizer, honestly**
@@ -2740,6 +2740,7 @@ other items depends on the result, so they proceed in parallel; only 2.2 waits.
 
 | Item | Verdict | Earliest | Trigger to revisit |
 |---|---|---|---|
+| **Release `2.0.0-rc.1`** | **Decided, 2026-10-15 (owner)** — a release candidate, not 2.0.0: RELEASING.md holds 2.0.0 for the whole 2.0 checklist, and its launch item (domain, launch post, npm) is open. Cut on `version/v2`; `main` fast-forwards to it and the tag follows CI there, both on the owner's go-ahead | now | The launch item done → cut 2.0.0 |
 | SQLite oracle (A1) | **Built, 2026-09-25** — two engine bugs found on the first run; TLP follows B1 | now | — |
 | §9 study kit (A2) | **Built, 2026-09-24** — runner + `pnpm study`; the instrument travels in the link, not the bundle | now | Pilot completed 2026-10-10 (n=2, laptop + mobile) |
 | **Run the §9 study during 2.0** | **Decided, 2026-09-24** | now | §25.6 checkpoint before 2.2 |
@@ -2850,6 +2851,20 @@ bug found on the way, older than this feature:** `SELECT name FROM users HAVING 
 **Feature 1 is done:** all eight optional parts of a `SELECT` run together; what still refuses a query is what it
 means (an ungrouped column, a missing table name, DISTINCT sorting by an unselected column), never which clauses it
 has. The *every-clause* challenge stays on its one-table database and asks for all seven parts that has.
+
+### Feature 4 — the release (cut, 2026-10-15)
+
+`2.0.0-rc.1`, the owner's choice over 2.0.0 because the 2.0 checklist's launch item is open (§25.9). Cut in one
+commit on `version/v2` per RELEASING.md: `[Unreleased]` became `[2.0.0-rc.1] - 2026-10-15` with a short summary
+above the full notes (73 kB of them, under GitHub's 125,000-character body limit), a fresh empty `[Unreleased]`,
+the link references, and `package.json`. The CHANGELOG test required a non-empty `[Unreleased]`, which RELEASING's
+own step 3 empties; it now requires only that the newest dated release has notes. CI runs on `main` and pull
+requests, not on `version/v2`, so the order is: fast-forward `main` to the cut commit (which is also the production
+deploy — Cloudflare builds `main`; production served `ccfa2b6` until then), let CI pass on it, then tag
+`v2.0.0-rc.1` and publish a pre-release with `pnpm -s release-notes 2.0.0-rc.1`. `version/v2` changes six
+deploy-config paths since `main` (`public/_headers`, `sw.js`, the manifest and icons, `index.html`'s manifest
+link), which RELEASING asks to see on a preview deploy before `main` moves; no preview of `version/v2` answers at
+the branch alias, so that check is the owner's, in the Cloudflare dashboard.
 
 ### Feature 3 — a preset with NULLs (built, 2026-10-15)
 

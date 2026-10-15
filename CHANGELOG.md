@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0-rc.1] - 2026-10-15
+
+The release candidate for 2.0: everything built on `version/v2` since 1.0.0, merged with `main`. It is a candidate,
+not 2.0.0, because RELEASING.md holds 2.0.0 for the whole of plan.md §25.8's 2.0 checklist, and one item there —
+the custom domain, the launch post, and the CLI, engine and MCP packages on npm — is still open (the owner's
+decision, 2026-10-15). In short:
+
+- **Answers checked against SQLite** — a differential oracle, metamorphic and ternary-logic tests, and a ledger of
+  where the two dialects really differ (*How we know the answers are right*).
+- **More SQL** — expressions, `OR`/`NOT`/`IN`/`LIKE`/`IS NULL`, `DISTINCT`, `HAVING`, `OFFSET`, `LEFT JOIN`,
+  chains of joins, an uncorrelated `IN (subquery)`, and every clause combining with the others; non-unique,
+  composite, unique and clustered indexes; `EXPLAIN [ANALYZE]` and the plan as relational algebra.
+- **An optimizer that counts** — `ANALYZE` statistics, q-error, cost-based choices with a *Why not?*, and a
+  Selinger join-order search.
+- **Transactions and durability** — two-session schedules, locks and deadlocks, MVCC snapshots, the Hermitage
+  isolation matrix against PostgreSQL's, SQL Server's and InnoDB's published results, five concurrency-control
+  protocols, a write-ahead log and ARIES recovery.
+- **Storage engines** — LSM trees, hash indexes, row vs. column layouts, latch crabbing, vector indexes, read-ahead
+  and scan-resistant pools, each a sandbox with a lesson and a challenge.
+- **A learning layer** — 31 lessons, 53 challenges, generated practice questions, a course map and an interview
+  roadmap; an installable, offline-capable app; per-page titles and an automated accessibility audit of every
+  route; a CLI and an MCP server over the same engine.
+
 ### Added
 - **A preset with NULLs: `customers`, with a lesson and a challenge** (plan.md §26, Feature 3). No preset row held
   a NULL, so three-valued logic only showed after editing data — which is how `NULL NOT IN (∅)` stayed wrong until
@@ -1364,6 +1387,7 @@ the plan for what comes next is §25. (The tag marks the deployed commit; this v
 - Tested CSP security headers
 - 326 unit tests, 14 end-to-end tests
 
-[Unreleased]: https://github.com/Naveen-Boddepalli/query-lens/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/Naveen-Boddepalli/query-lens/compare/v2.0.0-rc.1...HEAD
+[2.0.0-rc.1]: https://github.com/Naveen-Boddepalli/query-lens/releases/tag/v2.0.0-rc.1
 [1.0.0]: https://github.com/Naveen-Boddepalli/query-lens/releases/tag/v1.0.0
 [0.1.0]: https://github.com/Naveen-Boddepalli/QueryLens/releases/tag/v0.1.0

@@ -92,7 +92,7 @@ test('the challenge index has the two groups and a count over all of them', asyn
   await expect(section.getByRole('listitem')).toHaveCount(16);
   await section.getByRole('link', { name: /Read a value that never existed/ }).click();
   await expect(page).toHaveURL(/\/challenges\/read-the-unreal$/);
-  // Twenty-three query challenges come first, so the first transactions one is the twenty-fourth.
+  // Twenty-one query challenges come first, then two lock scripts, so this one is the twenty-fourth.
   await expect(page.getByText(/24 of \d+/)).toBeVisible();
 });
 

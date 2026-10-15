@@ -24,8 +24,12 @@ plan.md §25.4 A4. Two rules, both learned the hard way on the first deploy (CHA
 7. **Publish the release** with the derived notes:
 
    ```bash
-   pnpm -s release-notes x.y.z > /tmp/notes.md   # then paste, or: gh release create vx.y.z --notes-file /tmp/notes.md
+   node --experimental-strip-types scripts/release-notes.ts x.y.z > /tmp/notes.md   # then paste, or: gh release create vx.y.z --notes-file /tmp/notes.md
    ```
+
+   The script directly, not `pnpm -s release-notes`: pnpm 11 checks the install before a script runs and prints
+   *Already up to date* / *Done in …* on stdout even with `-s`, which would open the release body. A version with a
+   pre-release part (`2.0.0-rc.1`) is published as a GitHub *pre-release*.
 
 8. **Deploy that tag** and run the [post-deploy check](#after-a-deploy).
 

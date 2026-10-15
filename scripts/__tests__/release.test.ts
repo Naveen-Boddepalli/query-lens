@@ -76,13 +76,19 @@ describe('main', () => {
 describe('the real CHANGELOG.md', () => {
   const real = readFileSync('CHANGELOG.md', 'utf-8');
 
-  it('has a non-empty Unreleased section and a 1.0.0 section', () => {
-    expect(findRelease(real, 'Unreleased')!.body.length).toBeGreaterThan(100);
+  it('has an Unreleased section, a 1.0.0 section, and a dated newest release with real notes', () => {
+    // Right after a cut `[Unreleased]` is empty on purpose (RELEASING.md, step 3), so it is only required to exist.
+    expect(findRelease(real, 'Unreleased')).toBeDefined();
     expect(findRelease(real, '1.0.0')!.date).toBe('2026-09-23');
+    const newest = parseChangelog(real).find((r) => r.version !== 'Unreleased')!;
+    expect(newest.date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(newest.body.length).toBeGreaterThan(100);
   });
 
   it('produces notes for every release it lists, none empty', () => {
-    for (const r of parseChangelog(real)) expect(r.body.length, r.version).toBeGreaterThan(0);
+    for (const r of parseChangelog(real).filter((x) => x.version !== 'Unreleased')) {
+      expect(r.body.length, r.version).toBeGreaterThan(0);
+    }
   });
 });
 
