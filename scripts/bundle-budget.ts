@@ -96,8 +96,9 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
   // 404, tools index — plus the redesign's shared UI kit (primitives.ts,
   // PageHeader, Hero) that two or more of them import. Raised 12 → 13 for
   // Phase 2 modern landing page & interactive hero redesign. Raised 13 → 14 for
-  // Phase 3 tools index and examples library redesign.
-  { name: 'routes', test: /^(LandingPage|Hero|PageHeader|primitives|StagePage|StagesIndex|StagesLayout|ExamplesPage|DocsLayout|NotFoundPage|ToolsIndexPage)-/, kb: 14, note: 'lazy per-route chunks + shared UI kit, loaded on navigation' },
+  // Phase 3 tools index and examples library redesign. Raised 14 → 16 for
+  // Phase 4 documentation shell, stages explorer and utility views redesign.
+  { name: 'routes', test: /^(LandingPage|Hero|PageHeader|primitives|StagePage|StagesIndex|StagesLayout|ExamplesPage|DocsLayout|NotFoundPage|ToolsIndexPage)-/, kb: 16, note: 'lazy per-route chunks + shared UI kit, loaded on navigation' },
   // The §21.3 feature routes: Gallery, Compare, Settings, Assignments, the
   // buffer-pool sandbox, and what they share — the standalone buffer-trace
   // driver (src/engine/bufferTrace.ts), the panel it renders through, and the
