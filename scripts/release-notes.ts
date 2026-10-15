@@ -83,5 +83,7 @@ export function main(argv: readonly string[], read: () => string = () => readFil
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const { code, out } = main(process.argv.slice(2));
   (code === 0 ? process.stdout : process.stderr).write(out);
-  process.exit(code);
+  // Not `process.exit(code)`: that ends the process before a pipe has taken more than its first 64 kB, and these
+  // notes are bigger than that — `… | gh release create --notes-file -` got two thirds of them.
+  process.exitCode = code;
 }

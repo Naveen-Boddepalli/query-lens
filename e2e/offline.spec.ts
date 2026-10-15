@@ -36,6 +36,16 @@ test('the app registers a service worker and links a web manifest with install i
   expect(await page.evaluate(() => navigator.serviceWorker.controller?.scriptURL)).toMatch(/\/sw\.js$/);
 });
 
+test('the worker precaches the shell as / and no .html path the platform would redirect', async ({ request }) => {
+  // Cloudflare answers `/index.html` (and any `/name.html`) with a 307; a cached redirect cannot answer a navigation,
+  // and the preview now redirects the same way, so the reload in the tests below fails if this slips back.
+  const source = await (await request.get('/sw.js')).text();
+  const list = JSON.parse(/const PRECACHE = (\[.*?\]);/s.exec(source)?.[1] ?? '[]') as string[];
+  expect(list).toContain('/');
+  expect(list.filter((path) => path.endsWith('.html'))).toEqual([]);
+  expect((await request.get('/index.html', { maxRedirects: 0 })).status()).toBe(307);
+});
+
 test('the production Content-Security-Policy admits the service worker and the manifest', async ({ page }) => {
   // `pnpm preview` ignores _headers, so the policy is taken from the file and applied to each document here.
   const headers = readFileSync(new URL('../public/_headers', import.meta.url), 'utf8');

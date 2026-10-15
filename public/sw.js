@@ -21,7 +21,9 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// Every route is the same document, so a navigation gets the cached shell whatever the URL.
+// Every route is the same document, so a navigation gets the cached shell whatever the URL. The shell is cached as `/`:
+// the platform redirects `/index.html` to `/`, and a navigation answered with a redirected response fails outright —
+// which is how the first production build of this worker broke every visit after the first (CHANGELOG, 2.0.0-rc.2).
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
@@ -31,6 +33,10 @@ self.addEventListener('fetch', (event) => {
 
 async function answer(request, url) {
   const cache = await caches.open(CACHE);
-  const cached = await cache.match(request.mode === 'navigate' ? '/index.html' : url.pathname);
-  return cached ?? fetch(request);
+  const cached = await cache.match(request.mode === 'navigate' ? '/' : url.pathname);
+  if (!cached) return fetch(request);
+  // Belt and braces: a response that arrived by redirect is handed back as a fresh one, which a navigation accepts.
+  return cached.redirected
+    ? new Response(cached.body, { status: cached.status, statusText: cached.statusText, headers: cached.headers })
+    : cached;
 }

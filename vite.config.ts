@@ -71,15 +71,41 @@ const serviceWorkerPlugin = {
     if (!source.includes('__BUILD_STAMP__') || !source.includes('__PRECACHE__')) {
       throw new Error('public/sw.js lost its __BUILD_STAMP__ or __PRECACHE__ placeholder');
     }
+    // The shell is cached as `/`, never as `/index.html`: Cloudflare redirects every `/name.html` to `/name`, and a
+    // cached redirect cannot answer a navigation (see `cloudflareHtmlHandlingPlugin`). Any other page (`404.html`, the
+    // platform's own last resort) is the platform's business, not the worker's.
     const precache = listFiles(swOutDir)
       .filter((f) => !SW_NOT_PRECACHED.has(f) && !f.split('/').some((seg) => seg.startsWith('.')))
-      .map((f) => `/${f}`);
+      .filter((f) => f === 'index.html' || !f.endsWith('.html'))
+      .map((f) => (f === 'index.html' ? '/' : `/${f}`));
     writeFileSync(
       file,
       source
         .replace('__BUILD_STAMP__', () => `${BUILD_SHA}-${BUILD_TIME}`)
         .replace('__PRECACHE__', () => JSON.stringify(precache)),
     );
+  },
+};
+
+/**
+ * `vite preview` is what the e2e suite runs against, so where the platform answers differently from Vite and the app
+ * depends on it, the preview answers the platform's way. Cloudflare's asset handling (`html_handling`, default
+ * `auto-trailing-slash`) redirects `/name.html` to `/name` — `/index.html` to `/` — with a 307. The service worker once
+ * precached `/index.html` and served that redirected response to every navigation, which a browser refuses: the
+ * second visit to production failed to load at all, while every test here passed against a preview that never
+ * redirected (CHANGELOG, 2.0.0-rc.2). A request for an `.html` file now gets the same redirect here.
+ */
+const cloudflareHtmlHandlingPlugin = {
+  name: 'querylens-cloudflare-html-handling',
+  configurePreviewServer(server: { middlewares: { use: (fn: (req: { url?: string }, res: { statusCode: number; setHeader: (k: string, v: string) => void; end: () => void }, next: () => void) => void) => void } }) {
+    server.middlewares.use((req, res, next) => {
+      const [path = '', query] = (req.url ?? '').split('?');
+      if (!path.endsWith('.html')) return next();
+      const target = path === '/index.html' ? '/' : path.slice(0, -'.html'.length);
+      res.statusCode = 307;
+      res.setHeader('Location', query ? `${target}?${query}` : target);
+      res.end();
+    });
   },
 };
 
@@ -104,6 +130,7 @@ function rehypeFocusablePre() {
 
 export default defineConfig({
   plugins: [
+    cloudflareHtmlHandlingPlugin,
     // `rehype-slug` gives every rendered heading a stable `id` (kebab-cased
     // from its text), which is what lets a docs page's own `<Contents>` block
     // (src/ui/DocsComponents.tsx) link to `#section-name` and have the browser
