@@ -385,6 +385,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   beside it. Total is 392.2 of 424 kB.
 
 ### Fixed
+- **"Take the 60-second tour" was sometimes ignored, and a tour once taken could open again by itself.** The
+  first-visit hint and the Playground hand the request over with a window event and a `sessionStorage` flag. The
+  Playground read the flag while it rendered and started listening for the event only after it had committed, so
+  a click in between reached neither: the tour did not open, and the flag stayed set. Separately, a request the
+  Playground answered live never cleared the flag. Either way the tour then opened unprompted on the next visit
+  to the Playground in that tab. `listenForTour` (`src/ui/firstVisit.ts`) now listens first and takes the flag
+  second, and a live request takes its own flag, so every request is answered exactly once. The end-to-end test
+  that tripped on the race about one run in twenty-five now passes repeatedly under CPU throttling; a new one
+  covers the reopening.
 - **`x NOT IN (subquery)` kept no NULL rows when the subquery found nothing.** SQL's rule is that an empty list
   holds nothing to be unknown against, so `NULL IN (∅)` is FALSE and `NULL NOT IN (∅)` is TRUE; the evaluator
   called a NULL operand UNKNOWN before looking at the list, so `DELETE FROM b WHERE y NOT IN (SELECT x FROM a)`

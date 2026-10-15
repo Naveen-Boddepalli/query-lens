@@ -1339,6 +1339,29 @@ test('the 60-second tour steps through the Playground and is skippable', async (
   await expect(page.getByRole('dialog', { name: 'Playground tour' })).toHaveCount(0);
 });
 
+test('a tour taken from the first-visit hint opens once, and not again on the next visit to the Playground', async ({ page }) => {
+  await page.goto('/playground');
+  // The Playground is mounted and listening, so the request reaches it live rather than through the one-shot flag.
+  await expect(page.getByLabel('SQL query')).toBeVisible();
+  await page.getByRole('button', { name: 'Take the 60-second tour' }).click();
+  const tour = page.getByRole('dialog', { name: 'Playground tour' });
+  await expect(tour).toBeVisible();
+  await tour.getByRole('button', { name: 'Skip tour' }).click();
+  await expect(tour).toHaveCount(0);
+
+  // Away and back within the app — the same tab, so the same sessionStorage — and then a reload. The request was
+  // answered, so nothing may be left waiting to open the tour again.
+  const nav = page.getByRole('navigation', { name: 'Main navigation' });
+  await nav.getByRole('link', { name: 'Tools' }).click();
+  await expect(page).toHaveURL(/\/tools$/);
+  await nav.getByRole('link', { name: 'Playground' }).click();
+  await expect(page.getByLabel('SQL query')).toBeVisible();
+  await expect(page.getByRole('dialog', { name: 'Playground tour' })).toHaveCount(0);
+  await page.reload();
+  await expect(page.getByLabel('SQL query')).toBeVisible();
+  await expect(page.getByRole('dialog', { name: 'Playground tour' })).toHaveCount(0);
+});
+
 test('the tour spotlight lands on its target after the page scrolls to it', async ({ page }) => {
   // A phone-sized viewport is where the page itself scrolls: the trace comes
   // first and the editor sits a screen below it. The page sets

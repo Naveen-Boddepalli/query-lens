@@ -34,7 +34,7 @@ import { PredictionCard } from '../ui/PredictionCard.tsx';
 import { PresenterView } from '../ui/PresenterView.tsx';
 import { PlaygroundTour } from '../ui/PlaygroundTour.tsx';
 import { TraceWorksheet } from '../ui/TraceWorksheet.tsx';
-import { START_TOUR_EVENT, takePendingTour } from '../ui/firstVisit.ts';
+import { hasPendingTour, listenForTour } from '../ui/firstVisit.ts';
 import { ShortcutHints } from '../ui/ShortcutHints.tsx';
 import { WhyNotNote } from '../ui/WhyNotNote.tsx';
 import { recordPrediction, recordStages } from '../ui/progress.ts';
@@ -145,7 +145,9 @@ export function PlaygroundPage() {
 
   const [predictOn, setPredictOn] = useState(START.predictOn);
   const [presenting, setPresenting] = useState(PRESENT_INITIAL);
-  const [tourOpen, setTourOpen] = useState(() => TOUR_INITIAL || takePendingTour());
+  // A request already waiting opens the tour on the first render (only *looked at* here — a render may be thrown
+  // away); `listenForTour` below is what answers it.
+  const [tourOpen, setTourOpen] = useState(() => TOUR_INITIAL || hasPendingTour());
   const [answers, setAnswers] = useState<Record<number, string>>(() =>
     skippedAnswersBefore(INITIAL_RESULT.events, SHARED.step ?? 0),
   );
@@ -199,12 +201,8 @@ export function PlaygroundPage() {
   usePlaybackShortcuts(playback, !editingData && !tourOpen);
 
   // "Take the tour" in the first-visit hint (mounted by `Layout`, a different
-  // subtree) reaches the Playground as a window event once its chunk is live.
-  useEffect(() => {
-    const open = () => { setTourOpen(true); };
-    window.addEventListener(START_TOUR_EVENT, open);
-    return () => { window.removeEventListener(START_TOUR_EVENT, open); };
-  }, []);
+  // subtree): a request made before this ran, or any time after (`firstVisit.ts`).
+  useEffect(() => listenForTour(() => { setTourOpen(true); }), []);
 
   // The print worksheet (plan.md §22.6) is mounted *only* while printing —
   // keeping its copy of the whole trace out of the DOM the rest of the time.
