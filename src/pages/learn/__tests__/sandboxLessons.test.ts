@@ -234,18 +234,16 @@ describe('lesson: read the grammar diagram', () => {
     expect(calls('expr')).toEqual(['orExpr']);
   });
 
-  it('the engine refuses what the diagram allows: GROUP BY with a JOIN; seven clauses is the most', () => {
+  it('all eight optional parts run together; what the diagram cannot say — groups, table names, DISTINCT — is refused', () => {
     const db = createSeedDatabase();
     const msg = (sql: string, database = db) => runQuery(sql, database, DEFAULT_ENGINE_OPTIONS).error?.message;
     const demo = createJoinDemoDatabase();
-    const join = 'FROM authors JOIN posts ON authors.id = posts.authorId';
-    expect(msg(`SELECT authors.name, COUNT(*) ${join} GROUP BY authors.name`, demo)).toBe(
-      'GROUP BY is not supported yet in a query with JOIN.',
-    );
-    expect(msg(`SELECT * ${join} ORDER BY posts.id`, demo)).toBeUndefined();
-    const seven =
-      'SELECT DISTINCT age FROM users WHERE age > 0 GROUP BY age HAVING COUNT(*) > 0 ORDER BY age LIMIT 3 OFFSET 1';
-    expect(msg(seven)).toBeUndefined();
+    const eight =
+      'SELECT DISTINCT authors.name, COUNT(*) FROM authors JOIN posts ON authors.id = posts.authorId WHERE posts.id > 0 GROUP BY authors.name HAVING COUNT(*) > 0 ORDER BY authors.name LIMIT 3 OFFSET 1';
+    expect(msg(eight, demo)).toBeUndefined();
+    expect(msg('SELECT name, age FROM users GROUP BY age')).toMatch(/`name` is not aggregated/);
+    expect(msg('SELECT authors.name FROM authors JOIN posts ON authors.id = posts.authorId GROUP BY name', demo)).toMatch(/needs a table name/);
+    expect(msg('SELECT DISTINCT name FROM users ORDER BY age')).toMatch(/must appear in the select list/);
   });
 });
 

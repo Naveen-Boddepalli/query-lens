@@ -578,7 +578,14 @@ function estimateNode(
         // Textbook independence assumption, same as an AND's selectivity:
         // the product of each column's distinct-value count, capped at the
         // rows actually going in — there cannot be more groups than rows.
-        const groups = plan.groupBy.reduce((product, col) => product * ndistinct(table, col), 1);
+        // A group column after a JOIN is keyed `table.column` (plan.md §26 Feature 1, slice c): count it in its own table.
+        const ndistinctOf = (key: string): number => {
+          const dot = key.indexOf('.');
+          if (dot < 0) return ndistinct(table, key);
+          const owner = key.slice(0, dot) === table.name ? table : otherTables[key.slice(0, dot)];
+          return owner ? ndistinct(owner, key.slice(dot + 1)) : 1;
+        };
+        const groups = plan.groupBy.reduce((product, col) => product * ndistinctOf(col), 1);
         const groupBasis = `${plan.groupBy.map((c) => `ndistinct(${c})`).join(' × ')}, capped at the input`;
         estimate = {
           estRows: Math.max(1, Math.min(child.estRows, clampRows(groups))),

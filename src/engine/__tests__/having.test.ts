@@ -71,8 +71,13 @@ describe('parsing', () => {
     expect(parse('SELECT COUNT(*) FROM emp HAVING id > 3').ok).toBe(false);
   });
 
-  it('HAVING with a JOIN is refused', () => {
-    expect(parse('SELECT a.id FROM a JOIN b ON a.id = b.id HAVING COUNT(*) > 1').ok).toBe(false);
+  it('HAVING with no GROUP BY makes one group, so a plain column beside it is refused — join or not', () => {
+    // PostgreSQL refuses these; QueryLens once answered the first with a single row holding `name: null`.
+    for (const sql of ['SELECT name FROM emp HAVING COUNT(*) > 1', 'SELECT * FROM emp HAVING COUNT(*) > 1', 'SELECT a.id FROM a JOIN b ON a.id = b.id HAVING COUNT(*) > 1']) {
+      const out = parse(sql);
+      expect(!out.ok && out.error.message, sql).toMatch(/is not aggregated|cannot be combined with HAVING/);
+    }
+    expect(parse('SELECT COUNT(*) FROM emp HAVING COUNT(*) > 1').ok).toBe(true);
   });
 
   it('COUNT(DISTINCT x) is named as unsupported rather than mis-parsed', () => {

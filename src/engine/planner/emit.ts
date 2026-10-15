@@ -1,6 +1,6 @@
 import type { Emit } from '../trace.ts';
 import type { JoinAlgorithm, Table } from '../types.ts';
-import { selectItemKey } from '../parser/index.ts';
+import { columnKey, selectItemKey } from '../parser/index.ts';
 import type { SelectStatement } from '../parser/index.ts';
 import { buildAggregatePlan, buildJoinPlan, buildPlan, distinctNodeFor, isAggregateQuery, projectListFor } from './buildPlan.ts';
 import { estimatePlan, rootEstimate } from './cost.ts';
@@ -186,7 +186,7 @@ export function emitPlanEvents(
 
   if (isAggregateQuery(ast)) {
     current = buildAggregatePlan(ast, current, aggregateStrategy);
-    const groupBy = ast.groupBy?.columns.map((c) => c.name) ?? [];
+    const groupBy = ast.groupBy?.columns.map(columnKey) ?? [];
     const aggregateLabels =
       current.op === 'HashAggregate' || current.op === 'SortAggregate'
         ? current.aggregates.map((a) => a.key).join(', ')
@@ -201,7 +201,7 @@ export function emitPlanEvents(
         ? `GROUP BY becomes a ${nodeName} above that: rows are grouped by ${groupBy.join(', ')}${
             aggregateLabels ? `, computing ${aggregateLabels} per group` : ''
           }, ${mechanism}. Like Sort, it cannot produce a row until it has seen every one — the last group is not known to be complete until the input runs out.`
-        : `${aggregateLabels} becomes a ${nodeName} above that: with no GROUP BY, the whole table is one group, so it collapses every row into one${
+        : `${aggregateLabels} becomes a ${nodeName} above that: with no GROUP BY, the whole ${ast.joins ? 'joined result' : 'table'} is one group, so it collapses every row into one${
             aggregateStrategy === 'sort' ? ', sorting first even though there is only ever one group to produce' : ''
           }. Like Sort, it cannot produce a row until it has seen all of them.`,
       { stage: 'plan', planTree: display(current) },

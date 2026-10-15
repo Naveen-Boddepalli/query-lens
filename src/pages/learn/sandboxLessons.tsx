@@ -157,16 +157,17 @@ export const SANDBOX_STEPS: Record<string, LessonStep[]> = {
       heading: 'What the diagram does not say',
       body: (
         <>
-          The diagram is what the parser can <em>read</em>. The engine refuses some combinations it reads without
-          complaint: {code('GROUP BY')} in a query with a {code('JOIN')}. Of the eight optional parts of a{' '}
-          {code('SELECT')} the most that run together are seven — all but {code('JOIN')}.
+          The diagram is what the parser can <em>read</em>. All eight optional parts of a {code('SELECT')} can run
+          together, but what each names has to make sense beside the others, and the diagram cannot say that: once a
+          query groups, every selected column must be grouped or aggregated; in a {code('JOIN')} every column needs its
+          table; and {code('SELECT DISTINCT')} can only sort by a column it selected.
         </>
       ),
       link: to('grammarSelect', 'Open the select rule'),
       tryThis: (
         <>
-          Write one of the refused combinations in the Playground and read the message: it is the engine&apos;s, not the
-          parser&apos;s, and it says &ldquo;not supported yet&rdquo;.
+          Group by one column and select another in the Playground, and read the message: the diagram allows the query,
+          and the rule about groups refuses it.
         </>
       ),
     },

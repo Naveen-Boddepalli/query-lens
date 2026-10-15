@@ -150,6 +150,8 @@ export type Query =
       kind: 'aggregate';
       distinct?: boolean;
       table: string;
+      /** Grouping the rows of a join (plan.md §26 Feature 1, slice c): `table` then these steps; every ref qualified. */
+      joins?: JoinStep[];
       group: Ref[];
       /** Which group columns appear in the SELECT list (all of them, or a subset). */
       shownGroup: Ref[];
@@ -296,6 +298,9 @@ export function outputKeys(q: ReadQuery, tables: readonly TableSpec[]): string[]
  */
 export type Dialect = 'querylens' | 'sqlite';
 
+const renderJoins = (joins: readonly JoinStep[] | undefined): string =>
+  (joins ?? []).map((j) => ` ${j.type === 'left' ? 'LEFT ' : ''}JOIN ${j.table} ON ${renderRef(j.on.l)} = ${renderRef(j.on.r)}`).join('');
+
 export function renderQuery(q: Query, dialect: Dialect = 'querylens'): string {
   const page = (n: number | undefined, offset: number | undefined) =>
     n === undefined ? '' : ` LIMIT ${n}${offset ? ` OFFSET ${offset}` : ''}`;
@@ -312,12 +317,10 @@ export function renderQuery(q: Query, dialect: Dialect = 'querylens'): string {
       const group = q.group.length > 0 ? ` GROUP BY ${q.group.map(renderRef).join(', ')}` : '';
       const having = q.having ? ` HAVING ${renderPred(q.having)}` : '';
       const order = q.order ? renderOrder(orderKeyOf(q)!, q.order.dir, dialect) : '';
-      return `SELECT ${q.distinct ? 'DISTINCT ' : ''}${items} FROM ${q.table}${renderWhere(q.where)}${group}${having}${order}${page(q.limit, q.offset)}`;
+      return `SELECT ${q.distinct ? 'DISTINCT ' : ''}${items} FROM ${q.table}${renderJoins(q.joins)}${renderWhere(q.where)}${group}${having}${order}${page(q.limit, q.offset)}`;
     }
     case 'join': {
-      const steps = q.joins
-        .map((j) => ` ${j.type === 'left' ? 'LEFT ' : ''}JOIN ${j.table} ON ${renderRef(j.on.l)} = ${renderRef(j.on.r)}`)
-        .join('');
+      const steps = renderJoins(q.joins);
       const order = q.order ? renderOrder(renderRef(q.order.ref), q.order.dir, dialect) : '';
       return `SELECT ${q.distinct ? 'DISTINCT ' : ''}${[...q.proj.map(renderRef), ...renderComputed(q.computed)].join(', ')} FROM ${q.left}${steps}${renderWhere(q.where)}${order}${page(q.limit, q.offset)}`;
     }

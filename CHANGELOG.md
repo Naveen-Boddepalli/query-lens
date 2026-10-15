@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`GROUP BY`, `HAVING` and aggregates over a `JOIN`** (plan.md §26, Feature 1 slice c — the last refusal between
+  clauses the engine already had). `SELECT authors.name, COUNT(posts.id) FROM authors LEFT JOIN posts ON authors.id
+  = posts.authorId GROUP BY authors.name ORDER BY COUNT(posts.id) DESC` counts each author's posts, zero for one
+  with none, under every join algorithm and both aggregate strategies. Grouped columns, `HAVING` and an aggregate's
+  argument are qualified, like every column in a join query. The cost model counts a grouped column's distinct
+  values in its own table. All eight optional parts of a `SELECT` now run together; the grammar diagram lets
+  `GROUP BY` and `ORDER BY` take a qualified column, and the grammar lesson and the *Seven clauses* challenge say
+  what still refuses a query — meaning, not combination. The SQLite oracle generates grouped joins.
 - **`ORDER BY` with `JOIN`** (plan.md §26, Feature 1 slice b). A query with a `JOIN` — a chain, `LEFT` steps
   included — can sort its rows by a qualified column: `SELECT authors.name, posts.title FROM authors LEFT JOIN
   posts ON authors.id = posts.authorId ORDER BY posts.title DESC` puts the author with no posts first, NULL
@@ -405,6 +413,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   beside it. Total is 392.2 of 424 kB.
 
 ### Fixed
+- **`SELECT name FROM users HAVING COUNT(*) > 1` answered with one row holding `name: null`.** `HAVING` with no
+  `GROUP BY` makes the whole table one group, so a plain column beside it has no one value; the check that refuses
+  `SELECT name, COUNT(*) FROM users` only looked at the SELECT list's own aggregates, not `HAVING`'s. It is now
+  refused the way PostgreSQL refuses it (SQLite answers with an arbitrary row).
 - **A sort's scratch pages could run past the buffer pool unseen.** The block of page ids reserved for a sort
   after a `JOIN` was sized for at most 20,000 rows, and the pool ignores a read or write past its last page, so a
   sort over a bigger join — a sort-based `DISTINCT`, then — gave the right rows with buffer counts that left out

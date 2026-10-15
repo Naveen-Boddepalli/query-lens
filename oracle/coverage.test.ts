@@ -73,6 +73,9 @@ describe('the generators reach what the oracle is meant to check', () => {
     /** Join queries with an ORDER BY that returned two or more rows, by join algorithm, and ones with a LEFT step (F1b). */
     orderedJoins: new Map<string, number>(),
     orderedLeftJoins: 0,
+    /** Aggregate queries over a join that returned rows, by aggregate strategy, and ones grouping a LEFT JOIN (F1c). */
+    joinAggregates: new Map<string, number>(),
+    leftJoinGroups: 0,
   };
 
   for (const [{ tables: initial, steps }, options] of sessions) {
@@ -134,6 +137,11 @@ describe('the generators reach what the oracle is meant to check', () => {
         stats.reads += 1;
         if (result.rows.length > 0) stats.readsWithRows += 1;
         if (q.kind === 'join') stats.joins.set(options.joinStrategy ?? 'nested-loop', (stats.joins.get(options.joinStrategy ?? 'nested-loop') ?? 0) + (result.rows.length > 0 ? 1 : 0));
+        if (q.kind === 'aggregate' && q.joins && result.rows.length > 0) {
+          const strategy = options.aggregateStrategy ?? 'hash';
+          stats.joinAggregates.set(strategy, (stats.joinAggregates.get(strategy) ?? 0) + 1);
+          if (q.group.length > 0 && q.joins.some((j) => j.type === 'left')) stats.leftJoinGroups += 1;
+        }
         if (q.kind === 'join' && q.order && result.rows.length > 1) {
           const algorithm = options.joinStrategy ?? 'cost';
           stats.orderedJoins.set(algorithm, (stats.orderedJoins.get(algorithm) ?? 0) + 1);
@@ -222,17 +230,26 @@ describe('the generators reach what the oracle is meant to check', () => {
   });
 
   it('sorts groups by a grouped column and by an aggregate, under both aggregate strategies (plan.md §26 F1a)', () => {
+    // Measured 21–33 with the fixed seed above, since grouped joins became a fourth kind of read (F1c) and thin the rest.
     for (const key of ['hash:col', 'hash:agg', 'sort:col', 'sort:agg']) {
-      expect(stats.orderedGroups.get(key) ?? 0, `ordered groups ${key}`).toBeGreaterThan(20);
+      expect(stats.orderedGroups.get(key) ?? 0, `ordered groups ${key}`).toBeGreaterThan(12);
     }
   });
 
   it('sorts joined rows under every join algorithm, LEFT joins included (plan.md §26 F1b)', () => {
-    // Measured 16–26 per algorithm with the fixed seed above (each is requested by a fifth of sessions).
+    // Measured 11–20 per algorithm with the fixed seed above (each is requested by a fifth of sessions, and joins are
+    // one read in four since grouped joins arrived, F1c).
     for (const algorithm of ['cost', 'nested-loop', 'hash', 'sort-merge', 'index-nested-loop']) {
-      expect(stats.orderedJoins.get(algorithm) ?? 0, `ordered joins by ${algorithm}`).toBeGreaterThan(10);
+      expect(stats.orderedJoins.get(algorithm) ?? 0, `ordered joins by ${algorithm}`).toBeGreaterThan(5);
     }
     expect(stats.orderedLeftJoins, 'ordered joins with a LEFT step').toBeGreaterThan(30);
+  });
+
+  it('aggregates over joins under both strategies, LEFT joins grouped too (plan.md §26 F1c)', () => {
+    for (const strategy of ['hash', 'sort']) {
+      expect(stats.joinAggregates.get(strategy) ?? 0, `join aggregates, ${strategy}`).toBeGreaterThan(50);
+    }
+    expect(stats.leftJoinGroups, 'GROUP BY over a LEFT JOIN, with rows').toBeGreaterThan(30);
   });
 
   it('writes through UNIQUE indexes without tripping them (plan.md §25.4 B3c)', () => {

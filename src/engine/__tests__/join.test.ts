@@ -76,18 +76,16 @@ describe('JOIN — parsing', () => {
     if (!parsed.ok) expect(parsed.error.message).toMatch(/qualified column/);
   });
 
-  it('rejects an aggregate SELECT item combined with JOIN', () => {
-    const parsed = parse('SELECT COUNT(*) FROM authors JOIN posts ON authors.id = posts.authorId');
-    expect(parsed.ok).toBe(false);
-    if (!parsed.ok) expect(parsed.error.message).toMatch(/aggregate function is not supported/);
+  it('takes an aggregate over a JOIN, its argument qualified', () => {
+    expect(parse('SELECT COUNT(*), MAX(posts.id) FROM authors JOIN posts ON authors.id = posts.authorId').ok).toBe(true);
+    const bare = parse('SELECT COUNT(id) FROM authors JOIN posts ON authors.id = posts.authorId');
+    expect(!bare.ok && bare.error.message).toMatch(/`id` needs a table name/);
   });
 
-  it('rejects GROUP BY combined with JOIN', () => {
-    const parsed = parse(
-      'SELECT authors.name FROM authors JOIN posts ON authors.id = posts.authorId GROUP BY authors.name',
-    );
-    expect(parsed.ok).toBe(false);
-    if (!parsed.ok) expect(parsed.error.message).toMatch(/GROUP BY is not supported yet in a query with JOIN/);
+  it('takes GROUP BY with JOIN, by a qualified column — the key a joined row is stored under', () => {
+    const parsed = parse('SELECT authors.name FROM authors JOIN posts ON authors.id = posts.authorId GROUP BY authors.name');
+    if (!parsed.ok) throw new Error(parsed.error.message);
+    expect(parsed.ast.groupBy?.columns).toMatchObject([{ name: 'name', table: 'authors' }]);
   });
 
   it('takes ORDER BY with JOIN, by a qualified column — the key a joined row is stored under', () => {
@@ -864,10 +862,10 @@ describe('multi-join (plan.md §25.4 C3 slice b)', () => {
     expect(rows.some((r) => r['posts.title'] === "grace's post 6" && r['comments.body'] === null)).toBe(true);
   });
 
-  it('GROUP BY and an aggregate SELECT item are still rejected with a chain of two JOINs; ORDER BY is not', () => {
+  it('GROUP BY, an aggregate and ORDER BY all parse over a chain of two JOINs', () => {
     const base = 'FROM authors JOIN posts ON authors.id = posts.authorId JOIN comments ON posts.id = comments.postId';
-    expect(parseStatement(`SELECT COUNT(*) ${base}`).ok).toBe(false);
-    expect(parseStatement(`SELECT authors.name ${base} GROUP BY authors.name`).ok).toBe(false);
+    expect(parseStatement(`SELECT COUNT(*) ${base}`).ok).toBe(true);
+    expect(parseStatement(`SELECT authors.name ${base} GROUP BY authors.name`).ok).toBe(true);
     expect(parseStatement(`SELECT authors.name ${base} ORDER BY comments.id`).ok).toBe(true);
   });
 
@@ -1013,5 +1011,58 @@ describe('ORDER BY above a JOIN (plan.md §26 Feature 1, slice b)', () => {
     for (let x = 0; x < written.length; x++) {
       for (let y = x + 1; y < written.length; y++) expect([...written[x]!].filter((p) => written[y]!.has(p)), `sorts ${x} and ${y}`).toEqual([]);
     }
+  });
+});
+
+describe('GROUP BY, HAVING and aggregates above a JOIN (plan.md §26 Feature 1, slice c)', () => {
+  const ALGORITHMS = [undefined, 'nested-loop', 'hash', 'sort-merge', 'index-nested-loop'] as const;
+  const POSTS_PER_AUTHOR =
+    'SELECT authors.name, COUNT(posts.id) FROM authors LEFT JOIN posts ON authors.id = posts.authorId GROUP BY authors.name ORDER BY COUNT(posts.id) DESC';
+
+  it.each(ALGORITHMS.flatMap((j) => (['hash', 'sort'] as const).map((a) => [j, a] as const)))(
+    'counts posts per author the same way under any join (%s) and aggregate (%s) strategy',
+    (joinStrategy, aggregateStrategy) => {
+      const options = { ...DEFAULT_ENGINE_OPTIONS, bufferFrames: 4, aggregateStrategy, ...(joinStrategy ? { joinStrategy } : {}) };
+      const { rows, error } = run(POSTS_PER_AUTHOR, db(), options);
+      expect(error).toBeUndefined();
+      // barbara has no posts: the LEFT JOIN pads her row, and COUNT of a NULL column is 0 — COUNT(*) would say 1.
+      expect(rows).toEqual([
+        { 'authors.name': 'grace', 'COUNT(posts.id)': 4 },
+        { 'authors.name': 'ada', 'COUNT(posts.id)': 3 },
+        { 'authors.name': 'alan', 'COUNT(posts.id)': 2 },
+        { 'authors.name': 'donald', 'COUNT(posts.id)': 1 },
+        { 'authors.name': 'barbara', 'COUNT(posts.id)': 0 },
+      ]);
+    },
+  );
+
+  it('filters the groups with HAVING, and aggregates a whole join into one row with no GROUP BY', () => {
+    const base = 'FROM authors JOIN posts ON authors.id = posts.authorId';
+    expect(run(`SELECT authors.name, COUNT(*) ${base} GROUP BY authors.name HAVING COUNT(*) > 2 ORDER BY authors.name`).rows).toEqual([
+      { 'authors.name': 'ada', 'COUNT(*)': 3 },
+      { 'authors.name': 'grace', 'COUNT(*)': 4 },
+    ]);
+    expect(run(`SELECT COUNT(*), MAX(posts.id) ${base}`).rows).toEqual([{ 'COUNT(*)': 10, 'MAX(posts.id)': 10 }]);
+  });
+
+  it('plans the aggregate above the Join and the Sort above both', () => {
+    const plan = [...run(POSTS_PER_AUTHOR).events].reverse().find((e) => e.stage === 'plan')!;
+    expect(JSON.stringify(plan.planTree)).toMatch(/"op":"Project".*"op":"Sort".*"op":"HashAggregate".*"op":"Join"/);
+  });
+
+  it('estimates the groups from the grouped column’s own table, not the FROM table', () => {
+    // posts.authorId has 4 distinct values; looked up in `authors`, where it does not exist, it would come out as 1.
+    const sql = 'SELECT posts.authorId, COUNT(*) FROM authors JOIN posts ON authors.id = posts.authorId GROUP BY posts.authorId';
+    const explained = run(`EXPLAIN ${sql}`).rows.map((r) => String(r['QUERY PLAN']));
+    expect(explained.find((l) => l.includes('HashAggregate'))).toMatch(/est ~4 rows/);
+  });
+
+  it('asks for table names in GROUP BY, HAVING and an aggregate’s argument, and checks grouping by the qualified name', () => {
+    const base = 'FROM authors JOIN posts ON authors.id = posts.authorId';
+    expect(run(`SELECT authors.name ${base} GROUP BY name`).error?.message).toMatch(/`name` needs a table name/);
+    expect(run(`SELECT authors.name, COUNT(*) ${base} GROUP BY authors.id`).error?.message).toMatch(/`authors.name` is not aggregated/);
+    expect(run(`SELECT authors.name ${base} GROUP BY authors.name HAVING MAX(id) > 1`).error?.message).toMatch(/`id` needs a table name/);
+    expect(run(`SELECT authors.name ${base} GROUP BY authors.name ORDER BY SUM(id)`).error?.message).toMatch(/`id` needs a table name/);
+    expect(run(`SELECT authors.name ${base} GROUP BY authors.name ORDER BY posts.title`).error?.message).toMatch(/`posts.title` is not aggregated/);
   });
 });

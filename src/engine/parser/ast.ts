@@ -135,8 +135,8 @@ export interface InSubquery {
 /**
  * `[INNER | LEFT [OUTER]] JOIN table ON t1.col = t2.col` (plan.md §22.2, `LEFT` since §25.4 C3). `on` is always a
  * single equality between one qualified column from each side — checked at parse time (`checkJoinOn`), so the
- * planner never has to. `RIGHT`/`FULL`/`CROSS` stay out of scope. `ORDER BY` sorts the joined rows (plan.md §26
- * Feature 1, slice b); JOIN does not combine with `GROUP BY` or an aggregate SELECT item yet — checked at parse time.
+ * planner never has to. `RIGHT`/`FULL`/`CROSS` stay out of scope. `ORDER BY`, `GROUP BY`, `HAVING` and aggregates
+ * all work over the joined rows (plan.md §26 Feature 1, slices b and c), each column qualified.
  *
  * A `SelectStatement` may chain several of these (plan.md §25.4 C3 slice b), left-deep: `FROM a JOIN b ON … JOIN c
  * ON …` joins `c` to whatever `a ⋈ b` produced, never to `a` and `b` independently. Each one's `on` names the table
@@ -158,7 +158,9 @@ export interface JoinClause {
  * is a different predicate evaluator, not this one).
  */
 export interface GroupByClause {
-  columns: { name: string; span: Span }[];
+  /** `table` is set for a qualified column — required in a query with a `JOIN` (plan.md §26 Feature 1, slice c),
+   *  whose rows are keyed `table.column`: `columnKey` of each is the key the aggregate groups on. */
+  columns: { name: string; table?: string; span: Span }[];
   span: Span;
 }
 

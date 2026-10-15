@@ -92,7 +92,8 @@ export function buildAggregatePlan(
   child: Plan,
   strategy: 'hash' | 'sort' = 'hash',
 ): Plan {
-  const groupBy = ast.groupBy?.columns.map((c) => c.name) ?? [];
+  // A joined row is keyed `table.column` (plan.md §26 Feature 1, slice c), so a qualified group column's key is that.
+  const groupBy = ast.groupBy?.columns.map(columnKey) ?? [];
   const aggregates = aggregateSpecsOf(ast);
   return { op: strategy === 'sort' ? 'SortAggregate' : 'HashAggregate', groupBy, aggregates, child };
 }

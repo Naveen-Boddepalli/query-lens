@@ -60,10 +60,11 @@ export const GRAMMAR: GrammarRule[] = [
       // between one JOIN clause and the next, unlike every other `repeat` here.
       repeat(opt(), rule('join')),
       opt(lit('WHERE'), rule('expr')),
-      opt(lit('GROUP'), lit('BY'), rule('identifier'), repeat(lit(','), rule('identifier'))),
+      // Columns are qualified (`posts.authorId`) in a query with a JOIN, here as everywhere (plan.md §26 Feature 1).
+      opt(lit('GROUP'), lit('BY'), rule('qualifiedColumn'), repeat(lit(','), rule('qualifiedColumn'))),
       opt(lit('HAVING'), rule('expr')),
       // An aggregate call sorts the groups (plan.md §26 Feature 1, slice a); the engine then checks the query groups.
-      opt(lit('ORDER'), lit('BY'), choice([rule('identifier')], [rule('aggregateCall')]), opt(choice([lit('ASC')], [lit('DESC')]))),
+      opt(lit('ORDER'), lit('BY'), choice([rule('qualifiedColumn')], [rule('aggregateCall')]), opt(choice([lit('ASC')], [lit('DESC')]))),
       opt(lit('LIMIT'), rule('number'), opt(lit('OFFSET'), rule('number'))),
       opt(lit(';')),
     ],

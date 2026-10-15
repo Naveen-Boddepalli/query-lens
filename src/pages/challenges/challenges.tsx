@@ -135,7 +135,8 @@ const isColumn = (n: ASTNode | undefined, name: string): boolean => n?.kind === 
 
 /**
  * How many of a SELECT's optional parts the parse tree shows: DISTINCT, WHERE, GROUP BY, HAVING, ORDER BY, LIMIT and
- * OFFSET. JOIN is the eighth, and cannot be one of the seven that run together, so it is not counted here.
+ * OFFSET. JOIN is the eighth, and needs a second table — which the challenge's one-table database does not have —
+ * so it is not counted here.
  */
 export function optionalClauses(events: readonly StepEvent[]): number {
   const ast = lastAst(events);
@@ -699,20 +700,21 @@ export const CHALLENGES: Challenge[] = [
     title: 'Seven clauses in one SELECT',
     brief: (
       <>
-        A <code className="font-mono">SELECT</code> has eight optional parts: <code className="font-mono">DISTINCT</code>,{' '}
-        <code className="font-mono">JOIN</code>, <code className="font-mono">WHERE</code>,{' '}
+        A <code className="font-mono">SELECT</code> on one table has seven optional parts:{' '}
+        <code className="font-mono">DISTINCT</code>, <code className="font-mono">WHERE</code>,{' '}
         <code className="font-mono">GROUP BY</code>, <code className="font-mono">HAVING</code>,{' '}
         <code className="font-mono">ORDER BY</code>, <code className="font-mono">LIMIT</code> and{' '}
-        <code className="font-mono">OFFSET</code>. The grammar will read them in that order; the engine will not run them
-        all. Write one query that <strong>runs</strong> with seven of them.
+        <code className="font-mono">OFFSET</code> (a <code className="font-mono">JOIN</code> is the eighth, and needs a
+        second table). The grammar reads them in that order, and the engine runs them all together — if what each one
+        names makes sense beside the others. Write one query that <strong>runs</strong> with all seven.
       </>
     ),
     hint: (
       <>
-        The engine refuses <code className="font-mono">GROUP BY</code> in a query with a{' '}
-        <code className="font-mono">JOIN</code> — the message says &ldquo;not supported yet&rdquo;.
-        Count again without the part that cannot sit with the others. In a query that groups, ORDER BY sorts the
-        groups: name a grouped column, or an aggregate.
+        Once there is a <code className="font-mono">GROUP BY</code>, every selected column must be grouped or
+        aggregated, and <code className="font-mono">ORDER BY</code> sorts the groups — so name a grouped column, or an
+        aggregate. With <code className="font-mono">DISTINCT</code>, the sort key must be one you selected. And{' '}
+        <code className="font-mono">OFFSET</code> only comes after a <code className="font-mono">LIMIT</code>.
       </>
     ),
     starter: 'SELECT DISTINCT age FROM users WHERE age > 20 ORDER BY age LIMIT 5;',
@@ -720,8 +722,9 @@ export const CHALLENGES: Challenge[] = [
     tool: { label: 'See the select rule in the Grammar →', href: () => sandboxHref({ tool: 'grammar', rule: 'select' }) },
     misconception: (
       <>
-        The grammar diagram is what the parser can <em>read</em>, not what the engine will run. A query can be perfectly
-        well-formed and still be refused further down, and the message says which stage said no.
+        The grammar diagram is what the parser can <em>read</em>, not what the query <em>means</em>. A query can be
+        perfectly well-formed and still be refused — a column that is not grouped has no one value per group — and the
+        message says which rule said no.
       </>
     ),
   },

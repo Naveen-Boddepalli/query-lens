@@ -25,7 +25,7 @@ import type {
   UpdateAssignment,
   UpdateStatement,
 } from './ast.ts';
-import { selectItemKey } from './ast.ts';
+import { columnKey, selectItemKey } from './ast.ts';
 import { aggregateKeyOf, exprToSql } from './print.ts';
 
 function selectItemNode(item: SelectItem, id: string): ASTNode {
@@ -71,12 +71,12 @@ function groupByNode(groupBy: GroupByClause): ASTNode {
     id: 'groupBy',
     kind: 'GroupBy',
     label: 'GROUP BY',
-    detail: groupBy.columns.map((c) => c.name).join(', '),
+    detail: groupBy.columns.map(columnKey).join(', '),
     span: groupBy.span,
     children: groupBy.columns.map((c, i) => ({
       id: `groupBy.col${i}`,
       kind: 'Column',
-      label: c.name,
+      label: columnKey(c),
       span: c.span,
     })),
   };
@@ -350,7 +350,7 @@ export function emitParseEvents(emit: Emit, ast: SelectStatement): void {
     children.push(groupByNode(ast.groupBy));
     emit(
       `Read the GROUP BY clause: rows are grouped by ${ast.groupBy.columns
-        .map((c) => `\`${c.name}\``)
+        .map((c) => `\`${columnKey(c)}\``)
         .join(', ')}. Nothing has been computed yet — this is still only structure.`,
       { stage: 'parse', ast: root([...children], ast.span), span: ast.groupBy.span },
     );

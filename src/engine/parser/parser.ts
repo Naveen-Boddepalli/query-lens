@@ -89,7 +89,7 @@ import type {
   UpdateAssignment,
   UpdateStatement,
 } from './ast.ts';
-import { aggregateKeyOf, selectItemKey, walkExpr } from './ast.ts';
+import { aggregateKeyOf, columnKey, selectItemKey, walkExpr } from './ast.ts';
 import { exprToSql } from './print.ts';
 import { arithmetic, negate } from '../value.ts';
 import { TokenizeError, tokenize } from './tokenizer.ts';
@@ -327,10 +327,11 @@ function parseGroupBy(c: Cursor): GroupByClause | undefined {
   const groupToken = c.next();
   c.expectKeyword('BY', 'after GROUP');
 
-  const columns: { name: string; span: Span }[] = [];
+  const columns: GroupByClause['columns'] = [];
   for (;;) {
     const token = c.expectIdentifier('a column name to group by');
-    columns.push({ name: token.value, span: { from: token.from, to: token.to } });
+    const ref = parseQualifiedColumnTail(c, token);
+    columns.push({ name: ref.name, ...(ref.table === undefined ? {} : { table: ref.table }), span: { from: ref.from, to: ref.to } });
     if (c.peek().type !== 'comma') break;
     c.next();
   }
@@ -369,11 +370,11 @@ function checkGroupingValidity(select: SelectList, groupBy: GroupByClause | unde
     );
   }
 
-  const groupNames = new Set(groupBy?.columns.map((c) => c.name) ?? []);
-  const ungrouped = select.items.find((item) => item.kind === 'column' && !groupNames.has(item.name));
+  const groupNames = new Set(groupBy?.columns.map(columnKey) ?? []);
+  const ungrouped = select.items.find((item) => item.kind === 'column' && !groupNames.has(columnKey(item)));
   if (ungrouped) {
     throw new ParseError(
-      `\`${(ungrouped as Extract<SelectItem, { kind: 'column' }>).name}\` is not aggregated${
+      `\`${columnKey(ungrouped as Extract<SelectItem, { kind: 'column' }>)}\` is not aggregated${
         groupBy ? ' and is not in the GROUP BY list' : ''
       }.`,
       ungrouped.span,
@@ -412,11 +413,25 @@ function checkHavingValidity(
     );
   }
 
-  const groupNames = new Set(groupBy?.columns.map((c) => c.name) ?? []);
-  const ungrouped = columns.find((col) => !groupNames.has(col.name));
+  // With no GROUP BY, HAVING alone makes the whole table one group — so, as with an aggregate in the SELECT list,
+  // nothing else in the list has one value per group. (`checkGroupingValidity` ran before HAVING was read, and only
+  // saw the SELECT list's own aggregates.)
+  if (!groupBy) {
+    const plain = select.kind === 'star' ? select : select.items.find((item) => item.kind !== 'aggregate');
+    if (plain) {
+      throw new ParseError(
+        plain.kind === 'star' ? '`SELECT *` cannot be combined with HAVING.' : `\`${selectItemKey(plain)}\` is not aggregated.`,
+        plain.span,
+        'HAVING with no GROUP BY makes the whole table one group, so the SELECT list can only hold aggregates — group by the column, or aggregate it.',
+      );
+    }
+  }
+
+  const groupNames = new Set(groupBy?.columns.map(columnKey) ?? []);
+  const ungrouped = columns.find((col) => !groupNames.has(columnKey(col)));
   if (ungrouped) {
     throw new ParseError(
-      `\`${ungrouped.name}\` is not aggregated and is not in the GROUP BY list.`,
+      `\`${columnKey(ungrouped)}\` is not aggregated and is not in the GROUP BY list.`,
       ungrouped.span,
       groupBy
         ? 'A HAVING predicate may test grouped columns and aggregates like COUNT(*) — not a plain column.'
@@ -459,6 +474,7 @@ function parseOrderKey(
         'An aggregate is computed per group. Group the rows first — or sort by a plain column.',
       );
     }
+    if (arg.kind === 'column') checkColumnQualifier(arg, joins, from);
     const aggregate = { kind: 'aggregate' as const, fn: upper as AggregateFn, arg, span };
     return { column: aggregateKeyOf(aggregate.fn, arg), aggregate, span };
   }
@@ -468,7 +484,7 @@ function parseOrderKey(
   const span = { from: ref.from, to: ref.to };
   checkColumnQualifier({ name: ref.name, ...(ref.table === undefined ? {} : { table: ref.table }), span }, joins, from);
   const column = ref.table === undefined ? ref.name : `${ref.table}.${ref.name}`;
-  if (grouping && !(groupBy?.columns.some((g) => g.name === column) ?? false)) {
+  if (grouping && !(groupBy?.columns.some((g) => columnKey(g) === column) ?? false)) {
     throw new ParseError(
       `\`${column}\` is not aggregated and is not in the GROUP BY list.`,
       span,
@@ -591,11 +607,9 @@ function collectColumnRefs(select: SelectList, where: Expr | undefined): Extract
 }
 
 /**
- * Two checks, both about column qualifiers: a `join` combined with an
- * aggregate SELECT item is not supported yet (v1 restriction), and every
- * column reference's `table` — required at all once a `join` is present, so
- * no reference can ever be ambiguous between the tables — must actually
- * name a table this query knows about (`FROM` or any `JOIN`).
+ * Every column reference's `table` in the SELECT list and `WHERE` — required at all once a `join` is present, so no
+ * reference can ever be ambiguous between the tables — must actually name a table this query knows about (`FROM` or
+ * any `JOIN`). An aggregate over a join is fine (plan.md §26 Feature 1, slice c); its argument is checked here too.
  */
 function checkJoinValidity(
   select: SelectList,
@@ -603,20 +617,6 @@ function checkJoinValidity(
   where: Expr | undefined,
   from: TableRef,
 ): void {
-  const hasJoin = joins.length > 0;
-  if (hasJoin && select.kind === 'columns') {
-    const aggregate = select.items.find((item): item is Extract<SelectItem, { kind: 'aggregate' }> =>
-      item.kind === 'aggregate',
-    );
-    if (aggregate) {
-      throw new ParseError(
-        'An aggregate function is not supported yet in a query with JOIN.',
-        aggregate.span,
-        'JOIN queries return plain rows for now — aggregate the result in a later version.',
-      );
-    }
-  }
-
   for (const ref of collectColumnRefs(select, where)) checkColumnQualifier(ref, joins, from);
 }
 
@@ -1162,32 +1162,25 @@ function parseSelectBody(c: Cursor): SelectStatement {
   const hasJoin = joins.length > 0;
   const where = parseOptionalWhere(c);
   const groupBy = parseGroupBy(c);
-  if (hasJoin && groupBy) {
-    throw new ParseError(
-      'GROUP BY is not supported yet in a query with JOIN.',
-      groupBy.span,
-      'JOIN queries return plain rows for now — group the result in a later version.',
-    );
-  }
-  checkGroupingValidity(select, groupBy);
+  // Qualifiers first, so `GROUP BY name` in a join is told it needs a table name rather than that `authors.name`
+  // is not grouped.
   checkJoinValidity(select, joins, where, from);
+  for (const column of groupBy?.columns ?? []) checkColumnQualifier(column, joins, from);
+  checkGroupingValidity(select, groupBy);
 
   let having: Expr | undefined;
   if (isKeyword(c.peek(), 'HAVING')) {
     const havingToken = c.next();
-    if (hasJoin) {
-      throw new ParseError(
-        'HAVING is not supported yet in a query with JOIN.',
-        havingToken,
-        'JOIN queries return plain rows for now — group and filter the result in a later version.',
-      );
-    }
     c.allowAggregates = true;
     try {
       having = parseExpr(c);
     } finally {
       c.allowAggregates = false;
     }
+    walkExpr(having, (e) => {
+      if (e.kind === 'column') checkColumnQualifier(e, joins, from);
+      else if (e.kind === 'aggregate' && e.arg.kind === 'column') checkColumnQualifier(e.arg, joins, from);
+    });
     checkHavingValidity(having, select, groupBy, havingToken);
   }
 

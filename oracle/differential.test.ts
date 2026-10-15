@@ -45,6 +45,15 @@ describe('differential — QueryLens vs SQLite', () => {
     );
   });
 
+  it('GROUP BY, aggregates, HAVING and ORDER BY over a JOIN (plan.md §26 Feature 1, slice c)', () => {
+    fc.assert(
+      fc.property(sessionArb('join-aggregate'), optionsArb, ({ tables, steps }, options) => {
+        runSession(tables, steps, options);
+      }),
+      oracleParams(),
+    );
+  });
+
   it('INSERT / UPDATE / DELETE, then a read of what they left behind', () => {
     fc.assert(
       fc.property(sessionArb('any'), optionsArb, ({ tables, steps }, options) => {

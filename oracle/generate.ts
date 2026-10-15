@@ -10,6 +10,7 @@
 
 import fc from 'fast-check';
 import type { EngineOptions, IndexBuildOptions, JoinAlgorithm, ReplacementPolicyName, Row, SqlValue } from '../src/engine/types.ts';
+import { renderRef } from './model.ts';
 import type { AggItem, Arith, ArithOp, ColSpec, ColType, GroupOrderSpec, JoinStep, Op, Pred, Query, ReadQuery, Ref, SubSelect, TableSpec, WriteQuery } from './model.ts';
 
 /* -------------------------------------------------------------------------- */
@@ -529,7 +530,19 @@ export function selectArb(t: TableSpec, pool: Pool, subs: readonly SubSource[] =
 }
 
 export function aggregateArb(t: TableSpec, pool: Pool, subs: readonly SubSource[] = []): fc.Arbitrary<Query> {
-  const refs = refsOf(t, false);
+  return aggregateOver(refsOf(t, false), pool, subs, { table: t.name });
+}
+
+/**
+ * An aggregate query over `refs` — one table's columns, or (plan.md §26 Feature 1, slice c) every column of a join
+ * chain, qualified, with `from.joins` the chain. Grouping, HAVING and ORDER BY range over the same columns either way.
+ */
+function aggregateOver(
+  refs: readonly Ref[],
+  pool: Pool,
+  subs: readonly SubSource[],
+  from: { table: string; joins?: JoinStep[] },
+): fc.Arbitrary<Query> {
   const numericRefs = refs.filter((r) => numeric(r.type));
   const agg: fc.Arbitrary<AggItem> = fc.oneof(
     fc.constant<AggItem>({ fn: 'COUNT', arg: '*' }),
@@ -537,7 +550,7 @@ export function aggregateArb(t: TableSpec, pool: Pool, subs: readonly SubSource[
     fc.tuple(fc.constantFrom('SUM', 'AVG'), fc.constantFrom(...numericRefs)).map(([fn, arg]): AggItem => ({ fn, arg })),
     fc.tuple(fc.constantFrom('MIN', 'MAX'), fc.constantFrom(...refs)).map(([fn, arg]): AggItem => ({ fn, arg })),
   );
-  const groupCandidates = refs.filter((r) => r.name !== 'r'); // grouping by a REAL is legal but adds nothing the others don't
+  const groupCandidates = refs.filter((r) => r.type !== 'real'); // grouping by a REAL is legal but adds nothing the others don't
   // HAVING (plan.md §25.4 B2): a predicate over the groups. Its aggregates need not be in the SELECT list, and its
   // plain columns must be grouped ones — so the leaves are drawn from the group columns chosen *for this query*.
   const havingLeaf = (group: readonly Ref[]): fc.Arbitrary<Pred> =>
@@ -570,7 +583,7 @@ export function aggregateArb(t: TableSpec, pool: Pool, subs: readonly SubSource[
       { weight: 1, arbitrary: leaf.map((p): Pred => ({ k: 'not', p })) },
     );
   };
-  const aggKey = (a: AggItem): string => `${a.fn}(${a.arg === '*' ? '*' : a.arg.name})`;
+  const aggKey = (a: AggItem): string => `${a.fn}(${a.arg === '*' ? '*' : renderRef(a.arg)})`;
   const dirArb = fc.constantFrom<'asc' | 'desc'>('asc', 'desc');
   // ORDER BY over the groups (plan.md §26 Feature 1, slice a): a grouped column — shown or not — or any aggregate,
   // selected or not. With a LIMIT this is "the top n groups", which is what the order is for.
@@ -598,12 +611,13 @@ export function aggregateArb(t: TableSpec, pool: Pool, subs: readonly SubSource[
       let shownGroup = showAll ? group : group.slice(0, 1);
       // SELECT DISTINCT may only sort by a key it selects (PostgreSQL's rule, which QueryLens enforces) — so select it.
       const by = order?.by;
-      if (distinct && by?.k === 'col' && !shownGroup.some((r) => r.name === by.ref.name)) shownGroup = [...shownGroup, by.ref];
+      if (distinct && by?.k === 'col' && !shownGroup.some((r) => renderRef(r) === renderRef(by.ref))) shownGroup = [...shownGroup, by.ref];
       if (distinct && by?.k === 'agg' && !items.some((a) => aggKey(a) === aggKey(by.agg))) items = [...items, by.agg];
       return {
         kind: 'aggregate',
         ...(distinct ? { distinct } : {}),
-        table: t.name,
+        table: from.table,
+        ...(from.joins ? { joins: from.joins } : {}),
         group,
         shownGroup,
         aggs: items,
@@ -623,7 +637,8 @@ const joinTypeArb = fc.oneof({ weight: 3, arbitrary: fc.constant<JoinStep['type'
  * `ON` may be written first. A LEFT JOIN with a WHERE on its right-hand table is where predicate pushdown must hold
  * back (a NULL-padded row would be filtered before it exists), so the WHERE ranges over every table in the query.
  */
-export function joinArb(t: TableSpec, u: TableSpec, w: TableSpec, pool: Pool, subs: readonly SubSource[] = []): fc.Arbitrary<Query> {
+/** The chain a join query reads: `t [LEFT] JOIN u ON …`, and sometimes `[LEFT] JOIN w ON …` after it — with every column it brings into scope. */
+function chainArb(t: TableSpec, u: TableSpec, w: TableSpec): fc.Arbitrary<{ joins: JoinStep[]; all: Ref[] }> {
   const tRefs = refsOf(t, true);
   const uRefs = refsOf(u, true);
   const wRefs = refsOf(w, true);
@@ -640,8 +655,11 @@ export function joinArb(t: TableSpec, u: TableSpec, w: TableSpec, pool: Pool, su
     { weight: 3, arbitrary: toU.map((a) => [a]) },
     { weight: 2, arbitrary: fc.tuple(toU, toW).map(([a, b]) => [a, b]) },
   );
-  return chain.chain((joins) => {
-    const all = joins.length === 1 ? [...tRefs, ...uRefs] : [...tRefs, ...uRefs, ...wRefs];
+  return chain.map((joins) => ({ joins, all: joins.length === 1 ? [...tRefs, ...uRefs] : [...tRefs, ...uRefs, ...wRefs] }));
+}
+
+export function joinArb(t: TableSpec, u: TableSpec, w: TableSpec, pool: Pool, subs: readonly SubSource[] = []): fc.Arbitrary<Query> {
+  return chainArb(t, u, w).chain(({ joins, all }) => {
     return fc
       .record({
         proj: uniqueRefs(all, 1, 5),
@@ -669,6 +687,11 @@ export function joinArb(t: TableSpec, u: TableSpec, w: TableSpec, pool: Pool, su
         ...page,
       }));
   });
+}
+
+/** `GROUP BY` / aggregates / `HAVING` / `ORDER BY` over a join chain (plan.md §26 Feature 1, slice c). */
+export function joinAggregateArb(t: TableSpec, u: TableSpec, w: TableSpec, pool: Pool, subs: readonly SubSource[] = []): fc.Arbitrary<Query> {
+  return chainArb(t, u, w).chain(({ joins, all }) => aggregateOver(all, pool, subs, { table: t.name, joins }));
 }
 
 /* -------------------------------------------------------------------------- */
@@ -822,7 +845,7 @@ export const tablesArb: fc.Arbitrary<[TableSpec, TableSpec, TableSpec]> = tableT
   tableU(t).chain((u) => tableW(u).map((w): [TableSpec, TableSpec, TableSpec] => [t, u, w])),
 );
 
-export const sessionArb = (final: 'select' | 'aggregate' | 'join' | 'any' = 'any'): fc.Arbitrary<Session> =>
+export const sessionArb = (final: 'select' | 'aggregate' | 'join' | 'join-aggregate' | 'any' = 'any'): fc.Arbitrary<Session> =>
   tablesArb.chain(([t, u, w]) => {
     const pool = poolOf([t, u, w]);
     // An `IN (subquery)` may read any of the three — `t` itself included, which is still uncorrelated.
@@ -835,7 +858,9 @@ export const sessionArb = (final: 'select' | 'aggregate' | 'join' | 'any' = 'any
           ? aggregateArb(t, pool, subs)
           : final === 'join'
             ? joinArb(t, u, w, pool, subs)
-            : fc.oneof(selectArb(t, pool, subs), aggregateArb(t, pool, subs), joinArb(t, u, w, pool, subs))
+            : final === 'join-aggregate'
+              ? joinAggregateArb(t, u, w, pool, subs)
+              : fc.oneof(selectArb(t, pool, subs), aggregateArb(t, pool, subs), joinArb(t, u, w, pool, subs), joinAggregateArb(t, u, w, pool, subs))
     ) as fc.Arbitrary<ReadQuery>;
     return fc
       .tuple(fc.array(write, { minLength: 0, maxLength: 3 }), read)

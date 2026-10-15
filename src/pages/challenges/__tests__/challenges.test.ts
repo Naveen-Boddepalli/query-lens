@@ -137,7 +137,7 @@ describe('challenges', () => {
       expect(solved('and-before-or', 'SELECT id FROM users WHERE id = 3 AND age > 30 OR id = 4 AND age > 30;')).toBe(true);
     });
 
-    it('every-clause refuses the combinations the engine does not run, which is why they never pass', () => {
+    it('every-clause has one table, so a JOIN cannot be the way to more clauses — it is refused, and never passes', () => {
       const c = challengeById('every-clause')!;
       for (const sql of [
         'SELECT DISTINCT age FROM users JOIN orders ON users.id = orders.user_id WHERE age > 20 ORDER BY age LIMIT 5 OFFSET 1;',

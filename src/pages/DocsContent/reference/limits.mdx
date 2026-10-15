@@ -138,7 +138,8 @@ concept explanation.
   leaves the whole `WHERE` clause as a residual filter above the chain for now, correct either way, just
   not yet narrowed into any one step's own scan.
 - `ORDER BY` sorts the joined rows, in a `Sort` above the whole chain that spills to scratch pages past every joined
-  table's heap. Cannot combine with `GROUP BY` or an aggregate in the SELECT list yet.
+  table's heap; `GROUP BY` and aggregates group them, in an aggregate above the chain (a sort aggregate spills
+  there too). The estimate of how many groups there are looks each grouped column up in its own table.
 - **A chain of two or more plain inner `JOIN`s actually runs in whichever left-deep order costs least**
   (plan.md §25.4 C5 slice 3), not necessarily the order it was written in — a Selinger-style dynamic-
   programming search over the *subset lattice* (plan.md §25.4 C4) finds it, the plan-stage narration says

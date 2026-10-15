@@ -2816,7 +2816,7 @@ the full gate and an oracle extension:
 |---|---|---|
 | a | `ORDER BY` above an aggregate: a grouped column or an aggregate — selected or not (`aggregateSpecsOf` computes it) — sorted after `HAVING`. A sort aggregate and the `Sort` above it spill to separate scratch blocks. | **Built, 2026-10-15** |
 | b | `ORDER BY` above a `JOIN`, by a qualified column; the Sort's scratch block moves past every joined heap. | **Built, 2026-10-15** |
-| c | `GROUP BY`, `HAVING` and aggregates above a `JOIN`. | Next |
+| c | `GROUP BY`, `HAVING` and aggregates above a `JOIN`. | **Built, 2026-10-15** |
 
 **Slice a, checked by:** unit tests (the plan shape, a crafted table whose groups arrive in the opposite order to
 the answer — an earlier seed-data version let a missing aggregate pass unnoticed — NULL groups, HAVING, the
@@ -2837,6 +2837,19 @@ counted every pass, not the first); and a `LEFT JOIN` onto an empty table reserv
 next `sort-merge` step sorts, so its two sides shared page ids (a test checks four sorts' pages are disjoint).
 The course map's SQL row, stale since C3 (it said "one JOIN" and listed outer joins and subqueries as missing), is
 corrected.
+
+**Slice c, checked by:** posts per author over a `LEFT JOIN` — zero for the author with none — identical under all
+five join algorithms and both aggregate strategies; HAVING and a join-wide aggregate; the plan shape; the qualifier
+and grouping refusals; and an EXPLAIN estimate of the groups, which now counts a grouped column's distinct values in
+its own table (looked up in the FROM table, where the column does not exist, it came out as 1). The oracle
+generates aggregate queries over its join chains — grouping, HAVING, ORDER BY and all — as a fourth kind of read;
+an unqualified group key fails two oracle suites, and three 10,000-case seeds are clean. Coverage thresholds for
+ordered joins and ordered groups come down (measured 11–20 and 21–33) now that reads split four ways. **One more
+bug found on the way, older than this feature:** `SELECT name FROM users HAVING COUNT(*) > 1` answered one row with
+`name: null` instead of being refused — the grouping check never looked at `HAVING`'s aggregates. Fixed and pinned.
+**Feature 1 is done:** all eight optional parts of a `SELECT` run together; what still refuses a query is what it
+means (an ungrouped column, a missing table name, DISTINCT sorting by an unselected column), never which clauses it
+has. The *every-clause* challenge stays on its one-table database and asks for all seven parts that has.
 
 ---
 
