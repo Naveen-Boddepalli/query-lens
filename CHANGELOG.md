@@ -7,9 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [2.0.0-rc.1] - 2026-10-15
+## [2.0.0-rc.2] - 2026-10-15
 
-The release candidate for 2.0: everything built on `version/v2` since 1.0.0, merged with `main`. It is a candidate,
+The release candidate for 2.0: everything built on `version/v2` since 1.0.0, merged with `main`. (It is the second
+candidate: the first, rc.1, was deployed and withdrawn — see the first entry under *Fixed*.) It is a candidate,
 not 2.0.0, because RELEASING.md holds 2.0.0 for the whole of plan.md §25.8's 2.0 checklist, and one item there —
 the custom domain, the launch post, and the CLI, engine and MCP packages on npm — is still open (the owner's
 decision, 2026-10-15). In short:
@@ -448,6 +449,18 @@ decision, 2026-10-15). In short:
   beside it. Total is 392.2 of 424 kB.
 
 ### Fixed
+- **`pnpm release-notes` cut its output at 64 kB when piped.** It wrote the notes and called `process.exit()`, which
+  ends the process before a pipe has taken more than its first 64 kB — and these notes are 76 kB, so `… | gh release
+  create --notes-file -` would have published two thirds of them. It now sets the exit code and lets the write finish.
+- **Every visit after the first failed to load.** The service worker precached the app's shell as `/index.html` and
+  answered every navigation with it. Cloudflare answers `/index.html` with a redirect to `/`, so what was cached was a
+  redirect, and a browser refuses a redirected response for a navigation: once the worker had installed, the next
+  load of any page ended in a network error. Every test passed, because they run against `vite preview`, which never
+  redirects. The worker now caches the shell as `/`, never hands a navigation a redirected response, and leaves the
+  platform's own `404.html` uncached; the preview server now redirects `/name.html` the way Cloudflare does, so the
+  offline tests reproduce the failure with the old worker (all three failed with `net::ERR_FAILED`) and pass with
+  the new one, and a new test holds that nothing the worker precaches is an `.html` path. A browser holding the
+  broken worker fetches the new one on its next navigation (`sw.js` is served `max-age=0`) and recovers.
 - **A query under the optimal policy behaved as FIFO, while its narration said otherwise.** Bélády's policy evicts
   the page whose next use is farthest away, so it needs the future; the sandbox is handed a reference string, but a
   query had none, and the policy fell back to evicting the oldest page — with every eviction still narrated as "its
@@ -552,6 +565,11 @@ decision, 2026-10-15). In short:
   row, and only TRUE passes a filter — so `SELECT`s returned, and `DELETE`s destroyed, rows the predicate
   excludes. Only two-literal comparisons fold now. Found by the oracle; an existing unit test that asserted
   the old behaviour was rewritten.
+
+## [2.0.0-rc.1] - 2026-10-15
+
+Deployed to production at `c2b79e8` and withdrawn within the hour, never tagged or published: its service worker broke
+every visit after the first. Everything it held is in 2.0.0-rc.2, above, with that fixed.
 
 ## [1.0.0] - 2026-09-23
 
@@ -1387,7 +1405,8 @@ the plan for what comes next is §25. (The tag marks the deployed commit; this v
 - Tested CSP security headers
 - 326 unit tests, 14 end-to-end tests
 
-[Unreleased]: https://github.com/Naveen-Boddepalli/query-lens/compare/v2.0.0-rc.1...HEAD
-[2.0.0-rc.1]: https://github.com/Naveen-Boddepalli/query-lens/releases/tag/v2.0.0-rc.1
+[Unreleased]: https://github.com/Naveen-Boddepalli/query-lens/compare/v2.0.0-rc.2...HEAD
+[2.0.0-rc.2]: https://github.com/Naveen-Boddepalli/query-lens/releases/tag/v2.0.0-rc.2
+[2.0.0-rc.1]: https://github.com/Naveen-Boddepalli/query-lens/commit/c2b79e8
 [1.0.0]: https://github.com/Naveen-Boddepalli/query-lens/releases/tag/v1.0.0
 [0.1.0]: https://github.com/Naveen-Boddepalli/QueryLens/releases/tag/v0.1.0

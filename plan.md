@@ -2740,7 +2740,7 @@ other items depends on the result, so they proceed in parallel; only 2.2 waits.
 
 | Item | Verdict | Earliest | Trigger to revisit |
 |---|---|---|---|
-| **Release `2.0.0-rc.1`** | **Decided, 2026-10-15 (owner)** — a release candidate, not 2.0.0: RELEASING.md holds 2.0.0 for the whole 2.0 checklist, and its launch item (domain, launch post, npm) is open. Cut on `version/v2`; `main` fast-forwards to it and the tag follows CI there, both on the owner's go-ahead | now | The launch item done → cut 2.0.0 |
+| **Release `2.0.0-rc.1`** (withdrawn; **rc.2** ships) | **Decided, 2026-10-15 (owner)** — a release candidate, not 2.0.0. rc.1 (`c2b79e8`) reached production and its service worker broke every visit after the first (it cached Cloudflare's `/index.html` redirect as the shell); withdrawn untagged, fixed and re-cut as rc.2: RELEASING.md holds 2.0.0 for the whole 2.0 checklist, and its launch item (domain, launch post, npm) is open. Cut on `version/v2`; `main` fast-forwards to it and the tag follows CI there, both on the owner's go-ahead | now | The launch item done → cut 2.0.0 |
 | SQLite oracle (A1) | **Built, 2026-09-25** — two engine bugs found on the first run; TLP follows B1 | now | — |
 | §9 study kit (A2) | **Built, 2026-09-24** — runner + `pnpm study`; the instrument travels in the link, not the bundle | now | Pilot completed 2026-10-10 (n=2, laptop + mobile) |
 | **Run the §9 study during 2.0** | **Decided, 2026-09-24** | now | §25.6 checkpoint before 2.2 |
@@ -2852,7 +2852,16 @@ bug found on the way, older than this feature:** `SELECT name FROM users HAVING 
 means (an ungrouped column, a missing table name, DISTINCT sorting by an unselected column), never which clauses it
 has. The *every-clause* challenge stays on its one-table database and asks for all seven parts that has.
 
-### Feature 4 — the release (cut, 2026-10-15)
+### Feature 4 — the release (cut, 2026-10-15; rc.1 withdrawn, rc.2 cut)
+
+**What went wrong on the way, and what changed because of it.** rc.1 was fast-forwarded to `main` and deployed. The
+post-deploy check found the site loading once and then failing on every later navigation: the service worker
+precached `/index.html`, Cloudflare redirects that path to `/`, and a cached redirect cannot answer a navigation.
+None of 608 e2e tests saw it, because `vite preview` never redirects — and RELEASING's preview-deploy rule for these
+very files (`sw.js`, `_headers`, the manifest) was exactly the check skipped. The fix caches the shell as `/`; the
+lasting change is that the preview server now redirects `/name.html` the way the platform does, which made three
+existing offline tests fail on the broken worker. rc.1 stays in the CHANGELOG as deployed-and-withdrawn, untagged.
+
 
 `2.0.0-rc.1`, the owner's choice over 2.0.0 because the 2.0 checklist's launch item is open (§25.9). Cut in one
 commit on `version/v2` per RELEASING.md: `[Unreleased]` became `[2.0.0-rc.1] - 2026-10-15` with a short summary
