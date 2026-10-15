@@ -94,8 +94,9 @@ const BUDGETS: { name: string; test: RegExp; kb: number; note: string }[] = [
   { name: 'trace-ui', test: /^(PlaygroundPage|PlaygroundTour|TraceWorksheet|StageDetail|stageMeta|datasets|datasetCatalogue|types|seed|trace|runQuery|engine|SqlEditor|PlaybackControls|PresenterView|AstTree|BTreePanel|FlowTree|display|SchemaEditor|customDatabase|renderSvg|DownloadSvgButton|astTreeTones|planTreeTones|btreeTones)-/, kb: 56, note: 'Playground + the presenter view + the SQL editor + the shared panel/tree renderers (AstTree, BTreePanel, FlowTree, the two display transformers) plus the engine core (runQuery and the planner split into their own chunks once a third / second route imported them; SqlEditor split once /challenges became a second) plus the preset dataset library, the print worksheet, LIMIT, ORDER BY + the Sort operator, the full DELETE + INSERT + UPDATE write path, GROUP BY + aggregates, JOIN — all three algorithms plus predicate pushdown into its own children, the multi-table schema editor, true vector SVG export (plan.md §22.2, §22.7, §20.3), a second candidate index, and B+Tree leaf-chaining range scans (§23.1)' },
   // The small per-route shells: landing hub, stage index, examples, docs shell,
   // 404, tools index — plus the redesign's shared UI kit (primitives.ts,
-  // PageHeader, Hero) that two or more of them import.
-  { name: 'routes', test: /^(LandingPage|Hero|PageHeader|primitives|StagePage|StagesIndex|StagesLayout|ExamplesPage|DocsLayout|NotFoundPage|ToolsIndexPage)-/, kb: 12, note: 'lazy per-route chunks + shared UI kit, loaded on navigation' },
+  // PageHeader, Hero) that two or more of them import. Raised 12 → 13 for
+  // Phase 2 modern landing page & interactive hero redesign.
+  { name: 'routes', test: /^(LandingPage|Hero|PageHeader|primitives|StagePage|StagesIndex|StagesLayout|ExamplesPage|DocsLayout|NotFoundPage|ToolsIndexPage)-/, kb: 13, note: 'lazy per-route chunks + shared UI kit, loaded on navigation' },
   // The §21.3 feature routes: Gallery, Compare, Settings, Assignments, the
   // buffer-pool sandbox, and what they share — the standalone buffer-trace
   // driver (src/engine/bufferTrace.ts), the panel it renders through, and the
