@@ -4,6 +4,7 @@ Maintained by the orchestrator only. Newest first. Keep under ~100 entries.
 Format: `- [YYYY-MM-DD][T<id>][area] Symptom → Cause → Fix/Rule.`
 Mark entries `(promoted)` once they are copied into GEMINI.md §7.
 
+- [2026-10-15][T7][bundle/routes] Routes packaged into the shared routes chunk (e.g., ExamplesPage) must avoid importing syntax tokenizers or heavy editor components; a targeted regex sanitizer + dangerouslySetInnerHTML highlighter keeps the gzip footprint under 2 kB and prevents dragging heavy parser runtimes into entry navigations.
 - [2026-10-15][T6][budget] Repetitive multi-line JSX markup for metric cards and toolbars across 9 lazy sandbox route chunks inflates cumulative bundle category (standalone-tools) → Consolidate metric definitions into compact tuple mapping arrays rendered in-place to stay safely within the 46.0 kB gzip ceiling (passed at 45.9 kB).
 - [2026-10-15][T5][ui] Replacing emoji status icons in high-density visualizer panels (e.g. buffer frame indicators, btree node badges) → Inconsistent rendering across platforms and color slop → Replace with discrete, monochrome SVG line vectors and structured text chips (HAND, HIT, READ, WRITE, EVICTED).
 - [2026-10-15][T4][budget] Tight 56.0 kB gzip ceiling on trace-ui chunk group → Micro-variations in Tailwind class ordering and JSX button handlers prevent gzip LZ77 dictionary reuse → Standardize class order constants across glassmorphic cards and hoist common SVG path strings to fit within budget (55.97 kB / 56.0 kB limit).
