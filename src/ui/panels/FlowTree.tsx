@@ -66,7 +66,7 @@ function NodeView({ data }: NodeProps<TreeFlowNode>) {
         'cell ql-sheen rounded-lg border px-2.5 py-1.5 text-center shadow-e1',
         data.wide ? 'w-44' : 'min-w-24',
         data.tone,
-        data.highlighted ? 'z-10 scale-[1.03] shadow-glow' : '',
+        data.highlighted ? 'z-10 scale-[1.04] ring-2 ring-accent shadow-glow' : '',
       ].join(' ')}
     >
       <Handle id="in" type="target" position={Position.Top} className="!opacity-0" />

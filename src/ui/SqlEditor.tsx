@@ -16,22 +16,6 @@ import { CodeMirrorEditor } from './CodeMirrorEditor.tsx';
 import { markField, setMarks } from './editorMarks.ts';
 import type { QueryError, Span } from '../engine/index.ts';
 
-/**
- * Extensions are listed explicitly rather than using `basicSetup`: that bundle
- * statically imports search, folding and linting, so its feature flags cannot
- * tree-shake. Spelling out what we need keeps the editor near the payload
- * budget that made CodeMirror the right call over Monaco in the first place.
- */
-/**
- * CodeMirror's `defaultHighlightStyle` is built for light backgrounds — on the
- * dark one its keywords land at 1.6:1, well under the 4.5:1 WCAG needs for body
- * text. Every colour below was checked against the editor's own background.
- *
- * These are the one thing in the app that a CSS variable cannot carry:
- * `HighlightStyle.define` bakes its colours into generated class rules at
- * definition time, so the two themes have to be two objects, swapped through a
- * compartment rather than repainted by the cascade (plan.md §15.3).
- */
 const darkHighlight = HighlightStyle.define([
   { tag: tags.keyword, color: '#d3a0ff' },
   { tag: [tags.name, tags.variableName, tags.propertyName], color: '#e6eaf2' },
@@ -43,7 +27,6 @@ const darkHighlight = HighlightStyle.define([
   { tag: tags.invalid, color: '#ff8f7a' },
 ]);
 
-/** The same eight roles, re-picked against a near-white editor background. */
 const lightHighlight = HighlightStyle.define([
   { tag: tags.keyword, color: '#6b21a8' },
   { tag: [tags.name, tags.variableName, tags.propertyName], color: '#1f2733' },
@@ -55,10 +38,6 @@ const lightHighlight = HighlightStyle.define([
   { tag: tags.invalid, color: '#a4231a' },
 ]);
 
-/**
- * Everything here that *can* be a token is one, so the cascade handles it and
- * only `dark` — which CodeMirror uses to pick its own defaults — needs swapping.
- */
 const editorTheme = (dark: boolean) =>
   EditorView.theme(
     {
@@ -74,11 +53,6 @@ const editorTheme = (dark: boolean) =>
     { dark },
   );
 
-/**
- * One compartment for both, reconfigured together. The extension array stays
- * module-scoped — rebuilding it per render would tear the editor down on every
- * keystroke, which is the reason this file is shaped the way it is.
- */
 const appearance = new Compartment();
 
 const appearanceFor = (theme: 'light' | 'dark') =>
@@ -86,13 +60,6 @@ const appearanceFor = (theme: 'light' | 'dark') =>
     ? [syntaxHighlighting(darkHighlight, { fallback: true }), editorTheme(true)]
     : [syntaxHighlighting(lightHighlight, { fallback: true }), editorTheme(false)];
 
-/**
- * Mod-Enter must be a CodeMirror binding, not a DOM handler: the default keymap
- * binds it to `insertBlankLine` and consumes the event before React sees it.
- * `Prec.highest` puts ours in front. It re-emits as a DOM event so the
- * extension array can stay module-scoped — rebuilding it per render would tear
- * the editor down on every keystroke.
- */
 const RUN_EVENT = 'querylens:run';
 
 const runKeymap = Prec.highest(
@@ -120,15 +87,8 @@ const extensions = [
   keymap.of([...closeBracketsKeymap, ...defaultKeymap, ...historyKeymap]),
   sql({ dialect: SQLite, upperCaseKeywords: true }),
   markField,
-  // Resolved before first paint by public/theme.js, so the editor is never
-  // built with the wrong palette and then corrected.
-  appearance.of(appearanceFor(readInitialTheme())),
+  appearance.of(appearanceFor(typeof document !== 'undefined' && document.documentElement.dataset.theme === 'light' ? 'light' : 'dark')),
 ];
-
-function readInitialTheme(): 'light' | 'dark' {
-  if (typeof document === 'undefined') return 'dark';
-  return document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
-}
 
 export interface SqlEditorProps {
   value: string;
@@ -140,9 +100,14 @@ export interface SqlEditorProps {
   theme: 'light' | 'dark';
 }
 
+const S = 'SELECT * FROM users ';
+const SNIPPETS = [
+  ['WHERE', `${S}WHERE id = 1`],
+  ['LIMIT', `${S}LIMIT 5`],
+] as const;
+
 export function SqlEditor({ value, onChange, onRun, error, activeSpan, theme }: SqlEditorProps) {
   const viewRef = useRef<EditorView | null>(null);
-
   const wrapperRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -153,8 +118,6 @@ export function SqlEditor({ value, onChange, onRun, error, activeSpan, theme }: 
     return () => { el.removeEventListener(RUN_EVENT, handler); };
   }, [onRun]);
 
-  // Reconfigure rather than remount: the editor keeps its document, selection
-  // and undo history across a theme change.
   useEffect(() => {
     viewRef.current?.dispatch({ effects: appearance.reconfigure(appearanceFor(theme)) });
   }, [theme]);
@@ -178,8 +141,20 @@ export function SqlEditor({ value, onChange, onRun, error, activeSpan, theme }: 
         ref={wrapperRef}
         className="ql-sheen overflow-hidden rounded-xl border border-edge bg-surface-2 shadow-e2"
       >
-        <div className="border-b border-edge/70 px-3 py-1.5">
+        <div className="flex items-center justify-between border-b border-edge/70 px-3 py-1.5">
           <span className="font-mono text-label text-ink-dim">query.sql</span>
+          <div className="flex gap-1 font-mono text-label">
+            {SNIPPETS.map(([label, q]) => (
+              <button
+                key={label}
+                type="button"
+                onClick={() => { onChange(q); }}
+                className="rounded border border-edge bg-surface-2 px-1.5 py-0.5 text-ink-dim hover:text-ink"
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
         <CodeMirrorEditor
           value={value}
@@ -194,9 +169,9 @@ export function SqlEditor({ value, onChange, onRun, error, activeSpan, theme }: 
       {error && (
         <div
           role="alert"
-          className="rounded-lg border border-evict/60 bg-evict/10 px-3 py-2 text-label shadow-e1"
+          className="rounded-xl border border-edge bg-surface-2 px-3 py-2 text-label shadow-e1"
         >
-          <p className="text-ink">{error.message}</p>
+          <p className="font-medium text-evict">{error.message}</p>
           {error.hint && <p className="mt-1 text-ink-dim">{error.hint}</p>}
         </div>
       )}

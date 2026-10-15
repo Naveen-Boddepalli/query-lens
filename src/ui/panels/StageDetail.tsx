@@ -13,8 +13,8 @@ import {
 import { STAGE_META } from '../stageMeta.ts';
 import { CopyButton } from '../CopyButton.tsx';
 import { DownloadPngButton } from '../DownloadPngButton.tsx';
-import { DownloadSvgButton } from '../DownloadSvgButton.tsx';
-import type { FlowNode, SideEdge } from './FlowTree.tsx';
+import { DownloadSvgButton, type DownloadSvgButtonProps } from '../DownloadSvgButton.tsx';
+import type { SideEdge } from './FlowTree.tsx';
 import { AstTree } from './AstTree.tsx';
 import { TONES as AST_TONES } from './astTreeTones.ts';
 import { BTreePanel } from './BTreePanel.tsx';
@@ -115,14 +115,7 @@ export function StageDetail({
   // `svgTree` bundles exactly what `renderSvg` needs: the same `FlowNode`
   // root, tone map and layout flags (`wide`/`compact`/`sideEdges`) each panel
   // already builds for itself, reused here rather than duplicated.
-  const svgTree: {
-    root: FlowNode;
-    tones: Record<string, string>;
-    kindIcons?: Record<string, string>;
-    wide?: boolean;
-    compact?: boolean;
-    sideEdges?: SideEdge[];
-  } | null =
+  const svgTree: Omit<DownloadSvgButtonProps, 'name'> | null =
     stage === 'parse' && state.ast
       ? { root: state.ast, tones: AST_TONES }
       : (stage === 'plan' || stage === 'optimize') && state.plan
@@ -177,36 +170,26 @@ export function StageDetail({
 
         <div className="ml-auto flex flex-wrap items-center gap-2">
           {implemented && <DownloadPngButton target={panelRef} name={stage} />}
-          {svgTree && (
-            <DownloadSvgButton
-              root={svgTree.root}
-              tones={svgTree.tones}
-              name={stage}
-              {...(svgTree.kindIcons ? { kindIcons: svgTree.kindIcons } : {})}
-              {...(svgTree.wide === undefined ? {} : { wide: svgTree.wide })}
-              {...(svgTree.compact === undefined ? {} : { compact: svgTree.compact })}
-              {...(svgTree.sideEdges ? { sideEdges: svgTree.sideEdges } : {})}
-            />
-          )}
+          {svgTree && <DownloadSvgButton name={stage} {...svgTree} />}
           {mermaid && (
             <CopyButton
               text={mermaid}
               label="Copy as Mermaid"
-              title="Copy this tree as a Mermaid flowchart, ready to paste"
+              title="Copy tree as Mermaid flowchart"
             />
           )}
           {plainText && (
             <CopyButton
               text={plainText}
               label="Copy as text"
-              title="Copy this tree as monospace text for a code review or an email"
+              title="Copy tree as text"
             />
           )}
           {explainText && (
             <CopyButton
               text={explainText}
               label="Copy as EXPLAIN"
-              title="Copy the plan with the cost model's estimate next to the actual row count for every operator — this query's own EXPLAIN ANALYZE"
+              title="Copy plan with operator row estimates"
             />
           )}
 
@@ -281,32 +264,26 @@ export function StageDetail({
             <div className="space-y-3">
               {/* Listed root-last: rows are pulled from the top down and travel
                   back up, so reading bottom-to-top follows a single row. */}
-              <ul className="space-y-1.5">
+              <div className="relative pl-4 space-y-1.5 border-l border-dashed border-edge">
                 {[...state.operators].reverse().map((op) => {
                   const active =
                     state.lastEvent?.stage === 'execute' && state.lastEvent.op === op.op;
                   return (
-                    <li
+                    <div
                       key={op.op}
-                      /* plan.md §16.2 item 4. The active operator keeps the
-                         accent and deepens it on hover; the rest take the
-                         neutral lift. Both are `.cell`, so the two never
-                         animate at different speeds. */
-                      className={[
-                        'cell flex items-baseline justify-between rounded-md border px-2.5 py-1.5 font-mono text-label',
-                        active
-                          ? 'border-accent bg-accent/15 text-ink hover:bg-accent/25'
-                          : 'border-edge bg-surface-3 hover:border-ink-dim/50 hover:bg-surface-4',
-                      ].join(' ')}
+                      className={`cell ql-sheen relative flex items-center justify-between rounded-lg border px-2.5 py-1.5 font-mono text-label shadow-e1 ${active ? 'border-accent bg-accent/15 text-ink shadow-glow font-medium' : 'border-edge bg-surface-3 text-ink-dim'}`}
                     >
+                      <span
+                        className={`absolute -left-[21px] h-2 w-2 rounded-full border border-surface ${active ? 'bg-accent' : 'bg-edge'}`}
+                      />
                       <span>{op.op}</span>
-                      <span className={active ? 'text-accent' : 'text-ink-dim'}>
+                      <span className={active ? 'text-accent' : ''}>
                         {op.rowsProduced} row{op.rowsProduced === 1 ? '' : 's'}
                       </span>
-                    </li>
+                    </div>
                   );
                 })}
-              </ul>
+              </div>
               <p className="text-label leading-relaxed text-ink-dim">
                 Volcano model: each operator pulls one row at a time from the one below
                 it. Nothing materialises the whole table — a row travels all the way to
