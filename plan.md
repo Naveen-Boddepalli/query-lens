@@ -2783,12 +2783,49 @@ In the discipline of §20 and [RESEARCH.md §21](RESEARCH.md#21-what-i-deliberat
 - **No bundled or local LLM** (§25.6, RESEARCH.md §44). An MCP server instead.
 - **No distributed subject, no parallel execution** — separate models; a v3 horizon.
 - **No window functions or recursive CTEs** — §4's reasoning stands. v2 adds expressions, `DISTINCT`,
-  `HAVING`, outer joins and an uncorrelated `IN (subquery)`, and stops.
+  `HAVING`, outer joins and an uncorrelated `IN (subquery)`, and stops. *(2026-10-15, decided by the owner: the
+  clauses it already has may also combine — `ORDER BY` with `GROUP BY`, and both with `JOIN` (§26). No new
+  construct; the line above still holds.)*
 - **No Postgres-dialect `EXPLAIN` viewer** (§20.6) and **no APM use case** (§2).
 - **No accounts, no graded submission, no telemetry, no real-time collaboration.** The MCP server runs
   where the user runs it; nothing new leaves the browser.
 - **No Rust / WASM rewrite.**
 - **No claim of affiliation** with any course or institution whose syllabus is used as a checklist (G1).
+
+
+---
+
+## 26. After the v2 merge — fixes, then letting the clauses combine
+
+*Started 2026-10-14, after `main` was merged into `version/v2` (`19f7ec4`).* A full test pass over the merged
+branch — every gate, plus a differential probe of LEFT JOIN, join chains and `IN (subquery)` against SQLite and a
+75,000-input crash fuzz — found six things to fix, all done: `NULL NOT IN (∅)` and unresolved subqueries outside
+`WHERE`'s `AND`/`OR`/`NOT` (`6c70637`, with the oracle extended to C3's shapes), the tour's hand-off race
+(`a7fc063`), CI that retried flaky tests away (`46ce55e`), one browser title for every page (`e3ed2c7`), and docs
+the merge left stale (`d157021`).
+
+### Feature 1 — the clauses combine
+
+The parser refused the commonest query shapes there are: `ORDER BY` with `GROUP BY` (*the biggest accounts
+first*), and either of them, or an aggregate, in a query with a `JOIN` (*posts per author*). Every operator they
+need already existed — `Sort` spilling through the pool, both aggregate strategies, the left-deep `Join` chain — so
+this is plan building, narration and checks, not new SQL (§25.10's note). Three slices, each its own commit with
+the full gate and an oracle extension:
+
+| Slice | What | Status |
+|---|---|---|
+| a | `ORDER BY` above an aggregate: a grouped column or an aggregate — selected or not (`aggregateSpecsOf` computes it) — sorted after `HAVING`. A sort aggregate and the `Sort` above it spill to separate scratch blocks. | **Built, 2026-10-15** |
+| b | `ORDER BY` above a `JOIN`, by a qualified column; the Sort's scratch block moves past every joined heap. | Next |
+| c | `GROUP BY`, `HAVING` and aggregates above a `JOIN`. | After b |
+
+**Slice a, checked by:** unit tests (the plan shape, a crafted table whose groups arrive in the opposite order to
+the answer — an earlier seed-data version let a missing aggregate pass unnoticed — NULL groups, HAVING, the
+refusals, and that the two sorts' scratch pages never overlap), and the oracle, which now generates `ORDER BY` on
+aggregate queries by a grouped column or any aggregate, under both strategies (coverage asserts all four
+combinations). A Sort that cannot read an aggregate's key fails three oracle suites. The oracle cannot see the
+order when the sort key is not selected — only the rows — which is what the crafted unit test is for. The
+`every-clause` challenge (was `six-clauses`, never released) now asks for seven clauses; the grammar diagram lets
+`ORDER BY` take an aggregate call.
 
 ---
 

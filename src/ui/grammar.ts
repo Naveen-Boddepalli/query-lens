@@ -62,7 +62,8 @@ export const GRAMMAR: GrammarRule[] = [
       opt(lit('WHERE'), rule('expr')),
       opt(lit('GROUP'), lit('BY'), rule('identifier'), repeat(lit(','), rule('identifier'))),
       opt(lit('HAVING'), rule('expr')),
-      opt(lit('ORDER'), lit('BY'), rule('identifier'), opt(choice([lit('ASC')], [lit('DESC')]))),
+      // An aggregate call sorts the groups (plan.md §26 Feature 1, slice a); the engine then checks the query groups.
+      opt(lit('ORDER'), lit('BY'), choice([rule('identifier')], [rule('aggregateCall')]), opt(choice([lit('ASC')], [lit('DESC')]))),
       opt(lit('LIMIT'), rule('number'), opt(lit('OFFSET'), rule('number'))),
       opt(lit(';')),
     ],

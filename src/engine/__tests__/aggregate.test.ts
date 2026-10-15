@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { runQuery } from '../runQuery.ts';
 import { createSeedDatabase } from '../seed.ts';
 import { DATASETS } from '../datasets.ts';
+import { DEFAULT_ENGINE_OPTIONS } from '../types.ts';
 import type { StepEvent } from '../types.ts';
 
 const db = () => createSeedDatabase();
@@ -129,9 +130,90 @@ describe('Aggregates — errors, same discipline as SELECT', () => {
     expect(out.error?.message).toMatch(/SUM\(\*\).*not supported/);
   });
 
-  it('rejects ORDER BY combined with GROUP BY, at parse time', () => {
-    const out = run('SELECT name, COUNT(*) FROM users GROUP BY name ORDER BY name');
-    expect(out.error?.message).toMatch(/ORDER BY with GROUP BY/);
+  it('rejects an ORDER BY on a column the groups do not have one value of', () => {
+    const out = run('SELECT age, COUNT(*) FROM users GROUP BY age ORDER BY name');
+    expect(out.error?.message).toMatch(/`name` is not aggregated and is not in the GROUP BY list/);
+  });
+
+  it('rejects an aggregate in ORDER BY when nothing groups the rows', () => {
+    expect(run('SELECT name FROM users ORDER BY COUNT(*)').error?.message).toMatch(/needs a GROUP BY or an aggregate/);
+  });
+
+  it('checks the column an ORDER BY aggregate reads', () => {
+    expect(run('SELECT age FROM users GROUP BY age ORDER BY SUM(nope)').error?.message).toMatch(/no column called `nope`/);
+  });
+});
+
+describe('ORDER BY over groups (plan.md §26 Feature 1, slice a)', () => {
+  const ages = () => db().tables.users!.rows.map((r) => r.age as number);
+  const countsByAge = () => {
+    const m = new Map<number, number>();
+    for (const a of ages()) m.set(a, (m.get(a) ?? 0) + 1);
+    return m;
+  };
+
+  it.each(['hash', 'sort'] as const)('sorts the groups by a grouped column, either way (%s aggregate)', (aggregateStrategy) => {
+    const options = { ...DEFAULT_ENGINE_OPTIONS, aggregateStrategy };
+    const asc = runQuery('SELECT age, COUNT(*) FROM users GROUP BY age ORDER BY age', db(), options).rows.map((r) => r.age);
+    expect(asc).toEqual([...countsByAge().keys()].sort((a, b) => a - b));
+    const desc = runQuery('SELECT age, COUNT(*) FROM users GROUP BY age ORDER BY age DESC', db(), options).rows.map((r) => r.age);
+    expect(desc).toEqual([...asc].reverse());
+  });
+
+  it('sorts by an aggregate, and a LIMIT then keeps the top groups', () => {
+    const { rows } = run('SELECT age, COUNT(*) FROM users GROUP BY age ORDER BY COUNT(*) DESC LIMIT 3');
+    const counts = rows.map((r) => r['COUNT(*)'] as number);
+    expect(counts).toEqual([...countsByAge().values()].sort((a, b) => b - a).slice(0, 3));
+  });
+
+  it('sorts by an aggregate nobody selected — the aggregate computes it anyway, and Project drops it', () => {
+    // Groups arrive a, b, c and hold 1, 2 and 3 rows, so only a real count puts them in the opposite order.
+    const t = { tables: { t: { name: 't', columns: ['k'], rows: ['a', 'b', 'b', 'c', 'c', 'c'].map((k) => ({ k })) } } };
+    for (const aggregateStrategy of ['hash', 'sort'] as const) {
+      const { rows } = runQuery('SELECT k FROM t GROUP BY k ORDER BY COUNT(*) DESC', t, { ...DEFAULT_ENGINE_OPTIONS, aggregateStrategy });
+      expect(rows).toEqual([{ k: 'c' }, { k: 'b' }, { k: 'a' }]);
+    }
+  });
+
+  it('puts a NULL group last ascending and first descending, as a plain ORDER BY does', () => {
+    const t = { tables: { t: { name: 't', columns: ['k'], rows: [{ k: 2 }, { k: null }, { k: 1 }, { k: 2 }] } } };
+    expect(runQuery('SELECT k, COUNT(*) FROM t GROUP BY k ORDER BY k', t).rows.map((r) => r.k)).toEqual([1, 2, null]);
+    expect(runQuery('SELECT k, COUNT(*) FROM t GROUP BY k ORDER BY k DESC', t).rows.map((r) => r.k)).toEqual([null, 2, 1]);
+  });
+
+  it('sorts what HAVING kept', () => {
+    const { rows, error } = run('SELECT age, COUNT(*) FROM users GROUP BY age HAVING COUNT(*) > 1 ORDER BY COUNT(*)');
+    expect(error).toBeUndefined();
+    const counts = rows.map((r) => r['COUNT(*)'] as number);
+    expect(counts.length).toBeGreaterThan(1);
+    expect(counts.every((c) => c > 1)).toBe(true);
+    expect(counts).toEqual([...counts].sort((a, b) => a - b));
+  });
+
+  it('plans the Sort above the aggregate, under the Project', () => {
+    const { events } = run('SELECT age, COUNT(*) FROM users GROUP BY age ORDER BY COUNT(*) DESC');
+    const plan = [...events].reverse().find((e) => e.stage === 'plan')!;
+    expect(JSON.stringify(plan.planTree)).toMatch(/"op":"Project".*"op":"Sort".*"op":"HashAggregate".*"op":"SeqScan"/);
+  });
+
+  it('gives the aggregate’s own sort and the ORDER BY sort separate scratch pages', () => {
+    const options = { ...DEFAULT_ENGINE_OPTIONS, aggregateStrategy: 'sort' as const, bufferFrames: 3 };
+    const { events, rows } = runQuery('SELECT name, COUNT(*) FROM users GROUP BY name ORDER BY COUNT(*) DESC', db(), options);
+    expect(rows.length).toBeGreaterThan(1);
+    const firstSort = events.findIndex((e) => e.stage === 'execute' && e.op === 'Sort');
+    const firstAggregate = events.findIndex((e) => e.stage === 'execute' && e.op === 'SortAggregate');
+    expect(firstAggregate).toBeGreaterThan(-1);
+    expect(firstSort).toBeGreaterThan(firstAggregate);
+    const heapAndIndexPages = Math.max(
+      ...events.slice(0, firstAggregate).flatMap((e) => (e.stage === 'buffer' && 'pageId' in e ? [e.pageId] : [])),
+    );
+    const scratch = (from: number, to: number) =>
+      new Set(events.slice(from, to).flatMap((e) => (e.stage === 'buffer' && 'pageId' in e && e.pageId > heapAndIndexPages ? [e.pageId] : [])));
+    const aggregatePages = scratch(firstAggregate, firstSort);
+    const sortPages = scratch(firstSort, events.length);
+    expect(aggregatePages.size).toBeGreaterThan(0);
+    expect(sortPages.size).toBeGreaterThan(0);
+    expect([...sortPages].filter((p) => aggregatePages.has(p))).toEqual([]);
   });
 });
 

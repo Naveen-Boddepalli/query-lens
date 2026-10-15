@@ -54,10 +54,12 @@ export interface ExecContext {
    */
   sortMergeBases?: Map<Plan, { leftBase: number; rightBase: number }>;
   /**
-   * First page id of a `SortDistinct`'s own spill block (plan.md §25.4 B2) — placed after
-   * every page any other sort in the plan uses, so two sorts never share scratch pages.
-   * Set by `runQuery.ts`, which sized the buffer pool for it.
+   * First page id of each sort's own spill block — a `SortAggregate`'s, ORDER BY's `Sort`'s (plan.md §26 Feature 1)
+   * and a `SortDistinct`'s (plan.md §25.4 B2) — laid out one after another past every heap, index and sort-merge
+   * block, so two sorts never share scratch pages. Set by `runQuery.ts`, which sized the buffer pool for them.
    */
+  aggregateSortBase?: number;
+  sortBase?: number;
   distinctBase?: number;
 }
 
@@ -626,7 +628,7 @@ function sortAggregate(
           {
             pool: ctx.pool,
             emit: ctx.emit,
-            base: pageCountFor(ctx.heap, ctx.trees),
+            base: ctx.aggregateSortBase ?? pageCountFor(ctx.heap, ctx.trees),
             memPages: ctx.options.bufferFrames,
             rowsPerPage: ctx.options.rowsPerPage,
           },
@@ -688,7 +690,7 @@ function sort(plan: Extract<Plan, { op: 'Sort' }>, child: Operator, ctx: ExecCon
         rows = externalMergeSort(materialised, (r) => [r[plan.column] ?? null], plan.direction, {
           pool: ctx.pool,
           emit: ctx.emit,
-          base: pageCountFor(ctx.heap, ctx.trees),
+          base: ctx.sortBase ?? pageCountFor(ctx.heap, ctx.trees),
           memPages: ctx.options.bufferFrames,
           rowsPerPage: ctx.options.rowsPerPage,
         });

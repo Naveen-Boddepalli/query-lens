@@ -255,8 +255,8 @@ test('a query challenge about how a query is read opens the parser on what was w
   await expect(page.getByText(/\(id = 1 OR id = 3 OR id = 4\) AND age > 30/).first()).toBeVisible();
 });
 
-test('the six-clause challenge links to the select rule of the grammar', async ({ page }) => {
-  await page.goto('/challenges/six-clauses');
+test('the every-clause challenge links to the select rule of the grammar', async ({ page }) => {
+  await page.goto('/challenges/every-clause');
   await page.getByRole('button', { name: 'Run & check' }).click();
   await expect(page.getByText(/Not there yet/)).toBeVisible();
   await page.getByRole('link', { name: /See the select rule in the Grammar/ }).click();

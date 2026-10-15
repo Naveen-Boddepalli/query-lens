@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`ORDER BY` with `GROUP BY`** (plan.md §26, Feature 1 slice a). A query that groups can now sort its groups, by a
+  grouped column or an aggregate — selected or not: `SELECT account FROM transactions GROUP BY account ORDER BY
+  SUM(amount) DESC LIMIT 5` is the five biggest accounts. The plan puts the `Sort` above the aggregate and its
+  `HAVING`, and says it is ordering groups (and, for an aggregate nobody selected, that the aggregate computes it
+  so there is something to sort by). A sort aggregate and the `Sort` above it spill to scratch pages of their own.
+  `ORDER BY` on a column the groups do not have one value of is refused the way PostgreSQL refuses it, and so is
+  an aggregate in `ORDER BY` with nothing to group. The SQLite oracle generates these queries under both
+  aggregate strategies. The *Six clauses in one SELECT* challenge becomes *Seven clauses* (`/challenges/every-clause`).
 - **Recovery as a trace in three stages** (plan.md §25.4 E3). `/tools/recovery` and the Playground's Durability dialog show analysis, redo and undo as a strip of stages with a slider that walks a recovery one row at a time, in the order the machine took them, saying what each step was and marking it in the passes below. It rests at the end, where the three panels have always been.
 - **An InnoDB column in the isolation matrix** (plan.md §25.4 D5). `/tools/isolation` runs the ten Hermitage anomalies on a third engine, built level by level from what MySQL's InnoDB does: dirty reads under locks at `READ UNCOMMITTED`, a snapshot for each statement at `READ COMMITTED`, and at `REPEATABLE READ` one snapshot for plain reads but the latest committed row for writes, so a lost update gets through where snapshots refuse it. It is held against what MySQL publishes — 19 of the 40 cells; the others are computed and marked *not published* — and agrees on all but one, declared.
 - **An accessibility audit of each page's states, in both themes and at phone width** (plan.md §H6). `e2e/auditStates.spec.ts` presses Run on thirty-four pages, shows each chart as a table, and chooses each radio button and tab in turn, scanning with axe after every one. The route audit (`e2e/audit.spec.ts`) now runs each route in the light and the dark palette at 1280 and 360 px.

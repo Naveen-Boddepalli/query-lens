@@ -68,6 +68,8 @@ describe('the generators reach what the oracle is meant to check', () => {
     chains: 0,
     /** Statements with an `IN (subquery)` whose subquery found nothing — where `NULL NOT IN (∅)` is TRUE. */
     emptySubqueries: 0,
+    /** Aggregate queries with an ORDER BY that returned two or more groups, by aggregate strategy (plan.md §26 F1a). */
+    orderedGroups: new Map<string, number>(),
   };
 
   for (const [{ tables: initial, steps }, options] of sessions) {
@@ -129,6 +131,10 @@ describe('the generators reach what the oracle is meant to check', () => {
         stats.reads += 1;
         if (result.rows.length > 0) stats.readsWithRows += 1;
         if (q.kind === 'join') stats.joins.set(options.joinStrategy ?? 'nested-loop', (stats.joins.get(options.joinStrategy ?? 'nested-loop') ?? 0) + (result.rows.length > 0 ? 1 : 0));
+        if (q.kind === 'aggregate' && q.order && result.rows.length > 1) {
+          const key = `${options.aggregateStrategy ?? 'hash'}:${q.order.by.k}`;
+          stats.orderedGroups.set(key, (stats.orderedGroups.get(key) ?? 0) + 1);
+        }
         if (q.kind === 'aggregate' && q.group.length > 0) stats.aggregates.set(options.aggregateStrategy ?? 'hash', (stats.aggregates.get(options.aggregateStrategy ?? 'hash') ?? 0) + (result.rows.length > 0 ? 1 : 0));
       }
     }
@@ -205,6 +211,12 @@ describe('the generators reach what the oracle is meant to check', () => {
     // single joins do — measured at 83 with the fixed seed above.
     expect(stats.chains, 'two-step join chains that returned rows').toBeGreaterThan(50);
     expect(stats.emptySubqueries, 'statements whose IN subquery found nothing').toBeGreaterThan(N / 30);
+  });
+
+  it('sorts groups by a grouped column and by an aggregate, under both aggregate strategies (plan.md §26 F1a)', () => {
+    for (const key of ['hash:col', 'hash:agg', 'sort:col', 'sort:agg']) {
+      expect(stats.orderedGroups.get(key) ?? 0, `ordered groups ${key}`).toBeGreaterThan(20);
+    }
   });
 
   it('writes through UNIQUE indexes without tripping them (plan.md §25.4 B3c)', () => {

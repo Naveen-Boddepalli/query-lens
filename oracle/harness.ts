@@ -12,7 +12,7 @@ import { DEFAULT_ENGINE_OPTIONS } from '../src/engine/types.ts';
 import type { Database, EngineOptions, RunResult, Row } from '../src/engine/types.ts';
 import { multisetDiff, sequenceDiff, subMultisetDiff } from './compare.ts';
 import type { Tuple } from './compare.ts';
-import { isWrite, outputKeys, renderQuery } from './model.ts';
+import { isWrite, orderKeyOf, outputKeys, renderQuery } from './model.ts';
 import type { Query, ReadQuery, TableSpec, WriteQuery } from './model.ts';
 import { sqliteRead, sqliteTable, sqliteWith, sqliteWrite, tupleOf } from './sqlite.ts';
 
@@ -94,10 +94,10 @@ const withoutLimit = (q: ReadQuery): ReadQuery => {
   return rest;
 };
 
-/** Index of the ORDER BY column within the SELECT list, or -1 when it is not projected (or there is no ORDER BY). */
+/** Index of the ORDER BY key within the SELECT list, or -1 when it is not projected (or there is no ORDER BY). */
 function orderKeyIndex(q: ReadQuery, tables: readonly TableSpec[]): number {
-  if (q.kind !== 'select' || !q.order) return -1;
-  return outputKeys(q, tables).indexOf(q.order.ref.name);
+  const key = orderKeyOf(q);
+  return key === null ? -1 : outputKeys(q, tables).indexOf(key);
 }
 
 /** `null` when QueryLens's answer to a read agrees with SQLite's; otherwise why not. */
@@ -110,7 +110,7 @@ export function checkRead(q: ReadQuery, tables: readonly TableSpec[], ql: readon
     if (bag) return bag;
     if (keyAt >= 0) {
       const seq = sequenceDiff(ql.map((t) => t[keyAt]!), limited.map((t) => t[keyAt]!));
-      if (seq) return `ORDER BY ${q.kind === 'select' ? q.order!.ref.name : ''}: ${seq}`;
+      if (seq) return `ORDER BY ${orderKeyOf(q) ?? ''}: ${seq}`;
     }
     return null;
   }

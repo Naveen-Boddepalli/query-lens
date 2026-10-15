@@ -1,5 +1,6 @@
 import type { Emit } from '../trace.ts';
 import type { JoinAlgorithm, Table } from '../types.ts';
+import { selectItemKey } from '../parser/index.ts';
 import type { SelectStatement } from '../parser/index.ts';
 import { buildAggregatePlan, buildJoinPlan, buildPlan, distinctNodeFor, isAggregateQuery, projectListFor } from './buildPlan.ts';
 import { estimatePlan, rootEstimate } from './cost.ts';
@@ -222,10 +223,17 @@ export function emitPlanEvents(
       direction: ast.orderBy.direction,
       child: current,
     };
+    const grouped = isAggregateQuery(ast);
     emit(
-      `ORDER BY becomes a Sort above that: every row, ordered by \`${ast.orderBy.column}\` ${
+      `ORDER BY becomes a Sort above that: every ${grouped ? 'group' : 'row'}, ordered by \`${ast.orderBy.column}\` ${
         ast.orderBy.direction === 'asc' ? 'ascending' : 'descending'
-      }. Unlike everything below it, Sort cannot produce a row until it has seen all of them.`,
+      }.${
+        grouped
+          ? ast.orderBy.aggregate && !(ast.select.kind === 'columns' && ast.select.items.some((i) => selectItemKey(i) === ast.orderBy!.column))
+            ? ` The aggregate computes \`${ast.orderBy.column}\` for each group even though nothing selects it, so there is something to sort by; the Project above drops it.`
+            : ' It sorts what the aggregate produced, so it only has as many rows to order as there are groups.'
+          : ''
+      } Unlike everything below it, Sort cannot produce a row until it has seen all of them.`,
       { stage: 'plan', planTree: display(current) },
     );
   }

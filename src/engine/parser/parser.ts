@@ -89,7 +89,7 @@ import type {
   UpdateAssignment,
   UpdateStatement,
 } from './ast.ts';
-import { selectItemKey, walkExpr } from './ast.ts';
+import { aggregateKeyOf, selectItemKey, walkExpr } from './ast.ts';
 import { exprToSql } from './print.ts';
 import { arithmetic, negate } from '../value.ts';
 import { TokenizeError, tokenize } from './tokenizer.ts';
@@ -423,6 +423,55 @@ function checkHavingValidity(
         : 'Without a GROUP BY the whole table is one group, so HAVING can only test aggregates.',
     );
   }
+}
+
+/**
+ * The key after `ORDER BY`: a column, or — in a query that groups — an aggregate call (plan.md §26 Feature 1,
+ * slice a). Grouping turns the rows into groups before the Sort sees them, so there it may only name what a group
+ * has one value of: a grouped column, or an aggregate (selected or not; the aggregate computes it either way).
+ * Without grouping an aggregate has no group to be computed over, and is refused.
+ */
+function parseOrderKey(
+  c: Cursor,
+  select: SelectList,
+  groupBy: GroupByClause | undefined,
+  having: Expr | undefined,
+): { column: string; aggregate?: Extract<Expr, { kind: 'aggregate' }>; span: Span } {
+  const token = c.peek();
+  const grouping =
+    groupBy !== undefined ||
+    having !== undefined ||
+    (select.kind === 'columns' && select.items.some((item) => item.kind === 'aggregate'));
+
+  if (token.type === 'identifier' && AGGREGATE_FNS.has(token.value.toUpperCase()) && c.peekAt(1).type === 'lparen') {
+    c.next();
+    c.next(); // '('
+    const upper = token.value.toUpperCase();
+    const { arg, close } = parseAggregateArgs(c, upper);
+    const span = { from: token.from, to: close.to };
+    if (!grouping) {
+      throw new ParseError(
+        `ORDER BY \`${upper}(…)\` needs a GROUP BY or an aggregate in the SELECT list.`,
+        span,
+        'An aggregate is computed per group. Group the rows first — or sort by a plain column.',
+      );
+    }
+    const aggregate = { kind: 'aggregate' as const, fn: upper as AggregateFn, arg, span };
+    return { column: aggregateKeyOf(aggregate.fn, arg), aggregate, span };
+  }
+
+  const col = c.expectIdentifier('a column name to sort by');
+  const span = { from: col.from, to: col.to };
+  if (grouping && !(groupBy?.columns.some((g) => g.name === col.value) ?? false)) {
+    throw new ParseError(
+      `\`${col.value}\` is not aggregated and is not in the GROUP BY list.`,
+      span,
+      groupBy
+        ? 'ORDER BY sorts the groups, so it may name a grouped column or an aggregate like COUNT(*) — not a plain column.'
+        : 'Without a GROUP BY the whole table is one group, so ORDER BY can only name an aggregate.',
+    );
+  }
+  return { column: col.value, span };
 }
 
 function parseTableRef(c: Cursor): TableRef {
@@ -1130,13 +1179,6 @@ function parseSelectBody(c: Cursor): SelectStatement {
 
   let orderBy: SelectStatement['orderBy'];
   if (c.peek().type === 'keyword' && c.peek().upper === 'ORDER') {
-    if (groupBy) {
-      throw new ParseError(
-        'ORDER BY with GROUP BY is not supported yet.',
-        c.peek(),
-        'GROUP BY on its own still works — sort the grouped results yourself for now.',
-      );
-    }
     if (hasJoin) {
       throw new ParseError(
         'ORDER BY is not supported yet in a query with JOIN.',
@@ -1146,18 +1188,18 @@ function parseSelectBody(c: Cursor): SelectStatement {
     }
     const orderToken = c.next();
     c.expectKeyword('BY', 'after ORDER');
-    const col = c.expectIdentifier('a column name to sort by');
+    const key = parseOrderKey(c, select, groupBy, having);
     // SELECT DISTINCT returns each row once, so a row has no single value of a column that is not in the list
     // to sort it by — PostgreSQL's rule, and the only one that keeps DISTINCT's answer well defined.
-    if (distinct && select.kind === 'columns' && !select.items.some((item) => selectItemKey(item) === col.value)) {
+    if (distinct && select.kind === 'columns' && !select.items.some((item) => selectItemKey(item) === key.column)) {
       throw new ParseError(
-        `For SELECT DISTINCT, ORDER BY \`${col.value}\` must appear in the select list.`,
-        col,
+        `For SELECT DISTINCT, ORDER BY \`${key.column}\` must appear in the select list.`,
+        key.span,
         'Add it to the list, or drop DISTINCT: each distinct row stands for many source rows, so a column that is not selected has no one value to sort it by.',
       );
     }
     let direction: 'asc' | 'desc' = 'asc';
-    let end = col.to;
+    let end = key.span.to;
     if (c.peek().type === 'keyword' && (c.peek().upper === 'ASC' || c.peek().upper === 'DESC')) {
       const dir = c.next();
       direction = dir.upper === 'ASC' ? 'asc' : 'desc';
@@ -1165,7 +1207,12 @@ function parseSelectBody(c: Cursor): SelectStatement {
     }
     // Spans the whole clause including the keyword, like LIMIT — unlike
     // WHERE, whose span is its Expr's own and never includes "WHERE" itself.
-    orderBy = { column: col.value, direction, span: { from: orderToken.from, to: end } };
+    orderBy = {
+      column: key.column,
+      direction,
+      ...(key.aggregate ? { aggregate: key.aggregate } : {}),
+      span: { from: orderToken.from, to: end },
+    };
   }
 
   const limitToken = c.peek().type === 'keyword' && c.peek().upper === 'LIMIT' ? c.next() : undefined;

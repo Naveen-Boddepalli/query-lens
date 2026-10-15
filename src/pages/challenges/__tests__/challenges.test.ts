@@ -49,8 +49,8 @@ describe('challenges', () => {
     'keep-the-unmatched':
       'SELECT authors.name, posts.title FROM authors LEFT JOIN posts ON authors.id = posts.authorId WHERE posts.title IS NULL;',
     'and-before-or': 'SELECT * FROM users WHERE (id = 1 OR id = 3 OR id = 4) AND age > 30;',
-    'six-clauses':
-      'SELECT DISTINCT age, COUNT(*) FROM users WHERE age > 20 GROUP BY age HAVING COUNT(*) >= 1 LIMIT 5 OFFSET 1;',
+    'every-clause':
+      'SELECT DISTINCT age, COUNT(*) FROM users WHERE age > 20 GROUP BY age HAVING COUNT(*) >= 1 ORDER BY age LIMIT 5 OFFSET 1;',
   };
 
   it('has a solution wired for every challenge', () => {
@@ -107,12 +107,13 @@ describe('challenges', () => {
       ['and-before-or', 'SELECT * FROM users WHERE (id = 1 OR id = 3) AND age > 20;'],
       ['and-before-or', 'SELECT * FROM users WHERE (id = 3 OR id = 4 OR id = 5) AND age > 30;'],
       ['and-before-or', 'SELECT * FROM users WHERE (id = 3 OR id = 5) AND age > 30;'],
-      // Five of the six that run together, each time a different one missing (OFFSET cannot stand without a LIMIT).
-      ['six-clauses', 'SELECT DISTINCT age, COUNT(*) FROM users WHERE age > 20 GROUP BY age HAVING COUNT(*) >= 1 LIMIT 5;'],
-      ['six-clauses', 'SELECT age, COUNT(*) FROM users WHERE age > 20 GROUP BY age HAVING COUNT(*) >= 1 LIMIT 5 OFFSET 1;'],
-      ['six-clauses', 'SELECT DISTINCT age, COUNT(*) FROM users GROUP BY age HAVING COUNT(*) >= 1 LIMIT 5 OFFSET 1;'],
-      ['six-clauses', 'SELECT DISTINCT age, COUNT(*) FROM users WHERE age > 20 GROUP BY age LIMIT 5 OFFSET 1;'],
-      ['six-clauses', 'SELECT DISTINCT age FROM users WHERE age > 20 ORDER BY age LIMIT 5 OFFSET 1;'],
+      // Six of the seven that run together, each time a different one missing (OFFSET cannot stand without a LIMIT).
+      ['every-clause', 'SELECT DISTINCT age, COUNT(*) FROM users WHERE age > 20 GROUP BY age HAVING COUNT(*) >= 1 ORDER BY age LIMIT 5;'],
+      ['every-clause', 'SELECT age, COUNT(*) FROM users WHERE age > 20 GROUP BY age HAVING COUNT(*) >= 1 ORDER BY age LIMIT 5 OFFSET 1;'],
+      ['every-clause', 'SELECT DISTINCT age, COUNT(*) FROM users GROUP BY age HAVING COUNT(*) >= 1 ORDER BY age LIMIT 5 OFFSET 1;'],
+      ['every-clause', 'SELECT DISTINCT age, COUNT(*) FROM users WHERE age > 20 GROUP BY age ORDER BY age LIMIT 5 OFFSET 1;'],
+      ['every-clause', 'SELECT DISTINCT age, COUNT(*) FROM users WHERE age > 20 GROUP BY age HAVING COUNT(*) >= 1 LIMIT 5 OFFSET 1;'],
+      ['every-clause', 'SELECT DISTINCT age FROM users WHERE age > 20 ORDER BY age LIMIT 5 OFFSET 1;'],
     ];
     for (const [id, sql] of cheats) {
       it(`${id} rejects: ${sql}`, () => {
@@ -136,10 +137,9 @@ describe('challenges', () => {
       expect(solved('and-before-or', 'SELECT id FROM users WHERE id = 3 AND age > 30 OR id = 4 AND age > 30;')).toBe(true);
     });
 
-    it('six-clauses refuses the combinations the engine does not run, which is why they never pass', () => {
-      const c = challengeById('six-clauses')!;
+    it('every-clause refuses the combinations the engine does not run, which is why they never pass', () => {
+      const c = challengeById('every-clause')!;
       for (const sql of [
-        'SELECT DISTINCT age, COUNT(*) FROM users WHERE age > 20 GROUP BY age HAVING COUNT(*) >= 1 ORDER BY age LIMIT 5 OFFSET 1;',
         'SELECT DISTINCT age FROM users JOIN orders ON users.id = orders.user_id WHERE age > 20 ORDER BY age LIMIT 5 OFFSET 1;',
       ]) {
         const r = runOn(c, sql);
@@ -155,7 +155,7 @@ describe('challenges', () => {
       expect(count('SELECT * FROM users WHERE age > 20 LIMIT 5')).toBe(2);
       expect(count('SELECT * FROM users WHERE age > 20 LIMIT 5 OFFSET 1')).toBe(3);
       expect(count('SELECT DISTINCT age FROM users WHERE age > 20 ORDER BY age LIMIT 5 OFFSET 1')).toBe(5);
-      expect(count(solutions['six-clauses']!)).toBe(6);
+      expect(count(solutions['every-clause']!)).toBe(7);
     });
 
     it('opens the tool on what was written, and leaves the link out when the tool cannot take it', () => {
@@ -167,7 +167,7 @@ describe('challenges', () => {
       expect(parser.href('   ')).toBeNull();
       expect(parser.href('x'.repeat(2000))).not.toBeNull();
       expect(parser.href('x'.repeat(2001))).toBeNull();
-      expect(challengeById('six-clauses')!.tool!.href('anything')).toBe('/tools/grammar#rule-select');
+      expect(challengeById('every-clause')!.tool!.href('anything')).toBe('/tools/grammar#rule-select');
     });
   });
 

@@ -180,9 +180,8 @@ export interface SelectStatement {
    */
   having?: Expr;
   /**
-   * `ORDER BY column [ASC|DESC]` — v0 sorts on one column, and not together
-   * with `GROUP BY` (checked at parse time; `groupBy` and `orderBy` are
-   * mutually exclusive on every `SelectStatement` this parser produces).
+   * `ORDER BY key [ASC|DESC]` — one sort key. In a grouping query (plan.md §26 Feature 1, slice a) it sorts the
+   * *groups*, so the key is a grouped column or an aggregate, and the Sort sits above the aggregate.
    */
   orderBy?: OrderByClause;
   /** `LIMIT n [OFFSET m]` — non-negative whole numbers, checked at parse time. */
@@ -202,9 +201,15 @@ export interface LimitClause {
 }
 
 export interface OrderByClause {
+  /** The row key the Sort reads: a column's name, or an aggregate's canonical text (`SUM(amount)`). */
   column: string;
   direction: 'asc' | 'desc';
-  /** Span of the column name, for the "no column called X" check. */
+  /**
+   * `ORDER BY COUNT(*) DESC` (plan.md §26 Feature 1, slice a): the aggregate, when the key is one. The aggregate
+   * computes it per group like any other — selected or not — and `column` is its key.
+   */
+  aggregate?: Extract<Expr, { kind: 'aggregate' }>;
+  /** Span of the whole clause, keyword included, for the "no column called X" check. */
   span: Span;
 }
 

@@ -10,7 +10,7 @@
 
 import fc from 'fast-check';
 import type { EngineOptions, IndexBuildOptions, JoinAlgorithm, ReplacementPolicyName, Row, SqlValue } from '../src/engine/types.ts';
-import type { AggItem, Arith, ArithOp, ColSpec, ColType, JoinStep, Op, Pred, Query, ReadQuery, Ref, SubSelect, TableSpec, WriteQuery } from './model.ts';
+import type { AggItem, Arith, ArithOp, ColSpec, ColType, GroupOrderSpec, JoinStep, Op, Pred, Query, ReadQuery, Ref, SubSelect, TableSpec, WriteQuery } from './model.ts';
 
 /* -------------------------------------------------------------------------- */
 /* Tables                                                                      */
@@ -570,28 +570,46 @@ export function aggregateArb(t: TableSpec, pool: Pool, subs: readonly SubSource[
       { weight: 1, arbitrary: leaf.map((p): Pred => ({ k: 'not', p })) },
     );
   };
+  const aggKey = (a: AggItem): string => `${a.fn}(${a.arg === '*' ? '*' : a.arg.name})`;
+  const dirArb = fc.constantFrom<'asc' | 'desc'>('asc', 'desc');
+  // ORDER BY over the groups (plan.md §26 Feature 1, slice a): a grouped column — shown or not — or any aggregate,
+  // selected or not. With a LIMIT this is "the top n groups", which is what the order is for.
+  const orderArb = (group: readonly Ref[]): fc.Arbitrary<GroupOrderSpec | undefined> =>
+    fc.oneof(
+      { weight: 3, arbitrary: fc.constant<GroupOrderSpec | undefined>(undefined) },
+      { weight: 2, arbitrary: fc.tuple(agg, dirArb).map(([a, dir]): GroupOrderSpec => ({ by: { k: 'agg', agg: a }, dir })) },
+      ...(group.length === 0
+        ? []
+        : [{ weight: 2, arbitrary: fc.tuple(fc.constantFrom(...group), dirArb).map(([ref, dir]): GroupOrderSpec => ({ by: { k: 'col', ref }, dir })) }]),
+    );
   return fc
     .record({
       group: uniqueRefs(groupCandidates, 0, 2),
-      aggs: fc.uniqueArray(agg, { minLength: 0, maxLength: 3, selector: (a) => `${a.fn}(${a.arg === '*' ? '*' : a.arg.name})` }),
+      aggs: fc.uniqueArray(agg, { minLength: 0, maxLength: 3, selector: aggKey }),
       showAll: fc.boolean(),
       distinct: fc.integer({ min: 0, max: 5 }).map((x) => x === 0),
       where: whereArb(refs, pool, 2, subs),
       page: pageArb,
     })
-    .chain((base) => havingArb(base.group).map((having) => ({ ...base, having })))
-    .map(({ group, aggs, showAll, distinct, where, having, page }): Query => {
+    .chain((base) => fc.tuple(havingArb(base.group), orderArb(base.group)).map(([having, order]) => ({ ...base, having, order })))
+    .map(({ group, aggs, showAll, distinct, where, having, order, page }): Query => {
       // A query with no aggregate and no GROUP BY is a plain SELECT — force at least one aggregate then.
-      const items = group.length === 0 && aggs.length === 0 ? ([{ fn: 'COUNT', arg: '*' }] as AggItem[]) : aggs;
+      let items = group.length === 0 && aggs.length === 0 ? ([{ fn: 'COUNT', arg: '*' }] as AggItem[]) : aggs;
+      let shownGroup = showAll ? group : group.slice(0, 1);
+      // SELECT DISTINCT may only sort by a key it selects (PostgreSQL's rule, which QueryLens enforces) — so select it.
+      const by = order?.by;
+      if (distinct && by?.k === 'col' && !shownGroup.some((r) => r.name === by.ref.name)) shownGroup = [...shownGroup, by.ref];
+      if (distinct && by?.k === 'agg' && !items.some((a) => aggKey(a) === aggKey(by.agg))) items = [...items, by.agg];
       return {
         kind: 'aggregate',
         ...(distinct ? { distinct } : {}),
         table: t.name,
         group,
-        shownGroup: showAll ? group : group.slice(0, 1),
+        shownGroup,
         aggs: items,
         where,
         ...(having ? { having } : {}),
+        ...(order ? { order } : {}),
         ...page,
       };
     });

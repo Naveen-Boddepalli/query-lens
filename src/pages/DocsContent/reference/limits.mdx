@@ -177,6 +177,9 @@ concept explanation.
 - **Two strategies** — a hash aggregate (default) and a sort aggregate, which sorts the input on
   the `GROUP BY` columns first, spilling through the buffer pool exactly as `ORDER BY` does. Same
   groups out either way; [Compare](/compare)'s aggregate mode scores the difference in I/O.
+- **`ORDER BY` sorts the groups**, by a grouped column or an aggregate, in a `Sort` above the aggregate. It is
+  never dropped, even when a sort aggregate has already left the groups in that order: the plan stays a literal
+  reading of the query. A sort aggregate and the `Sort` above it each spill to scratch pages of their own.
 
 ## Writes
 

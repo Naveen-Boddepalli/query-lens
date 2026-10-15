@@ -42,6 +42,7 @@ export {
   exprToSql,
   findIndexNestedLoopJoins,
   findSort,
+  findSortAggregate,
   findSortDistinct,
   findSortMergeJoins,
   formatRangeBounds,
@@ -49,7 +50,6 @@ export {
   joinsIn,
   lookupKeysOf,
   lookupText,
-  needsSortSpill,
   rangeOn,
   toPlanDisplay,
 } from './plan.ts';

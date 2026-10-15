@@ -204,7 +204,11 @@ function orderByNode(orderBy: OrderByClause): ASTNode {
     label: 'ORDER BY',
     detail: `${orderBy.column} ${orderBy.direction === 'asc' ? 'ASC' : 'DESC'}`,
     span: orderBy.span,
-    children: [{ id: 'orderBy.col', kind: 'Column', label: orderBy.column, span: orderBy.span }],
+    children: [
+      orderBy.aggregate
+        ? exprNode(orderBy.aggregate, 'orderBy.expr')
+        : { id: 'orderBy.col', kind: 'Column', label: orderBy.column, span: orderBy.span },
+    ],
   };
 }
 

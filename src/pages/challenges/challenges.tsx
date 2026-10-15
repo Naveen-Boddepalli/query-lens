@@ -135,7 +135,7 @@ const isColumn = (n: ASTNode | undefined, name: string): boolean => n?.kind === 
 
 /**
  * How many of a SELECT's optional parts the parse tree shows: DISTINCT, WHERE, GROUP BY, HAVING, ORDER BY, LIMIT and
- * OFFSET. JOIN is the eighth, and cannot be one of the six that run together, so it is not counted here.
+ * OFFSET. JOIN is the eighth, and cannot be one of the seven that run together, so it is not counted here.
  */
 export function optionalClauses(events: readonly StepEvent[]): number {
   const ast = lastAst(events);
@@ -695,8 +695,8 @@ export const CHALLENGES: Challenge[] = [
     ),
   },
   {
-    id: 'six-clauses',
-    title: 'Six clauses in one SELECT',
+    id: 'every-clause',
+    title: 'Seven clauses in one SELECT',
     brief: (
       <>
         A <code className="font-mono">SELECT</code> has eight optional parts: <code className="font-mono">DISTINCT</code>,{' '}
@@ -704,19 +704,19 @@ export const CHALLENGES: Challenge[] = [
         <code className="font-mono">GROUP BY</code>, <code className="font-mono">HAVING</code>,{' '}
         <code className="font-mono">ORDER BY</code>, <code className="font-mono">LIMIT</code> and{' '}
         <code className="font-mono">OFFSET</code>. The grammar will read them in that order; the engine will not run them
-        all. Write one query that <strong>runs</strong> with six of them.
+        all. Write one query that <strong>runs</strong> with seven of them.
       </>
     ),
     hint: (
       <>
-        The engine refuses <code className="font-mono">ORDER BY</code> together with{' '}
-        <code className="font-mono">GROUP BY</code>, and either of them in a query with a{' '}
-        <code className="font-mono">JOIN</code> — the message says &ldquo;not supported yet&rdquo;. Count again without
-        the parts that cannot sit together.
+        The engine refuses <code className="font-mono">GROUP BY</code> or <code className="font-mono">ORDER BY</code>{' '}
+        in a query with a <code className="font-mono">JOIN</code> — the message says &ldquo;not supported yet&rdquo;.
+        Count again without the part that cannot sit with the others. In a query that groups, ORDER BY sorts the
+        groups: name a grouped column, or an aggregate.
       </>
     ),
     starter: 'SELECT DISTINCT age FROM users WHERE age > 20 ORDER BY age LIMIT 5;',
-    check: (r) => !r.error && optionalClauses(r.events) >= 6,
+    check: (r) => !r.error && optionalClauses(r.events) >= 7,
     tool: { label: 'See the select rule in the Grammar →', href: () => sandboxHref({ tool: 'grammar', rule: 'select' }) },
     misconception: (
       <>

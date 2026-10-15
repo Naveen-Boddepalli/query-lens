@@ -317,9 +317,22 @@ describe('parse — GROUP BY and aggregates', () => {
     expect(e.message).toMatch(/SELECT \*.*GROUP BY/);
   });
 
-  it('rejects ORDER BY combined with GROUP BY', () => {
-    const e = err('SELECT age, COUNT(*) FROM users GROUP BY age ORDER BY age');
-    expect(e.message).toMatch(/ORDER BY with GROUP BY/);
+  it('takes ORDER BY with GROUP BY: a grouped column, or an aggregate keyed by its canonical text', () => {
+    expect(ok('SELECT age, COUNT(*) FROM users GROUP BY age ORDER BY age').orderBy).toMatchObject({ column: 'age', direction: 'asc' });
+    const byCount = ok('SELECT age FROM users GROUP BY age ORDER BY count( * ) DESC').orderBy;
+    expect(byCount).toMatchObject({ column: 'COUNT(*)', direction: 'desc', aggregate: { kind: 'aggregate', fn: 'COUNT' } });
+    expect(ok('SELECT age, SUM(id) FROM users GROUP BY age ORDER BY sum(id)').orderBy?.column).toBe('SUM(id)');
+  });
+
+  it('refuses an ORDER BY key the groups do not have one value of', () => {
+    expect(err('SELECT age, COUNT(*) FROM users GROUP BY age ORDER BY name').message).toMatch(/`name` is not aggregated/);
+    expect(err('SELECT COUNT(*) FROM users ORDER BY age').message).toMatch(/whole table is one group|not in the GROUP BY/);
+    expect(err('SELECT name FROM users ORDER BY MAX(age)').message).toMatch(/needs a GROUP BY or an aggregate/);
+  });
+
+  it('SELECT DISTINCT with GROUP BY still sorts only by a selected key', () => {
+    expect(err('SELECT DISTINCT age FROM users GROUP BY age ORDER BY COUNT(*)').message).toMatch(/must appear in the select list/);
+    expect(ok('SELECT DISTINCT age, COUNT(*) FROM users GROUP BY age ORDER BY COUNT(*)').orderBy?.column).toBe('COUNT(*)');
   });
 
   it('still allows LIMIT with GROUP BY', () => {

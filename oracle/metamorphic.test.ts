@@ -31,7 +31,7 @@ import type { Tuple } from './compare.ts';
 import { ORACLE_TIMEOUT, oracleParams } from './config.ts';
 import { optionsArb, sessionArb } from './generate.ts';
 import { applyWrite, qlTuples, toDatabase } from './harness.ts';
-import { isWrite, outputKeys, renderQuery } from './model.ts';
+import { isWrite, orderKeyOf, outputKeys, renderQuery } from './model.ts';
 import type { ReadQuery, TableSpec, WriteQuery } from './model.ts';
 import { tupleOf } from './sqlite.ts';
 
@@ -73,12 +73,13 @@ function resolveForReference(expr: Expr | undefined, tables: readonly TableSpec[
 
 /** The order-defining column's position in the output, when there is an ORDER BY and it is projected. */
 function keyAt(q: ReadQuery, tables: readonly TableSpec[]): number {
-  return q.kind === 'select' && q.order ? outputKeys(q, tables).indexOf(q.order.ref.name) : -1;
+  const key = orderKeyOf(q);
+  return key === null ? -1 : outputKeys(q, tables).indexOf(key);
 }
 
 function same(q: ReadQuery, tables: readonly TableSpec[], a: Tuple[], b: Tuple[]): string | null {
   // A LIMIT without ORDER BY picks *some* rows, and which depends on scan order — only the count is defined.
-  if (q.limit !== undefined && !(q.kind === 'select' && q.order)) return a.length === b.length ? null : `LIMIT count ${a.length} vs ${b.length}`;
+  if (q.limit !== undefined && orderKeyOf(q) === null) return a.length === b.length ? null : `LIMIT count ${a.length} vs ${b.length}`;
   if (q.limit !== undefined) {
     // ORDER BY + LIMIT: ties make the *rows* undefined; the keys of the first n rows are not.
     const at = keyAt(q, tables);

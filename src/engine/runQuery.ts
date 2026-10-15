@@ -23,10 +23,11 @@ import {
   emitPlanEvents,
   emitUpdatePlanEvents,
   findIndexNestedLoopJoins,
+  findSort,
+  findSortAggregate,
   findSortDistinct,
   isReorderableChain,
   joinsIn,
-  needsSortSpill,
   reorderJoinsIfCheaper,
 } from './planner/index.ts';
 import type { Plan } from './planner/index.ts';
@@ -379,7 +380,6 @@ export function runQuery(
     joinTrees[ij.rightTable] = jTrees;
     pageBase = pageCountFor(joinHeaps[ij.rightTable]!, jTrees);
   }
-  const heapsEnd = pageBase;
 
   // Every `sort-merge` Join in the chain needs its own two-block reservation — one per side, since each sorts
   // independently — placed in chain order (the innermost join's scratch first, mirroring the order joins actually
@@ -402,25 +402,22 @@ export function runQuery(
     worstCaseLeftRows *= jTable.rows.length;
   }
 
-  // A Sort's (or a SortAggregate's own internal sort's) spill needs its own page ids, reserved up front — sized
-  // against the whole table (the worst case; a WHERE clause can only shrink what actually reaches it) so the
-  // reservation is never too small to discover only at runtime. This and the sort-merge reservation above never
-  // both apply: ORDER BY/GROUP BY still can't combine with JOIN at all.
-  const sortTemp = needsSortSpill(plan)
-    ? sortTempPageCount(table.rows.length, options.rowsPerPage, options.bufferFrames)
-    : pageBase - heapsEnd;
-  // A sort-based DISTINCT (plan.md §25.4 B2) sorts what the projection produced, which after a JOIN can be as many
-  // rows as every joined table's product (capped — these are teaching-sized tables) — and it gets its own block of
-  // scratch pages *after* whichever other sort the plan has, so no two sorts share a page id.
-  const distinctRows =
+  // Every other sort the plan runs gets its own block of scratch page ids after those, in the order the sorts run —
+  // a SortAggregate's own sort, then ORDER BY's Sort above it (plan.md §26 Feature 1), then a sort-based DISTINCT
+  // above the projection (plan.md §25.4 B2) — so no two sorts ever share a page id. Each is sized for the most rows
+  // that can reach it: the whole table (a WHERE clause can only shrink it), or after a JOIN every joined table's
+  // product (capped — these are teaching-sized tables). With one sort and no join this is exactly the block each
+  // sort always had, starting where the heap and its indexes end.
+  const worstCaseRows =
     joins.length > 0
       ? Math.min(joins.reduce((product, j) => product * joinTables[j.table.name]!.rows.length, table.rows.length), 20_000)
       : table.rows.length;
-  const distinctSpill = findSortDistinct(plan)
-    ? sortTempPageCount(distinctRows, options.rowsPerPage, options.bufferFrames)
-    : 0;
-  const distinctBase = heapsEnd + sortTemp;
-  const pool = createBufferPool(distinctBase + distinctSpill, options, emit);
+  const spillFor = (present: boolean) =>
+    present ? sortTempPageCount(worstCaseRows, options.rowsPerPage, options.bufferFrames) : 0;
+  const aggregateSortBase = pageBase;
+  const sortBase = aggregateSortBase + spillFor(findSortAggregate(plan) !== null);
+  const distinctBase = sortBase + spillFor(findSort(plan) !== null);
+  const pool = createBufferPool(distinctBase + spillFor(findSortDistinct(plan) !== null), options, emit);
 
   const rows = execute(plan, {
     emit,
@@ -430,6 +427,8 @@ export function runQuery(
     trees,
     table,
     options,
+    aggregateSortBase,
+    sortBase,
     distinctBase,
     ...(joins.length > 0
       ? {
@@ -485,7 +484,10 @@ function referencedColumns(ast: Exclude<Statement, { kind: 'explain' }>): Column
       else if (e.kind === 'aggregate' && e.arg.kind === 'column') push(e.arg);
     });
   }
-  if (ast.kind === 'select' && ast.orderBy) refs.push({ name: ast.orderBy.column, span: ast.orderBy.span });
+  // An aggregate key (`SUM(amount)`) is not a column; the column it reads is.
+  if (ast.kind === 'select' && ast.orderBy?.aggregate) {
+    if (ast.orderBy.aggregate.arg.kind === 'column') push(ast.orderBy.aggregate.arg);
+  } else if (ast.kind === 'select' && ast.orderBy) refs.push({ name: ast.orderBy.column, span: ast.orderBy.span });
   if (ast.kind === 'insert' && ast.columns) refs.push(...ast.columns.names);
   if (ast.kind === 'update') {
     refs.push(...ast.set.assignments.map((a) => ({ name: a.column, span: a.columnSpan })));

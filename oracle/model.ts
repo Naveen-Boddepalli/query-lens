@@ -125,6 +125,12 @@ export interface OrderSpec {
   dir: 'asc' | 'desc';
 }
 
+/** An aggregate query's ORDER BY (plan.md §26 Feature 1, slice a): a grouped column, or an aggregate, selected or not. */
+export interface GroupOrderSpec {
+  by: { k: 'col'; ref: Ref } | { k: 'agg'; agg: AggItem };
+  dir: 'asc' | 'desc';
+}
+
 export type Query =
   | {
       kind: 'select';
@@ -151,6 +157,7 @@ export type Query =
       where: Pred[];
       /** `HAVING`, a predicate over the groups (plan.md §25.4 B2). Absent when there is none. */
       having?: Pred;
+      order?: GroupOrderSpec;
       limit?: number;
       offset?: number;
     }
@@ -247,6 +254,18 @@ export const renderWhere = (where: readonly Pred[]): string =>
 
 const renderAgg = (a: AggItem): string => `${a.fn}(${a.arg === '*' ? '*' : renderRef(a.arg)})`;
 
+/** The key an ORDER BY sorts on, as the SELECT list names it — `null` without one. */
+export function orderKeyOf(q: ReadQuery): string | null {
+  if (q.kind === 'select') return q.order ? renderRef(q.order.ref) : null;
+  if (q.kind === 'aggregate' && q.order) return q.order.by.k === 'col' ? renderRef(q.order.by.ref) : renderAgg(q.order.by.agg);
+  return null;
+}
+
+/** ` ORDER BY key DIR` — with NULL placement spelled out for SQLite, whose default is the opposite of QueryLens's. */
+function renderOrder(key: string, dir: 'asc' | 'desc', dialect: Dialect): string {
+  return ` ORDER BY ${key} ${dir.toUpperCase()}${dialect === 'sqlite' ? (dir === 'asc' ? ' NULLS LAST' : ' NULLS FIRST') : ''}`;
+}
+
 /** The SELECT-list items of a read query, in output order — also the keys QueryLens names its result columns by. */
 export function outputKeys(q: ReadQuery, tables: readonly TableSpec[]): string[] {
   const computed = (q.kind === 'select' || q.kind === 'join' ? q.computed : undefined)?.map((c) => c.alias) ?? [];
@@ -282,18 +301,15 @@ export function renderQuery(q: Query, dialect: Dialect = 'querylens'): string {
       const list = [q.proj === '*' ? '*' : q.proj.map(renderRef).join(', '), ...renderComputed(q.computed)]
         .filter((x) => x !== '')
         .join(', ');
-      const order = q.order
-        ? ` ORDER BY ${renderRef(q.order.ref)} ${q.order.dir.toUpperCase()}${
-            dialect === 'sqlite' ? (q.order.dir === 'asc' ? ' NULLS LAST' : ' NULLS FIRST') : ''
-          }`
-        : '';
+      const order = q.order ? renderOrder(renderRef(q.order.ref), q.order.dir, dialect) : '';
       return `SELECT ${q.distinct ? 'DISTINCT ' : ''}${list} FROM ${q.table}${renderWhere(q.where)}${order}${page(q.limit, q.offset)}`;
     }
     case 'aggregate': {
       const items = [...q.shownGroup.map(renderRef), ...q.aggs.map(renderAgg)].join(', ');
       const group = q.group.length > 0 ? ` GROUP BY ${q.group.map(renderRef).join(', ')}` : '';
       const having = q.having ? ` HAVING ${renderPred(q.having)}` : '';
-      return `SELECT ${q.distinct ? 'DISTINCT ' : ''}${items} FROM ${q.table}${renderWhere(q.where)}${group}${having}${page(q.limit, q.offset)}`;
+      const order = q.order ? renderOrder(orderKeyOf(q)!, q.order.dir, dialect) : '';
+      return `SELECT ${q.distinct ? 'DISTINCT ' : ''}${items} FROM ${q.table}${renderWhere(q.where)}${group}${having}${order}${page(q.limit, q.offset)}`;
     }
     case 'join': {
       const steps = q.joins

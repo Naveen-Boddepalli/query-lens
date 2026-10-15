@@ -57,9 +57,10 @@ SELECT * FROM users ORDER BY id LIMIT 10 OFFSET 20;
   [DISTINCT](#distinct) below.
 - **`GROUP BY`**: one or more columns. Aggregates: `COUNT(*)`, `COUNT`/`SUM`/`AVG`/`MIN`/`MAX` over
   a column. Every plain column in the SELECT list must be grouped or wrapped in an aggregate.
-  Mutually exclusive with `ORDER BY`.
 - **`HAVING`**: a predicate over the *groups*, after `GROUP BY` — see [HAVING](#having) below.
-- **`ORDER BY`**: exactly one column, `ASC` (default) or `DESC`.
+- **`ORDER BY`**: exactly one key, `ASC` (default) or `DESC`. In a query that groups it sorts the *groups*, so
+  the key is a grouped column or an aggregate — selected or not: `SELECT account FROM transactions GROUP BY
+  account ORDER BY SUM(amount) DESC LIMIT 5` is the five biggest accounts. The Sort runs after `HAVING`.
 - **`LIMIT`**: a non-negative integer, always the outermost clause, optionally followed by
   **`OFFSET m`** to skip the first `m` rows of the (ordered) result: `LIMIT 10 OFFSET 20` is page three.
   An `OFFSET` needs its `LIMIT`. It is *not* free — the skipped rows are still produced by everything

@@ -3,9 +3,10 @@
  *
  *   Limit n                          -- only when there is a LIMIT
  *     └─ Project [columns]
- *          └─ Sort column [ASC|DESC] -- only when there is an ORDER BY
- *               └─ Filter (predicate)     -- only when there is a WHERE
- *                    └─ SeqScan table
+ *          └─ Sort key [ASC|DESC]    -- only when there is an ORDER BY
+ *               └─ Having / Aggregate     -- only when the query groups
+ *                    └─ Filter (predicate)     -- only when there is a WHERE
+ *                         └─ SeqScan table
  *
  * This is the *unoptimised* shape on purpose. It is a direct, obvious
  * translation of the query text, which is what makes the optimizer's rewrite
@@ -51,7 +52,8 @@ export function isAggregateQuery(ast: SelectStatement): boolean {
 /**
  * Every aggregate the query needs computed per group: the SELECT list's, then any
  * that only a HAVING predicate mentions (`SELECT dept … HAVING COUNT(*) > 2` needs a
- * count nobody selected), each once, keyed by its canonical text.
+ * count nobody selected), then an ORDER BY's (`… ORDER BY SUM(amount) DESC`, plan.md
+ * §26 Feature 1 slice a), each once, keyed by its canonical text.
  */
 export function aggregateSpecsOf(ast: SelectStatement): AggregateSpec[] {
   const specs = new Map<string, AggregateSpec>();
@@ -68,6 +70,10 @@ export function aggregateSpecsOf(ast: SelectStatement): AggregateSpec[] {
       const key = aggregateKeyOf(e.fn, e.arg);
       if (!specs.has(key)) specs.set(key, { key, fn: e.fn, column: e.arg.kind === 'star' ? null : columnKey(e.arg) });
     });
+  }
+  const sortBy = ast.orderBy?.aggregate;
+  if (sortBy && !specs.has(ast.orderBy!.column)) {
+    specs.set(ast.orderBy!.column, { key: ast.orderBy!.column, fn: sortBy.fn, column: sortBy.arg.kind === 'star' ? null : columnKey(sortBy.arg) });
   }
   return [...specs.values()];
 }
@@ -229,8 +235,8 @@ export function buildPlan(
   // HAVING runs after the aggregate, on the groups it produced.
   const having: Plan = ast.having ? { op: 'Having', predicate: ast.having, child: aggregated } : aggregated;
 
-  // ORDER BY and GROUP BY are mutually exclusive (the parser enforces this),
-  // so Sort only ever sits above the filtered scan, never above an aggregate.
+  // ORDER BY runs after grouping (plan.md §26 Feature 1, slice a): above an aggregate it sorts the groups, by a
+  // grouped column or an aggregate's key, which is what the aggregate's output rows are keyed by.
   const sorted: Plan = ast.orderBy
     ? { op: 'Sort', column: ast.orderBy.column, direction: ast.orderBy.direction, child: having }
     : having;

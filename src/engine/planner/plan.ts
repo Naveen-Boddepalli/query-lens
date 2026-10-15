@@ -205,9 +205,9 @@ export function childOf(plan: Plan): Plan | undefined {
 
 /**
  * The `Sort` node, wherever it sits in the chain — `runQuery.ts` needs to
- * know before the buffer pool exists, to reserve its spill's page ids. v0's
- * plan is always a single chain (no joins yet), so walking `childOf` visits
- * every node.
+ * know before the buffer pool exists, to reserve its spill's page ids. A Sort
+ * only ever sits above any `Join` (whose `left`/`right` `childOf` does not
+ * enter), so walking `childOf` from the root reaches it.
  */
 export function findSort(plan: Plan): Extract<Plan, { op: 'Sort' }> | null {
   let node: Plan | undefined = plan;
@@ -219,13 +219,18 @@ export function findSort(plan: Plan): Extract<Plan, { op: 'Sort' }> | null {
 }
 
 /**
- * Whether `plan` contains a node whose executor spills through the buffer
- * pool via `externalMergeSort` — `Sort` itself, or a `SortAggregate` (which
- * runs the same algorithm internally to order its groups). `runQuery.ts`
- * needs this before the buffer pool exists, to reserve the spill's page ids;
- * `Sort` and `SortAggregate` never both appear in one plan (`ORDER BY` and
- * `GROUP BY` are mutually exclusive), but the check does not depend on that.
+ * The `SortAggregate` node, if the plan has one — it runs `externalMergeSort` internally to order its groups, so
+ * `runQuery.ts` reserves it a spill block of its own, before ORDER BY's `Sort` (which runs after it, above it).
  */
+export function findSortAggregate(plan: Plan): Extract<Plan, { op: 'SortAggregate' }> | null {
+  let node: Plan | undefined = plan;
+  while (node) {
+    if (node.op === 'SortAggregate') return node;
+    node = childOf(node);
+  }
+  return null;
+}
+
 /** Whether the plan has a `SortDistinct` — which reserves a spill block of its own, after every other sort's. */
 export function findSortDistinct(plan: Plan): Extract<Plan, { op: 'SortDistinct' }> | null {
   let node: Plan | undefined = plan;
@@ -236,22 +241,13 @@ export function findSortDistinct(plan: Plan): Extract<Plan, { op: 'SortDistinct'
   return null;
 }
 
-export function needsSortSpill(plan: Plan): boolean {
-  let node: Plan | undefined = plan;
-  while (node) {
-    if (node.op === 'Sort' || node.op === 'SortAggregate') return true;
-    node = childOf(node);
-  }
-  return false;
-}
-
 /**
  * Every `Join` node in `plan`, in source order — the first `JOIN` clause first, the last (outermost in the tree,
  * plan.md §25.4 C3 slice b) last. `childOf` stops at a `Join` (it has `left`/`right`, not `child`), so finding more
  * than the outermost one means recursing into `left` on purpose: a left-deep chain's `right` side is always a base
  * table's own scan or probe, never itself a `Join`, so only `left` is ever worth walking further into. `ORDER
- * BY`/`GROUP BY` still can't combine with `JOIN` at all, so this and `needsSortSpill` never both find something on
- * the same plan.
+ * BY`/`GROUP BY` still can't combine with `JOIN` at all, so this and `findSort`/`findSortAggregate` never both find something
+ * on the same plan.
  */
 export function joinsIn(plan: Plan): Extract<Plan, { op: 'Join' }>[] {
   let node: Plan | undefined = plan;
