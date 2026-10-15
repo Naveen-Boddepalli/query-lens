@@ -88,9 +88,31 @@ export type Pred =
   | { k: 'isnull'; ref: Ref; neg: boolean }
   | { k: 'in'; ref: Ref; list: SqlValue[]; neg: boolean }
   | { k: 'like'; ref: Ref; pattern: string; neg: boolean }
+  /**
+   * `ref [NOT] IN (SELECT col FROM table [WHERE …])` (plan.md §25.4 C3 slice c): uncorrelated by construction — the
+   * subquery's own predicates name only its own table's columns, unqualified, so neither engine can read them as
+   * the outer query's.
+   */
+  | { k: 'insub'; ref: Ref; neg: boolean; sub: SubSelect }
+  /** `(P) IS [NOT] NULL` — a predicate in a value's place, the shape that asks whether P was UNKNOWN. */
+  | { k: 'pnull'; p: Pred; neg: boolean }
   | { k: 'not'; p: Pred }
   | { k: 'and'; a: Pred; b: Pred }
   | { k: 'or'; a: Pred; b: Pred };
+
+/** The one subquery shape both engines share with QueryLens's own limits: one plain column of one table. */
+export interface SubSelect {
+  table: string;
+  col: string;
+  where: Pred[];
+}
+
+/** One step of a left-deep join chain: `[LEFT] JOIN table ON l = r`, where one side names `table`. */
+export interface JoinStep {
+  table: string;
+  type: 'inner' | 'left';
+  on: { l: Ref; r: Ref };
+}
 
 export type AggFn = 'COUNT' | 'SUM' | 'AVG' | 'MIN' | 'MAX';
 export interface AggItem {
@@ -136,8 +158,8 @@ export type Query =
       kind: 'join';
       distinct?: boolean;
       left: string;
-      right: string;
-      on: { l: Ref; r: Ref };
+      /** One step or more, joined left-deep in this order (plan.md §25.4 C3 slices a and b). */
+      joins: JoinStep[];
       proj: Ref[];
       computed?: { e: Arith; alias: string }[];
       where: Pred[];
@@ -191,6 +213,10 @@ export function renderPred(p: Pred): string {
       return `${renderRef(p.ref)} ${p.neg ? 'NOT ' : ''}IN (${p.list.map(renderLiteral).join(', ')})`;
     case 'like':
       return `${renderRef(p.ref)} ${p.neg ? 'NOT ' : ''}LIKE ${renderLiteral(p.pattern)}`;
+    case 'insub':
+      return `${renderRef(p.ref)} ${p.neg ? 'NOT ' : ''}IN (${renderSubSelect(p.sub)})`;
+    case 'pnull':
+      return `(${renderPred(p.p)}) IS ${p.neg ? 'NOT ' : ''}NULL`;
     // Compound predicates are always parenthesised: the text never relies on precedence to mean what it says.
     case 'not':
       return `NOT (${renderPred(p.p)})`;
@@ -201,13 +227,15 @@ export function renderPred(p: Pred): string {
   }
 }
 
+export const renderSubSelect = (sub: SubSelect): string => `SELECT ${sub.col} FROM ${sub.table}${renderWhere(sub.where)}`;
+
 const renderComputed = (computed: { e: Arith; alias: string }[] | undefined): string[] =>
   (computed ?? []).map((c) => `${renderArith(c.e)} AS ${c.alias}`);
 
-/** Depth-first over a predicate tree. */
+/** Depth-first over a predicate tree — the outer query's own, not into a subquery's `WHERE` (a separate query). */
 export function walkPred(p: Pred, visit: (p: Pred) => void): void {
   visit(p);
-  if (p.k === 'not') walkPred(p.p, visit);
+  if (p.k === 'not' || p.k === 'pnull') walkPred(p.p, visit);
   else if (p.k === 'and' || p.k === 'or') {
     walkPred(p.a, visit);
     walkPred(p.b, visit);
@@ -267,8 +295,12 @@ export function renderQuery(q: Query, dialect: Dialect = 'querylens'): string {
       const having = q.having ? ` HAVING ${renderPred(q.having)}` : '';
       return `SELECT ${q.distinct ? 'DISTINCT ' : ''}${items} FROM ${q.table}${renderWhere(q.where)}${group}${having}${page(q.limit, q.offset)}`;
     }
-    case 'join':
-      return `SELECT ${q.distinct ? 'DISTINCT ' : ''}${[...q.proj.map(renderRef), ...renderComputed(q.computed)].join(', ')} FROM ${q.left} JOIN ${q.right} ON ${renderRef(q.on.l)} = ${renderRef(q.on.r)}${renderWhere(q.where)}${page(q.limit, q.offset)}`;
+    case 'join': {
+      const steps = q.joins
+        .map((j) => ` ${j.type === 'left' ? 'LEFT ' : ''}JOIN ${j.table} ON ${renderRef(j.on.l)} = ${renderRef(j.on.r)}`)
+        .join('');
+      return `SELECT ${q.distinct ? 'DISTINCT ' : ''}${[...q.proj.map(renderRef), ...renderComputed(q.computed)].join(', ')} FROM ${q.left}${steps}${renderWhere(q.where)}${page(q.limit, q.offset)}`;
+    }
     case 'insert': {
       const cols = q.columns ? ` (${q.columns.join(', ')})` : '';
       return `INSERT INTO ${q.table}${cols} VALUES (${q.values.map(renderLiteral).join(', ')})`;

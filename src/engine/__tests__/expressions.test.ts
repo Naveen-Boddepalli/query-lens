@@ -108,6 +108,15 @@ describe('three-valued logic — the truth tables', () => {
     expect(truth('n NOT IN (1, 2)', row)).toBeNull();
   });
 
+  it('an empty list is FALSE for IN and TRUE for NOT IN, a NULL operand included', () => {
+    // A literal `IN ()` does not parse; only a resolved `IN (subquery)` can be empty — so build one by hand.
+    const empty = (sql: string): Expr => ({ ...(where(sql) as Extract<Expr, { kind: 'in' }>), items: [] });
+    expect(evaluatePredicate(empty('a IN (1)'), row)).toBe(false);
+    expect(evaluatePredicate(empty('a NOT IN (1)'), row)).toBe(true);
+    expect(evaluatePredicate(empty('n IN (1)'), row)).toBe(false); // not UNKNOWN: nothing to be unknown against
+    expect(evaluatePredicate(empty('n NOT IN (1)'), row)).toBe(true);
+  });
+
   it('IN with a NULL in the list: a hit is still TRUE, a miss is UNKNOWN, not FALSE', () => {
     expect(truth('a IN (1, NULL)', row)).toBe(true);
     expect(truth('a IN (2, NULL)', row)).toBeNull();

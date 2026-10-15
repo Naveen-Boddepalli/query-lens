@@ -54,7 +54,7 @@
  * `inSubquery` (plan.md §25.4 C3 slice c, closing C3) is the one shape `IN` accepts besides a literal list —
  * always exactly one plain column, no `JOIN`/`GROUP BY`/`HAVING`/`ORDER BY`/`LIMIT`/`DISTINCT`/aggregate, and
  * always uncorrelated (its own `WHERE`, if any, can only name a column on its own `FROM` table — the same rule
- * that already applies to a bare non-`JOIN` query). `runQuery.ts`'s `resolveWhereSubqueries` runs it exactly once,
+ * that already applies to a bare non-`JOIN` query). `runQuery.ts`'s `resolveStatementSubqueries` runs it exactly once,
  * before the outer query is planned, replacing it with the literal-list shape everything downstream already knew.
  *
  * Hand-written rather than generated: the error messages are half the teaching

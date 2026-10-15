@@ -85,3 +85,33 @@ describe('a column compared with itself is not "always true" — it is UNKNOWN w
     expect(rules(events)).toContain('constant-folding');
   });
 });
+
+describe('an empty IN list is FALSE for every value, a NULL one included (found 2026-10-14)', () => {
+  // `k` is NULL on ids 2 and 4. With a non-empty list a NULL operand is UNKNOWN; with an empty one there is nothing
+  // for it to be unknown against, so `NULL IN (∅)` is FALSE and `NULL NOT IN (∅)` is TRUE. Only a subquery can be
+  // empty — here, one over `t` itself that no row satisfies.
+  const EMPTY = '(SELECT id FROM t WHERE id < 0)';
+
+  it('NOT IN keeps every row, and IN none', () => {
+    expect(runQuery(`SELECT id FROM t WHERE k NOT IN ${EMPTY}`, db()).rows.map((r) => r.id)).toEqual([1, 2, 3, 4]);
+    expect(runQuery(`SELECT id FROM t WHERE k IN ${EMPTY}`, db()).rows).toEqual([]);
+  });
+
+  it('DELETE … WHERE k NOT IN (∅) deletes the NULL-k rows too', () => {
+    expect(runQuery(`DELETE FROM t WHERE k NOT IN ${EMPTY}`, db()).write).toMatchObject({ kind: 'delete', deletedCount: 4 });
+  });
+});
+
+describe('an IN subquery is resolved wherever the grammar lets it stand, not only under AND/OR/NOT (found 2026-10-14)', () => {
+  // k IN (SELECT k FROM t) is TRUE for 10 and 30 and UNKNOWN for the NULLs. Left unresolved it read as an empty
+  // list, FALSE everywhere, so the IS NULL below found nothing and HAVING kept no group.
+  it('under IS NULL', () => {
+    expect(runQuery('SELECT id FROM t WHERE (k IN (SELECT k FROM t)) IS NULL', db()).rows.map((r) => r.id)).toEqual([2, 4]);
+  });
+
+  it('in HAVING', () => {
+    expect(runQuery('SELECT k, COUNT(*) FROM t GROUP BY k HAVING k IN (SELECT k FROM t WHERE id = 1)', db()).rows).toEqual([
+      { k: 10, 'COUNT(*)': 1 },
+    ]);
+  });
+});

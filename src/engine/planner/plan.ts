@@ -302,7 +302,7 @@ export function conjoin(parts: Expr[]): Expr | undefined {
 
 /**
  * What every `IN (subquery)` in `where` resolved to (plan.md §25.4 C3 slice c) — `subquery.ts`'s
- * `resolveWhereSubqueries` already ran each one exactly once, before this plan was even built, and filled its
+ * `resolveStatementSubqueries` already ran each one exactly once, before this plan was even built, and filled its
  * `items` with the real values found; this just says so, once, for the WHERE-clause narration (`emit.ts`,
  * `emitDelete.ts`, `emitUpdate.ts` all share it). Empty when `where` has none — the ordinary case, and the only
  * one before this slice existed at all.
@@ -311,8 +311,12 @@ export function subqueryResolutionNotes(where: Expr): string[] {
   const notes: string[] = [];
   walkExpr(where, (e) => {
     if (e.kind === 'in' && e.subquery) {
+      const found =
+        e.items.length === 0
+          ? `finding no values at all — so \`${e.negated ? 'NOT IN' : 'IN'}\` is ${e.negated ? 'TRUE' : 'FALSE'} for every row, even one whose value is NULL`
+          : `finding ${e.items.length} distinct value${e.items.length === 1 ? '' : 's'}`;
       notes.push(
-        `its subquery \`SELECT ${e.subquery.column.name} FROM ${e.subquery.from.name}${e.subquery.where ? ' WHERE …' : ''}\` already ran once, before this plan was built, finding ${e.items.length} distinct value${e.items.length === 1 ? '' : 's'}`,
+        `its subquery \`SELECT ${e.subquery.column.name} FROM ${e.subquery.from.name}${e.subquery.where ? ' WHERE …' : ''}\` already ran once, before this plan was built, ${found}`,
       );
     }
   });

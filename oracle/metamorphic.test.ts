@@ -21,7 +21,8 @@
 import fc from 'fast-check';
 import { describe, expect, it, vi } from 'vitest';
 import { passes } from '../src/engine/exec/evaluate.ts';
-import { parse } from '../src/engine/parser/index.ts';
+import { mapChildren, parse } from '../src/engine/parser/index.ts';
+import type { Expr } from '../src/engine/parser/index.ts';
 import { runQuery } from '../src/engine/runQuery.ts';
 import { DEFAULT_ENGINE_OPTIONS } from '../src/engine/types.ts';
 import type { EngineOptions } from '../src/engine/types.ts';
@@ -52,6 +53,22 @@ function answer(tables: readonly TableSpec[], q: ReadQuery, options: EngineOptio
   const result = runQuery(renderQuery(q), toDatabase(tables, indexed), options);
   expect(result.error, renderQuery(q)).toBeUndefined();
   return qlTuples(q, tables, result.rows);
+}
+
+/**
+ * The reference's own `IN (subquery)` resolution — the subquery's table, its WHERE as a filter, its column's values.
+ * No planner and no pages, so NoREC still compares the optimized plan with "the predicate and a loop"; without it a
+ * parsed subquery has no values yet and would read as an empty list.
+ */
+function resolveForReference(expr: Expr | undefined, tables: readonly TableSpec[]): Expr | undefined {
+  const walk = (e: Expr): Expr => {
+    const out = mapChildren(e, walk);
+    if (out.kind !== 'in' || !out.subquery) return out;
+    const { column, from, where } = out.subquery;
+    const rows = tables.find((t) => t.name === from.name)!.rows.filter((row) => passes(where, row));
+    return { ...out, items: rows.map((row) => ({ kind: 'literal' as const, value: row[column.name] ?? null, raw: '', span: out.span })) };
+  };
+  return expr && walk(expr);
 }
 
 /** The order-defining column's position in the output, when there is an ORDER BY and it is projected. */
@@ -106,7 +123,8 @@ describe('metamorphic — NoREC-shaped: the optimized plan agrees with evaluatin
         // comparison — what NoREC checks here is which rows the optimized plan keeps.
         const keys = outputKeys(read, settled).slice(0, outputKeys(read, settled).length - (read.computed?.length ?? 0));
         // The reference never plans, never touches a page or an index — it is the predicate and a loop.
-        const expected = table.rows.filter((row) => passes(parsed.ast.where, row)).map((row) => tupleOf(row, keys));
+        const where = resolveForReference(parsed.ast.where, settled);
+        const expected = table.rows.filter((row) => passes(where, row)).map((row) => tupleOf(row, keys));
 
         const actual = answer(settled, read, options, true).map((t) => t.slice(0, keys.length));
         expect(multisetDiff(actual, expected), renderQuery(read)).toBeNull();
@@ -130,7 +148,8 @@ describe('metamorphic — NoREC-shaped: the optimized plan agrees with evaluatin
         });
         const parsed = parse(count);
         if (!parsed.ok) throw new Error(parsed.error.message);
-        const kept = settled.find((t) => t.name === read.table)!.rows.filter((row) => passes(parsed.ast.where, row)).length;
+        const where = resolveForReference(parsed.ast.where, settled);
+        const kept = settled.find((t) => t.name === read.table)!.rows.filter((row) => passes(where, row)).length;
         const result = runQuery(count, toDatabase(settled), DEFAULT_ENGINE_OPTIONS);
         expect(result.rows, count).toEqual([{ 'COUNT(*)': kept }]);
       }),

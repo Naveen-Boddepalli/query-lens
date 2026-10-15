@@ -63,6 +63,11 @@ describe('the generators reach what the oracle is meant to check', () => {
     rangeWrites: 0,
     /** Writes that consulted a UNIQUE index (and found the key free). */
     uniqueChecks: 0,
+    /** Joins with a LEFT step, and chains of two steps, that returned rows (plan.md §25.4 C3 slices a and b). */
+    leftJoins: 0,
+    chains: 0,
+    /** Statements with an `IN (subquery)` whose subquery found nothing — where `NULL NOT IN (∅)` is TRUE. */
+    emptySubqueries: 0,
   };
 
   for (const [{ tables: initial, steps }, options] of sessions) {
@@ -79,7 +84,7 @@ describe('the generators reach what the oracle is meant to check', () => {
       if ('where' in q) {
         for (const w of [...q.where, ...(q.kind === 'aggregate' && q.having ? [q.having] : [])]) {
           walkPred(w, (p) => {
-            const key = p.k === 'between' && p.neg ? 'not-between' : p.k === 'in' && p.neg ? 'not-in' : p.k === 'like' && p.neg ? 'not-like' : p.k === 'isnull' && p.neg ? 'is-not-null' : p.k === 'cmp' && p.op === '<>' ? '<>' : p.k;
+            const key = p.k === 'between' && p.neg ? 'not-between' : p.k === 'in' && p.neg ? 'not-in' : p.k === 'insub' && p.neg ? 'not-insub' : p.k === 'like' && p.neg ? 'not-like' : p.k === 'isnull' && p.neg ? 'is-not-null' : p.k === 'cmp' && p.op === '<>' ? '<>' : p.k;
             stats.preds.set(key, (stats.preds.get(key) ?? 0) + 1);
           });
         }
@@ -107,6 +112,11 @@ describe('the generators reach what the oracle is meant to check', () => {
       if (/"op":"IndexRangeScan","label":"IndexRangeScan [tu]\.\([^"]*\)","detail":"range: [a-z_]+ = /.test(planned)) stats.prefixRanges += 1;
       if (isWrite(q) && planned.includes('"op":"IndexRangeScan"')) stats.rangeWrites += 1;
       if (isWrite(q) && result.events.some((e) => e.label.includes('so the key is free'))) stats.uniqueChecks += 1;
+      if (result.events.some((e) => e.label.includes('finding no values at all'))) stats.emptySubqueries += 1;
+      if (q.kind === 'join' && result.rows.length > 0) {
+        if (q.joins.some((j) => j.type === 'left')) stats.leftJoins += 1;
+        if (q.joins.length > 1) stats.chains += 1;
+      }
       if (planned.includes('"op":"IndexProbe","label":"IndexProbe u.(')) stats.compositeProbes += 1;
       if (result.events.some((e) => e.label.includes('cannot help: the predicate constrains'))) stats.compositeRefused += 1;
       if (isWrite(q)) {
@@ -135,7 +145,7 @@ describe('the generators reach what the oracle is meant to check', () => {
   });
 
   it('generates every predicate form, including the negated ones and the NULL-in-list trap', () => {
-    for (const form of ['cmp', 'colcmp', 'litcmp', 'between', 'not-between', 'isnull', 'is-not-null', 'in', 'not-in', 'like', 'not-like', 'not', 'and', 'or', '<>', 'acmp', 'ccmp', 'hagg']) {
+    for (const form of ['cmp', 'colcmp', 'litcmp', 'between', 'not-between', 'isnull', 'is-not-null', 'in', 'not-in', 'insub', 'not-insub', 'pnull', 'like', 'not-like', 'not', 'and', 'or', '<>', 'acmp', 'ccmp', 'hagg']) {
       expect(stats.preds.get(form) ?? 0, `predicate form ${form}`).toBeGreaterThan(N / 30);
     }
   });
@@ -177,13 +187,24 @@ describe('the generators reach what the oracle is meant to check', () => {
   });
 
   it('enters composite indexes by a leftmost prefix, covers queries with them, and declines them without one (plan.md §25.4 B3b)', () => {
-    expect(stats.compositeScans, 'lookups through a composite index').toBeGreaterThan(30);
+    // Lower than 30 since the generators gained a third table, `IN (subquery)` and `(P) IS NULL` (plan.md §25.4 C3,
+    // 2026-10-15): the fixed seed now draws a different sample, and the new predicate forms dilute the plain ones the
+    // composite lookups are built from — measured at 28.
+    expect(stats.compositeScans, 'lookups through a composite index').toBeGreaterThan(20);
     expect(stats.compositeCovering, 'queries a composite index covers').toBeGreaterThan(5);
     expect(stats.compositeRefused, 'composite indexes refused for lack of a leading column').toBeGreaterThan(10);
     expect(stats.compositeWrites, 'writes finding rows through a composite index').toBeGreaterThan(10);
     expect(stats.compositeProbes, 'joins probing a composite index').toBeGreaterThan(3);
     expect(stats.prefixRanges, 'an equality prefix plus a range on the next column').toBeGreaterThan(10);
     expect(stats.rangeWrites, 'writes finding their rows by a range scan').toBeGreaterThan(10);
+  });
+
+  it('runs LEFT JOINs and two-step chains to a non-empty answer, and empty subqueries (plan.md §25.4 C3)', () => {
+    expect(stats.leftJoins, 'joins with a LEFT step that returned rows').toBeGreaterThan(N / 30);
+    // A second step joins a third, smaller table and must find partners in both, so fewer chains return rows than
+    // single joins do — measured at 83 with the fixed seed above.
+    expect(stats.chains, 'two-step join chains that returned rows').toBeGreaterThan(50);
+    expect(stats.emptySubqueries, 'statements whose IN subquery found nothing').toBeGreaterThan(N / 30);
   });
 
   it('writes through UNIQUE indexes without tripping them (plan.md §25.4 B3c)', () => {

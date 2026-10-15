@@ -106,6 +106,34 @@ describe('IN (subquery) — execution', () => {
     expect(everything.rows).toHaveLength(10);
   });
 
+  it('…and that holds for a row whose own value is NULL: NULL IN (empty) is FALSE, NULL NOT IN (empty) is TRUE', () => {
+    // With a non-empty list a NULL operand is UNKNOWN and every filter rejects it, so these rows are exactly where
+    // "NULL is UNKNOWN whatever the list" and SQL's real rule part: the orphan post must be kept by NOT IN, never
+    // matched by IN, and deleted/updated by a NOT IN write.
+    const withOrphan = () => {
+      const database = db();
+      database.tables.posts!.rows.push({ id: 11, authorId: null, title: 'orphan' });
+      return database;
+    };
+    const NOBODY = "(SELECT id FROM authors WHERE name = 'nobody')";
+
+    expect(run(`SELECT id FROM posts WHERE authorId IN ${NOBODY}`, withOrphan()).rows).toEqual([]);
+    const kept = run(`SELECT id FROM posts WHERE authorId NOT IN ${NOBODY}`, withOrphan()).rows;
+    expect(kept).toHaveLength(11);
+    expect(kept).toContainEqual({ id: 11 });
+    expect(run(`SELECT id FROM posts WHERE NOT (authorId IN ${NOBODY})`, withOrphan()).rows).toContainEqual({ id: 11 });
+
+    const deleted = run(`DELETE FROM posts WHERE authorId NOT IN ${NOBODY}`, withOrphan());
+    expect(deleted.write?.kind === 'delete' ? deleted.write.deletedCount : -1).toBe(11);
+    const updated = run(`UPDATE posts SET title = 'x' WHERE authorId NOT IN ${NOBODY}`, withOrphan());
+    expect(updated.write?.kind === 'update' ? updated.write.updatedCount : -1).toBe(11);
+
+    const whereStep = run(`SELECT id FROM posts WHERE authorId NOT IN ${NOBODY}`, withOrphan()).events.find(
+      (e) => e.stage === 'plan' && e.label.startsWith('The WHERE clause'),
+    );
+    expect(whereStep?.label).toMatch(/finding no values at all — so `NOT IN` is TRUE for every row, even one whose value is NULL/);
+  });
+
   it('the classic NOT IN NULL trap: a NULL anywhere in the subquery result makes NOT IN match nothing', () => {
     // The same three-valued-logic trap a literal `NOT IN (1, NULL)` already has (expressions.test.ts) — a
     // subquery-sourced NULL must trigger it identically, since resolution just produces an ordinary literal list.
@@ -160,5 +188,52 @@ describe('IN (subquery) — execution', () => {
     const result = parseStatement('SELECT * FROM posts WHERE authorId IN (SELECT id FROM authors WHERE posts.id = 1)');
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.message).toMatch(/does not need a table name|no table called/);
+  });
+});
+
+describe('IN (subquery) — wherever an expression can hold one, not only under AND/OR/NOT in WHERE', () => {
+  // `n` = 1, 2, NULL against u.n = {1, NULL}: `n IN (…)` is TRUE for 1, UNKNOWN for 2 (the NULL in the list) and
+  // UNKNOWN for NULL. Before the resolver walked every child these subqueries were never run, and an unresolved IN
+  // reads as an empty list — FALSE for every row — so each expectation below would have come out different.
+  const small = (): Database => ({
+    tables: {
+      t: { name: 't', columns: ['id', 'n'], rows: [{ id: 1, n: 1 }, { id: 2, n: 2 }, { id: 3, n: null }] },
+      u: { name: 'u', columns: ['id', 'n'], rows: [{ id: 1, n: 1 }, { id: 2, n: null }] },
+    },
+  });
+  const ids = (sql: string) => run(sql, small()).rows.map((r) => r['id']);
+
+  it('under IS [NOT] NULL, and inside a comparison', () => {
+    expect(ids('SELECT id FROM t WHERE (n IN (SELECT n FROM u)) IS NULL')).toEqual([2, 3]);
+    expect(ids('SELECT id FROM t WHERE (n IN (SELECT n FROM u)) IS NOT NULL')).toEqual([1]);
+    expect(ids('SELECT id FROM t WHERE (n IN (SELECT n FROM u)) = TRUE')).toEqual([1]);
+  });
+
+  it('in a computed column of the SELECT list', () => {
+    expect(run('SELECT id, n IN (SELECT n FROM u) AS x FROM t', small()).rows).toEqual([
+      { id: 1, x: true },
+      { id: 2, x: null },
+      { id: 3, x: null },
+    ]);
+  });
+
+  it('in HAVING', () => {
+    expect(run('SELECT n, COUNT(*) FROM t GROUP BY n HAVING n IN (SELECT n FROM u)', small()).rows).toEqual([{ n: 1, 'COUNT(*)': 1 }]);
+  });
+
+  it("in an UPDATE's SET value and a nested WHERE, and a DELETE's nested WHERE", () => {
+    const set = run('UPDATE t SET n = (n IN (SELECT n FROM u))', small());
+    expect(set.write?.rows.map((r) => r['n'])).toEqual([true, null, null]);
+    const where = run('UPDATE t SET n = 9 WHERE (n IN (SELECT n FROM u)) IS NULL', small());
+    expect(where.write?.kind === 'update' ? where.write.updatedCount : -1).toBe(2);
+    const deleted = run('DELETE FROM t WHERE (n IN (SELECT n FROM u)) IS NULL', small());
+    expect(deleted.write?.rows).toEqual([{ id: 1, n: 1 }]);
+  });
+
+  it('a nested subquery that fails is reported against its own text', () => {
+    const sql = 'SELECT id FROM t WHERE (n IN (SELECT n FROM nope)) IS NULL';
+    const { error } = run(sql, small());
+    expect(error?.message).toMatch(/IN subquery failed.*no table called `nope`/);
+    expect(sql.slice(error?.from, error?.to)).toBe('SELECT n FROM nope');
   });
 });

@@ -2,13 +2,13 @@
  * Resolves an `IN (subquery)` predicate (plan.md §25.4 C3 slice c, closing C3) exactly once, before the query
  * that names it is planned — the one place `runQuery.ts`'s SELECT, DELETE and UPDATE paths all share.
  *
- * `mapChildren` (`parser/ast.ts`) already rebuilds every other `Expr` kind from its children, but it does not
- * know how to turn a `subquery` into `items` — that needs a real sub-run of the engine, not a pure tree
- * transform — so this walks the same shape `mapChildren` would (`and`/`or`/`not`, the only kinds that can nest
- * another predicate) by hand, stopping to resolve any `in` node that carries a `subquery`.
+ * `mapChildren` (`parser/ast.ts`) rebuilds every `Expr` kind from its children; this walks the tree with it and,
+ * at any `in` node that carries a `subquery`, turns the subquery into `items` — which needs a real sub-run of the
+ * engine, not a pure tree transform.
  */
 
-import type { Expr, InSubquery } from './parser/ast.ts';
+import { mapChildren } from './parser/ast.ts';
+import type { DeleteStatement, Expr, InSubquery, SelectItem, SelectStatement, UpdateStatement } from './parser/ast.ts';
 import type { QueryError, Row, RunResult, SqlValue } from './types.ts';
 
 /** Every distinct value `column` holds across `rows`, in first-seen order — `null` counted like any other value. */
@@ -67,37 +67,100 @@ function resolveOne(
   return { ok: true, expr: { ...expr, items } };
 }
 
-/** `resolveOne`, recursively, for every `IN (subquery)` anywhere in `expr` — under any nesting of `AND`/`OR`/`NOT`. */
+/**
+ * `resolveOne`, recursively, for every `IN (subquery)` anywhere in `expr` — through every child an `Expr` can have
+ * (`mapChildren`), not only `AND`/`OR`/`NOT`. A predicate can sit in a value's place: `(x IN (SELECT …)) IS NULL`,
+ * `(x IN (SELECT …)) = TRUE`, or an `IN` whose own operand is one. Walking only the boolean connectives left those
+ * unresolved, and an unresolved `IN` reads as an empty list — the SQLite oracle found that (plan.md §25.4 A1).
+ */
 function resolveInSubqueries(
   expr: Expr,
   sql: string,
   run: (sql: string) => RunResult,
 ): { ok: true; expr: Expr } | { ok: false; error: QueryError } {
-  if (expr.kind === 'in' && expr.subquery) return resolveOne(expr, expr.subquery, sql, run);
-  if (expr.kind === 'and' || expr.kind === 'or') {
-    const left = resolveInSubqueries(expr.left, sql, run);
-    if (!left.ok) return left;
-    const right = resolveInSubqueries(expr.right, sql, run);
-    if (!right.ok) return right;
-    return { ok: true, expr: { ...expr, left: left.expr, right: right.expr } };
-  }
-  if (expr.kind === 'not') {
-    const operand = resolveInSubqueries(expr.operand, sql, run);
-    if (!operand.ok) return operand;
-    return { ok: true, expr: { ...expr, operand: operand.expr } };
-  }
-  // Every other kind's own children are arithmetic/columns/literals — `parsePredicate`'s grammar never lets a
-  // predicate (so never an `IN (subquery)`) nest inside one of those.
-  return { ok: true, expr };
+  let error: QueryError | undefined;
+  const resolved = mapChildren(expr, (child) => {
+    if (error) return child;
+    const out = resolveInSubqueries(child, sql, run);
+    if (!out.ok) {
+      error = out.error;
+      return child;
+    }
+    return out.expr;
+  });
+  if (error) return { ok: false, error };
+  if (resolved.kind === 'in' && resolved.subquery) return resolveOne(resolved, resolved.subquery, sql, run);
+  return { ok: true, expr: resolved };
 }
 
-/** `where`, with every `IN (subquery)` it contains resolved — or the first error one of them hit. `undefined` in, `undefined` out. */
-export function resolveWhereSubqueries(
-  where: Expr | undefined,
+type Resolved<T> = { ok: true; value: T } | { ok: false; error: QueryError };
+
+/** `resolveInSubqueries` over a list, in order, stopping at the first error. */
+function resolveEach<T>(
+  items: readonly T[],
+  f: (item: T) => { ok: true; expr: Expr } | { ok: false; error: QueryError } | null,
+  rebuild: (item: T, expr: Expr) => T,
+): Resolved<T[]> {
+  const out: T[] = [];
+  for (const item of items) {
+    const r = f(item);
+    if (r && !r.ok) return r;
+    out.push(r ? rebuild(item, r.expr) : item);
+  }
+  return { ok: true, value: out };
+}
+
+type Statement = SelectStatement | DeleteStatement | UpdateStatement;
+
+/**
+ * `ast`, with every `IN (subquery)` it holds resolved — or the first error one of them hit. Everywhere the grammar
+ * lets an expression appear: `WHERE` (all three statements), and for a `SELECT` its `HAVING` and its computed
+ * columns, for an `UPDATE` each `SET` value. Each subquery runs exactly once, in source order.
+ */
+export function resolveStatementSubqueries<S extends Statement>(
+  ast: S,
   sql: string,
   run: (sql: string) => RunResult,
-): { ok: true; where: Expr | undefined } | { ok: false; error: QueryError } {
-  if (!where) return { ok: true, where };
-  const resolved = resolveInSubqueries(where, sql, run);
-  return resolved.ok ? { ok: true, where: resolved.expr } : resolved;
+): Resolved<S> {
+  // `resolveStatement` rebuilds the statement it is given field for field, so its kind — and `S` — is unchanged.
+  return resolveStatement(ast, sql, run) as Resolved<S>;
+}
+
+function resolveStatement(ast: Statement, sql: string, run: (sql: string) => RunResult): Resolved<Statement> {
+  const resolve = (e: Expr) => resolveInSubqueries(e, sql, run);
+  let where = ast.where;
+  if (where) {
+    const r = resolve(where);
+    if (!r.ok) return r;
+    where = r.expr;
+  }
+  const withWhere = where ? { where } : {};
+  switch (ast.kind) {
+    case 'delete':
+      return { ok: true, value: { ...ast, ...withWhere } };
+    case 'select': {
+      let list = ast.select;
+      if (list.kind === 'columns') {
+        const items = resolveEach(
+          list.items,
+          (item) => (item.kind === 'expression' ? resolve(item.expr) : null),
+          (item, expr): SelectItem => (item.kind === 'expression' ? { ...item, expr } : item),
+        );
+        if (!items.ok) return items;
+        list = { ...list, items: items.value };
+      }
+      let having = ast.having;
+      if (having) {
+        const r = resolve(having);
+        if (!r.ok) return r;
+        having = r.expr;
+      }
+      return { ok: true, value: { ...ast, ...withWhere, select: list, ...(having ? { having } : {}) } };
+    }
+    case 'update': {
+      const assignments = resolveEach(ast.set.assignments, (a) => resolve(a.value), (a, value) => ({ ...a, value }));
+      if (!assignments.ok) return assignments;
+      return { ok: true, value: { ...ast, ...withWhere, set: { ...ast.set, assignments: assignments.value } } };
+    }
+  }
 }

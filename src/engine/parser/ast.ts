@@ -40,7 +40,7 @@ export type Expr =
   | { kind: 'isNull'; operand: Expr; negated: boolean; span: Span }
   /**
    * `x [NOT] IN (a, b, …)` — `items` are literals or columns; or `x [NOT] IN (SELECT …)` (plan.md §25.4 C3 slice
-   * c), which `subquery` names instead. `items` starts empty when `subquery` is present: `resolveWhereSubqueries`
+   * c), which `subquery` names instead. `items` starts empty when `subquery` is present: `resolveStatementSubqueries`
    * (`src/engine/subquery.ts`) runs the subquery exactly once, before the outer query is planned, and replaces
    * `items` with the resolved values as ordinary literals — so the cost model, the executor, and every rewrite
    * rule in `optimize.ts` never have to know a subquery was ever involved; they only ever see a plain literal

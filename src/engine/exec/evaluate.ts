@@ -13,6 +13,9 @@
  *   NOT UNKNOWN is UNKNOWN          so `NOT (x = 1)` still rejects the NULL rows
  *   x NOT IN (1, NULL) is never TRUE   because `x <> NULL` is UNKNOWN for every x
  *
+ * and one that surprises in the other direction: `NULL NOT IN (empty subquery)` is TRUE, because an empty list
+ * leaves nothing for the NULL to be unknown against.
+ *
  * The tests in `oracle/` (ternary-logic partitioning, and a differential run
  * against SQLite) check these tables against an outside authority.
  */
@@ -147,8 +150,12 @@ export function evaluatePredicate(expr: Expr, row: Row): Truth {
     }
 
     case 'in': {
+      // An empty list holds nothing to be equal *or* unknown against, so `x IN ()` is FALSE for every x — NULL
+      // included. Only a resolved `IN (subquery)` can be empty (a literal `IN ()` does not parse), which is why
+      // this comes before the NULL rule below rather than after it. (Found by a differential run against SQLite.)
+      if (expr.items.length === 0) return negate(false, expr.negated);
       const value = evaluateValue(expr.operand, row);
-      if (value === null) return null; // NULL IN (…) is UNKNOWN, whatever the list holds
+      if (value === null) return null; // NULL IN (…) is UNKNOWN, whatever the (non-empty) list holds
       let sawUnknown = false;
       for (const item of expr.items) {
         const equal = compare('=', value, evaluateValue(item, row));

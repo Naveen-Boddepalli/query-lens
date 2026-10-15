@@ -354,6 +354,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a `study` bundle row (5.4 kB gzip, its own lazy chunk), six Playwright tests, and STUDY.md §4.
 
 ### Changed
+- **The SQLite oracle now checks outer joins, join chains and subqueries.** Its generators built only a single
+  inner `t JOIN u`; they now also build `LEFT JOIN`, two-step chains over a third table `w` (each step inner or
+  left, either side of the `ON` first), `[NOT] IN (SELECT col FROM … [WHERE …])` as a predicate anywhere a WHERE
+  or HAVING takes one — a quarter of them deliberately empty — and `(P) IS [NOT] NULL`. The NoREC reference
+  resolves subqueries by filtering rows itself, without the planner, and the ternary-logic partitioning draws
+  subqueries too. The coverage suite fails the build if LEFT joins, chains or empty subqueries stop returning
+  rows. This found the two bugs under *Fixed*; with either fix reverted, two to four suites fail.
 - **A settings challenge fetches only its own tool's checks.** The runner for the storage, execution and isolation challenges is split by tool (`src/pages/challenges/settings/*.ts`), and a challenge loads its tool's module when it opens, instead of every driver at once: the form and runner are 4.6 kB (they were 32.3 together with the drivers), and the largest single tool, the isolation matrix, is 12.4 kB. Running a challenge is asynchronous; if a tool's checks cannot be loaded the page says so and the next run asks again.
 - **The lock sandbox keeps its script in the address.** What was requested and released is a list of steps (`?s=`), replayed into the same lock table on a reload or a pasted link, instead of only the state it ended in; the page reads the address defensively (at most 40 steps, four pages, two transactions, and a value that is not a script is no script). Lessons and challenges open the sandbox on the script they name.
 - **`/learn` and `/progress` no longer load the lessons.** They list lessons from a small manifest (`src/pages/learn/lessonIndex.ts`: title, length, summary, group) and import neither the twenty-five lessons' steps nor the engine behind their Playground links. `/learn` drops from 182 to 116 kB gzip and `/progress` from 184 to 118. A lesson page still loads the steps, and the manifest is the one place a lesson's title and summary are written.
@@ -378,6 +385,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   beside it. Total is 392.2 of 424 kB.
 
 ### Fixed
+- **`x NOT IN (subquery)` kept no NULL rows when the subquery found nothing.** SQL's rule is that an empty list
+  holds nothing to be unknown against, so `NULL IN (∅)` is FALSE and `NULL NOT IN (∅)` is TRUE; the evaluator
+  called a NULL operand UNKNOWN before looking at the list, so `DELETE FROM b WHERE y NOT IN (SELECT x FROM a)`
+  with `a` empty left the rows whose `y` is NULL behind. A literal `IN ()` does not parse, and none of the preset
+  datasets holds a NULL, so only a subquery over a custom database could show it. The WHERE narration now says
+  what an empty subquery means for every row.
+- **An `IN (subquery)` outside `AND`/`OR`/`NOT` in a WHERE clause was never run.** The parser accepts one under
+  `IS [NOT] NULL`, inside a comparison, in a computed column, in `HAVING` and in an `UPDATE`'s `SET`, but only
+  the WHERE clause's boolean connectives were searched for subqueries to resolve; the others ran as an empty list.
+  `SELECT … WHERE (n IN (SELECT n FROM u)) IS NULL`, `… HAVING n IN (SELECT …)` and `SELECT n IN (SELECT …) AS x`
+  all answered wrongly. Every expression in the statement is now searched, and a failing subquery in any of them
+  is reported against its own text.
 - **The 60-second tour's spotlight pointed at the wrong region, and the page scrolled to the bottom
   behind it.** `index.css` sets `scroll-behavior: smooth` on `<html>`, which `scrollIntoView` honours,
   so the tour read the target's rect while the scroll was still in flight and parked the spotlight where

@@ -10,7 +10,7 @@
 
 import fc from 'fast-check';
 import type { EngineOptions, IndexBuildOptions, JoinAlgorithm, ReplacementPolicyName, Row, SqlValue } from '../src/engine/types.ts';
-import type { AggItem, Arith, ArithOp, ColSpec, ColType, Op, Pred, Query, ReadQuery, Ref, TableSpec, WriteQuery } from './model.ts';
+import type { AggItem, Arith, ArithOp, ColSpec, ColType, JoinStep, Op, Pred, Query, ReadQuery, Ref, SubSelect, TableSpec, WriteQuery } from './model.ts';
 
 /* -------------------------------------------------------------------------- */
 /* Tables                                                                      */
@@ -33,6 +33,11 @@ const U_COLUMNS: ColSpec[] = [
   { name: 't_id', type: 'int' },
   { name: 'v', type: 'text' },
   { name: 'w', type: 'real' },
+];
+const W_COLUMNS: ColSpec[] = [
+  { name: 'id', type: 'int' },
+  { name: 'u_id', type: 'int' },
+  { name: 'z', type: 'int' },
 ];
 
 /** Quarter-steps from -2 to 4: exact in binary, so sums and products agree bit for bit in both engines. */
@@ -119,6 +124,33 @@ export const tableU = (t: TableSpec): fc.Arbitrary<TableSpec> => {
   );
 };
 
+/**
+ * `w(id, u_id, z)` — the third link of a join chain (plan.md §25.4 C3 slice b): `u_id` points at `u` the way
+ * `t_id` points at `t`, mostly at ids `u` holds, sometimes NULL; `z` is a small int that repeats.
+ */
+export const tableW = (u: TableSpec): fc.Arbitrary<TableSpec> => {
+  const held = u.rows.map((r) => r.id).filter((id): id is number => typeof id === 'number');
+  const uId = fc.oneof(
+    { weight: held.length > 0 ? 4 : 0, arbitrary: held.length > 0 ? fc.constantFrom(...held) : fc.constant(0) },
+    { weight: 1, arbitrary: fc.integer({ min: 1, max: 40 }) },
+  );
+  return fc.integer({ min: 0, max: 14 }).chain((count) =>
+    fc
+      .record({
+        ids: fc.uniqueArray(fc.integer({ min: 1, max: 40 }), { minLength: count, maxLength: count }),
+        uIds: columnArray(nullable(uId, 8), count),
+        zs: columnArray(nullable(fc.integer({ min: -3, max: 6 })), count),
+        indexed: fc.subarray(['id', 'u_id', 'z']),
+      })
+      .map(({ ids, uIds, zs, indexed }): TableSpec => ({
+        name: 'w',
+        columns: W_COLUMNS,
+        rows: ids.map((id, i): Row => ({ id, u_id: uIds[i]!, z: zs[i]! })),
+        indexed,
+      })),
+  );
+};
+
 /* -------------------------------------------------------------------------- */
 /* Predicates                                                                  */
 /* -------------------------------------------------------------------------- */
@@ -196,10 +228,44 @@ const computedArb = (refs: readonly Ref[]): fc.Arbitrary<{ e: Arith; alias: stri
     .array(fc.boolean().chain((divide) => arithArb(refs, { divide })), { minLength: 0, maxLength: 2 })
     .map((es) => es.map((e, i) => ({ e, alias: `x${i}` })));
 
+/** A table an `IN (subquery)` may read: its columns unqualified, and literals drawn from its own rows. */
+export interface SubSource {
+  table: string;
+  refs: Ref[];
+  pool: Pool;
+}
+
+export function subSources(tables: readonly TableSpec[], pool: Pool): SubSource[] {
+  return tables.map((t) => ({ table: t.name, refs: refsOf(t, false), pool: (ref) => pool({ name: ref.name, table: t.name }) }));
+}
+
+/**
+ * `ref [NOT] IN (SELECT col FROM s [WHERE …])` over every outer column and every source column it can be compared
+ * with. One subquery in four is made *empty* on purpose (`id < 0` — no row's id is negative), since an empty IN list
+ * is where SQL's rule for a NULL operand turns around (`NULL NOT IN (∅)` is TRUE) and is otherwise rare.
+ */
+function subArb(outer: readonly Ref[], subs: readonly SubSource[]): fc.Arbitrary<Pred>[] {
+  const candidates = outer.flatMap((ref) =>
+    subs.flatMap((source) => source.refs.filter((c) => comparable(ref, c)).map((col) => ({ ref, source, col }))),
+  );
+  if (candidates.length === 0) return [];
+  return [
+    fc.tuple(fc.constantFrom(...candidates), fc.boolean()).chain(([{ ref, source, col }, neg]) => {
+      const id = source.refs.find((r) => r.name === 'id')!;
+      const where: fc.Arbitrary<Pred[]> = fc.oneof(
+        { weight: 2, arbitrary: fc.constant<Pred[]>([]) },
+        { weight: 4, arbitrary: fc.array(leafArb(source.refs, source.pool), { minLength: 1, maxLength: 2 }) },
+        { weight: 2, arbitrary: fc.constant<Pred[]>([{ k: 'cmp', ref: id, op: '<', lit: 0 }]) },
+      );
+      return where.map((w): Pred => ({ k: 'insub', ref, neg, sub: { table: source.table, col: col.name, where: w } satisfies SubSelect }));
+    }),
+  ];
+}
+
 const LIKE_PATTERNS = ['a%', '%a', '_b', 'a_c', '%b%', '%', 'ab', '', 'z%', 'Z%', '_', '__', '%_', "it%", "i_'s", 'b_', '%z'] as const;
 
-/** A leaf predicate: one comparison or one test on a column (or two literals). */
-function leafArb(refs: readonly Ref[], pool: Pool): fc.Arbitrary<Pred> {
+/** A leaf predicate: one comparison or one test on a column (or two literals), or — given `subs` — an `IN (subquery)`. */
+function leafArb(refs: readonly Ref[], pool: Pool, subs: readonly SubSource[] = []): fc.Arbitrary<Pred> {
   const refArb = fc.constantFrom(...refs);
   const cmp = fc
     .tuple(refArb, opArb)
@@ -269,19 +335,22 @@ function leafArb(refs: readonly Ref[], pool: Pool): fc.Arbitrary<Pred> {
     { weight: 2, arbitrary: inList },
     ...like,
     ...colcmp,
+    ...subArb(refs, subs).map((arbitrary) => ({ weight: 2, arbitrary })),
   );
 }
 
-/** A predicate tree at most `depth` levels of `AND` / `OR` / `NOT` deep. */
-export function predArb(refs: readonly Ref[], pool: Pool, depth = 2): fc.Arbitrary<Pred> {
-  const leaf = leafArb(refs, pool);
+/** A predicate tree at most `depth` levels of `AND` / `OR` / `NOT` / `(…) IS [NOT] NULL` deep. */
+export function predArb(refs: readonly Ref[], pool: Pool, depth = 2, subs: readonly SubSource[] = []): fc.Arbitrary<Pred> {
+  const leaf = leafArb(refs, pool, subs);
   if (depth <= 0) return leaf;
-  const sub = predArb(refs, pool, depth - 1);
+  const sub = predArb(refs, pool, depth - 1, subs);
   return fc.oneof(
     { weight: 6, arbitrary: leaf },
     { weight: 1, arbitrary: fc.tuple(sub, sub).map(([a, b]): Pred => ({ k: 'or', a, b })) },
     { weight: 1, arbitrary: fc.tuple(sub, sub).map(([a, b]): Pred => ({ k: 'and', a, b })) },
     { weight: 1, arbitrary: sub.map((p): Pred => ({ k: 'not', p })) },
+    // A predicate in a value's place: everything under it must be evaluated (and any subquery in it resolved) there too.
+    { weight: 1, arbitrary: fc.tuple(sub, fc.boolean()).map(([p, neg]): Pred => ({ k: 'pnull', p, neg })) },
   );
 }
 
@@ -290,10 +359,10 @@ export function predArb(refs: readonly Ref[], pool: Pool, depth = 2): fc.Arbitra
  * very little. Every new predicate form makes an empty answer likelier, so this weight is what keeps the
  * generators' non-empty share (asserted in `coverage.test.ts`) from eroding as the SQL grows.
  */
-const whereArb = (refs: readonly Ref[], pool: Pool, max = 3): fc.Arbitrary<Pred[]> =>
+const whereArb = (refs: readonly Ref[], pool: Pool, max = 3, subs: readonly SubSource[] = []): fc.Arbitrary<Pred[]> =>
   fc.oneof(
     { weight: 2, arbitrary: fc.constant<Pred[]>([]) },
-    { weight: 3, arbitrary: fc.array(predArb(refs, pool), { minLength: 1, maxLength: max }) },
+    { weight: 3, arbitrary: fc.array(predArb(refs, pool, 2, subs), { minLength: 1, maxLength: max }) },
   );
 
 /* -------------------------------------------------------------------------- */
@@ -424,12 +493,12 @@ function fixedProj(
   return proj;
 }
 
-export function selectArb(t: TableSpec, pool: Pool): fc.Arbitrary<Query> {
+export function selectArb(t: TableSpec, pool: Pool, subs: readonly SubSource[] = []): fc.Arbitrary<Query> {
   const refs = refsOf(t, false);
   const general = fc
     .record({
       proj: fc.oneof({ weight: 1, arbitrary: fc.constant('*' as const) }, { weight: 2, arbitrary: uniqueRefs(refs, 1, 4) }),
-      where: whereArb(refs, pool),
+      where: whereArb(refs, pool, 3, subs),
       order: fc.option(fc.record({ ref: fc.constantFrom(...refs), dir: fc.constantFrom('asc', 'desc') }), {
         nil: undefined,
         freq: 2,
@@ -459,7 +528,7 @@ export function selectArb(t: TableSpec, pool: Pool): fc.Arbitrary<Query> {
   return fc.oneof({ weight: 3, arbitrary: general }, { weight: 3, arbitrary: lookupArb(t, pool) });
 }
 
-export function aggregateArb(t: TableSpec, pool: Pool): fc.Arbitrary<Query> {
+export function aggregateArb(t: TableSpec, pool: Pool, subs: readonly SubSource[] = []): fc.Arbitrary<Query> {
   const refs = refsOf(t, false);
   const numericRefs = refs.filter((r) => numeric(r.type));
   const agg: fc.Arbitrary<AggItem> = fc.oneof(
@@ -488,6 +557,8 @@ export function aggregateArb(t: TableSpec, pool: Pool): fc.Arbitrary<Query> {
       ...(group.length === 0
         ? []
         : [{ weight: 2, arbitrary: fc.constantFrom(...group).chain((ref) => fc.tuple(opArb, literalFor(ref, pool)).map(([op, lit]): Pred => ({ k: 'cmp', ref, op, lit }))) }]),
+      // A grouped column against a subquery: HAVING resolves its subqueries like WHERE does.
+      ...subArb(group, subs).map((arbitrary) => ({ weight: 1, arbitrary })),
     );
   const havingArb = (group: readonly Ref[]): fc.Arbitrary<Pred | undefined> => {
     const leaf = havingLeaf(group);
@@ -505,7 +576,7 @@ export function aggregateArb(t: TableSpec, pool: Pool): fc.Arbitrary<Query> {
       aggs: fc.uniqueArray(agg, { minLength: 0, maxLength: 3, selector: (a) => `${a.fn}(${a.arg === '*' ? '*' : a.arg.name})` }),
       showAll: fc.boolean(),
       distinct: fc.integer({ min: 0, max: 5 }).map((x) => x === 0),
-      where: whereArb(refs, pool, 2),
+      where: whereArb(refs, pool, 2, subs),
       page: pageArb,
     })
     .chain((base) => havingArb(base.group).map((having) => ({ ...base, having })))
@@ -526,31 +597,52 @@ export function aggregateArb(t: TableSpec, pool: Pool): fc.Arbitrary<Query> {
     });
 }
 
-export function joinArb(t: TableSpec, u: TableSpec, pool: Pool): fc.Arbitrary<Query> {
+const joinTypeArb = fc.oneof({ weight: 3, arbitrary: fc.constant<JoinStep['type']>('inner') }, { weight: 2, arbitrary: fc.constant<JoinStep['type']>('left') });
+
+/**
+ * `t [LEFT] JOIN u ON …`, and two times in five a second step, `[LEFT] JOIN w ON …` (plan.md §25.4 C3 slices a and
+ * b) — mostly along `w`'s own foreign key to `u`, sometimes on any comparable pair with `t` or `u`. Either side of an
+ * `ON` may be written first. A LEFT JOIN with a WHERE on its right-hand table is where predicate pushdown must hold
+ * back (a NULL-padded row would be filtered before it exists), so the WHERE ranges over every table in the query.
+ */
+export function joinArb(t: TableSpec, u: TableSpec, w: TableSpec, pool: Pool, subs: readonly SubSource[] = []): fc.Arbitrary<Query> {
   const tRefs = refsOf(t, true);
   const uRefs = refsOf(u, true);
-  const all = [...tRefs, ...uRefs];
-  const pairs = tRefs.flatMap((l) => uRefs.filter((r) => comparable(l, r)).map((r) => ({ l, r })));
-  return fc
-    .record({
-      on: fc.constantFrom(...pairs),
-      proj: uniqueRefs(all, 1, 5),
-      computed: fc.oneof({ weight: 3, arbitrary: fc.constant<{ e: Arith; alias: string }[]>([]) }, { weight: 1, arbitrary: computedArb(all) }),
-      distinct: fc.integer({ min: 0, max: 3 }).map((x) => x === 0),
-      where: whereArb(all, pool, 2),
-      page: pageArb,
-    })
-    .map(({ on, proj, computed, distinct, where, page }): Query => ({
-      kind: 'join',
-      ...(distinct ? { distinct } : {}),
-      left: t.name,
-      right: u.name,
-      on,
-      proj,
-      ...(computed.length > 0 ? { computed } : {}),
-      where,
-      ...page,
-    }));
+  const wRefs = refsOf(w, true);
+  const pairs = (left: readonly Ref[], right: readonly Ref[]) =>
+    left.flatMap((l) => right.filter((r) => comparable(l, r)).map((r) => ({ l, r })));
+  const onArb = (candidates: { l: Ref; r: Ref }[]) =>
+    fc.tuple(fc.constantFrom(...candidates), fc.boolean()).map(([{ l, r }, flip]) => (flip ? { l: r, r: l } : { l, r }));
+  const toU = fc.tuple(joinTypeArb, onArb(pairs(tRefs, uRefs))).map(([type, on]): JoinStep => ({ table: u.name, type, on }));
+  const fk = { l: uRefs.find((r) => r.name === 'id')!, r: wRefs.find((r) => r.name === 'u_id')! };
+  const toW = fc
+    .tuple(joinTypeArb, fc.oneof({ weight: 3, arbitrary: onArb([fk]) }, { weight: 2, arbitrary: onArb(pairs([...tRefs, ...uRefs], wRefs)) }))
+    .map(([type, on]): JoinStep => ({ table: w.name, type, on }));
+  const chain = fc.oneof(
+    { weight: 3, arbitrary: toU.map((a) => [a]) },
+    { weight: 2, arbitrary: fc.tuple(toU, toW).map(([a, b]) => [a, b]) },
+  );
+  return chain.chain((joins) => {
+    const all = joins.length === 1 ? [...tRefs, ...uRefs] : [...tRefs, ...uRefs, ...wRefs];
+    return fc
+      .record({
+        proj: uniqueRefs(all, 1, 5),
+        computed: fc.oneof({ weight: 3, arbitrary: fc.constant<{ e: Arith; alias: string }[]>([]) }, { weight: 1, arbitrary: computedArb(all) }),
+        distinct: fc.integer({ min: 0, max: 3 }).map((x) => x === 0),
+        where: whereArb(all, pool, 2, subs),
+        page: pageArb,
+      })
+      .map(({ proj, computed, distinct, where, page }): Query => ({
+        kind: 'join',
+        ...(distinct ? { distinct } : {}),
+        left: t.name,
+        joins,
+        proj,
+        ...(computed.length > 0 ? { computed } : {}),
+        where,
+        ...page,
+      }));
+  });
 }
 
 /* -------------------------------------------------------------------------- */
@@ -590,8 +682,8 @@ export function insertArb(t: TableSpec): fc.Arbitrary<WriteQuery> {
  * A `WHERE` for a write: mostly any predicate, but often an equality on an *indexed* column, so the write finds its
  * rows through the index — several of them when the column repeats — and has to maintain that index as it goes.
  */
-function writeWhereArb(t: TableSpec, refs: readonly Ref[], pool: Pool): fc.Arbitrary<Pred[]> {
-  const general = whereArb(refs, pool, 2);
+function writeWhereArb(t: TableSpec, refs: readonly Ref[], pool: Pool, subs: readonly SubSource[] = []): fc.Arbitrary<Pred[]> {
+  const general = whereArb(refs, pool, 2, subs);
   const composites = t.composite ?? [];
   if (t.indexed.length === 0 && composites.length === 0) return general;
   const single = t.indexed.length === 0
@@ -643,14 +735,14 @@ function writeWhereArb(t: TableSpec, refs: readonly Ref[], pool: Pool): fc.Arbit
   );
 }
 
-export function updateArb(t: TableSpec, pool: Pool): fc.Arbitrary<WriteQuery> {
+export function updateArb(t: TableSpec, pool: Pool, subs: readonly SubSource[] = []): fc.Arbitrary<WriteQuery> {
   const refs = refsOf(t, false);
   // Any column but the join key's partner: SET on an *indexed* column moves that row's index entry, which is the point.
   const settable = t.columns.filter((c) => ['id', 'k', 'n', 's', 'r'].includes(c.name) && !(t.unique ?? []).includes(c.name));
   return fc
     .record({
       set: fc.uniqueArray(fc.constantFrom(...settable), { minLength: 1, maxLength: 2, selector: (c) => c.name }),
-      where: writeWhereArb(t, refs, pool),
+      where: writeWhereArb(t, refs, pool, subs),
     })
     .chain(({ set, where }) =>
       // Each assignment is a literal, or — a third of the time — arithmetic over the row's own columns
@@ -677,8 +769,8 @@ export function updateArb(t: TableSpec, pool: Pool): fc.Arbitrary<WriteQuery> {
     );
 }
 
-export function deleteArb(t: TableSpec, pool: Pool): fc.Arbitrary<WriteQuery> {
-  return writeWhereArb(t, refsOf(t, false), pool).map((where): WriteQuery => ({ kind: 'delete', table: t.name, where }));
+export function deleteArb(t: TableSpec, pool: Pool, subs: readonly SubSource[] = []): fc.Arbitrary<WriteQuery> {
+  return writeWhereArb(t, refsOf(t, false), pool, subs).map((where): WriteQuery => ({ kind: 'delete', table: t.name, where }));
 }
 
 /* -------------------------------------------------------------------------- */
@@ -699,20 +791,29 @@ function number(steps: Query[]): Query[] {
   });
 }
 
+/** `t`, `u` and `w`: every statement targets `t` (or joins from it); `u` and `w` are join partners and subquery sources. */
+export const tablesArb: fc.Arbitrary<[TableSpec, TableSpec, TableSpec]> = tableT.chain((t) =>
+  tableU(t).chain((u) => tableW(u).map((w): [TableSpec, TableSpec, TableSpec] => [t, u, w])),
+);
+
 export const sessionArb = (final: 'select' | 'aggregate' | 'join' | 'any' = 'any'): fc.Arbitrary<Session> =>
-  tableT.chain((t) => tableU(t).map((u) => [t, u] as const)).chain(([t, u]) => {
-    const pool = poolOf([t, u]);
-    const write = fc.oneof(insertArb(t), updateArb(t, pool), deleteArb(t, pool));
+  tablesArb.chain(([t, u, w]) => {
+    const pool = poolOf([t, u, w]);
+    // An `IN (subquery)` may read any of the three — `t` itself included, which is still uncorrelated.
+    const subs = subSources([u, w, t], pool);
+    const write = fc.oneof(insertArb(t), updateArb(t, pool, subs), deleteArb(t, pool, subs));
     const read: fc.Arbitrary<ReadQuery> = (
       final === 'select'
-        ? selectArb(t, pool)
+        ? selectArb(t, pool, subs)
         : final === 'aggregate'
-          ? aggregateArb(t, pool)
+          ? aggregateArb(t, pool, subs)
           : final === 'join'
-            ? joinArb(t, u, pool)
-            : fc.oneof(selectArb(t, pool), aggregateArb(t, pool), joinArb(t, u, pool))
+            ? joinArb(t, u, w, pool, subs)
+            : fc.oneof(selectArb(t, pool, subs), aggregateArb(t, pool, subs), joinArb(t, u, w, pool, subs))
     ) as fc.Arbitrary<ReadQuery>;
-    return fc.tuple(fc.array(write, { minLength: 0, maxLength: 3 }), read).map(([w, r]): Session => ({ tables: [t, u], steps: number([...w, r]) }));
+    return fc
+      .tuple(fc.array(write, { minLength: 0, maxLength: 3 }), read)
+      .map(([writes, r]): Session => ({ tables: [t, u, w], steps: number([...writes, r]) }));
   });
 
 /* -------------------------------------------------------------------------- */

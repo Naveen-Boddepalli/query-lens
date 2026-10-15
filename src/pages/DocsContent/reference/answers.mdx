@@ -35,8 +35,9 @@ it ships to your browser.
 
 **1. Differential: the same statement, two engines.** A generator builds small, deliberately collision-heavy
 tables (few distinct values, many `NULL`s, keys that overlap between two tables) and statements over them —
-`SELECT` with `WHERE`, `ORDER BY` and `LIMIT`; aggregates and `GROUP BY`; `JOIN`; `INSERT`, `UPDATE`,
-`DELETE` followed by a read of what they left behind. Each statement runs in QueryLens and in SQLite, and the
+`SELECT` with `WHERE`, `ORDER BY` and `LIMIT`; aggregates and `GROUP BY`; `JOIN` and `LEFT JOIN`, chained
+across three tables; `IN (subquery)`, some of them empty on purpose; `INSERT`, `UPDATE`, `DELETE` followed by a
+read of what they left behind. Each statement runs in QueryLens and in SQLite, and the
 answers must match — as a *multiset* unless an `ORDER BY` says otherwise, with a tolerance on floating point.
 Buffer size, page size, replacement policy, join algorithm and aggregate strategy are drawn at random too, so
 every physical strategy is checked, not only the default.
@@ -63,6 +64,14 @@ two real bugs, both now fixed and pinned by a regression test:
 - **`DELETE FROM t WHERE k = k` deleted the rows where `k` is `NULL`.** The optimizer's constant-folding rule
   treated a column compared with itself as always true. Under three-valued logic `k = k` is UNKNOWN on a `NULL`
   row, and only TRUE passes a filter — so the folded plan destroyed data the query never selected.
+
+Teaching it outer joins, join chains and subqueries later found two more:
+
+- **`x NOT IN (subquery)` left out the `NULL` rows when the subquery found nothing.** With an empty list there is
+  nothing for a `NULL` to be unknown against, so `NULL NOT IN (∅)` is TRUE; the engine called it UNKNOWN.
+- **A subquery outside a plain `WHERE … AND …` was never run.** Under `IS NULL`, in `HAVING` or in a computed
+  column it was read as an empty list, so `(n IN (SELECT …)) IS NULL` and `HAVING n IN (SELECT …)` answered
+  wrongly.
 
 ## What this does not prove
 

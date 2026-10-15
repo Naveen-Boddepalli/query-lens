@@ -23,7 +23,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { runQuery } from '../src/engine/runQuery.ts';
 import { multisetDiff } from './compare.ts';
 import { ORACLE_TIMEOUT, oracleParams } from './config.ts';
-import { optionsArb, poolOf, predArb, refsOf, tableT, tableU } from './generate.ts';
+import { optionsArb, poolOf, predArb, refsOf, subSources, tableT, tableU } from './generate.ts';
 import { toDatabase } from './harness.ts';
 import { renderPred } from './model.ts';
 import { tupleOf } from './sqlite.ts';
@@ -44,7 +44,9 @@ describe('ternary-logic partitioning', () => {
           // fast-check arbitraries cannot be drawn from inside a property, so the predicate is drawn by sampling its arbitrary
           // with a seed derived from the table (deterministic per counterexample, and shrinking still works on the table).
           const seed = t.rows.length * 7919 + u.rows.length * 104729 + (useIndex ? 1 : 0);
-          const predicates = fc.sample(predArb(refs, pool, 3), { seed, numRuns: 12 });
+          // Subqueries over `u` and `t` itself too: `(x IN (SELECT …)) IS NULL` is one of the three partitions, so a
+          // subquery the engine left unresolved there (it once did) puts a row in no partition at all.
+          const predicates = fc.sample(predArb(refs, pool, 3, subSources([u, t], pool)), { seed, numRuns: 12 });
 
           const db = toDatabase([t, u], useIndex);
           const cols = t.columns.map((c) => c.name);
