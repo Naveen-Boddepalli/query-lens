@@ -107,17 +107,20 @@ export function SortToolPage() {
   }, [selectedMerge]);
 
   return (
-    <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-4 p-6 sm:p-8">
-      <PageHeader title="External merge sort">
+    <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-5 p-6 sm:p-8">
+      <PageHeader
+        breadcrumbs={[{ label: 'Tools', to: '/tools' }, { label: 'External Sort' }]}
+        title="External Merge Sort Visualizer"
+      >
         Sorting more records than fit in memory: sort what fits into short runs, then merge the runs
-        together pass after pass until one sorted run remains. The cost is page reads and writes —
-        change the memory budget and watch it move. Not wired to a <code className="font-mono text-ink">Sort</code>{' '}
-        operator (the engine has none yet); a self-contained model.
+        together pass after pass until one sorted run remains. The cost is page reads and writes &mdash;
+        change the memory budget and watch pass counts and I/O move.
       </PageHeader>
 
-      <div className="flex flex-wrap items-end gap-4 rounded-xl border border-edge bg-surface-2 p-3 shadow-e1">
-        <label className="flex flex-col gap-1 text-label text-ink-dim">
-          Records
+      {/* Control Toolbar */}
+      <div className="ql-sheen flex flex-wrap items-end gap-4 rounded-xl border border-edge bg-surface-2/80 p-4 shadow-neu-rest backdrop-blur-md">
+        <label className="flex flex-col gap-1.5 text-label text-ink-dim">
+          <span>Records</span>
           <input
             type="number"
             min={SORT_LIMITS.minRecords}
@@ -130,29 +133,29 @@ export function SortToolPage() {
                 setSelected(null);
               }
             }}
-            className={`${inputField} w-20 tabular-nums`}
+            className={`${inputField} w-24 tabular-nums`}
           />
         </label>
 
-        <label className="flex flex-col gap-1 text-label text-ink-dim">
-          Records / page
+        <label className="flex flex-col gap-1.5 text-label text-ink-dim">
+          <span>Records / page</span>
           <select
             value={pageSize}
             onChange={(e) => { setPageSize(Number(e.target.value)); setSelected(null); }}
             className={inputField}
           >
-            {[2, 3, 4].map((v) => <option key={v} value={v}>{v}</option>)}
+            {[2, 3, 4].map((v) => <option key={v} value={v}>{v} records</option>)}
           </select>
         </label>
 
-        <label className="flex flex-col gap-1 text-label text-ink-dim">
-          Buffer pages
+        <label className="flex flex-col gap-1.5 text-label text-ink-dim">
+          <span>Buffer pages</span>
           <select
             value={memPages}
             onChange={(e) => { setMemPages(Number(e.target.value)); setSelected(null); }}
             className={inputField}
           >
-            {[3, 4, 5, 6].map((v) => <option key={v} value={v}>{v}</option>)}
+            {[3, 4, 5, 6].map((v) => <option key={v} value={v}>{v} pages</option>)}
           </select>
         </label>
 
@@ -161,24 +164,35 @@ export function SortToolPage() {
           onClick={() => { setSeed(Math.floor(Math.random() * MAX_SEED)); setSelected(null); }}
           className={btnSecondary}
         >
-          Shuffle
+          Shuffle Keys
         </button>
       </div>
 
-      <div className={`${panelSurface} flex flex-wrap items-start gap-x-8 gap-y-3 p-4`}>
-        <Stat label="data pages" value={plan.pageCount} sub={`${plan.recordCount} records`} />
-        <Stat label="initial runs" value={plan.initialRunCount} sub={`sort ${plan.memPages} pages at once`} />
-        <Stat
-          label="merge passes"
-          value={plan.mergePassCount}
-          sub={plan.mergePassCount === 0 ? 'fits in memory' : `${plan.fanIn} runs merged at once`}
-        />
-        <Stat
-          label="page I/Os"
-          value={plan.totalIO}
-          sub={`${plan.ioPerPass} per pass × ${plan.passes.length}`}
-          accent
-        />
+      {/* Metrics Strip */}
+      <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+        {[
+          { label: 'Data Pages', value: String(plan.pageCount), sub: `${plan.recordCount} records` },
+          { label: 'Initial Runs', value: String(plan.initialRunCount), sub: `${plan.memPages} pages/sort` },
+          {
+            label: 'Merge Passes',
+            value: String(plan.mergePassCount),
+            sub: plan.mergePassCount === 0 ? 'in-memory' : `${plan.fanIn}-way fan-in`,
+          },
+          {
+            label: 'Total Page I/Os',
+            value: String(plan.totalIO),
+            sub: `${plan.ioPerPass} I/Os × ${plan.passes.length} passes`,
+            color: 'text-accent',
+          },
+        ].map((m) => (
+          <div key={m.label} className="ql-sheen rounded-xl border border-edge bg-surface-2/60 p-3 shadow-neu-rest backdrop-blur-sm">
+            <span className="block font-mono text-[0.7rem] uppercase tracking-wider text-ink-dim">{m.label}</span>
+            <span className={`mt-1 block truncate text-heading font-semibold tabular-nums ${m.color ?? 'text-ink'}`}>
+              {m.value}
+            </span>
+            <span className="text-[0.75rem] text-ink-dim">{m.sub}</span>
+          </div>
+        ))}
       </div>
 
       <p className="text-label leading-relaxed text-ink-dim">
@@ -229,28 +243,6 @@ export function SortToolPage() {
         </Link>
         .
       </p>
-    </div>
-  );
-}
-
-function Stat({
-  label,
-  value,
-  sub,
-  accent = false,
-}: {
-  label: string;
-  value: number;
-  sub: string;
-  accent?: boolean;
-}) {
-  return (
-    <div className="flex flex-col">
-      <span className={`text-heading font-semibold tabular-nums ${accent ? 'text-accent' : 'text-ink'}`}>
-        {value}
-      </span>
-      <span className="text-label text-ink-dim">{label}</span>
-      <span className="text-label text-ink-dim/70">{sub}</span>
     </div>
   );
 }

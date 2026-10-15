@@ -103,22 +103,28 @@ export function LocksToolPage() {
     setLog([]);
   }
 
+  const totalHeld = Object.values(state.holders).reduce((acc, h) => acc + h.length, 0);
+  const totalWaiting = Object.values(state.waiters).reduce((acc, w) => acc + w.length, 0);
+
   return (
-    <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-4 p-6 sm:p-8">
-      <PageHeader title="Locks sandbox">
+    <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-5 p-6 sm:p-8">
+      <PageHeader
+        breadcrumbs={[{ label: 'Tools', to: '/tools' }, { label: 'Lock Manager' }]}
+        title="Lock Manager Simulator"
+      >
         Two transactions placing real lock requests against each other. A conflicting request
-        genuinely <em>blocks</em> here — unlike the{' '}
+        genuinely <em>blocks</em> here &mdash; unlike the{' '}
         <Link to="/playground" className="underline underline-offset-2 hover:text-ink">
           Playground
         </Link>
-        , which runs one query at a time and never contends with itself (plan.md §22.2). Block each
-        other in a cycle and watch the wait-for graph resolve: the transaction that arrived more
-        recently is aborted, and whatever it held is released.
+        , which runs one query at a time. Form a dependency cycle and watch the wait-for graph
+        resolve: the transaction that arrived more recently is aborted, releasing its held locks.
       </PageHeader>
 
-      <div className="flex flex-wrap items-end gap-3 rounded-xl border border-edge bg-surface-2 p-3 shadow-e1">
-        <div className="flex flex-col gap-1 text-label text-ink-dim">
-          Transaction
+      {/* Control Toolbar */}
+      <div className="ql-sheen flex flex-wrap items-end gap-3 rounded-xl border border-edge bg-surface-2/80 p-4 shadow-neu-rest backdrop-blur-md">
+        <div className="flex flex-col gap-1.5 text-label text-ink-dim">
+          <span>Transaction</span>
           <div className="flex gap-1" role="radiogroup" aria-label="Transaction">
             {TRANSACTIONS.map((t) => (
               <button
@@ -135,22 +141,22 @@ export function LocksToolPage() {
           </div>
         </div>
 
-        <label htmlFor="resource" className="flex flex-col gap-1 text-label text-ink-dim">
-          Page
+        <label htmlFor="resource" className="flex flex-col gap-1.5 text-label text-ink-dim">
+          <span>Page Resource</span>
           <select
             id="resource"
             value={resource}
             onChange={(e) => { setResource(Number(e.target.value)); }}
-            className={`${inputField} w-20 tabular-nums`}
+            className={`${inputField} w-24 tabular-nums font-mono`}
           >
             {RESOURCES.map((r) => (
-              <option key={r} value={r}>{r}</option>
+              <option key={r} value={r}>page {r}</option>
             ))}
           </select>
         </label>
 
-        <div className="flex flex-col gap-1 text-label text-ink-dim">
-          Mode
+        <div className="flex flex-col gap-1.5 text-label text-ink-dim">
+          <span>Lock Mode</span>
           <div className="flex gap-1" role="radiogroup" aria-label="Lock mode">
             {MODES.map((m) => (
               <button
@@ -159,7 +165,7 @@ export function LocksToolPage() {
                 role="radio"
                 aria-checked={mode === m}
                 onClick={() => { setMode(m); }}
-                className={`${segBase} ${mode === m ? segOn : segOff}`}
+                className={`${segBase} capitalize ${mode === m ? segOn : segOff}`}
               >
                 {m}
               </button>
@@ -167,11 +173,40 @@ export function LocksToolPage() {
           </div>
         </div>
 
-        <button type="button" onClick={runRequest} className={btnPrimary}>Request</button>
+        <div className="flex items-center gap-2">
+          <button type="button" onClick={runRequest} className={btnPrimary}>
+            Request Lock
+          </button>
+          <button type="button" onClick={runPreset} className={btnSecondary}>
+            Deadlock Example
+          </button>
+          <button type="button" onClick={reset} className={btnSecondary}>
+            Reset
+          </button>
+        </div>
+      </div>
 
-        <span className="mx-1 h-6 w-px bg-edge" aria-hidden />
-        <button type="button" onClick={runPreset} className={btnSecondary}>Deadlock example</button>
-        <button type="button" onClick={reset} className={btnSecondary}>Reset</button>
+      {/* Metrics Strip */}
+      <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+        {[
+          { label: 'Locks Held', value: String(totalHeld), sub: 'active grants', color: 'text-hit' },
+          { label: 'Pending Waiters', value: String(totalWaiting), sub: 'blocked requests', color: totalWaiting > 0 ? 'text-miss' : 'text-ink' },
+          {
+            label: 'Deadlock Status',
+            value: state.aborted.length > 0 ? `${state.aborted.join(', ')} Aborted` : 'None',
+            sub: 'cycle resolution',
+            color: state.aborted.length > 0 ? 'text-evict' : 'text-hit',
+          },
+          { label: 'Model', value: 'Strict 2PL', sub: 'Shared & Exclusive' },
+        ].map((m) => (
+          <div key={m.label} className="ql-sheen rounded-xl border border-edge bg-surface-2/60 p-3 shadow-neu-rest backdrop-blur-sm">
+            <span className="block font-mono text-[0.7rem] uppercase tracking-wider text-ink-dim">{m.label}</span>
+            <span className={`mt-1 block truncate text-heading font-semibold tabular-nums ${m.color ?? 'text-ink'}`}>
+              {m.value}
+            </span>
+            <span className="text-[0.75rem] text-ink-dim">{m.sub}</span>
+          </div>
+        ))}
       </div>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
