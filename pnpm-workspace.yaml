@@ -1,8 +1,13 @@
 # CodeMirror breaks — in types and at runtime — if two copies of
-# @codemirror/state or @codemirror/view are loaded. Force exactly one.
+# @codemirror/state or @codemirror/view are loaded. Force exactly one: the
+# version package.json depends on (`$name`), so a bump there is the bump here.
+# These used to be literal versions, and a copy in package.json's `pnpm` field
+# — which pnpm 11 does not read — is what Dependabot kept raising, so the
+# installed view and state sat at 6.43.10 and 6.7.2 behind a package.json that
+# claimed 6.43.13 and 6.7.6.
 overrides:
-  '@codemirror/state': 6.7.2
-  '@codemirror/view': 6.43.10
+  '@codemirror/state': $@codemirror/state
+  '@codemirror/view': $@codemirror/view
 
 # plan.md §14.1 item 7. pnpm 11 defaults minimumReleaseAge to 1440 minutes, but
 # `pnpm config get minimumReleaseAge` returns undefined here — an implicit

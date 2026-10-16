@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Dependency updates** (Dependabot #22, the codemirror group): `@codemirror/language` 6.12.4 → 6.13.1 (it
+  now depends on the new `@codemirror/streamparser` 6.0.0; QueryLens has no stream-parsed language),
+  `@lezer/highlight` 1.2.3 → 1.2.5, and `@codemirror/view` → 6.43.14 with `@codemirror/state` → 6.7.6 —
+  from 6.43.10 and 6.7.2, not from the 6.43.13 and 6.7.6 the PR shows, for the reason under *Fixed*. The
+  lockfile is regenerated and deduplicated here rather than taken from the PR. Typecheck, lint, all 2,783
+  unit tests, the build, the budget (`/playground` 332.1 / 340 kB) and all 609 Playwright tests pass.
+
+### Fixed
+
+- **The editor shipped older CodeMirror than `package.json` said.** The overrides that keep exactly one copy
+  of `@codemirror/view` and `@codemirror/state` live in `pnpm-workspace.yaml`, pinned to 6.43.10 and 6.7.2;
+  a second copy of them in `package.json`'s `pnpm` field, which pnpm 11 does not read, is the one Dependabot
+  kept raising. So `package.json` claimed 6.43.13 and 6.7.6 while production ran 6.43.10 and 6.7.2. The
+  workspace overrides now name `$@codemirror/view` and `$@codemirror/state` — whatever `package.json` depends
+  on — and the unread block is gone, so a bump there is the bump that installs.
+- **Two copies of `@lezer/common` (1.5.2, 1.5.3) and of `style-mod` (4.1.3, 4.1.4) were bundled.** A plain
+  install keeps an old resolution beside a new one when a caret range allows both — this update's own install
+  left two `@codemirror/language`s — and `pnpm dedupe` leaves one of each. The codemirror chunk is
+  6.4 kB smaller gzipped than production's (125.6 → 119.1 kB at `gzip -9`).
+
 ## [2.0.0-rc.2] - 2026-10-15
 
 The release candidate for 2.0: everything built on `version/v2` since 1.0.0, merged with `main`. (It is the second
