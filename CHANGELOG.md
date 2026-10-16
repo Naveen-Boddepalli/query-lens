@@ -15,6 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   from 6.43.10 and 6.7.2, not from the 6.43.13 and 6.7.6 the PR shows, for the reason under *Fixed*. The
   lockfile is regenerated and deduplicated here rather than taken from the PR. Typecheck, lint, all 2,783
   unit tests, the build, the budget (`/playground` 332.1 / 340 kB) and all 609 Playwright tests pass.
+- **Dependency updates** (Dependabot #24, the dev group): `vite` 8.3.0 → 8.3.4, `@vitejs/plugin-react` 6.1.1 →
+  6.1.2, `@playwright/test` 1.63.0 → 1.64.0 (Chromium build 1248), `eslint` 10.11.0 → 10.12.0, `globals`
+  17.12.0 → 17.13.0, `jsdom` 30.1.1 → 30.1.2. Lockfile regenerated and deduplicated here, as above. Typecheck,
+  lint, all 2,783 unit tests, the build, the budget (`/playground` 332.3 / 340 kB) and all 609 Playwright tests
+  pass unchanged.
 
 ### Fixed
 
