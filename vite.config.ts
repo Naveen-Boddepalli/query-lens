@@ -204,7 +204,12 @@ export default defineConfig({
           groups: [
             { name: 'codemirror', test: /node_modules\/(@codemirror|@lezer|style-mod|w3c-keyname)\// },
             { name: 'flow', test: /node_modules\/(flowinger|d3-)/ },
-            { name: 'react', test: /node_modules\/(react|react-dom|scheduler)\// },
+            // A group also takes its modules' dependencies (rolldown's `includeDependenciesRecursively`, default
+            // on), and groups claim modules in order of priority, then of position. At priority 0 after `flow`,
+            // this group found `react`, `react-dom` and `react/jsx-runtime` already taken by `flow` as flowinger's
+            // dependencies, so every component in the app imported React from `flow` and every route loaded
+            // flowinger and d3 with it, tree or no tree. The priority lets React claim its own modules first.
+            { name: 'react', test: /node_modules\/(react|react-dom|scheduler)\//, priority: 1 },
             // Panel PNG export (§20.3). `import()`ed on first use only, so this
             // gives it a stable chunk name rather than rolldown's generic `es-`.
             { name: 'html-to-image', test: /node_modules\/html-to-image\// },

@@ -62,6 +62,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   block goes whole to one shard. Still 203 tests a shard, and together exactly the 609. Summed test time is
   5.8, 4.8 and 4.9 minutes locally, against 4.3, 7.0 and 4.1 for the old split timed the same way. On CI
   (#146) the shard jobs took 7m 9s, 8m 32s and 8m 28s, and the whole run 8m 40s, against #145's 12m 5s.
+- **Every route downloaded flowinger and d3, tree or no tree.** The two names the app shell imported from the
+  `flow` chunk were `react` and `react/jsx-runtime`: a `codeSplitting` group in `vite.config.ts` also takes its
+  modules' dependencies (rolldown's `includeDependenciesRecursively`, on by default), groups claim modules in
+  order, and `flow`, listed before `react`, took React's main module, the JSX runtime and `react-dom`'s entry as
+  flowinger's dependencies. Every component imports React, so every route loaded `flow` too. The `react` group now
+  has `priority: 1` and claims them first. As Vite prints them, `flow` is now 19.0 kB gzip (was 22.9) and `react`
+  68.3 (was 64.8), and only `FlowTree` and `StageDetail` import `flow`. The 39 routes that draw no tree are each
+  about 18.7 kB lighter (`/settings` 126.4 → 107.7 kB, the landing page 179.4 → 160.7), and the six that draw one
+  are 0.4 kB lighter. 40 route ceilings lowered, each to measured + 3, rounded up (recorded in
+  `scripts/bundle-budget.ts`). Typecheck, lint, all 2,783 unit tests, the build, the budget and all 609
+  Playwright tests pass.
 
 ## [2.0.0-rc.2] - 2026-10-15
 
