@@ -159,10 +159,21 @@ jobs:
       - name: CLI JSON Mode
         run: pnpm querylens "SELECT * FROM orders WHERE id = 1" --dataset orders --json
 
+  # Three shards, each on its own runner. One runner ran all ~600 tests on a single worker (a private
+  # repository's runner has 2 vCPUs, so Playwright starts one) and sat at this job's 20 minutes: after
+  # the v2 merge most runs timed out at ~560 of 608 tests, and Playwright 1.64 made each test about a
+  # third slower again. A shard builds and installs for itself — about the same runner minutes in all,
+  # a third of the wall time, and the 20 minutes is headroom again. `ci-gate` still needs `e2e-test`,
+  # which succeeds only when every shard does; `fail-fast: false` lets the other shards finish and
+  # report when one fails.
   e2e-test:
-    name: E2E & Accessibility (Playwright & Axe)
+    name: E2E & Accessibility (Playwright & Axe) ${{ matrix.shard }}/3
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -190,13 +201,15 @@ jobs:
         run: pnpm exec playwright install --with-deps chromium
 
       - name: End-to-end smoke test
-        run: pnpm test:e2e
+        env:
+          SHARD: ${{ matrix.shard }}/3
+        run: pnpm test:e2e --shard="$SHARD"
 
       - name: Upload Playwright report
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: playwright-report
+          name: playwright-report-${{ matrix.shard }}
           path: playwright-report/
           retention-days: 7
 

@@ -33,6 +33,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   install keeps an old resolution beside a new one when a caret range allows both — this update's own install
   left two `@codemirror/language`s — and `pnpm dedupe` leaves one of each. The codemirror chunk is
   6.4 kB smaller gzipped than production's (125.6 → 119.1 kB at `gzip -9`).
+- **CI's e2e job ran out of time.** It ran every Playwright test on one runner, on a single worker (a
+  private repository's runner has 2 vCPUs), against a 20-minute limit. After the v2 merge most runs were
+  cancelled there at about 560 of 608 tests, and Playwright 1.64 made each test about a third slower again
+  (the runs on it reached 400–479 of 609). The job is now a three-way matrix, `--shard=1/3` to `3/3`, 203
+  tests each, every shard building and installing for itself. `ci-gate` still waits on all three, and a
+  failing shard uploads its own `playwright-report-<shard>`.
 
 ## [2.0.0-rc.2] - 2026-10-15
 

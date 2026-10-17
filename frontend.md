@@ -1293,7 +1293,7 @@ Runs on every PR and push to `main`. All GitHub Actions are **pinned to immutabl
 | `unit-test` | `pnpm test` (`vitest run`) |
 | `build-and-budget` | `pnpm build` + `pnpm budget` |
 | `cli-test` | CLI `--help`, query execution, `--policy clock`, `--json` |
-| `e2e-test` | Playwright + axe a11y audit; a flaky test fails it. Uploads the HTML report (with traces) on failure |
+| `e2e-test` | Playwright + axe a11y audit in three shards (`--shard=1/3` … `3/3`), each on its own runner; a flaky test fails it. A failing shard uploads its HTML report (with traces) as `playwright-report-<shard>` |
 | `ci-gate` | Required status check gating PR merges |
 
 ### Dependabot (`.github/dependabot.yml`)
