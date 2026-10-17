@@ -2747,7 +2747,7 @@ other items depends on the result, so they proceed in parallel; only 2.2 waits.
 | **Wait for the §9 pilot data before building 2.2 (D1–D6) and 2.3 (E1–E4)** | **Pilot completed, 2026-10-10** — 2 participants (laptop P01 + mobile P03) collated in `scoring/`. Gate cleared to proceed into 2.2. | 2026-10-10 | — |
 | Rename before launch (A5) | **Decided: keep the name, paired with a descriptor** | 2026-09-24 | A rival contests it, or launch feedback shows confusion |
 | Custom domain (A5) | **Recommended: `querylens.org`** — awaiting purchase | after purchase | — |
-| SQL tier 2 (B1, B2) | **Planned, 2.0** | now | — |
+| SQL tier 2 (B1, B2) | **Built, 2026-09-25** — B1 in three slices (predicates: `OR` / `NOT` / parentheses, `IS [NOT] NULL`, `[NOT] IN`, `[NOT] LIKE`, `NOT BETWEEN`, with three-valued logic; arithmetic; `OFFSET`), B2 in two (`HAVING`; `SELECT DISTINCT`). This row said "Planned" until 2026-10-17; §25.4's B1 and B2 rows have the detail | now | — |
 | Non-unique indexes (B3a) | **Built, 2026-09-25** — entries carry the row address as a tie-breaker; the oracle validates every tree after every write | now | — |
 | Composite indexes (B3b) | **Built, 2026-09-25** — leftmost prefix, a range within it, covering scans, the refusal said aloud; DELETE/UPDATE may walk a range | now | — |
 | `UNIQUE` indexes (B3c) | **Built, 2026-09-25** — enforcement is an index lookup; SQLite-checked | now | — |

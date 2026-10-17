@@ -1128,9 +1128,10 @@ after every build (plan.md §25.4 H8 replaced the older per-chunk-group ceilings
 
 ### Caching
 
-- `public/_headers` sets:
-  - `/assets/*`: `Cache-Control: public, max-age=31536000, immutable` (hashed filenames).
-  - Everything else: `Cache-Control: public, max-age=0, must-revalidate`.
+- `/assets/*`: `Cache-Control: public, max-age=31536000, immutable` (hashed filenames), set in `public/_headers`.
+- Everything else: `Cache-Control: public, max-age=0, must-revalidate` — Cloudflare's own default for static
+  assets, which `_headers` deliberately leaves alone. Only one rule may set `Cache-Control` for a path: a header
+  two matching rules set is joined with a comma, which is how hashed assets once went out with both values.
 
 ---
 

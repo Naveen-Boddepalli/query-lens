@@ -50,12 +50,63 @@ describe('Security headers and static distribution assets (plan.md §14.1, §14.
     expect(content).toMatch(/Referrer-Policy:\s*strict-origin-when-cross-origin/);
   });
 
-  it('configures long-term immutable caching for hashed assets and revalidation for HTML', () => {
-    const content = readFileSync(headersPath, 'utf8');
-    expect(content).toContain('/assets/*');
-    expect(content).toMatch(/Cache-Control:\s*public,\s*max-age=31536000,\s*immutable/);
-    expect(content).toContain('/*');
-    expect(content).toMatch(/Cache-Control:\s*public,\s*max-age=0,\s*must-revalidate/);
+  /**
+   * What Cloudflare sends for a path, worked out the way its asset worker does (workers-sdk,
+   * `packages/workers-shared/asset-worker/src/utils/headers.ts`): its default `Cache-Control` first, then every
+   * matching rule in turn — a rule's `! Name` lines delete, and its first value for a header replaces whatever is
+   * there, while a value a later rule sets for the same header is joined on with a comma. Checking the file's text,
+   * as this test once did, passed while both rules set `Cache-Control` and every hashed asset was sent both values.
+   */
+  const served = (path: string, order: 'file' | 'reversed' = 'file') => {
+    const rules: { pattern: RegExp; set: [string, string][]; unset: string[] }[] = [];
+    for (const line of readFileSync(headersPath, 'utf8').split(/\r?\n/)) {
+      if (line.trim() === '' || line.trim().startsWith('#')) continue;
+      if (!/^\s/.test(line)) {
+        const source = line.trim().split('*').map((part) => part.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('.*');
+        rules.push({ pattern: new RegExp(`^${source}$`), set: [], unset: [] });
+        continue;
+      }
+      const rule = rules.at(-1)!;
+      const body = line.trim();
+      if (body.startsWith('! ')) rule.unset.push(body.slice(2).trim().toLowerCase());
+      else {
+        const colon = body.indexOf(':');
+        rule.set.push([body.slice(0, colon).trim().toLowerCase(), body.slice(colon + 1).trim()]);
+      }
+    }
+    const headers = new Map([['cache-control', 'public, max-age=0, must-revalidate']]);
+    const setByRule = new Set<string>();
+    const matching = rules.filter((rule) => rule.pattern.test(path));
+    for (const rule of order === 'file' ? matching : matching.reverse()) {
+      for (const name of rule.unset) headers.delete(name);
+      for (const [name, value] of rule.set) {
+        headers.set(name, setByRule.has(name) ? `${headers.get(name) ?? ''}, ${value}` : value);
+        setByRule.add(name);
+      }
+    }
+    return headers;
+  };
+
+  it.each(['file', 'reversed'] as const)(
+    'hashed assets get one year-long Cache-Control, and everything else revalidates (rules in %s order)',
+    (order) => {
+      for (const asset of ['/assets/index-DOkIOFjv.js', '/assets/flow-DT8EqD97.js', '/assets/index-a1b2c3d4.css']) {
+        expect(served(asset, order).get('cache-control'), asset).toBe('public, max-age=31536000, immutable');
+      }
+      for (const document of ['/', '/index.html', '/playground', '/learn/nulls', '/sw.js', '/manifest.webmanifest']) {
+        expect(served(document, order).get('cache-control'), document).toBe('public, max-age=0, must-revalidate');
+      }
+    },
+  );
+
+  it('every path, assets included, gets the security headers as `/*` declares them, never joined', () => {
+    const declared = served('/'); // only `/*` matches `/`
+    expect(declared.get('content-security-policy')).toContain("frame-ancestors 'none'");
+    for (const path of ['/playground', '/sw.js', '/assets/index-DOkIOFjv.js']) {
+      for (const name of ['content-security-policy', 'strict-transport-security', 'x-content-type-options']) {
+        expect(served(path).get(name), `${path} ${name}`).toBe(declared.get(name));
+      }
+    }
   });
 
   it('required public static assets exist', () => {

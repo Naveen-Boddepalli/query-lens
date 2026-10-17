@@ -73,6 +73,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   are 0.4 kB lighter. 40 route ceilings lowered, each to measured + 3, rounded up (recorded in
   `scripts/bundle-budget.ts`). Typecheck, lint, all 2,783 unit tests, the build, the budget and all 609
   Playwright tests pass.
+- **Hashed assets were never cached for long.** Both `public/_headers` rules matched `/assets/*`, and a header two
+  matching rules set is joined with a comma, so every chunk went out as `Cache-Control: public, max-age=0,
+  must-revalidate, public, max-age=31536000, immutable` (seen on production). A cache that meets two `max-age`
+  values must use the first or treat the response as stale, so browsers revalidated every chunk on every load; the
+  service worker hid most of it from returning visitors. The `/*` rule no longer sets `Cache-Control`: everything
+  else gets Cloudflare's default, which is the same `public, max-age=0, must-revalidate`, and `/assets/*` is the
+  one rule that sets it, replacing that default. The test in `bin/__tests__/securityHeaders.test.ts` used to
+  check the file's text, which passed throughout; it now works out each path's headers the way Cloudflare's
+  asset worker does (workers-sdk's `asset-worker/src/utils/headers.ts`), with the rules in either order, and
+  fails on the old file with exactly the header production sent. Also: plan.md §25.9's SQL tier 2 (B1, B2) row
+  said "Planned" for work built on 2026-09-25.
 
 ## [2.0.0-rc.2] - 2026-10-15
 
