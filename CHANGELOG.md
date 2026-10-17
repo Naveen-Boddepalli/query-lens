@@ -20,6 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   17.12.0 → 17.13.0, `jsdom` 30.1.1 → 30.1.2. Lockfile regenerated and deduplicated here, as above. Typecheck,
   lint, all 2,783 unit tests, the build, the budget (`/playground` 332.3 / 340 kB) and all 609 Playwright tests
   pass unchanged.
+- **Dependency update** (Dependabot #25): `@types/node` 26.4.1 → 26.6.5, which brings `undici-types` 8.3.0 →
+  8.9.0. Types only; nothing in the bundle changes.
 
 ### Fixed
 
@@ -46,7 +48,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `preprocess` and `testRun.skipSharding()`: it deals the tests out in turn, so every shard gets a third of
   every file (92 route audits, 22–23 control audits) and stays even as files grow, and a `test.describe`
   block goes whole to one shard. Still 203 tests a shard, and together exactly the 609. Summed test time is
-  5.8, 4.8 and 4.9 minutes locally, against 4.3, 7.0 and 4.1 for the old split timed the same way.
+  5.8, 4.8 and 4.9 minutes locally, against 4.3, 7.0 and 4.1 for the old split timed the same way. On CI
+  (#146) the shard jobs took 7m 9s, 8m 32s and 8m 28s, and the whole run 8m 40s, against #145's 12m 5s.
 
 ## [2.0.0-rc.2] - 2026-10-15
 
