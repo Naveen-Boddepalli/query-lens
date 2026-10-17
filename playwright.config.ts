@@ -21,7 +21,11 @@ export default defineConfig({
   retries: process.env.CI ? 1 : 0,
   failOnFlakyTests: !!process.env.CI,
   // `github` annotates the PR; `html` writes `playwright-report/`, the folder CI uploads on failure, traces included.
-  reporter: process.env.CI ? [['github'], ['html', { open: 'never' }]] : 'list',
+  // `shards.ts` reports nothing: it deals the tests out when CI runs `--shard=i/3` (it says why).
+  reporter: [
+    ['./e2e/support/shards.ts'],
+    ...(process.env.CI ? [['github'], ['html', { open: 'never' }]] as const : [['list']] as const),
+  ],
 
   use: {
     baseURL: 'http://localhost:4173',

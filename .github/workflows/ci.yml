@@ -165,7 +165,8 @@ jobs:
   # third slower again. A shard builds and installs for itself — about the same runner minutes in all,
   # a third of the wall time, and the 20 minutes is headroom again. `ci-gate` still needs `e2e-test`,
   # which succeeds only when every shard does; `fail-fast: false` lets the other shards finish and
-  # report when one fails.
+  # report when one fails. Which test runs in which shard is `e2e/support/shards.ts`'s: it deals them
+  # out in turn, so the slow axe audits are spread over all three instead of filling one.
   e2e-test:
     name: E2E & Accessibility (Playwright & Axe) ${{ matrix.shard }}/3
     runs-on: ubuntu-latest

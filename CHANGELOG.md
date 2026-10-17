@@ -39,6 +39,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (the runs on it reached 400–479 of 609). The job is now a three-way matrix, `--shard=1/3` to `3/3`, 203
   tests each, every shard building and installing for itself. `ci-gate` still waits on all three, and a
   failing shard uploads its own `playwright-report-<shard>`.
+- **One e2e shard ran twice as long as the other two** (CI #145: 6m34s, 11m57s, 6m31s). Playwright's own
+  sharding gives each shard a run of consecutive tests, counted in tests, and the axe audits come first in
+  file order. So shard 2 got all 68 of `auditStates.spec.ts`'s tests, each worth three or four ordinary
+  ones. A reporter, `e2e/support/shards.ts`, now does the sharding instead, through Playwright 1.64's
+  `preprocess` and `testRun.skipSharding()`: it deals the tests out in turn, so every shard gets a third of
+  every file (92 route audits, 22–23 control audits) and stays even as files grow, and a `test.describe`
+  block goes whole to one shard. Still 203 tests a shard, and together exactly the 609. Summed test time is
+  5.8, 4.8 and 4.9 minutes locally, against 4.3, 7.0 and 4.1 for the old split timed the same way.
 
 ## [2.0.0-rc.2] - 2026-10-15
 
