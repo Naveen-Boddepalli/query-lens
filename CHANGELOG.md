@@ -22,6 +22,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pass unchanged.
 - **Dependency update** (Dependabot #25): `@types/node` 26.4.1 → 26.6.5, which brings `undici-types` 8.3.0 →
   8.9.0. Types only; nothing in the bundle changes.
+- **flowinger 0.3.0 → 1.0.1**, the library every tree is drawn with (our own; 1.0.1 is a patch over 1.0.0, whose
+  code is the same as the `1.0.0-rc.1` its authors asked QueryLens to try). Of 1.0's two breaking changes, the
+  first — `<ReactFlow>` taking React Flow's defaults — does not reach QueryLens, which renders `<FlowingerCore>`
+  and keeps flowinger's. The second does: an edge no longer meets a side guessed from its handle's name before
+  the node's `<Handle>` has registered, so `FlowTree` now lists each node's four handles (`in` top, `prev` left,
+  `out` bottom, `next` right) in `handles`, and the first paint draws the sides every later paint does. Checked in
+  the browser against production on 0.3.0: the B+Tree sandbox's 5 tree edges and 4 sibling-chain edges meet the
+  same handles, a tree is still one tab stop with no `role="application"`, and the dev build logs no flowinger
+  warning. The `flow` chunk grew from 19.9 to 22.9 kB gzip, and as the entry chunk imports from it, every route
+  pays that: 36 route ceilings raised, each to its measured size + 3 (recorded in `scripts/bundle-budget.ts`).
+  The release-age exemption in `pnpm-workspace.yaml` now names 1.0.1 and expires 2026-10-24. Typecheck, lint,
+  2,783 unit tests, the build, the budget and all 609 Playwright tests pass.
 
 ### Fixed
 

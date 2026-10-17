@@ -10,7 +10,7 @@ import {
   useReactFlow,
   useStore,
 } from 'flowinger';
-import type { Edge, Node, NodeProps } from 'flowinger';
+import type { Edge, Node, NodeHandle, NodeProps } from 'flowinger';
 import { hierarchy, tree } from 'd3-hierarchy';
 import { nextFocus, treeRelations } from './treeNavigation.ts';
 import type { TreeRelation } from './treeNavigation.ts';
@@ -123,6 +123,20 @@ function NodeView({ id, data }: NodeProps<TreeFlowNode>) {
 
 const nodeTypes = { tree: NodeView };
 
+/**
+ * The four `<Handle>`s `NodeView` renders, listed on every node too. An edge meets the side its named handle sits
+ * on — but from flowinger 1.0 only once that handle has registered, which is after the node mounts; until then
+ * (the first paint) an edge meets whatever side it runs towards. Listed here, the first paint draws the same sides
+ * as every paint after it. Before 1.0 the names did this on their own (`in` top, `out` bottom, `prev` left, `next`
+ * right), a rule flowinger dropped because React Flow has none.
+ */
+const TREE_HANDLES: NodeHandle[] = [
+  { id: 'in', type: 'target', position: Position.Top },
+  { id: 'prev', type: 'target', position: Position.Left },
+  { id: 'out', type: 'source', position: Position.Bottom },
+  { id: 'next', type: 'source', position: Position.Right },
+];
+
 // 24px minimum on both axes — WCAG 2.2 SC 2.5.8, the rule that also set the
 // scrubber's size (plan.md §15.1 item 8). React Flow's own buttons are 16px.
 const ZOOM_BUTTON =
@@ -219,6 +233,7 @@ function build(
         .filter((part): part is string => part !== undefined)
         .join(', '),
     },
+    handles: TREE_HANDLES,
     draggable: false,
     selectable: false,
   }));

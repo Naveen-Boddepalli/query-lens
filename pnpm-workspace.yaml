@@ -16,8 +16,8 @@ overrides:
 # yanked before this project would ever resolve it.
 minimumReleaseAge: 10080
 
-# flowinger 0.3.0 is our own package, published 2026-09-22 — younger than the rule above allows, so it is
-# exempt until it has aged past it. Delete this entry on or after 2026-09-29; nothing else is exempt.
+# flowinger is our own package. 1.0.1 was published 2026-10-17 — younger than the rule above allows, so it is
+# exempt until it has aged past it. Delete this entry on or after 2026-10-24; nothing else is exempt.
 minimumReleaseAgeExclude:
   - flowinger
 
