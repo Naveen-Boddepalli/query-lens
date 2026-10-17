@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { planVectorIndex, queryPoints, exactTopK, VECTOR_LIMITS, buildIvf, buildHnsw, ivfSearch, hnswSearch, recallAt } from '../../ui/vectorIndex.ts';
 import { PageHeader } from '../../ui/PageHeader.tsx';
 import { btnSecondary, inputField, panelSurface } from '../../ui/primitives.ts';
 import { ScrollRegion } from '../../ui/ScrollRegion.tsx';
+import { useAddressBarQuery } from '../../ui/addressBar.ts';
 
 /**
  * The vector-index standalone (plan.md §25.4 F6 `/tools/vector-index`). Brute force, IVF and HNSW answer the same
@@ -50,17 +51,14 @@ export function VectorIndexToolPage() {
   const ivfHit = useMemo(() => ivfSearch(plan.points, ivf, query, plan.k, 2), [plan, ivf, query]);
   const hnswHit = useMemo(() => hnswSearch(plan.points, hnsw, query, plan.k, 16), [plan, hnsw, query]);
 
-  useEffect(() => {
-    const t = window.setTimeout(() => {
-      const p = new URLSearchParams();
-      p.set('n', String(n));
-      p.set('k', String(k));
-      p.set('seed', String(seed));
-      const next = `${location.pathname}?${p.toString()}`;
-      if (next !== `${location.pathname}${location.search}`) history.replaceState(null, '', next);
-    }, 250);
-    return () => { window.clearTimeout(t); };
+  const shareQuery = useMemo(() => {
+    const p = new URLSearchParams();
+    p.set('n', String(n));
+    p.set('k', String(k));
+    p.set('seed', String(seed));
+    return p.toString();
   }, [n, k, seed]);
+  useAddressBarQuery(shareQuery);
 
   const truthSet = new Set(truth);
   const ivfSet = new Set(ivfHit.ids);

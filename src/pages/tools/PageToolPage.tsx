@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { buildHeap, createSeedDatabase, DEFAULT_ENGINE_OPTIONS } from '../../engine/index.ts';
 import { layOutPage } from '../../ui/slottedPage.ts';
 import { PageHeader } from '../../ui/PageHeader.tsx';
 import { inputField, panelSurface } from '../../ui/primitives.ts';
 import { ScrollRegion } from '../../ui/ScrollRegion.tsx';
+import { useAddressBarQuery } from '../../ui/addressBar.ts';
 
 /**
  * The storage-course standalone (plan.md §22.3): one heap page, laid out to the
@@ -55,16 +56,13 @@ export function PageToolPage() {
     [page, pageBytes],
   );
 
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      const params = new URLSearchParams();
-      params.set('page', String(pageId));
-      params.set('bytes', String(pageBytes));
-      const next = `${location.pathname}?${params.toString()}`;
-      if (next !== `${location.pathname}${location.search}`) history.replaceState(null, '', next);
-    }, 250);
-    return () => { window.clearTimeout(timer); };
+  const shareQuery = useMemo(() => {
+    const params = new URLSearchParams();
+    params.set('page', String(pageId));
+    params.set('bytes', String(pageBytes));
+    return params.toString();
   }, [pageId, pageBytes]);
+  useAddressBarQuery(shareQuery);
 
   const usedPct = Math.min(100, Math.round((layout.usedBytes / pageBytes) * 100));
 

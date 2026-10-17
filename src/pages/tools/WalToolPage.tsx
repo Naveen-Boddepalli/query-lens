@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   DEFAULT_PAGES,
   MAX_WAL_STEPS,
@@ -11,6 +11,7 @@ import { PageHeader } from '../../ui/PageHeader.tsx';
 import { btnPrimary, btnSecondary, inputField, panelSurface, segBase, segOff, segOn } from '../../ui/primitives.ts';
 import { CrashPanel, EffectsList, ScrollBox, StatePanels } from '../../ui/walPanels.tsx';
 import { decodeWalSteps, encodeWalSteps } from '../../ui/walUrl.ts';
+import { useAddressBarQuery } from '../../ui/addressBar.ts';
 
 /**
  * plan.md §25.4 E1, E2: a log, a buffer pool and a disk, and the rule that ties them together. You write the script; the
@@ -180,16 +181,16 @@ export function WalToolPage() {
   const current = at >= 0 ? run.steps[at]! : null;
   const state = current?.state ?? run.initial;
 
-  useEffect(() => {
+  const shareQuery = useMemo(() => {
     const params = new URLSearchParams();
     if (steps.length > 0) params.set('s', encodeWalSteps(steps));
     if (frames !== 3) params.set('f', String(frames));
     if (!enforce) params.set('e', '0');
     if (!steal) params.set('st', '0');
     if (force) params.set('fo', '1');
-    const next = `${location.pathname}${params.size > 0 ? `?${params.toString()}` : ''}`;
-    if (next !== `${location.pathname}${location.search}`) history.replaceState(null, '', next);
+    return params.toString();
   }, [steps, frames, enforce, steal, force]);
+  useAddressBarQuery(shareQuery, 0);
 
   const full = steps.length >= MAX_WAL_STEPS;
   const add = (step: WalStep) => {

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   buildPlan,
@@ -17,6 +17,7 @@ import { PlanTree } from '../../ui/panels/PlanTree.tsx';
 import { PageHeader } from '../../ui/PageHeader.tsx';
 import { inputField, panelSurface } from '../../ui/primitives.ts';
 import { WhyNotNote } from '../../ui/WhyNotNote.tsx';
+import { useAddressBarQuery } from '../../ui/addressBar.ts';
 
 /**
  * The optimizer standalone (plan.md §22.3). The rewrite rules already exist
@@ -108,17 +109,14 @@ export function PlannerToolPage() {
     };
   }, [validation.error, sql, db, table, rules]);
 
-  useEffect(() => {
-    const t = window.setTimeout(() => {
-      const p = new URLSearchParams();
-      p.set('q', sql);
-      p.set('idx', indexed ? '1' : '0');
-      p.set('rules', [...rules].join(','));
-      const next = `${location.pathname}?${p.toString()}`;
-      if (next !== `${location.pathname}${location.search}`) history.replaceState(null, '', next);
-    }, 250);
-    return () => { window.clearTimeout(t); };
+  const shareQuery = useMemo(() => {
+    const p = new URLSearchParams();
+    p.set('q', sql);
+    p.set('idx', indexed ? '1' : '0');
+    p.set('rules', [...rules].join(','));
+    return p.toString();
   }, [sql, indexed, rules]);
+  useAddressBarQuery(shareQuery);
 
   function toggleRule(name: string) {
     setRules((cur) => {

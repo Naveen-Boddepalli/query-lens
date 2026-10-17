@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { DEMO_INITIAL_KEYS, LATCH_LIMITS, demoScripts, planLatchCrabbing } from '../../ui/latchCrabbing.ts';
 import type { LatchProtocol } from '../../ui/latchCrabbing.ts';
 import { PageHeader } from '../../ui/PageHeader.tsx';
 import { btnSecondary, inputField, panelSurface } from '../../ui/primitives.ts';
 import { ScrollRegion } from '../../ui/ScrollRegion.tsx';
+import { useAddressBarQuery } from '../../ui/addressBar.ts';
 
 /**
  * The latch-crabbing standalone (plan.md §25.4 F5 `/tools/latch-crabbing`). Its driver, `src/ui/latchCrabbing.ts`,
@@ -61,19 +62,16 @@ export function LatchCrabbingToolPage() {
   const plans = [naive, crab, opt] as const;
   const shown = plans.find((p) => p.protocol === protocol) ?? crab;
 
-  useEffect(() => {
-    const t = window.setTimeout(() => {
-      const p = new URLSearchParams();
-      p.set('fanout', String(fanout));
-      p.set('threads', String(threads));
-      p.set('ops', String(ops));
-      p.set('seed', String(seed));
-      p.set('timeline', protocol);
-      const next = `${location.pathname}?${p.toString()}`;
-      if (next !== `${location.pathname}${location.search}`) history.replaceState(null, '', next);
-    }, 250);
-    return () => { window.clearTimeout(t); };
+  const shareQuery = useMemo(() => {
+    const p = new URLSearchParams();
+    p.set('fanout', String(fanout));
+    p.set('threads', String(threads));
+    p.set('ops', String(ops));
+    p.set('seed', String(seed));
+    p.set('timeline', protocol);
+    return p.toString();
   }, [fanout, threads, ops, seed, protocol]);
+  useAddressBarQuery(shareQuery);
 
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-4 p-6 sm:p-8">

@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { demoWrites, LSM_LIMITS, lookupKey, planLsm } from '../../ui/lsm.ts';
 import type { CompactionStrategy, LookupResult, LsmEvent, SSTable } from '../../ui/lsm.ts';
 import { DataView } from '../../ui/DataView.tsx';
 import { PageHeader } from '../../ui/PageHeader.tsx';
 import { btnPrimary, btnSecondary, inputField, panelSurface } from '../../ui/primitives.ts';
+import { useAddressBarQuery } from '../../ui/addressBar.ts';
 
 /**
  * The LSM-tree standalone (plan.md §25.4 F1 `/tools/lsm`). §4's engine has only ever built a B+Tree, so this
@@ -84,22 +85,19 @@ export function LsmToolPage() {
 
   const lookupResult = lookupState?.plan === plan ? lookupState.result : null;
 
-  useEffect(() => {
-    const t = window.setTimeout(() => {
-      const p = new URLSearchParams();
-      p.set('n', String(n));
-      p.set('strategy', compactionStrategy);
-      p.set('mem', String(memtableCapacity));
-      p.set('trigger', String(l0CompactionTrigger));
-      p.set('base', String(baseLevelCapacity));
-      p.set('mult', String(levelSizeMultiplier));
-      p.set('bits', String(bitsPerKey));
-      p.set('seed', String(seed));
-      const next = `${location.pathname}?${p.toString()}`;
-      if (next !== `${location.pathname}${location.search}`) history.replaceState(null, '', next);
-    }, 250);
-    return () => { window.clearTimeout(t); };
+  const shareQuery = useMemo(() => {
+    const p = new URLSearchParams();
+    p.set('n', String(n));
+    p.set('strategy', compactionStrategy);
+    p.set('mem', String(memtableCapacity));
+    p.set('trigger', String(l0CompactionTrigger));
+    p.set('base', String(baseLevelCapacity));
+    p.set('mult', String(levelSizeMultiplier));
+    p.set('bits', String(bitsPerKey));
+    p.set('seed', String(seed));
+    return p.toString();
   }, [n, compactionStrategy, memtableCapacity, l0CompactionTrigger, baseLevelCapacity, levelSizeMultiplier, bitsPerKey, seed]);
+  useAddressBarQuery(shareQuery);
 
   // Every table this table's own event (as the thing created, or the thing a later event removed) connects to —
   // its sources if it was compacted into being, or what it became if it was later compacted away.

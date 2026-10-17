@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import type { Page } from '@playwright/test';
 
 /**
  * Regressions, each one written after the behaviour was observed rather than
@@ -180,6 +181,79 @@ test('stepping does not pollute browser history', async ({ page }) => {
   // returns to wherever the visitor came from (here, the landing page).
   await page.goBack();
   await expect(page).toHaveURL(/\/$/);
+});
+
+// A page writes its state into the address bar after the fact: 250 ms after a change, or in the effect that follows a
+// render. React Router renders a navigation as a transition, so a nav-link click moves the address bar at once and
+// the page it leaves keeps running until that transition commits and its effects are cleaned up. A write that read
+// `location.pathname` when it ran put the old page's parameters on the new one: the tour test saw
+// `/tools?q=SELECT+*…&p=lru&x=1&s=1` about one run in twenty, when the Playground's debounce fell due in that gap.
+// Here the gap is held open on purpose. The clicks and the timers all run before the page yields a task, and the
+// route change waits for one.
+test.describe('a URL write made on one page', () => {
+  test.beforeEach(async ({ page }) => {
+    // Every 250 ms debounce the page sets, kept so the test can fire it when it chooses.
+    await page.addInitScript(() => {
+      const due = new Map<number, () => void>();
+      const set = window.setTimeout.bind(window);
+      const clear = window.clearTimeout.bind(window);
+      window.setTimeout = ((handler: () => void, ms?: number) => {
+        const id = set(() => { due.delete(id); handler(); }, ms);
+        if (ms === 250) due.set(id, handler);
+        return id;
+      }) as typeof window.setTimeout;
+      window.clearTimeout = ((id?: number) => {
+        if (id !== undefined) due.delete(id);
+        clear(id);
+      }) as typeof window.clearTimeout;
+      Object.assign(window, {
+        fireDebounces: () => {
+          for (const [id, handler] of due) {
+            window.clearTimeout(id);
+            handler();
+          }
+        },
+      });
+    });
+  });
+
+  for (const { from, change } of [
+    // The Playground's share-state write, and a tool page's own debounced copy of it.
+    { from: `/playground?q=${LOOKUP}&p=lru&x=0&s=1`, change: (page: Page) => page.getByRole('button', { name: 'Step forward' }) },
+    { from: '/tools/btree', change: (page: Page) => page.getByRole('button', { name: 'Clear', exact: true }) },
+    // A tool that writes in the effect itself, with no timer.
+    {
+      from: '/tools/wal',
+      change: (page: Page) => page.getByRole('radiogroup', { name: 'Log before data' }).getByRole('radio', { name: 'Off' }),
+    },
+  ]) {
+    test(`stays on that page (${new URL(from, 'https://x').pathname})`, async ({ page }) => {
+      await page.goto(from);
+      const target = change(page);
+      await expect(target).toBeVisible();
+      const link = page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'Tools' });
+
+      const mounted = await page.evaluate(
+        async ([link, target]) => {
+          // Leave, then change something on the page that is still running.
+          (link as HTMLElement).click();
+          (target as HTMLElement).click();
+          // The page renders that change, and runs its effects, in a microtask.
+          await new Promise<void>((resolve) => { queueMicrotask(resolve); });
+          const mounted = target.isConnected;
+          (window as unknown as { fireDebounces: () => void }).fireDebounces();
+          return mounted;
+        },
+        [await link.elementHandle(), await target.elementHandle()] as const,
+      );
+      // Otherwise its timers were already cleared, and this proves nothing.
+      expect(mounted, 'the page was still mounted when its writes ran').toBe(true);
+
+      await expect(page.getByRole('heading', { name: 'Tools', exact: true })).toBeVisible();
+      const { pathname, search } = new URL(page.url());
+      expect(`${pathname}${search}`).toBe('/tools');
+    });
+  }
 });
 
 test('editing seed data re-runs the trace', async ({ page }) => {

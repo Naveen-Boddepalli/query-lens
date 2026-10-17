@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import {
   DOCUMENTED,
   HERMITAGE_LEVELS,
@@ -17,6 +17,7 @@ import { StepList } from '../../ui/ScheduleStepList.tsx';
 import { MATRIX_COLUMNS, matrixRows } from '../../ui/isolationTable.ts';
 import { SCHEDULE_COLUMNS, scheduleRows } from '../../ui/transactionTables.ts';
 import { ScrollRegion } from '../../ui/ScrollRegion.tsx';
+import { writeAddressBar } from '../../ui/addressBar.ts';
 
 /**
  * plan.md §25.4 D5: the ten Hermitage anomalies at four isolation levels, on three engines. Nothing here is a lookup:
@@ -63,6 +64,7 @@ function readCell(raw: string | null): Selected | null {
 }
 
 export function IsolationToolPage() {
+  const { pathname } = useLocation();
   const matrices = useMemo(
     () => ({ locks: hermitageMatrix('locks'), mvcc: hermitageMatrix('mvcc'), innodb: hermitageMatrix('innodb') }),
     [],
@@ -85,7 +87,8 @@ export function IsolationToolPage() {
     setSelected(next);
     const params = new URLSearchParams();
     params.set('c', `${next.engine}.${next.test}.${next.level}`);
-    history.replaceState(null, '', `${location.pathname}?${params.toString()}`);
+    // On a click rather than from an effect: an untouched matrix keeps a bare URL.
+    writeAddressBar(params.toString(), pathname);
   }
 
   return (

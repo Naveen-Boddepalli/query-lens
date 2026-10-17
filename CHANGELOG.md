@@ -84,6 +84,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   asset worker does (workers-sdk's `asset-worker/src/utils/headers.ts`), with the rules in either order, and
   fails on the old file with exactly the header production sent. Also: plan.md §25.9's SQL tier 2 (B1, B2) row
   said "Planned" for work built on 2026-09-25.
+- **A page's parameters could land on the page you had just gone to.** The Playground, the trace page and 18 tools
+  write their state into the address bar after a change, 250 ms later or straight from the effect, and each
+  write took the path from `location.pathname` at the moment it ran. React Router renders a navigation as a
+  transition: a nav-link click moves the address bar at once, and the page it leaves keeps running until the
+  transition commits and its effects are cleaned up. A write that fell in that gap put the old page's parameters on
+  the new one, and the tour e2e test saw `/tools?q=SELECT+*…&p=lru&x=1&s=1` about one run in twenty. Every write
+  now goes through `writeAddressBar` in the new `src/ui/addressBar.ts`, usually by way of its
+  `useAddressBarQuery` hook. It is given the page's own path from `useLocation()`, which still names the old page
+  during that gap, and it drops any write whose path is no longer the one in the address bar. The module imports
+  nothing from the engine: the Playground's old `writeShareState` lived in `urlState.ts`, which does, and routing
+  every tool through that file put nine tools about 50 kB over budget. A unit test fails if any other module
+  calls `history.replaceState` or `pushState`. As a side effect, the tools' writes now keep the history entry's
+  state and the URL's hash, as the Playground's always did; before, they cleared both. New tests in
+  `e2e/regressions.spec.ts` hold the gap open: the clicks and the page's pending debounce all run before the page
+  yields a task. They failed on the old code for the Playground, the B+Tree sandbox and the WAL tool in 30 runs out
+  of 30. Typecheck, lint, 2,790 unit tests, the build, the budget and all 612 Playwright tests pass, and the tour
+  test passes 40 runs out of 40.
 
 ## [2.0.0-rc.2] - 2026-10-15
 

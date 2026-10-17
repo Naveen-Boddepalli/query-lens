@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   bestEncodingFor,
   COLUMNAR_LIMITS,
@@ -12,6 +12,7 @@ import type { Encoding, Layout } from '../../ui/columnar.ts';
 import { DataView } from '../../ui/DataView.tsx';
 import { PageHeader } from '../../ui/PageHeader.tsx';
 import { inputField, panelSurface } from '../../ui/primitives.ts';
+import { useAddressBarQuery } from '../../ui/addressBar.ts';
 
 /**
  * The row-vs-column-storage standalone (plan.md §25.4 F3 `/tools/columnar`). Its own driver, `src/ui/columnar.ts`
@@ -87,18 +88,15 @@ export function ColumnarToolPage() {
     [columns, filterColumn, threshold, projectColumn],
   );
 
-  useEffect(() => {
-    const t = window.setTimeout(() => {
-      const p = new URLSearchParams();
-      p.set('n', String(n));
-      p.set('page', String(pageSize));
-      p.set('layout', layout);
-      p.set('seed', String(seed));
-      const next = `${location.pathname}?${p.toString()}`;
-      if (next !== `${location.pathname}${location.search}`) history.replaceState(null, '', next);
-    }, 250);
-    return () => { window.clearTimeout(t); };
+  const shareQuery = useMemo(() => {
+    const p = new URLSearchParams();
+    p.set('n', String(n));
+    p.set('page', String(pageSize));
+    p.set('layout', layout);
+    p.set('seed', String(seed));
+    return p.toString();
   }, [n, pageSize, layout, seed]);
+  useAddressBarQuery(shareQuery);
 
   const selectedLayoutPlan = layoutPlans.find((p) => p.layout === layout)!;
 

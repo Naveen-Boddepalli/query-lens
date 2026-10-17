@@ -1400,7 +1400,8 @@ Runs on every PR and push to `main`. All GitHub Actions are **pinned to immutabl
 | `theme.ts` | `useTheme()` — theme state, localStorage, system preference listener |
 | `usePlayback.ts` | `usePlayback()` — step/play/pause/speed/gates + keyboard shortcuts |
 | `useReducedMotion.ts` | `useReducedMotion()` — prefers-reduced-motion |
-| `urlState.ts` | URL ↔ `ShareState` encode/decode + `writeShareState` |
+| `urlState.ts` | URL ↔ `ShareState` encode/decode |
+| `addressBar.ts` | `useAddressBarQuery()`, `writeAddressBar()` — every address-bar write, dropped once the page has been left |
 | `preferences.ts` | Read/write default policy + predict from localStorage |
 | `stageMeta.ts` | `STAGE_META` — title, blurb, help, doc link, tone for each stage |
 | `primitives.ts` | Shared className strings (buttons, cards, inputs, pills) |

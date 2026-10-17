@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { DataView } from '../../ui/DataView.tsx';
 import { demoWrites, HASH_LIMITS, lookupHashKey, planHashIndex } from '../../ui/hashIndex.ts';
 import type { Bucket, HashStrategy } from '../../ui/hashIndex.ts';
 import { PageHeader } from '../../ui/PageHeader.tsx';
 import { btnPrimary, btnSecondary, inputField, panelSurface } from '../../ui/primitives.ts';
+import { useAddressBarQuery } from '../../ui/addressBar.ts';
 
 /**
  * The extendible/linear hashing standalone (plan.md §25.4 F2 `/tools/hash-index`). Its own driver, `src/ui/hashIndex.ts`
@@ -51,19 +52,16 @@ export function HashIndexToolPage() {
 
   const lookupResult = lookupState?.plan === plan ? lookupState.result : null;
 
-  useEffect(() => {
-    const t = window.setTimeout(() => {
-      const p = new URLSearchParams();
-      p.set('n', String(n));
-      p.set('strategy', strategy);
-      p.set('cap', String(bucketCapacity));
-      p.set('init', String(initialBuckets));
-      p.set('seed', String(seed));
-      const next = `${location.pathname}?${p.toString()}`;
-      if (next !== `${location.pathname}${location.search}`) history.replaceState(null, '', next);
-    }, 250);
-    return () => { window.clearTimeout(t); };
+  const shareQuery = useMemo(() => {
+    const p = new URLSearchParams();
+    p.set('n', String(n));
+    p.set('strategy', strategy);
+    p.set('cap', String(bucketCapacity));
+    p.set('init', String(initialBuckets));
+    p.set('seed', String(seed));
+    return p.toString();
   }, [n, strategy, bucketCapacity, initialBuckets, seed]);
+  useAddressBarQuery(shareQuery);
 
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-4 p-6 sm:p-8">

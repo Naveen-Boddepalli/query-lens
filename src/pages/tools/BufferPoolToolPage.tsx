@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   createTraceProjector,
@@ -15,6 +15,7 @@ import { PlaybackControls } from '../../ui/PlaybackControls.tsx';
 import { usePlayback, usePlaybackShortcuts } from '../../ui/usePlayback.ts';
 import { PageHeader } from '../../ui/PageHeader.tsx';
 import { btnPrimary, btnSecondary, inputField, panelSurface } from '../../ui/primitives.ts';
+import { useAddressBarQuery } from '../../ui/addressBar.ts';
 
 /**
  * The OS-course standalone (plan.md §20.4, §21.3): the buffer pool with no
@@ -83,19 +84,16 @@ export function BufferPoolToolPage() {
 
   const state = projector.at(playback.step);
 
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      const params = new URLSearchParams();
-      params.set('ref', refInput);
-      params.set('frames', String(frames));
-      params.set('policy', policy);
-      if (readAhead > 0) params.set('ra', String(readAhead));
-      if (scanRing > 0) params.set('sr', String(scanRing));
-      const next = `${location.pathname}?${params.toString()}`;
-      if (next !== `${location.pathname}${location.search}`) history.replaceState(null, '', next);
-    }, 250);
-    return () => { window.clearTimeout(timer); };
+  const shareQuery = useMemo(() => {
+    const params = new URLSearchParams();
+    params.set('ref', refInput);
+    params.set('frames', String(frames));
+    params.set('policy', policy);
+    if (readAhead > 0) params.set('ra', String(readAhead));
+    if (scanRing > 0) params.set('sr', String(scanRing));
+    return params.toString();
   }, [refInput, frames, policy, readAhead, scanRing]);
+  useAddressBarQuery(shareQuery);
 
   function run() {
     setParsed(parseReferenceScans(refInput));

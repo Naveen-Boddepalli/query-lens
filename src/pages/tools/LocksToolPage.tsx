@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { heldBy, waitingBy } from '../../ui/lockSimulation.ts';
 import type { LockMode } from '../../ui/lockSimulation.ts';
@@ -23,6 +23,7 @@ import {
   segOff,
   segOn,
 } from '../../ui/primitives.ts';
+import { useAddressBarQuery } from '../../ui/addressBar.ts';
 
 /**
  * plan.md §22.2 "enforced concurrency" / §22.3 `/tools/locks`. Fixed at two
@@ -95,10 +96,11 @@ export function LocksToolPage() {
   );
   const full = steps.length >= MAX_LOCK_STEPS;
 
-  useEffect(() => {
-    const next = `${location.pathname}${steps.length > 0 ? `?s=${encodeURIComponent(encodeLockSteps(steps))}` : ''}`;
-    if (next !== `${location.pathname}${location.search}`) history.replaceState(null, '', next);
-  }, [steps]);
+  const shareQuery = useMemo(
+    () => (steps.length > 0 ? `s=${encodeURIComponent(encodeLockSteps(steps))}` : ''),
+    [steps],
+  );
+  useAddressBarQuery(shareQuery, 0);
 
   function add(step: LockStep) {
     if (full) return;

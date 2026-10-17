@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { createAccountsDatabase, DEFAULT_ENGINE_OPTIONS, runBufferTrace } from '../../engine/index.ts';
 import type { Database, Row } from '../../engine/index.ts';
@@ -24,6 +24,7 @@ import {
   segOn,
 } from '../../ui/primitives.ts';
 import { ScrollRegion } from '../../ui/ScrollRegion.tsx';
+import { useAddressBarQuery } from '../../ui/addressBar.ts';
 
 /**
  * plan.md §25.4 D1, D2: two sessions, one database, and an interleaving you choose. With *no locking* a statement
@@ -588,18 +589,15 @@ export function ScheduleToolPage() {
   );
   const columns = database.tables.accounts?.columns ?? [];
 
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      const params = new URLSearchParams();
-      if (steps.length > 0) params.set('s', encodeSchedule(steps));
-      if (locking !== 'none') params.set('l', locking);
-      if (rows !== 3) params.set('n', String(rows));
-      if (locking !== 'none' && isolation !== DEFAULT_ISOLATION) params.set('i', isolation);
-      const next = `${location.pathname}${params.size > 0 ? `?${params.toString()}` : ''}`;
-      if (next !== `${location.pathname}${location.search}`) history.replaceState(null, '', next);
-    }, 250);
-    return () => { window.clearTimeout(timer); };
+  const shareQuery = useMemo(() => {
+    const params = new URLSearchParams();
+    if (steps.length > 0) params.set('s', encodeSchedule(steps));
+    if (locking !== 'none') params.set('l', locking);
+    if (rows !== 3) params.set('n', String(rows));
+    if (locking !== 'none' && isolation !== DEFAULT_ISOLATION) params.set('i', isolation);
+    return params.toString();
   }, [steps, locking, rows, isolation]);
+  useAddressBarQuery(shareQuery);
 
   function add(statement: string) {
     const trimmed = statement.trim();

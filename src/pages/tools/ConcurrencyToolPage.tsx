@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { compareProtocols, PROTOCOLS } from '../../engine/concurrencyCompare.ts';
 import type { ProtocolId, ProtocolOutcome } from '../../engine/concurrencyCompare.ts';
@@ -10,6 +10,7 @@ import { DataView } from '../../ui/DataView.tsx';
 import { StepList } from '../../ui/ScheduleStepList.tsx';
 import { SCHEDULE_COLUMNS, scheduleRows } from '../../ui/transactionTables.ts';
 import { ScrollRegion } from '../../ui/ScrollRegion.tsx';
+import { useAddressBarQuery } from '../../ui/addressBar.ts';
 
 /**
  * plan.md §25.4 D6: one schedule, run under every concurrency-control protocol the schedule runner implements. The
@@ -196,14 +197,14 @@ export function ConcurrencyToolPage() {
   const selected = outcomes.find((o) => o.protocol.id === selectedId) ?? outcomes[0]!;
   const preset = PRESETS.find((p) => JSON.stringify(p.steps) === JSON.stringify(steps));
 
-  useEffect(() => {
+  const shareQuery = useMemo(() => {
     const params = new URLSearchParams();
     if (steps.length > 0) params.set('s', encodeSchedule(steps));
     if (rows !== 20) params.set('n', String(rows));
     if (selectedId !== 'two-phase') params.set('p', selectedId);
-    const next = `${location.pathname}${params.size > 0 ? `?${params.toString()}` : ''}`;
-    if (next !== `${location.pathname}${location.search}`) history.replaceState(null, '', next);
+    return params.toString();
   }, [steps, rows, selectedId]);
+  useAddressBarQuery(shareQuery, 0);
 
   const editParams = new URLSearchParams();
   if (steps.length > 0) editParams.set('s', encodeSchedule(steps));

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   DATASETS,
@@ -21,6 +21,7 @@ import {
   segOn,
 } from '../ui/primitives.ts';
 import { ScrollRegion } from '../ui/ScrollRegion.tsx';
+import { useAddressBarQuery } from '../ui/addressBar.ts';
 
 /**
  * plan.md §21.3, "Explore": the raw `StepEvent[]` for a query as a filterable
@@ -164,18 +165,15 @@ export function TracePage() {
     );
   }, [result, stageOff, query]);
 
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      const params = new URLSearchParams();
-      params.set('q', sql);
-      params.set('p', policy);
-      if (RAW_ROWS_PARAM !== null) params.set('d', RAW_ROWS_PARAM);
-      if (view === 'transcript') params.set('v', 'transcript');
-      const next = `${location.pathname}?${params.toString()}`;
-      if (next !== `${location.pathname}${location.search}`) history.replaceState(null, '', next);
-    }, 250);
-    return () => { window.clearTimeout(timer); };
+  const shareQuery = useMemo(() => {
+    const params = new URLSearchParams();
+    params.set('q', sql);
+    params.set('p', policy);
+    if (RAW_ROWS_PARAM !== null) params.set('d', RAW_ROWS_PARAM);
+    if (view === 'transcript') params.set('v', 'transcript');
+    return params.toString();
   }, [sql, policy, view]);
+  useAddressBarQuery(shareQuery);
 
   function toggleStage(stage: Stage) {
     setStageOff((prev) => {

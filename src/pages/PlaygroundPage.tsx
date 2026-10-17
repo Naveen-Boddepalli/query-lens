@@ -57,8 +57,8 @@ import {
   readDatasetParam,
   readShareState,
   skippedAnswersBefore,
-  writeShareState,
 } from '../ui/urlState.ts';
+import { useAddressBarQuery } from '../ui/addressBar.ts';
 import { parseTraceFile, serializeTraceFile } from '../ui/traceFile.ts';
 import type { TraceState } from '../ui/traceFile.ts';
 
@@ -298,14 +298,9 @@ export function PlaygroundPage() {
     [sql, policy, predictOn, playback.step, datasetId, isCustom, rowsEdited, table],
   );
 
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      // `present` is a view flag, not part of the shared moment — appended after
-      // `encodeShareState` so a copied link still opens the presenter.
-      writeShareState(presenting ? `${shareQuery}&present=1` : shareQuery);
-    }, 250);
-    return () => { window.clearTimeout(timer); };
-  }, [shareQuery, presenting]);
+  // `present` is a view flag, not part of the shared moment — appended after
+  // `encodeShareState` so a copied link still opens the presenter.
+  useAddressBarQuery(presenting ? `${shareQuery}&present=1` : shareQuery);
 
   // plan.md §25.4 A3 — everything a "confusing step" report needs, from state
   // the page already holds. Read at render, not from `location`, which trails

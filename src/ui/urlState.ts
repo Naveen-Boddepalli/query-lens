@@ -168,19 +168,6 @@ export function encodeShareState(state: ShareState, table: Table | undefined): s
 }
 
 /**
- * Writes the moment into the address bar.
- *
- * `replaceState`, never `pushState`: stepping a 33-event trace would otherwise
- * bury the previous page under 33 history entries and make Back useless.
- */
-export function writeShareState(query: string): void {
-  if (typeof history === 'undefined') return;
-  const next = `${location.pathname}${query ? `?${query}` : ''}${location.hash}`;
-  if (next === `${location.pathname}${location.search}${location.hash}`) return;
-  history.replaceState(history.state, '', next);
-}
-
-/**
  * Prompts before the restored step count as skipped.
  *
  * Opening a link at step 13 means the questions at steps 0–12 were never put to
