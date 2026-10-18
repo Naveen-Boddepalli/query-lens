@@ -1,7 +1,7 @@
 {
   "name": "querylens",
   "private": true,
-  "version": "2.0.0-rc.2",
+  "version": "2.0.0-rc.3",
   "description": "QueryLens — a database internals visualizer: watch a SQL query travel through a real (toy) engine — parser, planner, buffer pool, B+Tree index — one step at a time, in the browser.",
   "homepage": "https://query-lens.1234naveenboddepalli.workers.dev",
   "repository": {

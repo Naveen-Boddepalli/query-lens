@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0-rc.3] - 2026-10-18
+
+The third release candidate for 2.0: rc.2 and what its first days in production turned up. Two bugs a visitor
+could meet are fixed — hashed assets were never cached for long, so a browser revalidated every chunk on every
+load, and a page's parameters could land on the page you had just gone to. Every route that draws no tree is
+about 16 kB lighter than in rc.2 (`/settings` 123.5 → 107.7 kB, the landing page 176.5 → 160.7), and the six
+that draw one carry flowinger 1.0's extra 2.5 kB; the editor runs the CodeMirror its `package.json` names, and
+CI fits its time limit again, in three shards. No new features; 2.0.0 still waits on the 2.0 checklist's launch
+item (plan.md §25.8).
+
 ### Changed
 
 - **Dependency updates** (Dependabot #22, the codemirror group): `@codemirror/language` 6.12.4 → 6.13.1 (it
@@ -1500,7 +1510,8 @@ the plan for what comes next is §25. (The tag marks the deployed commit; this v
 - Tested CSP security headers
 - 326 unit tests, 14 end-to-end tests
 
-[Unreleased]: https://github.com/Naveen-Boddepalli/query-lens/compare/v2.0.0-rc.2...HEAD
+[Unreleased]: https://github.com/Naveen-Boddepalli/query-lens/compare/v2.0.0-rc.3...HEAD
+[2.0.0-rc.3]: https://github.com/Naveen-Boddepalli/query-lens/releases/tag/v2.0.0-rc.3
 [2.0.0-rc.2]: https://github.com/Naveen-Boddepalli/query-lens/releases/tag/v2.0.0-rc.2
 [2.0.0-rc.1]: https://github.com/Naveen-Boddepalli/query-lens/commit/c2b79e8
 [1.0.0]: https://github.com/Naveen-Boddepalli/query-lens/releases/tag/v1.0.0
