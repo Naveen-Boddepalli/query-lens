@@ -25,7 +25,7 @@ import { mapChildren, parse } from '../src/engine/parser/index.ts';
 import type { Expr } from '../src/engine/parser/index.ts';
 import { runQuery } from '../src/engine/runQuery.ts';
 import { DEFAULT_ENGINE_OPTIONS } from '../src/engine/types.ts';
-import type { EngineOptions } from '../src/engine/types.ts';
+import type { EngineOptions, Row } from '../src/engine/types.ts';
 import { multisetDiff, sequenceDiff } from './compare.ts';
 import type { Tuple } from './compare.ts';
 import { ORACLE_TIMEOUT, oracleParams } from './config.ts';
@@ -67,6 +67,22 @@ function resolveForReference(expr: Expr | undefined, tables: readonly TableSpec[
     const { column, from, where } = out.subquery;
     const rows = tables.find((t) => t.name === from.name)!.rows.filter((row) => passes(where, row));
     return { ...out, items: rows.map((row) => ({ kind: 'literal' as const, value: row[column.name] ?? null, raw: '', span: out.span })) };
+  };
+  return expr && walk(expr);
+}
+
+/**
+ * The reference's own `EXISTS` (plan.md §27.5 S1), for one outer row of `outer`: does any row of the subquery's table
+ * pass its `WHERE`, read off the two rows side by side, every column qualified? No join, no planner — the subquery
+ * run again for this row, which is what a correlated subquery means and what the engine's semi-join replaces.
+ */
+function existsForRow(expr: Expr | undefined, row: Row, outer: string, tables: readonly TableSpec[]): Expr | undefined {
+  const qualified = (table: string, r: Row): Row => Object.fromEntries(Object.entries(r).map(([k, v]) => [`${table}.${k}`, v]));
+  const walk = (e: Expr): Expr => {
+    if (e.kind !== 'exists') return mapChildren(e, walk);
+    const { from, where } = e.subquery;
+    const found = tables.find((t) => t.name === from.name)!.rows.some((inner) => passes(where, { ...qualified(outer, row), ...qualified(from.name, inner) }));
+    return { ...e, resolved: found };
   };
   return expr && walk(expr);
 }
@@ -125,7 +141,7 @@ describe('metamorphic — NoREC-shaped: the optimized plan agrees with evaluatin
         const keys = outputKeys(read, settled).slice(0, outputKeys(read, settled).length - (read.computed?.length ?? 0));
         // The reference never plans, never touches a page or an index — it is the predicate and a loop.
         const where = resolveForReference(parsed.ast.where, settled);
-        const expected = table.rows.filter((row) => passes(where, row)).map((row) => tupleOf(row, keys));
+        const expected = table.rows.filter((row) => passes(existsForRow(where, row, table.name, settled), row)).map((row) => tupleOf(row, keys));
 
         const actual = answer(settled, read, options, true).map((t) => t.slice(0, keys.length));
         expect(multisetDiff(actual, expected), renderQuery(read)).toBeNull();
@@ -150,7 +166,7 @@ describe('metamorphic — NoREC-shaped: the optimized plan agrees with evaluatin
         const parsed = parse(count);
         if (!parsed.ok) throw new Error(parsed.error.message);
         const where = resolveForReference(parsed.ast.where, settled);
-        const kept = settled.find((t) => t.name === read.table)!.rows.filter((row) => passes(where, row)).length;
+        const kept = settled.find((t) => t.name === read.table)!.rows.filter((row) => passes(existsForRow(where, row, read.table, settled), row)).length;
         const result = runQuery(count, toDatabase(settled), DEFAULT_ENGINE_OPTIONS);
         expect(result.rows, count).toEqual([{ 'COUNT(*)': kept }]);
       }),

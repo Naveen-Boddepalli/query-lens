@@ -604,7 +604,7 @@ export function runSchedule(
     let unresolved = false;
     if (target.where) {
       walkExpr(target.where, (e) => {
-        if (e.kind === 'in' && e.subquery) unresolved = true;
+        if ((e.kind === 'in' && e.subquery) || e.kind === 'exists') unresolved = true;
       });
     }
     const scanned = run.events.some((e) => e.stage === 'execute' && e.op === 'SeqScan');
@@ -630,12 +630,12 @@ export function runSchedule(
     return [...needs.values()];
   }
 
-  /** True when `where` holds a subquery, which has no value until it has run: treated as matching every row. */
+  /** True when `where` holds a subquery — `IN (SELECT …)` or `EXISTS` — which has no value until it has run: treated as matching every row. */
   function opaque(where: Expr | undefined): boolean {
     let found = false;
     if (where) {
       walkExpr(where, (e) => {
-        if (e.kind === 'in' && e.subquery) found = true;
+        if ((e.kind === 'in' && e.subquery) || e.kind === 'exists') found = true;
       });
     }
     return found;

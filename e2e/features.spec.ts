@@ -521,6 +521,21 @@ test('the planner sandbox plans a real JOIN against its authors/posts demo table
   await expect(page.getByText(/needs a table name/)).toBeVisible();
 });
 
+test('the planner sandbox plans NOT EXISTS as an anti-join, and picks its algorithm by cost (plan.md §27.5 S1)', async ({ page }) => {
+  await page.goto(
+    `/tools/planner?q=${encodeURIComponent('SELECT name FROM authors WHERE NOT EXISTS (SELECT * FROM posts WHERE posts.authorId = authors.id)')}`,
+  );
+  const canonical = page.getByRole('figure').filter({ hasText: 'canonical' });
+  await expect(canonical.getByText('Anti-join (nested-loop) authors ▷ posts')).toBeVisible();
+  const optimized = page.getByRole('figure').filter({ hasText: 'optimized' });
+  await expect(optimized.getByText('Anti-join (hash) authors ▷ posts')).toBeVisible();
+  await expect(page.getByText(/^join-algorithm-selection — /)).toContainText(/▷ `posts`: hash join chosen by cost/);
+
+  // A semi-join keeps or drops whole rows, so EXISTS under OR is refused, and the error says why.
+  await page.getByLabel('SQL query').fill('SELECT name FROM authors WHERE id = 1 OR EXISTS (SELECT * FROM posts WHERE posts.authorId = authors.id)');
+  await expect(page.getByText(/EXISTS has to be one of the conditions WHERE joins with AND/)).toBeVisible();
+});
+
 test('compare finds the point where LRU and clock sweep pick different victims', async ({ page }) => {
   await page.goto('/compare');
   await expect(page.getByText(/first pick a different victim/)).toBeVisible();

@@ -96,6 +96,11 @@ export type Pred =
   | { k: 'insub'; ref: Ref; neg: boolean; sub: SubSelect }
   /** `(P) IS [NOT] NULL` — a predicate in a value's place, the shape that asks whether P was UNKNOWN. */
   | { k: 'pnull'; p: Pred; neg: boolean }
+  /**
+   * `[NOT] EXISTS (SELECT * FROM table WHERE …)` (plan.md §27.5 S1). Only ever a whole element of a SELECT's `where`
+   * list — the one place QueryLens runs one — never inside `and` / `or` / `not`. Every ref in it is qualified.
+   */
+  | { k: 'exists'; neg: boolean; sub: ExistsSub }
   | { k: 'not'; p: Pred }
   | { k: 'and'; a: Pred; b: Pred }
   | { k: 'or'; a: Pred; b: Pred };
@@ -104,6 +109,17 @@ export type Pred =
 export interface SubSelect {
   table: string;
   col: string;
+  where: Pred[];
+}
+
+/**
+ * An `EXISTS` subquery: correlated through `key` (`inner = outer`, the equality QueryLens joins on) when it has one,
+ * with `where` its further conditions — on its own table, or (with a key) naming the outer query's too. Without a key
+ * nothing in it names the outer query: uncorrelated.
+ */
+export interface ExistsSub {
+  table: string;
+  key?: { inner: Ref; outer: Ref };
   where: Pred[];
 }
 
@@ -228,6 +244,8 @@ export function renderPred(p: Pred): string {
       return `${renderRef(p.ref)} ${p.neg ? 'NOT ' : ''}IN (${renderSubSelect(p.sub)})`;
     case 'pnull':
       return `(${renderPred(p.p)}) IS ${p.neg ? 'NOT ' : ''}NULL`;
+    case 'exists':
+      return `${p.neg ? 'NOT ' : ''}EXISTS (${renderExistsSub(p.sub)})`;
     // Compound predicates are always parenthesised: the text never relies on precedence to mean what it says.
     case 'not':
       return `NOT (${renderPred(p.p)})`;
@@ -239,6 +257,10 @@ export function renderPred(p: Pred): string {
 }
 
 export const renderSubSelect = (sub: SubSelect): string => `SELECT ${sub.col} FROM ${sub.table}${renderWhere(sub.where)}`;
+
+/** `SELECT * FROM table WHERE inner = outer AND …` — the correlation key first, as a reader would write it. */
+export const renderExistsSub = (sub: ExistsSub): string =>
+  `SELECT * FROM ${sub.table}${renderWhere([...(sub.key ? [{ k: 'colcmp', a: sub.key.inner, op: '=', b: sub.key.outer } satisfies Pred] : []), ...sub.where])}`;
 
 const renderComputed = (computed: { e: Arith; alias: string }[] | undefined): string[] =>
   (computed ?? []).map((c) => `${renderArith(c.e)} AS ${c.alias}`);

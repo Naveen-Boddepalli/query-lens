@@ -85,13 +85,14 @@ A `WHERE` clause is a tree. From loosest to tightest binding: `OR`, then `AND`, 
 | `x IS NULL`, `x IS NOT NULL` | Whether the value is NULL. The only test that is never UNKNOWN. |
 | `x IN (a, b, …)`, `x NOT IN (a, b, …)` | Equal to any listed value. |
 | `x IN (SELECT col FROM t [WHERE …])`, `x NOT IN (…)` | Equal to any value that query returns (plan.md §25.4 C3, closing C3). |
+| `EXISTS (SELECT * FROM t [WHERE …])`, `NOT EXISTS (…)` | Whether that query returns any row at all — never UNKNOWN. Its `WHERE` may name the outer query's tables (plan.md §27.5 S1); see below. |
 | `x LIKE pattern`, `x NOT LIKE pattern` | `%` matches any run of characters, `_` exactly one. **Case-sensitive**, no escape character. |
 
 An operand is a column, a literal (number, single-quoted string, `TRUE`/`FALSE`, `NULL`), or a
 parenthesised predicate.
 
-**`IN`'s subquery form** is the one place a `SELECT` may appear inside another query — nowhere else does
-(`x = (SELECT …)` and `EXISTS (…)` both stay unsupported). It is deliberately small: exactly one plain
+**`IN`'s subquery form** is one of the two places a `SELECT` may appear inside another query — the other
+is `EXISTS`, below; a scalar subquery (`x = (SELECT …)`) stays unsupported. It is deliberately small: exactly one plain
 column, and no `JOIN`/`GROUP BY`/`HAVING`/`ORDER BY`/`LIMIT`/`DISTINCT`/aggregate — none of those could
 change *which* values end up in the set `IN` tests membership against. It always runs exactly once,
 before the outer query is planned, and is always **uncorrelated**: its own `WHERE`, if it has one, can
@@ -103,6 +104,38 @@ SELECT * FROM posts WHERE authorId IN (SELECT id FROM authors WHERE name = 'ada'
 SELECT * FROM posts WHERE authorId NOT IN (SELECT id FROM authors);
 DELETE FROM posts WHERE authorId IN (SELECT id FROM authors WHERE name = 'ada');
 ```
+
+**`EXISTS` and `NOT EXISTS`** (plan.md §27.5 S1) ask whether a subquery returns any row. Unlike `IN`'s, an
+`EXISTS` subquery may be **correlated** — its `WHERE` may name a column of the outer query's row — which is
+what makes it useful: "authors who have a post", "authors who have none".
+
+```sql
+SELECT name FROM authors WHERE EXISTS (SELECT * FROM posts WHERE posts.authorId = authors.id);
+SELECT name FROM authors WHERE NOT EXISTS (SELECT * FROM posts WHERE posts.authorId = authors.id);
+SELECT name FROM authors
+  WHERE EXISTS (SELECT 1 FROM posts WHERE posts.authorId = authors.id AND posts.id > 6);
+```
+
+- **Every column inside it names its table.** The subquery can see two tables — its own and the outer
+  query's — so, the same rule a `JOIN` follows, `posts.authorId` and `authors.id`, never a bare `authorId`.
+  Its table must be one the outer query does not already have, and not one another `EXISTS` in the same
+  query reads: with no table aliases, `authors.id` could not say which of the two it meant.
+- **It runs as a join, not once per row.** A subquery correlated through an equality between one of its
+  own columns and an outer one (`posts.authorId = authors.id`) becomes a **semi-join** (⋉) for `EXISTS` —
+  an outer row is kept *once* if at least one row matches, however many do — or an **anti-join** (▷) for
+  `NOT EXISTS` — kept only if none does. The plan draws it like any join and the optimizer picks its
+  algorithm by cost: nested-loop is exactly "run the subquery again for every outer row, stopping at the
+  first match"; hash, sort-merge and index nested-loop are the unnested forms. The subquery's other
+  conditions on its own table filter its scan; one naming both tables is checked on each pair whose keys
+  match.
+- **Uncorrelated, it runs once.** An `EXISTS` that names nothing from the outer query has the same answer
+  for every row, so it runs exactly once, before planning, stopping at the first row it finds.
+- **Only as a condition joined by `AND`.** `WHERE a = 1 AND NOT EXISTS (…)` is fine; under `OR`, or inside
+  another test, it is refused — a semi-join keeps or drops whole rows. It works in a `SELECT`'s `WHERE`
+  only, not in `HAVING`, the `SELECT` list, `DELETE` or `UPDATE`; and a correlation needs an equality
+  to join on (`posts.authorId > authors.id` alone is refused, with the reason).
+- **`NOT EXISTS` is not `NOT IN`.** `NOT EXISTS` only asks whether a matching row exists, so a NULL on
+  either side never turns its answer UNKNOWN — the trap below does not apply to it.
 
 **Three-valued logic.** Comparing anything with `NULL` is neither true nor false but **UNKNOWN**, and
 only TRUE passes a `WHERE`. So `x = NULL` matches nothing (write `x IS NULL`), and `NOT (age > 40)`
@@ -283,7 +316,8 @@ with a generic syntax error:
 | A `JOIN`'s `ON` naming a table not yet in the query | *There is no table called that yet in this query — it has to be named in FROM or an earlier JOIN first.* |
 | `SELECT a, DISTINCT b`, `COUNT(DISTINCT x)` | *DISTINCT applies to the whole SELECT list — write `SELECT DISTINCT a, b …`. Inside an aggregate it is not supported yet.* |
 | `UNION` | *UNION is not in the v0 subset.* |
-| A subquery anywhere but `IN`, e.g. `x = (SELECT …)` | *A subquery is not supported here — write the value out, join the two tables, or use IN (SELECT …).* |
+| A subquery anywhere but `IN` or `EXISTS`, e.g. `x = (SELECT …)` | *A subquery is not supported here — QueryLens runs a subquery only inside IN (SELECT …) or EXISTS (SELECT …).* |
+| `EXISTS` under `OR`, or in `HAVING`, `DELETE` or `UPDATE` | *EXISTS has to be one of the conditions WHERE joins with AND* — it runs as a semi-join, which keeps or drops whole rows. |
 | `BEGIN` / `COMMIT` / `ROLLBACK` | *`BEGIN`, `COMMIT` and `ROLLBACK` need two sessions to mean anything, and the Playground runs one statement at a time.* They run in [Transaction schedules](/tools/schedule). |
 | `CREATE` / `DROP` | *QueryLens only runs SELECT, DELETE, INSERT and UPDATE. Edit the seed data to change the table.* |
 

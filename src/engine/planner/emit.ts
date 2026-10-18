@@ -1,8 +1,8 @@
 import type { Emit } from '../trace.ts';
 import type { JoinAlgorithm, Table } from '../types.ts';
 import { columnKey, selectItemKey } from '../parser/index.ts';
-import type { SelectStatement } from '../parser/index.ts';
-import { buildAggregatePlan, buildJoinPlan, buildPlan, distinctNodeFor, isAggregateQuery, projectListFor } from './buildPlan.ts';
+import type { SelectStatement, SemiJoinClause } from '../parser/index.ts';
+import { buildAggregatePlan, buildJoinPlan, buildPlan, buildSemiJoin, distinctNodeFor, isAggregateQuery, projectListFor } from './buildPlan.ts';
 import { estimatePlan, rootEstimate } from './cost.ts';
 import { costOfOrder, joinGraphFromAst, runJoinOrderDP, writtenOrderFromAst } from './joinOrder.ts';
 import { OPTIMIZER_RULES, leftmostPrefixNote, optimize } from './optimize.ts';
@@ -173,6 +173,16 @@ export function emitPlanEvents(
     );
   }
 
+  // Each correlated EXISTS (plan.md §27.5 S1), already moved out of WHERE by `resolveExists`, joins the plan here.
+  for (const sj of ast.semiJoins ?? []) {
+    const below = current;
+    current = buildSemiJoin(current, sj, structuralJoinStrategy, joinTables);
+    emit(semiJoinNarration(sj, current, below === leftScan, structuralJoinStrategy), {
+      stage: 'plan',
+      planTree: display(current),
+    });
+  }
+
   if (ast.where) {
     current = { op: 'Filter', predicate: ast.where, child: current };
     const subqueryNotes = subqueryResolutionNotes(ast.where);
@@ -311,8 +321,11 @@ export function emitPlanEvents(
   if (optimised === canonical) {
     const rows = rootEstimate(canonical, table, rowsPerPage, otherTables).estRows;
     const chainJoins = joinsIn(canonical);
+    const only = chainJoins[0];
     const note =
-      chainJoins.length === 1
+      chainJoins.length === 1 && (only!.joinType === 'semi' || only!.joinType === 'anti')
+        ? `No rewrite rule applies to this ${only!.joinType}-join — ${describeJoin(only!.algorithm, only!.leftTable, only!.rightTable)} is what runs.`
+        : chainJoins.length === 1
         ? `No rewrite rule applies to this JOIN — ${describeJoin(chainJoins[0]!.algorithm, chainJoins[0]!.leftTable, chainJoins[0]!.rightTable)} is what runs.`
         : chainJoins.length > 1
           ? `No rewrite rule applies to this chain of ${String(chainJoins.length)} JOINs — ${chainJoins
@@ -368,3 +381,35 @@ export function emitPlanEvents(
 }
 
 const plural = (n: number, noun: string): string => `${String(n)} ${noun}${n === 1 ? '' : 's'}`;
+
+/**
+ * What a correlated `[NOT] EXISTS` becomes in the plan (plan.md §27.5 S1), said once as it joins the tree: which rows
+ * survive, why that is a join and not a subquery run per row, and where each part of the subquery's `WHERE` went.
+ * `onScan` is whether it sits straight on the FROM table's scan, for the wording.
+ */
+function semiJoinNarration(
+  sj: SemiJoinClause,
+  join: Extract<Plan, { op: 'Join' }>,
+  onScan: boolean,
+  requested: JoinAlgorithm,
+): string {
+  const outer = `\`${sj.outerTable}\``;
+  const inner = `\`${sj.table.name}\``;
+  const key = `\`${sj.table.name}.${sj.innerColumn}\` = \`${sj.outerTable}.${sj.outerColumn}\``;
+  const what =
+    sj.kind === 'semi'
+      ? `\`${exprToSql(sj.source)}\` becomes a semi-join (⋉) above ${onScan ? 'that scan' : 'the plan so far'}: a row of ${outer} is kept if at least one row of ${inner} has ${key} — kept once, however many match, which is what a JOIN would not do — and ${inner}'s columns never reach the rows above.`
+      : `\`${exprToSql(sj.source)}\` becomes an anti-join (▷) above ${onScan ? 'that scan' : 'the plan so far'}: a row of ${outer} is kept only if no row of ${inner} has ${key}. A NULL on either side simply matches nothing, so unlike NOT IN, NOT EXISTS never turns UNKNOWN.`;
+  const why = `The subquery is correlated through that equality, so rather than running it again for every ${outer} row, the planner joins on it`;
+  const how =
+    join.algorithm === 'nested-loop'
+      ? `${why} — starting, like every join here, as a nested-loop: for each ${outer} row it reads ${inner} until the first match and stops, which is exactly what running the subquery once per row would cost. The optimizer may choose a cheaper algorithm below.`
+      : `${why}, as ${describeJoin(join.algorithm, sj.outerTable, sj.table.name)}.`;
+  const fallback =
+    requested === 'index-nested-loop' && join.algorithm !== 'index-nested-loop'
+      ? ` An index nested-loop was asked for, but ${sj.innerFilter ? `the subquery's own condition has to filter ${inner} as it is read, and an index probe has nowhere to put it` : `${inner} has no index on \`${sj.innerColumn}\` to probe`} — so this runs as a nested-loop.`
+      : '';
+  const own = sj.innerFilter ? ` The subquery's condition on ${inner} alone, \`${exprToSql(sj.innerFilter)}\`, filters that scan as it reads.` : '';
+  const both = sj.residual ? ` \`${exprToSql(sj.residual)}\` names both tables, so it is checked on each pair whose keys match.` : '';
+  return `${what} ${how}${fallback}${own}${both}`;
+}

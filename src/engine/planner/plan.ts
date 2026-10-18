@@ -64,8 +64,14 @@ export type Plan =
       algorithm: JoinAlgorithm;
       /** `LEFT JOIN` (plan.md §25.4 C3): every row of `left` appears at least once, NULL-padded on `right`'s side
        *  when nothing matched it. Absent means the join's original, still-default shape: an inner join, where an
-       *  unmatched `left` row simply does not appear. */
-      joinType?: 'left';
+       *  unmatched `left` row simply does not appear. `semi` and `anti` (plan.md §27.5 S1) are how a correlated
+       *  `EXISTS` and `NOT EXISTS` run: a `left` row comes out at most once and unchanged — kept when it has a match on
+       *  `right` (semi) or when it has none (anti) — and `right`'s columns never reach the rows above. Always after
+       *  every inner and LEFT join in a chain. */
+      joinType?: 'left' | 'semi' | 'anti';
+      /** A semi- or anti-join's further condition on each key-matched pair (plan.md §27.5 S1) — the rest of the
+       *  subquery's `WHERE` that names both tables, qualified, read off the two rows merged. */
+      residual?: Expr;
       left: Plan;
       right: Plan;
       leftTable: string;
@@ -314,6 +320,12 @@ export function subqueryResolutionNotes(where: Expr): string[] {
         `its subquery \`SELECT ${e.subquery.column.name} FROM ${e.subquery.from.name}${e.subquery.where ? ' WHERE …' : ''}\` already ran once, before this plan was built, ${found}`,
       );
     }
+    // An uncorrelated EXISTS (plan.md §27.5 S1): the same answer for every row, so it ran once, like an IN subquery.
+    if (e.kind === 'exists' && e.resolved !== undefined) {
+      notes.push(
+        `its \`EXISTS (SELECT ${e.subquery.select} FROM ${e.subquery.from.name}${e.subquery.where ? ' WHERE …' : ''})\` names nothing from the outer query, so its answer is the same for every row: it already ran once, before this plan was built, stopping at the first row, and ${e.resolved ? `found one — EXISTS is TRUE` : `found none — EXISTS is FALSE`} for every row`,
+      );
+    }
   });
   return notes;
 }
@@ -453,7 +465,10 @@ function raOf(plan: Plan): RaInfo {
     case 'Having':
       return { symbol: 'σ', sub: exprToSql(plan.predicate) };
     case 'Join':
-      return { symbol: '⋈', sub: `${plan.leftTable}.${plan.leftColumn} = ${plan.rightTable}.${plan.rightColumn}` };
+      return {
+        symbol: joinSymbol(plan),
+        sub: `${plan.leftTable}.${plan.leftColumn} = ${plan.rightTable}.${plan.rightColumn}${plan.residual ? ` AND ${exprToSql(plan.residual)}` : ''}`,
+      };
     case 'HashAggregate':
     case 'SortAggregate': {
       const keys = plan.aggregates.map((a) => a.key).join(', ');
@@ -476,6 +491,19 @@ function raOf(plan: Plan): RaInfo {
       return { symbol: 'δ' };
     case 'Limit':
       return { symbol: 'λ', sub: plan.offset ? `${String(plan.count)}, offset ${String(plan.offset)}` : String(plan.count) };
+  }
+}
+
+/** A `Join`'s relational-algebra symbol: ⋈, or ⋉ for a semi-join and ▷ for an anti-join (plan.md §27.5 S1). */
+function joinSymbol(plan: Extract<Plan, { op: 'Join' }>): '⋈' | '⋉' | '▷' {
+  switch (plan.joinType) {
+    case 'semi':
+      return '⋉';
+    case 'anti':
+      return '▷';
+    // A LEFT JOIN keeps its ⋈ (plan.md §25.4 B5's reading); only the subquery joins have symbols of their own here.
+    default:
+      return '⋈';
   }
 }
 
@@ -516,8 +544,11 @@ function convertBody(
       return {
         id,
         op: 'Join',
-        label: `Join (${plan.algorithm}) ${plan.leftTable} × ${plan.rightTable}`,
-        detail: `on: ${plan.leftTable}.${plan.leftColumn} = ${plan.rightTable}.${plan.rightColumn}`,
+        label:
+          plan.joinType === 'semi' || plan.joinType === 'anti'
+            ? `${plan.joinType === 'semi' ? 'Semi-join' : 'Anti-join'} (${plan.algorithm}) ${plan.leftTable} ${joinSymbol(plan)} ${plan.rightTable}`
+            : `Join (${plan.algorithm}) ${plan.leftTable} × ${plan.rightTable}`,
+        detail: `on: ${plan.leftTable}.${plan.leftColumn} = ${plan.rightTable}.${plan.rightColumn}${plan.residual ? ` · and: ${exprToSql(plan.residual)}` : ''}`,
         // `rightTable` is the table this specific `Join` step introduces — unique across a chain, since the parser
         // never allows a query to name the same table twice (plan.md §25.4 C3 slice b) — so it is what disambiguates
         // this node from another `Join` in the same chain for EXPLAIN ANALYZE's actual-row lookup (see `table`'s

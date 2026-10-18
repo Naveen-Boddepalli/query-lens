@@ -8,6 +8,7 @@
  */
 
 import { mapChildren } from './parser/ast.ts';
+import { sqlString } from './parser/print.ts';
 import type { DeleteStatement, Expr, InSubquery, SelectItem, SelectStatement, UpdateStatement } from './parser/ast.ts';
 import type { QueryError, Row, RunResult, SqlValue } from './types.ts';
 
@@ -30,7 +31,7 @@ function literalFor(value: SqlValue, span: Expr['span']): Expr {
   return {
     kind: 'literal',
     value,
-    raw: value === null ? 'NULL' : typeof value === 'string' ? `'${value}'` : String(value),
+    raw: value === null ? 'NULL' : typeof value === 'string' ? sqlString(value) : String(value),
     span,
   };
 }

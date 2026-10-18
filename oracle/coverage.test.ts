@@ -76,6 +76,16 @@ describe('the generators reach what the oracle is meant to check', () => {
     /** Aggregate queries over a join that returned rows, by aggregate strategy, and ones grouping a LEFT JOIN (F1c). */
     joinAggregates: new Map<string, number>(),
     leftJoinGroups: 0,
+    /**
+     * Reads with a `[NOT] EXISTS` (plan.md §27.5 S1): how many, how many returned rows, and of those, the correlated
+     * semi- and anti-joins by join algorithm, ones with a residual, and the uncorrelated ones run once.
+     */
+    existsReads: 0,
+    existsWithRows: 0,
+    semiJoins: new Map<string, number>(),
+    antiJoins: new Map<string, number>(),
+    existsResiduals: 0,
+    existsOnce: 0,
   };
 
   for (const [{ tables: initial, steps }, options] of sessions) {
@@ -136,6 +146,22 @@ describe('the generators reach what the oracle is meant to check', () => {
       } else {
         stats.reads += 1;
         if (result.rows.length > 0) stats.readsWithRows += 1;
+        const exists = q.where.flatMap((p) => (p.k === 'exists' ? [p] : []));
+        if (exists.length > 0) {
+          stats.existsReads += 1;
+          if (result.rows.length > 0) {
+            stats.existsWithRows += 1;
+            const algorithm = options.joinStrategy ?? 'cost';
+            for (const p of exists) {
+              if (!p.sub.key) stats.existsOnce += 1;
+              else {
+                const into = p.neg ? stats.antiJoins : stats.semiJoins;
+                into.set(algorithm, (into.get(algorithm) ?? 0) + 1);
+                if (p.sub.where.some((w) => w.k === 'colcmp' && w.a.table !== w.b.table)) stats.existsResiduals += 1;
+              }
+            }
+          }
+        }
         if (q.kind === 'join') stats.joins.set(options.joinStrategy ?? 'nested-loop', (stats.joins.get(options.joinStrategy ?? 'nested-loop') ?? 0) + (result.rows.length > 0 ? 1 : 0));
         if (q.kind === 'aggregate' && q.joins && result.rows.length > 0) {
           const strategy = options.aggregateStrategy ?? 'hash';
@@ -250,6 +276,19 @@ describe('the generators reach what the oracle is meant to check', () => {
       expect(stats.joinAggregates.get(strategy) ?? 0, `join aggregates, ${strategy}`).toBeGreaterThan(50);
     }
     expect(stats.leftJoinGroups, 'GROUP BY over a LEFT JOIN, with rows').toBeGreaterThan(30);
+  });
+
+  it('runs EXISTS and NOT EXISTS as semi- and anti-joins under every join algorithm, and once when uncorrelated (plan.md §27.5 S1)', () => {
+    // Measured with the fixed seed above: 161 of 517 EXISTS reads return rows; semi-joins with rows 5–11 per algorithm,
+    // anti-joins 15–22 (a semi-join must find a partner past the outer WHERE, an anti-join only miss one); 29 with a
+    // residual; 33 uncorrelated.
+    expect(stats.existsWithRows / stats.existsReads, 'EXISTS reads that return rows').toBeGreaterThan(0.25);
+    for (const algorithm of ['cost', 'nested-loop', 'hash', 'sort-merge', 'index-nested-loop']) {
+      expect(stats.semiJoins.get(algorithm) ?? 0, `semi-joins by ${algorithm}`).toBeGreaterThan(3);
+      expect(stats.antiJoins.get(algorithm) ?? 0, `anti-joins by ${algorithm}`).toBeGreaterThan(10);
+    }
+    expect(stats.existsResiduals, 'semi- and anti-joins with a residual').toBeGreaterThan(15);
+    expect(stats.existsOnce, 'uncorrelated EXISTS, run once').toBeGreaterThan(15);
   });
 
   it('writes through UNIQUE indexes without tripping them (plan.md §25.4 B3c)', () => {

@@ -163,8 +163,8 @@ concept explanation.
   one column's distinct values.
 - **Always uncorrelated.** The subquery's own `WHERE`, if it has one, can only name a column on its own
   `FROM` table — the same "no table name needed" rule a bare single-table query already enforces — so
-  there is no path for it to read a value from the outer query's own row. `EXISTS` and a scalar subquery
-  (`x = (SELECT …)`) both stay unsupported; `IN`'s subquery form is the only one.
+  there is no path for it to read a value from the outer query's own row. A correlated subquery is
+  `EXISTS`'s (below); a scalar subquery (`x = (SELECT …)`) stays unsupported.
 - **Runs exactly once, as its own complete sub-run of the engine** — its own buffer pool, its own real
   disk reads — before the outer query is planned at all, the same way `EXPLAIN`'s own inner query does.
   Its result becomes an ordinary literal list from that point on: the cost model, the executor, and every
@@ -175,6 +175,25 @@ concept explanation.
 - **The NULL trap applies exactly as sharply.** `x NOT IN (SELECT …)` is never TRUE for any row once
   that subquery's result contains even one NULL — the identical three-valued-logic trap a literal
   `NOT IN (1, 2, NULL)` already has, since resolution produces the exact same shape.
+
+## EXISTS subquery
+
+- **`[NOT] EXISTS (SELECT … FROM table [WHERE …])`** (plan.md §27.5 S1) — what the subquery selects is never
+  read (`*`, `1` or a column all do); an aggregate is refused, since with no `GROUP BY` it always returns a row.
+  No `JOIN`/`GROUP BY`/`HAVING`/`ORDER BY`/`LIMIT`/`DISTINCT` inside it, and no subquery inside it.
+- **One level of correlation, through one equality.** Every column in the subquery names its table. The first
+  equality between one of its own columns and an outer one is the join key; the rest of its `WHERE` naming only
+  its own table filters its scan, and anything naming both is a residual checked on each key-matched pair. A
+  subquery that names the outer query only through something else (`posts.authorId > authors.id`) is refused.
+- **A semi-join or an anti-join**, placed after every `JOIN` in the query and run by any of the four join
+  algorithms — chosen by cost when nothing forces one. An index nested-loop needs the subquery to have no
+  condition of its own on its table (an index probe has nowhere to apply it), and falls back to a nested-loop.
+  The estimate assumes *containment*: `min(1, distinct inner keys ÷ distinct outer keys)` of the outer rows match.
+- **Uncorrelated, it runs once**, as `SELECT * FROM table WHERE … LIMIT 1`, its own sub-run of the engine; the
+  WHERE clause's narration says what it found.
+- **Only in a `SELECT`'s `WHERE`, as a condition joined by `AND`** (or under one `NOT`). Its table must not be
+  one the outer query already has, or one another `EXISTS` in the query reads — there are no table aliases yet,
+  so a query cannot correlate a table with itself, and each table appears once.
 
 ## GROUP BY and aggregates
 
@@ -446,8 +465,9 @@ decide whether the rewrite happens.
 
 ## What's out of scope entirely
 
-No subqueries anywhere but an uncorrelated `IN (SELECT …)` (plan.md §25.4 C3, closing C3 — no `EXISTS`, no
-scalar subquery like `x = (SELECT …)`, no correlated subquery). No `RIGHT`/`FULL`/`CROSS` join, no transactions in
+No subqueries anywhere but `IN (SELECT …)` (uncorrelated, plan.md §25.4 C3) and `[NOT] EXISTS` (plan.md §27.5
+S1 — correlated through one equality, as a semi- or anti-join): no scalar subquery like `x = (SELECT …)`, and no
+correlated subquery outside `EXISTS`. No `RIGHT`/`FULL`/`CROSS` join, no transactions in
 the Playground (they exist only in [Transaction schedules](/tools/schedule)), no real
 concurrency there (the Locks panel is visual only). `UNION` and `COUNT(DISTINCT …)` are also not accepted.
 These are deliberate exclusions for this release, not bugs — see the parser's own error messages in

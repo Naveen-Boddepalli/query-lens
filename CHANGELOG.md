@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Work toward **v3** (plan.md §27), on the branch `version/v3`.
+
+### Added
+
+- **`EXISTS` and `NOT EXISTS`, run as semi-joins and anti-joins** (plan.md §27.5 S1, the first v3 item). An
+  `EXISTS` subquery may be *correlated* — `SELECT name FROM authors WHERE NOT EXISTS (SELECT * FROM posts WHERE
+  posts.authorId = authors.id)` — and every column inside it names its table, the rule a `JOIN` already follows.
+  A correlated one becomes a **semi-join** (⋉: an outer row kept once if anything matches, however many do) or an
+  **anti-join** (▷: kept only if nothing does) at the end of the join chain, run by all four join algorithms and
+  chosen by cost like any other join. Nested-loop is literally "run the subquery again for every outer row,
+  stopping at the first match" — the trace says when it stops — while hash, sort-merge and index nested-loop are
+  the unnested forms, so decorrelation is shown rather than described. The subquery's own conditions filter its
+  scan; one naming both tables is checked on each key-matched pair. An uncorrelated `EXISTS` runs once, before
+  planning, as `SELECT * … LIMIT 1`. The plan labels read `Semi-join (hash) authors ⋉ posts`, the relational-
+  algebra view and *Copy as LaTeX* use ⋉ / ▷ (`\ltimes`, `\triangleright`), `EXPLAIN [ANALYZE]` shows them, and
+  the cost model estimates them by containment (`min(1, distinct inner keys ÷ distinct outer keys)`). Refused,
+  with the reason: `EXISTS` under `OR` or inside another test, in `HAVING`, the `SELECT` list, `DELETE` or
+  `UPDATE`; a correlation with no equality to join on; the outer query's own table, or one another `EXISTS`
+  already reads (no aliases yet); an aggregate in the subquery (always TRUE). `/tools/planner` and `/tools/grammar` know it; `sql.mdx`, `limits.mdx`
+  and the course map say what it does and does not do. Checked by 79 unit tests (each of nine mutations of the new
+  code fails at least one — the one that first slipped through, the pushdown rule, got its own test), an e2e
+  test, and the SQLite oracle, which now generates correlated and uncorrelated `[NOT] EXISTS` — with a residual,
+  over join chains and under `GROUP BY` — and a NoREC reference that re-runs the subquery per row; three
+  10,000-case seeds are clean. Reachable today through the Custom editor, `/tools/planner`, the CLI and the MCP
+  server; a multi-table preset (S2) brings it to the Playground's own data.
+
+### Fixed
+
+- **A string holding a quote was printed back as SQL that did not parse.** `name = 'it''s'` printed as
+  `name = 'it's'` — in plan labels, a computed column's name and an `IN` subquery's resolved values — breaking
+  `exprToSql`'s promise that its text parses back to the same tree. The oracle found it on its first run with
+  `EXISTS`, whose one-time run re-parses the subquery's printed `WHERE`. Now quoted with the inner quote doubled.
+
 ## [2.0.0-rc.3] - 2026-10-18
 
 The third release candidate for 2.0: rc.2 and what its first days in production turned up. Two bugs a visitor

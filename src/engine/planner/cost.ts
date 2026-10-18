@@ -307,6 +307,11 @@ export function selectivityOf(expr: Expr, table: Table): Selectivity {
         fraction: expr.negated ? 1 - LIKE_SELECTIVITY : LIKE_SELECTIVITY,
         basis: expr.negated ? '0.9 default (NOT LIKE)' : '0.1 default (LIKE)',
       };
+    // An uncorrelated EXISTS has already run (plan.md §27.5 S1): its answer is known, the same for every row.
+    case 'exists':
+      return expr.resolved === undefined
+        ? { fraction: 1, basis: 'EXISTS not yet run' }
+        : { fraction: expr.resolved ? 1 : 0, basis: `EXISTS ran once: ${expr.resolved ? 'TRUE' : 'FALSE'}` };
     case 'compare': {
       if (expr.op === '=') return equalitySelectivity(columnName(expr), table, literalValue(expr));
       if (expr.op === '<>') {
@@ -367,11 +372,28 @@ function estimateNode(
       // An `IndexProbe`'s own estimate is *per outer row*, so the full inner size comes from the table itself.
       const rightRows = plan.algorithm === 'index-nested-loop' ? tableNamed(plan.rightTable).rows.length : right.estRows;
       const innerEstimate = clampRows((left.estRows * rightRows) / rightDistinct);
+      // A semi- or anti-join (plan.md §27.5 S1) never produces more rows than its outer side, and never one per match:
+      // under the textbook *containment* assumption, the outer key's distinct values are matched in proportion to how
+      // many distinct keys the inner side has left after its own filter — min(1, that / ndistinct(outer key)). The
+      // anti-join keeps the rest. A residual is not estimated: it is assumed to pass.
+      const semiKind = plan.joinType === 'semi' || plan.joinType === 'anti' ? plan.joinType : null;
+      const outerDistinct = Math.max(1, ndistinct(tableNamed(plan.leftTable), plan.leftColumn));
+      const innerKeys = Math.min(rightDistinct, Math.max(rightRows, 0));
+      const matchedFraction = Math.min(1, innerKeys / outerDistinct);
+      const semiRows = clampRows(left.estRows * matchedFraction);
       // A LEFT JOIN (plan.md §25.4 C3) never drops a left row — the equi-join estimate is a floor, not the answer,
       // whenever it would otherwise guess fewer rows than the outer side alone already has.
-      const estRows = plan.joinType === 'left' ? Math.max(left.estRows, innerEstimate) : innerEstimate;
-      const rowsBasis =
-        plan.joinType === 'left' && estRows === left.estRows && left.estRows > innerEstimate
+      const estRows =
+        semiKind === 'semi'
+          ? semiRows
+          : semiKind === 'anti'
+            ? Math.max(0, left.estRows - semiRows)
+            : plan.joinType === 'left'
+              ? Math.max(left.estRows, innerEstimate)
+              : innerEstimate;
+      const rowsBasis = semiKind
+        ? `${semiKind === 'anti' ? `${String(left.estRows)} − ` : ''}${String(left.estRows)} × min(1, ${String(innerKeys)} distinct ${plan.rightTable}.${plan.rightColumn} / ${String(outerDistinct)} distinct ${plan.leftTable}.${plan.leftColumn})`
+        : plan.joinType === 'left' && estRows === left.estRows && left.estRows > innerEstimate
           ? `${String(left.estRows)} (every ${plan.leftTable} row survives a LEFT JOIN; the equi-join estimate alone was only ${String(innerEstimate)})`
           : `${String(left.estRows)} × ${String(rightRows)} / ndistinct(${plan.rightTable}.${plan.rightColumn})`;
       switch (plan.algorithm) {
@@ -418,7 +440,9 @@ function estimateNode(
             // `left`/`right` are always a bare SeqScan in v1.
             estRows,
             estPages: left.estPages + left.estRows * right.estPages,
-            basis: `${rowsBasis}; nested-loop rescans ${plan.rightTable} once per ${plan.leftTable} row`,
+            basis: semiKind
+              ? `${rowsBasis}; nested-loop rescans ${plan.rightTable} once per ${plan.leftTable} row — at most, since it stops at the first match`
+              : `${rowsBasis}; nested-loop rescans ${plan.rightTable} once per ${plan.leftTable} row`,
           };
           break;
       }

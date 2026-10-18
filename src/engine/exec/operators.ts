@@ -945,6 +945,26 @@ function leftJoinKeyOf(row: Row, table: string, column: string): string | null {
   return value === null ? null : equalityKeyOf(value);
 }
 
+/** Which of the two subquery joins a `Join` is (plan.md §27.5 S1), or `null` for an inner or LEFT join. */
+function semiKindOf(plan: Extract<Plan, { op: 'Join' }>): 'semi' | 'anti' | null {
+  return plan.joinType === 'semi' || plan.joinType === 'anti' ? plan.joinType : null;
+}
+
+/**
+ * A semi- or anti-join's own test of a pair whose keys already matched (plan.md §27.5 S1): the rest of the
+ * subquery's `WHERE` that names both tables — `residual`, qualified — must hold too, read off the two rows merged the
+ * way an inner join would merge them. With no residual, a key match is the whole test.
+ */
+function residualHolds(plan: Extract<Plan, { op: 'Join' }>, leftRow: Row, rightRow: Row): boolean {
+  return plan.residual === undefined || passes(plan.residual, mergeJoinedRow(plan.leftTable, leftRow, plan.rightTable, rightRow));
+}
+
+/** How a semi- or anti-join's decision reads in the trace: the subquery's answer for this row, and what follows from it. */
+function semiVerdict(kind: 'semi' | 'anti', found: boolean): string {
+  if (kind === 'semi') return found ? 'EXISTS is TRUE, so the row is kept — once' : 'EXISTS is FALSE, so the row is dropped';
+  return found ? 'NOT EXISTS is FALSE, so the row is dropped' : 'NOT EXISTS is TRUE, so the row is kept';
+}
+
 /**
  * Nested-loop join — the simplest algorithm, and the first one v1 had
  * (plan.md §22.2; `hashJoin` below is the second). For every row the left
@@ -963,6 +983,9 @@ function join(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): Operator {
   const joinRight = ctx.joinPartners?.[plan.rightTable];
   if (!joinRight) throw new Error("unreachable: a Join plan implies ExecContext.joinPartners has this Join's rightTable");
   const isLeft = plan.joinType === 'left';
+  // A semi- or anti-join (plan.md §27.5 S1) is this same loop with one change: the rescan of `right` stops at the first
+  // match, because one is all EXISTS asks for. That is exactly what running the subquery again for every outer row does.
+  const semi = semiKindOf(plan);
 
   const left = buildOperator(plan.left, ctx);
   const right = buildOperator(plan.right, {
@@ -978,6 +1001,8 @@ function join(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): Operator {
   let checked = 0;
   // LEFT JOIN only (plan.md §25.4 C3): whether the current left row has matched anything yet.
   let matched = false;
+  // Semi- and anti-joins only: how many inner rows this outer row's rescan has read.
+  let readThisRow = 0;
 
   return {
     name: 'Join',
@@ -987,6 +1012,7 @@ function join(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): Operator {
       rightOpen = false;
       checked = 0;
       matched = false;
+      readThisRow = 0;
     },
     next() {
       for (;;) {
@@ -994,6 +1020,7 @@ function join(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): Operator {
           leftRow = left.next();
           if (!leftRow) return null;
           matched = false;
+          readThisRow = 0;
           right.open();
           rightOpen = true;
         }
@@ -1001,6 +1028,12 @@ function join(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): Operator {
         const rightRow = right.next();
         if (!rightRow) {
           rightOpen = false;
+          // The whole inner table was read and nothing matched: NOT EXISTS keeps the row; EXISTS has already moved on.
+          if (semi === 'anti') {
+            produced(`Join reads all ${String(readThisRow)} row${readThisRow === 1 ? '' : 's'} of ${plan.rightTable} and finds no match for a row from ${plan.leftTable} — ${semiVerdict('anti', false)}.`);
+            return leftRow;
+          }
+          if (semi === 'semi') continue;
           // The whole inner table was rescanned and nothing matched this left row — a LEFT JOIN keeps it anyway.
           if (isLeft && !matched) {
             produced(`Join finds no match in ${plan.rightTable} for a row from ${plan.leftTable} — LEFT JOIN keeps it, with ${plan.rightTable}'s columns NULL.`);
@@ -1009,11 +1042,24 @@ function join(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): Operator {
           continue;
         }
         checked += 1;
+        readThisRow += 1;
 
         // NULL never matches NULL — the same three-valued rule an ordinary
         // `=` predicate follows, so a NULL join key simply finds no partner.
         if (compare('=', leftJoinValue(leftRow!, plan.leftTable, plan.leftColumn), rightRow[plan.rightColumn] ?? null) !== true) {
           continue;
+        }
+
+        if (semi) {
+          if (!residualHolds(plan, leftRow!, rightRow)) continue;
+          // One match settles it either way: the rest of the inner table is never read for this row. The next outer
+          // row reopens the scan from its first page.
+          rightOpen = false;
+          if (semi === 'anti') continue;
+          produced(
+            `Join finds a match in ${plan.rightTable} for a row from ${plan.leftTable} after reading ${String(readThisRow)} of its rows — ${semiVerdict('semi', true)}, and the rest of ${plan.rightTable} is not read for it.`,
+          );
+          return leftRow;
         }
 
         matched = true;
@@ -1052,6 +1098,9 @@ function hashJoin(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): Operat
   const joinRight = ctx.joinPartners?.[plan.rightTable];
   if (!joinRight) throw new Error("unreachable: a Join plan implies ExecContext.joinPartners has this Join's rightTable");
   const isLeft = plan.joinType === 'left';
+  // A semi- or anti-join (plan.md §27.5 S1) builds the same table and probes it the same way, but an outer row comes out
+  // at most once: kept if any row in its bucket passes the residual (semi), or if none does (anti).
+  const semi = semiKindOf(plan);
 
   const left = buildOperator(plan.left, ctx);
   const right = buildOperator(plan.right, {
@@ -1098,6 +1147,23 @@ function hashJoin(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): Operat
           `Join builds an in-memory hash table over ${plan.rightTable}, keyed on ${plan.rightColumn} (${String(table.size)} distinct key${table.size === 1 ? '' : 's'}).`,
           { stage: 'execute', op: 'Join', rowsProduced: 0, table: plan.rightTable },
         );
+      }
+
+      if (semi) {
+        for (;;) {
+          const row = left.next();
+          if (!row) return null;
+          const value = leftJoinValue(row, plan.leftTable, plan.leftColumn);
+          const candidates = value === null ? [] : (built.get(equalityKeyOf(value)) ?? []);
+          const found = candidates.some((candidate) => residualHolds(plan, row, candidate));
+          if (found !== (semi === 'semi')) continue;
+          produced(
+            found
+              ? `Join probes the hash table with a row from ${plan.leftTable} and finds ${candidates.length === 1 ? 'a match' : `${String(candidates.length)} rows with its key`} in ${plan.rightTable} — ${semiVerdict('semi', true)}, however many rows share its key.`
+              : `Join probes the hash table with a row from ${plan.leftTable} and finds nothing in ${plan.rightTable} — ${semiVerdict('anti', false)}.`,
+          );
+          return row;
+        }
       }
 
       for (;;) {
@@ -1157,6 +1223,9 @@ function indexNestedLoopJoin(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecConte
   const tree = joinRight.trees[inner.column];
   if (!tree) throw new Error('unreachable: an index nested-loop Join implies its inner index was built');
   const isLeft = plan.joinType === 'left';
+  // A semi- or anti-join (plan.md §27.5 S1) probes once per outer row like the inner join, but stops fetching the
+  // probe's entries at the first that passes: one is all EXISTS needs.
+  const semi = semiKindOf(plan);
 
   const left = buildOperator(plan.left, ctx);
   const produced = counter(ctx, 'Join', plan.rightTable);
@@ -1180,6 +1249,49 @@ function indexNestedLoopJoin(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecConte
       matchedThisRow = false;
     },
     next() {
+      if (semi) {
+        for (;;) {
+          const row = left.next();
+          if (!row) return null;
+          const key = leftJoinValue(row, plan.leftTable, plan.leftColumn);
+          let found = false;
+          let fetched = 0;
+          // A NULL key matches nothing, so there is nothing to probe — EXISTS is FALSE and NOT EXISTS TRUE for it.
+          if (key !== null) {
+            probes += 1;
+            ctx.emit(
+              `Join takes a row from ${plan.leftTable} whose ${plan.leftColumn} is ${typeof key === 'string' ? `'${key}'` : String(key)} and probes ${plan.rightTable}'s B+Tree on ${plan.rightColumn} for it (probe ${String(probes)}).`,
+              { stage: 'execute', op: 'Join', rowsProduced: matched, table: plan.rightTable },
+            );
+            const entries = emitIndexLookup(ctx.emit, tree, [key], ctx.pool, inner.column, ctx.locks).pointers;
+            for (let at = 0; at < entries.length && !found; at++) {
+              const pointer = entries[at]!;
+              // The lookup itself fetched the first entry's heap page; each later one is fetched only if it is needed.
+              if (at > 0) fetchHeapPage(ctx, pointer);
+              fetched = at + 1;
+              const rightRow = rowAt(ctx, pointer, joinRight.heap);
+              if (!rightRow) continue;
+              if (compare('=', key, rightRow[plan.rightColumn] ?? null) !== true) continue;
+              found = residualHolds(plan, row, rightRow);
+            }
+            if (found && entries.length > fetched) {
+              ctx.emit(
+                `Join stops after ${String(fetched)} of the ${String(entries.length)} entries the probe found — one match settles it.`,
+                { stage: 'execute', op: 'Join', rowsProduced: matched, table: plan.rightTable },
+              );
+            }
+          }
+          if (found !== (semi === 'semi')) continue;
+          matched += 1;
+          produced(
+            found
+              ? `Join's probe of ${plan.rightTable} finds a match for a row from ${plan.leftTable} — ${semiVerdict('semi', true)}.`
+              : `Join's probe of ${plan.rightTable} finds nothing for a row from ${plan.leftTable} — ${semiVerdict('anti', false)}.`,
+          );
+          return row;
+        }
+      }
+
       for (;;) {
         const pointer = pointers[cursor];
         if (pointer === undefined) {
@@ -1312,6 +1424,39 @@ function* sortMergeMatches(
 }
 
 /**
+ * The merge phase of a sort-merge semi- or anti-join (plan.md §27.5 S1), as a generator of the `left` rows that
+ * survive: each left row is checked against the run of equal keys on `right` — the same walk `sortMergeMatches`
+ * makes — and comes out once if a row in that run passes `test` (semi), or if none does (anti). A NULL left key has
+ * no run at all, so an anti-join keeps it and a semi-join drops it.
+ */
+function* sortMergeSemi(
+  left: readonly Row[],
+  right: readonly Row[],
+  leftTable: string,
+  leftColumn: string,
+  rightColumn: string,
+  kind: 'semi' | 'anti',
+  test: (leftRow: Row, rightRow: Row) => boolean,
+): Generator<Row> {
+  let j = 0;
+  for (const row of left) {
+    const leftKey = leftJoinKeyOf(row, leftTable, leftColumn);
+    let found = false;
+    if (leftKey !== null) {
+      while (j < right.length) {
+        const aheadKey = joinKeyOf(right[j]!, rightColumn);
+        if (aheadKey !== null && aheadKey >= leftKey) break;
+        j += 1;
+      }
+      for (let k = j; k < right.length && joinKeyOf(right[k]!, rightColumn) === leftKey && !found; k++) {
+        found = test(row, right[k]!);
+      }
+    }
+    if (found === (kind === 'semi')) yield row;
+  }
+}
+
+/**
  * Sort-merge join — the third algorithm (plan.md §22.2). Sorts both sides on
  * the join key, each its own `externalMergeSort` call (the same driver
  * `Sort` uses, real spill I/O through `ctx.pool`), then merges the two
@@ -1336,6 +1481,7 @@ function sortMergeJoin(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): O
   const bases = ctx.sortMergeBases?.get(plan);
   if (!bases) throw new Error('unreachable: a sort-merge Join plan implies runQuery.ts reserved its scratch bases');
   const isLeft = plan.joinType === 'left';
+  const semi = semiKindOf(plan);
 
   const left = buildOperator(plan.left, ctx);
   const right = buildOperator(plan.right, {
@@ -1347,6 +1493,8 @@ function sortMergeJoin(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): O
 
   const produced = counter(ctx, 'Join', plan.rightTable);
   let matches: Generator<readonly [Row, Row | null]> | null = null;
+  // A semi- or anti-join's survivors (plan.md §27.5 S1), in place of `matches`' pairs.
+  let survivors: Generator<Row> | null = null;
   let matched = 0;
 
   return {
@@ -1355,6 +1503,7 @@ function sortMergeJoin(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): O
       left.open();
       right.open();
       matches = null;
+      survivors = null;
       matched = 0;
     },
     next() {
@@ -1411,7 +1560,22 @@ function sortMergeJoin(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): O
           { stage: 'execute', op: 'Join', rowsProduced: 0, table: plan.rightTable },
         );
 
+        if (semi) {
+          survivors = sortMergeSemi(leftSorted, rightSorted, plan.leftTable, plan.leftColumn, plan.rightColumn, semi, (l, r) => residualHolds(plan, l, r));
+        }
         matches = sortMergeMatches(leftSorted, rightSorted, plan.leftTable, plan.leftColumn, plan.rightColumn, isLeft);
+      }
+
+      if (survivors) {
+        const kept = survivors.next();
+        if (kept.done) return null;
+        matched += 1;
+        produced(
+          semi === 'semi'
+            ? `Join's merge finds a run of matching keys on ${plan.rightTable} for a row from ${plan.leftTable} — ${semiVerdict('semi', true)}.`
+            : `Join's merge finds no run of matching keys on ${plan.rightTable} for a row from ${plan.leftTable} — ${semiVerdict('anti', false)}.`,
+        );
+        return kept.value;
       }
 
       const step = matches.next();

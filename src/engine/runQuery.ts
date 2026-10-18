@@ -46,6 +46,7 @@ import { sortTempPageCount } from './exec/sort.ts';
 import { createLockManager } from './locks/index.ts';
 import { explainResult } from './explain.ts';
 import { resolveStatementSubqueries } from './subquery.ts';
+import { existsNodesIn, resolveExists } from './exists.ts';
 import { createTracer } from './trace.ts';
 import { DEFAULT_ENGINE_OPTIONS } from './types.ts';
 import type { Database, EngineOptions, QueryError, Row, RunResult, Table } from './types.ts';
@@ -191,25 +192,27 @@ export function runQuery(
   }
 
   // Every JOIN's own table (plan.md §25.4 C3 slice b: 0 or more, left-deep) — resolved here, alongside the
-  // FROM/INTO table above, so all of them go through the same "no table called X" shape.
+  // FROM/INTO table above, so all of them go through the same "no table called X" shape. So is every EXISTS
+  // subquery's table (plan.md §27.5 S1): a correlated one is joined like the rest.
   const joins = ast.kind === 'select' ? (ast.joins ?? []) : [];
+  const existsRefs = ast.kind === 'select' ? existsNodesIn(ast.where).map((e) => e.subquery.from) : [];
   const joinTables: Record<string, Table> = {};
-  for (const j of joins) {
-    const t = db.tables[j.table.name];
+  for (const ref of [...joins.map((j) => j.table), ...existsRefs]) {
+    const t = db.tables[ref.name];
     if (!t) {
       const known = Object.keys(db.tables);
       return {
         events: drain(),
         rows: [],
         error: {
-          message: `There is no table called \`${j.table.name}\`.`,
+          message: `There is no table called \`${ref.name}\`.`,
           hint: known.length === 1 ? `The only table is \`${known[0]}\`.` : `Tables: ${known.join(', ')}.`,
-          from: j.table.span.from,
-          to: j.table.span.to,
+          from: ref.span.from,
+          to: ref.span.to,
         },
       };
     }
-    joinTables[j.table.name] = t;
+    joinTables[ref.name] = t;
   }
 
   const unknownColumn = referencedColumns(ast).find((c) => {
@@ -365,7 +368,12 @@ export function runQuery(
   // here, before planning; the parse-stage narration above already showed the query exactly as written.
   const resolvedSubqueries = resolveStatementSubqueries(ast, sql, (s) => runQuery(s, db, options));
   if (!resolvedSubqueries.ok) return { events: drain(), rows: [], error: resolvedSubqueries.error };
-  const selectAst = resolvedSubqueries.value;
+  // Then every EXISTS (plan.md §27.5 S1): a correlated one leaves WHERE to become a semi- or anti-join, an
+  // uncorrelated one runs once here, like an IN subquery.
+  const resolvedExists = resolveExists(resolvedSubqueries.value, (s) => runQuery(s, db, options));
+  if (!resolvedExists.ok) return { events: drain(), rows: [], error: resolvedExists.error };
+  const selectAst = resolvedExists.value;
+  const semiTables = (selectAst.semiJoins ?? []).map((sj) => sj.table.name);
   const plan = emitPlanEvents(
     emit,
     selectAst,
@@ -385,9 +393,11 @@ export function runQuery(
   // heap and every earlier probe index, so nothing collides.
   const joinHeaps: Record<string, Heap> = {};
   let pageBase = pageCountFor(heap, trees);
-  for (const j of joins) {
-    const jHeap = buildHeap(joinTables[j.table.name]!, options.rowsPerPage, pageBase);
-    joinHeaps[j.table.name] = jHeap;
+  // The partners every Join reads: each JOIN's table, then each semi-joined subquery table (plan.md §27.5 S1).
+  const partnerNames = [...joins.map((j) => j.table.name), ...semiTables];
+  for (const name of partnerNames) {
+    const jHeap = buildHeap(joinTables[name]!, options.rowsPerPage, pageBase);
+    joinHeaps[name] = jHeap;
     pageBase += jHeap.pages.length;
   }
   const joinTrees: Record<string, Record<string, BPlusTree>> = {};
@@ -420,7 +430,8 @@ export function runQuery(
       pageBase += rightSize;
       sortMergeBases.set(j, { leftBase, rightBase });
     }
-    worstCaseLeftRows *= Math.max(1, jTable.rows.length);
+    // A semi- or anti-join (plan.md §27.5 S1) passes each left row at most once, so it never grows what comes next.
+    if (j.joinType !== 'semi' && j.joinType !== 'anti') worstCaseLeftRows *= Math.max(1, jTable.rows.length);
   }
 
   // Every other sort the plan runs gets its own block of scratch page ids after those, in the order the sorts run —
@@ -452,12 +463,12 @@ export function runQuery(
     aggregateSortBase,
     sortBase,
     distinctBase,
-    ...(joins.length > 0
+    ...(partnerNames.length > 0
       ? {
           joinPartners: Object.fromEntries(
-            joins.map((j) => [
-              j.table.name,
-              { table: joinTables[j.table.name]!, heap: joinHeaps[j.table.name]!, trees: joinTrees[j.table.name] ?? {} },
+            partnerNames.map((name) => [
+              name,
+              { table: joinTables[name]!, heap: joinHeaps[name]!, trees: joinTrees[name] ?? {} },
             ]),
           ),
         }
@@ -491,6 +502,14 @@ function referencedColumns(ast: Exclude<Statement, { kind: 'explain' }>): Column
     walkExpr(ast.where, (e) => {
       if (e.kind === 'column') push(e);
     });
+    // An EXISTS subquery is a scope of its own (plan.md §27.5 S1), which `walkExpr` does not enter; its columns are
+    // all qualified, so each is checked against the table it names.
+    for (const node of existsNodesIn(ast.where)) {
+      if (!node.subquery.where) continue;
+      walkExpr(node.subquery.where, (e) => {
+        if (e.kind === 'column') push(e);
+      });
+    }
   }
   if (ast.kind === 'select') {
     for (const join of ast.joins ?? []) {

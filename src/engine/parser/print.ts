@@ -5,6 +5,11 @@ export function aggregateKeyOf(fn: AggregateFn, arg: AggregateArg): string {
   return `${fn}(${arg.kind === 'star' ? '*' : arg.table ? `${arg.table}.${arg.name}` : arg.name})`;
 }
 
+/** A string as a SQL literal: quoted, with each `'` inside doubled — the form the tokenizer reads back as the same string. */
+export function sqlString(value: string): string {
+  return `'${value.replaceAll("'", "''")}'`;
+}
+
 /**
  * How tightly a node binds, for parenthesising: OR < AND < NOT < a predicate <
  * `+ -` < `* / %` < unary minus < an atom. (plan.md §25.4 B1.)
@@ -26,9 +31,11 @@ function precedence(expr: Expr): number {
       return expr.op === '+' || expr.op === '-' ? 5 : 6;
     case 'neg':
       return 7;
+    // An atom. An `exists` is one too: its parentheses are part of its syntax, so it never needs another pair.
     case 'column':
     case 'literal':
     case 'aggregate':
+    case 'exists':
       return 8;
   }
 }
@@ -64,6 +71,10 @@ export function exprToSql(expr: Expr): string {
         : `${at(expr.operand, 5)} ${expr.negated ? 'NOT ' : ''}IN (${expr.items.map((i) => at(i, 5)).join(', ')})`;
     case 'like':
       return `${at(expr.operand, 5)} ${expr.negated ? 'NOT ' : ''}LIKE ${at(expr.pattern, 5)}`;
+    case 'exists': {
+      const { select, from, where } = expr.subquery;
+      return `EXISTS (SELECT ${select} FROM ${from.name}${where ? ` WHERE ${exprToSql(where)}` : ''})`;
+    }
     case 'arith': {
       // Left-associative: the right operand of a same-level operator needs parentheses (`a - (b - c)`).
       const p = precedence(expr);

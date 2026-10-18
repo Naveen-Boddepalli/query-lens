@@ -13,7 +13,7 @@
  * legible when the two are shown side by side.
  */
 
-import type { DeleteStatement, Expr, JoinClause, SelectStatement, UpdateStatement } from '../parser/index.ts';
+import type { DeleteStatement, Expr, JoinClause, SelectStatement, SemiJoinClause, UpdateStatement } from '../parser/index.ts';
 import { exprToSql } from '../parser/print.ts';
 import { aggregateKeyOf, columnKey, selectItemArgColumn, selectItemKey, walkExpr } from '../parser/index.ts';
 import type { AggregateSpec, Plan, ProjectList } from './plan.ts';
@@ -173,6 +173,56 @@ export function buildJoinPlan(
 }
 
 /**
+ * One correlated `[NOT] EXISTS` as a semi-join or anti-join on top of `plan` (plan.md §27.5 S1) — the outer query's
+ * rows so far on the left, a scan (or, for `index-nested-loop`, a probe) of the subquery's table on the right, joined
+ * on the correlation equality. The subquery's own conditions on its own table filter that scan as it reads — they
+ * are its `WHERE`, not the outer query's — so a probe, which has nowhere to put them, gives way to a nested-loop the
+ * way `effectiveJoinAlgorithm` already does without an index. Anything naming both tables is the join's `residual`.
+ * Shared with `emit.ts`'s narration, like `buildJoinPlan`.
+ */
+export function buildSemiJoin(
+  plan: Plan,
+  sj: SemiJoinClause,
+  algorithm: JoinAlgorithm = 'nested-loop',
+  joinTables?: Record<string, Table>,
+): Extract<Plan, { op: 'Join' }> {
+  const innerTable = joinTables?.[sj.table.name];
+  const requested = sj.innerFilter && algorithm === 'index-nested-loop' ? 'nested-loop' : algorithm;
+  const effective = effectiveJoinAlgorithm(requested, innerTable, sj.innerColumn);
+  return {
+    op: 'Join',
+    algorithm: effective,
+    joinType: sj.kind,
+    left: plan,
+    right:
+      effective === 'index-nested-loop'
+        ? {
+            op: 'IndexProbe',
+            table: sj.table.name,
+            column: indexNameOf(joinIndexFor(innerTable!, sj.innerColumn)!.columns),
+            outerTable: sj.outerTable,
+            outerColumn: sj.outerColumn,
+          }
+        : { op: 'SeqScan', table: sj.table.name, ...(sj.innerFilter ? { filter: sj.innerFilter } : {}) },
+    leftTable: sj.outerTable,
+    rightTable: sj.table.name,
+    leftColumn: sj.outerColumn,
+    rightColumn: sj.innerColumn,
+    ...(sj.residual ? { residual: sj.residual } : {}),
+  };
+}
+
+/** `plan` with every semi- and anti-join `ast` carries stacked on top, in source order (plan.md §27.5 S1). */
+export function withSemiJoins(
+  plan: Plan,
+  ast: SelectStatement,
+  algorithm: JoinAlgorithm = 'nested-loop',
+  joinTables?: Record<string, Table>,
+): Plan {
+  return (ast.semiJoins ?? []).reduce<Plan>((below, sj) => buildSemiJoin(below, sj, algorithm, joinTables), plan);
+}
+
+/**
  * The `Project` list for a SELECT list. Plain columns and aggregates are read
  * off the row by name; as soon as any item is *computed* (plan.md §25.4 B1b) the
  * whole list becomes expressions — each item is then evaluated, a plain column
@@ -220,10 +270,12 @@ export function buildPlan(
   joinStrategy: JoinAlgorithm = 'nested-loop',
   joinTables?: Record<string, Table>,
 ): Plan {
-  const scan: Plan =
+  const joined: Plan =
     ast.joins && ast.joins.length > 0
       ? buildJoinPlan(ast.joins, ast.from.name, joinStrategy, joinTables)
       : { op: 'SeqScan', table: ast.from.name };
+  // A correlated EXISTS is a semi-join on top of every JOIN (plan.md §27.5 S1): it only keeps or drops rows.
+  const scan = withSemiJoins(joined, ast, joinStrategy, joinTables);
 
   const filtered: Plan = ast.where
     ? { op: 'Filter', predicate: ast.where, child: scan }

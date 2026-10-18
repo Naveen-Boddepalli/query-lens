@@ -1,4 +1,5 @@
 export { runQuery } from './runQuery.ts';
+export { resolveExists } from './exists.ts';
 export {
   MAX_REFERENCES,
   parseReferenceScans,

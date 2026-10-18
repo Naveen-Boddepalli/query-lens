@@ -168,6 +168,18 @@ export const GRAMMAR: GrammarRule[] = [
     name: 'inSubquery',
     parts: [lit('SELECT'), rule('identifier'), lit('FROM'), rule('identifier'), opt(lit('WHERE'), rule('expr'))],
   },
+  // The subquery EXISTS takes (plan.md §27.5 S1): what it selects is never read, and its WHERE may name the outer
+  // query's tables — every column there qualified. Only in a SELECT's WHERE, as a condition joined by AND.
+  {
+    name: 'existsSubquery',
+    parts: [
+      lit('SELECT'),
+      choice([lit('*')], [rule('value')], [rule('qualifiedColumn')]),
+      lit('FROM'),
+      rule('identifier'),
+      opt(lit('WHERE'), rule('expr')),
+    ],
+  },
   {
     name: 'compareOp',
     parts: [choice([lit('=')], [lit('<>')], [lit('!=')], [lit('<')], [lit('>')], [lit('<=')], [lit('>=')])],
@@ -195,6 +207,8 @@ export const GRAMMAR: GrammarRule[] = [
         [lit('('), rule('expr'), lit(')')],
         // Only inside HAVING — an aggregate has no group to read in a WHERE.
         [rule('aggregateCall')],
+        // Only in a SELECT's WHERE, as a condition joined by AND (plan.md §27.5 S1).
+        [lit('EXISTS'), lit('('), rule('existsSubquery'), lit(')')],
       ),
     ],
   },

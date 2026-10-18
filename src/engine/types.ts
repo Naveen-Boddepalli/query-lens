@@ -74,7 +74,8 @@ export interface IndexNode {
  *   δ    duplicate elimination
  */
 export interface RaInfo {
-  symbol: 'rel' | 'σ' | 'π' | '⋈' | 'γ' | 'τ' | 'λ' | 'δ';
+  /** `⋉` and `▷` are the semi-join and anti-join a correlated `EXISTS` / `NOT EXISTS` runs as (plan.md §27.5 S1). */
+  symbol: 'rel' | 'σ' | 'π' | '⋈' | '⋉' | '▷' | 'γ' | 'τ' | 'λ' | 'δ';
   /** What sits in the subscript: the predicate, the columns, the join condition. */
   sub?: string;
   /** The relation a leaf reads — set on scans, whether or not they carry a σ. */

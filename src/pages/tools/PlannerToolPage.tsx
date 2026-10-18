@@ -9,6 +9,7 @@ import {
   OPTIMIZER_RULES,
   optimize,
   parse,
+  resolveExists,
   runQuery,
   toPlanDisplay,
 } from '../../engine/index.ts';
@@ -91,11 +92,16 @@ export function PlannerToolPage() {
     if (validation.error) return null;
     const parsed = parse(sql);
     if (!parsed.ok) return null;
+    // An EXISTS becomes a semi- or anti-join, or a fact found once, before anything is planned (plan.md §27.5 S1) —
+    // the same step the Playground's pipeline takes, so the two never draw a different plan for one query.
+    const resolved = resolveExists(parsed.ast, (s) => runQuery(s, db, DEFAULT_ENGINE_OPTIONS));
+    if (!resolved.ok) return null;
+    const ast = resolved.value;
     // The rules and the cost model both key off the table the query is
     // actually against — `users` by default, but `authors`/`posts` once a
     // typed query names one of those instead (plan.md §22.2's JOIN).
-    const fromTable = db.tables[parsed.ast.from.name] ?? table;
-    const canonical = buildPlan(parsed.ast);
+    const fromTable = db.tables[ast.from.name] ?? table;
+    const canonical = buildPlan(ast);
     const rpp = DEFAULT_ENGINE_OPTIONS.rowsPerPage;
     const steps = optimize(canonical, fromTable, rpp, db.tables, rules);
     const last = steps.at(-1);

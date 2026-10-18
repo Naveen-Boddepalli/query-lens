@@ -11,7 +11,7 @@
 import fc from 'fast-check';
 import type { EngineOptions, IndexBuildOptions, JoinAlgorithm, ReplacementPolicyName, Row, SqlValue } from '../src/engine/types.ts';
 import { renderRef } from './model.ts';
-import type { AggItem, Arith, ArithOp, ColSpec, ColType, GroupOrderSpec, JoinStep, Op, Pred, Query, ReadQuery, Ref, SubSelect, TableSpec, WriteQuery } from './model.ts';
+import type { AggItem, Arith, ArithOp, ColSpec, ColType, ExistsSub, GroupOrderSpec, JoinStep, Op, Pred, Query, ReadQuery, Ref, SubSelect, TableSpec, WriteQuery } from './model.ts';
 
 /* -------------------------------------------------------------------------- */
 /* Tables                                                                      */
@@ -263,6 +263,46 @@ function subArb(outer: readonly Ref[], subs: readonly SubSource[]): fc.Arbitrary
   ];
 }
 
+/**
+ * Zero or one `[NOT] EXISTS` to add to a SELECT's `where` list (plan.md §27.5 S1), reading one of `sources` — a table
+ * the outer query does not have — against `outer`, the outer query's columns, qualified (the subquery can see both).
+ * Mostly correlated, through the foreign-key shape when there is one (`u.t_id = t.id`, `w.u_id = u.id`) and any
+ * comparable pair otherwise; with a key, a further condition may name both sides (the semi-join's residual). Without
+ * one it names only its own table, so it is uncorrelated — QueryLens refuses a correlation with no equality to join on.
+ */
+export function existsArb(outer: readonly Ref[], sources: readonly SubSource[]): fc.Arbitrary<Pred[]> {
+  if (sources.length === 0 || outer.length === 0) return fc.constant([]);
+  const one = fc.tuple(fc.constantFrom(...sources), fc.boolean()).chain(([source, neg]) => {
+    const inner = source.refs.map((r) => ({ ...r, table: source.table }));
+    const pool: Pool = (ref) => source.pool({ name: ref.name });
+    const fks = inner.flatMap((i) => outer.filter((o) => (i.name === `${o.table}_id` && o.name === 'id')).map((o) => ({ inner: i, outer: o })));
+    const pairs = inner.flatMap((i) => outer.filter((o) => comparable(i, o)).map((o) => ({ inner: i, outer: o })));
+    const key: fc.Arbitrary<ExistsSub['key']> = fc.oneof(
+      { weight: fks.length > 0 ? 5 : 0, arbitrary: fks.length > 0 ? fc.constantFrom(...fks) : fc.constant(undefined) },
+      { weight: pairs.length > 0 ? 2 : 0, arbitrary: pairs.length > 0 ? fc.constantFrom(...pairs) : fc.constant(undefined) },
+      { weight: 1, arbitrary: fc.constant(undefined) },
+    );
+    // Conditions on the subquery's own table, now and then: each one on top of the key makes a match rarer.
+    const own = fc.oneof(
+      { weight: 3, arbitrary: fc.constant<Pred[]>([]) },
+      { weight: 1, arbitrary: fc.array(leafArb(inner, pool), { minLength: 1, maxLength: 2 }) },
+    );
+    const residual = (k: ExistsSub['key']): fc.Arbitrary<Pred[]> =>
+      k === undefined || pairs.length === 0
+        ? fc.constant([])
+        : fc.oneof(
+            { weight: 3, arbitrary: fc.constant<Pred[]>([]) },
+            { weight: 1, arbitrary: fc.tuple(fc.constantFrom(...pairs), opArb).map(([{ inner: a, outer: b }, op]): Pred[] => [{ k: 'colcmp', a, op, b }]) },
+          );
+    return key.chain((k) =>
+      fc.tuple(own, residual(k)).map(([o, r]): Pred => ({ k: 'exists', neg, sub: { table: source.table, ...(k ? { key: k } : {}), where: [...o, ...r] } })),
+    );
+  });
+  // One read in four: an EXISTS is one more condition a row must pass, and every one makes an empty answer likelier
+  // (`whereArb`'s note) — the coverage suite's non-empty share is what this weight protects.
+  return fc.oneof({ weight: 3, arbitrary: fc.constant<Pred[]>([]) }, { weight: 1, arbitrary: one.map((p) => [p]) });
+}
+
 const LIKE_PATTERNS = ['a%', '%a', '_b', 'a_c', '%b%', '%', 'ab', '', 'z%', 'Z%', '_', '__', '%_', "it%", "i_'s", 'b_', '%z'] as const;
 
 /** A leaf predicate: one comparison or one test on a column (or two literals), or — given `subs` — an `IN (subquery)`. */
@@ -494,12 +534,13 @@ function fixedProj(
   return proj;
 }
 
-export function selectArb(t: TableSpec, pool: Pool, subs: readonly SubSource[] = []): fc.Arbitrary<Query> {
+export function selectArb(t: TableSpec, pool: Pool, subs: readonly SubSource[] = [], exists: readonly SubSource[] = []): fc.Arbitrary<Query> {
   const refs = refsOf(t, false);
   const general = fc
     .record({
       proj: fc.oneof({ weight: 1, arbitrary: fc.constant('*' as const) }, { weight: 2, arbitrary: uniqueRefs(refs, 1, 4) }),
-      where: whereArb(refs, pool, 3, subs),
+      // An EXISTS (plan.md §27.5 S1) is a whole element of the list, beside whatever else WHERE holds.
+      where: fc.tuple(whereArb(refs, pool, 3, subs), existsArb(refsOf(t, true), exists)).map(([w, e]) => [...w, ...e]),
       order: fc.option(fc.record({ ref: fc.constantFrom(...refs), dir: fc.constantFrom('asc', 'desc') }), {
         nil: undefined,
         freq: 2,
@@ -529,8 +570,8 @@ export function selectArb(t: TableSpec, pool: Pool, subs: readonly SubSource[] =
   return fc.oneof({ weight: 3, arbitrary: general }, { weight: 3, arbitrary: lookupArb(t, pool) });
 }
 
-export function aggregateArb(t: TableSpec, pool: Pool, subs: readonly SubSource[] = []): fc.Arbitrary<Query> {
-  return aggregateOver(refsOf(t, false), pool, subs, { table: t.name });
+export function aggregateArb(t: TableSpec, pool: Pool, subs: readonly SubSource[] = [], exists: readonly SubSource[] = []): fc.Arbitrary<Query> {
+  return aggregateOver(refsOf(t, false), pool, subs, { table: t.name }, existsArb(refsOf(t, true), exists));
 }
 
 /**
@@ -542,6 +583,8 @@ function aggregateOver(
   pool: Pool,
   subs: readonly SubSource[],
   from: { table: string; joins?: JoinStep[] },
+  /** `[NOT] EXISTS` elements for the `where` list (plan.md §27.5 S1) — `existsArb`'s, or none. */
+  exists: fc.Arbitrary<Pred[]> = fc.constant([]),
 ): fc.Arbitrary<Query> {
   const numericRefs = refs.filter((r) => numeric(r.type));
   const agg: fc.Arbitrary<AggItem> = fc.oneof(
@@ -601,7 +644,7 @@ function aggregateOver(
       aggs: fc.uniqueArray(agg, { minLength: 0, maxLength: 3, selector: aggKey }),
       showAll: fc.boolean(),
       distinct: fc.integer({ min: 0, max: 5 }).map((x) => x === 0),
-      where: whereArb(refs, pool, 2, subs),
+      where: fc.tuple(whereArb(refs, pool, 2, subs), exists).map(([w, e]) => [...w, ...e]),
       page: pageArb,
     })
     .chain((base) => fc.tuple(havingArb(base.group), orderArb(base.group)).map(([having, order]) => ({ ...base, having, order })))
@@ -658,14 +701,19 @@ function chainArb(t: TableSpec, u: TableSpec, w: TableSpec): fc.Arbitrary<{ join
   return chain.map((joins) => ({ joins, all: joins.length === 1 ? [...tRefs, ...uRefs] : [...tRefs, ...uRefs, ...wRefs] }));
 }
 
-export function joinArb(t: TableSpec, u: TableSpec, w: TableSpec, pool: Pool, subs: readonly SubSource[] = []): fc.Arbitrary<Query> {
+/** The `EXISTS` sources a join query may read (plan.md §27.5 S1): those its chain does not already have. */
+const outsideChain = (exists: readonly SubSource[], left: string, joins: readonly JoinStep[]): SubSource[] =>
+  exists.filter((source) => source.table !== left && !joins.some((j) => j.table === source.table));
+
+export function joinArb(t: TableSpec, u: TableSpec, w: TableSpec, pool: Pool, subs: readonly SubSource[] = [], exists: readonly SubSource[] = []): fc.Arbitrary<Query> {
   return chainArb(t, u, w).chain(({ joins, all }) => {
     return fc
       .record({
         proj: uniqueRefs(all, 1, 5),
         computed: fc.oneof({ weight: 3, arbitrary: fc.constant<{ e: Arith; alias: string }[]>([]) }, { weight: 1, arbitrary: computedArb(all) }),
         distinct: fc.integer({ min: 0, max: 3 }).map((x) => x === 0),
-        where: whereArb(all, pool, 2, subs),
+        // A semi- or anti-join on top of the chain, correlated with any of its tables (plan.md §27.5 S1).
+        where: fc.tuple(whereArb(all, pool, 2, subs), existsArb(all, outsideChain(exists, t.name, joins))).map(([wh, e]) => [...wh, ...e]),
         // ORDER BY over the joined rows (plan.md §26 Feature 1, slice b): any column of any table in the chain —
         // a LEFT JOIN's NULL padding included, which is where NULL placement shows.
         order: fc.option(fc.record({ ref: fc.constantFrom(...all), dir: fc.constantFrom<'asc' | 'desc'>('asc', 'desc') }), {
@@ -690,8 +738,10 @@ export function joinArb(t: TableSpec, u: TableSpec, w: TableSpec, pool: Pool, su
 }
 
 /** `GROUP BY` / aggregates / `HAVING` / `ORDER BY` over a join chain (plan.md §26 Feature 1, slice c). */
-export function joinAggregateArb(t: TableSpec, u: TableSpec, w: TableSpec, pool: Pool, subs: readonly SubSource[] = []): fc.Arbitrary<Query> {
-  return chainArb(t, u, w).chain(({ joins, all }) => aggregateOver(all, pool, subs, { table: t.name, joins }));
+export function joinAggregateArb(t: TableSpec, u: TableSpec, w: TableSpec, pool: Pool, subs: readonly SubSource[] = [], exists: readonly SubSource[] = []): fc.Arbitrary<Query> {
+  return chainArb(t, u, w).chain(({ joins, all }) =>
+    aggregateOver(all, pool, subs, { table: t.name, joins }, existsArb(all, outsideChain(exists, t.name, joins))),
+  );
 }
 
 /* -------------------------------------------------------------------------- */
@@ -850,17 +900,19 @@ export const sessionArb = (final: 'select' | 'aggregate' | 'join' | 'join-aggreg
     const pool = poolOf([t, u, w]);
     // An `IN (subquery)` may read any of the three — `t` itself included, which is still uncorrelated.
     const subs = subSources([u, w, t], pool);
+    // An `EXISTS` (plan.md §27.5 S1) reads a table the outer query does not have: no aliases, so never `t` itself.
+    const exists = subSources([u, w], pool);
     const write = fc.oneof(insertArb(t), updateArb(t, pool, subs), deleteArb(t, pool, subs));
     const read: fc.Arbitrary<ReadQuery> = (
       final === 'select'
-        ? selectArb(t, pool, subs)
+        ? selectArb(t, pool, subs, exists)
         : final === 'aggregate'
-          ? aggregateArb(t, pool, subs)
+          ? aggregateArb(t, pool, subs, exists)
           : final === 'join'
-            ? joinArb(t, u, w, pool, subs)
+            ? joinArb(t, u, w, pool, subs, exists)
             : final === 'join-aggregate'
-              ? joinAggregateArb(t, u, w, pool, subs)
-              : fc.oneof(selectArb(t, pool, subs), aggregateArb(t, pool, subs), joinArb(t, u, w, pool, subs), joinAggregateArb(t, u, w, pool, subs))
+              ? joinAggregateArb(t, u, w, pool, subs, exists)
+              : fc.oneof(selectArb(t, pool, subs, exists), aggregateArb(t, pool, subs, exists), joinArb(t, u, w, pool, subs, exists), joinAggregateArb(t, u, w, pool, subs, exists))
     ) as fc.Arbitrary<ReadQuery>;
     return fc
       .tuple(fc.array(write, { minLength: 0, maxLength: 3 }), read)

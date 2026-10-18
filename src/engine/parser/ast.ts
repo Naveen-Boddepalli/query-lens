@@ -63,7 +63,49 @@ export type Expr =
    * value the aggregate operator computes per group*: at run time it reads the group row's `key`
    * (`aggregateKeyOf`). Only the parser's HAVING context produces one; a WHERE with an aggregate is an error.
    */
-  | { kind: 'aggregate'; fn: AggregateFn; arg: AggregateArg; span: Span };
+  | { kind: 'aggregate'; fn: AggregateFn; arg: AggregateArg; span: Span }
+  /**
+   * `EXISTS (SELECT … FROM t [WHERE …])` (plan.md §27.5 S1): TRUE when the subquery finds at least one row — never
+   * UNKNOWN. `NOT EXISTS` is a `not` around one. Its subquery is a scope of its own, so `childrenOf` does not enter
+   * it: its `WHERE` may name the outer query's tables (a *correlated* subquery), and every column there is qualified.
+   * Only a part of a SELECT's `WHERE` joined by `AND` may be one; `resolveExists` (`src/engine/exists.ts`) turns each
+   * into a semi-join or an anti-join before planning, or — when nothing correlates it — runs it once and records
+   * what it found in `resolved`, keeping the node (as `IN (subquery)` keeps its `subquery`) so the plan can still
+   * say what ran.
+   */
+  | { kind: 'exists'; subquery: ExistsSubquery; resolved?: boolean; span: Span };
+
+/**
+ * The subquery inside `EXISTS (…)` (plan.md §27.5 S1): `SELECT * | value | column FROM table [WHERE expr]`. What it
+ * selects never matters — EXISTS asks only whether a row comes back — so `select` is kept as written, for display.
+ * `where`'s columns are all qualified (the parser requires it: the subquery can see its own table and the outer
+ * query's), which is how a reference says whether it is the subquery's own column or a correlated one.
+ */
+export interface ExistsSubquery {
+  select: string;
+  from: TableRef;
+  where?: Expr;
+  span: Span;
+}
+
+/**
+ * A correlated `[NOT] EXISTS`, as planning sees it (plan.md §27.5 S1) — derived by `resolveExists`, never written by
+ * the parser. `semi` keeps an outer row that has at least one match; `anti` keeps one that has none. The key is the
+ * subquery's first equality between one of its own columns (`innerColumn`) and an outer one (`outerTable`.
+ * `outerColumn`); `innerFilter` is the rest of its `WHERE` that names only its own table (unqualified, for its scan);
+ * `residual` is whatever else names both sides (qualified, checked on each candidate pair).
+ */
+export interface SemiJoinClause {
+  kind: 'semi' | 'anti';
+  table: TableRef;
+  outerTable: string;
+  outerColumn: string;
+  innerColumn: string;
+  innerFilter?: Expr;
+  residual?: Expr;
+  /** The `EXISTS` (or `NOT EXISTS`) as written, for the plan's narration. */
+  source: Expr;
+}
 
 /** What an aggregate reads: `*` (only `COUNT`) or one column. */
 export type AggregateArg = { kind: 'star'; span: Span } | { kind: 'column'; name: string; table?: string; span: Span };
@@ -187,6 +229,11 @@ export interface SelectStatement {
   orderBy?: OrderByClause;
   /** `LIMIT n [OFFSET m]` — non-negative whole numbers, checked at parse time. */
   limit?: LimitClause;
+  /**
+   * Each correlated `[NOT] EXISTS` the `WHERE` held, in source order (plan.md §27.5 S1) — set by `resolveExists`
+   * after parsing, never by the parser, with those conjuncts removed from `where`. Planned after every `JOIN`.
+   */
+  semiJoins?: SemiJoinClause[];
   span: Span;
 }
 
@@ -316,12 +363,16 @@ export type Statement =
   | ExplainStatement
   | AnalyzeStatement;
 
-/** The direct sub-expressions of a node, in source order. */
+/**
+ * The direct sub-expressions of a node, in source order. An `exists` has none here: its subquery is a different
+ * scope, and a walk of the outer query's columns must not meet the subquery's.
+ */
 export function childrenOf(expr: Expr): Expr[] {
   switch (expr.kind) {
     case 'column':
     case 'literal':
     case 'aggregate':
+    case 'exists':
       return [];
     case 'compare':
     case 'and':
@@ -345,6 +396,7 @@ export function mapChildren(expr: Expr, f: (child: Expr) => Expr): Expr {
     case 'column':
     case 'literal':
     case 'aggregate':
+    case 'exists':
       return expr;
     case 'compare':
     case 'and':

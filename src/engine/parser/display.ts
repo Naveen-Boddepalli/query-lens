@@ -166,6 +166,18 @@ function exprNode(expr: Expr, id: string): ASTNode {
       };
     case 'neg':
       return { id, kind: 'Arith', label: '−', detail: 'negate', span: expr.span, children: [exprNode(expr.operand, `${id}.o`)] };
+    case 'exists':
+      return {
+        id,
+        kind: 'Exists',
+        label: 'EXISTS',
+        detail: `subquery — SELECT ${expr.subquery.select} FROM ${expr.subquery.from.name}${expr.subquery.where ? ' WHERE …' : ''}`,
+        span: expr.span,
+        children: [
+          { id: `${id}.from`, kind: 'Table', label: expr.subquery.from.name, span: expr.subquery.from.span },
+          ...(expr.subquery.where ? [exprNode(expr.subquery.where, `${id}.w`)] : []),
+        ],
+      };
     case 'like':
       return {
         id,

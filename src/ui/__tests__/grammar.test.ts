@@ -97,6 +97,10 @@ describe('grammar data — every rule is demonstrated by a query the real parser
       'inSubquery — IN and NOT IN, with a WHERE',
       "SELECT * FROM users WHERE id IN (SELECT id FROM logins WHERE status = 'ok') AND age NOT IN (SELECT attempts FROM logins)",
     ],
+    [
+      'existsSubquery — EXISTS and NOT EXISTS, correlated, with each kind of select',
+      'SELECT name FROM authors WHERE EXISTS (SELECT * FROM posts WHERE posts.authorId = authors.id) AND NOT EXISTS (SELECT 1 FROM comments WHERE comments.authorId = authors.id) AND EXISTS (SELECT tags.id FROM tags)',
+    ],
     ['predicate — LIKE and NOT LIKE', "SELECT * FROM users WHERE name LIKE 'a%' AND name NOT LIKE '%z'"],
     ['compareOp — every operator', 'SELECT * FROM users WHERE id = 1 OR id <> 2 OR id != 3 OR id < 4 OR id > 5 OR id <= 6 OR id >= 7'],
     ['primary — a parenthesised expr', 'SELECT * FROM users WHERE (id = 1 OR id = 2) AND age > 3'],

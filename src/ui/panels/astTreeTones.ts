@@ -47,6 +47,8 @@ export const TONES: Record<string, string> = {
     'border-hue-amber/50 bg-hue-amber/5 text-hue-amber-ink hover:border-hue-amber/80 hover:bg-hue-amber/15',
   In: 'border-hue-amber/50 bg-hue-amber/5 text-hue-amber-ink hover:border-hue-amber/80 hover:bg-hue-amber/15',
   Like: 'border-hue-amber/50 bg-hue-amber/5 text-hue-amber-ink hover:border-hue-amber/80 hover:bg-hue-amber/15',
+  // A test on a row like the rest (plan.md §27.5 S1) — that its answer comes from another table is in its children.
+  Exists: 'border-hue-amber/50 bg-hue-amber/5 text-hue-amber-ink hover:border-hue-amber/80 hover:bg-hue-amber/15',
   Compare:
     'border-hue-amber/50 bg-hue-amber/5 text-hue-amber-ink hover:border-hue-amber/80 hover:bg-hue-amber/15',
   Column:

@@ -36,6 +36,8 @@
  *   unary         := '-' unary | primary
  *   primary       := qualifiedColumn | number | string | NULL | TRUE | FALSE | '(' expr ')'
  *                    | aggregateCall              -- only inside HAVING
+ *                    | EXISTS '(' existsSubquery ')'   -- only in a SELECT's WHERE, as a part joined by AND
+ *   existsSubquery := SELECT ('*' | value | qualifiedColumn) FROM identifier [WHERE expr]
  *   qualifiedColumn := identifier ['.' identifier]
  *
  * `GROUP BY` and `ORDER BY` are mutually exclusive — the parser rejects a
@@ -57,6 +59,11 @@
  * that already applies to a bare non-`JOIN` query). `runQuery.ts`'s `resolveStatementSubqueries` runs it exactly once,
  * before the outer query is planned, replacing it with the literal-list shape everything downstream already knew.
  *
+ * `existsSubquery` (plan.md §27.5 S1) may be *correlated*: its `WHERE` can name the outer query's tables as well as
+ * its own, so — the same rule a `JOIN` follows — every column there carries its table name. `EXISTS` is a part of a
+ * SELECT's `WHERE` joined by `AND` (or one under `NOT`), never under `OR` or inside another test: `resolveExists`
+ * runs each as a semi-join or an anti-join, which keeps or drops whole rows (`checkExistsSubqueries`).
+ *
  * Hand-written rather than generated: the error messages are half the teaching
  * value, and they need to name the v0 scope explicitly.
  *
@@ -75,6 +82,7 @@ import type {
   CompareOp,
   DeleteStatement,
   ExplainStatement,
+  ExistsSubquery,
   Expr,
   GroupByClause,
   InSubquery,
@@ -90,7 +98,7 @@ import type {
   UpdateStatement,
 } from './ast.ts';
 import { aggregateKeyOf, columnKey, selectItemKey, walkExpr } from './ast.ts';
-import { exprToSql } from './print.ts';
+import { exprToSql, sqlString } from './print.ts';
 import { arithmetic, negate } from '../value.ts';
 import { TokenizeError, tokenize } from './tokenizer.ts';
 import type { Token } from './tokenizer.ts';
@@ -134,6 +142,13 @@ interface Cursor {
    * there — the group's `COUNT(*)` — and an error anywhere else, where it would have no group to read.
    */
   allowAggregates: boolean;
+  /**
+   * True only while a SELECT's own `WHERE` is being parsed (plan.md §27.5 S1): the one place `EXISTS` can run, as a
+   * semi-join under the rows that clause filters.
+   */
+  allowExists: boolean;
+  /** True while an `EXISTS` subquery's `WHERE` is being parsed: no subquery may sit inside it. */
+  inSubquery: boolean;
   peek: () => Token;
   /** `n` tokens past the current one (`peekAt(0)` is `peek()`); the EOF token once past the end. */
   peekAt: (n: number) => Token;
@@ -179,7 +194,7 @@ function makeCursor(tokens: Token[]): Cursor {
     throw new ParseError(`Expected ${what}, found ${describe(token)}.`, token);
   }
 
-  return { allowAggregates: false, peek, peekAt, next, atEnd, guardScope, expectKeyword, expectIdentifier };
+  return { allowAggregates: false, allowExists: false, inSubquery: false, peek, peekAt, next, atEnd, guardScope, expectKeyword, expectIdentifier };
 }
 
 /** The v0 aggregate functions. Not tokenizer keywords — they parse as identifiers, recognised by name here. */
@@ -700,7 +715,8 @@ function parsePrimary(c: Cursor): Expr {
     return {
       kind: 'literal',
       value: token.value,
-      raw: `'${token.value}'`,
+      // Re-escaped, so `exprToSql` prints SQL that reads back as this same string (`'it''s'`, not `'it's'`).
+      raw: sqlString(token.value),
       span: { from: token.from, to: token.to },
     };
   }
@@ -728,11 +744,40 @@ function parsePrimary(c: Cursor): Expr {
     return { ...inner, span: { from: token.from, to: close.to } };
   }
 
+  if (isKeyword(token, 'EXISTS')) {
+    if (c.inSubquery) {
+      throw new ParseError(
+        'An EXISTS inside another subquery is not supported yet.',
+        token,
+        'QueryLens runs one level of subquery. Join the inner tables in the outer query instead.',
+      );
+    }
+    if (!c.allowExists) {
+      throw new ParseError(
+        '`EXISTS` is not supported here.',
+        token,
+        "EXISTS works in a SELECT's WHERE clause, where QueryLens runs it as a semi-join that keeps or drops the rows that clause filters.",
+      );
+    }
+    c.next();
+    const open = c.peek();
+    if (open.type !== 'lparen' || !isKeyword(c.peekAt(1), 'SELECT')) {
+      c.guardScope(open);
+      throw new ParseError(
+        `Expected \`(SELECT\` after EXISTS, found ${describe(open.type === 'lparen' ? c.peekAt(1) : open)}.`,
+        open.type === 'lparen' ? c.peekAt(1) : open,
+        'EXISTS takes a subquery in parentheses: `EXISTS (SELECT * FROM posts WHERE posts.authorId = authors.id)`.',
+      );
+    }
+    c.next(); // '('
+    const { subquery, close } = parseExistsSubquery(c);
+    return { kind: 'exists', subquery, span: { from: token.from, to: close.to } };
+  }
   if (isKeyword(token, 'SELECT')) {
     throw new ParseError(
       'A subquery is not supported here.',
       token,
-      'v2 has no subqueries yet — write the values out, or join the two tables.',
+      'QueryLens runs a subquery only inside `IN (SELECT …)` or `EXISTS (SELECT …)` — use one of those, write the value out, or join the two tables.',
     );
   }
   c.guardScope(token);
@@ -890,6 +935,13 @@ function parsePredicate(c: Cursor, bare = false): Expr {
     // `IN (SELECT …)` (plan.md §25.4 C3 slice c) vs. `IN (1, 2, 3)` — both start with `(`, so the token right after
     // it is the only thing that tells them apart.
     if (isKeyword(c.peekAt(1), 'SELECT')) {
+      if (c.inSubquery) {
+        throw new ParseError(
+          'A subquery inside an EXISTS subquery is not supported yet.',
+          c.peekAt(1),
+          'QueryLens runs one level of subquery. Write the values out, or join the tables in the outer query.',
+        );
+      }
       c.next(); // '('
       const { subquery, close } = parseInSubquery(c);
       return { kind: 'in', operand: left, items: [], subquery, negated, span: { from: left.span.from, to: close.to } };
@@ -1007,6 +1059,178 @@ function parseInSubquery(c: Cursor): { subquery: InSubquery; close: Token } {
     },
     close,
   };
+}
+
+/**
+ * `SELECT * | value | column FROM table [WHERE expr]` — the subquery `EXISTS` takes (plan.md §27.5 S1), starting right
+ * after its `(`. What it selects is never read — EXISTS asks only whether any row comes back — so `*`, a value or a
+ * column all do, kept as written. An aggregate is refused for the trap it is: with no `GROUP BY` it always returns
+ * exactly one row, so `EXISTS (SELECT COUNT(*) …)` is TRUE whatever the table holds. `JOIN`, `GROUP BY`, `ORDER BY`,
+ * `LIMIT` and `DISTINCT` are refused rather than parsed and ignored. Its columns are checked against the outer query's
+ * tables by `checkExistsSubqueries`, once those are known.
+ */
+function parseExistsSubquery(c: Cursor): { subquery: ExistsSubquery; close: Token } {
+  const selectToken = c.expectKeyword('SELECT', 'to begin the subquery');
+  if (isKeyword(c.peek(), 'DISTINCT')) {
+    throw new ParseError(
+      'DISTINCT makes no difference inside an EXISTS subquery.',
+      c.peek(),
+      'EXISTS only asks whether at least one row comes back. Drop DISTINCT.',
+    );
+  }
+  const first = c.peek();
+  let select: string;
+  if (first.type === 'star') {
+    c.next();
+    select = '*';
+  } else if (first.type === 'identifier' && AGGREGATE_FNS.has(first.value.toUpperCase()) && c.peekAt(1).type === 'lparen') {
+    throw new ParseError(
+      'An aggregate inside an EXISTS subquery is always TRUE.',
+      first,
+      `With no GROUP BY, \`SELECT ${first.value.toUpperCase()}(…)\` returns exactly one row even from an empty table — so EXISTS would find it every time. Write \`SELECT *\`.`,
+    );
+  } else if (first.type === 'identifier') {
+    c.next();
+    const tail = parseQualifiedColumnTail(c, first);
+    select = tail.table ? `${tail.table}.${tail.name}` : tail.name;
+  } else {
+    select = parseLiteralValue(c).raw;
+  }
+  if (c.peek().type === 'comma') {
+    throw new ParseError(
+      'EXISTS never reads what its subquery selects.',
+      c.peek(),
+      'It only asks whether a row comes back — select one thing, `*` or `1`.',
+    );
+  }
+  c.expectKeyword('FROM', "after what the subquery selects");
+  const from = parseTableRef(c);
+  const afterFrom = c.peek();
+  if (isKeyword(afterFrom, 'JOIN') || isKeyword(afterFrom, 'LEFT') || isKeyword(afterFrom, 'INNER')) {
+    throw new ParseError(
+      'JOIN is not supported yet inside an EXISTS subquery.',
+      afterFrom,
+      'Query one table in the subquery, or join the tables in the outer query.',
+    );
+  }
+  const outer = { allowExists: c.allowExists, inSubquery: c.inSubquery };
+  c.allowExists = false;
+  c.inSubquery = true;
+  let where: Expr | undefined;
+  try {
+    where = parseOptionalWhere(c);
+  } finally {
+    c.allowExists = outer.allowExists;
+    c.inSubquery = outer.inSubquery;
+  }
+  const after = c.peek();
+  if (isKeyword(after, 'GROUP', 'HAVING')) {
+    throw new ParseError(
+      `${after.upper === 'GROUP' ? 'GROUP BY' : 'HAVING'} is not supported inside an EXISTS subquery.`,
+      after,
+      'EXISTS only asks whether a row comes back — put the condition in its WHERE.',
+    );
+  }
+  if (isKeyword(after, 'ORDER')) {
+    throw new ParseError(
+      'ORDER BY makes no difference inside an EXISTS subquery.',
+      after,
+      'EXISTS only asks whether a row comes back, not which one comes first. Drop it.',
+    );
+  }
+  if (isKeyword(after, 'LIMIT')) {
+    throw new ParseError(
+      'LIMIT is not needed inside an EXISTS subquery.',
+      after,
+      'EXISTS already stops at the first row it finds. Drop it.',
+    );
+  }
+  const close = c.peek();
+  if (close.type !== 'rparen') {
+    c.guardScope(close);
+    throw new ParseError(`Expected \`)\` to close the subquery, found ${describe(close)}.`, close);
+  }
+  c.next();
+  return {
+    subquery: { select, from, ...(where ? { where } : {}), span: { from: selectToken.from, to: close.from } },
+    close,
+  };
+}
+
+/** The `EXISTS` a part of `WHERE` is, directly or under one `NOT`; `null` for any other part. */
+function existsConjunct(part: Expr): Extract<Expr, { kind: 'exists' }> | null {
+  if (part.kind === 'exists') return part;
+  if (part.kind === 'not' && part.operand.kind === 'exists') return part.operand;
+  return null;
+}
+
+/**
+ * Every `EXISTS` in a SELECT's `WHERE` (plan.md §27.5 S1), checked once the outer query's tables are known (`known`:
+ * `FROM`'s and every `JOIN`'s). Each must be a part of the clause joined by `AND`, or one under `NOT` — a semi-join or
+ * an anti-join keeps or drops a whole row, so it cannot sit under `OR` or inside another test. Its table must not be
+ * one the outer query already has, or one another `EXISTS` reads: with no table aliases, `users.id` could not say
+ * which of the two it meant. And
+ * every column in its `WHERE` names its table — the subquery's own, or one of the outer query's — which is what lets a
+ * reference to the outer row (a correlation) be told from the subquery's own column.
+ */
+function checkExistsSubqueries(where: Expr, known: readonly string[]): void {
+  const placed = new Set<Expr>();
+  const used = new Set<string>();
+  for (const part of conjunctsOf(where)) {
+    const node = existsConjunct(part);
+    if (node) placed.add(node);
+  }
+  walkExpr(where, (e) => {
+    if (e.kind !== 'exists') return;
+    if (!placed.has(e)) {
+      throw new ParseError(
+        'EXISTS has to be one of the conditions WHERE joins with AND.',
+        e.span,
+        'QueryLens runs EXISTS as a semi-join, which keeps or drops whole rows — so it cannot sit under OR or inside another test. `NOT EXISTS (…)` is fine.',
+      );
+    }
+    const inner = e.subquery.from;
+    if (known.includes(inner.name)) {
+      throw new ParseError(
+        `The subquery's table \`${inner.name}\` is already in the outer query.`,
+        inner.span,
+        `Without table aliases (not supported yet) \`${inner.name}.column\` could not say which of the two it means. Use a different table in the subquery.`,
+      );
+    }
+    // A table appears once per query — no aliases, so two of its scans could not be told apart in the plan.
+    if (used.has(inner.name)) {
+      throw new ParseError(
+        `\`${inner.name}\` is already read by another EXISTS subquery in this query.`,
+        inner.span,
+        'Without table aliases (not supported yet) two scans of one table could not be told apart. Put both conditions in one subquery if they are about the same row.',
+      );
+    }
+    used.add(inner.name);
+    const visible = [inner.name, ...known];
+    if (!e.subquery.where) return;
+    walkExpr(e.subquery.where, (ref) => {
+      if (ref.kind !== 'column') return;
+      if (ref.table === undefined) {
+        throw new ParseError(
+          `\`${ref.name}\` needs a table name inside this subquery.`,
+          ref.span,
+          `The subquery can see ${visible.map((t) => `\`${t}\``).join(' and ')} — write ${visible.map((t) => `\`${t}.${ref.name}\``).join(' or ')}, whichever table it is on.`,
+        );
+      }
+      if (!visible.includes(ref.table)) {
+        throw new ParseError(
+          `There is no table called \`${ref.table}\` in this subquery or the query around it.`,
+          ref.span,
+          `It can see ${visible.map((t) => `\`${t}\``).join(', ')}.`,
+        );
+      }
+    });
+  });
+}
+
+/** An `AND` tree's parts — `plan.ts`'s `conjuncts`, which the parser does not import. */
+function conjunctsOf(expr: Expr): Expr[] {
+  return expr.kind === 'and' ? [...conjunctsOf(expr.left), ...conjunctsOf(expr.right)] : [expr];
 }
 
 function parseNotExpr(c: Cursor, bare = false): Expr {
@@ -1160,7 +1384,15 @@ function parseSelectBody(c: Cursor): SelectStatement {
     joins.push(join);
   }
   const hasJoin = joins.length > 0;
-  const where = parseOptionalWhere(c);
+  // EXISTS is legal in this WHERE and nowhere else (plan.md §27.5 S1): a semi-join filters this query's own rows.
+  c.allowExists = true;
+  let where: Expr | undefined;
+  try {
+    where = parseOptionalWhere(c);
+  } finally {
+    c.allowExists = false;
+  }
+  if (where) checkExistsSubqueries(where, [...known]);
   const groupBy = parseGroupBy(c);
   // Qualifiers first, so `GROUP BY name` in a join is told it needs a table name rather than that `authors.name`
   // is not grouped.

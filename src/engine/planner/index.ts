@@ -2,11 +2,13 @@ export {
   buildAggregatePlan,
   buildDeletePlan,
   buildJoinPlan,
+  buildSemiJoin,
   distinctNodeFor,
   effectiveJoinAlgorithm,
   buildPlan,
   buildUpdatePlan,
   isAggregateQuery,
+  withSemiJoins,
 } from './buildPlan.ts';
 export {
   boundedRangeSelectivity,

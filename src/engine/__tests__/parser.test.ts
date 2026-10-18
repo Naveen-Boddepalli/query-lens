@@ -7,6 +7,7 @@ import {
   updateDisplayTree,
 } from '../parser/display.ts';
 import type { DeleteStatement, InsertStatement, SelectStatement, UpdateStatement } from '../parser/ast.ts';
+import { exprToSql } from '../parser/print.ts';
 
 function ok(sql: string): SelectStatement {
   const out = parse(sql);
@@ -122,6 +123,15 @@ describe('parse — the v0 subset', () => {
     expect(ok('SELECT * FROM t WHERE x = NULL').where).toMatchObject({
       right: { value: null },
     });
+  });
+
+  it("prints a string holding a quote so it parses back to the same string (found by the oracle, plan.md §27.5 S1)", () => {
+    // `'it''s'` is the string it's. Printed as `'it's'`, it no longer parsed — an EXISTS run once from its
+    // printed WHERE failed with "Unterminated string literal".
+    const where = ok("SELECT * FROM t WHERE name = 'it''s'").where!;
+    expect(where).toMatchObject({ right: { value: "it's", raw: "'it''s'" } });
+    const again = ok(`SELECT * FROM t WHERE ${exprToSql(where)}`).where!;
+    expect(again).toMatchObject({ right: { value: "it's" } });
   });
 
   it('tolerates a trailing semicolon, newlines and comments', () => {

@@ -371,6 +371,11 @@ function stripTableQualifiers(expr: Expr): Expr {
  * *would* have been NULL-padded instead vanishes with no trace of it — an inner join wearing a LEFT JOIN's syntax.
  * Left as a residual `Filter` above the `Join` instead, it runs after the padding, exactly where SQL puts it. The
  * outer (left) side has no such trap — filtering it first only ever removes rows the join would keep anyway.
+ *
+ * Below a semi- or anti-join (plan.md §27.5 S1) the outer `WHERE` can only name the outer side — the subquery's table
+ * is not in its scope at all — so every conjunct goes left, and one with no table name is the outer FROM table's
+ * (a single-table query writes its columns bare). The inner scan's own filter is the subquery's `WHERE`, put there
+ * when the plan was built; it is no reason to stop.
  */
 const joinPredicatePushdown: Rule = (input) => {
   const { limit, rest: plan } = unwrapLimit(input);
@@ -382,12 +387,13 @@ const joinPredicatePushdown: Rule = (input) => {
   // The inner side is a bare `SeqScan` — or, for an index nested-loop join, an `IndexProbe`, which has no scan to
   // filter: a conjunct naming only the inner table then stays above the Join as a residual, never pushed.
   const probesInner = join.op === 'Join' && join.right.op === 'IndexProbe';
+  const subqueryJoin = join.op === 'Join' && (join.joinType === 'semi' || join.joinType === 'anti');
   if (
     join.op !== 'Join' ||
     join.left.op !== 'SeqScan' ||
     join.left.filter ||
     (join.right.op !== 'SeqScan' && join.right.op !== 'IndexProbe') ||
-    (join.right.op === 'SeqScan' && join.right.filter)
+    (join.right.op === 'SeqScan' && join.right.filter && !subqueryJoin)
   ) {
     return null;
   }
@@ -398,7 +404,9 @@ const joinPredicatePushdown: Rule = (input) => {
   const residualParts: Expr[] = [];
   for (const part of parts) {
     const tables = tablesReferencedBy(part);
-    if (tables.size === 1 && tables.has(join.leftTable)) leftParts.push(part);
+    if (subqueryJoin && (tables.size === 0 || (tables.size === 1 && tables.has(join.leftTable)))) leftParts.push(part);
+    else if (subqueryJoin) residualParts.push(part);
+    else if (tables.size === 1 && tables.has(join.leftTable)) leftParts.push(part);
     else if (tables.size === 1 && tables.has(join.rightTable) && !probesInner && join.joinType !== 'left') rightParts.push(part);
     else residualParts.push(part);
   }
@@ -460,7 +468,7 @@ interface JoinCandidate {
 interface ChosenChain {
   plan: Extract<Plan, { op: 'Join' }>;
   /** One entry per step (chain order) whose algorithm actually changed from what `buildJoinPlan` structurally assigned. */
-  changes: { leftTable: string; rightTable: string; chosen: JoinCandidate; runnersUp: JoinCandidate[] }[];
+  changes: { leftTable: string; rightTable: string; symbol: string; chosen: JoinCandidate; runnersUp: JoinCandidate[] }[];
   changedNodes: Plan[];
 }
 
@@ -511,7 +519,11 @@ function chooseJoinAlgorithms(
 
   return {
     plan: chosen.plan,
-    changes: [...(below?.changes ?? []), ...(changedHere ? [{ leftTable: join.leftTable, rightTable: join.rightTable, chosen, runnersUp }] : [])],
+    changes: [
+      ...(below?.changes ?? []),
+      // A semi- or anti-join (plan.md §27.5 S1) is named by its own symbol, so the choice reads as what it joins.
+      ...(changedHere ? [{ leftTable: join.leftTable, rightTable: join.rightTable, symbol: join.joinType === 'semi' ? '⋉' : join.joinType === 'anti' ? '▷' : '×', chosen, runnersUp }] : []),
+    ],
     changedNodes: [...(below?.changedNodes ?? []), ...(changedHere ? [chosen.plan as Plan] : [])],
   };
 }
@@ -547,9 +559,9 @@ const joinAlgorithmSelection: Rule = (input, table, rowsPerPage, otherTables) =>
   const root = rewrapLimit(limit, { op: 'Project', columns: plan.columns, child: newBelowProject });
 
   const label = result.changes
-    .map(({ leftTable, rightTable, chosen, runnersUp }) => {
+    .map(({ leftTable, rightTable, symbol, chosen, runnersUp }) => {
       const others = runnersUp.map((c) => `${joinAlgorithmName(c.algorithm)}'s ${String(c.estPages)}`).join(', ');
-      return `\`${leftTable}\` × \`${rightTable}\`: ${joinAlgorithmName(chosen.algorithm)} chosen by cost — an estimated ${String(chosen.estPages)} pages against ${others}.`;
+      return `\`${leftTable}\` ${symbol} \`${rightTable}\`: ${joinAlgorithmName(chosen.algorithm)} chosen by cost — an estimated ${String(chosen.estPages)} pages against ${others}.`;
     })
     .join(' ');
 
