@@ -1,7 +1,7 @@
 # Project Plan: QueryLens — Interactive Database Internals Visualizer
 
-**Document Status**: v1 shipped and live (first deploy 2026-09-23) · **v2 planned** — retrospective §24, plan §25
-**Last Updated**: 2026-09-24
+**Document Status**: v1 shipped and live (first deploy 2026-09-23) · v2 built — retrospective §24, plan §25, after the merge §26 · **v3 planned** — §27, on `version/v3`
+**Last Updated**: 2026-10-18
 
 ## Executive Summary
 QueryLens is a 100% client-side, interactive database internals visualizer built for educational purposes. It executes real SQL queries inside the browser (zero server), rendering step-by-step visualizations of parsing, query planning, B+Tree index traversal, buffer pool eviction, locking, and execution. Designed specifically for students and educators, QueryLens focuses on pedagogical clarity over enterprise performance.
@@ -2906,6 +2906,188 @@ than any policy and fewer than FIFO on a sorted scan (63 vs 75), the database un
 read-ahead tests under optimal, every policy round-tripping through a link and a trace file, and an e2e that picks
 2Q and optimal in the Playground. Turning the rehearsal off, or letting a query's record widen read-ahead, each
 fails a test.
+
+## 27. QueryLens v3 — the SQL a Textbook Asks For, and the Last Two Subjects
+
+> Added 2026-10-18, after `2.0.0-rc.3`, on the owner's request for "next features, things to add for the next
+> major version", built on the branch `version/v3`. This section plans **product v3** as five releases, 3.0–3.4,
+> milestones **M22–M26** (§10's numbering continues from §25's M14–M21). Item IDs use new letters — **S**, **T**,
+> **P**, **X**, **L** — so none collides with §25's A–H. Evidence, all in the repository: the course map's own
+> *Partly* and *Not covered* rows (`src/pages/DocsContent/study/course-map.mdx`), `reference/limits.mdx`'s
+> *What's out of scope entirely*, and the two §25.9 rows already marked **Horizon (v3)**.
+
+### 27.1 Where v2 leaves off
+
+v2 built every item §25.4 planned except those waiting on the owner — the domain, the launch post, the npm
+organisation (A5, H3) and a manual screen-reader pass (H6) — and three deferred on their own triggers: the Web
+Worker (C6), i18n (H5) and detail levels (G5, which shares H5's refactor). Measured against the course map:
+
+| Course-map row | Status after v2 | What is missing (the map's own words) |
+|---|---|---|
+| Parallel execution | **Not covered** | Multi-core operators, exchange |
+| Distributed databases | **Not covered** | Replication, partitioning, consensus |
+| SQL | Partly | Correlated subqueries and `EXISTS`, `RIGHT`/`FULL` joins, window functions, CTEs, DDL |
+| Relational model and algebra | Partly | Set operators (∪, −, ×) and division |
+| Concurrency-control theory | Partly | Precedence graphs: serializability is checked by replay, not by drawing the conflict graph |
+| Two-phase locking | Covered, with gaps | Index-range and next-key locks, multi-granularity (intention) locks |
+| Cost models and join ordering | Covered, with gaps | Only left-deep plans are enumerated, never bushy ones; histograms beyond a few most-common values |
+
+And one gap no row names: **every Playground preset is one table.** Joins, `LEFT JOIN`, `IN (subquery)`, join
+order and the cost-based join choice — most of what v2's C3–C5 built — are reachable only through the Custom
+schema editor, `/tools/planner`'s fixed pair, the CLI and the MCP server. A visitor who never opens Custom never
+sees a join.
+
+### 27.2 The thesis
+
+1. **Finish the core contrast before widening again.** A query a database textbook's exercises ask for —
+   "authors with no posts", "customers who ordered both", "every pair" — should parse, plan, narrate and run,
+   checked against SQLite. That is the cheapest way to put v2's optimizer in front of more people, and it
+   deepens §9's contrast rather than widening away from it (§22.1's fifth question).
+2. **Two syllabus subjects remain** — parallel execution and distributed databases — and both fit §25.2's Q7
+   *if* workers, messages and failures are **inputs**: a schedule, a fault point, a partition. D (transactions)
+   and E (recovery) already proved the pattern; P and X reuse it.
+3. **Theory v2 shows by replay should be shown by construction**: a precedence graph beside the replay check,
+   intention locks beside the row locks, bushy plans beside the left-deep ones.
+
+So the order is **SQL completeness → theory you can see → parallel → distributed**, with the learning layer
+moving with each item rather than after it.
+
+### 27.3 The filter — §25.2's eight, plus one
+
+§20.1's four questions, §22.1's fifth and §25.2's Q6–Q8 all apply unchanged. One more, earned by §27.1's last
+paragraph:
+
+9. **Is it reachable from a preset?** A feature only the Custom editor can reach is one most visitors never
+   meet. Every S item names the preset it runs on; S2 exists to make that possible for the multi-table ones.
+
+### 27.4 Release plan
+
+| Release | Milestone | Theme | Scope (item IDs, §27.5) | Est. | Gate |
+|---|---|---|---|---|---|
+| **3.0** | **M22** | The SQL a textbook asks for | S1–S7 | 4–5 wk | none — start now |
+| **3.1** | **M23** | Theory you can see | T1–T5 | 3–4 wk | — |
+| **3.2** | **M24** | Parallel execution | P1–P3 | 4–6 wk | 3.0 |
+| **3.3** | **M25** | Distributed databases | X1–X4 | 6–8 wk | P1's scripted workers |
+| **3.4** | **M26** | Learning & reach | L1–L4 | parallel track | — |
+
+Estimates are §25.3's units and, like v2's, ceilings: v2 beat its own several times over. The schedule risk is
+still validation and maintenance, not typing.
+
+### 27.5 The item catalogue
+
+Costs are against the modules that exist today (paths checked 2026-10-18).
+
+#### S. The SQL a textbook asks for
+
+| ID | Rel. | Item | Shape | Cost |
+|---|---|---|---|---|
+| **S1** | 3.0 | **`EXISTS` / `NOT EXISTS` as semi- and anti-joins** | A subquery correlated through one equality between a column of its own table and a column of the outer query's (`posts.authorId = authors.id`), with any other condition kept as a residual. Planned as a **semi-join** (⋉) or **anti-join** (▷) at the end of the join chain, run by all four join algorithms and chosen by cost like any other join — **nested-loop *is* "run the subquery again for every outer row, stopping at the first match"**; hash, sort-merge and index nested-loop are the unnested forms, which is decorrelation shown rather than described. An uncorrelated `EXISTS` runs once, before planning, like `IN (subquery)`. `NOT EXISTS` against `NOT IN` with a NULL is the lesson. Oracle-checked. | 1 wk |
+| **S2** | 3.0 | **A multi-table preset** | The Playground's first preset with more than one table (a small shop: customers, orders, products) — so `JOIN`, `LEFT JOIN`, `IN`/`EXISTS` and join order run on load. Touches the dataset picker, the data editor (one tab per table), the share-link row codec (per table), trace files and the assignment builder. S1's lesson and challenge ride here, where a preset can reach them. | 1–1.5 wk |
+| **S3** | 3.0 | **`UNION [ALL]`, `INTERSECT`, `EXCEPT`** | A compound `SELECT`; ∪ ∩ − in the relational-algebra view; duplicate removal by hash or by sort through the existing `aggregateStrategy` seam, so `/compare` can set them side by side. Oracle-checked. | 1 wk |
+| **S4** | 3.0 | **`CROSS JOIN`, `RIGHT` and `FULL [OUTER] JOIN`** | × and the full outer join. `RIGHT` runs as the mirrored `LEFT`, said aloud in the plan; `FULL` needs to remember which inner rows matched — a bitmap the nested-loop and hash operators keep — which is the lesson. | 1 wk |
+| **S5** | 3.0 | **`COUNT(DISTINCT col)`** (and `SUM`/`AVG` `DISTINCT`) | A per-group set in both aggregate strategies; the sort strategy gets it by sorting on (group, value). | 3 days |
+| **S6** | 3.0 | **Scalar subqueries** | `x > (SELECT AVG(price) FROM products)` — uncorrelated, run once like `IN (subquery)`, with the "returned more than one row" error a real engine raises. A correlated scalar subquery stays out (§27.10). | 3–4 days |
+| **S7** | 3.0 | **Table aliases and self-joins** | `FROM employees AS e JOIN employees AS m ON e.manager = m.id`, and a subquery correlated with its own table ("customers who referred nobody", the `customers` preset's question, written as `NOT EXISTS`). The engine keys a joined row by the name in scope, so an alias becomes that name and the base table is looked up once. | 1 wk |
+
+#### T. Theory you can see
+
+| ID | Rel. | Item | Shape | Cost |
+|---|---|---|---|---|
+| **T1** | 3.1 | **Precedence graph** | In `/tools/schedule`: committed transactions as nodes, an edge for each pair of conflicting operations in schedule order, a cycle drawn and named. Checked against the existing replay-based serial check (`engine/serialCheck.ts`) on every Hermitage schedule and on random ones — the two must agree wherever conflict-serializability and the replay check coincide, and the page says where they do not (view-serializable schedules). | 1 wk |
+| **T2** | 3.1 | **Multi-granularity locking** | IS / IX / S / SIX / X on a table → page → row hierarchy in the lock table; the compatibility matrix computed, not drawn; lock escalation at a threshold. | 1 wk |
+| **T3** | 3.1 | **Next-key (gap) locks** | InnoDB's answer to phantoms: the phantom schedule prevented at `REPEATABLE READ` by a lock on the gap, shown on the index leaf it covers. The Hermitage InnoDB column's phantom cells are the check. | 1 wk |
+| **T4** | 3.1 | **Bushy plans** | `/tools/join-order` enumerates bushy trees beside left-deep ones over the same subset lattice — how many more plans there are, and the shapes where a bushy one wins. | 4 days |
+| **T5** | 3.1 | **Equi-depth histograms** | `ANALYZE` with a chosen bucket count; a range estimate's q-error against the bucket count, on the `transactions` preset. | 3 days |
+
+#### P. Parallel execution (the course map's *Not covered* row)
+
+| ID | Rel. | Item | Shape | Cost |
+|---|---|---|---|---|
+| **P1** | 3.2 | **`/tools/parallel` — morsel-driven execution** | A scan and an aggregate split into morsels of pages, handed to *N* workers by a dispatcher. Worker speeds are a **scripted profile** (an input, Q7) — never threads or timers. Speedup, skew and work stealing measured in ticks. | 1.5 wk |
+| **P2** | 3.2 | **Exchange operators** | Gather, repartition (by hash) and broadcast; a parallel hash join's two strategies compared by rows moved and ticks. | 1.5 wk |
+| **P3** | 3.2 | **Serial vs parallel in `/compare`** | The same query's plan run serially and with *N* workers: ticks, and Amdahl's serial fraction measured from the run. | 4 days |
+
+#### X. Distributed databases (the course map's other *Not covered* row)
+
+| ID | Rel. | Item | Shape | Cost |
+|---|---|---|---|---|
+| **X1** | 3.3 | **`/tools/partitioning`** | Hash, range and consistent hashing (with virtual nodes) over one table; add or remove a node and count the rows that move; skew. | 1 wk |
+| **X2** | 3.3 | **`/tools/2pc` — two-phase commit** | A coordinator and participants; failures as inputs (a crash before or after the vote, a lost message); the blocking window drawn; presumed abort. | 1.5 wk |
+| **X3** | 3.3 | **`/tools/raft` — consensus** | Leader election and log replication over a scripted message schedule (delays, drops and partitions are inputs). Election safety, log matching and leader completeness asserted by property tests over seeded random schedules. No membership changes, no snapshots — labelled. | 2–3 wk |
+| **X4** | 3.3 | **Distributed join** | Broadcast against shuffle across X1's partitions, priced in rows over the network. | 1 wk |
+
+#### L. Learning & reach
+
+| ID | Rel. | Item | Shape | Cost |
+|---|---|---|---|---|
+| **L1** | 3.4 | **A lesson, a challenge and a text alternative per item** (Q6) | In the item's own commit wherever a preset can reach it; S1's wait for S2. `toolCoverage.test.ts` already fails a tool without them. | per item |
+| **L2** | 3.4 | **Detail levels** (G5, carried over) | Novice / standard / expert narration. Still shares H5's event-label refactor. | 1 wk |
+| **L3** | 3.4 | **The course map and `limits.mdx` move with each item** (§25.5 rule 6) | Every S, T, P and X item updates the row it changes, in its own commit. | per item |
+| **L4** | 3.4 | **2.0's open launch item** (owner's) | The domain, the launch post and the npm organisation are still open from §25.8; v3 does not wait on them. | — |
+
+### 27.6 Engineering rules for v3
+
+§25.5's seven rules stand. Two more:
+
+8. **A SQL construct is supported only once SQLite agrees.** Each S item extends `oracle/` in its own commit
+   — a generator for its shape and a coverage threshold — not after the release, as C3's slices did.
+9. **Workers, messages and node failures are inputs** (Q7, extended to P and X): a schedule and a fault list,
+   seeded, never `setTimeout`, threads or `async` inside `src/engine/` or a tool's driver.
+
+### 27.7 Risks specific to v3
+
+| Risk | Why it matters | Mitigation |
+|---|---|---|
+| **Widening again** | P and X are second products in §22.1's sense | Each ships with a lesson, a challenge and a text view; at most one P/X tool per release until a signal (§25.6) points at one |
+| **Subquery scope bugs** | A correlated reference resolved against the wrong table returns plausible wrong rows | Qualification is required inside a subquery that can see two tables (the `JOIN` rule, applied to scopes); the oracle generates correlated shapes |
+| **Model honesty for Raft and 2PC** | A protocol toy that looks complete is §12's "plausible but false" | Assert properties, never claim an implementation; label every simplification on the page |
+| **Preset churn** | Pinned numbers in lessons, challenges and e2e tests move when a preset changes | S2 adds a preset rather than editing one — Feature 3's precedent |
+| **Bundle growth** | New tools on shared groups | Each tool its own lazy chunk and budget row (Q8) |
+
+### 27.8 Definition of done
+
+**3.0 — The SQL a textbook asks for**
+- [ ] A query using `NOT EXISTS`, `UNION`, a `FULL JOIN`, `COUNT(DISTINCT …)` and a self-join through an alias
+  runs and narrates end to end on a preset; `sql.mdx`, `limits.mdx` and `/tools/grammar` agree.
+- [ ] The oracle generates every S shape, with coverage thresholds; three 10,000-case seeds are clean.
+- [ ] The course map's *SQL* and *Relational model* rows lose every missing item but window functions, CTEs and DDL.
+
+**3.1 — Theory you can see**
+- [ ] The precedence graph and the replay check agree on every Hermitage schedule, and the page names the
+  view-serializable cases where they differ.
+- [ ] A phantom is prevented by a gap lock at InnoDB's `REPEATABLE READ`, in the Hermitage matrix's own cell.
+
+**3.2 — Parallel execution**
+- [ ] The course map's *Parallel execution* row is at least *Partly*: morsels, exchange and a measured speedup.
+
+**3.3 — Distributed databases**
+- [ ] The course map's *Distributed databases* row is at least *Partly*: partitioning, 2PC and Raft, each with
+  its property tests.
+
+### 27.9 Decision log
+
+| Item | Verdict | Earliest | Trigger to revisit |
+|---|---|---|---|
+| v3 on `version/v3`, one item per commit | **Decided, 2026-10-18 (owner)** — "do the work on a new branch" | now | — |
+| `EXISTS` / `NOT EXISTS` (S1) | **Building, 2026-10-18** — the first v3 item | now | — |
+| A multi-table preset (S2) | **Planned** — next after S1, since S1's lesson needs it | after S1 | — |
+| Set operations, outer-join completion, `COUNT(DISTINCT)`, scalar subqueries, aliases (S3–S7) | **Planned** | 3.0 | — |
+| Theory you can see (T1–T5) | **Planned** | 3.1 | — |
+| Parallel execution (P1–P3) | **Planned** — §25.9's *Horizon (v3)* row, now scheduled | 3.2 | — |
+| Distributed databases (X1–X4) | **Planned** — §25.9's other *Horizon (v3)* row | 3.3 | P1's scripted workers exist |
+| Web Worker engine (C6's deferred half) | **Still deferred** | — | Main-thread jank, or a dataset past 10,000 rows |
+| Window functions, recursive CTEs | **Still declined** (§4, §25.10) | — | A course adoption that asks for them |
+| A correlated scalar subquery | **Declined for 3.0** | — | S1 and S6 both shipped, and a lesson needs one |
+| In-app LLM explainer | **Still declined** (§25.6's kill criteria) | — | — |
+
+### 27.10 What v3 deliberately does not add
+
+- **No window functions, no recursive CTEs, no DDL** — §4's and §25.10's reasoning stands.
+- **No correlated scalar subqueries** in 3.0; `EXISTS` and `IN` cover the correlation lesson.
+- **No real threads, no real network.** P and X run scripted schedules in the same pure-function shape as D and E.
+- **No membership changes or log compaction in Raft**, and no Paxos — one consensus protocol, honestly labelled.
+- **No bundled or local LLM, no accounts, no telemetry, no graded submission** — §25.10 unchanged.
+- **No Rust / WASM rewrite.**
 
 ---
 
