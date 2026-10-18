@@ -93,6 +93,13 @@ export const LESSON_GROUPS: readonly LessonGroup[] = [
         summary: 'A missing value is UNKNOWN, not false — and = NULL, <>, COUNT, AVG and NOT IN each show it a different way.',
       },
       {
+        // plan.md §27.5 S1, on S2's `shop` preset.
+        id: 'not-exists',
+        title: 'NOT EXISTS is not NOT IN',
+        minutes: 5,
+        summary: 'A semi-join keeps each customer once, an anti-join finds the three who never ordered — and NOT IN, meeting a guest’s NULL, finds no one.',
+      },
+      {
         id: 'tokens-and-trees',
         title: 'From text to tokens to a tree',
         minutes: 3,

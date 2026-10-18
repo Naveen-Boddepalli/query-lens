@@ -657,6 +657,47 @@ export const CHALLENGES: Challenge[] = [
     ),
   },
   {
+    // plan.md §27.5 S1, on the `shop` preset (S2): the NOT IN trap, where NOT EXISTS is the plain answer.
+    id: 'never-ordered',
+    title: 'Customers who never ordered',
+    brief: (
+      <>
+        Return the customers who have never placed an order. The starting query asks with{' '}
+        <code className="font-mono">NOT IN</code>, and finds no one.
+      </>
+    ),
+    hint: (
+      <>
+        Two orders were placed by a guest, so <code className="font-mono">customerId</code> holds a NULL, and{' '}
+        <code className="font-mono">NOT IN</code> against a list with a NULL is never true. Ask whether a matching order{' '}
+        <em>exists</em> instead — or keep the NULLs out of the list.
+      </>
+    ),
+    starter: 'SELECT name FROM customers WHERE id NOT IN (SELECT customerId FROM orders);',
+    dataset: 'shop',
+    // The exact set of customers with no order — by any query that finds it, told apart by `id` or `name` (unique here),
+    // bare or, after a JOIN, as `customers.id` / `customers.name`.
+    check: (r) => {
+      const keys = (['id', 'name'] as const).flatMap((c) => [c, `customers.${c}`]);
+      const at = keys.find((k) => r.rows.length > 0 && r.rows.every((row) => k in row));
+      if (r.error || at === undefined) return false;
+      const column = at.replace('customers.', '');
+      const shop = DATASETS.shop.make().tables;
+      const ordered = new Set(shop.orders!.rows.map((row) => row['customerId']));
+      const want = shop.customers!.rows.filter((row) => !ordered.has(row['id'] ?? null)).map((row) => row[column]);
+      const got = r.rows.map((row) => row[at]);
+      return want.length > 0 && got.length === want.length && want.every((v) => got.includes(v));
+    },
+    misconception: (
+      <>
+        <code className="font-mono">NOT IN</code> and <code className="font-mono">NOT EXISTS</code> are two spellings of
+        one question. They part company at a NULL: <code className="font-mono">NOT IN</code> compares the value with
+        every item in the list, and a comparison with NULL is unknown, so one NULL leaves no row true.{' '}
+        <code className="font-mono">NOT EXISTS</code> only asks whether a matching row exists, and a NULL matches nothing.
+      </>
+    ),
+  },
+  {
     id: 'keep-the-unmatched',
     title: 'Keep the authors who have no posts',
     brief: (

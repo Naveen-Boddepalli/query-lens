@@ -29,6 +29,11 @@ import { TRANSACTION_STEPS } from './transactionLessons.tsx';
 const SEED = createSeedDatabase();
 
 const POINT_LOOKUP = 'SELECT *\nFROM users\nWHERE id = 5;';
+
+/** The `shop` queries the NOT EXISTS lesson opens (plan.md §27.5 S1, S2). */
+const SHOP_EXISTS = 'SELECT name\nFROM customers\nWHERE EXISTS (SELECT * FROM orders WHERE orders.customerId = customers.id);';
+const SHOP_NOT_EXISTS = 'SELECT name\nFROM customers\nWHERE NOT EXISTS (SELECT * FROM orders WHERE orders.customerId = customers.id);';
+const SHOP_NOT_IN = 'SELECT name\nFROM customers\nWHERE id NOT IN (SELECT customerId FROM orders);';
 const SEQ_SCAN = 'SELECT *\nFROM users\nWHERE age > 30;';
 
 interface OpenSpec {
@@ -414,7 +419,7 @@ export const PIPELINE_STEPS: Record<string, LessonStep[]> = {
       ),
     },
   ],
-  // plan.md §26 Feature 3 — on `customers`, the one preset with NULLs. Every step lands on its result.
+  // plan.md §26 Feature 3 — on `customers`, the preset built around NULLs. Every step lands on its result.
   nulls: [
     {
       heading: 'Equal to nothing',
@@ -493,6 +498,96 @@ export const PIPELINE_STEPS: Record<string, LessonStep[]> = {
         </>
       ),
       open: { sql: 'SELECT city, COUNT(*)\nFROM customers\nGROUP BY city\nORDER BY city;', dataset: 'customers', find: END, label: 'Group by city' },
+    },
+  ],
+  // plan.md §27.5 S1 — EXISTS as a semi-join and an anti-join, on the `shop` preset (S2). The numbers each step quotes
+  // are held against the engine by `lessons.test.ts`.
+  'not-exists': [
+    {
+      heading: 'A join repeats; EXISTS does not',
+      body: (
+        <>
+          Join <code className="font-mono">customers</code> to <code className="font-mono">orders</code> and alice
+          comes back seven times, once per order. Ask instead who has <em>an</em> order —{' '}
+          <code className="font-mono">WHERE EXISTS (SELECT * FROM orders WHERE orders.customerId = customers.id)</code>{' '}
+          — and nine customers come back, each once. The planner turns that subquery into a{' '}
+          <strong>semi-join</strong> (⋉): a customer is kept if anything matches, however many things do, and none of{' '}
+          <code className="font-mono">orders</code>&rsquo;s columns reach the result.
+        </>
+      ),
+      open: {
+        sql: SHOP_EXISTS,
+        dataset: 'shop',
+        find: (events) => at(events, (e) => e.stage === 'plan' && e.label.includes('semi-join (⋉)')),
+        label: 'See the semi-join planned',
+      },
+      tryThis: (
+        <>
+          Write it as a <code className="font-mono">JOIN</code> with <code className="font-mono">SELECT DISTINCT</code>{' '}
+          and compare the plans: the same nine names, and a join that does the duplicate work first.
+        </>
+      ),
+    },
+    {
+      heading: 'Again for every row, or once',
+      body: (
+        <>
+          The subquery names <code className="font-mono">customers.id</code> — it is <em>correlated</em>, so its answer
+          differs from one customer to the next. Running it again for every customer, stopping at the first order, is
+          a nested-loop semi-join: about 123 pages, the cost model reckons. Building a hash table on{' '}
+          <code className="font-mono">orders</code> once and probing it per customer is the same answer for about 13 —
+          so the optimizer picks the hash join. That rewrite, from &ldquo;per row&rdquo; to &ldquo;as a join&rdquo;, is
+          what a textbook calls <em>decorrelation</em>.
+        </>
+      ),
+      open: {
+        sql: SHOP_EXISTS,
+        dataset: 'shop',
+        find: (events) => at(events, (e) => e.stage === 'optimize' && e.rule === 'join-algorithm-selection'),
+        label: 'See the algorithm chosen',
+      },
+    },
+    {
+      heading: 'NOT EXISTS: an anti-join',
+      body: (
+        <>
+          Turn it round — <code className="font-mono">NOT EXISTS</code> — and the semi-join becomes an{' '}
+          <strong>anti-join</strong> (▷): a customer is kept only if no order matches. Three come back: dmitri, ines
+          and lars, the customers who never ordered.
+        </>
+      ),
+      open: { sql: SHOP_NOT_EXISTS, dataset: 'shop', find: END, label: 'Run NOT EXISTS' },
+    },
+    {
+      heading: 'NOT IN meets a guest’s NULL',
+      body: (
+        <>
+          The same question as <code className="font-mono">id NOT IN (SELECT customerId FROM orders)</code> returns no
+          one. Two orders were placed by a guest, with no customer, so the list holds a NULL — and{' '}
+          <code className="font-mono">x NOT IN (…, NULL)</code> is never true: <code className="font-mono">x &lt;&gt; NULL</code>{' '}
+          is unknown for every x. <code className="font-mono">NOT EXISTS</code> asks a different question — is there a
+          matching row? — and a NULL simply matches nothing.
+        </>
+      ),
+      open: { sql: SHOP_NOT_IN, dataset: 'shop', find: END, label: 'Run NOT IN' },
+      tryThis: (
+        <>
+          Add <code className="font-mono">WHERE customerId IS NOT NULL</code> inside the subquery, and the three come
+          back.
+        </>
+      ),
+    },
+    {
+      heading: 'Write it yourself',
+      body: (
+        <>
+          The <a href="/challenges/never-ordered" className="underline underline-offset-2">Customers who never ordered</a>{' '}
+          challenge starts from the <code className="font-mono">NOT IN</code> that finds no one. Any query that returns
+          exactly those three passes — <code className="font-mono">NOT EXISTS</code>, a{' '}
+          <code className="font-mono">NOT IN</code> that keeps its NULLs out, or a <code className="font-mono">LEFT JOIN</code>.
+        </>
+      ),
+      link: { href: '/challenges/never-ordered', label: 'Try the challenge' },
     },
   ],
   'errors': [

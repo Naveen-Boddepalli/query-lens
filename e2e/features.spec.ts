@@ -1493,6 +1493,43 @@ test('the customers preset has NULLs: IS NULL finds five, = NULL none, and NOT I
   await result('NOT IN meets a NULL', '0 rows returned');
 });
 
+test('the shop preset has three tables: NOT EXISTS finds three, NOT IN none, and a write to orders travels in the link (plan.md §27.5 S2)', async ({ page }) => {
+  await page.goto('/playground');
+  await page.getByRole('button', { name: 'shop', exact: true }).click();
+  await expect(page.getByText(/Three tables — customers, products and orders/)).toBeVisible();
+  await expect.poll(() => page.url()).toContain('t=shop');
+
+  const result = async (preset: string, rows: string) => {
+    await page.getByRole('button', { name: preset, exact: true }).click();
+    await page.getByLabel('Scrub to step').press('End');
+    await expect(page.getByText(rows).first()).toBeVisible();
+  };
+  await result('NOT EXISTS', '3 rows returned');
+  await result('NOT IN meets a NULL', '0 rows returned');
+  await result('EXISTS', '9 rows returned');
+
+  // Edit data opens whichever table the picker names.
+  await expect(page.getByRole('button', { name: /^Edit data/ })).toHaveText('Edit data (12)');
+  await page.getByLabel('Table').selectOption('orders');
+  await expect(page.getByRole('button', { name: /^Edit data/ })).toHaveText('Edit data (40)');
+
+  // Delete the two guest orders: NOT IN then finds the same three NOT EXISTS does.
+  const editor = page.locator('.cm-content');
+  await editor.click();
+  await page.keyboard.press('ControlOrMeta+A');
+  await page.keyboard.type('DELETE FROM orders WHERE customerId IS NULL;');
+  await page.getByRole('button', { name: 'Run' }).click();
+  await page.getByLabel('Scrub to step').press('End');
+  await expect(page.getByText(/2 rows deleted/)).toBeVisible();
+  await result('NOT IN meets a NULL', '3 rows returned');
+
+  // The edit is in the link as `d.orders`, so a reload reproduces it.
+  await expect.poll(() => new URL(page.url()).searchParams.has('d.orders')).toBe(true);
+  await page.reload();
+  await page.getByLabel('Scrub to step').press('End');
+  await expect(page.getByText('3 rows returned').first()).toBeVisible();
+});
+
 test('a link that names a dataset reopens on it, in the Playground and the inspector', async ({
   page,
 }) => {
@@ -1508,6 +1545,9 @@ test('a link that names a dataset reopens on it, in the Playground and the inspe
   await page.goto(link.replace('/playground', '/trace'));
   await expect(page.getByText(/\d+ of \d+ events/)).toBeVisible();
   await expect(page.getByText(/no table called/i)).toHaveCount(0);
+  // …and keeps it in the address it writes back, and in its links into the Playground (it once dropped `t`).
+  await expect.poll(() => new URL(page.url()).searchParams.get('t')).toBe('logins');
+  await expect(page.locator('a[href^="/playground?"]').first()).toHaveAttribute('href', /[?&]t=logins/);
 });
 
 test('a challenge checks the query on Run and remembers the solve', async ({ page }) => {

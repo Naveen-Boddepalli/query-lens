@@ -11,6 +11,20 @@ Work toward **v3** (plan.md §27), on the branch `version/v3`.
 
 ### Added
 
+- **`shop`, the first preset with more than one table** (plan.md §27.5 S2). `customers` (12), `products` (8) and
+  `orders` (40, indexed on its `customerId` foreign key): three customers never order, one product is never
+  ordered, alice orders seven times, and two orders are a guest's, with no `customerId` — so `JOIN`, `LEFT JOIN`,
+  `EXISTS`, join order and the NOT IN trap all run on a preset, without the Custom editor. Its chips: *JOIN*,
+  *EXISTS*, *NOT EXISTS* (the starter), *NOT IN meets a NULL*, *Orders per customer* and *Three tables*. **Edit
+  data** gains a *Table* picker on a multi-table preset, and edits are now tracked per table: a link carries the
+  main table's rows as `d` and any other edited table's as `d.<table>` — after a `DELETE FROM orders` too — and a
+  trace file carries them as `otherRows`. The lesson **NOT EXISTS is not NOT IN** (`/learn/not-exists`, after
+  *NULL is not a value*) walks the semi-join, the cost of running the subquery per row (about 123 pages against
+  13), the anti-join and the guest's NULL; the challenge **Customers who never ordered** (`/challenges/never-
+  ordered`) starts from the `NOT IN` that finds no one and accepts any query that returns exactly the three. The
+  numbers the lesson quotes are held by its tests; the challenge rejects four near misses and accepts `NOT EXISTS`,
+  a `NOT IN` that keeps its NULLs out, and a `LEFT JOIN`. An e2e test runs the preset, deletes the guest orders and
+  reloads the link; both new pages are in the accessibility audit.
 - **`EXISTS` and `NOT EXISTS`, run as semi-joins and anti-joins** (plan.md §27.5 S1, the first v3 item). An
   `EXISTS` subquery may be *correlated* — `SELECT name FROM authors WHERE NOT EXISTS (SELECT * FROM posts WHERE
   posts.authorId = authors.id)` — and every column inside it names its table, the rule a `JOIN` already follows.
@@ -35,6 +49,9 @@ Work toward **v3** (plan.md §27), on the branch `version/v3`.
 
 ### Fixed
 
+- **`/trace` dropped the dataset from its own links.** Opened with `?t=logins`, it wrote back an address — and
+  links into the Playground — with `q`, `p` and `d` but no `t`, so a copied link reran the query against `users`.
+  It now carries `t`, `d` and every `d.<table>`; an e2e assertion holds it.
 - **A string holding a quote was printed back as SQL that did not parse.** `name = 'it''s'` printed as
   `name = 'it's'` — in plan labels, a computed column's name and an `IN` subquery's resolved values — breaking
   `exprToSql`'s promise that its text parses back to the same tree. The oracle found it on its first run with

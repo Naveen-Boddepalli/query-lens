@@ -54,6 +54,8 @@ import { STAGE_META } from '../ui/stageMeta.ts';
 import { usePlayback, usePlaybackShortcuts } from '../ui/usePlayback.ts';
 import {
   encodeShareState,
+  otherColumnsOf,
+  presetWithRows,
   readDatasetParam,
   readShareState,
   skippedAnswersBefore,
@@ -61,6 +63,13 @@ import {
 import { useAddressBarQuery } from '../ui/addressBar.ts';
 import { parseTraceFile, serializeTraceFile } from '../ui/traceFile.ts';
 import type { TraceState } from '../ui/traceFile.ts';
+
+/** The rows of every edited table but `main`, by name — a multi-table preset's `d.<table>` (plan.md §27.5 S2). */
+function otherEditedRows(db: Database, main: string, edited: ReadonlySet<string>): Record<string, Row[]> {
+  return Object.fromEntries(
+    [...edited].filter((name) => name !== main && db.tables[name]).map((name) => [name, db.tables[name]!.rows]),
+  );
+}
 
 function landingStep(result: RunResult, predictOn: boolean): number {
   if (result.events.length === 0) return 0;
@@ -79,7 +88,8 @@ const DATASET = DATASETS[DATASET_ID];
 const CATALOGUE = DATASET_CATALOGUE[DATASET_ID];
 
 const SEED = DATASET.make();
-const SHARED = readShareState(SEARCH, SEED.tables[DATASET.table]?.columns ?? []);
+// A multi-table preset's other tables travel as `d.<table>` (plan.md §27.5 S2), checked against their own columns.
+const SHARED = readShareState(SEARCH, SEED.tables[DATASET.table]?.columns ?? [], otherColumnsOf(SEED, DATASET.table));
 
 /**
  * plan.md §20.5: an assignment link (`&l=1`) seals the trace at its landing
@@ -104,11 +114,9 @@ const START = {
   // for that. Same precedence order the theme already follows.
   policy: SHARED.policy ?? readDefaultPolicy() ?? DEFAULT_ENGINE_OPTIONS.policy,
   predictOn: SHARED.predictOn ?? readDefaultPredictOn() ?? true,
-  db: ((): Database => {
-    const table = SEED.tables[DATASET.table];
-    if (!SHARED.rows || !table) return SEED;
-    return { tables: { ...SEED.tables, [DATASET.table]: { ...table, rows: SHARED.rows } } };
-  })(),
+  db: presetWithRows(SEED, DATASET.table, SHARED.rows, SHARED.otherRows),
+  /** The tables a link's rows changed from the seed: the main table's `d`, and any other's `d.<table>`. */
+  edited: new Set([...(SHARED.rows ? [DATASET.table] : []), ...Object.keys(SHARED.otherRows ?? {})]),
 };
 
 const INITIAL_RESULT = runQuery(START.sql, START.db, {
@@ -143,7 +151,11 @@ export function PlaygroundPage() {
   const [workspacesOpen, setWorkspacesOpen] = useState(false);
   const [durabilityOpen, setDurabilityOpen] = useState(false);
   const [editingData, setEditingData] = useState(false);
-  const [rowsEdited, setRowsEdited] = useState(SHARED.rows !== undefined);
+  // The tables whose rows differ from the preset's seed (plan.md §27.5 S2) — by an edit, a write statement or a link.
+  // A link carries exactly these; a single-table preset only ever has its one table here.
+  const [editedTables, setEditedTables] = useState<ReadonlySet<string>>(START.edited);
+  const rowsEdited = editedTables.size > 0;
+  const markEdited = (name: string) => { setEditedTables((current) => new Set([...current, name])); };
   const [result, setResult] = useState<RunResult>(INITIAL_RESULT);
   const [traceDiff, setTraceDiff] = useState<{ sql: string; diff: TraceDiff | null } | null>(null);
 
@@ -166,6 +178,10 @@ export function PlaygroundPage() {
   const [durable, setDurable] = useState<DurableLog>(() => openLog(START.db, DEFAULT_ENGINE_OPTIONS.rowsPerPage));
   const tableName = DATASETS[datasetId].table;
   const table = db.tables[tableName];
+  // Which table **Edit data** opens (plan.md §27.5 S2): the main one, unless a multi-table preset's picker says another.
+  const [editTableName, setEditTableName] = useState(DATASETS[DATASET_ID].table);
+  const editTable = db.tables[editTableName] ?? table;
+  const presetTables = isCustom ? [] : Object.keys(db.tables);
   const presets = DATASET_CATALOGUE[datasetId].presets;
   const touch = useIsTouch();
   const { theme } = useThemeContext();
@@ -291,11 +307,13 @@ export function PlaygroundPage() {
           // omitted rather than the stale preset id underneath it, so a
           // copied link never claims to be a preset it isn't.
           ...(isCustom ? {} : { dataset: datasetId }),
-          ...(rowsEdited && table ? { rows: table.rows } : {}),
+          ...(editedTables.has(tableName) && table ? { rows: table.rows } : {}),
+          ...(isCustom ? {} : { otherRows: otherEditedRows(db, tableName, editedTables) }),
         },
         table,
+        db.tables,
       ),
-    [sql, policy, predictOn, playback.step, datasetId, isCustom, rowsEdited, table],
+    [sql, policy, predictOn, playback.step, datasetId, isCustom, editedTables, tableName, table, db],
   );
 
   // `present` is a view flag, not part of the shared moment — appended after
@@ -355,7 +373,7 @@ export function PlaygroundPage() {
           setDb({
             tables: { ...database.tables, [next.write.table]: { ...target, rows: next.write.rows } },
           });
-          setRowsEdited(true);
+          markEdited(next.write.table);
           const write = next.write;
           setDurable((log) =>
             recordWrite(log, database, sql, { table: write.table, kind: write.kind, rows: write.rows }),
@@ -379,10 +397,10 @@ export function PlaygroundPage() {
   );
 
   function applyRows(rows: Row[]) {
-    if (!table) return;
-    const next: Database = { tables: { ...db.tables, [tableName]: { ...table, rows } } };
+    if (!editTable) return;
+    const next: Database = { tables: { ...db.tables, [editTable.name]: { ...editTable, rows } } };
     setDb(next);
-    setRowsEdited(true);
+    markEdited(editTable.name);
     setEditingData(false);
     run(next);
   }
@@ -390,7 +408,7 @@ export function PlaygroundPage() {
   function resetData() {
     const fresh = DATASETS[datasetId].make();
     setDb(fresh);
-    setRowsEdited(false);
+    setEditedTables(new Set());
     setEditingData(false);
     run(fresh);
   }
@@ -419,7 +437,8 @@ export function PlaygroundPage() {
     setDatasetId(id);
     setIsCustom(false);
     setDb(nextDb);
-    setRowsEdited(false);
+    setEditedTables(new Set());
+    setEditTableName(DATASETS[id].table);
     setEditingData(false);
     setSql(nextSql);
     const next = runQuery(nextSql, nextDb, options);
@@ -437,7 +456,7 @@ export function PlaygroundPage() {
       if (change !== datasetChange.current) return;
       setIsCustom(true);
       setDb(nextDb);
-      setRowsEdited(false);
+      setEditedTables(new Set());
       setEditingData(false);
       setSql(CUSTOM_STARTER_SQL);
       const next = runQuery(CUSTOM_STARTER_SQL, nextDb, options);
@@ -451,13 +470,13 @@ export function PlaygroundPage() {
   function openDatabase(next: Database) {
     setWorkspacesOpen(false);
     setDb(next);
-    setRowsEdited(true);
+    setEditedTables(new Set(Object.keys(next.tables)));
     run(next);
   }
 
   function applySchema(next: Database) {
     setDb(next);
-    setRowsEdited(true);
+    setEditedTables(new Set(Object.keys(next.tables)));
     setSchemaEditorOpen(false);
     run(next);
   }
@@ -489,7 +508,8 @@ export function PlaygroundPage() {
       predictOn,
       step: playback.step,
       dataset: datasetId,
-      rows: rowsEdited && table ? table.rows : null,
+      rows: editedTables.has(tableName) && table ? table.rows : null,
+      otherRows: otherEditedRows(db, tableName, editedTables),
     });
     const a = document.createElement('a');
     a.href = `data:application/json;charset=utf-8,${encodeURIComponent(json)}`;
@@ -500,12 +520,7 @@ export function PlaygroundPage() {
   /** Restore a parsed trace file the same way a shared link's `START` would. */
   function applyTraceState(t: TraceState) {
     const spec = DATASETS[t.dataset];
-    const seed = spec.make();
-    const seedTable = seed.tables[spec.table];
-    const nextDb: Database =
-      t.rows && seedTable
-        ? { tables: { ...seed.tables, [spec.table]: { ...seedTable, rows: t.rows } } }
-        : seed;
+    const nextDb = presetWithRows(spec.make(), spec.table, t.rows, t.otherRows);
     const nextResult = runQuery(t.sql, nextDb, { ...DEFAULT_ENGINE_OPTIONS, policy: t.policy });
     const step = Math.min(t.step, nextResult.events.length);
 
@@ -516,7 +531,8 @@ export function PlaygroundPage() {
     datasetChange.current += 1;
     setIsCustom(false); // a trace file always names one of the fixed presets
     setDb(nextDb);
-    setRowsEdited(t.rows !== null);
+    setEditedTables(new Set([...(t.rows ? [spec.table] : []), ...Object.keys(t.otherRows ?? {})]));
+    setEditTableName(spec.table);
     setEditingData(false);
     setPinnedStage(null);
     setResult(nextResult);
@@ -637,13 +653,32 @@ export function PlaygroundPage() {
                 </button>
               </>
             ) : (
-              <button
-                type="button"
-                onClick={() => { setEditingData(true); }}
-                className={btnSecondary}
-              >
-                Edit data ({table?.rows.length ?? 0})
-              </button>
+              <>
+                {/* A multi-table preset (plan.md §27.5 S2): choose which of its tables Edit data opens. */}
+                {presetTables.length > 1 && (
+                  <label className="flex items-center gap-1.5 text-label text-ink-dim">
+                    Table
+                    <select
+                      className="rounded-lg border border-edge bg-surface-3 px-2 py-1 text-ink shadow-e1 transition hover:border-ink-dim/50"
+                      value={editTable?.name ?? tableName}
+                      onChange={(e) => { setEditTableName(e.target.value); }}
+                    >
+                      {presetTables.map((name) => (
+                        <option key={name} value={name}>
+                          {name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+                <button
+                  type="button"
+                  onClick={() => { setEditingData(true); }}
+                  className={btnSecondary}
+                >
+                  Edit data ({editTable?.rows.length ?? 0})
+                </button>
+              </>
             )}
             <button type="button" onClick={() => { setDurabilityOpen(true); }} className={btnSecondary}>
               Durability{durable.statements.length > 0 ? ` (${String(durable.statements.length)})` : ''}
@@ -883,9 +918,10 @@ export function PlaygroundPage() {
         />
       )}
 
-      {editingData && table && (
+      {editingData && editTable && (
         <DataEditor
-          table={table}
+          key={editTable.name}
+          table={editTable}
           onApply={applyRows}
           onReset={resetData}
           onClose={() => { setEditingData(false); }}
@@ -913,7 +949,8 @@ export function PlaygroundPage() {
             onRestart={() => { setDurable(openLog(db, options.rowsPerPage)); }}
             onUse={(recovered, heap) => {
               setDb(recovered);
-              setRowsEdited(true);
+              // Recovery rewrites whichever tables the log touched; carrying every one in the link is the safe reading.
+              setEditedTables(new Set(Object.keys(recovered.tables)));
               setDurable((log) => carryOn(log, recovered, heap));
               setDurabilityOpen(false);
               // A read can show the recovered rows at once; a write must not be run a second time.

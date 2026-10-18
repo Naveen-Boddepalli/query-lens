@@ -1,6 +1,6 @@
 import { lazy, Suspense, useState } from 'react';
 import { Link, Navigate, useParams } from 'react-router-dom';
-import { DEFAULT_ENGINE_OPTIONS, runQuery } from '../engine/index.ts';
+import { DATASETS, DEFAULT_ENGINE_OPTIONS, runQuery } from '../engine/index.ts';
 import type { RunResult } from '../engine/index.ts';
 import {
   challengeById,
@@ -71,6 +71,8 @@ function QueryChallengeView({ challengeId }: { challengeId: string | undefined }
   const challenge = challengeById(challengeId);
   const { theme } = useThemeContext();
   const dataset = challenge ? challengeDataset(challenge) : 'users';
+  // A multi-table preset (plan.md §27.5 S2) is named by its tables, not as one table.
+  const tableNames = Object.keys(DATASETS[dataset].make().tables);
 
   const [sql, setSql] = useState(challenge?.starter ?? '');
   const [run, setRun] = useState<{ sql: string; result: RunResult } | null>(null);
@@ -154,7 +156,22 @@ function QueryChallengeView({ challengeId }: { challengeId: string | undefined }
         ) : (
           dataset !== 'users' && (
             <p className="text-label text-ink-dim">
-              This one runs against the <code className="font-mono text-ink">{dataset}</code> table.
+              {tableNames.length > 1 ? (
+                <>
+                  This one runs against the <code className="font-mono text-ink">{dataset}</code> preset&rsquo;s tables:{' '}
+                  {tableNames.map((name, i) => (
+                    <span key={name}>
+                      {i > 0 ? (i === tableNames.length - 1 ? ' and ' : ', ') : ''}
+                      <code className="font-mono text-ink">{name}</code>
+                    </span>
+                  ))}
+                  .
+                </>
+              ) : (
+                <>
+                  This one runs against the <code className="font-mono text-ink">{dataset}</code> table.
+                </>
+              )}
             </p>
           )
         )}

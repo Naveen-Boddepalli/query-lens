@@ -328,9 +328,14 @@ columns `id`, `name`, `email`, `age` (48 rows); the **Data** chips above the edi
 (120 rows — a deeper index and a heavier scan), `logins` (a lopsided `status` column, for selectivity),
 `employees` (250 rows whose `department` and `office` are perfectly correlated, so the optimizer's estimate
 for both together is badly off), `transactions` (3,000 rows — the tallest B+Tree of the presets, and a
-scan that evicts hard) and `customers` (20 rows with NULLs in `city`, `referrer` and `discount` — the one
-preset where three-valued logic shows; the [NULL lesson](/learn/nulls) walks it). Rows are editable from the app (**Edit data**), and both the choice of dataset and
-any edits travel with a shareable link — see [URL parameters](/docs/reference/url-parameters).
+scan that evicts hard), `customers` (20 rows with NULLs in `city`, `referrer` and `discount`, so three-valued
+logic shows; the [NULL lesson](/learn/nulls) walks it) and `shop` — the one preset with **several tables**:
+`customers(id, name, city)`, `products(id, name, price)` and `orders(id, customerId, productId, qty)`, indexed on
+`orders.customerId` as a join would want. Three customers never order, one product is never ordered and two orders
+are a guest's, with no `customerId` — so `JOIN`, `LEFT JOIN`, `EXISTS` and join order all run on a preset, and
+`NOT IN` meets a NULL where `NOT EXISTS` does not (the [NOT EXISTS lesson](/learn/not-exists) walks it). Rows are
+editable from the app (**Edit data**; on `shop`, pick the table beside it), and both the choice of dataset and any
+edits — every table's — travel with a shareable link — see [URL parameters](/docs/reference/url-parameters).
 
 The **Custom** data chip lets you build your own multi-table database in the browser — add a
 table, declare indexes (single-column or composite, optionally `UNIQUE`), edit its rows, and `JOIN`

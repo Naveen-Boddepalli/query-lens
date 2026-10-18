@@ -84,12 +84,13 @@ const displayWhere = (sql: string): ASTNode => {
 const locks = (s: LocksScenario) => runLockSteps(s.steps.map((l) => parseLockStep(l)!));
 
 describe('the sandbox lessons are wired into the track', () => {
-  it('put four lessons after the ten Playground ones, and the lock table first among the transactions', () => {
+  it('put four lessons after the eleven Playground ones, and the lock table first among the transactions', () => {
     const pipeline = LESSON_GROUPS.find((g) => g.id === 'pipeline')!.lessons.map((l) => l.id);
-    // The NULL lesson (plan.md §26 Feature 3) runs in the Playground too, so it closes that run, after errors.
-    expect(pipeline.slice(8, 10)).toEqual(['errors', 'nulls']);
-    expect(pipeline.slice(10, 14)).toEqual(['tokens-and-trees', 'grammar-diagram', 'planner-rules', 'buffer-pool']);
-    expect(pipeline.slice(14)).toEqual(['external-sort', 'hash-join', 'join-order']);
+    // The NULL lesson (plan.md §26 Feature 3) and NOT EXISTS (§27.5 S1) run in the Playground too, so they close that
+    // run, after errors — NOT EXISTS last, since it builds on NULL.
+    expect(pipeline.slice(8, 11)).toEqual(['errors', 'nulls', 'not-exists']);
+    expect(pipeline.slice(11, 15)).toEqual(['tokens-and-trees', 'grammar-diagram', 'planner-rules', 'buffer-pool']);
+    expect(pipeline.slice(15)).toEqual(['external-sort', 'hash-join', 'join-order']);
     const transactions = LESSON_GROUPS.find((g) => g.id === 'transactions')!.lessons.map((l) => l.id);
     expect(transactions[0]).toBe('lock-table');
   });

@@ -54,6 +54,43 @@ describe('learn lessons', () => {
   });
 });
 
+describe('lesson: NOT EXISTS is not NOT IN (plan.md §27.5 S1, on S2’s shop preset)', () => {
+  const steps = lessonById('not-exists')!.steps;
+  const shop = () => DATASETS.shop.make();
+  const opened = (i: number) => {
+    const url = new URL(stepLink(steps[i]!.open!).href, 'https://x');
+    expect(url.searchParams.get('t'), `step ${String(i + 1)}`).toBe('shop');
+    return { sql: url.searchParams.get('q')!, step: Number(url.searchParams.get('s')) };
+  };
+  const names = (sql: string) => runQuery(sql, shop()).rows.map((r) => String(r['name'] ?? r['customers.name']));
+
+  it('a JOIN repeats alice seven times; EXISTS — and a DISTINCT JOIN — return the nine who ordered, once each', () => {
+    const join = names('SELECT customers.name FROM customers JOIN orders ON customers.id = orders.customerId');
+    expect(join.filter((n) => n === 'alice')).toHaveLength(7);
+    const exists = names(opened(0).sql);
+    expect(exists).toHaveLength(9);
+    expect(new Set(exists).size).toBe(9);
+    expect(names('SELECT DISTINCT customers.name FROM customers JOIN orders ON customers.id = orders.customerId').sort()).toEqual([...exists].sort());
+  });
+
+  it('the first step lands on the semi-join being planned, the second on the algorithm chosen: about 123 pages against 13', () => {
+    const first = opened(0);
+    const events = runQuery(first.sql, shop()).events;
+    expect(events[first.step - 1]?.label).toMatch(/semi-join \(⋉\)/);
+    const second = opened(1);
+    const chosen = runQuery(second.sql, shop()).events[second.step - 1];
+    expect(chosen?.stage === 'optimize' && chosen.rule).toBe('join-algorithm-selection');
+    expect(chosen?.label).toMatch(/hash join chosen by cost — an estimated 13 pages against nested-loop's 123/);
+  });
+
+  it('NOT EXISTS finds dmitri, ines and lars; NOT IN finds no one, because of two guest orders; without them, the three', () => {
+    expect(names(opened(2).sql).sort()).toEqual(['dmitri', 'ines', 'lars']);
+    expect(names(opened(3).sql)).toEqual([]);
+    expect(shop().tables.orders!.rows.filter((r) => r['customerId'] === null)).toHaveLength(2);
+    expect(names('SELECT name FROM customers WHERE id NOT IN (SELECT customerId FROM orders WHERE customerId IS NOT NULL)').sort()).toEqual(['dmitri', 'ines', 'lars']);
+  });
+});
+
 describe('lesson: NULL is not a value (plan.md §26 Feature 3)', () => {
   // Each step opens on the `customers` preset, and its prose quotes numbers — held here against the engine itself.
   const steps = lessonById('nulls')!.steps;
