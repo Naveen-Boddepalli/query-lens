@@ -327,6 +327,26 @@ export function selectivityOf(expr: Expr, table: Table): Selectivity {
 
 const clampRows = (value: number): number => Math.max(0, Math.round(value));
 
+/**
+ * The table a plan reads first — its leftmost scan's: a SELECT's `FROM` table, under whatever sits above it. How a
+ * compound query's `SetOp` (plan.md §27.5 S3) finds the table to estimate each of its inputs against.
+ */
+export function baseTableOf(plan: Plan): string {
+  switch (plan.op) {
+    case 'SeqScan':
+    case 'IndexScan':
+    case 'IndexOnlyScan':
+    case 'IndexRangeScan':
+    case 'IndexProbe':
+      return plan.table;
+    case 'Join':
+    case 'SetOp':
+      return baseTableOf(plan.left);
+    default:
+      return baseTableOf(plan.child);
+  }
+}
+
 /** Estimated B+Tree levels for a bulk-loaded index over `rowCount` rows. */
 export function estimateIndexLevels(rowCount: number): number {
   let nodes = Math.max(1, Math.ceil(rowCount / FANOUT));
@@ -360,6 +380,19 @@ function estimateNode(
 
   let estimate: CostEstimate;
   switch (plan.op) {
+    case 'SetOp': {
+      // Each input is a whole SELECT over its own table (plan.md §27.5 S3), estimated against that table.
+      const left = estimateNode(plan.left, tableNamed(baseTableOf(plan.left)), rowsPerPage, into, otherTables);
+      const right = estimateNode(plan.right, tableNamed(baseTableOf(plan.right)), rowsPerPage, into, otherTables);
+      const estPages = left.estPages + right.estPages;
+      estimate =
+        plan.kind === 'union'
+          ? { estRows: left.estRows + right.estRows, estPages, basis: `${String(left.estRows)} + ${String(right.estRows)}: every row of both` }
+          : plan.kind === 'intersect'
+            ? { estRows: Math.min(left.estRows, right.estRows), estPages, basis: `at most min(${String(left.estRows)}, ${String(right.estRows)}): no row is in both more often than in either` }
+            : { estRows: left.estRows, estPages, basis: `at most ${String(left.estRows)}: EXCEPT can only remove rows from the left` };
+      break;
+    }
     case 'Join': {
       const left = estimateNode(plan.left, tableNamed(plan.leftTable), rowsPerPage, into, otherTables);
       const right = estimateNode(plan.right, tableNamed(plan.rightTable), rowsPerPage, into, otherTables);

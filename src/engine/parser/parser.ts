@@ -4,9 +4,13 @@
  *   statement     := explain | analyze | select | delete | insert | update
  *   explain       := EXPLAIN [ANALYZE] select
  *   analyze       := ANALYZE identifier [';'] EOF
- *   select        := SELECT [DISTINCT] selectList FROM identifier [join]* [WHERE expr]
+ *   query         := select | compound
+ *   select        := selectCore [ORDER BY identifier [ASC|DESC]] [LIMIT number [OFFSET number]] [';'] EOF
+ *   selectCore    := SELECT [DISTINCT] selectList FROM identifier [join]* [WHERE expr]
  *                     [GROUP BY identifier (',' identifier)*] [HAVING expr]
- *                     [ORDER BY identifier [ASC|DESC]] [LIMIT number [OFFSET number]] [';'] EOF
+ *   compound      := selectCore setOp+ [ORDER BY qualifiedColumn [ASC|DESC]]
+ *                     [LIMIT number [OFFSET number]] [';'] EOF
+ *   setOp         := (UNION [ALL] | INTERSECT | EXCEPT) selectCore
  *   join          := [INNER | LEFT [OUTER]] JOIN identifier ON qualifiedColumn '=' qualifiedColumn
  *   delete        := DELETE FROM identifier [WHERE expr] [';'] EOF
  *   insert        := INSERT INTO identifier [columnList] VALUES valueList [';'] EOF
@@ -64,6 +68,11 @@
  * SELECT's `WHERE` joined by `AND` (or one under `NOT`), never under `OR` or inside another test: `resolveExists`
  * runs each as a semi-join or an anti-join, which keeps or drops whole rows (`checkExistsSubqueries`).
  *
+ * A `compound` (plan.md §27.5 S3) joins SELECTs left to right. Its `ORDER BY` and `LIMIT` belong to the whole result
+ * and name a column the first SELECT returns; no member may have its own. `INTERSECT` is never mixed with `UNION` or
+ * `EXCEPT` — the standard binds it tighter and SQLite does not — and `INTERSECT ALL` / `EXCEPT ALL` are refused, since
+ * SQLite, which checks QueryLens's answers, has neither.
+ *
  * Hand-written rather than generated: the error messages are half the teaching
  * value, and they need to name the v0 scope explicitly.
  *
@@ -80,6 +89,7 @@ import type {
   AggregateFn,
   AnalyzeStatement,
   CompareOp,
+  CompoundStatement,
   DeleteStatement,
   ExplainStatement,
   ExistsSubquery,
@@ -88,9 +98,11 @@ import type {
   InSubquery,
   InsertStatement,
   JoinClause,
+  LimitClause,
   SelectItem,
   SelectList,
   SelectStatement,
+  SetOperator,
   Span,
   Statement,
   TableRef,
@@ -124,7 +136,6 @@ const OUT_OF_SCOPE: Record<string, string> = {
   CROSS: 'CROSS JOIN is not in the v0 subset — JOIN ... ON needs an equality.',
   USING: 'USING is not in the v0 subset — write the equality out: JOIN t ON a.x = t.y.',
   DISTINCT: 'DISTINCT applies to the whole SELECT list — write `SELECT DISTINCT a, b …`. Inside an aggregate, `COUNT(DISTINCT x)` is not supported yet.',
-  UNION: 'UNION is not in the v0 subset.',
   CREATE: 'QueryLens only runs SELECT, DELETE, INSERT and UPDATE. Edit the seed data to change the table.',
   DROP: 'QueryLens only runs SELECT, DELETE, INSERT and UPDATE. Edit the seed data to change the table.',
 };
@@ -327,8 +338,21 @@ function parseSelectList(c: Cursor): SelectList {
   }
 
   const items: SelectItem[] = [];
+  const names = new Set<string>();
   for (;;) {
-    items.push(parseSelectItem(c));
+    const item = parseSelectItem(c);
+    // A result row is keyed by column name, so a second column of one name would overwrite the first — silently
+    // dropping a column (and, under UNION, comparing the wrong ones; the SQLite oracle found it, plan.md §27.5 S3).
+    const key = selectItemKey(item);
+    if (names.has(key)) {
+      throw new ParseError(
+        `\`${key}\` is selected twice.`,
+        item.span,
+        `Each column of the result needs its own name here — QueryLens keys a row by column name, so a second \`${key}\` would overwrite the first. Give one an alias: \`… AS ${key.replace(/[^A-Za-z0-9_]/g, '_')}_2\`.`,
+      );
+    }
+    names.add(key);
+    items.push(item);
     if (c.peek().type !== 'comma') break;
     c.next();
   }
@@ -1368,8 +1392,26 @@ function expectStatementEnd(c: Cursor): void {
 /* SELECT                                                                      */
 /* -------------------------------------------------------------------------- */
 
-function parseSelectBody(c: Cursor): SelectStatement {
-  const selectToken = c.expectKeyword('SELECT', 'to begin the query');
+/** `UNION`, `INTERSECT` or `EXCEPT` — a set operator that continues a compound query (plan.md §27.5 S3). */
+const isSetOp = (t: Token): boolean => isKeyword(t, 'UNION', 'INTERSECT', 'EXCEPT');
+
+/** Refuses an `ORDER BY` or `LIMIT` that sits before a set operator, where it would order one SELECT of several. */
+function refuseMidCompound(c: Cursor): void {
+  if (!isSetOp(c.peek())) return;
+  throw new ParseError(
+    `ORDER BY and LIMIT go after the last SELECT of a ${c.peek().upper}.`,
+    c.peek(),
+    'They sort and cut the combined result, so they are written once, at the end — no SELECT inside a compound query may have its own.',
+  );
+}
+
+/**
+ * One SELECT. `mode` says where it stands (plan.md §27.5 S3): `whole` is a query on its own, as every caller had
+ * before compounds; `first` may be followed by a set operator, and then stops before it, as `member` — any SELECT
+ * after one — always does, leaving `ORDER BY` and `LIMIT` to the compound.
+ */
+function parseSelectBody(c: Cursor, mode: 'whole' | 'first' | 'member' = 'whole'): SelectStatement {
+  const selectToken = c.expectKeyword('SELECT', mode === 'member' ? 'after the set operator' : 'to begin the query');
   const distinct = isKeyword(c.peek(), 'DISTINCT') ? (c.next(), true) : false;
   const select = parseSelectList(c);
   c.expectKeyword('FROM', 'after the column list');
@@ -1416,6 +1458,32 @@ function parseSelectBody(c: Cursor): SelectStatement {
     checkHavingValidity(having, select, groupBy, havingToken);
   }
 
+  const statement = (orderBy?: SelectStatement['orderBy'], limit?: SelectStatement['limit']): SelectStatement => {
+    const end =
+      limit?.span.to ??
+      orderBy?.span.to ??
+      having?.span.to ??
+      groupBy?.span.to ??
+      where?.span.to ??
+      joins.at(-1)?.span.to ??
+      from.span.to;
+    return {
+      kind: 'select',
+      select,
+      ...(distinct ? { distinct } : {}),
+      from,
+      ...(hasJoin ? { joins } : {}),
+      ...(where === undefined ? {} : { where }),
+      ...(groupBy === undefined ? {} : { groupBy }),
+      ...(having === undefined ? {} : { having }),
+      ...(orderBy === undefined ? {} : { orderBy }),
+      ...(limit === undefined ? {} : { limit }),
+      span: { from: selectToken.from, to: end },
+    };
+  };
+
+  // A compound query's member ends here (plan.md §27.5 S3): what follows belongs to the whole result.
+  if (mode === 'member' || (mode === 'first' && isSetOp(c.peek()))) return statement();
   let orderBy: SelectStatement['orderBy'];
   if (c.peek().type === 'keyword' && c.peek().upper === 'ORDER') {
     const orderToken = c.next();
@@ -1448,8 +1516,16 @@ function parseSelectBody(c: Cursor): SelectStatement {
     };
   }
 
+  const limit = parseLimit(c);
+  refuseMidCompound(c);
+  expectStatementEnd(c);
+  return statement(orderBy, limit);
+}
+
+/** `LIMIT n [OFFSET m]`, if present — shared by a SELECT and a compound query's whole result. */
+function parseLimit(c: Cursor): LimitClause | undefined {
   const limitToken = c.peek().type === 'keyword' && c.peek().upper === 'LIMIT' ? c.next() : undefined;
-  let limit: SelectStatement['limit'];
+  let limit: LimitClause | undefined;
   if (limitToken) {
     const token = c.peek();
     if (token.type !== 'number' || token.value.includes('.')) {
@@ -1478,39 +1554,142 @@ function parseSelectBody(c: Cursor): SelectStatement {
       'Write `LIMIT n OFFSET m` — skip m rows, then return the next n.',
     );
   }
+  return limit;
+}
 
+/**
+ * A SELECT, or several joined by `UNION [ALL]`, `INTERSECT` or `EXCEPT` (plan.md §27.5 S3) — what `parseStatement`
+ * and `EXPLAIN` take. The members are combined left to right; the compound's own `ORDER BY` names a column of its
+ * result, which is the first member's.
+ */
+function parseQuery(c: Cursor): SelectStatement | CompoundStatement {
+  const first = parseSelectBody(c, 'first');
+  if (!isSetOp(c.peek())) return first;
+
+  const members: SelectStatement[] = [first];
+  const ops: CompoundStatement['ops'] = [];
+  while (isSetOp(c.peek())) {
+    const opToken = c.next();
+    const op = opToken.upper.toLowerCase() as SetOperator;
+    let to = opToken.to;
+    let all = false;
+    if (isKeyword(c.peek(), 'ALL')) {
+      all = true;
+      to = c.next().to;
+      if (op !== 'union') {
+        throw new ParseError(
+          `\`${opToken.upper} ALL\` is not supported yet.`,
+          { from: opToken.from, to },
+          `SQLite, which QueryLens checks its answers against, has no ${opToken.upper} ALL either. Without ALL, ${opToken.upper} returns each row once.`,
+        );
+      }
+    }
+    if (isKeyword(c.peek(), 'DISTINCT')) {
+      throw new ParseError(
+        `\`${opToken.upper} DISTINCT\` is not needed.`,
+        c.peek(),
+        `${opToken.upper} already returns each row once — drop DISTINCT${op === 'union' ? ', or write UNION ALL to keep the repeats' : ''}.`,
+      );
+    }
+    if (!isKeyword(c.peek(), 'SELECT')) {
+      c.guardScope(c.peek());
+      throw new ParseError(
+        `Expected a SELECT after ${opToken.upper}${all ? ' ALL' : ''}, found ${describe(c.peek())}.`,
+        c.peek(),
+        c.peek().type === 'lparen'
+          ? 'A SELECT in parentheses is not supported here — write the SELECT itself.'
+          : `${opToken.upper} combines two SELECTs: \`SELECT … ${opToken.upper} SELECT …\`.`,
+      );
+    }
+    ops.push({ op, all, span: { from: opToken.from, to } });
+    members.push(parseSelectBody(c, 'member'));
+  }
+
+  // INTERSECT binds tighter than UNION and EXCEPT in the standard and in PostgreSQL; SQLite reads them left to right.
+  const intersect = ops.find((o) => o.op === 'intersect');
+  const other = ops.find((o) => o.op !== 'intersect');
+  if (intersect && other) {
+    const later = intersect.span.from > other.span.from ? intersect : other;
+    throw new ParseError(
+      'INTERSECT cannot share a query with UNION or EXCEPT.',
+      later.span,
+      'Standard SQL (and PostgreSQL) does INTERSECT first; SQLite reads the operators left to right — so the same text means two different things. QueryLens refuses rather than pick one: use one kind of operator per query.',
+    );
+  }
+
+  let orderBy: CompoundStatement['orderBy'];
+  if (isKeyword(c.peek(), 'ORDER')) {
+    const orderToken = c.next();
+    c.expectKeyword('BY', 'after ORDER');
+    const keys = first.select.kind === 'columns' ? first.select.items.map(selectItemKey) : null;
+    const operator = ops[0]!.op.toUpperCase();
+    const token = c.peek();
+    if (token.type !== 'identifier' || (AGGREGATE_FNS.has(token.value.toUpperCase()) && c.peekAt(1).type === 'lparen')) {
+      c.guardScope(token);
+      throw new ParseError(
+        `After ${operator}, ORDER BY names a column of the combined result, found ${describe(token)}.`,
+        token,
+        `Name one of the first SELECT's columns${keys ? ` — ${keys.map((k) => `\`${k}\``).join(', ')}` : ''}; give a computed one a name with AS.`,
+      );
+    }
+    c.next();
+    const tail = parseQualifiedColumnTail(c, token);
+    const column = tail.table === undefined ? tail.name : `${tail.table}.${tail.name}`;
+    if (keys && !keys.includes(column)) {
+      throw new ParseError(
+        `\`${column}\` is not a column of the combined result.`,
+        { from: tail.from, to: tail.to },
+        `After ${operator}, ORDER BY sorts the rows of every SELECT together, so it names one of the result's columns — named by the first SELECT: ${keys.map((k) => `\`${k}\``).join(', ')}.`,
+      );
+    }
+    let direction: 'asc' | 'desc' = 'asc';
+    let end = tail.to;
+    if (isKeyword(c.peek(), 'ASC', 'DESC')) {
+      const dir = c.next();
+      direction = dir.upper === 'ASC' ? 'asc' : 'desc';
+      end = dir.to;
+    }
+    orderBy = { column, direction, span: { from: orderToken.from, to: end } };
+  }
+  const limit = parseLimit(c);
+  refuseMidCompound(c);
   expectStatementEnd(c);
 
-  const end =
-    limit?.span.to ??
-    orderBy?.span.to ??
-    having?.span.to ??
-    groupBy?.span.to ??
-    where?.span.to ??
-    joins.at(-1)?.span.to ??
-    from.span.to;
   return {
-    kind: 'select',
-    select,
-    ...(distinct ? { distinct } : {}),
-    from,
-    ...(hasJoin ? { joins } : {}),
-    ...(where === undefined ? {} : { where }),
-    ...(groupBy === undefined ? {} : { groupBy }),
-    ...(having === undefined ? {} : { having }),
-    ...(orderBy === undefined ? {} : { orderBy }),
-    ...(limit === undefined ? {} : { limit }),
-    span: { from: selectToken.from, to: end },
+    kind: 'compound',
+    members,
+    ops,
+    ...(orderBy ? { orderBy } : {}),
+    ...(limit ? { limit } : {}),
+    span: { from: first.span.from, to: limit?.span.to ?? orderBy?.span.to ?? members.at(-1)!.span.to },
   };
 }
 
 export type ParseOutcome = { ok: true; ast: SelectStatement } | { ok: false; error: QueryError };
 
-/** The SELECT-only entry point — every existing caller's contract, unchanged. */
+/** The SELECT-only entry point — every existing caller's contract, unchanged. A compound query is refused here. */
 export function parse(sql: string): ParseOutcome {
   return runParse(sql, (c) => {
     if (c.atEnd()) throw new ParseError('Nothing to run — the query is empty.', c.peek());
-    return parseSelectBody(c);
+    const ast = parseQuery(c);
+    if (ast.kind === 'compound') {
+      throw new ParseError(
+        `This takes one SELECT, not a ${ast.ops[0]!.op.toUpperCase()}.`,
+        ast.ops[0]!.span,
+        'A UNION, INTERSECT or EXCEPT runs in the Playground.',
+      );
+    }
+    return ast;
+  });
+}
+
+export type QueryOutcome = { ok: true; ast: SelectStatement | CompoundStatement } | { ok: false; error: QueryError };
+
+/** A SELECT or a compound of several (plan.md §27.5 S3) — for a caller that can show either, such as the parse tree. */
+export function parseQueryStatement(sql: string): QueryOutcome {
+  return runParse(sql, (c) => {
+    if (c.atEnd()) throw new ParseError('Nothing to run — the query is empty.', c.peek());
+    return parseQuery(c);
   });
 }
 
@@ -1648,7 +1827,7 @@ function parseExplainBody(c: Cursor): ExplainStatement {
     throw new ParseError('EXPLAIN cannot be nested.', next, 'One EXPLAIN, then the SELECT.');
   }
 
-  const select = parseSelectBody(c);
+  const select = parseQuery(c);
   return { kind: 'explain', analyze, select, span: { from: explainToken.from, to: select.span.to } };
 }
 
@@ -1679,7 +1858,7 @@ export function parseStatement(sql: string): StatementOutcome {
     if (first.type === 'keyword' && first.upper === 'DELETE') return parseDeleteBody(c);
     if (first.type === 'keyword' && first.upper === 'INSERT') return parseInsertBody(c);
     if (first.type === 'keyword' && first.upper === 'UPDATE') return parseUpdateBody(c);
-    return parseSelectBody(c);
+    return parseQuery(c);
   });
 }
 

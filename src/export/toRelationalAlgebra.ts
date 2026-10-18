@@ -22,8 +22,12 @@ export function raLabel(ra: RaInfo): string {
 
 const isScanSelection = (ra: RaInfo): boolean => ra.symbol === 'σ' && ra.rel !== undefined;
 
-/** The binary operators, written between their two arguments: a join, and a semi- or anti-join (plan.md §27.5 S1). */
-const isJoin = (ra: RaInfo | undefined): boolean => ra?.symbol === '⋈' || ra?.symbol === '⋉' || ra?.symbol === '▷';
+/**
+ * The binary operators, written between their two arguments: a join, a semi- or anti-join (plan.md §27.5 S1), and the
+ * set operators ∪ ∩ − (§27.5 S3).
+ */
+const BINARY: ReadonlySet<RaInfo['symbol']> = new Set(['⋈', '⋉', '▷', '∪', '∩', '−']);
+const isJoin = (ra: RaInfo | undefined): boolean => ra !== undefined && BINARY.has(ra.symbol);
 
 /** `σ_{p}` — the operator and its subscript, without its argument. */
 function head(ra: RaInfo): string {
@@ -83,6 +87,9 @@ const LATEX_SYMBOL: Record<Exclude<RaInfo['symbol'], 'rel'>, string> = {
   '⋈': '\\bowtie',
   '⋉': '\\ltimes',
   '▷': '\\triangleright',
+  '∪': '\\cup',
+  '∩': '\\cap',
+  '−': '\\setminus',
   γ: '\\gamma',
   τ: '\\tau',
   λ: '\\lambda',

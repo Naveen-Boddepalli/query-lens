@@ -8,7 +8,7 @@ import type { JoinAlgorithm, PlanNode, RaInfo, SqlValue } from '../types.ts';
 import { columnsOfIndex } from '../index/spec.ts';
 import { exprToSql } from '../parser/print.ts';
 import { walkExpr } from '../parser/index.ts';
-import type { AggregateFn, CompareOp, Expr } from '../parser/index.ts';
+import type { AggregateFn, CompareOp, Expr, SetOperator } from '../parser/index.ts';
 import type { PlanCost } from './cost.ts';
 
 /**
@@ -192,6 +192,26 @@ export type Plan =
    */
   | { op: 'HashDistinct'; child: Plan }
   | { op: 'SortDistinct'; sortKey?: { column: string; direction: 'asc' | 'desc' }; child: Plan }
+  /**
+   * Two inputs combined by a set operator (plan.md §27.5 S3) — each a whole SELECT's plan (a member of a compound
+   * query), or for a chain, `left` is the combination so far. `UNION ALL` (`all`) passes every row of `left` and then
+   * every row of `right`; a plain `UNION` is that with a `HashDistinct` or `SortDistinct` above it, the same node
+   * `SELECT DISTINCT` uses. `INTERSECT` and `EXCEPT` read `right` into a hash set first, then keep each distinct row
+   * of `left` that is (or is not) in it — NULLs counting as equal, as in `DISTINCT`. Rows are matched by position:
+   * `right`'s columns (`rightColumns`) are renamed to `columns`, the result's, which the first member names.
+   */
+  | {
+      op: 'SetOp';
+      kind: SetOperator;
+      /** Only for `UNION`: keep every row, repeats included. INTERSECT and EXCEPT always return each row once. */
+      all: boolean;
+      left: Plan;
+      right: Plan;
+      columns: string[];
+      rightColumns: string[];
+      /** Which SELECT of the compound `right` is — 2 for the second — telling this node apart from another in a chain. */
+      position: number;
+    }
   /** `LIMIT n`, always the outermost node when present: `Limit → Project → …`. */
   | { op: 'Limit'; count: number; /** Rows skipped first (`OFFSET m`); absent means none. */ offset?: number; child: Plan };
 
@@ -464,6 +484,8 @@ function raOf(plan: Plan): RaInfo {
     case 'Filter':
     case 'Having':
       return { symbol: 'σ', sub: exprToSql(plan.predicate) };
+    case 'SetOp':
+      return { symbol: plan.kind === 'union' ? '∪' : plan.kind === 'intersect' ? '∩' : '−' };
     case 'Join':
       return {
         symbol: joinSymbol(plan),
@@ -554,6 +576,20 @@ function convertBody(
         // this node from another `Join` in the same chain for EXPLAIN ANALYZE's actual-row lookup (see `table`'s
         // own doc comment on `PlanNode`), the same way `plan.table` does for a scan below.
         table: plan.rightTable,
+        ...(highlight ? { highlight } : {}),
+        ...cost,
+        children: [
+          convert(plan.left, `${id}.0`, changed, estimates),
+          convert(plan.right, `${id}.1`, changed, estimates),
+        ],
+      };
+    case 'SetOp':
+      return {
+        id,
+        op: 'SetOp',
+        label: plan.kind === 'union' ? 'Union all' : plan.kind === 'intersect' ? 'Intersect (hash)' : 'Except (hash)',
+        detail: `columns: ${plan.columns.join(', ')}${plan.rightColumns.some((c, i) => c !== plan.columns[i]) ? ` · SELECT ${String(plan.position)} matched by position: ${plan.rightColumns.join(', ')}` : ''}`,
+        table: `SELECT ${String(plan.position)}`,
         ...(highlight ? { highlight } : {}),
         ...cost,
         children: [

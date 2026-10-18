@@ -91,6 +91,37 @@ describe('lesson: NOT EXISTS is not NOT IN (plan.md §27.5 S1, on S2’s shop pr
   });
 });
 
+describe('lesson: UNION, INTERSECT, EXCEPT (plan.md §27.5 S3, on shop)', () => {
+  const steps = lessonById('set-operations')!.steps;
+  const opened = (i: number) => {
+    const url = new URL(stepLink(steps[i]!.open!).href, 'https://x');
+    expect(url.searchParams.get('t'), `step ${String(i + 1)}`).toBe('shop');
+    return { sql: url.searchParams.get('q')!, step: Number(url.searchParams.get('s')) };
+  };
+  const rows = (sql: string) => runQuery(sql, DATASETS.shop.make()).rows;
+  const ids = (sql: string) => rows(sql).map((r) => Object.values(r)[0] ?? null);
+
+  it('UNION ALL returns fifty-two rows, named after the first SELECT', () => {
+    const all = rows(opened(0).sql);
+    expect(all).toHaveLength(52);
+    expect(Object.keys(all[0]!)).toEqual(['customerId']);
+  });
+
+  it('UNION lands on its HashDistinct being planned, and returns thirteen: twelve ids and one NULL', () => {
+    const { sql, step } = opened(1);
+    expect(runQuery(sql, DATASETS.shop.make()).events[step - 1]?.label).toMatch(/HashDistinct above it/);
+    const union = ids(sql);
+    expect(union).toHaveLength(13);
+    expect(union.filter((v) => v === null)).toHaveLength(1);
+  });
+
+  it('INTERSECT finds the nine who ordered; EXCEPT the three who did not, NULL or no NULL; swapped, the NULL', () => {
+    expect(ids(opened(2).sql)).toHaveLength(9);
+    expect(ids(opened(3).sql).sort()).toEqual([12, 4, 9].sort());
+    expect(ids('SELECT customerId FROM orders EXCEPT SELECT id FROM customers')).toEqual([null]);
+  });
+});
+
 describe('lesson: NULL is not a value (plan.md §26 Feature 3)', () => {
   // Each step opens on the `customers` preset, and its prose quotes numbers — held here against the engine itself.
   const steps = lessonById('nulls')!.steps;

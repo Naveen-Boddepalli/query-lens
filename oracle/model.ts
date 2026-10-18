@@ -130,6 +130,14 @@ export interface JoinStep {
   on: { l: Ref; r: Ref };
 }
 
+/** One SELECT of a compound query (plan.md §27.5 S3): plain columns of one table, filtered, maybe DISTINCT. */
+export interface MemberSelect {
+  table: string;
+  proj: Ref[];
+  where: Pred[];
+  distinct?: boolean;
+}
+
 export type AggFn = 'COUNT' | 'SUM' | 'AVG' | 'MIN' | 'MAX';
 export interface AggItem {
   fn: AggFn;
@@ -190,6 +198,16 @@ export type Query =
       where: Pred[];
       /** `ORDER BY t.col` over the joined rows (plan.md §26 Feature 1, slice b) — any column of any table in the chain. */
       order?: OrderSpec;
+      limit?: number;
+      offset?: number;
+    }
+  | {
+      /** `SELECT … UNION [ALL] | INTERSECT | EXCEPT SELECT …` (plan.md §27.5 S3): `ops[i]` joins `members[i + 1]` to everything before it. */
+      kind: 'compound';
+      members: MemberSelect[];
+      ops: { op: 'union' | 'intersect' | 'except'; all: boolean }[];
+      /** A column of the result — one the first member projects — to sort the combined rows by. */
+      order?: { column: string; dir: 'asc' | 'desc' };
       limit?: number;
       offset?: number;
     }
@@ -285,6 +303,7 @@ export function orderKeyOf(q: ReadQuery): string | null {
   if (q.kind === 'select') return q.order ? renderRef(q.order.ref) : null;
   if (q.kind === 'aggregate' && q.order) return q.order.by.k === 'col' ? renderRef(q.order.by.ref) : renderAgg(q.order.by.agg);
   if (q.kind === 'join' && q.order) return renderRef(q.order.ref);
+  if (q.kind === 'compound' && q.order) return q.order.column;
   return null;
 }
 
@@ -308,6 +327,9 @@ export function outputKeys(q: ReadQuery, tables: readonly TableSpec[]): string[]
       return [...q.shownGroup.map(renderRef), ...q.aggs.map(renderAgg)];
     case 'join':
       return [...q.proj.map(renderRef), ...computed];
+    // A compound's columns are named by its first SELECT (plan.md §27.5 S3), in both engines.
+    case 'compound':
+      return q.members[0].proj.map(renderRef);
   }
 }
 
@@ -345,6 +367,12 @@ export function renderQuery(q: Query, dialect: Dialect = 'querylens'): string {
       const steps = renderJoins(q.joins);
       const order = q.order ? renderOrder(renderRef(q.order.ref), q.order.dir, dialect) : '';
       return `SELECT ${q.distinct ? 'DISTINCT ' : ''}${[...q.proj.map(renderRef), ...renderComputed(q.computed)].join(', ')} FROM ${q.left}${steps}${renderWhere(q.where)}${order}${page(q.limit, q.offset)}`;
+    }
+    case 'compound': {
+      const member = (m: MemberSelect) => `SELECT ${m.distinct ? 'DISTINCT ' : ''}${m.proj.map(renderRef).join(', ')} FROM ${m.table}${renderWhere(m.where)}`;
+      const body = q.members.map((m, i) => (i === 0 ? member(m) : ` ${q.ops[i - 1].op.toUpperCase()}${q.ops[i - 1].all ? ' ALL' : ''} ${member(m)}`)).join('');
+      const order = q.order ? renderOrder(q.order.column, q.order.dir, dialect) : '';
+      return `${body}${order}${page(q.limit, q.offset)}`;
     }
     case 'insert': {
       const cols = q.columns ? ` (${q.columns.join(', ')})` : '';

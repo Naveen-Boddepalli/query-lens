@@ -34,7 +34,7 @@ export interface Token {
 export const KEYWORDS = new Set([
   'SELECT', 'FROM', 'WHERE', 'AND', 'OR', 'NOT', 'AS', 'NULL', 'TRUE', 'FALSE', 'BETWEEN', 'IN', 'IS', 'LIKE', 'EXISTS',
   'JOIN', 'INNER', 'LEFT', 'RIGHT', 'OUTER', 'FULL', 'CROSS', 'ON', 'USING',
-  'GROUP', 'ORDER', 'BY', 'ASC', 'DESC', 'HAVING', 'LIMIT', 'OFFSET', 'DISTINCT', 'UNION',
+  'GROUP', 'ORDER', 'BY', 'ASC', 'DESC', 'HAVING', 'LIMIT', 'OFFSET', 'DISTINCT', 'UNION', 'INTERSECT', 'EXCEPT', 'ALL',
   'INSERT', 'UPDATE', 'DELETE', 'INTO', 'VALUES', 'SET', 'CREATE', 'DROP', 'EXPLAIN', 'ANALYZE',
 ]);
 

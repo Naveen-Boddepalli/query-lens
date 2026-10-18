@@ -86,7 +86,29 @@ describe('the generators reach what the oracle is meant to check', () => {
     antiJoins: new Map<string, number>(),
     existsResiduals: 0,
     existsOnce: 0,
+    /** Compound reads (plan.md §27.5 S3) that returned rows: by operator (UNION's by distinct strategy), self-compounds, ordered ones. */
+    compounds: new Map<string, number>(),
+    selfCompounds: 0,
+    orderedCompounds: 0,
   };
+  // Compounds are rare in the mixed sessions on purpose; their coverage is sampled from their own generator.
+  for (const [{ tables: initial, steps }, options] of fc.sample(fc.tuple(sessionArb('compound'), optionsArb), { seed: COVERAGE_SEED, numRuns: N / 3 })) {
+    let tables: TableSpec[] = [...initial];
+    for (const q of steps) {
+      const result = runQuery(renderQuery(q), toDatabase(tables), options);
+      if (isWrite(q)) {
+        if (!result.error) tables = applyWrite(tables, q, result);
+        continue;
+      }
+      if (q.kind !== 'compound' || result.error || result.rows.length === 0) continue;
+      for (const step of q.ops) {
+        const key = step.op === 'union' ? `union${step.all ? '-all' : `:${options.aggregateStrategy ?? 'hash'}`}` : step.op;
+        stats.compounds.set(key, (stats.compounds.get(key) ?? 0) + 1);
+      }
+      if (new Set(q.members.map((m) => m.table)).size < q.members.length) stats.selfCompounds += 1;
+      if (q.order && result.rows.length > 1) stats.orderedCompounds += 1;
+    }
+  }
 
   for (const [{ tables: initial, steps }, options] of sessions) {
     let tables: TableSpec[] = [...initial];
@@ -146,7 +168,7 @@ describe('the generators reach what the oracle is meant to check', () => {
       } else {
         stats.reads += 1;
         if (result.rows.length > 0) stats.readsWithRows += 1;
-        const exists = q.where.flatMap((p) => (p.k === 'exists' ? [p] : []));
+        const exists = q.kind === 'compound' ? [] : q.where.flatMap((p) => (p.k === 'exists' ? [p] : []));
         if (exists.length > 0) {
           stats.existsReads += 1;
           if (result.rows.length > 0) {
@@ -239,7 +261,9 @@ describe('the generators reach what the oracle is meant to check', () => {
     // 2026-10-15): the fixed seed now draws a different sample, and the new predicate forms dilute the plain ones the
     // composite lookups are built from — measured at 28.
     expect(stats.compositeScans, 'lookups through a composite index').toBeGreaterThan(20);
-    expect(stats.compositeCovering, 'queries a composite index covers').toBeGreaterThan(5);
+    // Measured at 5 since compound queries joined the mix (plan.md §27.5 S3, 2026-10-18): a covering scan needs a query
+    // projecting only a composite index's columns with an equality on its leading one, which a sample of 3,000 meets rarely.
+    expect(stats.compositeCovering, 'queries a composite index covers').toBeGreaterThan(3);
     expect(stats.compositeRefused, 'composite indexes refused for lack of a leading column').toBeGreaterThan(10);
     expect(stats.compositeWrites, 'writes finding rows through a composite index').toBeGreaterThan(10);
     expect(stats.compositeProbes, 'joins probing a composite index').toBeGreaterThan(3);
@@ -289,6 +313,16 @@ describe('the generators reach what the oracle is meant to check', () => {
     }
     expect(stats.existsResiduals, 'semi- and anti-joins with a residual').toBeGreaterThan(15);
     expect(stats.existsOnce, 'uncorrelated EXISTS, run once').toBeGreaterThan(15);
+  });
+
+  it('runs every set operator to rows, UNION under both distinct strategies, a table against itself, and ordered (plan.md §27.5 S3)', () => {
+    // Measured with the fixed seed above, over 1,000 compound sessions: 81–170 per operator, 282 a table against itself,
+    // 201 ordered with two or more rows.
+    for (const key of ['union-all', 'union:hash', 'union:sort', 'intersect', 'except']) {
+      expect(stats.compounds.get(key) ?? 0, `compounds with ${key}`).toBeGreaterThan(50);
+    }
+    expect(stats.selfCompounds, 'a table compounded with itself').toBeGreaterThan(100);
+    expect(stats.orderedCompounds, 'an ordered compound').toBeGreaterThan(100);
   });
 
   it('writes through UNIQUE indexes without tripping them (plan.md §25.4 B3c)', () => {

@@ -104,6 +104,7 @@ deliberate; **gap** means a known limit the roadmap intends to close.
 | `arithmetic-on-text` | design | `'abc' + 1` is `NULL` — text that is not a number has no arithmetic value | Read as `0`, silently: the result is `1` |
 | `division-of-whole-reals` | gap | A `REAL` holding `3.0` is just `3`, so `r / 2` is whole-number division: `1` | The column really is `REAL`: `1.5` |
 | `identifier-case` | design | Column names are case-sensitive, and the error lists the real ones | Identifiers ignore case |
+| `column-selected-twice` | design | `SELECT n, n` is refused — a result row is keyed by column name, so alias one (`n AS n2`) | Both columns come back, named alike |
 
 ## Run it yourself
 

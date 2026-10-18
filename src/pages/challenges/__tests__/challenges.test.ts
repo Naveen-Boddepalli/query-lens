@@ -47,6 +47,7 @@ describe('challenges', () => {
     'count-the-nulls': 'SELECT COUNT(*), COUNT(email) FROM contacts;',
     'not-in-the-null': 'SELECT * FROM people WHERE id NOT IN (SELECT person_id FROM banned);',
     'never-ordered': 'SELECT name FROM customers WHERE NOT EXISTS (SELECT * FROM orders WHERE orders.customerId = customers.id);',
+    'nobody-ordered-it': 'SELECT id FROM products EXCEPT SELECT productId FROM orders;',
     'not-paris-either': "SELECT * FROM customers WHERE city <> 'Paris' OR city IS NULL;",
     'keep-the-unmatched':
       'SELECT authors.name, posts.title FROM authors LEFT JOIN posts ON authors.id = posts.authorId WHERE posts.title IS NULL;',
@@ -108,6 +109,11 @@ describe('challenges', () => {
       ['never-ordered', 'SELECT name FROM customers WHERE EXISTS (SELECT * FROM orders WHERE orders.customerId = customers.id);'],
       ['never-ordered', 'SELECT name FROM customers WHERE NOT EXISTS (SELECT * FROM orders WHERE orders.customerId = customers.id) AND id < 12;'],
       ['never-ordered', 'SELECT city FROM customers WHERE NOT EXISTS (SELECT * FROM orders WHERE orders.customerId = customers.id);'],
+      // The vase, but by a subquery; a set operator, but the wrong rows; or the right operator the wrong way round.
+      ['nobody-ordered-it', 'SELECT id FROM products WHERE id NOT IN (SELECT productId FROM orders);'],
+      ['nobody-ordered-it', 'SELECT id FROM products INTERSECT SELECT productId FROM orders;'],
+      ['nobody-ordered-it', 'SELECT productId FROM orders EXCEPT SELECT id FROM products;'],
+      ['nobody-ordered-it', 'SELECT id, name FROM products EXCEPT SELECT id, name FROM products WHERE id < 8;'],
       ['not-paris-either', "SELECT * FROM customers WHERE NOT (city = 'Paris');"],
       ['not-paris-either', "SELECT * FROM customers WHERE city NOT IN ('Paris');"],
       ['not-paris-either', 'SELECT * FROM customers WHERE city IS NULL;'],
@@ -136,6 +142,18 @@ describe('challenges', () => {
         expect(r.error).toBeUndefined();
         expect(c.check(r, sql)).toBe(false);
       });
+    }
+  });
+
+  it('nobody-ordered-it accepts the vase by its id or its name (plan.md §27.5 S3)', () => {
+    const c = challengeById('nobody-ordered-it')!;
+    for (const sql of [
+      'SELECT name FROM products EXCEPT SELECT products.name FROM products JOIN orders ON products.id = orders.productId;',
+      'SELECT id FROM products EXCEPT SELECT productId FROM orders ORDER BY id;',
+    ]) {
+      const r = runOn(c, sql);
+      expect(r.error, sql).toBeUndefined();
+      expect(c.check(r, sql), sql).toBe(true);
     }
   });
 

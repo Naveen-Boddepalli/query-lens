@@ -34,6 +34,11 @@ const POINT_LOOKUP = 'SELECT *\nFROM users\nWHERE id = 5;';
 const SHOP_EXISTS = 'SELECT name\nFROM customers\nWHERE EXISTS (SELECT * FROM orders WHERE orders.customerId = customers.id);';
 const SHOP_NOT_EXISTS = 'SELECT name\nFROM customers\nWHERE NOT EXISTS (SELECT * FROM orders WHERE orders.customerId = customers.id);';
 const SHOP_NOT_IN = 'SELECT name\nFROM customers\nWHERE id NOT IN (SELECT customerId FROM orders);';
+
+/** The set-operation lesson's queries (plan.md §27.5 S3), each over `orders.customerId` and `customers.id`. */
+const SHOP_SET = (op: string) => `SELECT customerId FROM orders\n${op}\nSELECT id FROM customers;`;
+const SHOP_EXCEPT = 'SELECT id FROM customers\nEXCEPT\nSELECT customerId FROM orders;';
+const SHOP_INTERSECT = 'SELECT id FROM customers\nINTERSECT\nSELECT customerId FROM orders;';
 const SEQ_SCAN = 'SELECT *\nFROM users\nWHERE age > 30;';
 
 interface OpenSpec {
@@ -588,6 +593,79 @@ export const PIPELINE_STEPS: Record<string, LessonStep[]> = {
         </>
       ),
       link: { href: '/challenges/never-ordered', label: 'Try the challenge' },
+    },
+  ],
+  // plan.md §27.5 S3 — set operations on the `shop` preset. The numbers each step quotes are held by `lessons.test.ts`.
+  'set-operations': [
+    {
+      heading: 'Every row of both',
+      body: (
+        <>
+          <code className="font-mono">UNION ALL</code> stacks two SELECTs: the forty <code className="font-mono">customerId</code>s
+          of the orders, then the twelve <code className="font-mono">id</code>s of the customers — fifty-two rows. The
+          columns are matched by <em>position</em>, not by name: <code className="font-mono">customerId</code> and{' '}
+          <code className="font-mono">id</code> line up because each is its SELECT's first, and the result is named after
+          the first SELECT's.
+        </>
+      ),
+      open: { sql: SHOP_SET('UNION ALL'), dataset: 'shop', find: END, label: 'Run UNION ALL' },
+    },
+    {
+      heading: 'Each row once',
+      body: (
+        <>
+          <code className="font-mono">UNION</code> is the same plan with a <code className="font-mono">HashDistinct</code>{' '}
+          above it — the node <code className="font-mono">SELECT DISTINCT</code> uses — and thirteen rows come back: the
+          twelve ids, and one NULL for the two guest orders. Here two NULLs count as the same row, though{' '}
+          <code className="font-mono">NULL = NULL</code> is never true.
+        </>
+      ),
+      open: {
+        sql: SHOP_SET('UNION'),
+        dataset: 'shop',
+        find: (events) => at(events, (e) => e.stage === 'plan' && e.label.includes('HashDistinct above it')),
+        label: 'See the DISTINCT planned',
+      },
+    },
+    {
+      heading: 'In both: INTERSECT',
+      body: (
+        <>
+          <code className="font-mono">INTERSECT</code> reads every id the orders mention into a hash set, then keeps each
+          customer whose id is in it: nine — the customers who ordered, the same nine <code className="font-mono">EXISTS</code>{' '}
+          found as a semi-join.
+        </>
+      ),
+      open: { sql: SHOP_INTERSECT, dataset: 'shop', find: END, label: 'Run INTERSECT' },
+    },
+    {
+      heading: 'In one, not the other: EXCEPT',
+      body: (
+        <>
+          <code className="font-mono">EXCEPT</code> keeps the customers whose id is <em>not</em> in that set: 4, 9 and 12 —
+          dmitri, ines and lars, again. The guests' NULL changes nothing, unlike under{' '}
+          <code className="font-mono">NOT IN</code>: a set operator never asks whether a value is <em>equal</em> to a
+          NULL, only whether a row is the same row, and two NULLs are.
+        </>
+      ),
+      open: { sql: SHOP_EXCEPT, dataset: 'shop', find: END, label: 'Run EXCEPT' },
+      tryThis: (
+        <>
+          Swap the two SELECTs: <code className="font-mono">EXCEPT</code> is not symmetric, and the order ids that no
+          customer has — the guests' NULL — come back instead.
+        </>
+      ),
+    },
+    {
+      heading: 'Write one',
+      body: (
+        <>
+          The <a href="/challenges/nobody-ordered-it" className="underline underline-offset-2">Products nobody ordered</a>{' '}
+          challenge asks for the product no order mentions, with <code className="font-mono">EXCEPT</code> rather than a
+          subquery.
+        </>
+      ),
+      link: { href: '/challenges/nobody-ordered-it', label: 'Try the challenge' },
     },
   ],
   'errors': [

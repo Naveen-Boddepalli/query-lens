@@ -195,6 +195,18 @@ concept explanation.
   one the outer query already has, or one another `EXISTS` in the query reads — there are no table aliases yet,
   so a query cannot correlate a table with itself, and each table appears once.
 
+## UNION, INTERSECT, EXCEPT
+
+- **Combined left to right**, every SELECT returning as many columns as the first, matched by position (plan.md
+  §27.5 S3). `INTERSECT` is never mixed with `UNION` or `EXCEPT`; `ALL` is accepted on `UNION` only.
+- **Each member is planned on its own**: no rewrite rule crosses the set operation, so a predicate is never pushed
+  from one SELECT into another, and two SELECTs that read the same table are not merged into one scan.
+- **`INTERSECT` and `EXCEPT` run by hash only** — the right-hand SELECT into a hash set; `UNION`'s duplicate removal
+  follows the hash-or-sort choice `SELECT DISTINCT` already has. No partitioned or spilled hash set: it lives in memory,
+  the same simplification `HashAggregate` makes.
+- **A SELECT in parentheses is not accepted**, so there is no grouping but left to right, and no `ORDER BY` or `LIMIT`
+  on one member.
+
 ## GROUP BY and aggregates
 
 - `COUNT(*)`, and `COUNT`/`SUM`/`AVG`/`MIN`/`MAX` over a column.
@@ -467,8 +479,10 @@ decide whether the rewrite happens.
 
 No subqueries anywhere but `IN (SELECT …)` (uncorrelated, plan.md §25.4 C3) and `[NOT] EXISTS` (plan.md §27.5
 S1 — correlated through one equality, as a semi- or anti-join): no scalar subquery like `x = (SELECT …)`, and no
-correlated subquery outside `EXISTS`. No `RIGHT`/`FULL`/`CROSS` join, no transactions in
+correlated subquery outside `EXISTS`. A SELECT list may not name one column twice (`SELECT n, n`): a result row is
+keyed by column name, so the second would overwrite the first. No `RIGHT`/`FULL`/`CROSS` join, no transactions in
 the Playground (they exist only in [Transaction schedules](/tools/schedule)), no real
-concurrency there (the Locks panel is visual only). `UNION` and `COUNT(DISTINCT …)` are also not accepted.
+concurrency there (the Locks panel is visual only). `COUNT(DISTINCT …)`, `INTERSECT ALL` and `EXCEPT ALL` are also
+not accepted.
 These are deliberate exclusions for this release, not bugs — see the parser's own error messages in
 [Supported SQL](/docs/reference/sql) for exactly which keywords are recognised and rejected.

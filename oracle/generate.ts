@@ -11,7 +11,7 @@
 import fc from 'fast-check';
 import type { EngineOptions, IndexBuildOptions, JoinAlgorithm, ReplacementPolicyName, Row, SqlValue } from '../src/engine/types.ts';
 import { renderRef } from './model.ts';
-import type { AggItem, Arith, ArithOp, ColSpec, ColType, ExistsSub, GroupOrderSpec, JoinStep, Op, Pred, Query, ReadQuery, Ref, SubSelect, TableSpec, WriteQuery } from './model.ts';
+import type { AggItem, Arith, ArithOp, ColSpec, ColType, ExistsSub, GroupOrderSpec, JoinStep, MemberSelect, Op, Pred, Query, ReadQuery, Ref, SubSelect, TableSpec, WriteQuery } from './model.ts';
 
 /* -------------------------------------------------------------------------- */
 /* Tables                                                                      */
@@ -744,6 +744,73 @@ export function joinAggregateArb(t: TableSpec, u: TableSpec, w: TableSpec, pool:
   );
 }
 
+/**
+ * `SELECT … UNION [ALL] | INTERSECT | EXCEPT SELECT …` (plan.md §27.5 S3): two members, sometimes three, over any of the
+ * three tables — the same one twice included, which is where a self-union's NULLs and repeats show. Every member
+ * projects columns of one *type signature*, position by position (an int beside an int, text beside text: a mixed-type
+ * comparison is a ledger entry, not a generated case). The operators are all INTERSECT, or a mix of UNION, UNION ALL and
+ * EXCEPT — what QueryLens accepts. Sometimes an ORDER BY on a result column, and a page.
+ */
+export function compoundArb(tables: readonly TableSpec[], pool: Pool): fc.Arbitrary<Query> {
+  const SIGNATURES: readonly (readonly ColType[])[] = [['int'], ['text'], ['real'], ['int', 'int'], ['int', 'text'], ['int', 'real']];
+  const ofType = (t: TableSpec, type: ColType) => refsOf(t, false).filter((r) => r.type === type);
+  const need = (sig: readonly ColType[], type: ColType) => sig.filter((x) => x === type).length;
+  const fits = (t: TableSpec, sig: readonly ColType[]) => sig.every((type) => ofType(t, type).length >= need(sig, type));
+  // Distinct columns, in the signature's order: QueryLens refuses a SELECT that names one column twice, since a row
+  // is keyed by name (SQLite allows it — a deliberate difference, not a generated case).
+  const projOf = (t: TableSpec, sig: readonly ColType[]): fc.Arbitrary<Ref[]> => {
+    const types = [...new Set(sig)];
+    return fc
+      .tuple(...types.map((type) => fc.shuffledSubarray(ofType(t, type), { minLength: need(sig, type), maxLength: need(sig, type) })))
+      .map((picked) => {
+        const queues = new Map(types.map((type, i) => [type, [...picked[i]]]));
+        return sig.map((type) => queues.get(type)!.shift()!);
+      });
+  };
+  const member = (sig: readonly ColType[]): fc.Arbitrary<MemberSelect> => {
+    const able = tables.filter((t) => fits(t, sig));
+    return fc.constantFrom(...able).chain((t) => {
+      const refs = refsOf(t, false);
+      const tablePool: Pool = (ref) => pool({ name: ref.name, table: t.name });
+      return fc
+        .record({
+          proj: projOf(t, sig),
+          where: fc.oneof({ weight: 3, arbitrary: fc.constant<Pred[]>([]) }, { weight: 2, arbitrary: fc.array(predArb(refs, tablePool, 1), { minLength: 1, maxLength: 2 }) }),
+          distinct: fc.integer({ min: 0, max: 5 }).map((x) => x === 0),
+        })
+        .map(({ proj, where, distinct }): MemberSelect => ({ table: t.name, proj, where, ...(distinct ? { distinct } : {}) }));
+    });
+  };
+  type Step = Extract<Query, { kind: 'compound' }>['ops'][number];
+  const opsArb = (n: number): fc.Arbitrary<Step[]> =>
+    fc.boolean().chain((intersect) =>
+      fc.array<Step>(
+        intersect
+          ? fc.constant<Step>({ op: 'intersect', all: false })
+          : fc.constantFrom<Step>({ op: 'union', all: false }, { op: 'union', all: true }, { op: 'except', all: false }),
+        { minLength: n, maxLength: n },
+      ),
+    );
+  return fc
+    .tuple(fc.constantFrom(...SIGNATURES), fc.oneof({ weight: 4, arbitrary: fc.constant(2) }, { weight: 1, arbitrary: fc.constant(3) }))
+    .chain(([sig, n]) =>
+      fc
+        .record({
+          members: fc.tuple(...Array.from({ length: n }, () => member(sig))),
+          ops: opsArb(n - 1),
+          order: fc.option(fc.record({ at: fc.integer({ min: 0, max: sig.length - 1 }), dir: fc.constantFrom<'asc' | 'desc'>('asc', 'desc') }), { nil: undefined, freq: 2 }),
+          page: pageArb,
+        })
+        .map(({ members, ops, order, page }): Query => ({
+          kind: 'compound',
+          members,
+          ops,
+          ...(order ? { order: { column: members[0].proj[order.at].name, dir: order.dir } } : {}),
+          ...page,
+        })),
+    );
+}
+
 /* -------------------------------------------------------------------------- */
 /* Write statements                                                            */
 /* -------------------------------------------------------------------------- */
@@ -895,7 +962,7 @@ export const tablesArb: fc.Arbitrary<[TableSpec, TableSpec, TableSpec]> = tableT
   tableU(t).chain((u) => tableW(u).map((w): [TableSpec, TableSpec, TableSpec] => [t, u, w])),
 );
 
-export const sessionArb = (final: 'select' | 'aggregate' | 'join' | 'join-aggregate' | 'any' = 'any'): fc.Arbitrary<Session> =>
+export const sessionArb = (final: 'select' | 'aggregate' | 'join' | 'join-aggregate' | 'compound' | 'any' = 'any'): fc.Arbitrary<Session> =>
   tablesArb.chain(([t, u, w]) => {
     const pool = poolOf([t, u, w]);
     // An `IN (subquery)` may read any of the three — `t` itself included, which is still uncorrelated.
@@ -912,7 +979,17 @@ export const sessionArb = (final: 'select' | 'aggregate' | 'join' | 'join-aggreg
             ? joinArb(t, u, w, pool, subs, exists)
             : final === 'join-aggregate'
               ? joinAggregateArb(t, u, w, pool, subs, exists)
-              : fc.oneof(selectArb(t, pool, subs, exists), aggregateArb(t, pool, subs, exists), joinArb(t, u, w, pool, subs, exists), joinAggregateArb(t, u, w, pool, subs, exists))
+              : final === 'compound'
+                ? compoundArb([t, u, w], pool)
+                : fc.oneof(
+                    { weight: 4, arbitrary: selectArb(t, pool, subs, exists) },
+                    { weight: 4, arbitrary: aggregateArb(t, pool, subs, exists) },
+                    { weight: 4, arbitrary: joinArb(t, u, w, pool, subs, exists) },
+                    { weight: 4, arbitrary: joinAggregateArb(t, u, w, pool, subs, exists) },
+                    // Rarer here than the rest: compounds have a differential suite of their own (`sessionArb('compound')`),
+                    // and every read kind added to this mix thins the others the coverage floors were measured on.
+                    { weight: 1, arbitrary: compoundArb([t, u, w], pool) },
+                  )
     ) as fc.Arbitrary<ReadQuery>;
     return fc
       .tuple(fc.array(write, { minLength: 0, maxLength: 3 }), read)

@@ -61,6 +61,12 @@ export interface ExecContext {
   aggregateSortBase?: number;
   sortBase?: number;
   distinctBase?: number;
+  /**
+   * A compound query's own contexts (plan.md §27.5 S3), keyed by plan node: each member SELECT's root, with its own
+   * table, heap, partners and sort blocks — every member shares the one buffer pool — and a `DISTINCT` inside a chain,
+   * with its own sort block. A `SetOp` builds each input with the context named here, or its own.
+   */
+  members?: Map<Plan, ExecContext>;
 }
 
 /**
@@ -1600,6 +1606,90 @@ function sortMergeJoin(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): O
   };
 }
 
+/**
+ * A set operator over two inputs (plan.md §27.5 S3). `UNION ALL` streams `left`, then `right` — renaming `right`'s
+ * columns to the result's, by position. `INTERSECT` and `EXCEPT` first read all of `right` into a hash set of whole
+ * rows (`rowKey`: NULLs equal, a number and its numeric string equal, as `DISTINCT` counts them), then stream `left`,
+ * passing each distinct row that is in the set (INTERSECT) or not (EXCEPT). Each input runs in its own context — its
+ * member's table and pages — looked up in `ctx.members`.
+ */
+function setOp(plan: Extract<Plan, { op: 'SetOp' }>, ctx: ExecContext): Operator {
+  const contextOf = (child: Plan): ExecContext => ctx.members?.get(child) ?? ctx;
+  const left = buildOperator(plan.left, contextOf(plan.left));
+  const right = buildOperator(plan.right, contextOf(plan.right));
+  const produced = counter(ctx, 'SetOp', `SELECT ${String(plan.position)}`);
+  const name = plan.kind === 'union' ? 'Union all' : plan.kind === 'intersect' ? 'Intersect' : 'Except';
+  const fromLeft = (row: Row): Row => Object.fromEntries(plan.columns.map((c) => [c, row[c] ?? null]));
+  const fromRight = (row: Row): Row => Object.fromEntries(plan.columns.map((c, i) => [c, row[plan.rightColumns[i]!] ?? null]));
+  let onRight = false;
+  let built: Set<string> | null = null;
+  let passed = new Set<string>();
+
+  return {
+    name: 'SetOp',
+    open() {
+      left.open();
+      onRight = false;
+      built = null;
+      passed = new Set();
+    },
+    next() {
+      if (plan.kind === 'union') {
+        if (!onRight) {
+          const row = left.next();
+          if (row) {
+            produced(`${name} passes on a row from the SELECTs before SELECT ${String(plan.position)}.`);
+            return fromLeft(row);
+          }
+          left.close();
+          right.open();
+          onRight = true;
+        }
+        const row = right.next();
+        if (!row) return null;
+        produced(`${name} passes on a row from SELECT ${String(plan.position)}${plan.rightColumns.some((c, i) => c !== plan.columns[i]) ? ', its columns renamed to the first SELECT’s' : ''}.`);
+        return fromRight(row);
+      }
+
+      if (!built) {
+        const set = new Set<string>();
+        right.open();
+        for (;;) {
+          const row = right.next();
+          if (!row) break;
+          set.add(rowKey(fromRight(row)));
+        }
+        right.close();
+        built = set;
+        ctx.emit(
+          `${name} reads every row SELECT ${String(plan.position)} returns into an in-memory hash set (${String(set.size)} distinct), then checks each row before it against the set.`,
+          { stage: 'execute', op: 'SetOp', rowsProduced: 0, table: `SELECT ${String(plan.position)}` },
+        );
+      }
+      for (;;) {
+        const raw = left.next();
+        if (!raw) return null;
+        const row = fromLeft(raw);
+        const key = rowKey(row);
+        if (passed.has(key)) continue;
+        const inRight = built.has(key);
+        if (inRight !== (plan.kind === 'intersect')) continue;
+        passed.add(key);
+        produced(
+          plan.kind === 'intersect'
+            ? `${name} finds this row in SELECT ${String(plan.position)}'s set too — it comes out, once.`
+            : `${name} does not find this row in SELECT ${String(plan.position)}'s set — it comes out, once.`,
+        );
+        return row;
+      }
+    },
+    close() {
+      if (!onRight) left.close();
+      else right.close();
+    },
+  };
+}
+
 /** Dispatches a `Join` node to its own algorithm's operator. */
 function buildJoinOperator(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): Operator {
   switch (plan.algorithm) {
@@ -1630,6 +1720,8 @@ export function buildOperator(plan: Plan, ctx: ExecContext): Operator {
       throw new Error('unreachable: an IndexProbe is driven by its Join, never built on its own');
     case 'Join':
       return buildJoinOperator(plan, ctx);
+    case 'SetOp':
+      return setOp(plan, ctx);
     case 'Filter':
       return filter(plan.predicate, buildOperator(plan.child, ctx), ctx);
     case 'Having':

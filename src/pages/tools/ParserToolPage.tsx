@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { parse, toDisplayTree, tokenize } from '../../engine/index.ts';
+import { compoundDisplayTree, parseQueryStatement, toDisplayTree, tokenize } from '../../engine/index.ts';
 import type { ASTNode, Token, TokenType } from '../../engine/index.ts';
 import { AstTree } from '../../ui/panels/AstTree.tsx';
 import { PageHeader } from '../../ui/PageHeader.tsx';
@@ -106,9 +106,10 @@ export function ParserToolPage() {
   const [src, setSrc] = useState(readInitialSrc);
 
   const lexed = useMemo(() => lex(src), [src]);
-  const parsed = useMemo(() => parse(src), [src]);
+  // A SELECT, or several joined by UNION, INTERSECT or EXCEPT (plan.md §27.5 S3), each drawn as its own subtree.
+  const parsed = useMemo(() => parseQueryStatement(src), [src]);
   const tree = useMemo(
-    () => (parsed.ok ? toDisplayTree(parsed.ast) : null),
+    () => (parsed.ok ? (parsed.ast.kind === 'compound' ? compoundDisplayTree(parsed.ast) : toDisplayTree(parsed.ast)) : null),
     [parsed],
   );
 

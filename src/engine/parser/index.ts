@@ -1,11 +1,13 @@
-export { AGGREGATE_FNS, parse, parseStatement } from './parser.ts';
-export type { ParseOutcome, StatementOutcome } from './parser.ts';
+export { AGGREGATE_FNS, parse, parseQueryStatement, parseStatement } from './parser.ts';
+export type { ParseOutcome, QueryOutcome, StatementOutcome } from './parser.ts';
 export { tokenize, KEYWORDS, TokenizeError } from './tokenizer.ts';
 export type { Token, TokenType } from './tokenizer.ts';
 export {
   analyzeDisplayTree,
+  compoundDisplayTree,
   deleteDisplayTree,
   emitAnalyzeParseEvents,
+  emitCompoundParseEvents,
   emitDeleteParseEvents,
   emitInsertParseEvents,
   emitParseEvents,
@@ -20,6 +22,7 @@ export type {
   AggregateFn,
   AnalyzeStatement,
   CompareOp,
+  CompoundStatement,
   DeleteStatement,
   ExistsSubquery,
   ExplainStatement,
@@ -35,6 +38,7 @@ export type {
   SelectList,
   SelectStatement,
   SemiJoinClause,
+  SetOperator,
   Span,
   Statement,
   TableRef,

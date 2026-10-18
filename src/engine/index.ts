@@ -23,7 +23,7 @@ export {
 } from './datasets.ts';
 export type { DatasetId, DatasetSpec } from './datasets.ts';
 export { createTracer } from './trace.ts';
-export { parse, toDisplayTree, columnsIn, tokenize } from './parser/index.ts';
+export { compoundDisplayTree, parse, parseQueryStatement, toDisplayTree, columnsIn, tokenize } from './parser/index.ts';
 export type { Token, TokenType } from './parser/index.ts';
 export {
   buildPlan,

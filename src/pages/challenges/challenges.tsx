@@ -698,6 +698,40 @@ export const CHALLENGES: Challenge[] = [
     ),
   },
   {
+    // plan.md §27.5 S3, on the `shop` preset: EXCEPT, with its columns matched by position.
+    id: 'nobody-ordered-it',
+    title: 'Products nobody ordered',
+    brief: (
+      <>
+        Return the product that no order mentions — with <code className="font-mono">EXCEPT</code>, not a subquery.
+      </>
+    ),
+    hint: (
+      <>
+        <code className="font-mono">EXCEPT</code> keeps the rows of the first SELECT that the second does not return. The
+        two columns need not share a name: <code className="font-mono">products.id</code> and{' '}
+        <code className="font-mono">orders.productId</code> are matched by position.
+      </>
+    ),
+    starter: 'SELECT id FROM products UNION SELECT productId FROM orders;',
+    dataset: 'shop',
+    // An EXCEPT ran, and its one row is the vase — by its id or its name, in whichever single column was selected.
+    check: (r) => {
+      if (r.error || r.rows.length !== 1) return false;
+      const values = Object.values(r.rows[0]!);
+      const vase = DATASETS.shop.make().tables.products!.rows.find((p) => !DATASETS.shop.make().tables.orders!.rows.some((o) => o['productId'] === p['id']))!;
+      const usedExcept = r.events.some((e) => e.stage === 'execute' && e.op === 'SetOp' && e.label.startsWith('Except'));
+      return usedExcept && values.length === 1 && (values[0] === vase['id'] || values[0] === vase['name']);
+    },
+    misconception: (
+      <>
+        Set operators match columns by name, so <code className="font-mono">id</code> and{' '}
+        <code className="font-mono">productId</code> cannot be compared. They are matched by position — the first column
+        of one SELECT with the first of the other — and the result takes the first SELECT's names.
+      </>
+    ),
+  },
+  {
     id: 'keep-the-unmatched',
     title: 'Keep the authors who have no posts',
     brief: (

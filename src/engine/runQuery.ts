@@ -10,15 +10,17 @@
 
 import {
   emitAnalyzeParseEvents,
+  emitCompoundParseEvents,
   emitDeleteParseEvents,
   emitInsertParseEvents,
   emitParseEvents,
   emitUpdateParseEvents,
   parseStatement,
 } from './parser/index.ts';
-import type { InsertStatement, SelectStatement, Statement } from './parser/index.ts';
+import type { CompoundStatement, InsertStatement, SelectStatement, Statement, TableRef } from './parser/index.ts';
 import { analyzeTable, statsToRows } from './stats.ts';
 import {
+  emitCompoundPlanEvents,
   emitDeletePlanEvents,
   emitPlanEvents,
   emitUpdatePlanEvents,
@@ -28,9 +30,10 @@ import {
   findSortDistinct,
   isReorderableChain,
   joinsIn,
+  projectListFor,
   reorderJoinsIfCheaper,
 } from './planner/index.ts';
-import type { Plan } from './planner/index.ts';
+import type { CompoundMember, Plan } from './planner/index.ts';
 import { buildHeap, createBufferPool } from './storage/index.ts';
 import { controlKindOf } from './transactionControl.ts';
 import { buildIndexes, describeUniqueKey, findIndexSpec, indexSpecsOf, pageCountFor } from './index/index.ts';
@@ -38,6 +41,7 @@ import type { BPlusTree } from './index/index.ts';
 import type { Heap } from './storage/index.ts';
 import { walkExpr } from './parser/index.ts';
 import { execute } from './exec/index.ts';
+import type { ExecContext } from './exec/operators.ts';
 import { executeDelete } from './exec/delete.ts';
 import { executeInsert } from './exec/insert.ts';
 import { executeUpdate } from './exec/update.ts';
@@ -103,6 +107,83 @@ function applyCostOrder(
   return reordered ? { ast: { ...ast, from: reordered.from, joins: reordered.joins }, writtenOrder: names } : { ast };
 }
 
+/** "There is no table called X", pointing at the reference that named it. */
+function noSuchTable(ref: TableRef, db: Database): QueryError {
+  const known = Object.keys(db.tables);
+  return {
+    message: `There is no table called \`${ref.name}\`.`,
+    hint: known.length === 1 ? `The only table is \`${known[0]}\`.` : `Tables: ${known.join(', ')}.`,
+    from: ref.span.from,
+    to: ref.span.to,
+  };
+}
+
+/**
+ * Every table a SELECT reads besides its `FROM` table, by name — each `JOIN`'s (plan.md §25.4 C3 slice b) and each
+ * `EXISTS` subquery's (§27.5 S1), since a correlated one is joined like the rest — or the first that does not exist.
+ */
+function partnerTablesOf(ast: SelectStatement, db: Database): { ok: true; tables: Record<string, Table> } | { ok: false; error: QueryError } {
+  const tables: Record<string, Table> = {};
+  for (const ref of [...(ast.joins ?? []).map((j) => j.table), ...existsNodesIn(ast.where).map((e) => e.subquery.from)]) {
+    const t = db.tables[ref.name];
+    if (!t) return { ok: false, error: noSuchTable(ref, db) };
+    tables[ref.name] = t;
+  }
+  return { ok: true, tables };
+}
+
+/** The first column a statement names that its table does not have, as the error to report — or `null`. */
+function unknownColumnError(ast: Exclude<Statement, { kind: 'explain' | 'compound' }>, db: Database, table: Table): QueryError | null {
+  const unknownColumn = referencedColumns(ast).find((c) => {
+    const named = c.table ? db.tables[c.table] : table;
+    return !named || !named.columns.includes(c.name);
+  });
+  if (!unknownColumn) return null;
+  const named = (unknownColumn.table ? db.tables[unknownColumn.table] : table)!;
+  return {
+    message: `\`${named.name}\` has no column called \`${unknownColumn.name}\`.`,
+    hint: `Columns: ${named.columns.join(', ')}.`,
+    from: unknownColumn.span.from,
+    to: unknownColumn.span.to,
+  };
+}
+
+/**
+ * Each `sort-merge` Join's own two-block scratch reservation (one per side, since each sorts independently), in chain
+ * order from `pageBase`. A join's worst-case left input is the FROM table itself; a later step's is the product of every
+ * earlier table's row count, counting an empty table as one row (a LEFT JOIN onto it still passes every left row
+ * through, NULL-padded). A semi- or anti-join (plan.md §27.5 S1) passes each left row at most once, so it never grows
+ * what comes next. Returns the reservations and the first page id past them.
+ */
+function reserveSortMergeBases(
+  plan: Plan,
+  fromRows: number,
+  joinTables: Record<string, Table>,
+  options: EngineOptions,
+  pageBase: number,
+): { bases: Map<Plan, { leftBase: number; rightBase: number }>; end: number } {
+  const bases = new Map<Plan, { leftBase: number; rightBase: number }>();
+  let next = pageBase;
+  let worstCaseLeftRows = fromRows;
+  for (const j of joinsIn(plan)) {
+    const jTable = joinTables[j.rightTable]!;
+    if (j.algorithm === 'sort-merge') {
+      const leftBase = next;
+      next += sortTempPageCount(worstCaseLeftRows, options.rowsPerPage, options.bufferFrames);
+      const rightBase = next;
+      next += sortTempPageCount(jTable.rows.length, options.rowsPerPage, options.bufferFrames);
+      bases.set(j, { leftBase, rightBase });
+    }
+    if (j.joinType !== 'semi' && j.joinType !== 'anti') worstCaseLeftRows *= Math.max(1, jTable.rows.length);
+  }
+  return { bases, end: next };
+}
+
+/** The most rows a SELECT's own sorts can meet: its table's, times every joined table's (an empty one counted as one). */
+function worstCaseRowsOf(ast: SelectStatement, table: Table, joinTables: Record<string, Table>): number {
+  return (ast.joins ?? []).reduce((product, j) => product * Math.max(1, joinTables[j.table.name]!.rows.length), table.rows.length);
+}
+
 /** A disk read is a miss, or a page read ahead of the request (plan.md §25.4 F7) — both cost the same I/O. */
 function diskReads(pool: { stats: { misses: number; prefetches: number } }): number {
   return pool.stats.misses + pool.stats.prefetches;
@@ -152,6 +233,10 @@ export function runQuery(
   if (parsedAst.kind === 'explain') {
     return explainResult(sql, parsedAst, (inner) => runQuery(inner, db, options, hooks));
   }
+  // UNION / INTERSECT / EXCEPT (plan.md §27.5 S3): several SELECTs, each run as one, combined above them.
+  if (parsedAst.kind === 'compound') {
+    return runCompound(sql, parsedAst, db, options, { emit, drain, poolFor });
+  }
   // A chain of 2+ plain inner JOINs may cost less in a different order (plan.md §25.4 C5 slice 3) — resolved here,
   // before any table is looked up for real, so every later step (table/column validation, the heap, the plan
   // itself) already sees whichever order will actually run. Left exactly as written when it is not eligible (a
@@ -165,19 +250,7 @@ export function runQuery(
   const tableRef = ast.kind === 'insert' ? ast.into : ast.kind === 'update' || ast.kind === 'analyze' ? ast.table : ast.from;
 
   const table = db.tables[tableRef.name];
-  if (!table) {
-    const known = Object.keys(db.tables);
-    return {
-      events: drain(),
-      rows: [],
-      error: {
-        message: `There is no table called \`${tableRef.name}\`.`,
-        hint: known.length === 1 ? `The only table is \`${known[0]}\`.` : `Tables: ${known.join(', ')}.`,
-        from: tableRef.span.from,
-        to: tableRef.span.to,
-      },
-    };
-  }
+  if (!table) return { events: drain(), rows: [], error: noSuchTable(tableRef, db) };
 
   // ANALYZE (plan.md §25.4 C1): a real scan, nothing to plan or optimize, and no join/column checks below apply.
   if (ast.kind === 'analyze') {
@@ -195,43 +268,12 @@ export function runQuery(
   // FROM/INTO table above, so all of them go through the same "no table called X" shape. So is every EXISTS
   // subquery's table (plan.md §27.5 S1): a correlated one is joined like the rest.
   const joins = ast.kind === 'select' ? (ast.joins ?? []) : [];
-  const existsRefs = ast.kind === 'select' ? existsNodesIn(ast.where).map((e) => e.subquery.from) : [];
-  const joinTables: Record<string, Table> = {};
-  for (const ref of [...joins.map((j) => j.table), ...existsRefs]) {
-    const t = db.tables[ref.name];
-    if (!t) {
-      const known = Object.keys(db.tables);
-      return {
-        events: drain(),
-        rows: [],
-        error: {
-          message: `There is no table called \`${ref.name}\`.`,
-          hint: known.length === 1 ? `The only table is \`${known[0]}\`.` : `Tables: ${known.join(', ')}.`,
-          from: ref.span.from,
-          to: ref.span.to,
-        },
-      };
-    }
-    joinTables[ref.name] = t;
-  }
+  const partners = ast.kind === 'select' ? partnerTablesOf(ast, db) : { ok: true as const, tables: {} };
+  if (!partners.ok) return { events: drain(), rows: [], error: partners.error };
+  const joinTables: Record<string, Table> = partners.tables;
 
-  const unknownColumn = referencedColumns(ast).find((c) => {
-    const named = c.table ? db.tables[c.table] : table;
-    return !named || !named.columns.includes(c.name);
-  });
-  if (unknownColumn) {
-    const named = (unknownColumn.table ? db.tables[unknownColumn.table] : table)!;
-    return {
-      events: drain(),
-      rows: [],
-      error: {
-        message: `\`${named.name}\` has no column called \`${unknownColumn.name}\`.`,
-        hint: `Columns: ${named.columns.join(', ')}.`,
-        from: unknownColumn.span.from,
-        to: unknownColumn.span.to,
-      },
-    };
-  }
+  const unknownColumn = unknownColumnError(ast, db, table);
+  if (unknownColumn) return { events: drain(), rows: [], error: unknownColumn };
 
   if (ast.kind === 'insert' && !ast.columns && ast.values.items.length !== table.columns.length) {
     return {
@@ -417,22 +459,9 @@ export function runQuery(
   // the FROM table itself (`table.rows.length`, unchanged from before chains existed); a later step's worst case is
   // the product of every earlier table's row count, since no join can ever produce more rows than that — counting an
   // empty table as one row, because a LEFT JOIN onto it still passes every left row through, NULL-padded.
-  const sortMergeBases = new Map<Plan, { leftBase: number; rightBase: number }>();
-  let worstCaseLeftRows = table.rows.length;
-  for (const j of joinsIn(plan)) {
-    const jTable = joinTables[j.rightTable]!;
-    if (j.algorithm === 'sort-merge') {
-      const leftSize = sortTempPageCount(worstCaseLeftRows, options.rowsPerPage, options.bufferFrames);
-      const leftBase = pageBase;
-      pageBase += leftSize;
-      const rightSize = sortTempPageCount(jTable.rows.length, options.rowsPerPage, options.bufferFrames);
-      const rightBase = pageBase;
-      pageBase += rightSize;
-      sortMergeBases.set(j, { leftBase, rightBase });
-    }
-    // A semi- or anti-join (plan.md §27.5 S1) passes each left row at most once, so it never grows what comes next.
-    if (j.joinType !== 'semi' && j.joinType !== 'anti') worstCaseLeftRows *= Math.max(1, jTable.rows.length);
-  }
+  const reserved = reserveSortMergeBases(plan, table.rows.length, joinTables, options, pageBase);
+  const sortMergeBases = reserved.bases;
+  pageBase = reserved.end;
 
   // Every other sort the plan runs gets its own block of scratch page ids after those, in the order the sorts run —
   // a SortAggregate's own sort, then ORDER BY's Sort above it (plan.md §26 Feature 1), then a sort-based DISTINCT
@@ -441,10 +470,7 @@ export function runQuery(
   // product (an empty one counted as one row, for a LEFT JOIN's padding). Not capped: a block is only a range of ids,
   // and the pool does not count a read or write past its last page — a cap once let a big join's sort spill there
   // unseen. With one sort and no join this is exactly the block each sort always had, after the heap and indexes.
-  const worstCaseRows = joins.reduce(
-    (product, j) => product * Math.max(1, joinTables[j.table.name]!.rows.length),
-    table.rows.length,
-  );
+  const worstCaseRows = worstCaseRowsOf(selectAst, table, joinTables);
   const spillFor = (present: boolean) =>
     present ? sortTempPageCount(worstCaseRows, options.rowsPerPage, options.bufferFrames) : 0;
   const aggregateSortBase = pageBase;
@@ -486,7 +512,7 @@ interface ColumnRef {
   span: { from: number; to: number };
 }
 
-function referencedColumns(ast: Exclude<Statement, { kind: 'explain' }>): ColumnRef[] {
+function referencedColumns(ast: Exclude<Statement, { kind: 'explain' | 'compound' }>): ColumnRef[] {
   const refs: ColumnRef[] = [];
   const push = (ref: { name: string; table?: string; span: { from: number; to: number } }) =>
     refs.push({ name: ref.name, ...(ref.table === undefined ? {} : { table: ref.table }), span: ref.span });
@@ -539,6 +565,184 @@ function referencedColumns(ast: Exclude<Statement, { kind: 'explain' }>): Column
     for (const a of ast.set.assignments) walkExpr(a.value, (e) => { if (e.kind === 'column') push(e); });
   }
   return refs;
+}
+
+/**
+ * The columns a SELECT returns, in order — what a compound query matches its members by (plan.md §27.5 S3). A list
+ * names its own; `*` is the table's columns, or after a JOIN every table's, qualified, in the order the joined row
+ * holds them.
+ */
+function outputColumnsOf(ast: SelectStatement, table: Table, joinTables: Record<string, Table>): string[] {
+  const list = projectListFor(ast.select);
+  if (list.kind === 'columns') return list.names;
+  if (list.kind === 'expressions') return list.items.map((i) => i.key);
+  if (!ast.joins || ast.joins.length === 0) return [...table.columns];
+  return [table, ...ast.joins.map((j) => joinTables[j.table.name]!)].flatMap((t) => t.columns.map((c) => `${t.name}.${c}`));
+}
+
+/**
+ * `SELECT … UNION [ALL] | INTERSECT | EXCEPT SELECT …` (plan.md §27.5 S3). Each member goes through what a SELECT on its
+ * own does — a cheaper join order, the table and column checks, its `IN` and `EXISTS` subqueries resolved, then planned
+ * and optimized — and the set operations sit above them. Every table any member reads is laid out once, heap then
+ * every index, so two SELECTs over one table read the same pages and the second can find them already in the pool.
+ * Each member runs in a context of its own (its table, partners and scratch blocks), all sharing the one buffer pool.
+ */
+function runCompound(
+  sql: string,
+  compound: CompoundStatement,
+  db: Database,
+  options: EngineOptions,
+  tracer: { emit: ReturnType<typeof createTracer>['emit']; drain: () => RunResult['events']; poolFor: (pages: number) => ReturnType<typeof createBufferPool> },
+): RunResult {
+  const { emit, drain, poolFor } = tracer;
+  const fail = (error: QueryError): RunResult => ({ events: drain(), rows: [], error });
+  const operators = [...new Set(compound.ops.map((o) => o.op.toUpperCase()))].join(' / ');
+
+  const prepared: CompoundMember[] = [];
+  for (const member of compound.members) {
+    const { ast, writtenOrder } = applyCostOrder(member, db, options.rowsPerPage);
+    const table = db.tables[ast.from.name];
+    if (!table) return fail(noSuchTable(ast.from, db));
+    const partners = partnerTablesOf(ast, db);
+    if (!partners.ok) return fail(partners.error);
+    const unknownColumn = unknownColumnError(ast, db, table);
+    if (unknownColumn) return fail(unknownColumn);
+    prepared.push({
+      ast,
+      table,
+      joinTables: partners.tables,
+      ...(writtenOrder ? { writtenJoinOrder: writtenOrder } : {}),
+      columns: outputColumnsOf(ast, table, partners.tables),
+    });
+  }
+
+  // Rows are matched column by column, by position: every member returns as many columns as the first.
+  const width = prepared[0]!.columns.length;
+  const odd = prepared.findIndex((m) => m.columns.length !== width);
+  if (odd > 0) {
+    const span = compound.members[odd]!.span;
+    return fail({
+      message: `Every SELECT in a ${operators} returns the same number of columns: the first returns ${String(width)}, SELECT ${String(odd + 1)} returns ${String(prepared[odd]!.columns.length)}.`,
+      hint: 'Rows are combined column by column, by position — give each SELECT as many columns as the first.',
+      from: span.from,
+      to: span.to,
+    });
+  }
+  const orderBy = compound.orderBy;
+  if (orderBy && !prepared[0]!.columns.includes(orderBy.column)) {
+    return fail({
+      message: `\`${orderBy.column}\` is not a column of the combined result.`,
+      hint: `After ${operators}, ORDER BY names one of the result's columns — the first SELECT's: ${prepared[0]!.columns.map((c) => `\`${c}\``).join(', ')}.`,
+      from: orderBy.span.from,
+      to: orderBy.span.to,
+    });
+  }
+
+  emitCompoundParseEvents(emit, compound);
+
+  // Each member's `IN` and `EXISTS` subqueries, resolved as a SELECT on its own resolves them.
+  const run = (s: string) => runQuery(s, db, options);
+  for (const m of prepared) {
+    const inSubqueries = resolveStatementSubqueries(m.ast, sql, run);
+    if (!inSubqueries.ok) return fail(inSubqueries.error);
+    const exists = resolveExists(inSubqueries.value, run);
+    if (!exists.ok) return fail(exists.error);
+    m.ast = exists.value;
+  }
+
+  const planned = emitCompoundPlanEvents(emit, compound, prepared, options.rowsPerPage, options.aggregateStrategy ?? 'hash', options.joinStrategy);
+
+  // Every table once: its heap, then all its indexes — a FROM table needs them, and an index nested-loop probes one.
+  const placed = new Map<string, { table: Table; heap: Heap; trees: Record<string, BPlusTree> }>();
+  let pageBase = 0;
+  const place = (t: Table): void => {
+    if (placed.has(t.name)) return;
+    const heap = buildHeap(t, options.rowsPerPage, pageBase);
+    const heapEnd = pageBase + heap.pages.length;
+    const trees = buildIndexes(heap, indexSpecsOf(t), undefined, heapEnd, options.indexBuild, t.clusteredKey);
+    pageBase = Math.max(heapEnd, ...Object.values(trees).map((tree) => tree.nextPageId));
+    placed.set(t.name, { table: t, heap, trees });
+  };
+  for (const m of prepared) {
+    place(m.table);
+    for (const t of Object.values(m.joinTables)) place(t);
+  }
+
+  // Then each member's own scratch blocks — for its sort-merge joins and any sort it runs — sized for its own rows.
+  const spill = (rows: number, present: boolean) => (present ? sortTempPageCount(rows, options.rowsPerPage, options.bufferFrames) : 0);
+  const memberParts = prepared.map((m, i) => {
+    const plan = planned.members[i]!;
+    const reserved = reserveSortMergeBases(plan, m.table.rows.length, m.joinTables, options, pageBase);
+    pageBase = reserved.end;
+    const worst = worstCaseRowsOf(m.ast, m.table, m.joinTables);
+    const aggregateSortBase = pageBase;
+    pageBase += spill(worst, findSortAggregate(plan) !== null);
+    const sortBase = pageBase;
+    pageBase += spill(worst, findSort(plan) !== null);
+    const distinctBase = pageBase;
+    pageBase += spill(worst, findSortDistinct(plan) !== null);
+    const partnerNames = [...(m.ast.joins ?? []).map((j) => j.table.name), ...(m.ast.semiJoins ?? []).map((sj) => sj.table.name)];
+    return {
+      plan,
+      from: placed.get(m.table.name)!,
+      aggregateSortBase,
+      sortBase,
+      distinctBase,
+      ...(reserved.bases.size > 0 ? { sortMergeBases: reserved.bases } : {}),
+      joinPartners: Object.fromEntries(partnerNames.map((name) => [name, placed.get(name)!])),
+      worst,
+    };
+  });
+
+  // The combined result's own sorts — each UNION's DISTINCT, and ORDER BY's Sort — sized for every member's rows.
+  const total = memberParts.reduce((sum, part) => sum + part.worst, 0);
+  const distinctBases = planned.distincts.map((d) => {
+    const base = pageBase;
+    pageBase += spill(total, d.op === 'SortDistinct');
+    return base;
+  });
+  const topSortBase = pageBase;
+  pageBase += spill(total, findSort(planned.plan) !== null);
+
+  const pool = poolFor(pageBase);
+  const locks = createLockManager(emit);
+  const first = memberParts[0]!;
+  const contexts = new Map<Plan, ExecContext>();
+  const top: ExecContext = {
+    emit,
+    pool,
+    locks,
+    heap: first.from.heap,
+    trees: first.from.trees,
+    table: first.from.table,
+    options,
+    sortBase: topSortBase,
+    ...(distinctBases.length > 0 ? { distinctBase: distinctBases.at(-1)! } : {}),
+    // Every table, for the result's estimate; the members' own partners are in their own contexts.
+    joinPartners: Object.fromEntries(placed),
+    members: contexts,
+  };
+  for (const part of memberParts) {
+    contexts.set(part.plan, {
+      emit,
+      pool,
+      locks,
+      heap: part.from.heap,
+      trees: part.from.trees,
+      table: part.from.table,
+      options,
+      aggregateSortBase: part.aggregateSortBase,
+      sortBase: part.sortBase,
+      distinctBase: part.distinctBase,
+      ...(Object.keys(part.joinPartners).length > 0 ? { joinPartners: part.joinPartners } : {}),
+      ...(part.sortMergeBases ? { sortMergeBases: part.sortMergeBases } : {}),
+    });
+  }
+  planned.distincts.forEach((d, i) => contexts.set(d, { ...top, distinctBase: distinctBases[i]! }));
+
+  // No "how many rows" prompt: its options are framed as a share of one table, and a compound reads several.
+  const rows = execute(planned.plan, top, null);
+  return { events: drain(), rows };
 }
 
 /** Builds the new row: every table column defaults to `null`, then the given values overwrite it. */

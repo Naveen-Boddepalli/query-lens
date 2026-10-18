@@ -8,6 +8,7 @@ export {
   buildPlan,
   buildUpdatePlan,
   isAggregateQuery,
+  projectListFor,
   withSemiJoins,
 } from './buildPlan.ts';
 export {
@@ -22,6 +23,8 @@ export {
 } from './cost.ts';
 export type { CostEstimate, PlanCost } from './cost.ts';
 export { emitPlanEvents } from './emit.ts';
+export { combineMembers, emitCompoundPlanEvents } from './compound.ts';
+export type { CompoundMember, CompoundPlan } from './compound.ts';
 export { emitDeletePlanEvents } from './emitDelete.ts';
 export { emitUpdatePlanEvents } from './emitUpdate.ts';
 export {

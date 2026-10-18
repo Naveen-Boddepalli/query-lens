@@ -338,7 +338,30 @@ export interface UpdateStatement {
 export interface ExplainStatement {
   kind: 'explain';
   analyze: boolean;
-  select: SelectStatement;
+  /** The query explained: one SELECT, or a compound of several (plan.md §27.5 S3). */
+  select: SelectStatement | CompoundStatement;
+  span: Span;
+}
+
+/** The three set operators (plan.md §27.5 S3): ∪, ∩ and −. */
+export type SetOperator = 'union' | 'intersect' | 'except';
+
+/**
+ * `SELECT … UNION [ALL] SELECT … [ORDER BY col] [LIMIT n [OFFSET m]]` (plan.md §27.5 S3) — two or more SELECTs combined
+ * left to right: `ops[i]` joins `members[i + 1]` to everything before it, so `a UNION b EXCEPT c` is `(a ∪ b) − c`.
+ * Every member returns the same number of columns, matched by position; the result's columns are named by the first
+ * member. `ORDER BY` and `LIMIT` belong to the whole result, written after the last member, and none of the members
+ * may have its own. `ALL` keeps duplicates — on `UNION` only; without it every operator returns each row once, NULLs
+ * counted equal. `INTERSECT` never shares a query with `UNION` or `EXCEPT` (the standard binds it tighter, SQLite
+ * reads them left to right), which the parser refuses rather than choose.
+ */
+export interface CompoundStatement {
+  kind: 'compound';
+  members: SelectStatement[];
+  ops: { op: SetOperator; all: boolean; span: Span }[];
+  /** A column of the result — one the first member names — to sort the combined rows by. */
+  orderBy?: { column: string; direction: 'asc' | 'desc'; span: Span };
+  limit?: LimitClause;
   span: Span;
 }
 
@@ -357,6 +380,7 @@ export interface AnalyzeStatement {
 /** Every statement form `parseStatement` can produce. `parse` stays SELECT-only. */
 export type Statement =
   | SelectStatement
+  | CompoundStatement
   | DeleteStatement
   | InsertStatement
   | UpdateStatement

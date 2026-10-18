@@ -11,6 +11,25 @@ Work toward **v3** (plan.md §27), on the branch `version/v3`.
 
 ### Added
 
+- **`UNION [ALL]`, `INTERSECT` and `EXCEPT`** (plan.md §27.5 S3) — two or more SELECTs combined left to right, the
+  relational algebra's ∪, ∩ and −. Rows are matched by position and named by the first SELECT; `ORDER BY` and
+  `LIMIT` belong to the whole result, written once after the last SELECT. Each SELECT is planned and optimized exactly
+  as it would be alone (its trace steps prefixed *SELECT 2 of 2.*), and the set operation sits above them: `UNION ALL`
+  passes both sides; `UNION` adds the `HashDistinct` or `SortDistinct` that `SELECT DISTINCT` uses, so the hash-or-sort
+  choice carries over; `INTERSECT` and `EXCEPT` read the right-hand SELECT into a hash set. Set operators count two
+  NULLs as the same row, so `EXCEPT` finds the shop's three never-ordering customers where `NOT IN` finds none. Every
+  table is laid out once in the buffer pool, so two SELECTs over one table share its pages — the second finds them
+  cached. The plan reads `Union all` / `Intersect (hash)` / `Except (hash)`, the algebra view and LaTeX use ∪ ∩ −,
+  EXPLAIN [ANALYZE] shows them, the parser sandbox draws a compound as one root over each SELECT's tree, and
+  `/tools/grammar` has `compound`, `selectCore` and `setOp`. Refused, with the reason: `INTERSECT` beside `UNION` or
+  `EXCEPT` (the standard and SQLite read that text two ways), `INTERSECT ALL` / `EXCEPT ALL` (SQLite has neither),
+  `UNION DISTINCT`, an `ORDER BY` or `LIMIT` on one SELECT of several, an `ORDER BY` that is not a result column,
+  SELECTs of different widths, a SELECT in parentheses. The lesson **UNION, INTERSECT, EXCEPT** (`/learn/set-operations`)
+  and the challenge **Products nobody ordered** (`/challenges/nobody-ordered-it`, with `EXCEPT`) run on `shop`, which
+  gains an *EXCEPT* chip. Checked by 28 unit tests (each of ten mutations of the new code fails at least one), an e2e
+  test, and the SQLite oracle, which now generates compounds of two or three SELECTs over any of its tables — one
+  table against itself included — with every operator, both distinct strategies, ORDER BY and a page; three 10,000-case
+  seeds are clean.
 - **`shop`, the first preset with more than one table** (plan.md §27.5 S2). `customers` (12), `products` (8) and
   `orders` (40, indexed on its `customerId` foreign key): three customers never order, one product is never
   ordered, alice orders seven times, and two orders are a guest's, with no `customerId` — so `JOIN`, `LEFT JOIN`,
@@ -46,6 +65,13 @@ Work toward **v3** (plan.md §27), on the branch `version/v3`.
   over join chains and under `GROUP BY` — and a NoREC reference that re-runs the subquery per row; three
   10,000-case seeds are clean. Reachable today through the Custom editor, `/tools/planner`, the CLI and the MCP
   server; a multi-table preset (S2) brings it to the Playground's own data.
+
+### Changed
+
+- **A SELECT may not name one column twice.** `SELECT n, n` silently returned one column — a result row is keyed by
+  column name — which under a set operator compared the wrong columns; the oracle's first compounds found it. It is now
+  refused, and the error says to alias one (`n AS n2`). SQLite accepts it; the divergence ledger and the answers page
+  record the difference.
 
 ### Fixed
 

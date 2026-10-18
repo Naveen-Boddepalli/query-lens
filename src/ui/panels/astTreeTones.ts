@@ -20,6 +20,9 @@ export const TONES: Record<string, string> = {
     'border-hue-sky/70 bg-hue-sky/10 text-hue-sky-ink hover:border-hue-sky hover:bg-hue-sky/20',
   UpdateStatement:
     'border-hue-sky/70 bg-hue-sky/10 text-hue-sky-ink hover:border-hue-sky hover:bg-hue-sky/20',
+  // A compound query (plan.md §27.5 S3) is a statement whose children are statements — the same tone.
+  CompoundStatement:
+    'border-hue-sky/70 bg-hue-sky/10 text-hue-sky-ink hover:border-hue-sky hover:bg-hue-sky/20',
   SelectList:
     'border-hue-sky/50 bg-hue-sky/5 text-hue-sky-ink hover:border-hue-sky/80 hover:bg-hue-sky/15',
   // INSERT's own two lists, and UPDATE's SET — same tone family as SelectList, the thing they mirror.

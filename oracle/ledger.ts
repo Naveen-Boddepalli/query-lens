@@ -159,4 +159,16 @@ export const LEDGER: Divergence[] = [
     columns: ['N'],
     expect: { querylens: { error: 'no column called `N`' }, sqlite: { rows: [[1]] } },
   },
+  {
+    // plan.md §27.5 S3: found by the oracle's first compound queries, where the lost column compared the wrong values.
+    id: 'column-selected-twice',
+    title: 'Can a SELECT list name one column twice?',
+    kind: 'design',
+    querylens: 'No — a result row is keyed by column name, so the second would overwrite the first; the error says to alias one.',
+    sqlite: 'Yes — both columns come back, with the same name.',
+    tables: t([{ name: 'n', type: 'int' }], [{ n: 1 }]),
+    steps: ['SELECT n, n FROM t'],
+    columns: ['n', 'n'],
+    expect: { querylens: { error: 'is selected twice' }, sqlite: { rows: [[1, 1]] } },
+  },
 ];

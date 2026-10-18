@@ -105,8 +105,8 @@ test('the parser sandbox shows the token stream and the parser\'s own errors', a
   await expect(page.getByText(/Parsed ·/)).toContainText('recursion depth');
 
   // Unsupported SQL tokenizes fine but the parser rejects it by name.
-  await src.fill('SELECT * FROM users UNION SELECT * FROM users');
-  await expect(page.getByText(/`UNION` is not supported yet/)).toBeVisible();
+  await src.fill('SELECT * FROM users CROSS JOIN logins');
+  await expect(page.getByText(/`CROSS` is not supported yet/)).toBeVisible();
   await expect(page.getByText(/not in the v0 subset/)).toBeVisible();
 
   // A lexing failure is reported where it happens, not swallowed — the ribbon
@@ -1528,6 +1528,18 @@ test('the shop preset has three tables: NOT EXISTS finds three, NOT IN none, and
   await page.reload();
   await page.getByLabel('Scrub to step').press('End');
   await expect(page.getByText('3 rows returned').first()).toBeVisible();
+});
+
+test('UNION, INTERSECT and EXCEPT run in the Playground and draw in the parser sandbox (plan.md §27.5 S3)', async ({ page }) => {
+  await page.goto('/playground?t=shop&x=0');
+  await page.getByRole('button', { name: 'EXCEPT', exact: true }).click();
+  await page.getByLabel('Scrub to step').press('End');
+  await expect(page.getByText('3 rows returned').first()).toBeVisible();
+
+  // The parse tree: one root naming the operator, a subtree per SELECT.
+  await page.goto(`/tools/parser?src=${encodeURIComponent('SELECT id FROM users UNION ALL SELECT id FROM logins')}`);
+  await expect(page.getByRole('treeitem', { name: /^UNION ALL/ })).toBeVisible();
+  await expect(page.getByRole('treeitem', { name: /^SELECT/ })).toHaveCount(2);
 });
 
 test('a link that names a dataset reopens on it, in the Playground and the inspector', async ({

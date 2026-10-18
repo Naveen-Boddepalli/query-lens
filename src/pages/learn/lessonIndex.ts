@@ -100,6 +100,13 @@ export const LESSON_GROUPS: readonly LessonGroup[] = [
         summary: 'A semi-join keeps each customer once, an anti-join finds the three who never ordered — and NOT IN, meeting a guest’s NULL, finds no one.',
       },
       {
+        // plan.md §27.5 S3, on the `shop` preset.
+        id: 'set-operations',
+        title: 'UNION, INTERSECT, EXCEPT',
+        minutes: 4,
+        summary: 'Two SELECTs, one result: every row, each row once, the rows in both, the rows in one and not the other — and why a NULL does not trip EXCEPT.',
+      },
+      {
         id: 'tokens-and-trees',
         title: 'From text to tokens to a tree',
         minutes: 3,

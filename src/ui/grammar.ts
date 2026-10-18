@@ -43,10 +43,12 @@ export const GRAMMAR: GrammarRule[] = [
   {
     name: 'statement',
     parts: [
-      choice([rule('explain')], [rule('analyze')], [rule('select')], [rule('delete')], [rule('insert')], [rule('update')]),
+      choice([rule('explain')], [rule('analyze')], [rule('query')], [rule('delete')], [rule('insert')], [rule('update')]),
     ],
   },
-  { name: 'explain', parts: [lit('EXPLAIN'), opt(lit('ANALYZE')), rule('select')] },
+  { name: 'explain', parts: [lit('EXPLAIN'), opt(lit('ANALYZE')), rule('query')] },
+  // One SELECT, or several combined by set operators (plan.md §27.5 S3).
+  { name: 'query', parts: [choice([rule('select')], [rule('compound')])] },
   { name: 'analyze', parts: [lit('ANALYZE'), rule('identifier'), opt(lit(';'))] },
   {
     name: 'select',
@@ -67,6 +69,38 @@ export const GRAMMAR: GrammarRule[] = [
       opt(lit('ORDER'), lit('BY'), choice([rule('qualifiedColumn')], [rule('aggregateCall')]), opt(choice([lit('ASC')], [lit('DESC')]))),
       opt(lit('LIMIT'), rule('number'), opt(lit('OFFSET'), rule('number'))),
       opt(lit(';')),
+    ],
+  },
+  // SELECTs joined left to right (plan.md §27.5 S3). ORDER BY and LIMIT belong to the whole result, and ORDER BY names
+  // one of its columns — the first SELECT's. INTERSECT never shares a query with UNION or EXCEPT.
+  {
+    name: 'compound',
+    parts: [
+      rule('selectCore'),
+      rule('setOp'),
+      // More of them, back to back — no separator token, like a chain of JOINs.
+      repeat(opt(), rule('setOp')),
+      opt(lit('ORDER'), lit('BY'), rule('qualifiedColumn'), opt(choice([lit('ASC')], [lit('DESC')]))),
+      opt(lit('LIMIT'), rule('number'), opt(lit('OFFSET'), rule('number'))),
+      opt(lit(';')),
+    ],
+  },
+  // An operator and the SELECT it adds. ALL only on UNION: SQLite, which checks the answers, has no INTERSECT ALL or
+  // EXCEPT ALL.
+  { name: 'setOp', parts: [choice([lit('UNION'), opt(lit('ALL'))], [lit('INTERSECT')], [lit('EXCEPT')]), rule('selectCore')] },
+  // `select` without its ORDER BY and LIMIT — one SELECT inside a compound, whose ordering belongs to the whole result.
+  {
+    name: 'selectCore',
+    parts: [
+      lit('SELECT'),
+      opt(lit('DISTINCT')),
+      rule('selectList'),
+      lit('FROM'),
+      rule('identifier'),
+      repeat(opt(), rule('join')),
+      opt(lit('WHERE'), rule('expr')),
+      opt(lit('GROUP'), lit('BY'), rule('qualifiedColumn'), repeat(lit(','), rule('qualifiedColumn'))),
+      opt(lit('HAVING'), rule('expr')),
     ],
   },
   {

@@ -4,7 +4,8 @@ description: The exact SQL subset QueryLens's parser accepts, and what it says w
 ---
 
 QueryLens implements four statements — `SELECT`, `DELETE`, `INSERT` and `UPDATE` — plus `EXPLAIN` for a `SELECT`
-and `ANALYZE` for a table, over one table at a time (more, for a chain of `JOIN`s). This page is the complete
+and `ANALYZE` for a table, over one table at a time (more, for a chain of `JOIN`s, or SELECTs combined by
+[`UNION`, `INTERSECT` or `EXCEPT`](#union-intersect-except)). This page is the complete
 subset: if it isn't listed here, the parser does not accept it yet, and it will tell you so by name rather than
 failing with a generic syntax error.
 
@@ -244,6 +245,33 @@ UPDATE items SET qty = qty + 1, price = -price WHERE id = 5;
 - **Not yet:** arithmetic on an aggregate (`COUNT(*) + 1`), a computed column beside `GROUP BY`, and
   arithmetic in `ORDER BY` or `GROUP BY`.
 
+## UNION, INTERSECT, EXCEPT
+
+Two or more SELECTs, combined left to right (plan.md §27.5 S3) — the relational algebra's ∪, ∩ and −.
+
+```sql
+SELECT id FROM customers EXCEPT SELECT customerId FROM orders;            -- customers who never ordered
+SELECT id FROM customers INTERSECT SELECT customerId FROM orders;         -- customers who did
+SELECT customerId FROM orders UNION SELECT id FROM customers;            -- every id, once
+SELECT name FROM customers UNION ALL SELECT name FROM products ORDER BY name LIMIT 5;
+```
+
+- **Rows are matched by position, not by name.** Every SELECT returns the same number of columns; the result's
+  columns are named by the first one. `id` beside `customerId` is fine.
+- **Each row once, unless `UNION ALL`.** `UNION` removes repeats — across both sides and within either — and so do
+  `INTERSECT` and `EXCEPT`. Like `DISTINCT`, they count two NULLs as the same row, though no comparison says so:
+  `EXCEPT` is not thrown by a NULL the way `NOT IN` is. `INTERSECT ALL` and `EXCEPT ALL` are refused — SQLite, which
+  checks these answers, has neither.
+- **`ORDER BY` and `LIMIT` belong to the whole result**, written once after the last SELECT; no SELECT inside may have
+  its own. `ORDER BY` names a column of the result — one the first SELECT returns.
+- **Left to right.** `a UNION b EXCEPT c` is `(a ∪ b) − c`. `INTERSECT` is never mixed with `UNION` or `EXCEPT`:
+  standard SQL does it first, SQLite reads left to right, and QueryLens refuses rather than pick.
+- **How it runs.** Each SELECT is planned and optimized exactly as it would be on its own; the set operation sits
+  above them. `UNION ALL` passes every row of one side, then the other; `UNION` adds the `DISTINCT` node above that —
+  hash or sort, the same choice `SELECT DISTINCT` makes; `INTERSECT` and `EXCEPT` read the right-hand SELECT into a
+  hash set, then check each row of the left against it. Every table is laid out once, so two SELECTs over the same
+  table read the same pages — the second often finds them already in the buffer pool.
+
 ## EXPLAIN
 
 ```sql
@@ -315,7 +343,9 @@ with a generic syntax error:
 | Joining the same table twice | *Already in this query — joining it again needs an alias, which v0 does not have.* |
 | A `JOIN`'s `ON` naming a table not yet in the query | *There is no table called that yet in this query — it has to be named in FROM or an earlier JOIN first.* |
 | `SELECT a, DISTINCT b`, `COUNT(DISTINCT x)` | *DISTINCT applies to the whole SELECT list — write `SELECT DISTINCT a, b …`. Inside an aggregate it is not supported yet.* |
-| `UNION` | *UNION is not in the v0 subset.* |
+| `INTERSECT` beside `UNION` or `EXCEPT` | *INTERSECT cannot share a query with UNION or EXCEPT* — the standard and SQLite read the same text two ways. |
+| `INTERSECT ALL`, `EXCEPT ALL` | *Not supported yet* — SQLite, which checks the answers, has neither. |
+| `SELECT n, n` | *`n` is selected twice* — a result row is keyed by column name, so alias one: `n AS n2`. |
 | A subquery anywhere but `IN` or `EXISTS`, e.g. `x = (SELECT …)` | *A subquery is not supported here — QueryLens runs a subquery only inside IN (SELECT …) or EXISTS (SELECT …).* |
 | `EXISTS` under `OR`, or in `HAVING`, `DELETE` or `UPDATE` | *EXISTS has to be one of the conditions WHERE joins with AND* — it runs as a semi-join, which keeps or drops whole rows. |
 | `BEGIN` / `COMMIT` / `ROLLBACK` | *`BEGIN`, `COMMIT` and `ROLLBACK` need two sessions to mean anything, and the Playground runs one statement at a time.* They run in [Transaction schedules](/tools/schedule). |

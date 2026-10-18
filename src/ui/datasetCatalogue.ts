@@ -99,6 +99,8 @@ export const DATASET_CATALOGUE: Record<DatasetId, DatasetCatalogueEntry> = {
       { label: 'EXISTS', sql: 'SELECT name\nFROM customers\nWHERE EXISTS (SELECT * FROM orders WHERE orders.customerId = customers.id);' },
       { label: 'NOT EXISTS', sql: SHOP_NOT_EXISTS },
       { label: 'NOT IN meets a NULL', sql: 'SELECT name\nFROM customers\nWHERE id NOT IN (SELECT customerId FROM orders);' },
+      // plan.md §27.5 S3: the same three customers, by set difference.
+      { label: 'EXCEPT', sql: 'SELECT id\nFROM customers\nEXCEPT\nSELECT customerId\nFROM orders;' },
       {
         label: 'Orders per customer',
         sql: 'SELECT customers.name, COUNT(orders.id)\nFROM customers\nLEFT JOIN orders ON customers.id = orders.customerId\nGROUP BY customers.name\nORDER BY COUNT(orders.id) DESC;',
