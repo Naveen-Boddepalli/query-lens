@@ -185,6 +185,18 @@ test('the locks sandbox blocks a conflicting request, then detects and resolves 
   // transaction either "release" button can belong to).
   await expect(page.getByText('page 0 · exclusive · release')).toBeVisible();
   await expect(page.getByText('page 1 · exclusive · release')).toBeVisible();
+
+  // plan.md §27.5 T2: five modes, and the matrix computed from what each does. IX and IS share a page.
+  await page.getByRole('button', { name: 'Reset' }).click();
+  await page.getByRole('radio', { name: 'T1' }).click();
+  await page.getByRole('radio', { name: 'intention-exclusive', exact: true }).click();
+  await page.getByRole('button', { name: 'Request' }).click();
+  await page.getByRole('radio', { name: 'T2' }).click();
+  await page.getByRole('radio', { name: 'intention-shared', exact: true }).click();
+  await page.getByRole('button', { name: 'Request' }).click();
+  await expect(page.getByText('T2 holds intention-shared (IS)')).toBeVisible();
+  const matrix = page.getByRole('table', { name: /Compatibility of a mode held/ });
+  await expect(matrix.getByRole('row', { name: /^SIX/ }).getByText('compatible')).toHaveCount(1);
 });
 
 test('the grammar sandbox diagrams every rule, and a rule reference jumps to its own row', async ({

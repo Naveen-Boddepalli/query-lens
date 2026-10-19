@@ -295,6 +295,21 @@ index entries of the rows it touches.
   version is the [locks sandbox](/tools/locks) (two transactions placing lock requests directly) and
   [Transaction schedules](/tools/schedule) (the same lock table applied to real statements).
 
+- **Five modes over a hierarchy** (plan.md §27.5 T2) in the enforced lock table: `IS`, `IX`, `S`, `SIX` and `X` on
+  a table → page → row hierarchy. In [Transaction schedules](/tools/schedule) every page or row lock sits under an
+  intention lock on each resource above it, taken top down — IS above a read, IX above a write, so `SELECT` under
+  row locks holds IS on the table, IS on the page and S on the row. The compatibility matrix is **computed, not
+  typed in**: each mode is what it lets its holder do to the whole resource and below it (S reads the whole, X writes
+  it, an intention touches nothing at this level and says what it will lock below, SIX is S plus IX), and two modes
+  conflict when one writes something the other reads or writes. A transaction holds one mode per resource: asking for
+  more asks for the weakest mode covering both (S held, IX asked: SIX). At `READ COMMITTED` a statement's IS locks go
+  with its S locks. The [locks sandbox](/tools/locks) offers all five modes on its pages and draws the matrix.
+- **Lock escalation** is off unless asked for (*Escalation* on the schedules page, `e` in its link): past 2 or 5
+  row (or page) locks on one table, a transaction asks for one lock on the whole table instead — S if it has only
+  read there, X if it has written — and, once granted, lets its finer locks go. Fewer locks to keep, and every other
+  transaction's intention on that table now waits, a reader of a row nobody touched included. No real engine
+  escalates this early; SQL Server's threshold is about 5,000 locks.
+
 ## Transactions
 
 - **`BEGIN`, `COMMIT` and `ROLLBACK` exist only in [Transaction schedules](/tools/schedule)**, not the

@@ -23,6 +23,7 @@ import {
   segOff,
   segOn,
 } from '../../ui/primitives.ts';
+import { modeName } from '../../engine/locks/lockTable.ts';
 import { PrecedencePanel } from '../../ui/PrecedencePanel.tsx';
 import { ScrollRegion } from '../../ui/ScrollRegion.tsx';
 import { useAddressBarQuery } from '../../ui/addressBar.ts';
@@ -45,6 +46,10 @@ const LOCKING_MODES: { value: LockingMode; label: string }[] = [
 const TABLE_SIZES = [3, 20] as const;
 type TableSize = (typeof TABLE_SIZES)[number];
 
+/** Lock escalation (plan.md §27.5 T2): off, or the leaf locks on one table a transaction may hold before it escalates. */
+const ESCALATIONS = [0, 2, 5] as const;
+type Escalation = (typeof ESCALATIONS)[number];
+
 const ISOLATION_BUTTONS: Record<IsolationLevel, string> = {
   'read-uncommitted': 'Read uncommitted',
   'read-committed': 'Read committed',
@@ -58,6 +63,7 @@ interface Preset {
   locking: LockingMode;
   rows: TableSize;
   isolation?: IsolationLevel;
+  escalation?: Escalation;
 }
 
 const PRESETS: Preset[] = [
@@ -204,6 +210,21 @@ const PRESETS: Preset[] = [
     ],
   },
   {
+    // plan.md §27.5 T2: three row locks become one table lock, and a reader of a row nobody touched has to wait.
+    label: 'Escalation',
+    locking: 'row',
+    rows: 20,
+    escalation: 2,
+    steps: [
+      { session: 'A', sql: 'BEGIN' },
+      { session: 'A', sql: 'UPDATE accounts SET balance = 1 WHERE id = 1' },
+      { session: 'A', sql: 'UPDATE accounts SET balance = 1 WHERE id = 2' },
+      { session: 'A', sql: 'UPDATE accounts SET balance = 1 WHERE id = 3' },
+      { session: 'B', sql: 'SELECT balance FROM accounts WHERE id = 10' },
+      { session: 'A', sql: 'COMMIT' },
+    ],
+  },
+  {
     label: 'Deadlock',
     locking: 'row',
     rows: 20,
@@ -226,12 +247,13 @@ const CONTROL: { label: string; sql: string }[] = [
   { label: 'ROLLBACK', sql: 'ROLLBACK' },
 ];
 
-function readInitial(): { steps: ScheduleStep[]; locking: LockingMode; rows: TableSize; isolation: IsolationLevel } {
+function readInitial(): { steps: ScheduleStep[]; locking: LockingMode; rows: TableSize; isolation: IsolationLevel; escalation: Escalation } {
   const params = new URLSearchParams(typeof location === 'undefined' ? '' : location.search);
   const steps = decodeSchedule(params.get('s'));
   const lockingRaw = params.get('l');
   const rowsRaw = Number(params.get('n'));
   const isolationRaw = params.get('i');
+  const escalation: Escalation = ESCALATIONS.find((e) => e > 0 && String(e) === params.get('e')) ?? 0;
   const locking: LockingMode =
     lockingRaw === 'page' || lockingRaw === 'row' || lockingRaw === 'mvcc' ? lockingRaw : 'none';
   const rows: TableSize = rowsRaw === 20 ? 20 : 3;
@@ -239,9 +261,15 @@ function readInitial(): { steps: ScheduleStep[]; locking: LockingMode; rows: Tab
     ISOLATION_LEVELS.find((level) => level === isolationRaw) ?? DEFAULT_ISOLATION;
   if (steps === null) {
     const first = PRESETS[0]!;
-    return { steps: first.steps, locking: first.locking, rows: first.rows, isolation: first.isolation ?? DEFAULT_ISOLATION };
+    return {
+      steps: first.steps,
+      locking: first.locking,
+      rows: first.rows,
+      isolation: first.isolation ?? DEFAULT_ISOLATION,
+      escalation: first.escalation ?? 0,
+    };
   }
-  return { steps, locking, rows, isolation };
+  return { steps, locking, rows, isolation, escalation };
 }
 
 const INITIAL = readInitial();
@@ -531,9 +559,9 @@ function StepCard({
             {step.locks.map((l) => (
               <li key={l.resource}>
                 <span className="text-ink">{l.resource}</span>
-                {l.holders.length > 0 && <> — held by {l.holders.map((h) => `${h.session} (${h.mode})`).join(', ')}</>}
+                {l.holders.length > 0 && <> — held by {l.holders.map((h) => `${h.session} (${modeName(h.mode)})`).join(', ')}</>}
                 {l.waiters.length > 0 && (
-                  <span className="text-evict"> — {l.waiters.map((w) => `${w.session} waits (${w.mode})`).join(', ')}</span>
+                  <span className="text-evict"> — {l.waiters.map((w) => `${w.session} waits (${modeName(w.mode)})`).join(', ')}</span>
                 )}
               </li>
             ))}
@@ -573,6 +601,7 @@ export function ScheduleToolPage() {
   const [locking, setLocking] = useState<LockingMode>(INITIAL.locking);
   const [rows, setRows] = useState<TableSize>(INITIAL.rows);
   const [isolation, setIsolation] = useState<IsolationLevel>(INITIAL.isolation);
+  const [escalation, setEscalation] = useState<Escalation>(INITIAL.escalation);
   const [session, setSession] = useState<SessionName>('A');
   const [sql, setSql] = useState('');
 
@@ -581,8 +610,13 @@ export function ScheduleToolPage() {
     () =>
       locking === 'none'
         ? undefined
-        : { granularity: locking === 'page' ? 'page' : 'row', isolation, ...(locking === 'mvcc' ? { mvcc: true } : {}) },
-    [locking, isolation],
+        : {
+            granularity: locking === 'page' ? 'page' : 'row',
+            isolation,
+            ...(locking === 'mvcc' ? { mvcc: true } : {}),
+            ...(escalation > 0 ? { escalateAt: escalation } : {}),
+          },
+    [locking, isolation, escalation],
   );
   const result = useMemo(
     () => runSchedule(steps, database, undefined, lockingOptions),
@@ -596,8 +630,9 @@ export function ScheduleToolPage() {
     if (locking !== 'none') params.set('l', locking);
     if (rows !== 3) params.set('n', String(rows));
     if (locking !== 'none' && isolation !== DEFAULT_ISOLATION) params.set('i', isolation);
+    if (locking !== 'none' && escalation > 0) params.set('e', String(escalation));
     return params.toString();
-  }, [steps, locking, rows, isolation]);
+  }, [steps, locking, rows, isolation, escalation]);
   useAddressBarQuery(shareQuery);
 
   function add(statement: string) {
@@ -731,6 +766,25 @@ export function ScheduleToolPage() {
             </div>
           </div>
         )}
+        {locking !== 'none' && (
+          <div className="flex flex-col gap-1 text-label text-ink-dim">
+            Escalation
+            <div className="flex gap-1" role="radiogroup" aria-label="Lock escalation">
+              {ESCALATIONS.map((e) => (
+                <button
+                  key={e}
+                  type="button"
+                  role="radio"
+                  aria-checked={escalation === e}
+                  onClick={() => { setEscalation(e); }}
+                  className={`${segBase} ${escalation === e ? segOn : segOff}`}
+                >
+                  {e === 0 ? 'Off' : `After ${String(e)} locks`}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         <div className="flex flex-col gap-1 text-label text-ink-dim">
           Accounts
           <div className="flex gap-1" role="radiogroup" aria-label="Number of accounts">
@@ -774,6 +828,15 @@ export function ScheduleToolPage() {
                       ? 'Repeatable read holds read locks to the end, but locks only rows that exist: a new matching row can still appear.'
                       : 'Serializable also holds each read’s WHERE as a lock, so an insert that would match it waits.'
               }`}
+          {/* plan.md §27.5 T2: the hierarchy above every lock, and what escalation trades. */}
+          {locking !== 'none' &&
+            ` Above each ${locking === 'page' ? 'page' : 'row'} lock it takes an intention lock — IS to read, IX to write — on the table${
+              locking === 'page' ? '' : ' and the page'
+            }, so a lock on the whole table could see it (the locks sandbox computes which modes can share).${
+              escalation > 0
+                ? ` Past ${String(escalation)} ${locking === 'page' ? 'page' : 'row'} locks on the table, a transaction escalates: one S or X on the table instead, its finer locks let go — and every other transaction's intention on the table waits.`
+                : ''
+            }`}
         </p>
       </div>
 
@@ -788,6 +851,7 @@ export function ScheduleToolPage() {
               setLocking(p.locking);
               setRows(p.rows);
               setIsolation(p.isolation ?? DEFAULT_ISOLATION);
+              setEscalation(p.escalation ?? 0);
             }}
             className={btnSecondary}
           >

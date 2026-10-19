@@ -158,3 +158,13 @@ test('a lost update draws a cycle in the precedence graph, and the replay check 
   await expect(panel.getByText('The replay check agrees')).toBeVisible();
   await expect(panel.getByRole('cell', { name: 'rw — read it, then the other overwrote it' })).toBeVisible();
 });
+
+// plan.md §27.5 T2: intention locks above every row lock, and escalation's price.
+test('escalation trades three row locks for a table lock, and a reader of another row waits', async ({ page }) => {
+  await page.goto('/tools/schedule');
+  await page.getByRole('button', { name: 'Escalation' }).click();
+  await expect(page.getByRole('radio', { name: 'After 2 locks' })).toHaveAttribute('aria-checked', 'true');
+  await expect(page.getByText(/A would hold more than 2 locks on accounts, so it escalates/)).toBeVisible();
+  await expect(page.getByText('B requests an intention-shared (IS) lock on the table accounts, held by A — it must wait.')).toBeVisible();
+  await expect.poll(() => page.url()).toContain('e=2');
+});

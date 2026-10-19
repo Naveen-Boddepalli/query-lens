@@ -11,6 +11,20 @@ Work toward **v3** (plan.md §27), on the branch `version/v3`.
 
 ### Added
 
+- **Multi-granularity locking** (plan.md §27.5 T2) — the lock table has five modes, **IS, IX, S, SIX and X**, over a
+  table → page → row hierarchy. Their compatibility matrix is computed, not typed in: each mode is what it lets its
+  holder do to the whole resource and below it, and two modes conflict when one writes something the other reads or
+  writes — the result is the textbook's matrix, which a test holds it to. A transaction holds one mode per resource,
+  and asking for more asks for the weakest that covers both (S held, IX asked: SIX). On
+  [Transaction schedules](/tools/schedule) every page or row lock now sits under an intention lock on each resource
+  above it, taken top down (an `UPDATE` under row locks holds IX on the table, IX on the page and X on the row; an
+  `INSERT` says IX on the table before it writes), and at `READ COMMITTED` a statement's IS locks go with its shared
+  ones. No schedule's outcome changes — every Hermitage cell and the protocol fuzz are as they were — only the lock
+  lists are longer. **Lock escalation**, off by default: *Escalation* (`e` in the link) makes a transaction past 2 or 5
+  row locks on a table trade them for one table lock, S or X, and the new *Escalation* example shows the price — a
+  reader of a row nobody touched waits on its IS. The [locks sandbox](/tools/locks) offers all five modes (its scripts
+  read `is`, `ix`, `six`) and draws the matrix with what each mode does. Checked by 11 unit tests (each of ten
+  mutations fails at least one), the lock-script tests, and two e2e tests.
 - **The precedence graph** (plan.md §27.5 T1, the first 3.1 item) — on [Transaction schedules](/tools/schedule),
   every run drawn as its committed transactions with an arrow for each pair of conflicting operations on a row:
   **ww**, **wr** and **rw**, a cycle drawn in the warning colour and named (*Cycle: B → A → B … not

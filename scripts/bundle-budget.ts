@@ -400,6 +400,10 @@ const T = (name: string): string => `src/pages/tools/${name}.tsx`;
  *  - 2026-10-19, the precedence graph (plan.md §27.5 T1): /tools/schedule now carries the graph's engine module, its
  *    panel and the replay check (`serialCheck`, which only /tools/concurrency loaded before) — 196.1 kB, raised to
  *    measured + 3, rounded up: 193 → 200. No other route imports them.
+ *  - 2026-10-19, multi-granularity locking (plan.md §27.5 T2): the docs chunk 174.5 kB — two Locks bullets in
+ *    reference/limits and a sentence in the course map — so /docs and the three essays that share it were raised to
+ *    measured + 3, rounded up: 174 → 178. The lock table's five modes, the computed matrix and `combine` reach
+ *    `ScriptChallengeView` through the lock scripts: 31.1 kB, raised 31 → 35.
  */
 export const ROUTES: readonly RouteBudget[] = [
   { route: '/', roots: [P('LandingPage')], kb: 177, note: 'the landing page' },
@@ -440,11 +444,11 @@ export const ROUTES: readonly RouteBudget[] = [
   { route: '/tools/columnar', roots: [T('ColumnarToolPage')], kb: 114, note: 'NSM/DSM/PAX row vs. column storage sandbox' },
   { route: '/tools/vector-index', roots: [T('VectorIndexToolPage')], kb: 115, note: 'brute force vs. IVF vs. HNSW vector search' },
   { route: '/tools/latch-crabbing', roots: [T('LatchCrabbingToolPage')], kb: 179, note: 'latch crabbing: naive vs. lock coupling vs. optimistic coupling on a scripted B+Tree workload' },
-  { route: '/docs', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 174, note: 'the docs shell and every prose page (one shared chunk)' },
+  { route: '/docs', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 178, note: 'the docs shell and every prose page (one shared chunk)' },
   { route: '/docs/concepts/btree', roots: ['src/ui/DocsLayout.tsx', 'src/pages/DocsContent/concepts/btree.mdx'], kb: 205, note: 'a concept page with a live B+Tree widget' },
-  { route: '/docs/essays/index-write-tax', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 174, note: 'an essay: prose, with links into the B+Tree sandbox (plan.md §25.4 H2)' },
-  { route: '/docs/essays/repeatable-read', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 174, note: 'an essay: prose, with links into the isolation matrix and the schedule tool (plan.md §25.4 H2)' },
-  { route: '/docs/essays/scan-resistance', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 174, note: 'an essay: prose, with links into the buffer-pool sandbox under LRU and LRU-2 (plan.md §25.4 H2)' },
+  { route: '/docs/essays/index-write-tax', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 178, note: 'an essay: prose, with links into the B+Tree sandbox (plan.md §25.4 H2)' },
+  { route: '/docs/essays/repeatable-read', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 178, note: 'an essay: prose, with links into the isolation matrix and the schedule tool (plan.md §25.4 H2)' },
+  { route: '/docs/essays/scan-resistance', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 178, note: 'an essay: prose, with links into the buffer-pool sandbox under LRU and LRU-2 (plan.md §25.4 H2)' },
   { route: '/docs/concepts/buffer-pool', roots: ['src/ui/DocsLayout.tsx', 'src/pages/DocsContent/concepts/buffer-pool.mdx'], kb: 184, note: 'a concept page with a live buffer-pool widget' },
   { route: '/* (404)', roots: [P('NotFoundPage')], kb: 110, note: 'the not-found page' },
 ];
@@ -482,7 +486,7 @@ export const OPT_IN: readonly { key: string; kb: number; note: string; after?: s
   { key: 'src/perf/inp.ts', kb: 2, note: 'the opt-in INP recorder for the §9 study (§25.4 A6) — fetched only after a participant opts in' },
   { key: 'src/ui/WorkspaceDialog.tsx', kb: 6, after: 'src/pages/PlaygroundPage.tsx', note: 'the Workspaces dialog (§H7) — fetched only when Custom mode\'s Workspaces button is pressed' },
   { key: 'src/ui/DurabilityDialog.tsx', kb: 17, after: 'src/pages/PlaygroundPage.tsx', note: 'the Durability dialog (§25.4 E4): the write-ahead-log machine, crash and recovery — fetched only when the Playground\'s Durability button is pressed' },
-  { key: 'src/pages/challenges/ScriptChallengeView.tsx', kb: 31, after: 'src/pages/ChallengePage.tsx', note: 'a transaction or durability challenge: the schedule runner, the protocol comparison and the log machine — fetched only when one of those challenges is opened' },
+  { key: 'src/pages/challenges/ScriptChallengeView.tsx', kb: 35, after: 'src/pages/ChallengePage.tsx', note: 'a transaction or durability challenge: the schedule runner, the protocol comparison and the log machine — fetched only when one of those challenges is opened' },
   { key: 'src/pages/challenges/SettingsChallengeView.tsx', kb: 8, after: 'src/pages/ChallengePage.tsx', note: 'a storage, execution or isolation challenge: the form and the runner — no driver; each tool\'s own checks are the rows below, fetched when one of its challenges is opened' },
   ...SETTINGS_TOOL_CHECKS.map(([tool, kb, what]) => ({
     key: `src/pages/challenges/settings/${tool}.ts`,

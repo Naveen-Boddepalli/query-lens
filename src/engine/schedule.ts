@@ -37,7 +37,7 @@
 
 import { passes } from './exec/evaluate.ts';
 import { indexNameOf, indexSpecsOf } from './index/spec.ts';
-import { emptyTable, forget, holds, release, releaseAll, request } from './locks/lockTable.ts';
+import { combine, emptyTable, forget, heldBy, holds, modePhrase, release, releaseAll, request } from './locks/lockTable.ts';
 import type { LockMode, LockTableState } from './locks/lockTable.ts';
 import { parseStatement, walkExpr } from './parser/index.ts';
 import type { Expr } from './parser/index.ts';
@@ -88,6 +88,13 @@ export interface LockingOptions {
    * it began. Neither ever waits, so neither can deadlock.
    */
   protocol?: 'timestamp' | 'optimistic';
+  /**
+   * Lock escalation (plan.md §27.5 T2): once a statement would leave a transaction holding more than this many row (or,
+   * at page granularity, page) locks on one table, it asks for one lock on the whole table instead — S if it has only
+   * read there, X if it has written — and, once granted, lets the finer ones go. Fewer locks to keep, at the price of
+   * locking out every other transaction's intention on that table. Off when absent.
+   */
+  escalateAt?: number;
 }
 
 /** What a write did to one row, in the terms needed to put it back. Rows are identified by reference, not by value. */
@@ -533,6 +540,85 @@ export function runSchedule(
       locks: lockRows(),
       versions: mvcc ? versionRows() : [],
     });
+  }
+
+  /**
+   * The multi-granularity protocol (plan.md §27.5 T2): before a lock on a page or a row, an intention lock on each
+   * resource above it, the table first — IS above a shared lock, IX above an exclusive one. A leaf a table lock this
+   * transaction already holds covers is not asked for again; and past `escalateAt` leaf locks on one table, the leaves
+   * become one lock on the table (`escalated` names it, so the finer locks can be let go once it is granted).
+   */
+  function hierarchical(session: string, sql: string, leaves: Need[], db: Database): { needs: Need[]; escalated: Need[] } {
+    const multi = Object.keys(db.tables).length > 1;
+    const tableKey = (table: string) => `${table}/table`;
+    const target = targetOf(sql);
+    const out = new Map<string, Need>();
+    const ask = (need: Need): void => {
+      const had = out.get(need.key);
+      out.set(need.key, had ? { ...had, mode: combine(had.mode, need.mode) } : need);
+    };
+    const intent = (mode: LockMode): LockMode => (mode === 'exclusive' ? 'intention-exclusive' : 'intention-shared');
+    const parse = (key: string) => {
+      const m = /^(.+)\/(row|page)\/(\d+)$/.exec(key);
+      return m ? { table: m[1]!, level: m[2] as 'row' | 'page', id: Number(m[3]) } : null;
+    };
+    const covered = (table: string, mode: LockMode) => holds(locks, session, tableKey(table), mode === 'exclusive' ? 'exclusive' : 'shared');
+
+    // Escalation: how many leaf locks — rows, or pages at page granularity — this transaction would hold on each table,
+    // counting what it holds already. The intention locks above them are not leaves.
+    const leafLevel = rowLevel ? 'row' : 'page';
+    const byTable = new Map<string, { keys: Set<string>; mode: LockMode }>();
+    const count = (table: string, key: string, mode: LockMode) => {
+      const t = byTable.get(table) ?? { keys: new Set<string>(), mode: 'shared' as LockMode };
+      t.keys.add(key);
+      t.mode = combine(t.mode, mode);
+      byTable.set(table, t);
+    };
+    for (const leaf of leaves) {
+      const at = parse(leaf.key);
+      if (at?.level === leafLevel) count(at.table, leaf.key, leaf.mode);
+    }
+    for (const held of heldBy(locks, session)) {
+      const at = parse(held.resource);
+      if (at?.level === leafLevel && byTable.has(at.table)) count(at.table, held.resource, held.mode);
+    }
+    const escalated: Need[] = [];
+    if (locking?.escalateAt !== undefined) {
+      for (const [table, t] of byTable) {
+        if (t.keys.size <= locking?.escalateAt || covered(table, t.mode)) continue;
+        escalated.push({ key: tableKey(table), label: `the table ${table}`, mode: t.mode === 'exclusive' ? 'exclusive' : 'shared' });
+      }
+    }
+    const isEscalated = (table: string) => escalated.some((e) => e.key === tableKey(table));
+
+    // An INSERT under row locks says its intention on the table before it writes; its new row is locked once it exists.
+    if (target?.kind === 'insert' && rowLevel && !isEscalated(target.table)) {
+      ask({ key: tableKey(target.table), label: `the table ${target.table}`, mode: 'intention-exclusive' });
+    }
+    for (const e of escalated) ask(e);
+    const rest: Need[] = [];
+    for (const leaf of leaves) {
+      const at = parse(leaf.key);
+      if (!at) {
+        rest.push(leaf);
+        continue;
+      }
+      if (isEscalated(at.table) || covered(at.table, leaf.mode)) continue;
+      ask({ key: tableKey(at.table), label: `the table ${at.table}`, mode: intent(leaf.mode) });
+      if (at.level === 'row') {
+        const page = homePages.get(at.id) ?? 0;
+        ask({
+          key: `${at.table}/page/${String(page)}`,
+          label: multi ? `page ${String(page)} of ${at.table}` : `page ${String(page)}`,
+          mode: intent(leaf.mode),
+        });
+      }
+      rest.push(leaf);
+    }
+    // The table first, then each page, then the leaves — top down, as the protocol asks.
+    const tables = [...out.values()].filter((n) => n.key.endsWith('/table'));
+    const pages = [...out.values()].filter((n) => !n.key.endsWith('/table'));
+    return { needs: [...tables, ...pages, ...rest], escalated };
   }
 
   /** The locks a statement needs, in the order it will ask: what it reads is shared, what it changes is exclusive. */
@@ -1069,6 +1155,7 @@ export function runSchedule(
 
     // Under locking, take every lock the statement needs before it runs, holding each to the end of the transaction.
     let needs: Need[] = [];
+    let escalated: Need[] = [];
     const heldShared = new Set<string>();
     if (locking) {
       needs = footprint(sql, run, view);
@@ -1108,6 +1195,10 @@ export function runSchedule(
       // Any write waits for a predicate another session is holding that it would change, whatever level the writer
       // runs at: a lock is not optional for the one it is taken against.
       if (!mvcc) needs = [...needs, ...predicateNeeds(session, sql, run)];
+      // Intention locks above every page and row lock, and escalation past the threshold (plan.md §27.5 T2).
+      const layered = hierarchical(session, sql, needs, view);
+      needs = layered.needs;
+      escalated = layered.escalated;
       for (const n of needs) {
         if (n.mode === 'shared' && holds(locks, session, n.key, 'shared')) heldShared.add(n.key);
       }
@@ -1163,6 +1254,16 @@ export function runSchedule(
           return execute(step, resumed);
         }
       }
+    }
+
+    // An escalated table lock is held now: the row and page locks it covers go (plan.md §27.5 T2).
+    for (const e of escalated) {
+      const table = e.key.slice(0, -'/table'.length);
+      const finer = heldBy(locks, session).filter((h) => h.resource.startsWith(`${table}/row/`) || h.resource.startsWith(`${table}/page/`));
+      for (const h of finer) locks = release(locks, session, h.resource, h.mode, labelOf).state;
+      notes.push(
+        `${session} would hold more than ${String(locking?.escalateAt)} locks on ${table}, so it escalates: it holds ${modePhrase(e.mode)} lock on the whole table instead, and lets its ${plural(finer.length, 'finer lock')} go.`,
+      );
     }
 
     // Holding the key's lock, check the key against everything committed, whatever the snapshot — a unique index
@@ -1327,6 +1428,12 @@ export function runSchedule(
           const key = `${table}/row/${String(ridOf(entry.row))}`;
           const first = current.tables[table]?.columns[0];
           labels.set(key, `the row of ${table} with ${first ?? 'id'} = ${String(first === undefined ? '' : (entry.row[first] ?? 'NULL'))}`);
+          // Under a table lock it already holds, the row needs nothing more; otherwise IX on its page first.
+          if (holds(locks, session, `${table}/table`, 'exclusive')) continue;
+          const page = homePages.get(ridOf(entry.row)) ?? 0;
+          const pageKey = `${table}/page/${String(page)}`;
+          labels.set(pageKey, Object.keys(current.tables).length > 1 ? `page ${String(page)} of ${table}` : `page ${String(page)}`);
+          locks = request(locks, session, pageKey, 'intention-exclusive', labelOf).state;
           locks = request(locks, session, key, 'exclusive', labelOf).state;
         }
       }
@@ -1437,10 +1544,20 @@ export function runSchedule(
           locks = release(locks, session, need.key, 'shared', labelOf).state;
           released += 1;
         }
+        // And the IS locks above them (plan.md §27.5 T2): an IS stands only for shared locks below, and here none
+        // outlives its statement.
+        let intents = 0;
+        for (const h of heldBy(locks, session)) {
+          if (h.mode !== 'intention-shared') continue;
+          locks = release(locks, session, h.resource, h.mode, labelOf).state;
+          intents += 1;
+        }
         if (released > 0) {
           gaveBack = true;
           notes.push(
-            `${session} is at ${ISOLATION_LABELS[isolation]}, so it gives back the ${plural(released, 'shared lock')} this statement took.`,
+            `${session} is at ${ISOLATION_LABELS[isolation]}, so it gives back the ${plural(released, 'shared lock')} this statement took${
+              intents > 0 ? `, and the ${plural(intents, 'intention lock')} above them` : ''
+            }.`,
           );
         }
       } else if (isolation === 'serializable' && !mvcc) {

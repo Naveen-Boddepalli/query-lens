@@ -2,6 +2,8 @@ import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { heldBy, waitingBy } from '../../ui/lockSimulation.ts';
 import type { LockMode } from '../../ui/lockSimulation.ts';
+import { compatibilityMatrix, LOCK_MODES, MODE_SHORT, modeName, RIGHTS } from '../../engine/locks/lockTable.ts';
+import { ScrollRegion } from '../../ui/ScrollRegion.tsx';
 import {
   decodeLockSteps,
   encodeLockSteps,
@@ -41,7 +43,64 @@ import { useAddressBarQuery } from '../../ui/addressBar.ts';
 const TRANSACTIONS = LOCK_TRANSACTIONS;
 type Transaction = LockTransaction;
 const RESOURCES: readonly number[] = LOCK_PAGES;
-const MODES: LockMode[] = ['shared', 'exclusive'];
+const MODES: readonly LockMode[] = LOCK_MODES;
+
+
+/** What each mode does, in the words the matrix is computed from (plan.md §27.5 T2). A lock on the whole covers below. */
+const WHOLE_WORDS = ['nothing on the page itself', 'reads the whole page', 'writes the whole page'] as const;
+const BELOW_WORDS = ['', 'means to read rows below', 'means to write rows below'] as const;
+
+/**
+ * The compatibility matrix, computed by the engine from what each mode lets its holder do — not a table typed in. On
+ * this sandbox's pages the "below" is the rows of a page.
+ */
+function CompatibilityMatrix() {
+  const cells = compatibilityMatrix();
+  return (
+    <section className={card} aria-labelledby="matrix-heading">
+      <h2 id="matrix-heading" className="mb-1 text-body font-semibold text-ink">Which modes can share a page</h2>
+      <p className="mb-3 text-label text-ink-dim">
+        Computed, not drawn: each mode is what it lets its holder do to the whole page and to the rows below it, and two
+        modes conflict when one writes something the other reads or writes. The intention modes touch nothing on the
+        page itself — they say what will be locked below, where a real conflict waits — so IS and IX never wait for
+        each other.
+      </p>
+      <ScrollRegion label="Lock modes and their compatibility" className="overflow-x-auto">
+        <table className="w-full text-left text-label">
+          <caption className="sr-only">Compatibility of a mode held (row) with a mode requested (column)</caption>
+          <thead className="text-ink-dim">
+            <tr>
+              <th scope="col" className="py-1 pr-3 font-medium">Held \ requested</th>
+              {LOCK_MODES.map((m) => (
+                <th key={m} scope="col" className="py-1 pr-3 font-mono font-medium">{MODE_SHORT[m]}</th>
+              ))}
+              <th scope="col" className="py-1 font-medium">What it does</th>
+            </tr>
+          </thead>
+          <tbody>
+            {LOCK_MODES.map((held) => (
+              <tr key={held} className="border-t border-edge">
+                <th scope="row" className="py-1 pr-3 font-mono font-medium text-ink">{MODE_SHORT[held]}</th>
+                {LOCK_MODES.map((requested) => {
+                  const ok = cells.find((c) => c.held === held && c.requested === requested)!.compatible;
+                  return (
+                    <td key={requested} className={`py-1 pr-3 font-mono ${ok ? 'text-hit' : 'text-evict'}`}>
+                      <span aria-hidden>{ok ? '✓' : '✗'}</span>
+                      <span className="sr-only">{ok ? 'compatible' : 'conflicts'}</span>
+                    </td>
+                  );
+                })}
+                <td className="py-1 text-ink-dim">
+                  {held}: {[WHOLE_WORDS[RIGHTS[held].whole], BELOW_WORDS[RIGHTS[held].below]].filter(Boolean).join('; ')}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </ScrollRegion>
+    </section>
+  );
+}
 
 interface LogEntry {
   id: number;
@@ -178,10 +237,11 @@ export function LocksToolPage() {
                 type="button"
                 role="radio"
                 aria-checked={mode === m}
+                aria-label={m}
                 onClick={() => { setMode(m); }}
-                className={`${segBase} ${mode === m ? segOn : segOff}`}
+                className={`${segBase} ${mode === m ? segOn : segOff} font-mono`}
               >
-                {m}
+                {MODE_SHORT[m]}
               </button>
             ))}
           </div>
@@ -207,12 +267,12 @@ export function LocksToolPage() {
                 <>
                   {holders.map((h) => (
                     <p key={`${h.transaction}-${h.mode}`} className="text-label text-hit">
-                      {h.transaction} holds {h.mode}
+                      {h.transaction} holds {modeName(h.mode)}
                     </p>
                   ))}
                   {waiters.map((w) => (
                     <p key={`${w.transaction}-${w.mode}`} className="text-label text-ink-dim">
-                      {w.transaction} waits {w.mode}
+                      {w.transaction} waits {modeName(w.mode)}
                     </p>
                   ))}
                 </>
@@ -246,9 +306,9 @@ export function LocksToolPage() {
                     type="button"
                     onClick={() => { runRelease(t, r, m); }}
                     className={`${pill} hover:border-accent hover:text-ink`}
-                    title={`Release ${t}'s ${m} lock on page ${r}`}
+                    title={`Release ${t}'s ${modeName(m)} lock on page ${r}`}
                   >
-                    page {r} · {m} · release
+                    page {r} · {modeName(m)} · release
                   </button>
                 ))}
               </div>
@@ -257,7 +317,7 @@ export function LocksToolPage() {
                 {waits.length === 0 && <span className="text-label text-ink-dim">(nothing)</span>}
                 {waits.map(({ resource: r, mode: m }) => (
                   <span key={`${r}-${m}`} className={pill}>
-                    page {r} · {m}
+                    page {r} · {modeName(m)}
                   </span>
                 ))}
               </div>
@@ -265,6 +325,8 @@ export function LocksToolPage() {
           );
         })}
       </div>
+
+      <CompatibilityMatrix />
 
       <div className={`${panelSurface} min-h-48 flex-1 overflow-y-auto p-4`}>
         <h3 className="mb-2 text-body font-semibold text-ink">Timeline</h3>
