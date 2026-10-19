@@ -107,8 +107,13 @@ export function effectiveJoinAlgorithm(
   requested: JoinAlgorithm,
   joinTable: Table | undefined,
   rightColumn: string,
+  joinType?: JoinClause['joinType'],
 ): JoinAlgorithm {
+  // A cross join has no key: nested-loop is the only way to pair every row with every row (plan.md §27.5 S4).
+  if (joinType === 'cross') return 'nested-loop';
   if (requested !== 'index-nested-loop') return requested;
+  // RIGHT and FULL keep the inner rows nothing matched — which a probe never visits, so it gives way to a nested-loop.
+  if (joinType === 'right' || joinType === 'full') return 'nested-loop';
   // An index whose *leading* column is the join column will do — a composite one that starts with it is entered
   // through that one-column leftmost prefix.
   return joinTable && joinIndexFor(joinTable, rightColumn) ? requested : 'nested-loop';
@@ -134,7 +139,24 @@ export function buildJoinPlan(
   joinTables?: Record<string, Table>,
 ): Plan {
   let plan: Plan = { op: 'SeqScan', table: fromTable };
+  let previous = fromTable;
   for (const join of joins) {
+    // A cross join (plan.md §27.5 S4) has no ON: every row of the chain so far with every row of its table.
+    if (!join.on) {
+      plan = {
+        op: 'Join',
+        algorithm: 'nested-loop',
+        joinType: 'cross',
+        left: plan,
+        right: { op: 'SeqScan', table: join.table.name },
+        leftTable: previous,
+        rightTable: join.table.name,
+        leftColumn: '',
+        rightColumn: '',
+      };
+      previous = join.table.name;
+      continue;
+    }
     const { left, right } = join.on;
     if (left.kind !== 'column' || right.kind !== 'column') {
       throw new Error('unreachable: checkJoinOn guarantees a JOIN ON is column = column');
@@ -146,7 +168,7 @@ export function buildJoinPlan(
     const leftColumn = newTableIsLeftOperand ? right.name : left.name;
     const leftTable = (newTableIsLeftOperand ? right.table : left.table)!;
     const joinTable = joinTables?.[newTable];
-    const effective = effectiveJoinAlgorithm(algorithm, joinTable, rightColumn);
+    const effective = effectiveJoinAlgorithm(algorithm, joinTable, rightColumn, join.joinType);
     plan = {
       op: 'Join',
       algorithm: effective,
@@ -168,6 +190,7 @@ export function buildJoinPlan(
       leftColumn,
       rightColumn,
     };
+    previous = newTable;
   }
   return plan;
 }

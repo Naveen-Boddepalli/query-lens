@@ -187,10 +187,17 @@ export interface InSubquery {
  */
 export interface JoinClause {
   table: TableRef;
-  on: Extract<Expr, { kind: 'compare' }>;
-  /** `LEFT [OUTER] JOIN`: every row on the other side of this join survives, NULL-padded when nothing on `table`
-   *  matched it. Absent for a bare `JOIN` or an explicit `INNER JOIN` — the original, still-default inner-join shape. */
-  joinType?: 'left';
+  /** The equality the join matches on — absent exactly for a cross join, which keeps every pair (plan.md §27.5 S4). */
+  on?: Extract<Expr, { kind: 'compare' }>;
+  /**
+   * `LEFT [OUTER] JOIN`: every row on the other side of this join survives, NULL-padded when nothing on `table` matched
+   * it. `RIGHT [OUTER]` (plan.md §27.5 S4) keeps every row of `table` the same way, and `FULL [OUTER]` both; `CROSS`
+   * (or a comma in `FROM`) pairs every row with every row, with no `ON`. Absent for a bare `JOIN` or an explicit
+   * `INNER JOIN` — the original, still-default inner-join shape.
+   */
+  joinType?: 'left' | 'right' | 'full' | 'cross';
+  /** `FROM a, b` — a cross join written with a comma, as a textbook writes one (plan.md §27.5 S4). */
+  comma?: boolean;
   span: Span;
 }
 

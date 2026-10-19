@@ -763,6 +763,48 @@ export const CHALLENGES: Challenge[] = [
     ),
   },
   {
+    // plan.md §27.5 S4, on the `shop` preset: a FULL JOIN, each unmatched row once.
+    id: 'leave-no-one-out',
+    title: 'Leave no one out',
+    brief: (
+      <>
+        Return <code className="font-mono">customers.name</code> and <code className="font-mono">orders.id</code> for
+        every customer and every order: each order beside the customer who placed it, a customer with no order on a row of
+        their own, and an order with no customer on a row of its own.
+      </>
+    ),
+    hint: (
+      <>
+        A <code className="font-mono">LEFT JOIN</code> keeps the customers nothing matched, a{' '}
+        <code className="font-mono">RIGHT JOIN</code> the orders. One kind of join keeps both, padding whichever side is
+        missing with NULL.
+      </>
+    ),
+    starter: 'SELECT customers.name, orders.id\nFROM customers\nLEFT JOIN orders ON customers.id = orders.customerId;',
+    dataset: 'shop',
+    // Every matched pair once, the three customers who never ordered, and the two guest orders — however it was written.
+    check: (r) => {
+      if (r.error || !r.rows[0] || !('customers.name' in r.rows[0]) || !('orders.id' in r.rows[0])) return false;
+      const { customers, orders } = DATASETS.shop.make().tables;
+      const expected: string[] = [];
+      for (const o of orders!.rows) {
+        const c = customers!.rows.find((row) => o['customerId'] !== null && row['id'] === o['customerId']);
+        expected.push(`${String(c?.['name'] ?? null)}|${String(o['id'])}`);
+      }
+      for (const c of customers!.rows) if (!orders!.rows.some((o) => o['customerId'] === c['id'])) expected.push(`${String(c['name'])}|null`);
+      const got = r.rows.map((row) => `${String(row['customers.name'])}|${String(row['orders.id'])}`);
+      return got.length === expected.length && [...got].sort().join() === [...expected].sort().join();
+    },
+    misconception: (
+      <>
+        A <code className="font-mono">FULL JOIN</code> is a <code className="font-mono">LEFT JOIN</code> and a{' '}
+        <code className="font-mono">RIGHT JOIN</code> stacked together. Stack them with{' '}
+        <code className="font-mono">UNION ALL</code> and every matched pair comes back twice — once from each. A{' '}
+        <code className="font-mono">FULL JOIN</code> returns each pair once, then each row nothing matched once.
+      </>
+    ),
+  },
+  {
     id: 'and-before-or',
     title: 'Where the AND lands',
     brief: (

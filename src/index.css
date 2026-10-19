@@ -354,6 +354,8 @@ body,
 
 html {
   scroll-behavior: smooth;
+  /* The sticky header's height, which TopNav measures as it wraps: what scrolls into view lands below it. */
+  scroll-padding-top: var(--header-h, 0px);
 }
 
 /* plan.md §15.1 item 4. Without this the UA renders its own chrome in the
@@ -470,7 +472,8 @@ body {
 }
 .prose :where(h1, h2, h3):not(:where([class~='not-prose'] *)) {
   letter-spacing: -0.015em;
-  scroll-margin-top: 5rem;
+  /* Beyond the header, which the scrollport's own padding already clears. */
+  scroll-margin-top: 1rem;
 }
 .prose :where(h2):not(:where([class~='not-prose'] *)) {
   margin-top: 2.4em;

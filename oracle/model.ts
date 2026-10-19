@@ -126,8 +126,13 @@ export interface ExistsSub {
 /** One step of a left-deep join chain: `[LEFT] JOIN table ON l = r`, where one side names `table`. */
 export interface JoinStep {
   table: string;
-  type: 'inner' | 'left';
+  /** `right`, `full` and `cross` since plan.md §27.5 S4. A cross join has no ON: its `on` is only the key a WHERE may state. */
+  type: 'inner' | 'left' | 'right' | 'full' | 'cross';
   on: { l: Ref; r: Ref };
+  /** A cross join written `FROM a, b`, as a textbook writes one. */
+  comma?: boolean;
+  /** A cross join whose `on` is added to WHERE — the shape QueryLens's `product-to-join` rule turns into a join. */
+  keyInWhere?: boolean;
 }
 
 /** One SELECT of a compound query (plan.md §27.5 S3): plain columns of one table, filtered, maybe DISTINCT. */
@@ -342,8 +347,21 @@ export function outputKeys(q: ReadQuery, tables: readonly TableSpec[]): string[]
  */
 export type Dialect = 'querylens' | 'sqlite';
 
+const JOIN_WORDS: Record<JoinStep['type'], string> = { inner: '', left: 'LEFT ', right: 'RIGHT ', full: 'FULL ', cross: 'CROSS ' };
 const renderJoins = (joins: readonly JoinStep[] | undefined): string =>
-  (joins ?? []).map((j) => ` ${j.type === 'left' ? 'LEFT ' : ''}JOIN ${j.table} ON ${renderRef(j.on.l)} = ${renderRef(j.on.r)}`).join('');
+  (joins ?? [])
+    .map((j) =>
+      j.type === 'cross'
+        ? j.comma
+          ? `, ${j.table}`
+          : ` CROSS JOIN ${j.table}`
+        : ` ${JOIN_WORDS[j.type]}JOIN ${j.table} ON ${renderRef(j.on.l)} = ${renderRef(j.on.r)}`,
+    )
+    .join('');
+
+/** The keys cross joins with `keyInWhere` state in WHERE instead of ON (plan.md §27.5 S4). */
+export const crossKeysOf = (joins: readonly JoinStep[] | undefined): Pred[] =>
+  (joins ?? []).flatMap((j) => (j.type === 'cross' && j.keyInWhere ? [{ k: 'colcmp', a: j.on.l, op: '=', b: j.on.r } satisfies Pred] : []));
 
 export function renderQuery(q: Query, dialect: Dialect = 'querylens'): string {
   const page = (n: number | undefined, offset: number | undefined) =>

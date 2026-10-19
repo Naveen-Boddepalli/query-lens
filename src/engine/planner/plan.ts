@@ -67,8 +67,10 @@ export type Plan =
        *  unmatched `left` row simply does not appear. `semi` and `anti` (plan.md §27.5 S1) are how a correlated
        *  `EXISTS` and `NOT EXISTS` run: a `left` row comes out at most once and unchanged — kept when it has a match on
        *  `right` (semi) or when it has none (anti) — and `right`'s columns never reach the rows above. Always after
-       *  every inner and LEFT join in a chain. */
-      joinType?: 'left' | 'semi' | 'anti';
+       *  every inner and LEFT join in a chain. `right` and `full` (plan.md §27.5 S4) keep `right`'s unmatched rows too,
+       *  NULL-padded on every column of `left`'s tables; `cross` pairs every row with every row — no key, so
+       *  `leftColumn`/`rightColumn` are empty and only nested-loop can run it. */
+      joinType?: 'left' | 'right' | 'full' | 'cross' | 'semi' | 'anti';
       /** A semi- or anti-join's further condition on each key-matched pair (plan.md §27.5 S1) — the rest of the
        *  subquery's `WHERE` that names both tables, qualified, read off the two rows merged. */
       residual?: Expr;
@@ -487,10 +489,12 @@ function raOf(plan: Plan): RaInfo {
     case 'SetOp':
       return { symbol: plan.kind === 'union' ? '∪' : plan.kind === 'intersect' ? '∩' : '−' };
     case 'Join':
-      return {
-        symbol: joinSymbol(plan),
-        sub: `${plan.leftTable}.${plan.leftColumn} = ${plan.rightTable}.${plan.rightColumn}${plan.residual ? ` AND ${exprToSql(plan.residual)}` : ''}`,
-      };
+      return plan.joinType === 'cross'
+        ? { symbol: '×' }
+        : {
+            symbol: joinSymbol(plan),
+            sub: `${plan.leftTable}.${plan.leftColumn} = ${plan.rightTable}.${plan.rightColumn}${plan.residual ? ` AND ${exprToSql(plan.residual)}` : ''}`,
+          };
     case 'HashAggregate':
     case 'SortAggregate': {
       const keys = plan.aggregates.map((a) => a.key).join(', ');
@@ -516,18 +520,39 @@ function raOf(plan: Plan): RaInfo {
   }
 }
 
-/** A `Join`'s relational-algebra symbol: ⋈, or ⋉ for a semi-join and ▷ for an anti-join (plan.md §27.5 S1). */
-function joinSymbol(plan: Extract<Plan, { op: 'Join' }>): '⋈' | '⋉' | '▷' {
+/**
+ * A `Join`'s relational-algebra symbol: ⋈ for an inner join, ⟕ ⟖ ⟗ for the outer joins and × for a cross join (plan.md
+ * §27.5 S4 — LEFT's was ⋈ until then, which the algebra does not mean), ⋉ and ▷ for a semi- and an anti-join (S1).
+ */
+function joinSymbol(plan: Extract<Plan, { op: 'Join' }>): RaInfo['symbol'] {
   switch (plan.joinType) {
     case 'semi':
       return '⋉';
     case 'anti':
       return '▷';
-    // A LEFT JOIN keeps its ⋈ (plan.md §25.4 B5's reading); only the subquery joins have symbols of their own here.
+    case 'left':
+      return '⟕';
+    case 'right':
+      return '⟖';
+    case 'full':
+      return '⟗';
+    case 'cross':
+      return '×';
     default:
       return '⋈';
   }
 }
+
+/** A `Join`'s label word: `Join` for an inner join, otherwise its kind (plan.md §27.5 S4). */
+const JOIN_WORD: Record<NonNullable<Extract<Plan, { op: 'Join' }>['joinType']> | 'inner', string> = {
+  inner: 'Join',
+  left: 'Left join',
+  right: 'Right join',
+  full: 'Full join',
+  cross: 'Cross join',
+  semi: 'Semi-join',
+  anti: 'Anti-join',
+};
 
 function convert(
   plan: Plan,
@@ -568,9 +593,12 @@ function convertBody(
         op: 'Join',
         label:
           plan.joinType === 'semi' || plan.joinType === 'anti'
-            ? `${plan.joinType === 'semi' ? 'Semi-join' : 'Anti-join'} (${plan.algorithm}) ${plan.leftTable} ${joinSymbol(plan)} ${plan.rightTable}`
-            : `Join (${plan.algorithm}) ${plan.leftTable} × ${plan.rightTable}`,
-        detail: `on: ${plan.leftTable}.${plan.leftColumn} = ${plan.rightTable}.${plan.rightColumn}${plan.residual ? ` · and: ${exprToSql(plan.residual)}` : ''}`,
+            ? `${JOIN_WORD[plan.joinType]} (${plan.algorithm}) ${plan.leftTable} ${joinSymbol(plan)} ${plan.rightTable}`
+            : `${JOIN_WORD[plan.joinType ?? 'inner']} (${plan.algorithm}) ${plan.leftTable} × ${plan.rightTable}`,
+        detail:
+          plan.joinType === 'cross'
+            ? 'every pair of rows'
+            : `on: ${plan.leftTable}.${plan.leftColumn} = ${plan.rightTable}.${plan.rightColumn}${plan.residual ? ` · and: ${exprToSql(plan.residual)}` : ''}`,
         // `rightTable` is the table this specific `Join` step introduces — unique across a chain, since the parser
         // never allows a query to name the same table twice (plan.md §25.4 C3 slice b) — so it is what disambiguates
         // this node from another `Join` in the same chain for EXPLAIN ANALYZE's actual-row lookup (see `table`'s

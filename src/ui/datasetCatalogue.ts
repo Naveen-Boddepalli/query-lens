@@ -101,6 +101,9 @@ export const DATASET_CATALOGUE: Record<DatasetId, DatasetCatalogueEntry> = {
       { label: 'NOT IN meets a NULL', sql: 'SELECT name\nFROM customers\nWHERE id NOT IN (SELECT customerId FROM orders);' },
       // plan.md §27.5 S3: the same three customers, by set difference.
       { label: 'EXCEPT', sql: 'SELECT id\nFROM customers\nEXCEPT\nSELECT customerId\nFROM orders;' },
+      // plan.md §27.5 S4: every customer and every order, each unmatched row once; then every pair.
+      { label: 'FULL JOIN', sql: 'SELECT customers.name, orders.id\nFROM customers\nFULL JOIN orders ON customers.id = orders.customerId;' },
+      { label: 'CROSS JOIN', sql: 'SELECT customers.name, products.name\nFROM customers\nCROSS JOIN products;' },
       {
         label: 'Orders per customer',
         sql: 'SELECT customers.name, COUNT(orders.id)\nFROM customers\nLEFT JOIN orders ON customers.id = orders.customerId\nGROUP BY customers.name\nORDER BY COUNT(orders.id) DESC;',

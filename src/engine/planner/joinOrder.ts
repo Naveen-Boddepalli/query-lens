@@ -227,6 +227,8 @@ export function joinGraphFromAst(
   const nodes: JoinOrderNode[] = [nodeFor(ast.from.name)];
   const edges: JoinOrderEdge[] = [];
   for (const join of ast.joins ?? []) {
+    // A cross join has no edge: every caller keeps it out (`isReorderableChain`, emit's join-order note).
+    if (!join.on) continue;
     const { left, right } = join.on;
     if (left.kind !== 'column' || right.kind !== 'column') continue; // unreachable: checkJoinOn guarantees this
     const newTable = join.table.name;
@@ -254,10 +256,13 @@ export function writtenOrderFromAst(ast: SelectStatement): string[] {
   return [ast.from.name, ...(ast.joins ?? []).map((j) => j.table.name)];
 }
 
-/** A chain real execution may reorder (plan.md §25.4 C5 slice 3): 2+ `JOIN`s, none of them `LEFT`. */
+/**
+ * A chain real execution may reorder (plan.md §25.4 C5 slice 3): 2+ `JOIN`s, every one a plain inner join — no LEFT,
+ * RIGHT or FULL (not commutative or associative in general) and no CROSS (no edge to price, plan.md §27.5 S4).
+ */
 export function isReorderableChain(ast: SelectStatement): boolean {
   const joins = ast.joins ?? [];
-  return joins.length >= 2 && joins.every((j) => j.joinType !== 'left');
+  return joins.length >= 2 && joins.every((j) => j.joinType === undefined);
 }
 
 /**

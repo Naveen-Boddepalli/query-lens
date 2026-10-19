@@ -105,8 +105,8 @@ test('the parser sandbox shows the token stream and the parser\'s own errors', a
   await expect(page.getByText(/Parsed ·/)).toContainText('recursion depth');
 
   // Unsupported SQL tokenizes fine but the parser rejects it by name.
-  await src.fill('SELECT * FROM users CROSS JOIN logins');
-  await expect(page.getByText(/`CROSS` is not supported yet/)).toBeVisible();
+  await src.fill('SELECT * FROM users JOIN logins USING (id)');
+  await expect(page.getByText(/`USING` is not supported yet/)).toBeVisible();
   await expect(page.getByText(/not in the v0 subset/)).toBeVisible();
 
   // A lexing failure is reported where it happens, not swallowed — the ribbon
@@ -492,7 +492,7 @@ test('the planner sandbox runs the rewrite rules one at a time', async ({ page }
   await expect(page.getByText('optimized · unchanged')).toBeVisible();
   await expect(page.getByText(/predicate-pushdown — turned off/)).toBeVisible();
   await expect.poll(() => page.url()).toMatch(
-    /rules=constant-folding%2Cjoin-predicate-pushdown%2Cjoin-algorithm-selection%2Cindex-selection%2Crange-index-selection%2Cindex-only-scan/,
+    /rules=constant-folding%2Cproduct-to-join%2Cjoin-predicate-pushdown%2Cjoin-algorithm-selection%2Cindex-selection%2Crange-index-selection%2Cindex-only-scan/,
   );
 });
 
@@ -1540,6 +1540,20 @@ test('UNION, INTERSECT and EXCEPT run in the Playground and draw in the parser s
   await page.goto(`/tools/parser?src=${encodeURIComponent('SELECT id FROM users UNION ALL SELECT id FROM logins')}`);
   await expect(page.getByRole('treeitem', { name: /^UNION ALL/ })).toBeVisible();
   await expect(page.getByRole('treeitem', { name: /^SELECT/ })).toHaveCount(2);
+});
+
+test('RIGHT, FULL and CROSS JOIN run in the Playground, and a FULL JOIN reads ⟗ in the algebra (plan.md §27.5 S4)', async ({ page }) => {
+  await page.goto('/playground?t=shop&x=0');
+  await page.getByRole('button', { name: 'CROSS JOIN', exact: true }).click();
+  await page.getByLabel('Scrub to step').press('End');
+  await expect(page.getByText('96 rows returned').first()).toBeVisible();
+
+  await page.getByRole('button', { name: 'FULL JOIN', exact: true }).click();
+  await page.getByLabel('Scrub to step').press('End');
+  await expect(page.getByText('43 rows returned').first()).toBeVisible();
+  await page.getByRole('button', { name: /^Planner/ }).click();
+  await page.getByRole('group', { name: 'Plan notation' }).getByRole('button', { name: 'Relational algebra' }).click();
+  await expect(page.locator('.react-flow__node').getByText(/⟗/).first()).toBeVisible();
 });
 
 test('a link that names a dataset reopens on it, in the Playground and the inspector', async ({

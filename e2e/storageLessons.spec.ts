@@ -26,11 +26,11 @@ test('the learn track groups the pipeline, the storage structures and the transa
   // The sort, the hash join and the join order sit with the pipeline; the six structures have their own group.
   const pipeline = page.getByRole('region', { name: 'The query pipeline' });
   await expect(pipeline.getByRole('link', { name: /Sort more than fits in memory/ })).toBeVisible();
-  await expect(pipeline.getByRole('listitem')).toHaveCount(19);
+  await expect(pipeline.getByRole('listitem')).toHaveCount(20);
   const storage = page.getByRole('region', { name: 'Storage engines and access methods' });
   await expect(storage.getByRole('listitem')).toHaveCount(6);
   await expect(storage.getByRole('link', { name: /Write fast, pay later/ })).toBeVisible();
-  await expect(page.getByText(/^0 of 33 complete$/)).toBeVisible();
+  await expect(page.getByText(/^0 of 34 complete$/)).toBeVisible();
 });
 
 for (const id of LESSON_IDS) {

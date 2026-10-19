@@ -11,7 +11,8 @@
  *   compound      := selectCore setOp+ [ORDER BY qualifiedColumn [ASC|DESC]]
  *                     [LIMIT number [OFFSET number]] [';'] EOF
  *   setOp         := (UNION [ALL] | INTERSECT | EXCEPT) selectCore
- *   join          := [INNER | LEFT [OUTER]] JOIN identifier ON qualifiedColumn '=' qualifiedColumn
+ *   join          := [INNER | LEFT [OUTER] | RIGHT [OUTER] | FULL [OUTER]] JOIN identifier ON qualifiedColumn '=' qualifiedColumn
+ *                  | CROSS JOIN identifier | ',' identifier
  *   delete        := DELETE FROM identifier [WHERE expr] [';'] EOF
  *   insert        := INSERT INTO identifier [columnList] VALUES valueList [';'] EOF
  *   update        := UPDATE identifier SET assignment (',' assignment)* [WHERE expr] [';'] EOF
@@ -131,9 +132,6 @@ class ParseError extends Error {
 
 /** Keywords that tokenise cleanly but land outside the v0 subset. */
 const OUT_OF_SCOPE: Record<string, string> = {
-  RIGHT: 'RIGHT JOIN is not in the v0 subset — write it the other way round: swap the two tables and use a LEFT JOIN.',
-  FULL: 'FULL (OUTER) JOIN is not in the v0 subset — an inner or a LEFT JOIN only.',
-  CROSS: 'CROSS JOIN is not in the v0 subset — JOIN ... ON needs an equality.',
   USING: 'USING is not in the v0 subset — write the equality out: JOIN t ON a.x = t.y.',
   DISTINCT: 'DISTINCT applies to the whole SELECT list — write `SELECT DISTINCT a, b …`. Inside an aggregate, `COUNT(DISTINCT x)` is not supported yet.',
   CREATE: 'QueryLens only runs SELECT, DELETE, INSERT and UPDATE. Edit the seed data to change the table.',
@@ -543,20 +541,36 @@ function parseTableRef(c: Cursor): TableRef {
 /** `[INNER | LEFT [OUTER]] JOIN identifier ON qualifiedColumn '=' qualifiedColumn`, if present (plan.md §25.4 C3). */
 function parseJoin(c: Cursor): JoinClause | undefined {
   const first = c.peek();
-  const isLeft = isKeyword(first, 'LEFT');
-  const isInner = isKeyword(first, 'INNER');
-  if (!isLeft && !isInner && !isKeyword(first, 'JOIN')) return undefined;
+  // `FROM a, b` (plan.md §27.5 S4): a cross join, written as a textbook writes one — a WHERE then says how they match.
+  if (first.type === 'comma') {
+    c.next();
+    const table = parseTableRef(c);
+    return { table, joinType: 'cross', comma: true, span: { from: first.from, to: table.span.to } };
+  }
+  const word = isKeyword(first, 'LEFT', 'RIGHT', 'FULL', 'CROSS', 'INNER') ? first.upper : null;
+  if (word === null && !isKeyword(first, 'JOIN')) return undefined;
 
   let joinType: JoinClause['joinType'];
-  if (isLeft) {
+  if (word !== null) {
     c.next();
-    if (isKeyword(c.peek(), 'OUTER')) c.next();
-    joinType = 'left';
-  } else if (isInner) {
-    c.next();
+    if (word !== 'CROSS' && word !== 'INNER' && isKeyword(c.peek(), 'OUTER')) c.next();
+    if (word === 'LEFT') joinType = 'left';
+    else if (word === 'RIGHT') joinType = 'right';
+    else if (word === 'FULL') joinType = 'full';
+    else if (word === 'CROSS') joinType = 'cross';
   }
-  c.expectKeyword('JOIN', isLeft || isInner ? 'after LEFT/INNER' : 'to begin a join');
+  c.expectKeyword('JOIN', word !== null ? `after ${word}` : 'to begin a join');
   const table = parseTableRef(c);
+  if (joinType === 'cross') {
+    if (isKeyword(c.peek(), 'ON')) {
+      throw new ParseError(
+        'CROSS JOIN takes no ON.',
+        c.peek(),
+        'A cross join keeps every pair of rows. For a condition, write `JOIN … ON`, or put it in WHERE — the optimizer turns a product with an equality into a join.',
+      );
+    }
+    return { table, joinType, span: { from: first.from, to: table.span.to } };
+  }
   c.expectKeyword('ON', 'after the joined table name');
   const on = parseComparison(c);
   checkJoinOn(on);
@@ -596,8 +610,6 @@ function checkJoinOn(on: Extract<Expr, { kind: 'compare' }>): void {
  * `ON` was never actually checked against `FROM`'s and its own table name; `buildJoinPlan` just assumed it).
  */
 function checkJoinChain(join: JoinClause, known: ReadonlySet<string>): void {
-  const { left, right } = join.on;
-  if (left.kind !== 'column' || right.kind !== 'column') return; // unreachable: checkJoinOn already guarantees this
   const newTable = join.table.name;
   if (known.has(newTable)) {
     throw new ParseError(
@@ -606,6 +618,9 @@ function checkJoinChain(join: JoinClause, known: ReadonlySet<string>): void {
       'Joining the same table twice needs an alias, which v0 does not have — give the table a different name in a copy of the data instead.',
     );
   }
+  if (!join.on) return; // a cross join has no ON to check (plan.md §27.5 S4)
+  const { left, right } = join.on;
+  if (left.kind !== 'column' || right.kind !== 'column') return; // unreachable: checkJoinOn already guarantees this
   const leftIsNew = left.table === newTable;
   const rightIsNew = right.table === newTable;
   if (!leftIsNew && !rightIsNew) {

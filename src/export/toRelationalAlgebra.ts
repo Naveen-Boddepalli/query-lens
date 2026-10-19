@@ -26,7 +26,7 @@ const isScanSelection = (ra: RaInfo): boolean => ra.symbol === 'σ' && ra.rel !=
  * The binary operators, written between their two arguments: a join, a semi- or anti-join (plan.md §27.5 S1), and the
  * set operators ∪ ∩ − (§27.5 S3).
  */
-const BINARY: ReadonlySet<RaInfo['symbol']> = new Set(['⋈', '⋉', '▷', '∪', '∩', '−']);
+const BINARY: ReadonlySet<RaInfo['symbol']> = new Set(['⋈', '⟕', '⟖', '⟗', '×', '⋉', '▷', '∪', '∩', '−']);
 const isJoin = (ra: RaInfo | undefined): boolean => ra !== undefined && BINARY.has(ra.symbol);
 
 /** `σ_{p}` — the operator and its subscript, without its argument. */
@@ -85,6 +85,11 @@ const LATEX_SYMBOL: Record<Exclude<RaInfo['symbol'], 'rel'>, string> = {
   σ: '\\sigma',
   π: '\\pi',
   '⋈': '\\bowtie',
+  // No standard LaTeX command draws the outer joins; the Unicode glyphs need XeLaTeX, LuaLaTeX, KaTeX or MathJax.
+  '⟕': '\\mathbin{⟕}',
+  '⟖': '\\mathbin{⟖}',
+  '⟗': '\\mathbin{⟗}',
+  '×': '\\times',
   '⋉': '\\ltimes',
   '▷': '\\triangleright',
   '∪': '\\cup',

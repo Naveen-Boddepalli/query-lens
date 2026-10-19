@@ -81,6 +81,7 @@ const POLICIES = [
 const RULES = [
   { value: 'constant-folding', label: 'constant-folding' },
   { value: 'predicate-pushdown', label: 'predicate-pushdown' },
+  { value: 'product-to-join', label: 'product-to-join' },
   { value: 'join-predicate-pushdown', label: 'join-predicate-pushdown' },
   { value: 'join-algorithm-selection', label: 'join-algorithm-selection' },
   { value: 'index-selection', label: 'index-selection' },
@@ -607,7 +608,7 @@ export const SETTINGS_CHALLENGES: SettingsChallenge[] = [
     tool: 'planner',
     brief: (
       <>
-        The planner has seven rewrite rules, all on. For {code('SELECT name, email FROM users WHERE id = 5 AND age > 30')}{' '}
+        The planner has eight rewrite rules, all on. For {code('SELECT name, email FROM users WHERE id = 5 AND age > 30')}{' '}
         the result is an {code('IndexScan')}. Switch rules off until <strong>at most two remain</strong> and the plan is
         still an {code('IndexScan')}.
       </>
@@ -622,7 +623,7 @@ export const SETTINGS_CHALLENGES: SettingsChallenge[] = [
     controls: [{ kind: 'checks', key: 'rules', label: 'Rules that are on', options: RULES }],
     starter: {
       rules:
-        'constant-folding,predicate-pushdown,join-predicate-pushdown,join-algorithm-selection,index-selection,range-index-selection,index-only-scan',
+        'constant-folding,predicate-pushdown,product-to-join,join-predicate-pushdown,join-algorithm-selection,index-selection,range-index-selection,index-only-scan',
     },
     misconception: (
       <>

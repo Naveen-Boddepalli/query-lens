@@ -107,6 +107,13 @@ export const LESSON_GROUPS: readonly LessonGroup[] = [
         summary: 'Two SELECTs, one result: every row, each row once, the rows in both, the rows in one and not the other — and why a NULL does not trip EXCEPT.',
       },
       {
+        // plan.md §27.5 S4, on the `shop` preset.
+        id: 'outer-joins',
+        title: 'RIGHT, FULL and CROSS JOIN',
+        minutes: 5,
+        summary: 'The rows an inner join drops, kept on the right or on both sides — and the cross product a WHERE equality turns back into a join.',
+      },
+      {
         id: 'tokens-and-trees',
         title: 'From text to tokens to a tree',
         minutes: 3,
@@ -122,7 +129,7 @@ export const LESSON_GROUPS: readonly LessonGroup[] = [
         id: 'planner-rules',
         title: 'Rewrite rules need each other',
         minutes: 3,
-        summary: 'Seven rules, two of which make a lookup — and what each does alone.',
+        summary: 'Eight rules, two of which make a lookup — and what each does alone.',
       },
       {
         id: 'buffer-pool',

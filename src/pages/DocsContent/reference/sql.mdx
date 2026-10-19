@@ -36,13 +36,23 @@ SELECT * FROM users ORDER BY id LIMIT 10 OFFSET 20;
 - **`FROM`**: exactly one table, plus zero or more `JOIN`s, chained left-deep (plan.md §25.4 C3 slice b):
   `FROM a JOIN b ON … JOIN c ON …` joins `c` to whatever `a ⋈ b` already produced, not to `a` and `b`
   independently.
-- **`JOIN`**: `[INNER | LEFT [OUTER]] JOIN table ON a.col = b.col`, always an equality between one
-  qualified column on each side. A bare `JOIN` and `INNER JOIN` are the same thing: a row from either
-  side with no match on the other simply does not appear. `LEFT [OUTER] JOIN` (plan.md §25.4 C3) keeps
-  every row on the other side of *this* join, even one with no match — its columns from the table this
-  `JOIN` introduces come back `NULL` instead; a chain may mix `LEFT` and inner freely, step by step. No
-  `RIGHT`/`FULL`/`CROSS`/`USING` (write a `RIGHT JOIN` the other way round, as a `LEFT JOIN` with the two
-  tables swapped), and no aliasing — so the same table can never be named twice in one query's chain, and
+- **`JOIN`**: `[INNER | LEFT [OUTER] | RIGHT [OUTER] | FULL [OUTER]] JOIN table ON a.col = b.col`, always an
+  equality between one qualified column on each side. A bare `JOIN` and `INNER JOIN` are the same thing: a row
+  from either side with no match on the other simply does not appear. `LEFT [OUTER] JOIN` (plan.md §25.4 C3)
+  keeps every row on the other side of *this* join, even one with no match — its columns from the table this
+  `JOIN` introduces come back `NULL` instead. `RIGHT [OUTER] JOIN` (plan.md §27.5 S4) is the mirror: it keeps
+  every row of the table it introduces, and pads every column of the rows so far — every table before it —
+  with `NULL`; `FULL [OUTER] JOIN` keeps both, each unmatched row exactly once. A chain may mix them all
+  freely, step by step. In relational algebra they read ⟕, ⟖ and ⟗. Neither `RIGHT` nor `FULL` runs as an
+  index nested-loop (a probe never visits the inner rows nothing matched, and those are the rows it must
+  keep), so the trace says so and a nested-loop takes its place.
+- **`CROSS JOIN table`**, or a comma — `FROM a, b` — pairs every row with every row: the Cartesian product
+  ×, with no `ON` (`CROSS JOIN … ON` is refused; put the condition in `WHERE`). It always runs as a nested
+  loop. A `WHERE` equality between the two sides turns it into a real join before anything runs — the
+  optimizer's **product-to-join** rule, σ over × becomes ⋈ — so the textbook's `FROM customers, orders WHERE
+  customers.id = orders.customerId` plans exactly as the `JOIN … ON` it means. The rule leaves a cross join a
+  later `RIGHT` or `FULL` join pads alone: there, the `WHERE` must stay above to remove the padded rows.
+- No `USING` and no aliasing — so the same table can never be named twice in one query's chain, and
   each `JOIN`'s `ON` must name the table it introduces on one side and some table already in the query
   (`FROM`'s, or an earlier `JOIN`'s — not necessarily the one written just before it) on the other. Every
   column reference is qualified (`authors.id`, not `id`) once a query has any `JOIN` — there is no
@@ -337,8 +347,7 @@ with a generic syntax error:
 
 | You write | The parser says |
 |---|---|
-| `RIGHT`/`FULL` JOIN | *Not in the v0 subset — write a RIGHT JOIN the other way round, as a LEFT JOIN with the two tables swapped; FULL isn't an inner or a LEFT JOIN either.* |
-| `CROSS JOIN` | *CROSS JOIN is not in the v0 subset — JOIN ... ON needs an equality.* |
+| `CROSS JOIN … ON …` | *CROSS JOIN takes no ON. — a cross join keeps every pair of rows; for a condition, write JOIN … ON, or put it in WHERE.* |
 | `JOIN ... USING (...)` | *USING is not in the v0 subset — write the equality out.* |
 | Joining the same table twice | *Already in this query — joining it again needs an alias, which v0 does not have.* |
 | A `JOIN`'s `ON` naming a table not yet in the query | *There is no table called that yet in this query — it has to be named in FROM or an earlier JOIN first.* |

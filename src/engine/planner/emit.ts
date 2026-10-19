@@ -114,23 +114,38 @@ export function emitPlanEvents(
     const j = current as Extract<Plan, { op: 'Join' }>;
     const algorithm = j.algorithm;
     // Asked for an index join, but this step's inner table has no index on the join column: say so, and run the plain one.
+    // A cross join has no key, and RIGHT and FULL keep inner rows a probe never visits (plan.md §27.5 S4).
+    const outerRight = join.joinType === 'right' || join.joinType === 'full';
     const fallback =
-      structuralJoinStrategy === 'index-nested-loop' && algorithm !== 'index-nested-loop'
-        ? `You asked for an index nested-loop join, but \`${join.table.name}\` has no index on \`${j.rightColumn}\` for it to probe — so this runs as an ordinary nested-loop. `
-        : '';
+      join.joinType === 'cross' && structuralJoinStrategy !== 'nested-loop'
+        ? `A cross join has no key to hash, sort or probe on, so whatever algorithm was asked for, this runs as a nested-loop. `
+        : structuralJoinStrategy === 'index-nested-loop' && algorithm !== 'index-nested-loop'
+          ? outerRight
+            ? `You asked for an index nested-loop join, but a ${join.joinType!.toUpperCase()} JOIN keeps the rows of \`${join.table.name}\` nothing matched, which a probe never visits — so this runs as an ordinary nested-loop. `
+            : `You asked for an index nested-loop join, but \`${join.table.name}\` has no index on \`${j.rightColumn}\` for it to probe — so this runs as an ordinary nested-loop. `
+          : '';
     const mechanism =
-      algorithm === 'index-nested-loop'
+      join.joinType === 'cross'
+        ? `for every row \`${j.leftTable}\` produces, it reads all of \`${j.rightTable}\` and keeps every pair — no key, no match to look for: about ${String(rootEstimate(j.left, table, rowsPerPage, otherTables).estRows)} × ${String(joinTables?.[j.rightTable]?.rows.length ?? 0)} rows, the whole product`
+        : algorithm === 'index-nested-loop'
         ? `for every row \`${j.leftTable}\` produces, it descends \`${j.rightTable}\`'s B+Tree on \`${j.rightColumn}\` with that row's \`${j.leftColumn}\` — a few page reads per outer row instead of a rescan of the whole inner table, which is why a small outer over a big indexed inner is where this algorithm wins`
         : algorithm === 'hash'
         ? `it builds an in-memory hash table over all of \`${j.rightTable}\`, keyed on \`${j.rightColumn}\`, once — then probes it with each \`${j.leftTable}\` row's \`${j.leftColumn}\`, reading \`${j.rightTable}\` exactly once regardless of how many rows \`${j.leftTable}\` has`
         : algorithm === 'sort-merge'
           ? `it sorts both \`${j.leftTable}\` and \`${j.rightTable}\` on the join key, then merges the two sorted lists in a single pass — no per-row rescan and no table held in memory, at the cost of sorting both sides first`
           : `for every row \`${j.leftTable}\` produces, it rescans all of \`${j.rightTable}\` looking for a match on \`${j.leftColumn}\` = \`${j.rightColumn}\` — nested-loop, the simplest join algorithm, and the most expensive once neither side has an index to speed the inner scan up`;
-    const outer = join.joinType === 'left'
-      ? ` This is a LEFT JOIN: every row from \`${j.leftTable}\` survives even when nothing on \`${j.rightTable}\` matches it, with \`${j.rightTable}\`'s columns NULL.`
-      : '';
+    const outer =
+      join.joinType === 'left'
+        ? ` This is a LEFT JOIN: every row from \`${j.leftTable}\` survives even when nothing on \`${j.rightTable}\` matches it, with \`${j.rightTable}\`'s columns NULL.`
+        : join.joinType === 'right'
+          ? ` This is a RIGHT JOIN: every row of \`${j.rightTable}\` survives even when nothing on the left matches it, with the left side's columns NULL — the join remembers which rows of \`${j.rightTable}\` matched, and the rest come out at the end.`
+          : join.joinType === 'full'
+            ? ` This is a FULL JOIN: every row of both sides survives — a row from the left with nothing in \`${j.rightTable}\` NULL-padded on the right, a row of \`${j.rightTable}\` nothing matched NULL-padded on the left, each once.`
+            : join.joinType === 'cross' && join.comma
+              ? ' The comma in FROM is a cross join, written the way a textbook writes one; a WHERE equality between the two is what will turn it into a join.'
+              : '';
     emit(
-      `${fallback}JOIN adds ${algorithm === 'index-nested-loop' ? 'an index probe on' : 'a second scan of'} \`${j.rightTable}\` and a Join above ${i === 0 ? 'that' : 'the chain so far'}: ${mechanism}.${outer}`,
+      `${fallback}${join.joinType === 'cross' ? 'CROSS JOIN' : 'JOIN'} adds ${algorithm === 'index-nested-loop' ? 'an index probe on' : 'a second scan of'} \`${j.rightTable}\` and a Join above ${i === 0 ? 'that' : 'the chain so far'}: ${mechanism}.${outer}`,
       { stage: 'plan', planTree: display(current) },
     );
   }
@@ -142,19 +157,20 @@ export function emitPlanEvents(
   // C1's stats and C2's q-error already take, and (plan.md §25.4 C5 slice 3) still the only stance a chain with a
   // `LEFT JOIN` in it ever gets, since that is never reordered for real. `/tools/join-order` is the same search,
   // with the whole subset lattice visible.
-  if (allJoins.length >= 2 && joinTables && !writtenJoinOrder) {
+  // A cross join has no edge to price (plan.md §27.5 S4), so a chain with one gets no join-order note.
+  if (allJoins.length >= 2 && joinTables && !writtenJoinOrder && allJoins.every((j) => j.on)) {
     const allTables: Record<string, Table> = { ...joinTables, [table.name]: table };
     const { nodes, edges } = joinGraphFromAst(ast, allTables, rowsPerPage);
     const dp = runJoinOrderDP(nodes, edges);
     const written = writtenOrderFromAst(ast);
     const writtenCost = costOfOrder(nodes, edges, written);
     const ratio = writtenCost.pages / dp.winner.pages;
-    const hasLeftJoin = allJoins.some((j) => j.joinType === 'left');
+    const outerJoin = allJoins.find((j) => j.joinType === 'left' || j.joinType === 'right' || j.joinType === 'full');
     emit(
       ratio >= 1.05
         ? `A cost-based join-order search (plan.md §25.4 C4) would instead join these ${String(nodes.length)} tables as ${dp.winner.tables.join(' → ')}: an estimated ${String(dp.winner.pages)} pages, against the ${String(writtenCost.pages)} the order actually written above costs — about ${ratio.toFixed(1)}× cheaper.${
-            hasLeftJoin
-              ? ' This chain is never reordered for real (plan.md §25.4 C5 slice 3): a LEFT JOIN is not commutative or associative in general, so the order above is what actually runs.'
+            outerJoin
+              ? ` This chain is never reordered for real (plan.md §25.4 C5 slice 3): a ${outerJoin.joinType!.toUpperCase()} JOIN is not commutative or associative in general, so the order above is what actually runs.`
               : ' This query still runs in the order it was written; nothing here changes that.'
           }`
         : `A cost-based join-order search (plan.md §25.4 C4) agrees with the order written above — among left-deep orderings of these ${String(nodes.length)} tables, this is already about as cheap as it gets.`,

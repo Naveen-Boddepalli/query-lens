@@ -539,8 +539,8 @@ function referencedColumns(ast: Exclude<Statement, { kind: 'explain' | 'compound
   }
   if (ast.kind === 'select') {
     for (const join of ast.joins ?? []) {
-      if (join.on.left.kind === 'column') push(join.on.left);
-      if (join.on.right.kind === 'column') push(join.on.right);
+      if (join.on?.left.kind === 'column') push(join.on.left);
+      if (join.on?.right.kind === 'column') push(join.on.right);
     }
   }
   if (ast.kind === 'select' && ast.groupBy) refs.push(...ast.groupBy.columns);

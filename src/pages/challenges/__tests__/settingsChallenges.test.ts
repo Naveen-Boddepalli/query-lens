@@ -172,6 +172,8 @@ describe('settings challenges', () => {
       }
     }
     expect(options('index-with-two-rules', 'rules').map((o) => o.value)).toEqual([...OPTIMIZER_RULES]);
+    // Its brief says every rule starts on: a rule added to the optimizer belongs in the starter too.
+    expect(SETTINGS_CHALLENGES.find((c) => c.id === 'index-with-two-rules')!.starter['rules']!.split(',')).toEqual([...OPTIMIZER_RULES]);
     expect(options('same-level-different-promise', 'anomaly').map((o) => o.label)).toEqual(
       HERMITAGE_TESTS.map((t) => `${t.id} ${t.name}`),
     );
@@ -290,7 +292,7 @@ describe('settings challenges', () => {
       ['scan-keeps-the-hot-set', '2Q, which a one-time scan still floods', { policy: 'two-q' }],
       ['scan-keeps-the-hot-set', 'a ring of three in a pool of six', { policy: 'lru', ring: 3 }],
       ['scan-keeps-the-hot-set', 'midpoint LRU, one hit short', { policy: 'midpoint' }],
-      ['index-with-two-rules', 'all seven', {}],
+      ['index-with-two-rules', 'all eight', {}],
       ['index-with-two-rules', 'the index rule alone', { rules: 'index-selection' }],
       ['index-with-two-rules', 'pushdown alone', { rules: 'predicate-pushdown' }],
       ['index-with-two-rules', 'a lookup, but with three rules on', { rules: 'constant-folding,predicate-pushdown,index-selection' }],

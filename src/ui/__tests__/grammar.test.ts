@@ -70,6 +70,9 @@ describe('grammar data — every rule is demonstrated by a query the real parser
     ['join — INNER', 'SELECT * FROM authors INNER JOIN posts ON authors.id = posts.authorId'],
     ['join — LEFT', 'SELECT * FROM authors LEFT JOIN posts ON authors.id = posts.authorId'],
     ['join — LEFT OUTER', 'SELECT * FROM authors LEFT OUTER JOIN posts ON authors.id = posts.authorId'],
+    ['join — RIGHT and RIGHT OUTER', 'SELECT * FROM authors RIGHT JOIN posts ON authors.id = posts.authorId RIGHT OUTER JOIN tags ON posts.id = tags.postId'],
+    ['join — FULL and FULL OUTER', 'SELECT * FROM authors FULL JOIN posts ON authors.id = posts.authorId FULL OUTER JOIN tags ON posts.id = tags.postId'],
+    ['join — CROSS, and a comma', 'SELECT * FROM authors CROSS JOIN posts, tags'],
     ['join', 'SELECT * FROM authors JOIN posts ON authors.id = posts.authorId'],
     [
       'join — chained, left-deep (plan.md §25.4 C3 slice b)',

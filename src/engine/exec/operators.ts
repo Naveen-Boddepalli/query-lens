@@ -934,6 +934,48 @@ function nullPaddedRow(leftTable: string, leftRow: Row, rightTable: string, righ
 }
 
 /**
+ * The tables whose columns a plan's rows carry, in the order a joined row holds them — its scan's table, then each
+ * joined table; a semi- or anti-join adds none, since only its left side's columns come out. What a RIGHT or FULL
+ * join (plan.md §27.5 S4) pads with NULLs for a right row nothing on the left matched.
+ */
+function tablesOf(plan: Plan): string[] {
+  switch (plan.op) {
+    case 'SeqScan':
+    case 'IndexScan':
+    case 'IndexOnlyScan':
+    case 'IndexRangeScan':
+    case 'IndexProbe':
+      return [plan.table];
+    case 'Join':
+      return plan.joinType === 'semi' || plan.joinType === 'anti' ? tablesOf(plan.left) : [...tablesOf(plan.left), plan.rightTable];
+    case 'SetOp':
+      return tablesOf(plan.left);
+    default:
+      return tablesOf(plan.child);
+  }
+}
+
+/** Every column of `plan.left`'s tables, qualified — the keys a RIGHT or FULL join's padded row sets to NULL. */
+function leftColumnsOf(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): string[] {
+  return tablesOf(plan.left).flatMap((name) => {
+    const table = name === ctx.table.name ? ctx.table : ctx.joinPartners?.[name]?.table;
+    return (table?.columns ?? []).map((c) => `${name}.${c}`);
+  });
+}
+
+/** A RIGHT or FULL join's row for a `right` row nothing on the left matched (plan.md §27.5 S4): the left side all NULL. */
+function rightPaddedRow(leftColumns: readonly string[], rightTable: string, rightRow: Row): Row {
+  const merged: Row = {};
+  for (const key of leftColumns) merged[key] = null;
+  for (const [key, value] of Object.entries(rightRow)) merged[`${rightTable}.${key}`] = value;
+  return merged;
+}
+
+/** A RIGHT or FULL join's narration for that row, in its own words. */
+const keptRight = (plan: Extract<Plan, { op: 'Join' }>): string =>
+  `${plan.joinType === 'full' ? 'FULL' : 'RIGHT'} JOIN keeps it, with every column on the ${plan.leftTable} side NULL`;
+
+/**
  * Reads a `Join`'s own left-hand join-key value off `row` — `column` bare if `row` came straight off a base-table
  * scan (a query's first `JOIN`), or `table.column` if an earlier `Join` in the chain already merged and qualified it
  * (plan.md §25.4 C3 slice b). Only ever needed for the *left* side: a left-deep chain's `right` side is always a
@@ -988,10 +1030,17 @@ function semiVerdict(kind: 'semi' | 'anti', found: boolean): string {
 function join(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): Operator {
   const joinRight = ctx.joinPartners?.[plan.rightTable];
   if (!joinRight) throw new Error("unreachable: a Join plan implies ExecContext.joinPartners has this Join's rightTable");
-  const isLeft = plan.joinType === 'left';
+  const isLeft = plan.joinType === 'left' || plan.joinType === 'full';
   // A semi- or anti-join (plan.md §27.5 S1) is this same loop with one change: the rescan of `right` stops at the first
   // match, because one is all EXISTS asks for. That is exactly what running the subquery again for every outer row does.
   const semi = semiKindOf(plan);
+  // RIGHT and FULL (plan.md §27.5 S4) remember every inner row that matched, then read the inner table once more for
+  // the rest. A cross join keeps every pair, with no key to compare.
+  const keepsRight = plan.joinType === 'right' || plan.joinType === 'full';
+  const cross = plan.joinType === 'cross';
+  const leftColumns = keepsRight ? leftColumnsOf(plan, ctx) : [];
+  let matchedRight = new Set<Row>();
+  let sweeping = false;
 
   const left = buildOperator(plan.left, ctx);
   const right = buildOperator(plan.right, {
@@ -1019,12 +1068,31 @@ function join(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): Operator {
       checked = 0;
       matched = false;
       readThisRow = 0;
+      matchedRight = new Set();
+      sweeping = false;
     },
     next() {
       for (;;) {
+        // The last pass of a RIGHT or FULL join: every inner row no outer row matched, padded on the left.
+        if (sweeping) {
+          const rightRow = right.next();
+          if (!rightRow) return null;
+          if (matchedRight.has(rightRow)) continue;
+          produced(`Join's last pass finds a row of ${plan.rightTable} no row of ${plan.leftTable} matched — ${keptRight(plan)}.`);
+          return rightPaddedRow(leftColumns, plan.rightTable, rightRow);
+        }
         if (!rightOpen) {
           leftRow = left.next();
-          if (!leftRow) return null;
+          if (!leftRow) {
+            if (!keepsRight) return null;
+            ctx.emit(
+              `Join has paired every row of ${plan.leftTable}; it reads ${plan.rightTable} once more, for the rows no pairing used.`,
+              { stage: 'execute', op: 'Join', rowsProduced: matchedRight.size, table: plan.rightTable },
+            );
+            sweeping = true;
+            right.open();
+            continue;
+          }
           matched = false;
           readThisRow = 0;
           right.open();
@@ -1040,9 +1108,9 @@ function join(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): Operator {
             return leftRow;
           }
           if (semi === 'semi') continue;
-          // The whole inner table was rescanned and nothing matched this left row — a LEFT JOIN keeps it anyway.
+          // The whole inner table was rescanned and nothing matched this left row — a LEFT (or FULL) JOIN keeps it anyway.
           if (isLeft && !matched) {
-            produced(`Join finds no match in ${plan.rightTable} for a row from ${plan.leftTable} — LEFT JOIN keeps it, with ${plan.rightTable}'s columns NULL.`);
+            produced(`Join finds no match in ${plan.rightTable} for a row from ${plan.leftTable} — ${plan.joinType === 'full' ? 'FULL' : 'LEFT'} JOIN keeps it, with ${plan.rightTable}'s columns NULL.`);
             return nullPaddedRow(plan.leftTable, leftRow!, plan.rightTable, joinRight.table.columns);
           }
           continue;
@@ -1052,8 +1120,13 @@ function join(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): Operator {
 
         // NULL never matches NULL — the same three-valued rule an ordinary
         // `=` predicate follows, so a NULL join key simply finds no partner.
-        if (compare('=', leftJoinValue(leftRow!, plan.leftTable, plan.leftColumn), rightRow[plan.rightColumn] ?? null) !== true) {
+        if (!cross && compare('=', leftJoinValue(leftRow!, plan.leftTable, plan.leftColumn), rightRow[plan.rightColumn] ?? null) !== true) {
           continue;
+        }
+
+        if (cross) {
+          produced(`Join pairs a row from ${plan.leftTable} with one from ${plan.rightTable} — a cross join keeps every pair (${String(checked)} so far).`);
+          return mergeJoinedRow(plan.leftTable, leftRow!, plan.rightTable, rightRow);
         }
 
         if (semi) {
@@ -1069,6 +1142,7 @@ function join(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): Operator {
         }
 
         matched = true;
+        if (keepsRight) matchedRight.add(rightRow);
         produced(
           `Join matches a row from ${plan.leftTable} with one from ${plan.rightTable} (${checked} candidate${
             checked === 1 ? '' : 's'
@@ -1103,10 +1177,17 @@ function join(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): Operator {
 function hashJoin(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): Operator {
   const joinRight = ctx.joinPartners?.[plan.rightTable];
   if (!joinRight) throw new Error("unreachable: a Join plan implies ExecContext.joinPartners has this Join's rightTable");
-  const isLeft = plan.joinType === 'left';
+  const isLeft = plan.joinType === 'left' || plan.joinType === 'full';
   // A semi- or anti-join (plan.md §27.5 S1) builds the same table and probes it the same way, but an outer row comes out
   // at most once: kept if any row in its bucket passes the residual (semi), or if none does (anti).
   const semi = semiKindOf(plan);
+  // RIGHT and FULL (plan.md §27.5 S4) mark each built row a probe matches; once the probe side runs out, every unmarked
+  // one — a NULL key included, which was never in a bucket — comes out padded on the left.
+  const keepsRight = plan.joinType === 'right' || plan.joinType === 'full';
+  const leftColumns = keepsRight ? leftColumnsOf(plan, ctx) : [];
+  let builtRows: Row[] = [];
+  let matchedRight = new Set<Row>();
+  let unmatched: Row[] | null = null;
 
   const left = buildOperator(plan.left, ctx);
   const right = buildOperator(plan.right, {
@@ -1133,6 +1214,9 @@ function hashJoin(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): Operat
       bucket = [];
       bucketIndex = 0;
       matched = 0;
+      builtRows = [];
+      matchedRight = new Set();
+      unmatched = null;
     },
     next() {
       if (!built) {
@@ -1140,6 +1224,7 @@ function hashJoin(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): Operat
         for (;;) {
           const row = right.next();
           if (!row) break;
+          if (keepsRight) builtRows.push(row);
           const value = row[plan.rightColumn] ?? null;
           if (value === null) continue;
           const key = equalityKeyOf(value);
@@ -1173,15 +1258,29 @@ function hashJoin(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): Operat
       }
 
       for (;;) {
+        if (unmatched) {
+          const rightRow = unmatched.shift();
+          if (!rightRow) return null;
+          produced(`Join finds a row of ${plan.rightTable} no probe matched — ${keptRight(plan)}.`);
+          return rightPaddedRow(leftColumns, plan.rightTable, rightRow);
+        }
         if (bucketIndex >= bucket.length) {
           leftRow = left.next();
-          if (!leftRow) return null;
+          if (!leftRow) {
+            if (!keepsRight) return null;
+            unmatched = builtRows.filter((r) => !matchedRight.has(r));
+            ctx.emit(
+              `Join has probed with every row of ${plan.leftTable}; ${String(unmatched.length)} row${unmatched.length === 1 ? '' : 's'} of ${plan.rightTable} matched nothing, and come out next.`,
+              { stage: 'execute', op: 'Join', rowsProduced: matched, table: plan.rightTable },
+            );
+            continue;
+          }
           const value = leftJoinValue(leftRow, plan.leftTable, plan.leftColumn);
           bucket = value === null ? [] : (built.get(equalityKeyOf(value)) ?? []);
           bucketIndex = 0;
           // Empty bucket, or a NULL key that was never even looked up — nothing matched this left row at all.
           if (isLeft && bucket.length === 0) {
-            produced(`Join probes the hash table with a row from ${plan.leftTable} and finds nothing in ${plan.rightTable} — LEFT JOIN keeps it, with ${plan.rightTable}'s columns NULL.`);
+            produced(`Join probes the hash table with a row from ${plan.leftTable} and finds nothing in ${plan.rightTable} — ${plan.joinType === 'full' ? 'FULL' : 'LEFT'} JOIN keeps it, with ${plan.rightTable}'s columns NULL.`);
             return nullPaddedRow(plan.leftTable, leftRow, plan.rightTable, joinRight.table.columns);
           }
           continue;
@@ -1190,6 +1289,7 @@ function hashJoin(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): Operat
         const rightRow = bucket[bucketIndex]!;
         bucketIndex += 1;
         matched += 1;
+        if (keepsRight) matchedRight.add(rightRow);
         produced(
           `Join probes the hash table with a row from ${plan.leftTable} and finds a match in ${plan.rightTable} (${matched} match${matched === 1 ? '' : 'es'} so far).`,
         );
@@ -1228,6 +1328,10 @@ function indexNestedLoopJoin(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecConte
   if (inner.op !== 'IndexProbe') throw new Error('unreachable: an index nested-loop Join has an IndexProbe as its inner side');
   const tree = joinRight.trees[inner.column];
   if (!tree) throw new Error('unreachable: an index nested-loop Join implies its inner index was built');
+  // A probe never visits the inner rows nothing matched, so RIGHT, FULL and CROSS never run here (plan.md §27.5 S4).
+  if (plan.joinType === 'right' || plan.joinType === 'full' || plan.joinType === 'cross') {
+    throw new Error('unreachable: effectiveJoinAlgorithm runs RIGHT, FULL and CROSS joins by another algorithm');
+  }
   const isLeft = plan.joinType === 'left';
   // A semi- or anti-join (plan.md §27.5 S1) probes once per outer row like the inner join, but stops fetching the
   // probe's entries at the first that passes: one is all EXISTS needs.
@@ -1392,9 +1496,12 @@ function* sortMergeMatches(
   leftColumn: string,
   rightColumn: string,
   isLeft: boolean,
-): Generator<readonly [Row, Row | null]> {
+  /** RIGHT or FULL (plan.md §27.5 S4): after the merge, every right row no run of equal keys paired, as `[null, row]`. */
+  keepRight = false,
+): Generator<readonly [Row | null, Row | null]> {
   let i = 0;
   let j = 0;
+  const paired = new Set<Row>();
   while (i < left.length) {
     const leftKey = leftJoinKeyOf(left[i]!, leftTable, leftColumn);
     if (leftKey === null) {
@@ -1420,12 +1527,16 @@ function* sortMergeMatches(
     const runStart = j;
     while (i < left.length && leftJoinKeyOf(left[i]!, leftTable, leftColumn) === leftKey) {
       for (let k = runStart; k < right.length && joinKeyOf(right[k]!, rightColumn) === leftKey; k++) {
+        if (keepRight) paired.add(right[k]!);
         yield [left[i]!, right[k]!];
       }
       i += 1;
     }
     j = runStart;
     while (j < right.length && joinKeyOf(right[j]!, rightColumn) === leftKey) j += 1;
+  }
+  if (keepRight) {
+    for (const row of right) if (!paired.has(row)) yield [null, row];
   }
 }
 
@@ -1486,8 +1597,10 @@ function sortMergeJoin(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): O
   if (!joinRight) throw new Error("unreachable: a Join plan implies ExecContext.joinPartners has this Join's rightTable");
   const bases = ctx.sortMergeBases?.get(plan);
   if (!bases) throw new Error('unreachable: a sort-merge Join plan implies runQuery.ts reserved its scratch bases');
-  const isLeft = plan.joinType === 'left';
+  const isLeft = plan.joinType === 'left' || plan.joinType === 'full';
   const semi = semiKindOf(plan);
+  const keepsRight = plan.joinType === 'right' || plan.joinType === 'full';
+  const leftColumns = keepsRight ? leftColumnsOf(plan, ctx) : [];
 
   const left = buildOperator(plan.left, ctx);
   const right = buildOperator(plan.right, {
@@ -1498,7 +1611,7 @@ function sortMergeJoin(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): O
   });
 
   const produced = counter(ctx, 'Join', plan.rightTable);
-  let matches: Generator<readonly [Row, Row | null]> | null = null;
+  let matches: Generator<readonly [Row | null, Row | null]> | null = null;
   // A semi- or anti-join's survivors (plan.md §27.5 S1), in place of `matches`' pairs.
   let survivors: Generator<Row> | null = null;
   let matched = 0;
@@ -1569,7 +1682,7 @@ function sortMergeJoin(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): O
         if (semi) {
           survivors = sortMergeSemi(leftSorted, rightSorted, plan.leftTable, plan.leftColumn, plan.rightColumn, semi, (l, r) => residualHolds(plan, l, r));
         }
-        matches = sortMergeMatches(leftSorted, rightSorted, plan.leftTable, plan.leftColumn, plan.rightColumn, isLeft);
+        matches = sortMergeMatches(leftSorted, rightSorted, plan.leftTable, plan.leftColumn, plan.rightColumn, isLeft, keepsRight);
       }
 
       if (survivors) {
@@ -1587,8 +1700,12 @@ function sortMergeJoin(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): O
       const step = matches.next();
       if (step.done) return null;
       const [leftRow, rightRow] = step.value;
+      if (leftRow === null) {
+        produced(`Join's merge leaves a row of ${plan.rightTable} that no run of keys paired — ${keptRight(plan)}.`);
+        return rightPaddedRow(leftColumns, plan.rightTable, rightRow!);
+      }
       if (rightRow === null) {
-        produced(`Join's merge passes a row from ${plan.leftTable} with no run of matching keys on ${plan.rightTable} — LEFT JOIN keeps it, with ${plan.rightTable}'s columns NULL.`);
+        produced(`Join's merge passes a row from ${plan.leftTable} with no run of matching keys on ${plan.rightTable} — ${plan.joinType === 'full' ? 'FULL' : 'LEFT'} JOIN keeps it, with ${plan.rightTable}'s columns NULL.`);
         return nullPaddedRow(plan.leftTable, leftRow, plan.rightTable, joinRight.table.columns);
       }
       matched += 1;

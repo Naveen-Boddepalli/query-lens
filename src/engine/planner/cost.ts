@@ -416,15 +416,27 @@ function estimateNode(
       const semiRows = clampRows(left.estRows * matchedFraction);
       // A LEFT JOIN (plan.md §25.4 C3) never drops a left row — the equi-join estimate is a floor, not the answer,
       // whenever it would otherwise guess fewer rows than the outer side alone already has.
+      // RIGHT and FULL (plan.md §27.5 S4) floor the estimate at the side they keep whole, as LEFT does at its own; a
+      // cross join is every pair.
       const estRows =
         semiKind === 'semi'
           ? semiRows
           : semiKind === 'anti'
             ? Math.max(0, left.estRows - semiRows)
-            : plan.joinType === 'left'
-              ? Math.max(left.estRows, innerEstimate)
-              : innerEstimate;
-      const rowsBasis = semiKind
+            : plan.joinType === 'cross'
+              ? clampRows(left.estRows * rightRows)
+              : plan.joinType === 'left'
+                ? Math.max(left.estRows, innerEstimate)
+                : plan.joinType === 'right'
+                  ? Math.max(rightRows, innerEstimate)
+                  : plan.joinType === 'full'
+                    ? Math.max(left.estRows, rightRows, innerEstimate)
+                    : innerEstimate;
+      const rowsBasis = plan.joinType === 'cross'
+        ? `${String(left.estRows)} × ${String(rightRows)}: every pair`
+        : (plan.joinType === 'right' || plan.joinType === 'full') && estRows > innerEstimate
+          ? `${String(estRows)} (every ${plan.joinType === 'full' ? `${plan.leftTable} and ${plan.rightTable}` : plan.rightTable} row survives a ${plan.joinType.toUpperCase()} JOIN; the equi-join estimate alone was only ${String(innerEstimate)})`
+          : semiKind
         ? `${semiKind === 'anti' ? `${String(left.estRows)} − ` : ''}${String(left.estRows)} × min(1, ${String(innerKeys)} distinct ${plan.rightTable}.${plan.rightColumn} / ${String(outerDistinct)} distinct ${plan.leftTable}.${plan.leftColumn})`
         : plan.joinType === 'left' && estRows === left.estRows && left.estRows > innerEstimate
           ? `${String(left.estRows)} (every ${plan.leftTable} row survives a LEFT JOIN; the equi-join estimate alone was only ${String(innerEstimate)})`

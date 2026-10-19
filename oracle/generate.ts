@@ -10,7 +10,7 @@
 
 import fc from 'fast-check';
 import type { EngineOptions, IndexBuildOptions, JoinAlgorithm, ReplacementPolicyName, Row, SqlValue } from '../src/engine/types.ts';
-import { renderRef } from './model.ts';
+import { crossKeysOf, renderRef } from './model.ts';
 import type { AggItem, Arith, ArithOp, ColSpec, ColType, ExistsSub, GroupOrderSpec, JoinStep, MemberSelect, Op, Pred, Query, ReadQuery, Ref, SubSelect, TableSpec, WriteQuery } from './model.ts';
 
 /* -------------------------------------------------------------------------- */
@@ -672,7 +672,19 @@ function aggregateOver(
     });
 }
 
-const joinTypeArb = fc.oneof({ weight: 3, arbitrary: fc.constant<JoinStep['type']>('inner') }, { weight: 2, arbitrary: fc.constant<JoinStep['type']>('left') });
+const joinTypeArb = fc.oneof(
+  { weight: 5, arbitrary: fc.constant<JoinStep['type']>('inner') },
+  { weight: 5, arbitrary: fc.constant<JoinStep['type']>('left') },
+  // RIGHT, FULL and CROSS (plan.md §27.5 S4), rarer than the two the coverage floors were measured on; a cross join is
+  // written with a comma half the time, and three times in four its would-be key goes into WHERE — the textbook join,
+  // and what `product-to-join` rewrites.
+  { weight: 1, arbitrary: fc.constant<JoinStep['type']>('right') },
+  { weight: 1, arbitrary: fc.constant<JoinStep['type']>('full') },
+  { weight: 2, arbitrary: fc.constant<JoinStep['type']>('cross') },
+);
+const stepOf = (table: string, type: JoinStep['type'], on: JoinStep['on'], comma: boolean, keyInWhere: boolean): JoinStep =>
+  type === 'cross' ? { table, type, on, ...(comma ? { comma } : {}), ...(keyInWhere ? { keyInWhere } : {}) } : { table, type, on };
+const crossShape = fc.tuple(fc.boolean(), fc.integer({ min: 0, max: 3 }).map((x) => x > 0));
 
 /**
  * `t [LEFT] JOIN u ON …`, and two times in five a second step, `[LEFT] JOIN w ON …` (plan.md §25.4 C3 slices a and
@@ -689,11 +701,11 @@ function chainArb(t: TableSpec, u: TableSpec, w: TableSpec): fc.Arbitrary<{ join
     left.flatMap((l) => right.filter((r) => comparable(l, r)).map((r) => ({ l, r })));
   const onArb = (candidates: { l: Ref; r: Ref }[]) =>
     fc.tuple(fc.constantFrom(...candidates), fc.boolean()).map(([{ l, r }, flip]) => (flip ? { l: r, r: l } : { l, r }));
-  const toU = fc.tuple(joinTypeArb, onArb(pairs(tRefs, uRefs))).map(([type, on]): JoinStep => ({ table: u.name, type, on }));
+  const toU = fc.tuple(joinTypeArb, onArb(pairs(tRefs, uRefs)), crossShape).map(([type, on, [comma, key]]) => stepOf(u.name, type, on, comma, key));
   const fk = { l: uRefs.find((r) => r.name === 'id')!, r: wRefs.find((r) => r.name === 'u_id')! };
   const toW = fc
-    .tuple(joinTypeArb, fc.oneof({ weight: 3, arbitrary: onArb([fk]) }, { weight: 2, arbitrary: onArb(pairs([...tRefs, ...uRefs], wRefs)) }))
-    .map(([type, on]): JoinStep => ({ table: w.name, type, on }));
+    .tuple(joinTypeArb, fc.oneof({ weight: 3, arbitrary: onArb([fk]) }, { weight: 2, arbitrary: onArb(pairs([...tRefs, ...uRefs], wRefs)) }), crossShape)
+    .map(([type, on, [comma, key]]) => stepOf(w.name, type, on, comma, key));
   const chain = fc.oneof(
     { weight: 3, arbitrary: toU.map((a) => [a]) },
     { weight: 2, arbitrary: fc.tuple(toU, toW).map(([a, b]) => [a, b]) },
@@ -712,8 +724,9 @@ export function joinArb(t: TableSpec, u: TableSpec, w: TableSpec, pool: Pool, su
         proj: uniqueRefs(all, 1, 5),
         computed: fc.oneof({ weight: 3, arbitrary: fc.constant<{ e: Arith; alias: string }[]>([]) }, { weight: 1, arbitrary: computedArb(all) }),
         distinct: fc.integer({ min: 0, max: 3 }).map((x) => x === 0),
-        // A semi- or anti-join on top of the chain, correlated with any of its tables (plan.md §27.5 S1).
-        where: fc.tuple(whereArb(all, pool, 2, subs), existsArb(all, outsideChain(exists, t.name, joins))).map(([wh, e]) => [...wh, ...e]),
+        // A semi- or anti-join on top of the chain, correlated with any of its tables (plan.md §27.5 S1); and the keys of
+        // any cross join that states them in WHERE (S4).
+        where: fc.tuple(whereArb(all, pool, 2, subs), existsArb(all, outsideChain(exists, t.name, joins))).map(([wh, e]) => [...crossKeysOf(joins), ...wh, ...e]),
         // ORDER BY over the joined rows (plan.md §26 Feature 1, slice b): any column of any table in the chain —
         // a LEFT JOIN's NULL padding included, which is where NULL placement shows.
         order: fc.option(fc.record({ ref: fc.constantFrom(...all), dir: fc.constantFrom<'asc' | 'desc'>('asc', 'desc') }), {
@@ -740,7 +753,7 @@ export function joinArb(t: TableSpec, u: TableSpec, w: TableSpec, pool: Pool, su
 /** `GROUP BY` / aggregates / `HAVING` / `ORDER BY` over a join chain (plan.md §26 Feature 1, slice c). */
 export function joinAggregateArb(t: TableSpec, u: TableSpec, w: TableSpec, pool: Pool, subs: readonly SubSource[] = [], exists: readonly SubSource[] = []): fc.Arbitrary<Query> {
   return chainArb(t, u, w).chain(({ joins, all }) =>
-    aggregateOver(all, pool, subs, { table: t.name, joins }, existsArb(all, outsideChain(exists, t.name, joins))),
+    aggregateOver(all, pool, subs, { table: t.name, joins }, existsArb(all, outsideChain(exists, t.name, joins)).map((e) => [...crossKeysOf(joins), ...e])),
   );
 }
 

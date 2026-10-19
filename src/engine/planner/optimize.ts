@@ -370,7 +370,9 @@ function stripTableQualifiers(expr: Expr): Expr {
  * the inner scan removes rows *before* the join can even find out they would not have matched, so a left row that
  * *would* have been NULL-padded instead vanishes with no trace of it — an inner join wearing a LEFT JOIN's syntax.
  * Left as a residual `Filter` above the `Join` instead, it runs after the padding, exactly where SQL puts it. The
- * outer (left) side has no such trap — filtering it first only ever removes rows the join would keep anyway.
+ * outer (left) side has no such trap — filtering it first only ever removes rows the join would keep anyway. A RIGHT JOIN
+ * is the mirror (only its right side may be filtered first) and a FULL JOIN pads both, so neither of its sides may be
+ * (plan.md §27.5 S4).
  *
  * Below a semi- or anti-join (plan.md §27.5 S1) the outer `WHERE` can only name the outer side — the subquery's table
  * is not in its scope at all — so every conjunct goes left, and one with no table name is the outer FROM table's
@@ -406,8 +408,10 @@ const joinPredicatePushdown: Rule = (input) => {
     const tables = tablesReferencedBy(part);
     if (subqueryJoin && (tables.size === 0 || (tables.size === 1 && tables.has(join.leftTable)))) leftParts.push(part);
     else if (subqueryJoin) residualParts.push(part);
-    else if (tables.size === 1 && tables.has(join.leftTable)) leftParts.push(part);
-    else if (tables.size === 1 && tables.has(join.rightTable) && !probesInner && join.joinType !== 'left') rightParts.push(part);
+    // A side an outer join pads may not be filtered early (plan.md §27.5 S4, as for LEFT JOIN's inner side above): a
+    // RIGHT JOIN pads the left, a FULL JOIN both. A cross join pads neither.
+    else if (tables.size === 1 && tables.has(join.leftTable) && join.joinType !== 'right' && join.joinType !== 'full') leftParts.push(part);
+    else if (tables.size === 1 && tables.has(join.rightTable) && !probesInner && join.joinType !== 'left' && join.joinType !== 'full') rightParts.push(part);
     else residualParts.push(part);
   }
   if (leftParts.length === 0 && rightParts.length === 0) return null;
@@ -442,6 +446,71 @@ const joinPredicatePushdown: Rule = (input) => {
       : `Predicate pushdown: every part of the WHERE clause names only one side, so the whole thing moves into ${pushedSides.length === 1 ? 'that scan' : 'the two scans'} — nothing is left to recheck after the Join.`,
     plan: root,
     changed,
+  };
+};
+
+/**
+ * σ over × becomes ⋈ (plan.md §27.5 S4) — the textbook's first algebraic rewrite. A cross join (`CROSS JOIN`, or a comma
+ * in `FROM`) pairs every row with every row; a `WHERE` equality between a column of the cross join's own table and a
+ * column of a table already on its left keeps only the pairs that match, which is exactly an inner join on it. So the
+ * product becomes that join, and the equality leaves the `Filter` — the pairs it would have thrown away are never
+ * made. Walks a whole chain (`FROM a, b, c WHERE …`), each cross join taking the first equality that fits it — except
+ * one under a RIGHT or FULL join, which pads that side with NULLs: moving a WHERE equality below the padding would keep
+ * the padded rows it is there to remove (the SQLite oracle found it, the same trap pushdown already avoids).
+ */
+const productToJoin: Rule = (input) => {
+  const { limit, rest: plan } = unwrapLimit(input);
+  if (plan.op !== 'Project') return null;
+  const { sort, rest: belowSort } = unwrapSort(plan.child);
+  const { aggregate, rest: belowProject } = unwrapAggregate(belowSort);
+  if (belowProject.op !== 'Filter' || belowProject.child.op !== 'Join') return null;
+
+  const parts = conjuncts(belowProject.predicate);
+  const used = new Set<number>();
+  const changed: Plan[] = [];
+  const keys: string[] = [];
+  const tablesUnder = (p: Plan): string[] =>
+    p.op === 'Join' ? [...tablesUnder(p.left), p.rightTable] : p.op === 'SeqScan' ? [p.table] : [];
+  const convert = (join: Extract<Plan, { op: 'Join' }>, padded: boolean): Extract<Plan, { op: 'Join' }> => {
+    // `padded`: a RIGHT or FULL join above this one NULL-pads its side, so no WHERE conjunct may move below it.
+    const paddedBelow = padded || join.joinType === 'right' || join.joinType === 'full';
+    const left = join.left.op === 'Join' ? convert(join.left, paddedBelow) : join.left;
+    if (join.joinType !== 'cross' || padded) return left === join.left ? join : { ...join, left };
+    const known = new Set(tablesUnder(left));
+    const at = parts.findIndex((part, i) => {
+      if (used.has(i) || part.kind !== 'compare' || part.op !== '=' || part.left.kind !== 'column' || part.right.kind !== 'column') return false;
+      const a = part.left.table;
+      const b = part.right.table;
+      return (a === join.rightTable && b !== undefined && known.has(b)) || (b === join.rightTable && a !== undefined && known.has(a));
+    });
+    if (at < 0) return left === join.left ? join : { ...join, left };
+    used.add(at);
+    const eq = parts[at] as Extract<Expr, { kind: 'compare' }> & { left: Extract<Expr, { kind: 'column' }>; right: Extract<Expr, { kind: 'column' }> };
+    const [own, other] = eq.left.table === join.rightTable ? [eq.left, eq.right] : [eq.right, eq.left];
+    const { joinType: _cross, ...rest } = join;
+    const next: Extract<Plan, { op: 'Join' }> = {
+      ...rest,
+      left,
+      algorithm: 'nested-loop',
+      leftTable: other.table!,
+      leftColumn: other.name,
+      rightColumn: own.name,
+    };
+    changed.push(next);
+    keys.push(exprToSql(eq));
+    return next;
+  };
+  const joined = convert(belowProject.child, false);
+  if (changed.length === 0) return null;
+
+  const residual = conjoin(parts.filter((_, i) => !used.has(i)));
+  const filtered: Plan = residual ? { op: 'Filter', predicate: residual, child: joined } : joined;
+  const root = rewrapLimit(limit, { op: 'Project', columns: plan.columns, child: rewrapSort(sort, rewrapAggregate(aggregate, filtered)) });
+  return {
+    rule: 'product-to-join',
+    label: `σ over × becomes ⋈: ${keys.map((k) => `\`${k}\``).join(' and ')} name${keys.length === 1 ? 's' : ''} both sides of a cross join, so the product becomes a join on ${keys.length === 1 ? 'it' : 'them'} — the pairs the WHERE clause would have thrown away are never made.${residual ? ' The rest of WHERE stays a Filter above.' : ''}`,
+    plan: root,
+    changed: new Set<Plan>(changed),
   };
 };
 
@@ -498,10 +567,16 @@ function chooseJoinAlgorithms(
   // `IndexProbe` has nowhere to carry a residual filter, so a pushed-down conjunct on this side rules index
   // nested-loop out entirely rather than risk silently dropping it — the same reason `join-predicate-pushdown`
   // itself never pushes a conjunct into a side that already probes an index (its own `probesInner` check).
-  const idxSpec = rightHasPushedFilter ? undefined : joinIndexFor(rightTableData, join.rightColumn);
-  const algorithms: JoinAlgorithm[] = idxSpec
-    ? ['nested-loop', 'hash', 'sort-merge', 'index-nested-loop']
-    : ['nested-loop', 'hash', 'sort-merge'];
+  // RIGHT and FULL keep inner rows a probe never visits, so index nested-loop cannot run them; a cross join has no key,
+  // so only nested-loop can (plan.md §27.5 S4).
+  const outerOnRight = join.joinType === 'right' || join.joinType === 'full';
+  const idxSpec = rightHasPushedFilter || outerOnRight ? undefined : joinIndexFor(rightTableData, join.rightColumn);
+  const algorithms: JoinAlgorithm[] =
+    join.joinType === 'cross'
+      ? ['nested-loop']
+      : idxSpec
+        ? ['nested-loop', 'hash', 'sort-merge', 'index-nested-loop']
+        : ['nested-loop', 'hash', 'sort-merge'];
 
   const candidates: JoinCandidate[] = algorithms.map((algorithm) => {
     const right: Plan =
@@ -1012,6 +1087,7 @@ const indexOnlyScan: Rule = (input) => {
 const RULES: { name: string; apply: Rule }[] = [
   { name: 'constant-folding', apply: constantFolding },
   { name: 'predicate-pushdown', apply: predicatePushdown },
+  { name: 'product-to-join', apply: productToJoin },
   { name: 'join-predicate-pushdown', apply: joinPredicatePushdown },
   { name: 'join-algorithm-selection', apply: joinAlgorithmSelection },
   { name: 'index-selection', apply: indexSelection },

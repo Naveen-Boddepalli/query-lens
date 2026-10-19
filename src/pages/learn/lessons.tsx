@@ -39,6 +39,11 @@ const SHOP_NOT_IN = 'SELECT name\nFROM customers\nWHERE id NOT IN (SELECT custom
 const SHOP_SET = (op: string) => `SELECT customerId FROM orders\n${op}\nSELECT id FROM customers;`;
 const SHOP_EXCEPT = 'SELECT id FROM customers\nEXCEPT\nSELECT customerId FROM orders;';
 const SHOP_INTERSECT = 'SELECT id FROM customers\nINTERSECT\nSELECT customerId FROM orders;';
+
+/** The outer-join lesson's queries (plan.md §27.5 S4): customers against orders, each kind of join in turn. */
+const SHOP_JOIN = (kind: string) => `SELECT customers.name, orders.id\nFROM customers\n${kind} orders ON customers.id = orders.customerId;`;
+const SHOP_CROSS = 'SELECT customers.name, products.name\nFROM customers\nCROSS JOIN products;';
+const SHOP_COMMA = 'SELECT customers.name, orders.id\nFROM customers, orders\nWHERE customers.id = orders.customerId;';
 const SEQ_SCAN = 'SELECT *\nFROM users\nWHERE age > 30;';
 
 interface OpenSpec {
@@ -666,6 +671,106 @@ export const PIPELINE_STEPS: Record<string, LessonStep[]> = {
         </>
       ),
       link: { href: '/challenges/nobody-ordered-it', label: 'Try the challenge' },
+    },
+  ],
+  // plan.md §27.5 S4 — outer joins and the cross product on the `shop` preset. The numbers each step quotes are held by
+  // `lessons.test.ts`.
+  'outer-joins': [
+    {
+      heading: 'What an inner join drops',
+      body: (
+        <>
+          Join the customers to their orders and thirty-eight rows come back. Two kinds of row are missing: dmitri, ines
+          and lars, who never ordered, and orders 17 and 33, a guest&rsquo;s, whose{' '}
+          <code className="font-mono">customerId</code> is NULL. An inner join keeps a row only when it matches something
+          on the other side.
+        </>
+      ),
+      open: { sql: SHOP_JOIN('JOIN'), dataset: 'shop', find: END, label: 'Run the inner join' },
+    },
+    {
+      heading: 'RIGHT keeps the orders',
+      body: (
+        <>
+          A <code className="font-mono">RIGHT JOIN</code> keeps every row of the table it introduces: all forty orders,
+          the two guest orders with <code className="font-mono">customers.name</code> NULL. The hash join remembers which
+          orders a customer matched, and once every customer has probed, the rest come out padded on the left. It is the{' '}
+          <code className="font-mono">LEFT JOIN</code> written the other way round, and in relational algebra it reads ⟖.
+        </>
+      ),
+      open: {
+        sql: SHOP_JOIN('RIGHT JOIN'),
+        dataset: 'shop',
+        find: (events) => at(events, (e) => e.stage === 'execute' && e.label.includes('matched nothing, and come out next')),
+        label: 'See the unmatched orders come out',
+      },
+      tryThis: (
+        <>
+          Write <code className="font-mono">FROM orders LEFT JOIN customers ON …</code> and compare: the same forty rows.
+        </>
+      ),
+    },
+    {
+      heading: 'FULL keeps both',
+      body: (
+        <>
+          A <code className="font-mono">FULL JOIN</code> keeps both sides, each unmatched row exactly once: the
+          thirty-eight matched pairs, the three customers with no order, the two orders with no customer — forty-three
+          rows. ⟗ in relational algebra.
+        </>
+      ),
+      open: { sql: SHOP_JOIN('FULL JOIN'), dataset: 'shop', find: END, label: 'Run the full join' },
+      tryThis: (
+        <>
+          Add <code className="font-mono">WHERE customers.id IS NULL OR orders.id IS NULL</code>: the five rows nothing
+          matched, and nothing else. A <code className="font-mono">WHERE</code> runs above the join, so it sees the padding —
+          and the optimizer never pushes a test on a padded side below the join, where it would see none.
+        </>
+      ),
+    },
+    {
+      heading: 'Every pair: CROSS JOIN',
+      body: (
+        <>
+          A <code className="font-mono">CROSS JOIN</code> has no <code className="font-mono">ON</code>: it pairs every
+          customer with every product, twelve times eight — ninety-six rows, the Cartesian product ×. With no key to
+          match there is nothing for a hash table or a sort to do, so it always runs as a nested loop.
+        </>
+      ),
+      open: { sql: SHOP_CROSS, dataset: 'shop', find: END, label: 'Run the cross join' },
+    },
+    {
+      heading: 'σ over × becomes ⋈',
+      body: (
+        <>
+          A textbook often writes a join as a product and a selection: <code className="font-mono">FROM customers, orders
+          WHERE customers.id = orders.customerId</code>. Run as written, that makes all 480 pairs and throws away 442. The
+          optimizer&rsquo;s <strong>product-to-join</strong> rule sees an equality naming both sides and turns the product
+          into a join on it — the same thirty-eight rows as the first step, and the same hash join.
+        </>
+      ),
+      open: {
+        sql: SHOP_COMMA,
+        dataset: 'shop',
+        find: (events) => at(events, (e) => e.stage === 'optimize' && e.rule === 'product-to-join'),
+        label: 'See the rewrite',
+      },
+      tryThis: (
+        <>
+          Change the <code className="font-mono">=</code> to <code className="font-mono">&gt;</code>: no longer an
+          equality, so the product stays a product, and the Filter above it does the work.
+        </>
+      ),
+    },
+    {
+      heading: 'Write one',
+      body: (
+        <>
+          The <a href="/challenges/leave-no-one-out" className="underline underline-offset-2">Leave no one out</a>{' '}
+          challenge asks for every customer and every order, matched where they can be, in one query.
+        </>
+      ),
+      link: { href: '/challenges/leave-no-one-out', label: 'Try the challenge' },
     },
   ],
   'errors': [

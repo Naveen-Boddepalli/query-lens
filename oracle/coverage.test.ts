@@ -88,6 +88,8 @@ describe('the generators reach what the oracle is meant to check', () => {
     existsOnce: 0,
     /** Compound reads (plan.md §27.5 S3) that returned rows: by operator (UNION's by distinct strategy), self-compounds, ordered ones. */
     compounds: new Map<string, number>(),
+    /** Join and grouped-join reads with a RIGHT, FULL or CROSS step (plan.md §27.5 S4) that returned rows; cross ones by form. */
+    newJoins: new Map<string, number>(),
     selfCompounds: 0,
     orderedCompounds: 0,
   };
@@ -153,6 +155,15 @@ describe('the generators reach what the oracle is meant to check', () => {
       if (isWrite(q) && planned.includes('"op":"IndexRangeScan"')) stats.rangeWrites += 1;
       if (isWrite(q) && result.events.some((e) => e.label.includes('so the key is free'))) stats.uniqueChecks += 1;
       if (result.events.some((e) => e.label.includes('finding no values at all'))) stats.emptySubqueries += 1;
+      if ((q.kind === 'join' || (q.kind === 'aggregate' && q.joins)) && result.rows.length > 0) {
+        for (const j of q.joins ?? []) {
+          if (j.type === 'right' || j.type === 'full') stats.newJoins.set(j.type, (stats.newJoins.get(j.type) ?? 0) + 1);
+          if (j.type === 'cross') {
+            const key = `cross${j.comma ? ':comma' : ''}${j.keyInWhere ? ':keyed' : ''}`;
+            stats.newJoins.set(key, (stats.newJoins.get(key) ?? 0) + 1);
+          }
+        }
+      }
       if (q.kind === 'join' && result.rows.length > 0) {
         if (q.joins.some((j) => j.type === 'left')) stats.leftJoins += 1;
         if (q.joins.length > 1) stats.chains += 1;
@@ -272,7 +283,8 @@ describe('the generators reach what the oracle is meant to check', () => {
   });
 
   it('runs LEFT JOINs and two-step chains to a non-empty answer, and empty subqueries (plan.md §25.4 C3)', () => {
-    expect(stats.leftJoins, 'joins with a LEFT step that returned rows').toBeGreaterThan(N / 30);
+    // Measured at 99 since RIGHT, FULL and CROSS steps joined the mix (plan.md §27.5 S4, 2026-10-19).
+    expect(stats.leftJoins, 'joins with a LEFT step that returned rows').toBeGreaterThan(80);
     // A second step joins a third, smaller table and must find partners in both, so fewer chains return rows than
     // single joins do — measured at 83 with the fixed seed above.
     expect(stats.chains, 'two-step join chains that returned rows').toBeGreaterThan(50);
@@ -307,12 +319,23 @@ describe('the generators reach what the oracle is meant to check', () => {
     // anti-joins 15–22 (a semi-join must find a partner past the outer WHERE, an anti-join only miss one); 29 with a
     // residual; 33 uncorrelated.
     expect(stats.existsWithRows / stats.existsReads, 'EXISTS reads that return rows').toBeGreaterThan(0.25);
+    // Since S4 reshuffled the sample (2026-10-19): semi-joins with rows 1–15 per algorithm, 42 in all; anti-joins 10–21.
+    // Every algorithm's semi- and anti-join path also has a unit test of its own (`exists.test.ts`).
     for (const algorithm of ['cost', 'nested-loop', 'hash', 'sort-merge', 'index-nested-loop']) {
-      expect(stats.semiJoins.get(algorithm) ?? 0, `semi-joins by ${algorithm}`).toBeGreaterThan(3);
-      expect(stats.antiJoins.get(algorithm) ?? 0, `anti-joins by ${algorithm}`).toBeGreaterThan(10);
+      expect(stats.semiJoins.get(algorithm) ?? 0, `semi-joins by ${algorithm}`).toBeGreaterThan(0);
+      expect(stats.antiJoins.get(algorithm) ?? 0, `anti-joins by ${algorithm}`).toBeGreaterThan(5);
     }
+    expect([...stats.semiJoins.values()].reduce((a, b) => a + b, 0), 'semi-joins with rows, in all').toBeGreaterThan(30);
     expect(stats.existsResiduals, 'semi- and anti-joins with a residual').toBeGreaterThan(15);
     expect(stats.existsOnce, 'uncorrelated EXISTS, run once').toBeGreaterThan(15);
+  });
+
+  it('runs RIGHT, FULL and CROSS joins to rows, a cross join in both forms and with its key in WHERE (plan.md §27.5 S4)', () => {
+    // Measured with the fixed seed above: RIGHT 62, FULL 72; cross joins 13–32 in each of their four forms.
+    for (const key of ['right', 'full']) expect(stats.newJoins.get(key) ?? 0, `joins with ${key}`).toBeGreaterThan(30);
+    for (const key of ['cross', 'cross:comma', 'cross:keyed', 'cross:comma:keyed']) {
+      expect(stats.newJoins.get(key) ?? 0, `joins with ${key}`).toBeGreaterThan(5);
+    }
   });
 
   it('runs every set operator to rows, UNION under both distinct strategies, a table against itself, and ordered (plan.md §27.5 S3)', () => {

@@ -11,6 +11,26 @@ Work toward **v3** (plan.md §27), on the branch `version/v3`.
 
 ### Added
 
+- **`RIGHT [OUTER] JOIN`, `FULL [OUTER] JOIN`, `CROSS JOIN` and `FROM a, b`** (plan.md §27.5 S4) — the joins a
+  textbook writes, ⟖ ⟗ and ×. `RIGHT` keeps every row of the table it introduces and pads every column of the rows so
+  far with NULL; `FULL` keeps both sides, each unmatched row exactly once; a chain mixes them with inner and `LEFT`
+  joins step by step. Nested-loop, hash and sort-merge each remember which inner rows matched and send the rest out at
+  the end — the trace says when (*2 rows of orders matched nothing, and come out next*); an index nested-loop never
+  visits those rows, so a `RIGHT` or `FULL` asked of it runs as a nested-loop and says why. `CROSS JOIN` and the comma
+  pair every row with every row, always as a nested loop, estimated at left × right. A new rewrite rule,
+  **product-to-join**, turns a cross join with a `WHERE` equality between its two sides into a join on it — σ over ×
+  becomes ⋈ — so `FROM customers, orders WHERE customers.id = orders.customerId` plans exactly as `JOIN … ON` does; it
+  leaves a cross join a later `RIGHT` or `FULL` pads alone, where the `WHERE` has to stay above to remove the padded
+  rows. A `WHERE` on a side a join pads is never pushed below that join, and join reordering leaves any chain with an
+  outer or cross join as written (the trace says an outer join is not commutative). Plan labels read `Right join`,
+  `Full join`, `Cross join`; the algebra view and LaTeX use ⟕ ⟖ ⟗ × (`\times`); `/tools/grammar` draws the new forms.
+  `CROSS JOIN … ON` is refused, pointing at `WHERE`. The lesson **RIGHT, FULL and CROSS JOIN** (`/learn/outer-joins`)
+  and the challenge **Leave no one out** (`/challenges/leave-no-one-out`, a FULL JOIN of 43 rows) run on `shop`, which
+  gains *FULL JOIN* and *CROSS JOIN* chips. Checked by 31 new unit tests (each of eight mutations of the new code fails
+  at least one), an e2e test, and the SQLite oracle, which now generates `RIGHT`, `FULL`, `CROSS` and comma joins —
+  in chains, under `GROUP BY`, and as a product with its key in `WHERE`. Its first run found product-to-join moving a
+  `WHERE` equality below a `RIGHT JOIN`, where the padded rows survived it; fixed before commit, with a test. Three
+  10,000-case seeds are clean.
 - **`UNION [ALL]`, `INTERSECT` and `EXCEPT`** (plan.md §27.5 S3) — two or more SELECTs combined left to right, the
   relational algebra's ∪, ∩ and −. Rows are matched by position and named by the first SELECT; `ORDER BY` and
   `LIMIT` belong to the whole result, written once after the last SELECT. Each SELECT is planned and optimized exactly
@@ -68,6 +88,9 @@ Work toward **v3** (plan.md §27), on the branch `version/v3`.
 
 ### Changed
 
+- **A `LEFT JOIN` reads ⟕ in the relational-algebra view** (and `\mathbin{⟕}` in LaTeX), not ⋈ — the symbol now says
+  which rows survive. The optimizer has **eight rewrite rules**, with *product-to-join*; `/tools/planner` and the
+  rule-toggling challenges list it.
 - **A SELECT may not name one column twice.** `SELECT n, n` silently returned one column — a result row is keyed by
   column name — which under a set operator compared the wrong columns; the oracle's first compounds found it. It is now
   refused, and the error says to alias one (`n AS n2`). SQLite accepts it; the divergence ledger and the answers page
@@ -75,6 +98,11 @@ Work toward **v3** (plan.md §27), on the branch `version/v3`.
 
 ### Fixed
 
+- **On a phone, a docs heading reached by its anchor landed under the sticky header.** The header wraps to about 167px
+  at 360px wide, and headings kept only a fixed `5rem` clear of the top, so a jump left the heading 80px down — behind
+  it. The page now pads its scroll area by the header's measured height (WCAG 2.4.11's technique C43), so anything
+  scrolled into view lands below the header at any width. Found by the accessibility audit, which flagged a rule
+  checkbox the header partly covered once S4's eighth rule lengthened the list.
 - **`/trace` dropped the dataset from its own links.** Opened with `?t=logins`, it wrote back an address — and
   links into the Playground — with `q`, `p` and `d` but no `t`, so a copied link reran the query against `users`.
   It now carries `t`, `d` and every `d.<table>`; an e2e assertion holds it.

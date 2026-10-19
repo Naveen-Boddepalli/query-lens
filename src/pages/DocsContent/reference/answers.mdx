@@ -35,9 +35,10 @@ it ships to your browser.
 
 **1. Differential: the same statement, two engines.** A generator builds small, deliberately collision-heavy
 tables (few distinct values, many `NULL`s, keys that overlap between two tables) and statements over them —
-`SELECT` with `WHERE`, `ORDER BY` and `LIMIT`; aggregates and `GROUP BY`; `JOIN` and `LEFT JOIN`, chained
-across three tables; `IN (subquery)`, some of them empty on purpose; `INSERT`, `UPDATE`, `DELETE` followed by a
-read of what they left behind. Each statement runs in QueryLens and in SQLite, and the
+`SELECT` with `WHERE`, `ORDER BY` and `LIMIT`; aggregates and `GROUP BY`; inner, `LEFT`, `RIGHT`, `FULL` and
+`CROSS` joins (and `FROM a, b`), chained across three tables; `IN (subquery)`, some of them empty on purpose, and
+`[NOT] EXISTS`; `UNION`, `INTERSECT` and `EXCEPT`; `INSERT`, `UPDATE`, `DELETE` followed by a read of what they
+left behind. Each statement runs in QueryLens and in SQLite, and the
 answers must match — as a *multiset* unless an `ORDER BY` says otherwise, with a tolerance on floating point.
 Buffer size, page size, replacement policy, join algorithm and aggregate strategy are drawn at random too, so
 every physical strategy is checked, not only the default.

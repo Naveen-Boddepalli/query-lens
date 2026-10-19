@@ -122,6 +122,56 @@ describe('lesson: UNION, INTERSECT, EXCEPT (plan.md §27.5 S3, on shop)', () => 
   });
 });
 
+describe('lesson: RIGHT, FULL and CROSS JOIN (plan.md §27.5 S4, on shop)', () => {
+  const steps = lessonById('outer-joins')!.steps;
+  const opened = (i: number) => {
+    const url = new URL(stepLink(steps[i]!.open!).href, 'https://x');
+    expect(url.searchParams.get('t'), `step ${String(i + 1)}`).toBe('shop');
+    return { sql: url.searchParams.get('q')!, step: Number(url.searchParams.get('s')) };
+  };
+  const run = (sql: string) => runQuery(sql, DATASETS.shop.make());
+  const names = (rows: readonly Record<string, unknown>[], key: string) => rows.map((r) => r[key]);
+
+  it('the inner join returns thirty-eight rows, without dmitri, ines, lars or orders 17 and 33', () => {
+    const { rows } = run(opened(0).sql);
+    expect(rows).toHaveLength(38);
+    for (const name of ['dmitri', 'ines', 'lars']) expect(names(rows, 'customers.name')).not.toContain(name);
+    expect(names(rows, 'orders.id')).not.toContain(17);
+    expect(names(rows, 'orders.id')).not.toContain(33);
+  });
+
+  it('RIGHT lands on the unmatched orders coming out, keeps all forty, and is the LEFT JOIN the other way round', () => {
+    const { sql, step } = opened(1);
+    const r = run(sql);
+    expect(r.events[step - 1]?.label).toMatch(/2 rows of orders matched nothing, and come out next/);
+    expect(r.rows).toHaveLength(40);
+    expect(r.rows.filter((row) => row['customers.name'] === null).map((row) => row['orders.id']).sort()).toEqual([17, 33]);
+    expect(run('SELECT customers.name, orders.id FROM orders LEFT JOIN customers ON orders.customerId = customers.id').rows).toHaveLength(40);
+  });
+
+  it('FULL returns forty-three, and its try-this WHERE the five nothing matched', () => {
+    const { sql } = opened(2);
+    expect(run(sql).rows).toHaveLength(43);
+    expect(run(`${sql.replace(/;$/, '')} WHERE customers.id IS NULL OR orders.id IS NULL`).rows).toHaveLength(5);
+  });
+
+  it('CROSS JOIN returns twelve times eight, as a nested loop', () => {
+    const r = run(opened(3).sql);
+    expect(r.rows).toHaveLength(96);
+    expect(r.events.some((e) => e.stage === 'execute' && /a cross join keeps every pair/.test(e.label))).toBe(true);
+  });
+
+  it('the comma form lands on product-to-join, which a > does not trigger, and finds the inner join’s rows', () => {
+    const { sql, step } = opened(4);
+    const r = run(sql);
+    expect(r.events[step - 1]).toMatchObject({ stage: 'optimize', rule: 'product-to-join' });
+    expect(r.rows).toHaveLength(38);
+    expect(12 * 40 - 38).toBe(442);
+    const greater = run(sql.replace('=', '>'));
+    expect(greater.events.some((e) => e.stage === 'optimize' && e.rule === 'product-to-join')).toBe(false);
+  });
+});
+
 describe('lesson: NULL is not a value (plan.md §26 Feature 3)', () => {
   // Each step opens on the `customers` preset, and its prose quotes numbers — held here against the engine itself.
   const steps = lessonById('nulls')!.steps;

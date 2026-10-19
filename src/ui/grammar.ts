@@ -103,16 +103,23 @@ export const GRAMMAR: GrammarRule[] = [
       opt(lit('HAVING'), rule('expr')),
     ],
   },
+  // RIGHT, FULL and CROSS since plan.md §27.5 S4; a comma in FROM is a cross join, as a textbook writes one.
   {
     name: 'join',
     parts: [
-      opt(choice([lit('INNER')], [lit('LEFT'), opt(lit('OUTER'))])),
-      lit('JOIN'),
-      rule('identifier'),
-      lit('ON'),
-      rule('qualifiedColumn'),
-      lit('='),
-      rule('qualifiedColumn'),
+      choice(
+        [
+          opt(choice([lit('INNER')], [lit('LEFT'), opt(lit('OUTER'))], [lit('RIGHT'), opt(lit('OUTER'))], [lit('FULL'), opt(lit('OUTER'))])),
+          lit('JOIN'),
+          rule('identifier'),
+          lit('ON'),
+          rule('qualifiedColumn'),
+          lit('='),
+          rule('qualifiedColumn'),
+        ],
+        [lit('CROSS'), lit('JOIN'), rule('identifier')],
+        [lit(','), rule('identifier')],
+      ),
     ],
   },
   {
