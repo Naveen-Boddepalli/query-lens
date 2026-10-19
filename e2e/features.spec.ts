@@ -2190,3 +2190,21 @@ test('the join-order page prices bushy plans beside left-deep ones, and finds wh
   await expect(section.getByLabel('Rows in B')).toHaveValue('2000');
   await expect(section.getByRole('status').nth(1)).toContainText('1.32× fewer pages');
 });
+
+test('the histogram tool reads a range estimate off the buckets ANALYZE builds, at every bucket count', async ({ page }) => {
+  await page.goto('/tools/histograms');
+  await expect(page.getByRole('heading', { name: 'Histograms', exact: true })).toBeVisible();
+  // The clustered column, ten buckets, the range in the gap: 199 estimated for 29.
+  await expect(page.getByRole('status')).toHaveText('6.67×');
+  await expect(page.getByText('199 rows')).toBeVisible();
+  await page.getByLabel('Buckets', { exact: true }).fill('100');
+  await expect(page.getByRole('status')).toHaveText('1.20×');
+  await page.getByRole('button', { name: '1 bucket', exact: true }).click();
+  await expect(page.getByRole('status')).toHaveText('29.87×');
+  await expect.poll(() => page.url()).toContain('b=1');
+  // The preset's even amounts: one bucket is as good as any.
+  await page.getByRole('radio', { name: 'transactions.amount' }).click();
+  await expect(page.getByText('181 rows')).toBeVisible();
+  await page.getByRole('button', { name: 'Show as table' }).first().click();
+  await expect(page.getByRole('table').filter({ hasText: 'Rows (assumed)' })).toBeVisible();
+});

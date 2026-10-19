@@ -3,7 +3,7 @@
  *
  *   statement     := explain | analyze | select | delete | insert | update
  *   explain       := EXPLAIN [ANALYZE] select
- *   analyze       := ANALYZE identifier [';'] EOF
+ *   analyze       := ANALYZE identifier [WITH number BUCKETS] [';'] EOF
  *   query         := select | compound
  *   select        := selectCore [ORDER BY identifier [ASC|DESC]] [LIMIT number [OFFSET number]] [';'] EOF
  *   selectCore    := SELECT [DISTINCT] selectList FROM identifier [join]* [WHERE expr]
@@ -1983,9 +1983,38 @@ function parseExplainBody(c: Cursor): ExplainStatement {
 /* ANALYZE                                                                     */
 /* -------------------------------------------------------------------------- */
 
+/** The most buckets `ANALYZE … WITH n BUCKETS` builds a histogram with (plan.md §27.5 T5); PostgreSQL's own cap is 10,000. */
+export const MAX_HISTOGRAM_BUCKETS = 100;
+
+/**
+ * Words the parser reads by their spelling in one place only, and so are not keywords: a column may still be called
+ * `buckets`. `ANALYZE t WITH n BUCKETS` (plan.md §27.5 T5) is where.
+ */
+export const CONTEXTUAL_WORDS: ReadonlySet<string> = new Set(['WITH', 'BUCKETS']);
+
 function parseAnalyzeBody(c: Cursor): AnalyzeStatement {
   const analyzeToken = c.expectKeyword('ANALYZE', 'to begin an analyze');
   const table = parseTableRef(c);
+  // `WITH n BUCKETS` (plan.md §27.5 T5) — neither word is a keyword anywhere else, so both are read as words here.
+  const word = (token: ReturnType<Cursor['peek']>, upper: string) =>
+    CONTEXTUAL_WORDS.has(upper) && token.type === 'identifier' && token.upper === upper;
+  if (word(c.peek(), 'WITH')) {
+    c.next();
+    const count = c.peek();
+    if (count.type !== 'number' || count.value.includes('.')) {
+      throw new ParseError(`Expected a whole number of buckets after WITH, found ${describe(count)}.`, count, 'For example: ANALYZE transactions WITH 20 BUCKETS');
+    }
+    const buckets = Number(count.value);
+    if (buckets < 1 || buckets > MAX_HISTOGRAM_BUCKETS) {
+      throw new ParseError(`A histogram has between 1 and ${String(MAX_HISTOGRAM_BUCKETS)} buckets, not ${count.value}.`, count);
+    }
+    c.next();
+    const end = c.peek();
+    if (!word(end, 'BUCKETS')) throw new ParseError(`Expected BUCKETS after the bucket count, found ${describe(end)}.`, end);
+    c.next();
+    expectStatementEnd(c);
+    return { kind: 'analyze', table, buckets, span: { from: analyzeToken.from, to: end.to } };
+  }
   expectStatementEnd(c);
   return { kind: 'analyze', table, span: { from: analyzeToken.from, to: table.span.to } };
 }

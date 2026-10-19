@@ -114,6 +114,13 @@ const TOOLS = [
     available: true,
   },
   {
+    title: 'Histograms',
+    href: '/tools/histograms',
+    description:
+      'ANALYZE with the bucket count you choose: the equi-depth histogram it builds over a column, a range estimate read off it, and the q-error at every bucket count from 1 to 100 — on the transactions preset\'s amounts, and on a skewed and a clustered column where the count matters.',
+    available: true,
+  },
+  {
     title: 'LSM tree',
     href: '/tools/lsm',
     description:

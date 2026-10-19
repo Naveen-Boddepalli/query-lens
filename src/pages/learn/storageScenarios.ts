@@ -82,6 +82,15 @@ export interface JoinOrderScenario {
   tool: 'join-order';
 }
 
+/** A column, a bucket count and a range (plan.md §27.5 T5). */
+export interface HistogramScenario {
+  tool: 'histograms';
+  c: 'amount' | 'skewed' | 'clustered';
+  b: number;
+  lo: number;
+  hi: number;
+}
+
 export type StorageScenario =
   | LsmScenario
   | HashIndexScenario
@@ -91,7 +100,8 @@ export type StorageScenario =
   | PageScenario
   | SortScenario
   | HashJoinScenario
-  | JoinOrderScenario;
+  | JoinOrderScenario
+  | HistogramScenario;
 
 const LSM = { tool: 'lsm', n: 60, mem: 4, trigger: 3, base: 8, mult: 2, seed: 1 } as const;
 const HASH = { tool: 'hash-index', n: 60, cap: 4, init: 2, seed: 1 } as const;
@@ -138,6 +148,12 @@ export const STORAGE_SCENARIOS = {
 
   // — Join order —
   joinOrder: { tool: 'join-order' },
+
+  // — Histograms —
+  histogramGap: { tool: 'histograms', c: 'clustered', b: 10, lo: 500, hi: 2000 },
+  histogramGapFine: { tool: 'histograms', c: 'clustered', b: 100, lo: 500, hi: 2000 },
+  histogramEdge: { tool: 'histograms', c: 'clustered', b: 10, lo: 2400, hi: 2410 },
+  histogramEven: { tool: 'histograms', c: 'amount', b: 1, lo: 100, hi: 400 },
 } as const satisfies Record<string, StorageScenario>;
 
 export type StorageScenarioName = keyof typeof STORAGE_SCENARIOS;
@@ -199,6 +215,12 @@ export function storageHref(scenario: StorageScenario): string {
       p.set('seed', String(scenario.seed));
       break;
     case 'join-order':
+      break;
+    case 'histograms':
+      p.set('c', scenario.c);
+      p.set('b', String(scenario.b));
+      p.set('lo', String(scenario.lo));
+      p.set('hi', String(scenario.hi));
       break;
   }
   const query = p.toString();

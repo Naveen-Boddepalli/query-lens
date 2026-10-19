@@ -16,7 +16,7 @@
 import type { CompareOp, Expr } from '../parser/index.ts';
 import type { Row, SqlValue, Table } from '../types.ts';
 import { columnsOfIndex } from '../index/spec.ts';
-import { lookupKeysOf } from './plan.ts';
+import { conjuncts, lookupKeysOf, rangeOn } from './plan.ts';
 import type { Plan } from './plan.ts';
 
 /** Default selectivity for an open range with no usable min/max (Selinger et al., 1979). */
@@ -265,9 +265,50 @@ const clampFraction = (f: number): number => Math.min(1, Math.max(0, f));
  * assumes the two parts are independent; `NOT` is the complement. Both are
  * exactly the assumptions plan.md §25.4 C2 later sets out to break on purpose.
  */
+/**
+ * The bounds an `AND` puts on one column, gathered into one range: `amount >= 100 AND amount <= 400` (a `BETWEEN`) is
+ * one fact about `amount`, not two independent ones, so it is priced as `boundedRangeSelectivity` prices it — as an
+ * index range scan already is — rather than as the product of two half-open ranges, which counts the rows outside
+ * each bound twice (plan.md §27.5 T5 found the two disagreeing). Only a column bounded from both sides by numbers is
+ * gathered; anything else is left to the ordinary `AND`.
+ */
+function boundedRanges(parts: readonly Expr[]): { ranges: { column: string; low: number; high: number }[]; rest: Expr[] } {
+  const bounds = new Map<string, { low: number | null; high: number | null; parts: Expr[] }>();
+  for (const part of parts) {
+    if (part.kind !== 'compare') continue;
+    const column = part.left.kind === 'column' ? part.left.name : part.right.kind === 'column' ? part.right.name : null;
+    const range = column === null ? undefined : rangeOn(part, column);
+    if (!column || !range || typeof range.value !== 'number') continue;
+    const b = bounds.get(column) ?? { low: null, high: null, parts: [] };
+    if (range.op === '>' || range.op === '>=') b.low = b.low === null ? range.value : Math.max(b.low, range.value);
+    else b.high = b.high === null ? range.value : Math.min(b.high, range.value);
+    b.parts.push(part);
+    bounds.set(column, b);
+  }
+  const ranges: { column: string; low: number; high: number }[] = [];
+  const gathered = new Set<Expr>();
+  for (const [column, b] of bounds) {
+    if (b.low === null || b.high === null) continue;
+    ranges.push({ column, low: b.low, high: b.high });
+    for (const part of b.parts) gathered.add(part);
+  }
+  return { ranges, rest: parts.filter((part) => !gathered.has(part)) };
+}
+
 export function selectivityOf(expr: Expr, table: Table): Selectivity {
   switch (expr.kind) {
     case 'and': {
+      const { ranges, rest } = boundedRanges(conjuncts(expr));
+      if (ranges.length > 0) {
+        const pieces = [
+          ...ranges.map((r) => boundedRangeSelectivity(r.column, r.low, r.high, table)),
+          ...rest.map((part) => selectivityOf(part, table)),
+        ];
+        return {
+          fraction: pieces.reduce((product, piece) => product * piece.fraction, 1),
+          basis: pieces.map((piece) => piece.basis).join(' × '),
+        };
+      }
       const left = selectivityOf(expr.left, table);
       const right = selectivityOf(expr.right, table);
       return {

@@ -155,6 +155,12 @@ export const LESSON_GROUPS: readonly LessonGroup[] = [
         minutes: 4,
         summary: 'Every order gives the same rows. Selinger’s search finds the cheap one without pricing every order.',
       },
+      {
+        id: 'histograms',
+        title: 'Histograms: how many buckets an estimate needs',
+        minutes: 4,
+        summary: 'ANALYZE cuts a column into buckets of equal depth. Too few, and a range over a gap is guessed many times too high.',
+      },
     ],
   },
   {

@@ -338,6 +338,7 @@ The Planner panel's **Copy as EXPLAIN** button gives the same text for a query y
 
 ```sql
 ANALYZE users;
+ANALYZE transactions WITH 20 BUCKETS;
 ```
 
 A real scan of the named table, producing its statistics — distinct count, null fraction,
@@ -345,7 +346,9 @@ most-common values, a histogram, correlation — one column per result row, in t
 panel any other query's answer would be. Every later query against that table then reads them,
 in place of scanning the live rows itself, until `ANALYZE` runs again — see
 [Statistics](/docs/reference/limits#statistics) for what they hold and how the cost model uses
-them. No `WHERE`, no `JOIN`: `ANALYZE` names exactly one table.
+them. No `WHERE`, no `JOIN`: `ANALYZE` names exactly one table. `WITH n BUCKETS` (MySQL's phrase, plan.md §27.5
+T5) sets how many buckets each column's histogram gets, 1 to 100; without it, 10. `WITH` and `BUCKETS` are read
+as words only there, so a column may still be called `buckets`.
 
 ## DELETE, INSERT, UPDATE
 

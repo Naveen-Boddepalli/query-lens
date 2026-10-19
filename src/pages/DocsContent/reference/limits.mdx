@@ -272,6 +272,19 @@ index entries of the rows it touches.
   equi-depth histogram over what is left, and how much the column's own order tracks the table's
   physical row order (correlation, `-1` to `1`; a [clustered table](/docs/concepts/btree) achieves
   exactly `1` on its clustering key). Shaped after PostgreSQL's own `pg_stats`.
+- **How many buckets is yours to choose** (plan.md §27.5 T5): `ANALYZE table WITH n BUCKETS`, 1 to 100, and 10
+  without it (PostgreSQL's default target is 100; MySQL's own histograms default to 100 buckets too). A column
+  with fewer values left to split gets fewer. [Histograms](/tools/histograms) draws the buckets the engine's own
+  `ANALYZE` builds over a column and reads a range estimate off them at every bucket count from 1 to 100, against
+  the rows really there: on the transactions preset's even amounts the count hardly matters, and on two columns
+  made there — one skewed, one in three dense bands — it does — 30× off with one or two buckets on a range in a gap — and not monotonically: a
+  narrow range at a bucket's edge can be guessed worse with more buckets. Its estimate is the one `EXPLAIN` gives
+  the same range after the same `ANALYZE`, which a test holds.
+- **A column bounded from both sides is one range.** `amount BETWEEN 100 AND 400` — or
+  `amount >= 100 AND amount <= 400` — is priced as one bounded range on `amount`, the way an index range scan always priced it, not as the
+  product of two half-open ranges, which counts the rows outside each bound twice. Until plan.md §27.5 T5 a
+  sequential scan's filter did multiply them: 230 rows estimated for the 183 in that range, where the bounded
+  range says 181.
 - **The result *is* the statistics** — one row per column — shown in the same Result panel any
   other query's answer would be. There is no separate stats panel to open; opening the result is
   opening the statistics.

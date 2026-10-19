@@ -412,6 +412,10 @@ const T = (name: string): string => `src/pages/tools/${name}.tsx`;
  *  - 2026-10-19, bushy plans (plan.md §27.5 T4): /tools/join-order carries the shape search (`joinShapes.ts`), the
  *    explorer's sweep and its section — 179.1 kB, raised to measured + 3, rounded up: 178 → 183. No other route
  *    imports them.
+ *  - 2026-10-19, equi-depth histograms (plan.md §27.5 T5): /tools/histograms is a new route, 178.9 kB → 182; its
+ *    challenge's checks are a new opt-in chunk, 1.5 kB → 5. The lesson and the challenge put their text in the lesson
+ *    and challenge lists every one of those routes carries: /learn/:id 201 → 205 (201.1), /challenges 194 → 198
+ *    (194.5), /challenges/:id 315 → 319 (315.4), each measured + 3, rounded up.
  */
 export const ROUTES: readonly RouteBudget[] = [
   { route: '/', roots: [P('LandingPage')], kb: 177, note: 'the landing page' },
@@ -419,15 +423,15 @@ export const ROUTES: readonly RouteBudget[] = [
   { route: '/stages', roots: ['src/ui/StagesLayout.tsx', P('StagesIndex')], kb: 177, note: 'the stage explainers, index' },
   { route: '/stages/:id', roots: ['src/ui/StagesLayout.tsx', P('StagePage')], kb: 213, note: 'one stage explainer' },
   { route: '/learn', roots: [P('LearnPage')], kb: 113, note: 'the lesson track' },
-  { route: '/learn/:id', roots: [P('LessonPage')], kb: 201, note: 'one lesson' },
+  { route: '/learn/:id', roots: [P('LessonPage')], kb: 205, note: 'one lesson' },
   { route: '/examples', roots: [P('ExamplesPage')], kb: 110, note: 'preset queries' },
   { route: '/gallery', roots: [P('GalleryPage')], kb: 178, note: 'named moments' },
   { route: '/compare', roots: [P('ComparePage')], kb: 189, note: 'index vs scan, policy vs policy, hash vs sort, join algorithms, B+Tree vs. LSM' },
   { route: '/trace', roots: [P('TracePage')], kb: 180, note: 'the trace inspector' },
   { route: '/progress', roots: [P('ProgressPage')], kb: 116, note: 'the progress dashboard' },
   { route: '/practice', roots: [P('PracticePage')], kb: 189, note: 'generated questions with engine-computed answers, and a Leitner schedule' },
-  { route: '/challenges', roots: [P('ChallengesPage')], kb: 194, note: 'challenge index' },
-  { route: '/challenges/:id', roots: [P('ChallengePage')], kb: 315, note: 'one challenge' },
+  { route: '/challenges', roots: [P('ChallengesPage')], kb: 198, note: 'challenge index' },
+  { route: '/challenges/:id', roots: [P('ChallengePage')], kb: 319, note: 'one challenge' },
   { route: '/settings', roots: [P('SettingsPage')], kb: 111, note: 'preferences' },
   { route: '/study', roots: [P('StudyPage')], kb: 117, note: 'the §9 study runner (unlisted); the instrument travels in the link, not the bundle (§25.4 A2)' },
   { route: '/assignments/new', roots: [P('AssignmentsNewPage')], kb: 178, note: 'assignment-link builder' },
@@ -447,6 +451,7 @@ export const ROUTES: readonly RouteBudget[] = [
   { route: '/tools/grammar', roots: [T('GrammarToolPage')], kb: 112, note: 'the SQL grammar diagram' },
   { route: '/tools/hash-join', roots: [T('HashJoinToolPage')], kb: 114, note: 'Grace hash join' },
   { route: '/tools/join-order', roots: [T('JoinOrderToolPage')], kb: 183, note: 'Selinger join-order search over the subset lattice' },
+  { route: '/tools/histograms', roots: [T('HistogramToolPage')], kb: 182, note: 'equi-depth histograms: ANALYZE with a bucket count, and a range estimate’s q-error (plan.md §27.5 T5)' },
   { route: '/tools/lsm', roots: [T('LsmToolPage')], kb: 116, note: 'log-structured merge-tree sandbox' },
   { route: '/tools/hash-index', roots: [T('HashIndexToolPage')], kb: 115, note: 'extendible and linear hashing sandbox' },
   { route: '/tools/columnar', roots: [T('ColumnarToolPage')], kb: 114, note: 'NSM/DSM/PAX row vs. column storage sandbox' },
@@ -470,6 +475,7 @@ const SETTINGS_TOOL_CHECKS: readonly (readonly [string, number, string])[] = [
   ['sort', 6, 'the external merge sort driver'],
   ['hash-join', 6, 'the Grace hash join driver'],
   ['join-order', 4, 'the join-order graph and the Selinger search'],
+  ['histograms', 5, 'the histogram columns, ANALYZE and the range estimate (plan.md §27.5 T5)'],
   ['page', 5, 'the slotted-page layout'],
   ['hash-index', 7, 'the extendible and linear hashing driver'],
   ['lsm', 7, 'the LSM tree planner'],

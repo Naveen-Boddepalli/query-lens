@@ -121,6 +121,9 @@ const HashJoinToolPage = lazy(() =>
 const JoinOrderToolPage = lazy(() =>
   import('./pages/tools/JoinOrderToolPage.tsx').then((m) => ({ default: m.JoinOrderToolPage })),
 );
+const HistogramToolPage = lazy(() =>
+  import('./pages/tools/HistogramToolPage.tsx').then((m) => ({ default: m.HistogramToolPage })),
+);
 const LsmToolPage = lazy(() =>
   import('./pages/tools/LsmToolPage.tsx').then((m) => ({ default: m.LsmToolPage })),
 );
@@ -251,6 +254,7 @@ export default function App() {
               <Route path="grammar" element={suspended(GrammarToolPage)} />
               <Route path="hash-join" element={suspended(HashJoinToolPage)} />
               <Route path="join-order" element={suspended(JoinOrderToolPage)} />
+              <Route path="histograms" element={suspended(HistogramToolPage)} />
               <Route path="lsm" element={suspended(LsmToolPage)} />
               <Route path="hash-index" element={suspended(HashIndexToolPage)} />
               <Route path="columnar" element={suspended(ColumnarToolPage)} />

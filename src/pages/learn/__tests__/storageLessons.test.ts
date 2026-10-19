@@ -23,6 +23,7 @@ import { demoKeys, HASH_JOIN_LIMITS, planHashJoin } from '../../../ui/hashJoin.t
 import { demoWrites as hashWrites, HASH_LIMITS, planHashIndex } from '../../../ui/hashIndex.ts';
 import { DEMO_INITIAL_KEYS, demoScripts, LATCH_LIMITS, planLatchCrabbing } from '../../../ui/latchCrabbing.ts';
 import { demoWrites as lsmWrites, LSM_LIMITS, planLsm } from '../../../ui/lsm.ts';
+import { estimateAt, HISTOGRAM_LIMITS, isColumnId } from '../../../ui/histogramColumns.ts';
 import { layOutPage } from '../../../ui/slottedPage.ts';
 import { planVectorIndex, VECTOR_LIMITS } from '../../../ui/vectorIndex.ts';
 import { STORAGE_SCENARIOS, storageHref } from '../storageScenarios.ts';
@@ -50,7 +51,7 @@ function lessonsOf(group: LessonGroupId) {
   return ids.map((id) => LESSONS.find((l) => l.id === id)!);
 }
 
-const EXECUTION_IDS = ['external-sort', 'hash-join', 'join-order'];
+const EXECUTION_IDS = ['external-sort', 'hash-join', 'join-order', 'histograms'];
 const EXECUTION_LESSONS = EXECUTION_IDS.map((id) => LESSONS.find((l) => l.id === id)!);
 const STORAGE_LESSONS = lessonsOf('storage');
 
@@ -74,8 +75,8 @@ describe('the storage and execution lessons are wired into the track', () => {
   it('sit in the pipeline group and a group of their own, before the transactions, with unique ids', () => {
     expect(LESSON_GROUPS.map((g) => g.id)).toEqual(['pipeline', 'storage', 'transactions']);
     expect(LESSONS).toEqual([...lessonsOf('pipeline'), ...lessonsOf('storage'), ...lessonsOf('transactions')]);
-    // The sort, the hash join and the join order close the pipeline group.
-    expect(lessonsOf('pipeline').slice(-3).map((l) => l.id)).toEqual(EXECUTION_IDS);
+    // The sort, the hash join, the join order and the histograms (plan.md §27.5 T5) close the pipeline group.
+    expect(lessonsOf('pipeline').slice(-EXECUTION_IDS.length).map((l) => l.id)).toEqual(EXECUTION_IDS);
     const ids = LESSONS.map((l) => l.id);
     expect(new Set(ids).size).toBe(ids.length);
     expect(STORAGE_LESSONS.map((l) => l.id)).toEqual([
@@ -164,6 +165,11 @@ describe('the storage and execution lessons are wired into the track', () => {
         case 'join-order':
           expect(url.search).toBe('');
           break;
+        case 'histograms':
+          expect(isColumnId(s.c)).toBe(true);
+          expect(within(s.b, HISTOGRAM_LIMITS.minBuckets, HISTOGRAM_LIMITS.maxBuckets)).toBe(true);
+          expect(within(s.lo, HISTOGRAM_LIMITS.minValue, s.hi) && within(s.hi, s.lo, HISTOGRAM_LIMITS.maxValue)).toBe(true);
+          break;
       }
     }
   });
@@ -251,6 +257,32 @@ describe('lesson: join order', () => {
     expect(written.pages / dp.winner.pages).toBeLessThan(5.3);
     const last = Object.fromEntries(dp.winner.candidates.map((c) => [c.addedTable, c.pages]));
     expect(last).toEqual({ projects: 290252, departments: 590050, timesheets: 1501542, employees: 7537542 });
+  });
+});
+
+describe('lesson: histograms', () => {
+  const at = (s: { c: 'amount' | 'skewed' | 'clustered'; b: number; lo: number; hi: number }, b = s.b) => estimateAt(s.c, s.lo, s.hi, b);
+
+  it('ten buckets put a gap in one bucket: 199 estimated, 29 really, 6.67×', () => {
+    const e = at(STORAGE_SCENARIOS.histogramGap);
+    expect([e.estimate, e.actual, e.qError.toFixed(2)]).toEqual([199, 29, '6.67']);
+  });
+
+  it('a hundred buckets: 35, 1.20× — down from 29.87× with one', () => {
+    const e = at(STORAGE_SCENARIOS.histogramGapFine);
+    expect([e.estimate, e.qError.toFixed(2)]).toEqual([35, '1.20']);
+    expect(at(STORAGE_SCENARIOS.histogramGap, 1).qError.toFixed(2)).toBe('29.87');
+  });
+
+  it('a narrow range at a boundary: 110 rows, estimated 1 with ten buckets (55.50×) and 83 with twenty', () => {
+    const e = at(STORAGE_SCENARIOS.histogramEdge);
+    expect([e.actual, e.estimate, e.qError.toFixed(2)]).toEqual([110, 1, '55.50']);
+    expect(at(STORAGE_SCENARIOS.histogramEdge, 20).estimate).toBe(83);
+  });
+
+  it('the even amounts: one bucket estimates 181 of 183', () => {
+    const e = at(STORAGE_SCENARIOS.histogramEven);
+    expect([e.estimate, e.actual]).toEqual([181, 183]);
   });
 });
 

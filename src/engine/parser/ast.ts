@@ -406,6 +406,8 @@ export interface CompoundStatement {
 export interface AnalyzeStatement {
   kind: 'analyze';
   table: TableRef;
+  /** `WITH n BUCKETS` (plan.md §27.5 T5, MySQL's phrase): how many buckets each histogram gets. Absent: the default. */
+  buckets?: number;
   span: Span;
 }
 

@@ -261,10 +261,12 @@ export function runQuery(
   // ANALYZE (plan.md §25.4 C1): a real scan, nothing to plan or optimize, and no join/column checks below apply.
   if (ast.kind === 'analyze') {
     emitAnalyzeParseEvents(emit, ast);
-    const stats = analyzeTable(table);
+    const stats = analyzeTable(table, ast.buckets);
     const rows = statsToRows(stats);
     emit(
-      `ANALYZE scanned all ${String(table.rows.length)} row${table.rows.length === 1 ? '' : 's'} of \`${table.name}\` and built statistics for ${String(table.columns.length)} column${table.columns.length === 1 ? '' : 's'}. The next query against \`${table.name}\` reads these instead of scanning the live rows to estimate a plan.`,
+      `ANALYZE scanned all ${String(table.rows.length)} row${table.rows.length === 1 ? '' : 's'} of \`${table.name}\` and built statistics for ${String(table.columns.length)} column${table.columns.length === 1 ? '' : 's'}${
+        ast.buckets === undefined ? '' : `, each histogram in up to ${String(ast.buckets)} bucket${ast.buckets === 1 ? '' : 's'}`
+      }. The next query against \`${table.name}\` reads these instead of scanning the live rows to estimate a plan.`,
       { stage: 'result', rows },
     );
     return { events: drain(), rows, analyze: { table: table.name, stats } };

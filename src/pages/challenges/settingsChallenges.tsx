@@ -26,6 +26,7 @@ export type SettingsTool =
   | 'sort'
   | 'hash-join'
   | 'join-order'
+  | 'histograms'
   | 'page'
   | 'hash-index'
   | 'lsm'
@@ -207,6 +208,35 @@ export const SETTINGS_CHALLENGES: SettingsChallenge[] = [
         Join the tables in the order the query names them, or smallest first. Any order returns the same rows; the order
         decides how big the intermediate results get. The cheapest orders here all finish on {code('projects')} — the
         written order joins it second, and pays for it in every join after.
+      </>
+    ),
+  },
+  {
+    id: 'enough-buckets',
+    title: 'Enough buckets for the gap',
+    group: 'storage',
+    tool: 'histograms',
+    brief: (
+      <>
+        On the clustered column, {code('v BETWEEN 500 AND 2000')} lies in the gap between two dense bands: 29 rows. With
+        the default ten buckets the planner estimates 199. Choose a bucket count for {code('ANALYZE … WITH n BUCKETS')},
+        no more than 50, that brings the estimate within 1.5× of the truth.
+      </>
+    ),
+    hint: (
+      <>
+        The tool&rsquo;s sweep tries 1, 2, 5, 10, 20, 50 and 100, and 50 is not good enough — 2.33×. The q-error is not a
+        smooth curve in the bucket count: where the bucket boundaries fall decides it. Try counts in the forties.
+      </>
+    ),
+    needs: 'a bucket count of at most 50 with a q-error of at most 1.5',
+    controls: [{ kind: 'number', key: 'buckets', label: 'Buckets', min: 1, max: 100 }],
+    starter: { buckets: '10' },
+    misconception: (
+      <>
+        More buckets always give a better estimate. Usually — but 50 buckets miss by 2.33× where 46 come within 1.5×,
+        because each count moves every boundary, and a boundary inside the gap decides how much of a dense band the
+        planner smears across it.
       </>
     ),
   },

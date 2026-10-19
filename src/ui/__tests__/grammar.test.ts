@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { GRAMMAR, ruleNamed } from '../grammar.ts';
 import type { GrammarPart } from '../grammar.ts';
 import { KEYWORDS } from '../../engine/parser/tokenizer.ts';
-import { AGGREGATE_FNS, parseStatement } from '../../engine/parser/parser.ts';
+import { AGGREGATE_FNS, CONTEXTUAL_WORDS, parseStatement } from '../../engine/parser/parser.ts';
 
 /** Every literal and rule-reference part, anywhere in the grammar, depth-first. */
 function walk(parts: GrammarPart[], visit: (part: GrammarPart) => void): void {
@@ -30,8 +30,8 @@ describe('grammar data — structural consistency', () => {
       walk(r.parts, (part) => {
         if (part.kind === 'literal' && /^[A-Z]+$/.test(part.text)) {
           expect(
-            KEYWORDS.has(part.text) || AGGREGATE_FNS.has(part.text),
-            `${r.name} claims "${part.text}" is a keyword or aggregate function`,
+            KEYWORDS.has(part.text) || AGGREGATE_FNS.has(part.text) || CONTEXTUAL_WORDS.has(part.text),
+            `${r.name} claims "${part.text}" is a keyword, an aggregate function or a contextual word`,
           ).toBe(true);
         }
       });
@@ -58,6 +58,7 @@ describe('grammar data — every rule is demonstrated by a query the real parser
     ['explain — with ANALYZE', 'EXPLAIN ANALYZE SELECT * FROM users WHERE id = 5'],
     ['statement (analyze)', 'ANALYZE users'],
     ['analyze — with a trailing semicolon', 'ANALYZE users;'],
+    ['analyze — with a bucket count', 'ANALYZE users WITH 20 BUCKETS;'],
     ['statement (delete)', 'DELETE FROM users'],
     ['statement (insert)', "INSERT INTO users VALUES (1, 'a')"],
     ['statement (update)', 'UPDATE users SET age = 1'],

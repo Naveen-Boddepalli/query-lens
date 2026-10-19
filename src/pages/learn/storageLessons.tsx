@@ -135,6 +135,61 @@ export const EXECUTION_STEPS: Record<string, LessonStep[]> = {
       link: to('joinOrder', 'Open the winning order'),
     },
   ],
+  histograms: [
+    {
+      heading: 'Ten buckets, and one of them spans a gap',
+      body: (
+        <>
+          Three thousand values in three dense bands, with a hundred scattered between them. {code('ANALYZE')} cuts them
+          into ten buckets of equal depth, and one bucket runs from the end of the first band to the start of the second.
+          Asked for {code('v BETWEEN 500 AND 2000')}, the planner spreads that bucket&rsquo;s rows evenly across it and
+          estimates <strong>199</strong> rows. There are <strong>29</strong>: a q-error of 6.67×.
+        </>
+      ),
+      link: to('histogramGap', 'Open the ten buckets'),
+    },
+    {
+      heading: 'More buckets, narrower guesses',
+      body: (
+        <>
+          {code('ANALYZE … WITH 100 BUCKETS')}: the gap is now cut into buckets of its own, few rows each, and the estimate
+          is <strong>35</strong> — 1.20×. The q-error falls as the buckets rise, from 29.87× with one bucket. Each bucket
+          is one more value the planner stores and reads; PostgreSQL&rsquo;s default is a hundred.
+        </>
+      ),
+      link: to('histogramGapFine', 'Open it with a hundred'),
+    },
+    {
+      heading: 'But not always',
+      body: (
+        <>
+          A narrow range, {code('2400 to 2410')}, at the start of the second band: 110 rows. With ten buckets it falls
+          where one bucket ends and the next begins, the planner credits it with a sliver of each, and estimates{' '}
+          <strong>1</strong> — 55.50× too few. Twenty buckets give 83. More buckets usually help; a range at a
+          boundary can still be a guess.
+        </>
+      ),
+      link: to('histogramEdge', 'Open the narrow range'),
+    },
+    {
+      heading: 'On even data, one bucket is enough',
+      body: (
+        <>
+          The transactions preset&rsquo;s amounts are spread almost evenly from 10 to 4,999. One bucket — the column&rsquo;s
+          minimum and maximum — estimates <strong>181</strong> rows for {code('amount BETWEEN 100 AND 400')}; there are
+          183. A histogram earns its buckets on a column with a shape.
+        </>
+      ),
+      link: to('histogramEven', 'Open the even column'),
+      tryThis: (
+        <>
+          In the Playground, on the transactions preset, run {code('ANALYZE transactions WITH 1 BUCKETS')} and then{' '}
+          {code('EXPLAIN ANALYZE SELECT * FROM transactions WHERE amount BETWEEN 100 AND 400')}: the estimate beside the
+          count is the one this step quotes.
+        </>
+      ),
+    },
+  ],
 };
 
 /** The slotted page, and the structures that are alternatives to the engine's heap and B+Tree. */

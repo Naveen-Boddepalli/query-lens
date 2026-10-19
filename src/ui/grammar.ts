@@ -49,7 +49,7 @@ export const GRAMMAR: GrammarRule[] = [
   { name: 'explain', parts: [lit('EXPLAIN'), opt(lit('ANALYZE')), rule('query')] },
   // One SELECT, or several combined by set operators (plan.md §27.5 S3).
   { name: 'query', parts: [choice([rule('select')], [rule('compound')])] },
-  { name: 'analyze', parts: [lit('ANALYZE'), rule('identifier'), opt(lit(';'))] },
+  { name: 'analyze', parts: [lit('ANALYZE'), rule('identifier'), opt(lit('WITH'), rule('number'), lit('BUCKETS')), opt(lit(';'))] },
   {
     name: 'select',
     parts: [

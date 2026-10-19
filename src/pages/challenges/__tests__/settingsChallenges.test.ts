@@ -8,6 +8,7 @@ import { demoKeys, HASH_JOIN_LIMITS, planHashJoin } from '../../../ui/hashJoin.t
 import { demoWrites as hashWrites, HASH_LIMITS, planHashIndex } from '../../../ui/hashIndex.ts';
 import { DEMO_INITIAL_KEYS, demoScripts, LATCH_LIMITS, planLatchCrabbing } from '../../../ui/latchCrabbing.ts';
 import { demoWrites as lsmWrites, LSM_LIMITS, planLsm } from '../../../ui/lsm.ts';
+import { HISTOGRAM_LIMITS } from '../../../ui/histogramColumns.ts';
 import { layOutPage } from '../../../ui/slottedPage.ts';
 import { planVectorIndex, VECTOR_LIMITS } from '../../../ui/vectorIndex.ts';
 import { CHALLENGES } from '../challenges.tsx';
@@ -69,6 +70,7 @@ describe('settings challenges', () => {
         'columnar',
         'hash-index',
         'hash-join',
+        'histograms',
         'isolation',
         'join-order',
         'latch-crabbing',
@@ -79,7 +81,7 @@ describe('settings challenges', () => {
         'vector-index',
       ].sort(),
     );
-    expect(SETTINGS_CHALLENGES.length).toBe(17);
+    expect(SETTINGS_CHALLENGES.length).toBe(18);
     expect(SETTINGS_CHALLENGES.filter((c) => c.group === 'transactions').map((c) => c.id)).toEqual([
       'same-level-different-promise',
     ]);
@@ -144,6 +146,7 @@ describe('settings challenges', () => {
       'clock-is-not-lru': { frames: [2, 8] },
       'scan-keeps-the-hot-set': { frames: [2, 8], ring: [0, 4] },
       'third-level': { fanout: [3, 6], keys: [1, 200] },
+      'enough-buckets': { buckets: [HISTOGRAM_LIMITS.minBuckets, HISTOGRAM_LIMITS.maxBuckets] },
     };
     for (const c of SETTINGS_CHALLENGES) {
       const want = ranges[c.id] ?? {};
@@ -197,6 +200,8 @@ describe('settings challenges', () => {
     ['more-memory-more-io', { build: 10, probe: 6, page: 2, mem: 3 }],
     ['cheapest-order', { first: 'departments', second: 'employees', third: 'timesheets', fourth: 'projects' }],
     ['cheapest-order', { first: 'timesheets', second: 'employees', third: 'departments', fourth: 'projects' }],
+    ['enough-buckets', { buckets: 46 }],
+    ['enough-buckets', { buckets: 49 }],
     ['tightest-page', { page: 0, bytes: 202 }],
     ['tightest-page', { page: 5, bytes: 200 }],
     ['split-the-other-bucket', { n: 40, strategy: 'linear', cap: 4, init: 2 }],
@@ -251,6 +256,10 @@ describe('settings challenges', () => {
       ['more-memory-more-io', 'one more page that changes nothing', { build: 12, probe: 20, page: 2, mem: 4 }],
       ['more-memory-more-io', 'a join that fits either way', { build: 12, probe: 20, page: 4, mem: 3 }],
       ['cheapest-order', 'the order as written', {}],
+      ['enough-buckets', 'the default ten', {}],
+      ['enough-buckets', 'fifty, the most allowed, at 2.33×', { buckets: 50 }],
+      ['enough-buckets', 'forty, just short at 1.70×', { buckets: 40 }],
+      ['enough-buckets', 'a hundred: close enough, but too many', { buckets: 100 }],
       ['cheapest-order', 'ending on departments', { first: 'employees', second: 'timesheets', third: 'projects', fourth: 'departments' }],
       ['cheapest-order', 'timesheets before the branch that feeds it', { first: 'departments', second: 'timesheets', third: 'employees', fourth: 'projects' }],
       ['tightest-page', 'one byte too few', { page: 0, bytes: 201 }],

@@ -11,6 +11,17 @@ Work toward **v3** (plan.md §27), on the branch `version/v3`.
 
 ### Added
 
+- **Equi-depth histograms with a bucket count you choose** (plan.md §27.5 T5) — `ANALYZE table WITH n BUCKETS`
+  (MySQL's phrase; 1 to 100, 10 without it). The new [Histograms](/tools/histograms) tool draws the buckets the
+  engine's own `ANALYZE` builds over a column, reads a range estimate off them — the one `EXPLAIN` gives — and shows
+  its q-error at every bucket count from 1 to 100, against the rows really in the range. On the transactions preset's
+  even amounts the count hardly matters; on a skewed column and a clustered one made in the tool it does, and not
+  monotonically: with ten buckets a range in the gap between two bands is guessed 6.67× too high and a narrow one at a
+  band's edge 55× too low. A lesson, *Histograms: how many buckets an estimate needs*, and a challenge, *Enough
+  buckets for the gap*, where 50 buckets miss and 46 do not. `WITH` and `BUCKETS` are not keywords. Checked by unit
+  tests (the tool's estimate against `EXPLAIN`'s, the parser's refusals), the lesson's quoted figures, the
+  challenge's solutions and near-misses, and an e2e test.
+
 - **Bushy plans** (plan.md §27.5 T4) — [Join order](/tools/join-order) now searches the same subset lattice a second
   way, trying every split of a subset into an outer and an inner part rather than only which table goes last, and
   prices bushy plans beside left-deep ones: how many more there are (120 trees against 24 orders for four tables, and a
@@ -205,6 +216,11 @@ Work toward **v3** (plan.md §27), on the branch `version/v3`.
   record the difference.
 
 ### Fixed
+
+- **A range on one column was priced as two.** `amount BETWEEN 100 AND 400` under a sequential scan was estimated as
+  the product of `amount >= 100` and `amount <= 400`, counting the rows outside each bound twice — 230 rows for the
+  183 really there, where the index range scan's own formula said 181. Bounds on one column are now gathered into one
+  range for every access path. No other estimate in the test suite moved (plan.md §27.5 T5).
 
 - **A read under an alias took no locks.** Since aliases (S7), the schedule engine looked an aliased table up by its
   alias and found nothing, so `SELECT … FROM accounts AS a` under locking locked no row. It locks the stored table now
