@@ -397,6 +397,9 @@ const T = (name: string): string => `src/pages/tools/${name}.tsx`;
  *  - 2026-10-19, table aliases and self-joins (plan.md §27.5 S7): the engine chunk 61.6 → 62.8 kB gzip — alias
  *    parsing and scoping, one heap per stored table, ρ in the algebra, the pinned-pool error. The two routes it took
  *    over were raised to measured + 3, rounded up: /gallery 173 → 178 (174.1), /docs/concepts/btree 200 → 205 (201.1).
+ *  - 2026-10-19, the precedence graph (plan.md §27.5 T1): /tools/schedule now carries the graph's engine module, its
+ *    panel and the replay check (`serialCheck`, which only /tools/concurrency loaded before) — 196.1 kB, raised to
+ *    measured + 3, rounded up: 193 → 200. No other route imports them.
  */
 export const ROUTES: readonly RouteBudget[] = [
   { route: '/', roots: [P('LandingPage')], kb: 177, note: 'the landing page' },
@@ -428,7 +431,7 @@ export const ROUTES: readonly RouteBudget[] = [
   { route: '/tools/recovery', roots: [T('RecoveryToolPage')], kb: 126, note: 'crash recovery: checkpoints, a crash, and ARIES analysis, redo and undo' },
   { route: '/tools/wal', roots: [T('WalToolPage')], kb: 126, note: 'write-ahead log: a pool, a disk, a log and the rule between them' },
   { route: '/tools/concurrency', roots: [T('ConcurrencyToolPage')], kb: 191, note: 'one schedule under five concurrency-control protocols, each really run' },
-  { route: '/tools/schedule', roots: [T('ScheduleToolPage')], kb: 193, note: 'transaction schedules (the engine, a shared database, two sessions)' },
+  { route: '/tools/schedule', roots: [T('ScheduleToolPage')], kb: 200, note: 'transaction schedules (the engine, a shared database, two sessions)' },
   { route: '/tools/grammar', roots: [T('GrammarToolPage')], kb: 112, note: 'the SQL grammar diagram' },
   { route: '/tools/hash-join', roots: [T('HashJoinToolPage')], kb: 114, note: 'Grace hash join' },
   { route: '/tools/join-order', roots: [T('JoinOrderToolPage')], kb: 178, note: 'Selinger join-order search over the subset lattice' },

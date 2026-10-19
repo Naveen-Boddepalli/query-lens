@@ -2993,7 +2993,7 @@ Costs are against the modules that exist today (paths checked 2026-10-18).
 
 | ID | Rel. | Item | Shape | Cost |
 |---|---|---|---|---|
-| **T1** | 3.1 | **Precedence graph** | In `/tools/schedule`: committed transactions as nodes, an edge for each pair of conflicting operations in schedule order, a cycle drawn and named. Checked against the existing replay-based serial check (`engine/serialCheck.ts`) on every Hermitage schedule and on random ones — the two must agree wherever conflict-serializability and the replay check coincide, and the page says where they do not (view-serializable schedules). | 1 wk |
+| **T1** | 3.1 | **Precedence graph** | **Built, 2026-10-19** — `engine/precedence.ts`: the multiversion serialization graph from what each statement *saw* (the schedule engine now records each statement's view as `saw`; row versions are told apart by object identity), Adya's predicate-read rules for wr/rw, ww by version order; G1a, G1b and a rollback-corrupted table listed as what it cannot see. `serialCheck` now compares every table of the start (it read `accounts` only). Agreement with the replay check holds on all 120 Hermitage cells and on fuzzed three-transaction interleavings under all nine modes; the cyclic-but-serializable case is value coincidence (an UPDATE always reads what it writes, so blind-write view-serializability barely arises). As first planned: in `/tools/schedule`: committed transactions as nodes, an edge for each pair of conflicting operations in schedule order, a cycle drawn and named. Checked against the existing replay-based serial check (`engine/serialCheck.ts`) on every Hermitage schedule and on random ones — the two must agree wherever conflict-serializability and the replay check coincide, and the page says where they do not (view-serializable schedules). | 1 wk |
 | **T2** | 3.1 | **Multi-granularity locking** | IS / IX / S / SIX / X on a table → page → row hierarchy in the lock table; the compatibility matrix computed, not drawn; lock escalation at a threshold. | 1 wk |
 | **T3** | 3.1 | **Next-key (gap) locks** | InnoDB's answer to phantoms: the phantom schedule prevented at `REPEATABLE READ` by a lock on the gap, shown on the index leaf it covers. The Hermitage InnoDB column's phantom cells are the check. | 1 wk |
 | **T4** | 3.1 | **Bushy plans** | `/tools/join-order` enumerates bushy trees beside left-deep ones over the same subset lattice — how many more plans there are, and the shapes where a bushy one wins. | 4 days |
@@ -3057,8 +3057,11 @@ Costs are against the modules that exist today (paths checked 2026-10-18).
   division. *(Reworded 2026-10-19 by the owner — the first wording asked for all three too — and met after S7.)*
 
 **3.1 — Theory you can see**
-- [ ] The precedence graph and the replay check agree on every Hermitage schedule, and the page names the
-  view-serializable cases where they differ.
+- [x] The precedence graph and the replay check agree on every Hermitage schedule, and the page names the
+  view-serializable cases where they differ. *(2026-10-19, T1: they agree on all 120 cells. Where the two can differ
+  on this engine is value coincidence — a cycle whose values happen to agree — not the textbook's blind-write
+  view-serializable schedule, which needs a write that reads nothing, and an SQL UPDATE or DELETE always reads the
+  rows it changes. The page says both.)*
 - [ ] A phantom is prevented by a gap lock at InnoDB's `REPEATABLE READ`, in the Hermitage matrix's own cell.
 
 **3.2 — Parallel execution**
@@ -3080,7 +3083,8 @@ Costs are against the modules that exist today (paths checked 2026-10-18).
 | `COUNT(DISTINCT)` (S5) | **Built, 2026-10-19** — both strategies, sort on (group, value) | now | — |
 | Scalar subqueries (S6) | **Built, 2026-10-19** — uncorrelated, run once, planned as a constant; two rows an error | now | — |
 | Table aliases and self-joins (S7) | **Built, 2026-10-19** — aliases scope a query; one heap per stored table; ρ in the algebra | now | — |
-| Theory you can see (T1–T5) | **Planned** | 3.1 | — |
+| Precedence graph (T1) | **Built, 2026-10-19** — multiversion, from what each statement saw; agrees with the replay check everywhere it should | now | — |
+| Theory you can see (T2–T5) | **Planned** | 3.1 | — |
 | Parallel execution (P1–P3) | **Planned** — §25.9's *Horizon (v3)* row, now scheduled | 3.2 | — |
 | Distributed databases (X1–X4) | **Planned** — §25.9's other *Horizon (v3)* row | 3.3 | P1's scripted workers exist |
 | Web Worker engine (C6's deferred half) | **Still deferred** | — | Main-thread jank, or a dataset past 10,000 rows |

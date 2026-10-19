@@ -384,6 +384,18 @@ index entries of the rows it touches.
   table it leaves is one a serial run could leave, because each transaction read something no serial order would
   have shown it. It is a check on one run, not a proof about the protocol; the protocols that claim
   serializability are held to it, in tests, over thousands of fuzzed schedules.
+- **The precedence graph** (plan.md §27.5 T1) on [Transaction schedules](/tools/schedule) draws the same run the
+  textbook way: a node for each committed transaction, and an edge for each pair of conflicting operations on a
+  row — **ww**, **wr**, **rw** — with a cycle named when there is one. Edges come from the version of each row a
+  statement actually *saw*, so the graph is the multiversion one, and under snapshots a read that ran after a write
+  but did not see it is an **rw** edge, not a **wr**. A statement reads by its `WHERE`: only rows it picks out count,
+  and a row inserted later that it would have picked out is a conflict too (a phantom); a statement with a join or a
+  subquery reads every row. Three things it cannot draw, being over committed transactions only, are listed beneath
+  it: a read of a version no committed transaction kept (G1a, G1b), and a table a rollback left holding something
+  other than every row's last committed version. It is held against the replay check on every Hermitage cell and on
+  thousands of random schedules under every protocol: no cycle and nothing unseen always means a serial order
+  explains the run, and a run no order explains always shows a cycle or something unseen. The two can differ one
+  way — a cycle the replay check passes, because the values happened to agree — and the page says so when they do.
 - **A row another open transaction has deleted or re-keyed** keeps its old image, still locked, until that
   transaction ends — otherwise a lookup for the old key finds nothing, touches no page, takes no lock, and
   reads a change nobody committed.

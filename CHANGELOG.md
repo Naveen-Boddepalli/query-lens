@@ -11,6 +11,22 @@ Work toward **v3** (plan.md §27), on the branch `version/v3`.
 
 ### Added
 
+- **The precedence graph** (plan.md §27.5 T1, the first 3.1 item) — on [Transaction schedules](/tools/schedule),
+  every run drawn as its committed transactions with an arrow for each pair of conflicting operations on a row:
+  **ww**, **wr** and **rw**, a cycle drawn in the warning colour and named (*Cycle: B → A → B … not
+  conflict-serializable*), or the serial order the graph allows. Edges come from the version of each row a statement
+  actually saw, so under snapshots the graph is the multiversion one — a read that did not see an earlier write is an
+  rw edge, as write skew needs. A statement reads by its `WHERE` (Adya's predicate reads): a write counts where it
+  changes what the predicate picks out, so a phantom insert is an edge. What a graph of committed transactions cannot
+  show is listed under it: an aborted read (G1a), an intermediate read (G1b), and a table a rollback left holding
+  another transaction's uncommitted write. Beside it, the replay check `/tools/concurrency` already used, now also on
+  this page, and what it means when they disagree — a cycle the replay passes because the values happened to agree.
+  A table lists every edge with its kind, row and steps, for a screen reader and for checking by hand. The two
+  checks are held against each other on all 120 Hermitage cells and on random interleavings of three transactions
+  under every protocol: no cycle and nothing unseen always means a serial order explains the run, and a run none
+  explains always shows a cycle or something unseen. Checked by 13 unit tests (each of nine mutations of the graph
+  fails at least one) and an e2e test. The replay check now compares every table of the database a run started from
+  (it compared `accounts` only), so it can judge a Hermitage schedule.
 - **Table aliases and self-joins** (plan.md §27.5 S7) — `FROM customers AS c`, or `customers c`, anywhere a SELECT
   names a table: `FROM`, every `JOIN` form, and the `FROM` of an `EXISTS`, `IN` or scalar subquery. The alias becomes
   the table's only name in that query (`customers.name` is then refused, and the error says it is called `c`), so one

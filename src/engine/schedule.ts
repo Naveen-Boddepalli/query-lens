@@ -166,6 +166,12 @@ export interface ScheduleStepResult {
   waitingOn?: string[];
   /** The shared database after this record, uncommitted changes included. */
   after: Database;
+  /**
+   * For a statement that ran: the database as *it* saw it — its snapshot under MVCC, its workspace under optimistic
+   * control, the shared state otherwise. The precedence graph (plan.md §27.5 T1) reads which version of each row a
+   * statement saw from it: row objects are shared, so a version is the same object everywhere it appears.
+   */
+  saw?: Database;
   /** Every session's state after this record. */
   sessions: SessionSnapshot[];
   /** The lock table after this record. Empty without `locking`. */
@@ -322,7 +328,7 @@ function producedBy(entries: readonly Logged[], row: Row): Logged | undefined {
 }
 
 /** What a successful write did to `table`, as undo entries — found by comparing the rows before and after. */
-function entriesOf(
+export function entriesOf(
   kind: 'insert' | 'delete' | 'update',
   table: string,
   before: Row[],
@@ -504,7 +510,7 @@ export function runSchedule(
     step: Queued,
     kind: StepKind,
     phase: StepPhase,
-    parts: Partial<Pick<ScheduleStepResult, 'run' | 'rows' | 'error' | 'notes' | 'anomalies' | 'waitingOn'>> & {
+    parts: Partial<Pick<ScheduleStepResult, 'run' | 'rows' | 'error' | 'notes' | 'anomalies' | 'waitingOn' | 'saw'>> & {
       /** The table as the acting session saw it, when that is not simply the latest state (MVCC). */
       view?: Database;
     },
@@ -522,6 +528,7 @@ export function runSchedule(
       anomalies: parts.anomalies ?? [],
       ...(parts.waitingOn ? { waitingOn: parts.waitingOn } : {}),
       after: parts.view ?? current,
+      ...(parts.saw ? { saw: parts.saw } : {}),
       sessions: snapshots(),
       locks: lockRows(),
       versions: mvcc ? versionRows() : [],
@@ -1453,7 +1460,7 @@ export function runSchedule(
 
     // An autocommit statement is its own transaction: its locks end with it.
     if (!txn && locking) endLocks(session, notes);
-    record(step, 'statement', phase, { run, rows, notes, anomalies, ...(mvcc ? { view: viewNow() } : {}) });
+    record(step, 'statement', phase, { run, rows, notes, anomalies, saw: view, ...(mvcc ? { view: viewNow() } : {}) });
     if ((!txn && locking) || gaveBack) drain();
     return 'done';
   }

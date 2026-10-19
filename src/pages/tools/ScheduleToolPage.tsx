@@ -23,6 +23,7 @@ import {
   segOff,
   segOn,
 } from '../../ui/primitives.ts';
+import { PrecedencePanel } from '../../ui/PrecedencePanel.tsx';
 import { ScrollRegion } from '../../ui/ScrollRegion.tsx';
 import { useAddressBarQuery } from '../../ui/addressBar.ts';
 
@@ -853,6 +854,9 @@ export function ScheduleToolPage() {
           </p>
         )}
       </div>
+
+      {/* plan.md §27.5 T1: the same run as a precedence graph, beside the replay check. */}
+      {result.steps.length > 0 && <PrecedencePanel result={result} start={database} />}
 
       {result.bloat !== null && (
         <div className={card}>

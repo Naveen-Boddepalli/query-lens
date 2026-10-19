@@ -147,3 +147,14 @@ test('dead versions can push a heap past the pool, and a VACUUM brings it back',
   const cost = page.getByRole('region', { name: 'What the dead versions cost' });
   await expect(cost.getByRole('status')).toContainText('read 18 pages from disk as it is (6 pages), and 5 after a VACUUM (5 pages)');
 });
+
+// plan.md §27.5 T1: the run as a precedence graph, its cycle named, beside the replay check.
+test('a lost update draws a cycle in the precedence graph, and the replay check agrees', async ({ page }) => {
+  await page.goto('/tools/schedule');
+  await page.getByRole('button', { name: 'Lost update' }).click();
+  const panel = page.getByRole('region', { name: 'Precedence graph' });
+  await expect(panel.getByRole('status')).toContainText(/^Cycle: (A → B → A|B → A → B)\./);
+  await expect(panel.getByRole('img', { name: /^Precedence graph:/ })).toBeVisible();
+  await expect(panel.getByText('The replay check agrees')).toBeVisible();
+  await expect(panel.getByRole('cell', { name: 'rw — read it, then the other overwrote it' })).toBeVisible();
+});
