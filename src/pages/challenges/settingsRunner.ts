@@ -27,6 +27,7 @@ const LOADERS: Record<SettingsTool, () => Promise<{ CHECKERS: Checkers }>> = {
   'hash-join': () => import('./settings/hash-join.ts'),
   'join-order': () => import('./settings/join-order.ts'),
   histograms: () => import('./settings/histograms.ts'),
+  parallel: () => import('./settings/parallel.ts'),
   page: () => import('./settings/page.ts'),
   'hash-index': () => import('./settings/hash-index.ts'),
   lsm: () => import('./settings/lsm.ts'),

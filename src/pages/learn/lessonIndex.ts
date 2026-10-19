@@ -161,6 +161,12 @@ export const LESSON_GROUPS: readonly LessonGroup[] = [
         minutes: 4,
         summary: 'ANALYZE cuts a column into buckets of equal depth. Too few, and a range over a gap is guessed many times too high.',
       },
+      {
+        id: 'parallel',
+        title: 'Parallel execution: morsels and the slow worker',
+        minutes: 5,
+        summary: 'Four workers, one slow: an even split waits for it, a shared queue reads remotely, work stealing gets both right.',
+      },
     ],
   },
   {

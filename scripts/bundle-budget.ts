@@ -416,6 +416,11 @@ const T = (name: string): string => `src/pages/tools/${name}.tsx`;
  *    challenge's checks are a new opt-in chunk, 1.5 kB → 5. The lesson and the challenge put their text in the lesson
  *    and challenge lists every one of those routes carries: /learn/:id 201 → 205 (201.1), /challenges 194 → 198
  *    (194.5), /challenges/:id 315 → 319 (315.4), each measured + 3, rounded up.
+ *  - 2026-10-19, morsel-driven execution (plan.md §27.5 P1): /tools/parallel is a new route, 129.7 kB → 133, and its
+ *    challenge's checks 3.3 kB → 7. Its lazy route, the histogram tool's before it, put the entry chunk at 24.1 kB,
+ *    over §25.4 H8's 24: rather than raise that, App.tsx now builds its lazy pages with one helper and its tool routes
+ *    from a table, and the entry is 23.9 kB again — which also brings /playground, /practice, /tools/latch-crabbing
+ *    and /docs, each pushed 0.1 kB over by it, back under their ceilings.
  */
 export const ROUTES: readonly RouteBudget[] = [
   { route: '/', roots: [P('LandingPage')], kb: 177, note: 'the landing page' },
@@ -451,6 +456,7 @@ export const ROUTES: readonly RouteBudget[] = [
   { route: '/tools/grammar', roots: [T('GrammarToolPage')], kb: 112, note: 'the SQL grammar diagram' },
   { route: '/tools/hash-join', roots: [T('HashJoinToolPage')], kb: 114, note: 'Grace hash join' },
   { route: '/tools/join-order', roots: [T('JoinOrderToolPage')], kb: 183, note: 'Selinger join-order search over the subset lattice' },
+  { route: '/tools/parallel', roots: [T('ParallelToolPage')], kb: 133, note: 'morsel-driven parallel execution, worker speeds scripted (plan.md §27.5 P1)' },
   { route: '/tools/histograms', roots: [T('HistogramToolPage')], kb: 182, note: 'equi-depth histograms: ANALYZE with a bucket count, and a range estimate’s q-error (plan.md §27.5 T5)' },
   { route: '/tools/lsm', roots: [T('LsmToolPage')], kb: 116, note: 'log-structured merge-tree sandbox' },
   { route: '/tools/hash-index', roots: [T('HashIndexToolPage')], kb: 115, note: 'extendible and linear hashing sandbox' },
@@ -475,6 +481,7 @@ const SETTINGS_TOOL_CHECKS: readonly (readonly [string, number, string])[] = [
   ['sort', 6, 'the external merge sort driver'],
   ['hash-join', 6, 'the Grace hash join driver'],
   ['join-order', 4, 'the join-order graph and the Selinger search'],
+  ['parallel', 7, 'the morsel model and the transactions preset (plan.md §27.5 P1)'],
   ['histograms', 5, 'the histogram columns, ANALYZE and the range estimate (plan.md §27.5 T5)'],
   ['page', 5, 'the slotted-page layout'],
   ['hash-index', 7, 'the extendible and linear hashing driver'],

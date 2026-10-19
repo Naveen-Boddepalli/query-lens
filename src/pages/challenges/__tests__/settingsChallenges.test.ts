@@ -8,6 +8,7 @@ import { demoKeys, HASH_JOIN_LIMITS, planHashJoin } from '../../../ui/hashJoin.t
 import { demoWrites as hashWrites, HASH_LIMITS, planHashIndex } from '../../../ui/hashIndex.ts';
 import { DEMO_INITIAL_KEYS, demoScripts, LATCH_LIMITS, planLatchCrabbing } from '../../../ui/latchCrabbing.ts';
 import { demoWrites as lsmWrites, LSM_LIMITS, planLsm } from '../../../ui/lsm.ts';
+import { PARALLEL_LIMITS } from '../../../engine/parallel.ts';
 import { HISTOGRAM_LIMITS } from '../../../ui/histogramColumns.ts';
 import { layOutPage } from '../../../ui/slottedPage.ts';
 import { planVectorIndex, VECTOR_LIMITS } from '../../../ui/vectorIndex.ts';
@@ -76,12 +77,13 @@ describe('settings challenges', () => {
         'latch-crabbing',
         'lsm',
         'page',
+        'parallel',
         'planner',
         'sort',
         'vector-index',
       ].sort(),
     );
-    expect(SETTINGS_CHALLENGES.length).toBe(18);
+    expect(SETTINGS_CHALLENGES.length).toBe(19);
     expect(SETTINGS_CHALLENGES.filter((c) => c.group === 'transactions').map((c) => c.id)).toEqual([
       'same-level-different-promise',
     ]);
@@ -147,6 +149,7 @@ describe('settings challenges', () => {
       'scan-keeps-the-hot-set': { frames: [2, 8], ring: [0, 4] },
       'third-level': { fanout: [3, 6], keys: [1, 200] },
       'enough-buckets': { buckets: [HISTOGRAM_LIMITS.minBuckets, HISTOGRAM_LIMITS.maxBuckets] },
+      'outrun-the-slow-worker': { morsel: [PARALLEL_LIMITS.minMorselPages, PARALLEL_LIMITS.maxMorselPages] },
     };
     for (const c of SETTINGS_CHALLENGES) {
       const want = ranges[c.id] ?? {};
@@ -202,6 +205,8 @@ describe('settings challenges', () => {
     ['cheapest-order', { first: 'timesheets', second: 'employees', third: 'departments', fourth: 'projects' }],
     ['enough-buckets', { buckets: 46 }],
     ['enough-buckets', { buckets: 49 }],
+    ['outrun-the-slow-worker', { dispatch: 'stealing', morsel: 16 }],
+    ['outrun-the-slow-worker', { dispatch: 'stealing', morsel: 4 }],
     ['tightest-page', { page: 0, bytes: 202 }],
     ['tightest-page', { page: 5, bytes: 200 }],
     ['split-the-other-bucket', { n: 40, strategy: 'linear', cap: 4, init: 2 }],
@@ -260,6 +265,10 @@ describe('settings challenges', () => {
       ['enough-buckets', 'fifty, the most allowed, at 2.33×', { buckets: 50 }],
       ['enough-buckets', 'forty, just short at 1.70×', { buckets: 40 }],
       ['enough-buckets', 'a hundred: close enough, but too many', { buckets: 100 }],
+      ['outrun-the-slow-worker', 'static ranges: everyone waits for the slow quarter', {}],
+      ['outrun-the-slow-worker', 'a shared queue: balanced, but its reads are remote', { dispatch: 'shared' }],
+      ['outrun-the-slow-worker', 'stealing with morsels of one page: all dispatch', { dispatch: 'stealing', morsel: 1 }],
+      ['outrun-the-slow-worker', 'stealing with morsels of 64 pages: the last one holds everyone up', { dispatch: 'stealing', morsel: 64 }],
       ['cheapest-order', 'ending on departments', { first: 'employees', second: 'timesheets', third: 'projects', fourth: 'departments' }],
       ['cheapest-order', 'timesheets before the branch that feeds it', { first: 'departments', second: 'timesheets', third: 'employees', fourth: 'projects' }],
       ['tightest-page', 'one byte too few', { page: 0, bytes: 201 }],

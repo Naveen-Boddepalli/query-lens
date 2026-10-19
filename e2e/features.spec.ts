@@ -2208,3 +2208,19 @@ test('the histogram tool reads a range estimate off the buckets ANALYZE builds, 
   await page.getByRole('button', { name: 'Show as table' }).first().click();
   await expect(page.getByRole('table').filter({ hasText: 'Rows (assumed)' })).toBeVisible();
 });
+
+test('the parallel tool runs morsels on scripted workers, and work stealing outruns the slow one', async ({ page }) => {
+  await page.goto('/tools/parallel');
+  await expect(page.getByRole('heading', { name: 'Parallel execution', exact: true })).toBeVisible();
+  // Four workers, the fourth three times slower, work stealing: 3.09×.
+  await expect(page.getByRole('status')).toHaveText('3.09×');
+  await page.getByRole('radio', { name: 'Static ranges' }).click();
+  await expect(page.getByRole('status')).toHaveText('1.34×');
+  await expect(page.getByLabel('Pages per morsel')).toBeDisabled();
+  await page.getByRole('radio', { name: 'Shared queue' }).click();
+  await expect(page.getByRole('status')).toHaveText('2.67×');
+  await page.getByLabel('Worker 4').selectOption('1');
+  await expect.poll(() => page.url()).toContain('s=1111');
+  await page.getByRole('button', { name: 'Show as table' }).first().click();
+  await expect(page.getByRole('table').filter({ hasText: 'Stolen from' })).toBeVisible();
+});

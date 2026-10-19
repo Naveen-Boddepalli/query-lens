@@ -190,6 +190,60 @@ export const EXECUTION_STEPS: Record<string, LessonStep[]> = {
       ),
     },
   ],
+  parallel: [
+    {
+      heading: 'Four workers, four quarters',
+      body: (
+        <>
+          The transactions totalled by status: 750 pages and 3,000 rows, <strong>3,750</strong> ticks for one worker
+          alone. Give each of four workers a quarter of the pages and they finish in <strong>948</strong> — 3.96× sooner.
+          Each aggregates its quarter into a partial result, and one of them merges the four: 8 ticks no number of
+          workers shortens.
+        </>
+      ),
+      link: to('parallelEven', 'Open four even workers'),
+    },
+    {
+      heading: 'One slow worker',
+      body: (
+        <>
+          Make the fourth worker three times slower. Its quarter now takes it three times as long, and the static split
+          never moves work off it: the other three finish and wait. <strong>2,798</strong> ticks — 1.34×. An even split is
+          even in pages, not in time.
+        </>
+      ),
+      link: to('parallelSlowStatic', 'Open the slow fourth'),
+    },
+    {
+      heading: 'Morsels from a shared queue',
+      body: (
+        <>
+          Cut the pages into morsels of 16 and keep them in one queue: whoever is free takes the next. The slow worker
+          simply takes fewer. 2.67× — better, but not the 3.96 the work allows, because a worker taking whatever comes
+          next mostly reads pages that live in another&rsquo;s memory, a second tick each.
+        </>
+      ),
+      link: to('parallelSlowShared', 'Open the shared queue'),
+    },
+    {
+      heading: 'Work stealing',
+      body: (
+        <>
+          Give each worker a queue of the morsels in its own quarter, and let one that runs out take the last morsel of
+          whoever has the most left. Everyone reads their own pages until the end; then 6 morsels change hands.{' '}
+          <strong>1,213</strong> ticks, 3.09× — the morsel-driven scheme of HyPer and its descendants.
+        </>
+      ),
+      link: to('parallelSlowStealing', 'Open work stealing'),
+      tryThis: (
+        <>
+          Switch to <em>One corner</em>, where only the first 600 rows match: static ranges give one worker all the
+          aggregating (1.71×), stealing spreads it (3.22×). Then make the morsels one page each: 93 steals, and the
+          dispatching costs more than it saves.
+        </>
+      ),
+    },
+  ],
 };
 
 /** The slotted page, and the structures that are alternatives to the engine's heap and B+Tree. */

@@ -3003,7 +3003,7 @@ Costs are against the modules that exist today (paths checked 2026-10-18).
 
 | ID | Rel. | Item | Shape | Cost |
 |---|---|---|---|---|
-| **P1** | 3.2 | **`/tools/parallel` — morsel-driven execution** | A scan and an aggregate split into morsels of pages, handed to *N* workers by a dispatcher. Worker speeds are a **scripted profile** (an input, Q7) — never threads or timers. Speedup, skew and work stealing measured in ticks. | 1.5 wk |
+| **P1** | 3.2 | **`/tools/parallel` — morsel-driven execution** | **Built, 2026-10-19** — `engine/parallel.ts` (`runParallel`): pages from the real heap, work = 1 tick a page + 1 per passing row, × the worker's scripted speed; pages homed in *N* equal ranges, a remote read +1 tick; dispatch 1 tick, steal 2, merge 1 per group per partial. Dispatchers `static`, `shared`, `stealing`. Merged partials = the serial engine's rows (fuzz); timeline invariants (fuzz). `ui/parallelPresets.ts`, the page with a Gantt timeline (table view) and a 1–8 workers sweep; lesson `parallel`, settings challenge `outrun-the-slow-worker` (≥ 3× with a ×3 fourth worker: stealing only). Course map row now *Partly*. As first planned: A scan and an aggregate split into morsels of pages, handed to *N* workers by a dispatcher. Worker speeds are a **scripted profile** (an input, Q7) — never threads or timers. Speedup, skew and work stealing measured in ticks. | 1.5 wk |
 | **P2** | 3.2 | **Exchange operators** | Gather, repartition (by hash) and broadcast; a parallel hash join's two strategies compared by rows moved and ticks. | 1.5 wk |
 | **P3** | 3.2 | **Serial vs parallel in `/compare`** | The same query's plan run serially and with *N* workers: ticks, and Amdahl's serial fraction measured from the run. | 4 days |
 
@@ -3095,7 +3095,8 @@ Costs are against the modules that exist today (paths checked 2026-10-18).
 | Bushy plans (T4) | **Built, 2026-10-19** — priced, never run; one size per subset so the comparison is about shape; the planner's order-dependent estimate left as it is | now | — |
 | Equi-depth histograms (T5) | **Built, 2026-10-19** — `WITH n BUCKETS`; a tool, a lesson and a challenge; a two-sided range is one range for every access path. 3.1 is complete | now | — |
 | Remaining v3 on `version/v3-remaining` | **Decided, 2026-10-19 (owner)** — "continue with remaining one by one by commiting and pushing to new branch" | now | — |
-| Parallel execution (P1–P3) | **Planned** — §25.9's *Horizon (v3)* row, now scheduled | 3.2 | — |
+| Morsel-driven execution (P1) | **Built, 2026-10-19** — ticks, scripted speeds, NUMA-style homes; static, shared and stealing dispatch | now | — |
+| Parallel execution (P2–P3) | **Planned** | 3.2 | — |
 | Distributed databases (X1–X4) | **Planned** — §25.9's other *Horizon (v3)* row | 3.3 | P1's scripted workers exist |
 | Web Worker engine (C6's deferred half) | **Still deferred** | — | Main-thread jank, or a dataset past 10,000 rows |
 | Window functions, recursive CTEs | **Still declined** (§4, §25.10) | — | A course adoption that asks for them |

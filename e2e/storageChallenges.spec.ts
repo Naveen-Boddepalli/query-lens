@@ -12,6 +12,7 @@ const IDS = [
   'more-memory-more-io',
   'cheapest-order',
   'enough-buckets',
+  'outrun-the-slow-worker',
   'tightest-page',
   'split-the-other-bucket',
   'cheap-writes-cheap-reads',

@@ -24,6 +24,8 @@ import { demoWrites as hashWrites, HASH_LIMITS, planHashIndex } from '../../../u
 import { DEMO_INITIAL_KEYS, demoScripts, LATCH_LIMITS, planLatchCrabbing } from '../../../ui/latchCrabbing.ts';
 import { demoWrites as lsmWrites, LSM_LIMITS, planLsm } from '../../../ui/lsm.ts';
 import { estimateAt, HISTOGRAM_LIMITS, isColumnId } from '../../../ui/histogramColumns.ts';
+import { parallelRun } from '../../../ui/parallelPresets.ts';
+import { PARALLEL_LIMITS } from '../../../engine/parallel.ts';
 import { layOutPage } from '../../../ui/slottedPage.ts';
 import { planVectorIndex, VECTOR_LIMITS } from '../../../ui/vectorIndex.ts';
 import { STORAGE_SCENARIOS, storageHref } from '../storageScenarios.ts';
@@ -51,7 +53,7 @@ function lessonsOf(group: LessonGroupId) {
   return ids.map((id) => LESSONS.find((l) => l.id === id)!);
 }
 
-const EXECUTION_IDS = ['external-sort', 'hash-join', 'join-order', 'histograms'];
+const EXECUTION_IDS = ['external-sort', 'hash-join', 'join-order', 'histograms', 'parallel'];
 const EXECUTION_LESSONS = EXECUTION_IDS.map((id) => LESSONS.find((l) => l.id === id)!);
 const STORAGE_LESSONS = lessonsOf('storage');
 
@@ -164,6 +166,12 @@ describe('the storage and execution lessons are wired into the track', () => {
           break;
         case 'join-order':
           expect(url.search).toBe('');
+          break;
+        case 'parallel':
+          expect(within(s.w, PARALLEL_LIMITS.minWorkers, PARALLEL_LIMITS.maxWorkers)).toBe(true);
+          expect(within(s.m, PARALLEL_LIMITS.minMorselPages, PARALLEL_LIMITS.maxMorselPages)).toBe(true);
+          expect(s.s).toHaveLength(s.w);
+          for (const v of s.s) expect(within(v, PARALLEL_LIMITS.minSpeed, PARALLEL_LIMITS.maxSpeed)).toBe(true);
           break;
         case 'histograms':
           expect(isColumnId(s.c)).toBe(true);
@@ -283,6 +291,29 @@ describe('lesson: histograms', () => {
   it('the even amounts: one bucket estimates 181 of 183', () => {
     const e = at(STORAGE_SCENARIOS.histogramEven);
     expect([e.estimate, e.actual]).toEqual([181, 183]);
+  });
+});
+
+describe('lesson: parallel execution', () => {
+  const at = (s: { q: string; w: number; d: 'static' | 'shared' | 'stealing'; m: number; s: readonly number[] }) => parallelRun(s.q, s.w, s.d, s.m, s.s);
+
+  it('four even workers: 3,750 ticks alone, 948 together, 3.96×, an 8-tick merge', () => {
+    const r = at(STORAGE_SCENARIOS.parallelEven);
+    expect([r.serialTicks, r.ticks, r.speedup.toFixed(2), r.merge.end - r.merge.start]).toEqual([3750, 948, '3.96', 8]);
+  });
+
+  it('a slow fourth: static 2,798 ticks (1.34×), a shared queue 2.67×, stealing 1,213 ticks (3.09×) with 6 steals', () => {
+    const fixed = at(STORAGE_SCENARIOS.parallelSlowStatic);
+    expect([fixed.ticks, fixed.speedup.toFixed(2)]).toEqual([2798, '1.34']);
+    expect(at(STORAGE_SCENARIOS.parallelSlowShared).speedup.toFixed(2)).toBe('2.67');
+    const stealing = at(STORAGE_SCENARIOS.parallelSlowStealing);
+    expect([stealing.ticks, stealing.speedup.toFixed(2), stealing.steals]).toEqual([1213, '3.09', 6]);
+  });
+
+  it('one corner: static 1.71×, stealing 3.22×; one-page morsels steal 93 times', () => {
+    expect(parallelRun('corner', 4, 'static', 16, [1, 1, 1, 1]).speedup.toFixed(2)).toBe('1.71');
+    expect(parallelRun('corner', 4, 'stealing', 16, [1, 1, 1, 1]).speedup.toFixed(2)).toBe('3.22');
+    expect(parallelRun('corner', 4, 'stealing', 1, [1, 1, 1, 1]).steals).toBe(93);
   });
 });
 

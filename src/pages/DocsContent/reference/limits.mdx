@@ -311,6 +311,29 @@ index entries of the rows it touches.
   `employees` headline query measures **11×**. Nothing here *corrects* for the correlation; naming
   it honestly is the whole feature.
 
+## Parallel execution
+
+- **[Parallel execution](/tools/parallel) is a model, not threads** (plan.md §27.5 P1). A scan, a filter and an
+  aggregate on the transactions preset — `SELECT [grouped columns,] aggregates FROM one table [WHERE …] [GROUP BY …]`
+  — are cut into **morsels** of 1 to 64 pages and run by 1 to 8 workers, after Leis et al.'s *Morsel-Driven
+  Parallelism*. Each worker aggregates what it reads into a partial result; once every morsel is done, one worker
+  merges the partials. Nothing runs in parallel in the browser and nothing waits on a timer: time is **ticks**,
+  counted, and each worker's speed is a number you set, so the same settings always draw the same timeline.
+- **What a tick buys:** reading a page is one tick and each row that passes the filter one more; a worker of speed
+  3 takes three times as long. Every page has a home — the table cut into one equal range per worker, the paper's
+  NUMA nodes — and reading a page from another worker's memory costs a second tick. Taking a morsel costs a tick,
+  stealing one two, and the merge a tick per group per partial result. The speedup is one full-speed worker's ticks,
+  with no dispatching and no merge, over the run's.
+- **Three dispatchers:** *static ranges* give each worker its home range and never rebalance — every read local, and
+  a slow worker or a range where the matching rows cluster decides the end; a *shared queue* hands the next morsel
+  to whoever is free — balanced, but most pages a worker reads are another's; *work stealing* gives each worker a
+  queue of its own range's morsels and lets one that runs out take the last morsel of the longest queue. The merged
+  answer is held, by a test over random queries, worker counts, dispatchers, morsel sizes and speeds, to be the rows
+  the engine returns running the query alone. `COUNT(DISTINCT …)` is refused: partial distinct counts do not add up.
+- **Not modelled:** contention for the shared queue (taking a morsel costs the same however many workers want one),
+  the memory each partial result takes, caches, and any operator past the aggregate. A join, `ORDER BY` or `LIMIT` is
+  refused rather than run serially in disguise.
+
 ## Locks
 
 - **Page-level**, coarse-grained: one shared read lock per page, taken and released as a scan or

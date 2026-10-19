@@ -11,6 +11,18 @@ Work toward **v3** (plan.md §27), on the branch `version/v3`.
 
 ### Added
 
+- **Parallel execution** (plan.md §27.5 P1) — a new tool, [Parallel execution](/tools/parallel): morsel-driven
+  parallelism after Leis et al. A scan, a filter and an aggregate on the transactions preset are cut into morsels of
+  pages and run by one to eight workers whose speeds you script — nothing runs in parallel, time is ticks — each
+  aggregating into a partial result that one of them merges at the end. Three dispatchers: static ranges, a shared
+  queue, and work stealing over per-worker queues of the morsels in each worker's own memory. The timeline is drawn
+  worker by worker (remote reads and stolen morsels marked; a table view beside it), the speedup is measured against
+  one worker alone, and a table runs one to eight workers under each dispatcher. With one worker three times slower,
+  static ranges reach 1.34×, a shared queue 2.67× and stealing 3.09×. A lesson, *Parallel execution: morsels and the
+  slow worker*, and a challenge, *Outrun the slow worker*. The engine model (`engine/parallel.ts`) is checked by a
+  fuzz holding the merged answer to the serial engine's over random queries, worker counts, dispatchers, morsel sizes
+  and speeds, and another holding the timeline well formed.
+
 - **Equi-depth histograms with a bucket count you choose** (plan.md §27.5 T5) — `ANALYZE table WITH n BUCKETS`
   (MySQL's phrase; 1 to 100, 10 without it). The new [Histograms](/tools/histograms) tool draws the buckets the
   engine's own `ANALYZE` builds over a column, reads a range estimate off them — the one `EXPLAIN` gives — and shows

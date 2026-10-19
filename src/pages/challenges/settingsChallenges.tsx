@@ -27,6 +27,7 @@ export type SettingsTool =
   | 'hash-join'
   | 'join-order'
   | 'histograms'
+  | 'parallel'
   | 'page'
   | 'hash-index'
   | 'lsm'
@@ -237,6 +238,48 @@ export const SETTINGS_CHALLENGES: SettingsChallenge[] = [
         More buckets always give a better estimate. Usually — but 50 buckets miss by 2.33× where 46 come within 1.5×,
         because each count moves every boundary, and a boundary inside the gap decides how much of a dense band the
         planner smears across it.
+      </>
+    ),
+  },
+  {
+    id: 'outrun-the-slow-worker',
+    title: 'Outrun the slow worker',
+    group: 'storage',
+    tool: 'parallel',
+    brief: (
+      <>
+        Four workers total the transactions by status, and the fourth is three times slower than the rest. Alone, one
+        worker takes 3,750 ticks. Choose how the morsels are handed out, and how many pages each holds, so the four
+        finish at least three times sooner.
+      </>
+    ),
+    hint: (
+      <>
+        Static ranges give the slow worker a quarter of the table and make the others wait for it. A shared queue keeps
+        everyone busy, but most of what a worker reads then lives in another&rsquo;s memory. What would let a worker read
+        its own pages first, and help only at the end?
+      </>
+    ),
+    needs: 'a speedup of at least 3×',
+    controls: [
+      {
+        kind: 'select',
+        key: 'dispatch',
+        label: 'Dispatch',
+        options: [
+          { value: 'static', label: 'Static ranges' },
+          { value: 'shared', label: 'Shared queue' },
+          { value: 'stealing', label: 'Work stealing' },
+        ],
+      },
+      { kind: 'number', key: 'morsel', label: 'Pages per morsel', min: 1, max: 64 },
+    ],
+    starter: { dispatch: 'static', morsel: '16' },
+    misconception: (
+      <>
+        Splitting the work evenly is what makes it parallel. An even split is even in pages, not in time: a slow worker,
+        or rows that cluster on some pages, leaves the others idle. Morsels, handed out as workers come free, even it out —
+        and stealing does it while keeping most reads local.
       </>
     ),
   },

@@ -90,7 +90,7 @@ describe('the sandbox lessons are wired into the track', () => {
     // run in the Playground too, so they close that run, after errors — each after the one it builds on.
     expect(pipeline.slice(8, 13)).toEqual(['errors', 'nulls', 'not-exists', 'set-operations', 'outer-joins']);
     expect(pipeline.slice(13, 17)).toEqual(['tokens-and-trees', 'grammar-diagram', 'planner-rules', 'buffer-pool']);
-    expect(pipeline.slice(17)).toEqual(['external-sort', 'hash-join', 'join-order', 'histograms']);
+    expect(pipeline.slice(17)).toEqual(['external-sort', 'hash-join', 'join-order', 'histograms', 'parallel']);
     const transactions = LESSON_GROUPS.find((g) => g.id === 'transactions')!.lessons.map((l) => l.id);
     expect(transactions[0]).toBe('lock-table');
   });

@@ -82,6 +82,16 @@ export interface JoinOrderScenario {
   tool: 'join-order';
 }
 
+/** A query, workers, a dispatcher, a morsel size and the workers' speeds (plan.md §27.5 P1). */
+export interface ParallelScenario {
+  tool: 'parallel';
+  q: 'grouped' | 'corner';
+  w: number;
+  d: 'static' | 'shared' | 'stealing';
+  m: number;
+  s: readonly number[];
+}
+
 /** A column, a bucket count and a range (plan.md §27.5 T5). */
 export interface HistogramScenario {
   tool: 'histograms';
@@ -101,7 +111,8 @@ export type StorageScenario =
   | SortScenario
   | HashJoinScenario
   | JoinOrderScenario
-  | HistogramScenario;
+  | HistogramScenario
+  | ParallelScenario;
 
 const LSM = { tool: 'lsm', n: 60, mem: 4, trigger: 3, base: 8, mult: 2, seed: 1 } as const;
 const HASH = { tool: 'hash-index', n: 60, cap: 4, init: 2, seed: 1 } as const;
@@ -154,6 +165,12 @@ export const STORAGE_SCENARIOS = {
   histogramGapFine: { tool: 'histograms', c: 'clustered', b: 100, lo: 500, hi: 2000 },
   histogramEdge: { tool: 'histograms', c: 'clustered', b: 10, lo: 2400, hi: 2410 },
   histogramEven: { tool: 'histograms', c: 'amount', b: 1, lo: 100, hi: 400 },
+
+  // — Parallel execution —
+  parallelEven: { tool: 'parallel', q: 'grouped', w: 4, d: 'static', m: 16, s: [1, 1, 1, 1] },
+  parallelSlowStatic: { tool: 'parallel', q: 'grouped', w: 4, d: 'static', m: 16, s: [1, 1, 1, 3] },
+  parallelSlowShared: { tool: 'parallel', q: 'grouped', w: 4, d: 'shared', m: 16, s: [1, 1, 1, 3] },
+  parallelSlowStealing: { tool: 'parallel', q: 'grouped', w: 4, d: 'stealing', m: 16, s: [1, 1, 1, 3] },
 } as const satisfies Record<string, StorageScenario>;
 
 export type StorageScenarioName = keyof typeof STORAGE_SCENARIOS;
@@ -215,6 +232,13 @@ export function storageHref(scenario: StorageScenario): string {
       p.set('seed', String(scenario.seed));
       break;
     case 'join-order':
+      break;
+    case 'parallel':
+      p.set('q', scenario.q);
+      p.set('w', String(scenario.w));
+      p.set('d', scenario.d);
+      p.set('m', String(scenario.m));
+      p.set('s', scenario.s.join(''));
       break;
     case 'histograms':
       p.set('c', scenario.c);

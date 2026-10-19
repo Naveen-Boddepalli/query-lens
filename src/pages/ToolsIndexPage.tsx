@@ -121,6 +121,13 @@ const TOOLS = [
     available: true,
   },
   {
+    title: 'Parallel execution',
+    href: '/tools/parallel',
+    description:
+      'Morsel-driven parallelism: a scan and an aggregate cut into morsels of pages and run by up to eight workers, each aggregating into a partial result that one of them merges. Static ranges, a shared queue, or work stealing — with worker speeds you script, the timeline drawn, and the speedup measured in ticks.',
+    available: true,
+  },
+  {
     title: 'LSM tree',
     href: '/tools/lsm',
     description:
