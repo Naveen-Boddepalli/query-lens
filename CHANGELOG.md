@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **flowinger 1.0.1 → 1.2.0**, the library every tree is drawn with (our own). Nothing in 1.1 or 1.2 reaches what
+  QueryLens draws: it renders `<FlowingerCore>` with no features, fits trees with its own maths rather than
+  `fitView`, reports no changes, and draws bezier edges, so neither 1.1's margin arithmetic and changesets nor 1.2's
+  keyboard connecting (a feature) changes a tree, and the development build logs no flowinger warning about 2.0.
+  The `flow` chunk grows from 19.0 to 20.2 kB gzip (1.1 added changesets and React Flow's margin arithmetic to
+  flowinger's core), within every route ceiling. `pnpm-workspace.yaml`'s release-age exemption now names 1.2.0 and
+  expires 2026-10-26. Typecheck, lint, all 2,790 unit tests, the build, the budget and all 612 Playwright tests
+  pass.
+
 ## [2.0.0-rc.3] - 2026-10-18
 
 The third release candidate for 2.0: rc.2 and what its first days in production turned up. Two bugs a visitor

@@ -46,8 +46,8 @@ importers:
         specifier: 3.1.2
         version: 3.1.2
       flowinger:
-        specifier: 1.0.1
-        version: 1.0.1(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
+        specifier: 1.2.0
+        version: 1.2.0(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       html-to-image:
         specifier: 1.11.13
         version: 1.11.13
@@ -1515,8 +1515,8 @@ packages:
   flatted@3.4.4:
     resolution: {integrity: sha512-5+ybhBZANEJxaH3X5evAFatUxLfEHSr7n6kYJ+1Qd0mUqr4eu9gIf6GDbWHf8RJijHrjjO8G+la14SlL2SeS1Q==}
 
-  flowinger@1.0.1:
-    resolution: {integrity: sha512-7Q6fC4ndYvVUrZLSU9wBUeHvA91kBhoeG4Nf1SZE9XtPS8f9nSM6Nxqt2eL4MN4n3J3TDQ6skXuuTMLy9LMECg==}
+  flowinger@1.2.0:
+    resolution: {integrity: sha512-yaVW/kVGLeOTTfFMuW9j6tRA0Ffglinzec2WDarJ7375W9lyW9mglAbPkN4SQrxzRgYzxsM2kzCPMcLW/d4b7g==}
     peerDependencies:
       react: '>=18.0.0'
       react-dom: '>=18.0.0'
@@ -4431,7 +4431,7 @@ snapshots:
 
   flatted@3.4.4: {}
 
-  flowinger@1.0.1(react-dom@19.3.0(react@19.3.0))(react@19.3.0):
+  flowinger@1.2.0(react-dom@19.3.0(react@19.3.0))(react@19.3.0):
     dependencies:
       react: 19.3.0
       react-dom: 19.3.0(react@19.3.0)
