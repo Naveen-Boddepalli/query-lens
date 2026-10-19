@@ -164,6 +164,18 @@ concept explanation.
   and this DP does not attempt the harder problem of reordering *around* that constraint. For a chain like
   that, the plan-stage narration and `/tools/join-order` still show what the search would have picked —
   purely informational there, never a rewrite, exactly as every chain's order used to be before this.
+- **Bushy plans are priced, never run** (plan.md §27.5 T4). [`/tools/join-order`](/tools/join-order) searches the
+  same subset lattice a second way, trying every split of a subset into an outer and an inner part rather than only
+  which table goes last: `2^k − 2` splits for a `k`-table subset where left-deep tries `k`, over `(2n − 2)!/(n − 1)!`
+  plans where left-deep has `n!` (120 against 24 for four tables). A join whose inner side is itself a join computes
+  it once, writes it out — a page per four rows — and reads it once per outer row. That search gives every plan for
+  the same tables one row estimate, System R's (each predicate keeps one row in the larger of its columns' distinct
+  counts), so plans differ only in shape and the search is exact — a test prices every plan outright to check. The
+  planner's own search estimates each join from the table it adds, so the same tables can get a different size in
+  a different order; keeping only the cheapest plan per subset then is not always exact, and on random graphs it
+  sometimes misses the cheapest left-deep order its own estimates allow. On the demo query the two agree. The
+  page's explorer — four tables joined by foreign keys, chain or star, sizes from a menu — searches all 2,592
+  graphs its menus make: a bushy plan is cheaper in 425 of them, never by more than 1.32×.
 
 ## IN subquery
 

@@ -409,6 +409,9 @@ const T = (name: string): string => `src/pages/tools/${name}.tsx`;
  *    the leaf view. Each route over was raised to measured + 3, rounded up: /tools/schedule 200 → 205 (201.7),
  *    /tools/isolation 189 → 194 (190.1), /tools/concurrency 191 → 196 (192.5), and the isolation challenges' checks
  *    16 → 20 (16.1).
+ *  - 2026-10-19, bushy plans (plan.md §27.5 T4): /tools/join-order carries the shape search (`joinShapes.ts`), the
+ *    explorer's sweep and its section — 179.1 kB, raised to measured + 3, rounded up: 178 → 183. No other route
+ *    imports them.
  */
 export const ROUTES: readonly RouteBudget[] = [
   { route: '/', roots: [P('LandingPage')], kb: 177, note: 'the landing page' },
@@ -443,7 +446,7 @@ export const ROUTES: readonly RouteBudget[] = [
   { route: '/tools/schedule', roots: [T('ScheduleToolPage')], kb: 205, note: 'transaction schedules (the engine, a shared database, two sessions)' },
   { route: '/tools/grammar', roots: [T('GrammarToolPage')], kb: 112, note: 'the SQL grammar diagram' },
   { route: '/tools/hash-join', roots: [T('HashJoinToolPage')], kb: 114, note: 'Grace hash join' },
-  { route: '/tools/join-order', roots: [T('JoinOrderToolPage')], kb: 178, note: 'Selinger join-order search over the subset lattice' },
+  { route: '/tools/join-order', roots: [T('JoinOrderToolPage')], kb: 183, note: 'Selinger join-order search over the subset lattice' },
   { route: '/tools/lsm', roots: [T('LsmToolPage')], kb: 116, note: 'log-structured merge-tree sandbox' },
   { route: '/tools/hash-index', roots: [T('HashIndexToolPage')], kb: 115, note: 'extendible and linear hashing sandbox' },
   { route: '/tools/columnar', roots: [T('ColumnarToolPage')], kb: 114, note: 'NSM/DSM/PAX row vs. column storage sandbox' },

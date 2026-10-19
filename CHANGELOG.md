@@ -11,6 +11,19 @@ Work toward **v3** (plan.md §27), on the branch `version/v3`.
 
 ### Added
 
+- **Bushy plans** (plan.md §27.5 T4) — [Join order](/tools/join-order) now searches the same subset lattice a second
+  way, trying every split of a subset into an outer and an inner part rather than only which table goes last, and
+  prices bushy plans beside left-deep ones: how many more there are (120 trees against 24 orders for four tables, and a
+  table up to ten), the cheapest of each for the demo query — `(departments ⋈ projects) ⋈ (employees ⋈ timesheets)`,
+  0.5% cheaper — and every split of all four tables it priced. A join whose inner side is itself a join computes it
+  once, writes it out and reads it once per outer row. Every plan for the same tables gets one row estimate, System
+  R's, so plans differ only in shape and the search is exact. An explorer of four tables joined by foreign keys, as a
+  chain or a star with sizes from a menu, shows where a bushy plan wins: *Two pairs* is 24% cheaper bushy, and of the
+  2,592 graphs the menus make, bushy wins in 425, never by more than 1.32×. The engine still runs left-deep chains only.
+  Checked by 9 unit tests — two of them price every plan outright, on random graphs, against the search — with nine of
+  ten mutations failing at least one (the tenth only changes which of two equally cheap plans is shown), and an e2e
+  test.
+
 - **Next-key (gap) locks** (plan.md §27.5 T3) — InnoDB's answer to the phantom, on
   [Transaction schedules](/tools/schedule) under row locks with *Gap locks: Next-key* (`g=1` in the link). At
   `REPEATABLE READ` and `SERIALIZABLE` a statement locks each index record it reads and the gap below it — a full scan

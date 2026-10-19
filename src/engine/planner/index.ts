@@ -37,6 +37,8 @@ export {
   writtenOrderFromAst,
 } from './joinOrder.ts';
 export type { JoinOrderCandidate, JoinOrderEdge, JoinOrderNode, JoinOrderResult, SubsetPlan } from './joinOrder.ts';
+export { connectedPlanCounts, isLeftDeep, planCounts, searchJoinShapes, treeText } from './joinShapes.ts';
+export type { JoinTree, ShapePlan, ShapeSearch, ShapeSplit } from './joinShapes.ts';
 export { optimize, OPTIMIZER_RULES, scanPredicate, WRITE_PATH_RULES } from './optimize.ts';
 export type { Rewrite } from './optimize.ts';
 export {

@@ -2172,3 +2172,21 @@ test('a confidence rating is taken before the commit and shown as a calibration 
   await expect(page.locator('li', { hasText: 'Certain' }).filter({ hasText: /of 1 right/ })).toBeVisible();
   await expect(page.locator('li', { hasText: 'Guessing' }).filter({ hasText: 'none yet' })).toBeVisible();
 });
+
+test('the join-order page prices bushy plans beside left-deep ones, and finds where one wins', async ({ page }) => {
+  await page.goto('/tools/join-order');
+  const section = page.getByRole('region', { name: 'Bushy plans' });
+  await expect(section.getByText(/24\s+left-deep orders and\s+120\s+bushy trees/)).toBeVisible();
+  const demo = section.getByRole('group', { name: "The demo query's cheapest plans" });
+  await expect(demo.getByText('(departments ⋈ projects) ⋈ (employees ⋈ timesheets)')).toBeVisible();
+  await expect(section.getByRole('status').first()).toHaveText('The bushy plan is 0.5% cheaper.');
+  // The explorer opens on two pairs; a star of equal tables has nothing to gain.
+  const chosen = section.getByRole('group', { name: "The chosen graph's cheapest plans" });
+  await expect(chosen.getByText('(A ⋈ B) ⋈ (C ⋈ D)')).toBeVisible();
+  await section.getByRole('radio', { name: 'Star around A' }).click();
+  for (const name of ['A', 'B', 'C', 'D']) await section.getByLabel(`Rows in ${name}`).selectOption('20');
+  await expect(section.getByRole('status').nth(1)).toHaveText('No bushy plan is cheaper here: the cheapest plan of any shape is left-deep.');
+  await section.getByRole('button', { name: 'Show the biggest win' }).click();
+  await expect(section.getByLabel('Rows in B')).toHaveValue('2000');
+  await expect(section.getByRole('status').nth(1)).toContainText('1.32× fewer pages');
+});

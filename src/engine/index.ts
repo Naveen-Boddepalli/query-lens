@@ -49,6 +49,8 @@ export {
   writtenOrderFromAst,
 } from './planner/joinOrder.ts';
 export type { JoinOrderCandidate, JoinOrderEdge, JoinOrderNode, JoinOrderResult, SubsetPlan } from './planner/joinOrder.ts';
+export { connectedPlanCounts, isLeftDeep, planCounts, searchJoinShapes, treeText } from './planner/joinShapes.ts';
+export type { JoinTree, ShapePlan, ShapeSearch, ShapeSplit } from './planner/joinShapes.ts';
 export {
   buildHeap,
   createBufferPool,
