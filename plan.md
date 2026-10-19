@@ -3062,13 +3062,13 @@ Costs are against the modules that exist today (paths checked 2026-10-18).
   on this engine is value coincidence — a cycle whose values happen to agree — not the textbook's blind-write
   view-serializable schedule, which needs a write that reads nothing, and an SQL UPDATE or DELETE always reads the
   rows it changes. The page says both.)*
-- [ ] A phantom is prevented by a gap lock at InnoDB's `REPEATABLE READ`, in the Hermitage matrix's own cell.
-  *(2026-10-19, T3: built, but not as worded, so left for the owner. Next-key locks stop the Phantom schedule at
-  `REPEATABLE READ` on the schedules page, where every read takes locks. In InnoDB only a* locking *read takes gap
-  locks; the matrix's InnoDB `REPEATABLE READ` cells are plain reads — a snapshot, no locks, as in MySQL — so their
-  phantom cells are kept by the snapshot (PMP) or let through (G2), matching MySQL's page, and no cell there can show a
-  gap lock without misdescribing InnoDB. The gap lock shows in the InnoDB column's `SERIALIZABLE` cells instead, where
-  every read is a locking one: PMP's insert waits on it, and G2's two inserts deadlock on one gap.)*
+- [x] A phantom is prevented by a gap lock — at `REPEATABLE READ` on the schedules page, where every read takes
+  locks, and in the Hermitage matrix's own InnoDB `SERIALIZABLE` cells, where every read is a locking one.
+  *(2026-10-19, T3: the Phantom schedule's insert waits on the gap above the last key at `REPEATABLE READ`; in the
+  matrix, PMP's insert waits on the gap below id = 101 and G2's two inserts deadlock on it, and every InnoDB cell still
+  agrees with MySQL's page. Reworded by the owner from "at InnoDB's `REPEATABLE READ`, in the matrix's own cell": in
+  InnoDB only a locking read takes gap locks, and the matrix's InnoDB `REPEATABLE READ` cells are plain snapshot reads,
+  so no cell there could show one without misdescribing InnoDB.)*
 
 **3.2 — Parallel execution**
 - [ ] The course map's *Parallel execution* row is at least *Partly*: morsels, exchange and a measured speedup.
