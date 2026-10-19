@@ -13,6 +13,7 @@ const IDS = [
   'cheapest-order',
   'enough-buckets',
   'outrun-the-slow-worker',
+  'meet-the-rows',
   'tightest-page',
   'split-the-other-bucket',
   'cheap-writes-cheap-reads',

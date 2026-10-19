@@ -330,6 +330,18 @@ index entries of the rows it touches.
   queue of its own range's morsels and lets one that runs out take the last morsel of the longest queue. The merged
   answer is held, by a test over random queries, worker counts, dispatchers, morsel sizes and speeds, to be the rows
   the engine returns running the query alone. `COUNT(DISTINCT …)` is refused: partial distinct counts do not add up.
+- **Exchange operators and a parallel hash join** (plan.md §27.5 P2), the same page's second section: `SELECT *` or
+  `SELECT COUNT(*) FROM a JOIN b ON a.x = b.y` on 1 to 8 workers, each table starting spread over them in equal
+  ranges. The hash table is built on the smaller side. **Broadcast** copies that side to every worker and leaves the
+  other where it lies; **repartition** hashes every row of both sides on the join key and sends it to that key's
+  worker; a **gather** brings the results to the first worker — every row for `SELECT *`, one partial count each
+  for `COUNT(*)`. A tick moves a row, inserts one into a hash table, or probes one (and one more per match), and each
+  phase — exchange, build, probe, gather — ends when its slowest worker does. The page shows the rows each worker sent
+  each other as a table, what each then holds, and the other strategy's figures beside the chosen one's. On the
+  join-order demo's tables and two made there (2,000 orders, 3,000 payments): broadcast wins small with big,
+  repartition big with big, and a key with five values cannot fill eight workers however it is hashed. The count is
+  held to the engine's own over every preset join, strategy and worker count, and to a nested loop's over random
+  tables.
 - **Not modelled:** contention for the shared queue (taking a morsel costs the same however many workers want one),
   the memory each partial result takes, caches, and any operator past the aggregate. A join, `ORDER BY` or `LIMIT` is
   refused rather than run serially in disguise.

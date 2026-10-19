@@ -90,6 +90,10 @@ export interface ParallelScenario {
   d: 'static' | 'shared' | 'stealing';
   m: number;
   s: readonly number[];
+  /** The exchange section (plan.md §27.5 P2): join, workers and exchange. */
+  jq?: 'small-big' | 'big-big' | 'few-keys' | 'all-rows';
+  jw?: number;
+  jx?: 'broadcast' | 'repartition';
 }
 
 /** A column, a bucket count and a range (plan.md §27.5 T5). */
@@ -171,6 +175,10 @@ export const STORAGE_SCENARIOS = {
   parallelSlowStatic: { tool: 'parallel', q: 'grouped', w: 4, d: 'static', m: 16, s: [1, 1, 1, 3] },
   parallelSlowShared: { tool: 'parallel', q: 'grouped', w: 4, d: 'shared', m: 16, s: [1, 1, 1, 3] },
   parallelSlowStealing: { tool: 'parallel', q: 'grouped', w: 4, d: 'stealing', m: 16, s: [1, 1, 1, 3] },
+  joinSmallBroadcast: { tool: 'parallel', q: 'grouped', w: 4, d: 'stealing', m: 16, s: [1, 1, 1, 3], jq: 'small-big', jw: 4, jx: 'broadcast' },
+  joinSmallRepartition: { tool: 'parallel', q: 'grouped', w: 4, d: 'stealing', m: 16, s: [1, 1, 1, 3], jq: 'small-big', jw: 4, jx: 'repartition' },
+  joinBigRepartition: { tool: 'parallel', q: 'grouped', w: 4, d: 'stealing', m: 16, s: [1, 1, 1, 3], jq: 'big-big', jw: 4, jx: 'repartition' },
+  joinFewKeys: { tool: 'parallel', q: 'grouped', w: 4, d: 'stealing', m: 16, s: [1, 1, 1, 3], jq: 'few-keys', jw: 8, jx: 'repartition' },
 } as const satisfies Record<string, StorageScenario>;
 
 export type StorageScenarioName = keyof typeof STORAGE_SCENARIOS;
@@ -239,6 +247,9 @@ export function storageHref(scenario: StorageScenario): string {
       p.set('d', scenario.d);
       p.set('m', String(scenario.m));
       p.set('s', scenario.s.join(''));
+      if (scenario.jq !== undefined) p.set('jq', scenario.jq);
+      if (scenario.jw !== undefined) p.set('jw', String(scenario.jw));
+      if (scenario.jx !== undefined) p.set('jx', scenario.jx);
       break;
     case 'histograms':
       p.set('c', scenario.c);

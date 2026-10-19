@@ -284,6 +284,48 @@ export const SETTINGS_CHALLENGES: SettingsChallenge[] = [
     ),
   },
   {
+    id: 'meet-the-rows',
+    title: 'Bring the rows together',
+    group: 'storage',
+    tool: 'parallel',
+    brief: (
+      <>
+        Three joins, each run by eight workers: 200 employees with 5,000 timesheets, 2,000 orders with 3,000 payments,
+        and 30 projects with 200 employees on a department key with five values. For each, choose the exchange that
+        finishes sooner: broadcast the smaller side to every worker, or repartition both sides on the join key.
+      </>
+    ),
+    hint: (
+      <>
+        A broadcast moves the smaller side once per worker; a repartition moves most of both sides once. And a key with
+        five values can only ever fill five of eight workers.
+      </>
+    ),
+    needs: 'the faster exchange for all three joins',
+    controls: [
+      { kind: 'select', key: 'smallBig', label: 'Small with big', options: [
+          { value: 'broadcast', label: 'Broadcast the smaller side' },
+          { value: 'repartition', label: 'Repartition both' },
+        ] },
+      { kind: 'select', key: 'bigBig', label: 'Big with big', options: [
+          { value: 'broadcast', label: 'Broadcast the smaller side' },
+          { value: 'repartition', label: 'Repartition both' },
+        ] },
+      { kind: 'select', key: 'fiveKeys', label: 'Five keys', options: [
+          { value: 'broadcast', label: 'Broadcast the smaller side' },
+          { value: 'repartition', label: 'Repartition both' },
+        ] },
+    ],
+    starter: { smallBig: 'repartition', bigBig: 'repartition', fiveKeys: 'repartition' },
+    misconception: (
+      <>
+        Repartitioning is the parallel way to join. It is one way: it moves almost every row once, which is cheap only
+        when both sides are big, and it can never spread a key with few values over more workers than it has values. A
+        small side is cheaper to copy to everyone.
+      </>
+    ),
+  },
+  {
     id: 'tightest-page',
     title: 'Find the smallest page that holds the rows',
     group: 'storage',

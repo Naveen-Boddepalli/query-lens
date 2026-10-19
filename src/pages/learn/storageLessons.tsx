@@ -244,6 +244,59 @@ export const EXECUTION_STEPS: Record<string, LessonStep[]> = {
       ),
     },
   ],
+  exchange: [
+    {
+      heading: 'Broadcast the small side',
+      body: (
+        <>
+          200 employees against 5,000 timesheets, on four workers, each holding a quarter of both. Rows with equal keys must
+          meet on one worker. Copy the employees to every worker and leave the timesheets where they are: 200 rows to three
+          other workers, <strong>603</strong> rows moved, and every worker joins its own timesheets locally — 3.58× one
+          worker alone.
+        </>
+      ),
+      link: to('joinSmallBroadcast', 'Open the broadcast join'),
+    },
+    {
+      heading: 'Or repartition both sides',
+      body: (
+        <>
+          Hash every row of both tables on the join key and send it to that key&rsquo;s worker: equal keys meet wherever
+          they started. Three quarters of every row moves — <strong>3,903</strong> rows — and the join is 2.84×. For a small
+          side, copying it is cheaper than shuffling the big one.
+        </>
+      ),
+      link: to('joinSmallRepartition', 'Open the repartition'),
+    },
+    {
+      heading: 'Two big tables',
+      body: (
+        <>
+          2,000 orders against 3,000 payments. Broadcasting the orders now moves 6,003 rows and leaves each worker building a
+          hash table of all 2,000 — 1.60×. Repartitioning moves <strong>3,751</strong>, each worker builds a quarter, and
+          the join is 2.72×. Which exchange wins depends on the sizes.
+        </>
+      ),
+      link: to('joinBigRepartition', 'Open the big join'),
+    },
+    {
+      heading: 'A key with five values',
+      body: (
+        <>
+          Projects against employees on the department: five departments, eight workers. Repartitioning by department can
+          fill at most five workers, and here three get nothing at all — 4.44×, where broadcasting the 30 projects keeps all
+          eight busy and reaches 5.96×. A hash spreads keys, not rows.
+        </>
+      ),
+      link: to('joinFewKeys', 'Open the five keys'),
+      tryThis: (
+        <>
+          Pick <em>Every row back</em>: the same small-with-big join, but every joined row goes to the first worker. On four
+          workers the gather alone takes 3,750 of 6,600 ticks — count where the rows are, and gather only the counts.
+        </>
+      ),
+    },
+  ],
 };
 
 /** The slotted page, and the structures that are alternatives to the engine's heap and B+Tree. */

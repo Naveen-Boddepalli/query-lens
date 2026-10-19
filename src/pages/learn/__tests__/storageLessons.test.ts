@@ -25,6 +25,7 @@ import { DEMO_INITIAL_KEYS, demoScripts, LATCH_LIMITS, planLatchCrabbing } from 
 import { demoWrites as lsmWrites, LSM_LIMITS, planLsm } from '../../../ui/lsm.ts';
 import { estimateAt, HISTOGRAM_LIMITS, isColumnId } from '../../../ui/histogramColumns.ts';
 import { parallelRun } from '../../../ui/parallelPresets.ts';
+import { joinRun } from '../../../ui/exchangePresets.ts';
 import { PARALLEL_LIMITS } from '../../../engine/parallel.ts';
 import { layOutPage } from '../../../ui/slottedPage.ts';
 import { planVectorIndex, VECTOR_LIMITS } from '../../../ui/vectorIndex.ts';
@@ -53,7 +54,7 @@ function lessonsOf(group: LessonGroupId) {
   return ids.map((id) => LESSONS.find((l) => l.id === id)!);
 }
 
-const EXECUTION_IDS = ['external-sort', 'hash-join', 'join-order', 'histograms', 'parallel'];
+const EXECUTION_IDS = ['external-sort', 'hash-join', 'join-order', 'histograms', 'parallel', 'exchange'];
 const EXECUTION_LESSONS = EXECUTION_IDS.map((id) => LESSONS.find((l) => l.id === id)!);
 const STORAGE_LESSONS = lessonsOf('storage');
 
@@ -172,6 +173,7 @@ describe('the storage and execution lessons are wired into the track', () => {
           expect(within(s.m, PARALLEL_LIMITS.minMorselPages, PARALLEL_LIMITS.maxMorselPages)).toBe(true);
           expect(s.s).toHaveLength(s.w);
           for (const v of s.s) expect(within(v, PARALLEL_LIMITS.minSpeed, PARALLEL_LIMITS.maxSpeed)).toBe(true);
+          if (s.jw !== undefined) expect(within(s.jw, 1, 8)).toBe(true);
           break;
         case 'histograms':
           expect(isColumnId(s.c)).toBe(true);
@@ -314,6 +316,32 @@ describe('lesson: parallel execution', () => {
     expect(parallelRun('corner', 4, 'static', 16, [1, 1, 1, 1]).speedup.toFixed(2)).toBe('1.71');
     expect(parallelRun('corner', 4, 'stealing', 16, [1, 1, 1, 1]).speedup.toFixed(2)).toBe('3.22');
     expect(parallelRun('corner', 4, 'stealing', 1, [1, 1, 1, 1]).steals).toBe(93);
+  });
+});
+
+describe('lesson: exchange', () => {
+  const at = (s: { jq?: string; jw?: number; jx?: 'broadcast' | 'repartition' }) => joinRun(s.jq!, s.jw!, s.jx!);
+
+  it('small with big on four: broadcast moves 603 rows (3.58×), repartition 3,903 (2.84×)', () => {
+    const b = at(STORAGE_SCENARIOS.joinSmallBroadcast);
+    const r = at(STORAGE_SCENARIOS.joinSmallRepartition);
+    expect([b.moved.total, b.speedup.toFixed(2), r.moved.total, r.speedup.toFixed(2)]).toEqual([603, '3.58', 3903, '2.84']);
+  });
+
+  it('big with big: broadcast 6,003 rows (1.60×), repartition 3,751 (2.72×)', () => {
+    const r = at(STORAGE_SCENARIOS.joinBigRepartition);
+    const b = joinRun('big-big', 4, 'broadcast');
+    expect([b.moved.total, b.speedup.toFixed(2), r.moved.total, r.speedup.toFixed(2)]).toEqual([6003, '1.60', 3751, '2.72']);
+  });
+
+  it('five keys on eight: repartition leaves three workers empty (4.44×), broadcast 5.96×', () => {
+    const r = at(STORAGE_SCENARIOS.joinFewKeys);
+    expect([r.held.probe.filter((h) => h === 0).length, r.speedup.toFixed(2), joinRun('few-keys', 8, 'broadcast').speedup.toFixed(2)]).toEqual([3, '4.44', '5.96']);
+  });
+
+  it('every row back on four: the gather takes 3,750 of 6,600 ticks', () => {
+    const r = joinRun('all-rows', 4, 'broadcast');
+    expect([r.phases.find((p) => p.name === 'gather')!.ticks, r.ticks]).toEqual([3750, 6600]);
   });
 });
 

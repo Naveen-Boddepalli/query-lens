@@ -1,7 +1,11 @@
 import { useMemo, useState } from 'react';
 import { DISPATCHES, PARALLEL_LIMITS } from '../../engine/parallel.ts';
 import type { Dispatch, ParallelResult } from '../../engine/parallel.ts';
+import { EXCHANGE_LIMITS } from '../../engine/exchange.ts';
+import type { JoinExchange } from '../../engine/exchange.ts';
 import { DataView } from '../../ui/DataView.tsx';
+import { ExchangeSection } from '../../ui/ExchangeSection.tsx';
+import { JOIN_QUERIES } from '../../ui/exchangePresets.ts';
 import { PageHeader } from '../../ui/PageHeader.tsx';
 import {
   DISPATCH_LABELS,
@@ -20,7 +24,8 @@ import { useAddressBarQuery } from '../../ui/addressBar.ts';
  * cut into morsels and run by *N* workers whose speeds are a script you set. `engine/parallel.ts` is the model; this
  * page draws its timeline, worker by worker, and measures the speedup in ticks.
  *
- * URL state: `q` (query), `w` (workers), `d` (dispatch), `m` (pages per morsel), `s` (one speed digit per worker).
+ * URL state: `q` (query), `w` (workers), `d` (dispatch), `m` (pages per morsel), `s` (one speed digit per worker); and
+ * for the exchange section (plan.md §27.5 P2), `jq` (join), `jw` (workers) and `jx` (broadcast or repartition).
  */
 
 const W = 720;
@@ -41,7 +46,10 @@ function readInitial() {
   const dispatch: Dispatch = isDispatch(raw) ? raw : PARALLEL_DEFAULTS.dispatch;
   const morselPages = clampInt(p.get('m'), PARALLEL_LIMITS.minMorselPages, PARALLEL_LIMITS.maxMorselPages, PARALLEL_DEFAULTS.morselPages);
   const speeds = parseSpeeds(p.get('s'), workers) ?? Array.from({ length: workers }, (_, i) => PARALLEL_DEFAULTS.speeds[i] ?? 1);
-  return { query, workers, dispatch, morselPages, speeds };
+  const joinQuery = JOIN_QUERIES.some((q) => q.id === p.get('jq')) ? p.get('jq')! : 'small-big';
+  const joinWorkers = clampInt(p.get('jw'), EXCHANGE_LIMITS.minWorkers, EXCHANGE_LIMITS.maxWorkers, 4);
+  const joinStrategy: JoinExchange = p.get('jx') === 'repartition' ? 'repartition' : 'broadcast';
+  return { query, workers, dispatch, morselPages, speeds, joinQuery, joinWorkers, joinStrategy };
 }
 
 const INITIAL = readInitial();
@@ -95,6 +103,9 @@ export function ParallelToolPage() {
   const [dispatch, setDispatch] = useState<Dispatch>(INITIAL.dispatch);
   const [morselPages, setMorselPages] = useState(INITIAL.morselPages);
   const [speeds, setSpeeds] = useState<number[]>(INITIAL.speeds);
+  const [joinQuery, setJoinQuery] = useState(INITIAL.joinQuery);
+  const [joinWorkers, setJoinWorkers] = useState(INITIAL.joinWorkers);
+  const [joinStrategy, setJoinStrategy] = useState<JoinExchange>(INITIAL.joinStrategy);
   // The speeds of the workers in use, as a string: one digit each, which is also how the link carries them.
   const profile = Array.from({ length: workers }, (_, k) => speeds[k] ?? 1).join('');
   const active = [...profile].map(Number);
@@ -120,8 +131,11 @@ export function ParallelToolPage() {
     p.set('d', dispatch);
     p.set('m', String(morselPages));
     p.set('s', profile);
+    p.set('jq', joinQuery);
+    p.set('jw', String(joinWorkers));
+    p.set('jx', joinStrategy);
     return p.toString();
-  }, [query, workers, dispatch, morselPages, profile]);
+  }, [query, workers, dispatch, morselPages, profile, joinQuery, joinWorkers, joinStrategy]);
   useAddressBarQuery(shareQuery);
 
   const about = PARALLEL_QUERIES.find((q) => q.id === query)!;
@@ -307,6 +321,16 @@ export function ParallelToolPage() {
           </table>
         </ScrollRegion>
       </div>
+
+      {/* plan.md §27.5 P2: exchanges, and a parallel hash join's two ways of getting rows together. */}
+      <ExchangeSection
+        query={joinQuery}
+        workers={joinWorkers}
+        strategy={joinStrategy}
+        onQuery={setJoinQuery}
+        onWorkers={setJoinWorkers}
+        onStrategy={setJoinStrategy}
+      />
 
       <div className={`${panelSurface} p-4`}>
         <h2 className="mb-2 text-body font-semibold text-ink">The answer</h2>

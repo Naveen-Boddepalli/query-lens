@@ -11,6 +11,16 @@ Work toward **v3** (plan.md §27), on the branch `version/v3`.
 
 ### Added
 
+- **Exchange operators** (plan.md §27.5 P2) — [Parallel execution](/tools/parallel) gains a second section: a
+  parallel hash join on one to eight workers, by **broadcast** (copy the smaller side to every worker) or
+  **repartition** (hash both sides to the join key's worker), with a **gather** at the end. It shows the rows each
+  worker sent each other as a table, what each then holds, the ticks of each phase, and the other strategy's figures
+  beside the chosen one's. Broadcast wins 200 employees with 5,000 timesheets (603 rows moved against 3,903; 3.58×
+  against 2.84× on four workers), repartition wins 2,000 orders with 3,000 payments (2.72× against 1.60×), and a key
+  with five values leaves three of eight workers empty when hashed. A lesson, *Exchange: broadcast or repartition*,
+  and a challenge, *Bring the rows together*. The model (`engine/exchange.ts`) is checked against the engine's own
+  count over every preset join, strategy and worker count, and against a nested loop over random tables.
+
 - **Parallel execution** (plan.md §27.5 P1) — a new tool, [Parallel execution](/tools/parallel): morsel-driven
   parallelism after Leis et al. A scan, a filter and an aggregate on the transactions preset are cut into morsels of
   pages and run by one to eight workers whose speeds you script — nothing runs in parallel, time is ticks — each

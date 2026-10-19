@@ -2213,14 +2213,29 @@ test('the parallel tool runs morsels on scripted workers, and work stealing outr
   await page.goto('/tools/parallel');
   await expect(page.getByRole('heading', { name: 'Parallel execution', exact: true })).toBeVisible();
   // Four workers, the fourth three times slower, work stealing: 3.09×.
-  await expect(page.getByRole('status')).toHaveText('3.09×');
+  await expect(page.getByRole('status').first()).toHaveText('3.09×');
   await page.getByRole('radio', { name: 'Static ranges' }).click();
-  await expect(page.getByRole('status')).toHaveText('1.34×');
+  await expect(page.getByRole('status').first()).toHaveText('1.34×');
   await expect(page.getByLabel('Pages per morsel')).toBeDisabled();
   await page.getByRole('radio', { name: 'Shared queue' }).click();
-  await expect(page.getByRole('status')).toHaveText('2.67×');
+  await expect(page.getByRole('status').first()).toHaveText('2.67×');
   await page.getByLabel('Worker 4').selectOption('1');
   await expect.poll(() => page.url()).toContain('s=1111');
   await page.getByRole('button', { name: 'Show as table' }).first().click();
   await expect(page.getByRole('table').filter({ hasText: 'Stolen from' })).toBeVisible();
+});
+
+test('the parallel tool’s exchange section joins by broadcast or repartition, and counts the rows moved', async ({ page }) => {
+  await page.goto('/tools/parallel');
+  const section = page.getByRole('region', { name: 'Exchange: a parallel hash join' });
+  await expect(section.getByRole('status')).toHaveText('3.58×');
+  await expect(section.getByText(/moves 3,903 rows/)).toBeVisible();
+  await section.getByRole('radio', { name: 'Big with big' }).click();
+  await section.getByRole('radio', { name: 'Repartition both' }).click();
+  await expect(section.getByRole('status')).toHaveText('2.72×');
+  await section.getByRole('radio', { name: 'Five keys' }).click();
+  await section.getByLabel('Join workers').selectOption('8');
+  await expect(section.getByRole('status')).toHaveText('4.44×');
+  await expect.poll(() => page.url()).toContain('jq=few-keys');
+  await expect(section.getByRole('table', { name: /Rows sent in the exchange/ })).toBeVisible();
 });

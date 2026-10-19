@@ -421,6 +421,9 @@ const T = (name: string): string => `src/pages/tools/${name}.tsx`;
  *    over §25.4 H8's 24: rather than raise that, App.tsx now builds its lazy pages with one helper and its tool routes
  *    from a table, and the entry is 23.9 kB again — which also brings /playground, /practice, /tools/latch-crabbing
  *    and /docs, each pushed 0.1 kB over by it, back under their ceilings.
+ *  - 2026-10-19, exchange operators (plan.md §27.5 P2), on the same page: /tools/parallel 132.6 kB → 136, its checks
+ *    5.2 kB → 9 (the join challenge), and the docs chunk 178.5 kB with the parallel-execution section in
+ *    reference/limits → /docs and its three essays 178 → 182, each measured + 3, rounded up.
  */
 export const ROUTES: readonly RouteBudget[] = [
   { route: '/', roots: [P('LandingPage')], kb: 177, note: 'the landing page' },
@@ -456,18 +459,18 @@ export const ROUTES: readonly RouteBudget[] = [
   { route: '/tools/grammar', roots: [T('GrammarToolPage')], kb: 112, note: 'the SQL grammar diagram' },
   { route: '/tools/hash-join', roots: [T('HashJoinToolPage')], kb: 114, note: 'Grace hash join' },
   { route: '/tools/join-order', roots: [T('JoinOrderToolPage')], kb: 183, note: 'Selinger join-order search over the subset lattice' },
-  { route: '/tools/parallel', roots: [T('ParallelToolPage')], kb: 133, note: 'morsel-driven parallel execution, worker speeds scripted (plan.md §27.5 P1)' },
+  { route: '/tools/parallel', roots: [T('ParallelToolPage')], kb: 136, note: 'morsel-driven parallel execution and exchange operators, worker speeds scripted (plan.md §27.5 P1)' },
   { route: '/tools/histograms', roots: [T('HistogramToolPage')], kb: 182, note: 'equi-depth histograms: ANALYZE with a bucket count, and a range estimate’s q-error (plan.md §27.5 T5)' },
   { route: '/tools/lsm', roots: [T('LsmToolPage')], kb: 116, note: 'log-structured merge-tree sandbox' },
   { route: '/tools/hash-index', roots: [T('HashIndexToolPage')], kb: 115, note: 'extendible and linear hashing sandbox' },
   { route: '/tools/columnar', roots: [T('ColumnarToolPage')], kb: 114, note: 'NSM/DSM/PAX row vs. column storage sandbox' },
   { route: '/tools/vector-index', roots: [T('VectorIndexToolPage')], kb: 115, note: 'brute force vs. IVF vs. HNSW vector search' },
   { route: '/tools/latch-crabbing', roots: [T('LatchCrabbingToolPage')], kb: 179, note: 'latch crabbing: naive vs. lock coupling vs. optimistic coupling on a scripted B+Tree workload' },
-  { route: '/docs', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 178, note: 'the docs shell and every prose page (one shared chunk)' },
+  { route: '/docs', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 182, note: 'the docs shell and every prose page (one shared chunk)' },
   { route: '/docs/concepts/btree', roots: ['src/ui/DocsLayout.tsx', 'src/pages/DocsContent/concepts/btree.mdx'], kb: 205, note: 'a concept page with a live B+Tree widget' },
-  { route: '/docs/essays/index-write-tax', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 178, note: 'an essay: prose, with links into the B+Tree sandbox (plan.md §25.4 H2)' },
-  { route: '/docs/essays/repeatable-read', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 178, note: 'an essay: prose, with links into the isolation matrix and the schedule tool (plan.md §25.4 H2)' },
-  { route: '/docs/essays/scan-resistance', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 178, note: 'an essay: prose, with links into the buffer-pool sandbox under LRU and LRU-2 (plan.md §25.4 H2)' },
+  { route: '/docs/essays/index-write-tax', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 182, note: 'an essay: prose, with links into the B+Tree sandbox (plan.md §25.4 H2)' },
+  { route: '/docs/essays/repeatable-read', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 182, note: 'an essay: prose, with links into the isolation matrix and the schedule tool (plan.md §25.4 H2)' },
+  { route: '/docs/essays/scan-resistance', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 182, note: 'an essay: prose, with links into the buffer-pool sandbox under LRU and LRU-2 (plan.md §25.4 H2)' },
   { route: '/docs/concepts/buffer-pool', roots: ['src/ui/DocsLayout.tsx', 'src/pages/DocsContent/concepts/buffer-pool.mdx'], kb: 184, note: 'a concept page with a live buffer-pool widget' },
   { route: '/* (404)', roots: [P('NotFoundPage')], kb: 110, note: 'the not-found page' },
 ];
@@ -481,7 +484,7 @@ const SETTINGS_TOOL_CHECKS: readonly (readonly [string, number, string])[] = [
   ['sort', 6, 'the external merge sort driver'],
   ['hash-join', 6, 'the Grace hash join driver'],
   ['join-order', 4, 'the join-order graph and the Selinger search'],
-  ['parallel', 7, 'the morsel model and the transactions preset (plan.md §27.5 P1)'],
+  ['parallel', 9, 'the morsel and exchange models and the transactions preset (plan.md §27.5 P1)'],
   ['histograms', 5, 'the histogram columns, ANALYZE and the range estimate (plan.md §27.5 T5)'],
   ['page', 5, 'the slotted-page layout'],
   ['hash-index', 7, 'the extendible and linear hashing driver'],

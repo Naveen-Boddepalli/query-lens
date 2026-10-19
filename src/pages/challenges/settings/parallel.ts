@@ -1,5 +1,7 @@
 /** The parallel-execution challenge (plan.md §27.5 P1), run by the engine's own morsel model, as the tool runs it. */
 
+import type { JoinExchange } from '../../../engine/exchange.ts';
+import { joinHref, joinRun } from '../../../ui/exchangePresets.ts';
 import { isDispatch, parallelHref, parallelRun } from '../../../ui/parallelPresets.ts';
 import { fixed, num, str } from './shared.ts';
 import type { Checkers } from './shared.ts';
@@ -26,4 +28,30 @@ export const CHECKERS: Checkers = {
       toolHref: parallelHref('grouped', 4, dispatch, morselPages, SLOW_FOURTH),
     };
   },
+  // plan.md §27.5 P2: three joins on eight workers, and the exchange that runs each sooner.
+  'meet-the-rows': (v) => {
+    const joins = [
+      ['small-big', 'smallBig', 'small with big'],
+      ['big-big', 'bigBig', 'big with big'],
+      ['few-keys', 'fiveKeys', 'five keys'],
+    ] as const;
+    const verdicts = joins.map(([id, key, words]) => {
+      const chosen: JoinExchange = str(v, key) === 'broadcast' ? 'broadcast' : 'repartition';
+      const mine = joinRun(id, JOIN_WORKERS, chosen);
+      const other = joinRun(id, JOIN_WORKERS, chosen === 'broadcast' ? 'repartition' : 'broadcast');
+      return { id, words, chosen, mine, right: mine.ticks <= other.ticks };
+    });
+    const wrong = verdicts.find((x) => !x.right);
+    return {
+      passed: wrong === undefined,
+      facts: verdicts.map((x) => ({
+        label: x.words,
+        value: `${x.chosen}: ${fixed(x.mine.speedup)}×, ${x.mine.moved.total.toLocaleString('en-US')} rows moved${x.right ? '' : ' — the other way is faster'}`,
+      })),
+      toolHref: joinHref(wrong?.id ?? 'big-big', JOIN_WORKERS, wrong?.chosen ?? 'repartition'),
+    };
+  },
 };
+
+/** The join challenge's workers. */
+export const JOIN_WORKERS = 8;

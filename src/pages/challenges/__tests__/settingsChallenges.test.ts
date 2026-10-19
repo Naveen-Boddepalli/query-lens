@@ -83,7 +83,7 @@ describe('settings challenges', () => {
         'vector-index',
       ].sort(),
     );
-    expect(SETTINGS_CHALLENGES.length).toBe(19);
+    expect(SETTINGS_CHALLENGES.length).toBe(20);
     expect(SETTINGS_CHALLENGES.filter((c) => c.group === 'transactions').map((c) => c.id)).toEqual([
       'same-level-different-promise',
     ]);
@@ -207,6 +207,7 @@ describe('settings challenges', () => {
     ['enough-buckets', { buckets: 49 }],
     ['outrun-the-slow-worker', { dispatch: 'stealing', morsel: 16 }],
     ['outrun-the-slow-worker', { dispatch: 'stealing', morsel: 4 }],
+    ['meet-the-rows', { smallBig: 'broadcast', bigBig: 'repartition', fiveKeys: 'broadcast' }],
     ['tightest-page', { page: 0, bytes: 202 }],
     ['tightest-page', { page: 5, bytes: 200 }],
     ['split-the-other-bucket', { n: 40, strategy: 'linear', cap: 4, init: 2 }],
@@ -266,6 +267,9 @@ describe('settings challenges', () => {
       ['enough-buckets', 'forty, just short at 1.70×', { buckets: 40 }],
       ['enough-buckets', 'a hundred: close enough, but too many', { buckets: 100 }],
       ['outrun-the-slow-worker', 'static ranges: everyone waits for the slow quarter', {}],
+      ['meet-the-rows', 'repartition everything', {}],
+      ['meet-the-rows', 'broadcast everything', { smallBig: 'broadcast', bigBig: 'broadcast', fiveKeys: 'broadcast' }],
+      ['meet-the-rows', 'repartition on five keys', { smallBig: 'broadcast', bigBig: 'repartition', fiveKeys: 'repartition' }],
       ['outrun-the-slow-worker', 'a shared queue: balanced, but its reads are remote', { dispatch: 'shared' }],
       ['outrun-the-slow-worker', 'stealing with morsels of one page: all dispatch', { dispatch: 'stealing', morsel: 1 }],
       ['outrun-the-slow-worker', 'stealing with morsels of 64 pages: the last one holds everyone up', { dispatch: 'stealing', morsel: 64 }],

@@ -167,6 +167,12 @@ export const LESSON_GROUPS: readonly LessonGroup[] = [
         minutes: 5,
         summary: 'Four workers, one slow: an even split waits for it, a shared queue reads remotely, work stealing gets both right.',
       },
+      {
+        id: 'exchange',
+        title: 'Exchange: broadcast or repartition',
+        minutes: 5,
+        summary: 'A parallel join brings equal keys together: copy the small side everywhere, or hash both sides to their key’s worker.',
+      },
     ],
   },
   {
