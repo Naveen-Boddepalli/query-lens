@@ -98,6 +98,7 @@ const TOOL_PAGES: Record<string, ComponentType> = {
   parallel: page(() => import('./pages/tools/ParallelToolPage.tsx'), 'ParallelToolPage'),
   partitioning: page(() => import('./pages/tools/PartitioningToolPage.tsx'), 'PartitioningToolPage'),
   '2pc': page(() => import('./pages/tools/TwoPhaseCommitToolPage.tsx'), 'TwoPhaseCommitToolPage'),
+  raft: page(() => import('./pages/tools/RaftToolPage.tsx'), 'RaftToolPage'),
   lsm: page(() => import('./pages/tools/LsmToolPage.tsx'), 'LsmToolPage'),
   'hash-index': page(() => import('./pages/tools/HashIndexToolPage.tsx'), 'HashIndexToolPage'),
   columnar: page(() => import('./pages/tools/ColumnarToolPage.tsx'), 'ColumnarToolPage'),

@@ -130,4 +130,60 @@ export const DISTRIBUTED_STEPS: Record<string, LessonStep[]> = {
       ),
     },
   ],
+  raft: [
+    {
+      heading: 'An election, then a log',
+      body: (
+        <>
+          Five servers start as followers. Each waits a random 12 to 23 ticks for a leader; server 2 waits least, stands
+          for term 1, and wins at tick 15 with a majority of votes. It appends a no-op, then each of the client&rsquo;s five
+          commands, and copies them out every four ticks. An entry is committed once three of the five hold it: every
+          server ends committed through entry <strong>6</strong>.
+        </>
+      ),
+      link: to('raftCalm', 'Open the election'),
+    },
+    {
+      heading: 'The leader crashes',
+      body: (
+        <>
+          Crash server 2 at tick 50. The others hear nothing, time out, and server 3 wins term 2 at tick 66 — with every
+          committed entry, because a server votes only for a candidate whose log is at least as up to date as its own. The
+          command sent at tick 50, with no leader to take it, is simply lost: the client would have to try again.
+        </>
+      ),
+      link: to('raftLeaderCrash', 'Open the crash'),
+    },
+    {
+      heading: 'A leader cut off in a minority',
+      body: (
+        <>
+          Cut servers 1 and 2 — the leader — off from the rest from tick 40 to 90. Server 2 still thinks it leads term 1
+          and takes six more commands, but with only two of five it can commit none of them. The other three need two tries
+          (split votes in terms 2 and 3) before server 4 wins term 4 at tick 84. When the network heals, server 2 sees term 4,
+          steps down, and both it and server 1 <strong>drop</strong> the six uncommitted entries: they were never
+          committed, so nothing that anyone was promised is lost.
+        </>
+      ),
+      link: to('raftMinority', 'Open the partition'),
+    },
+    {
+      heading: 'And a lossy network',
+      body: (
+        <>
+          Lose three messages in ten. Elections and copies are slower — server 2 leads term 1, server 3 term 2 — but the four
+          properties Raft promises are checked on every run, and they hold: one leader per term, logs that agree wherever
+          they share an entry, every committed entry in every later leader&rsquo;s log, and no two servers applying different
+          commands at the same index.
+        </>
+      ),
+      link: to('raftLossy', 'Open the lossy network'),
+      tryThis: (
+        <>
+          Turn off the new leader&rsquo;s no-op. Entries of an earlier term then commit only beneath one of the new term — a
+          leader may not commit an old entry just by counting copies (the paper&rsquo;s Figure 8 shows why).
+        </>
+      ),
+    },
+  ],
 };

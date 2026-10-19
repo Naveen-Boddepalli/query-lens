@@ -2293,3 +2293,27 @@ test('commit after the wait: a crash after COMMIT is logged keeps them waiting, 
   await expect(page.getByText('✓ Solved.')).toBeVisible();
   await expect(page.getByRole('link', { name: /Open this run in its tool/ })).toHaveAttribute('href', /\/tools\/2pc\?/);
 });
+
+test('the Raft tool elects, replicates, and checks its four safety properties on every run', async ({ page }) => {
+  await page.goto('/tools/raft');
+  await expect(page.getByRole('heading', { name: 'Raft', exact: true })).toBeVisible();
+  await expect(page.getByRole('status')).toHaveText('1 leader: S2 for term 1 at tick 15');
+  for (const name of ['Election safety', 'Log matching', 'Leader completeness', 'State machine safety']) {
+    await expect(page.getByText(name, { exact: true })).toBeVisible();
+  }
+  await page.getByRole('button', { name: 'The leader is cut off' }).click();
+  await expect(page.getByRole('status')).toHaveText('2 leaders: S2 for term 1 at tick 15, S4 for term 4 at tick 84');
+  await expect(page.getByText(/2 times a server dropped entries/)).toBeVisible();
+  await expect.poll(() => page.url()).toContain('side=12');
+  await page.getByRole('button', { name: 'Show as table' }).first().click();
+  await expect(page.getByRole('table').filter({ hasText: 'wins term 4' })).toBeVisible();
+});
+
+test('lost in the minority: cut the leader off while it takes commands, and lose them — but nothing committed', async ({ page }) => {
+  await page.goto('/challenges/lost-in-the-minority');
+  await page.getByRole('button', { name: 'Run & check' }).click();
+  await expect(page.getByText(/Not there yet/)).toBeVisible();
+  await page.getByLabel('Cut off').selectOption('12');
+  await page.getByRole('button', { name: 'Run & check' }).click();
+  await expect(page.getByText('✓ Solved.')).toBeVisible();
+});

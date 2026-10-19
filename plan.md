@@ -3013,7 +3013,7 @@ Costs are against the modules that exist today (paths checked 2026-10-18).
 |---|---|---|---|---|
 | **X1** | 3.3 | **`/tools/partitioning`** | **Built, 2026-10-19** — `engine/partitioning.ts` (`partition`, `fnv` = FNV-1a + MurmurHash3 fmix32 — plain FNV-1a left a 64-point ring with an empty node): hash mod n; range (equal-depth, a joiner splits the fullest range, a leaver merges into its neighbour); consistent hashing (1–64 points per node). Rows moved vs the least a change must move, skew, the next 300 inserts. `ui/partitionPresets.ts`, the page (bars, ring, ranges; table view); a new lesson group *Distributed databases* (`distributedLessons.tsx`, `distributedScenarios.ts`) with lesson `partitioning`; settings challenge `grow-without-churn` (consistent with ≳ 37 points passes). Course map row *Partly*. As first planned: Hash, range and consistent hashing (with virtual nodes) over one table; add or remove a node and count the rows that move; skew. | 1 wk |
 | **X2** | 3.3 | **`/tools/2pc` — two-phase commit** | **Built, 2026-10-19** — `engine/twoPhaseCommit.ts` (`runTwoPhaseCommit`): a discrete-event run in ticks; presumed abort (only COMMIT forced; aborts never acknowledged; a recovering coordinator with no record answers ABORT); crash points as protocol points with a recovery delay or never; one lost message; vote timeout 5, inquiry and COMMIT resend every 4, unilateral abort at 12, horizon 60. Fuzzed: atomic always; live when every crash recovers. `ui/tpcLinks.ts` (engine-free), `ui/tpcRun.ts`, the page (lanes, in-doubt shading; table view), lesson `two-phase-commit`, settings challenge `commit-after-the-wait` (group *transactions*). As first planned: A coordinator and participants; failures as inputs (a crash before or after the vote, a lost message); the blocking window drawn; presumed abort. | 1.5 wk |
-| **X3** | 3.3 | **`/tools/raft` — consensus** | Leader election and log replication over a scripted message schedule (delays, drops and partitions are inputs). Election safety, log matching and leader completeness asserted by property tests over seeded random schedules. No membership changes, no snapshots — labelled. | 2–3 wk |
+| **X3** | 3.3 | **`/tools/raft` — consensus** | **Built, 2026-10-19** — `engine/raft.ts` (`runRaft`, `mulberry32`, `leaderCommitIndex`, and `electionSafety`/`logMatching`/`leaderCompleteness`/`stateMachineSafety`): Figure 2 in ticks — timeouts 12–23, heartbeat 4, delays 1–3, all from the seed; drop rate; partition and crash windows; persistent term, vote and log; §8 no-op (switchable). 400 fuzzed schedules hold all four properties; six mutations all killed (a pinned search-found schedule for the forgotten vote; Figure 8 on `leaderCommitIndex`). `ui/raftLinks.ts` (engine-free), `ui/raftRun.ts`, the page (role lanes, logs at a tick, the four checks; table view), lesson `raft`, challenge `lost-in-the-minority`. As first planned: Leader election and log replication over a scripted message schedule (delays, drops and partitions are inputs). Election safety, log matching and leader completeness asserted by property tests over seeded random schedules. No membership changes, no snapshots — labelled. | 2–3 wk |
 | **X4** | 3.3 | **Distributed join** | Broadcast against shuffle across X1's partitions, priced in rows over the network. | 1 wk |
 
 #### L. Learning & reach
@@ -3077,8 +3077,10 @@ Costs are against the modules that exist today (paths checked 2026-10-18).
   all in ticks over scripted workers, each held to the serial engine's answer. The row reads* Partly*.)*
 
 **3.3 — Distributed databases**
-- [ ] The course map's *Distributed databases* row is at least *Partly*: partitioning, 2PC and Raft, each with
-  its property tests.
+- [x] The course map's *Distributed databases* row is at least *Partly*: partitioning, 2PC and Raft, each with
+  its property tests. *(2026-10-19, X1–X3: `/tools/partitioning` (rows move only onto a joiner or off a leaver),
+  `/tools/2pc` (atomic always, live when crashes recover) and `/tools/raft` (the four safety properties over 400
+  random schedules), each with a lesson and a challenge. The row reads* Partly*.)*
 
 ### 27.9 Decision log
 
@@ -3103,7 +3105,8 @@ Costs are against the modules that exist today (paths checked 2026-10-18).
 | Serial vs parallel in Compare (P3) | **Built, 2026-10-19** — Amdahl from the one-worker merge, Karp–Flatt per N. 3.2 is complete | now | — |
 | Partitioning (X1) | **Built, 2026-10-19** — hash, range, consistent hashing; rows moved, skew, inserts; a new lesson group | now | — |
 | Two-phase commit (X2) | **Built, 2026-10-19** — presumed abort; failures scripted; blocking drawn, not fixed | now | — |
-| Distributed databases (X3–X4) | **Planned** — Raft, a distributed join | 3.3 | — |
+| Raft (X3) | **Built, 2026-10-19** — Figure 2 over scripted schedules; the four safety properties fuzzed; no membership changes, no snapshots, labelled | now | — |
+| Distributed join (X4) | **Planned** | 3.3 | — |
 | Web Worker engine (C6's deferred half) | **Still deferred** | — | Main-thread jank, or a dataset past 10,000 rows |
 | Window functions, recursive CTEs | **Still declined** (§4, §25.10) | — | A course adoption that asks for them |
 | A correlated scalar subquery | **Declined for 3.0** | — | S1 and S6 both shipped, and a lesson needs one |

@@ -382,6 +382,19 @@ index entries of the rows it touches.
   — no participant commits where another aborts, and none commits before the coordinator's COMMIT — and **live**
   whenever every crashed machine comes back. A coordinator that logs COMMIT and never returns leaves every participant
   in doubt for good: two-phase commit's blocking, drawn, not fixed (three-phase commit is not modelled).
+- **[Raft](/tools/raft)** (plan.md §27.5 X3) runs leader election and log replication on three or five servers,
+  after the paper's Figure 2, over a scripted schedule: a seed draws each election timeout (12 to 23 ticks) and each
+  message's delay (1 to 3), a drop rate loses that share of messages, and you choose a partition (which servers are
+  cut off, from when to when) and a crash (which server, down from when to when). A leader sends AppendEntries every 4
+  ticks; a new leader appends a no-op (§8, which can be turned off); a server votes only for a candidate whose log is
+  at least as up to date as its own; a leader commits by counting only entries of its own term; and `currentTerm`,
+  `votedFor` and the log survive a crash. The client sends each command to the leader it last knew, and a command
+  that finds none is lost. The page draws each server's role over time, every log at any tick, and checks the paper's
+  four safety properties on the run — **election safety, log matching, leader completeness and state machine
+  safety** — which property tests also assert over hundreds of seeded random schedules of losses, partitions, crashes
+  and commands; a test pins a schedule that elects two leaders in one term if a recovering server forgets its vote,
+  and the commit rule is tested on the paper's Figure 8 state. **Not modelled**, and said so on the page: membership
+  changes, snapshots and log compaction, client sessions and retries, and read leases.
 
 ## Locks
 

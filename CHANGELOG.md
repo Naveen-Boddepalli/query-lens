@@ -11,6 +11,19 @@ Work toward **v3** (plan.md §27), on the branch `version/v3`.
 
 ### Added
 
+- **Raft** (plan.md §27.5 X3) — a new tool, [Raft](/tools/raft): leader election and log replication on three or
+  five servers, after the paper's Figure 2, over a schedule you script — a seed for the timeouts and message delays,
+  a share of messages lost, a partition and a crash. The page draws each server's role over time with its term, every
+  log at any tick you choose (entries coloured by term, uncommitted ones dashed), and checks Raft's four safety
+  properties on the run. Five scenarios: a calm election, the leader crashing, the leader cut off in a minority (it
+  takes six commands it can never commit, and drops them when it rejoins), a lossy network, three servers. A new
+  leader's no-op can be turned off. Property tests assert election safety, log matching, leader completeness and state
+  machine safety over 400 seeded random schedules; of six classic mutations each fails at least one test — two of them
+  (a recovering server forgetting its vote, and the Figure 8 commit rule) only once a counterexample found by search
+  was pinned and the commit rule tested on its own. Not modelled, and said so: membership changes, snapshots, client
+  sessions. A lesson, *Raft: one log, many machines*, and a challenge, *Lost in the minority*. With partitioning and
+  two-phase commit, plan.md's 3.3 criterion is met.
+
 - **Two-phase commit** (plan.md §27.5 X2) — a new tool, [Two-phase commit](/tools/2pc): a coordinator and two to
   five participants commit one transaction with presumed abort, and you script what goes wrong — the votes, a crash
   of the coordinator at one of five points or of a participant before or after voting, each back after some ticks or

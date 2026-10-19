@@ -438,6 +438,8 @@ const T = (name: string): string => `src/pages/tools/${name}.tsx`;
  *    the footer — below the fold, with the docs navigation it maps — is fetched after the page instead of with the
  *    shell: a new opt-in row, 2.0 kB → 5, and the entry chunk is 22.8 kB. That also pulled /challenges, /challenges/:id
  *    and /tools/planner, each 0.1 kB over, back under.
+ *  - 2026-10-19, Raft (plan.md §27.5 X3): /tools/raft is a new route, 114.2 kB → 118, its challenge's checks 4.4 → 8.
+ *    Nothing else moved over its ceiling; the entry chunk is 22.9 kB.
  */
 export const ROUTES: readonly RouteBudget[] = [
   { route: '/', roots: [P('LandingPage')], kb: 177, note: 'the landing page' },
@@ -473,6 +475,7 @@ export const ROUTES: readonly RouteBudget[] = [
   { route: '/tools/grammar', roots: [T('GrammarToolPage')], kb: 112, note: 'the SQL grammar diagram' },
   { route: '/tools/hash-join', roots: [T('HashJoinToolPage')], kb: 114, note: 'Grace hash join' },
   { route: '/tools/join-order', roots: [T('JoinOrderToolPage')], kb: 183, note: 'Selinger join-order search over the subset lattice' },
+  { route: '/tools/raft', roots: [T('RaftToolPage')], kb: 118, note: 'Raft: election and replication over a scripted schedule, its safety properties checked (plan.md §27.5 X3)' },
   { route: '/tools/2pc', roots: [T('TwoPhaseCommitToolPage')], kb: 116, note: 'two-phase commit with presumed abort; crashes and lost messages scripted (plan.md §27.5 X2)' },
   { route: '/tools/partitioning', roots: [T('PartitioningToolPage')], kb: 119, note: 'partitioning by hash, range and consistent hashing; rows moved when a node joins or leaves (plan.md §27.5 X1)' },
   { route: '/tools/parallel', roots: [T('ParallelToolPage')], kb: 136, note: 'morsel-driven parallel execution and exchange operators, worker speeds scripted (plan.md §27.5 P1)' },
@@ -500,6 +503,7 @@ const SETTINGS_TOOL_CHECKS: readonly (readonly [string, number, string])[] = [
   ['sort', 6, 'the external merge sort driver'],
   ['hash-join', 6, 'the Grace hash join driver'],
   ['join-order', 4, 'the join-order graph and the Selinger search'],
+  ['raft', 8, 'the Raft model (plan.md §27.5 X3)'],
   ['two-phase-commit', 7, 'the two-phase commit model (plan.md §27.5 X2)'],
   ['partitioning', 6, 'the partitioning model and the transactions preset (plan.md §27.5 X1)'],
   ['parallel', 9, 'the morsel and exchange models and the transactions preset (plan.md §27.5 P1)'],

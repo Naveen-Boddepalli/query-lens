@@ -291,6 +291,12 @@ export const LESSON_GROUPS: readonly LessonGroup[] = [
         minutes: 6,
         summary: 'Every machine commits or none does: votes, one log record that decides, and the wait when the coordinator fails.',
       },
+      {
+        id: 'raft',
+        title: 'Raft: one log, many machines',
+        minutes: 6,
+        summary: 'Elect a leader, replicate a log, crash the leader, cut it off — and check the four promises on every run.',
+      },
     ],
   },
 ];

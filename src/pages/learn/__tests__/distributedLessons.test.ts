@@ -4,6 +4,9 @@ import { PARTITION_LINK_LIMITS } from '../../../ui/partitionLinks.ts';
 import { partitionRun, readPartitionSettings } from '../../../ui/partitionPresets.ts';
 import { readTpcSettings } from '../../../ui/tpcLinks.ts';
 import { tpcRun } from '../../../ui/tpcRun.ts';
+import { readRaftSettings } from '../../../ui/raftLinks.ts';
+import { raftRun } from '../../../ui/raftRun.ts';
+import { electionSafety, leaderCompleteness, logAt, logMatching, stateMachineSafety } from '../../../engine/raft.ts';
 import { DISTRIBUTED_SCENARIOS, distributedHref } from '../distributedScenarios.ts';
 import { LESSONS } from '../lessons.tsx';
 
@@ -13,7 +16,7 @@ const lesson = (id: string) => LESSONS.find((l) => l.id === id)!;
 
 describe('the distributed lessons link the tools as they are', () => {
   it('every step links a scenario, every scenario has a step, and each link reads back as itself', () => {
-    const used = new Set(['partitioning', 'two-phase-commit'].flatMap((id) => lesson(id).steps.map((s) => s.link!.href)));
+    const used = new Set(['partitioning', 'two-phase-commit', 'raft'].flatMap((id) => lesson(id).steps.map((s) => s.link!.href)));
     const hrefs = Object.values(DISTRIBUTED_SCENARIOS).map((s) => distributedHref(s));
     expect([...used].sort()).toEqual([...hrefs].sort());
     expect(PARTITION_LINK_LIMITS).toEqual(PARTITION_LIMITS);
@@ -22,7 +25,8 @@ describe('the distributed lessons link the tools as they are', () => {
       expect(url.pathname).toBe(`/tools/${s.tool}`);
       const { tool: _tool, ...settings } = s;
       if (s.tool === 'partitioning') expect(readPartitionSettings(url.search)).toEqual(settings);
-      else expect(readTpcSettings(url.search)).toEqual(settings);
+      else if (s.tool === '2pc') expect(readTpcSettings(url.search)).toEqual(settings);
+      else expect(readRaftSettings(url.search)).toEqual(settings);
     }
   });
 });
@@ -76,5 +80,33 @@ describe('lesson: two-phase commit', () => {
   it('no recovery: every participant still in doubt at the end', () => {
     const r = tpcRun(DISTRIBUTED_SCENARIOS.tpcNeverReturns);
     expect(r.final.map((f) => f.state)).toEqual(['in doubt', 'in doubt', 'in doubt']);
+  });
+});
+
+describe('lesson: raft', () => {
+  it('calm: server 2 wins term 1 at tick 15, and every server commits through entry 6', () => {
+    const r = raftRun(DISTRIBUTED_SCENARIOS.raftCalm);
+    expect(r.leaders.map((l) => [l.server, l.term, l.at])).toEqual([[2, 1, 15]]);
+    expect(r.final.map((f) => f.commitIndex)).toEqual([6, 6, 6, 6, 6]);
+  });
+
+  it('the leader crashes at 50: server 3 wins term 2 at 66, and the command at 50 finds no leader', () => {
+    const r = raftRun(DISTRIBUTED_SCENARIOS.raftLeaderCrash);
+    expect(r.leaders.map((l) => [l.server, l.term, l.at])).toEqual([[2, 1, 15], [3, 2, 66]]);
+    expect(r.unheard.map((u) => [u.at, u.command])).toEqual([[50, 'x=5']]);
+  });
+
+  it('cut off 40–90: server 2 takes six more it cannot commit; split votes in terms 2 and 3; server 4 wins term 4 at 84; both drop the six', () => {
+    const r = raftRun(DISTRIBUTED_SCENARIOS.raftMinority);
+    expect(r.leaders.map((l) => [l.server, l.term, l.at])).toEqual([[2, 1, 15], [4, 4, 84]]);
+    expect(logAt(r, 2, 85).filter((e) => e.command.startsWith('x=')).length).toBe(8);
+    expect(r.events.filter((e) => e.kind === 'truncate').map((e) => e.server)).toEqual([1, 2]);
+    for (const f of r.final) expect(f.log.map((e) => e.command)).toEqual(['no-op', 'x=1', 'x=2', 'no-op']);
+  });
+
+  it('a lossy network: server 2 leads term 1, server 3 term 2, and all four properties hold', () => {
+    const r = raftRun(DISTRIBUTED_SCENARIOS.raftLossy);
+    expect(r.leaders.map((l) => [l.server, l.term])).toEqual([[2, 1], [3, 2]]);
+    expect([electionSafety(r), logMatching(r), leaderCompleteness(r), stateMachineSafety(r)]).toEqual([true, true, true, true]);
   });
 });

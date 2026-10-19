@@ -142,6 +142,13 @@ const TOOLS = [
     available: true,
   },
   {
+    title: 'Raft',
+    href: '/tools/raft',
+    description:
+      'Consensus on a replicated log: leader election and log replication over a schedule you script — lost messages, a partition, a crash — with each server’s role drawn over time, every log at any tick, and Raft’s four safety properties checked on the run.',
+    available: true,
+  },
+  {
     title: 'LSM tree',
     href: '/tools/lsm',
     description:

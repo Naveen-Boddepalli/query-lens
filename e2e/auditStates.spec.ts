@@ -22,7 +22,7 @@ const ROUTES = [
   '/challenges/and-before-or', '/challenges/index-with-two-rules', '/challenges/win-despite-restarts',
   '/tools/buffer-pool', '/tools/parser', '/tools/planner', '/tools/btree', '/tools/page', '/tools/sort', '/tools/locks',
   '/tools/schedule', '/tools/isolation', '/tools/concurrency', '/tools/wal', '/tools/recovery', '/tools/grammar',
-  '/tools/hash-join', '/tools/join-order', '/tools/histograms', '/tools/parallel', '/tools/partitioning', '/tools/2pc', '/tools/lsm', '/tools/hash-index', '/tools/columnar',
+  '/tools/hash-join', '/tools/join-order', '/tools/histograms', '/tools/parallel', '/tools/partitioning', '/tools/2pc', '/tools/raft', '/tools/lsm', '/tools/hash-index', '/tools/columnar',
   '/tools/latch-crabbing', '/tools/vector-index', '/trace', '/progress', '/settings',
 ];
 

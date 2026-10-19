@@ -30,6 +30,7 @@ export type SettingsTool =
   | 'parallel'
   | 'partitioning'
   | 'two-phase-commit'
+  | 'raft'
   | 'page'
   | 'hash-index'
   | 'lsm'
@@ -439,6 +440,58 @@ export const SETTINGS_CHALLENGES: SettingsChallenge[] = [
         A participant that voted yes has committed. It has only promised to: until the coordinator writes COMMIT, the
         transaction can still abort — a crash a moment before that write ends in abort, a moment after in commit, and the
         participants wait the same either way.
+      </>
+    ),
+  },
+  {
+    id: 'lost-in-the-minority',
+    title: 'Lost in the minority',
+    group: 'transactions',
+    tool: 'raft',
+    brief: (
+      <>
+        Five Raft servers, seed 1: server 2 is elected leader of term 1 at tick 15, and the client sends eight commands,
+        one every five ticks from tick 30. Cut some servers off from the rest for a while, so that a leader accepts at
+        least one command that is then lost — without any committed entry ever being lost.
+      </>
+    ),
+    hint: (
+      <>
+        An entry is committed only once a majority holds it. Which leader could go on taking commands while unable to
+        reach a majority — and what happens to those entries when it hears from the other side?
+      </>
+    ),
+    needs: 'a command a leader accepted that ends up in no log, and every safety property intact',
+    controls: [
+      {
+        kind: 'select',
+        key: 'side',
+        label: 'Cut off',
+        options: [
+          { value: '4', label: 'server 4' },
+          { value: '1', label: 'server 1' },
+          { value: '2', label: 'server 2' },
+          { value: '12', label: 'servers 1 and 2' },
+          { value: '345', label: 'servers 3, 4 and 5' },
+        ],
+      },
+      {
+        kind: 'select',
+        key: 'window',
+        label: 'For',
+        options: [
+          { value: 'early', label: 'ticks 10 to 25' },
+          { value: 'middle', label: 'ticks 40 to 90' },
+          { value: 'late', label: 'ticks 100 to 140' },
+        ],
+      },
+    ],
+    starter: { side: '4', window: 'middle' },
+    misconception: (
+      <>
+        A leader that accepted a command has stored it. It has written it to its own log; until a majority holds the
+        entry, it is not committed, and a leader on the minority side of a partition will see it replaced. Raft never
+        loses a committed entry — the client is only told a command is done once it is committed.
       </>
     ),
   },

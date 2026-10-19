@@ -82,14 +82,16 @@ describe('settings challenges', () => {
         'parallel',
         'partitioning',
         'planner',
+        'raft',
         'sort',
         'two-phase-commit',
         'vector-index',
       ].sort(),
     );
-    expect(SETTINGS_CHALLENGES.length).toBe(23);
+    expect(SETTINGS_CHALLENGES.length).toBe(24);
     expect(SETTINGS_CHALLENGES.filter((c) => c.group === 'transactions').map((c) => c.id)).toEqual([
       'commit-after-the-wait',
+      'lost-in-the-minority',
       'same-level-different-promise',
     ]);
   });
@@ -221,6 +223,8 @@ describe('settings challenges', () => {
     ['grow-without-churn', { scheme: 'consistent', virtual: 40 }],
     ['commit-after-the-wait', { crash: 'after-decision', recover: 10 }],
     ['commit-after-the-wait', { crash: 'after-first-commit', recover: 12 }],
+    ['lost-in-the-minority', { side: '12', window: 'middle' }],
+    ['lost-in-the-minority', { side: '345', window: 'middle' }],
     ['tightest-page', { page: 0, bytes: 202 }],
     ['tightest-page', { page: 5, bytes: 200 }],
     ['split-the-other-bucket', { n: 40, strategy: 'linear', cap: 4, init: 2 }],
@@ -284,6 +288,9 @@ describe('settings challenges', () => {
       ['efficiency-floor', 'eight: 58%', {}],
       ['grow-without-churn', 'hash: 2,399 rows move', {}],
       ['commit-after-the-wait', 'a crash before the decision: presumed abort', {}],
+      ['lost-in-the-minority', 'a follower cut off: the leader keeps its majority', {}],
+      ['lost-in-the-minority', 'server 1 alone: a follower again', { side: '1' }],
+      ['lost-in-the-minority', 'the leader’s side, but after the last command', { side: '12', window: 'late' }],
       ['commit-after-the-wait', 'a crash after it, but back too soon', { crash: 'after-decision', recover: 5 }],
       ['commit-after-the-wait', 'never back: in doubt for good', { crash: 'after-decision', recover: 0 }],
       ['grow-without-churn', 'range: 375 move, but skew 1.25', { scheme: 'range' }],

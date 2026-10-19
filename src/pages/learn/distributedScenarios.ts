@@ -1,5 +1,7 @@
 import { partitionHref } from '../../ui/partitionLinks.ts';
 import type { PartitionSettings } from '../../ui/partitionLinks.ts';
+import { RAFT_SCENARIOS, raftHref } from '../../ui/raftLinks.ts';
+import type { RaftSettings } from '../../ui/raftLinks.ts';
 import { TPC_SCENARIOS, tpcHref } from '../../ui/tpcLinks.ts';
 import type { TpcSettings } from '../../ui/tpcLinks.ts';
 
@@ -16,7 +18,13 @@ export interface TpcScenario extends TpcSettings {
   tool: '2pc';
 }
 
-export type DistributedScenario = PartitionScenario | TpcScenario;
+export interface RaftScenario extends RaftSettings {
+  tool: 'raft';
+}
+
+export type DistributedScenario = PartitionScenario | TpcScenario | RaftScenario;
+
+const raft = (id: string): RaftScenario => ({ tool: 'raft', ...RAFT_SCENARIOS.find((s) => s.id === id)!.settings });
 
 const tpc = (id: string): TpcScenario => ({ tool: '2pc', ...TPC_SCENARIOS.find((s) => s.id === id)!.settings });
 
@@ -32,10 +40,16 @@ export const DISTRIBUTED_SCENARIOS = {
   tpcAfterDecision: tpc('crash-after-decision'),
   tpcBeforeDecision: tpc('crash-before-decision'),
   tpcNeverReturns: tpc('never-returns'),
+  raftCalm: raft('calm'),
+  raftLeaderCrash: raft('leader-crash'),
+  raftMinority: raft('minority-leader'),
+  raftLossy: raft('lossy'),
 } as const satisfies Record<string, DistributedScenario>;
 
 export type DistributedScenarioName = keyof typeof DISTRIBUTED_SCENARIOS;
 
 export function distributedHref(scenario: DistributedScenario): string {
-  return scenario.tool === '2pc' ? tpcHref(scenario) : partitionHref(scenario);
+  if (scenario.tool === '2pc') return tpcHref(scenario);
+  if (scenario.tool === 'raft') return raftHref(scenario);
+  return partitionHref(scenario);
 }
