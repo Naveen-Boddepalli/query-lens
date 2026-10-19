@@ -3052,9 +3052,9 @@ Costs are against the modules that exist today (paths checked 2026-10-18).
   `customers`, held by `aliases.test.ts`'s "definition of done" test.)*
 - [x] The oracle generates every S shape, with coverage thresholds; three 10,000-case seeds are clean. *(2026-10-19,
   after S7.)*
-- [ ] The course map's *SQL* and *Relational model* rows lose every missing item but window functions, CTEs and DDL.
-  *(Left after S7: correlated subqueries outside `EXISTS` — declined for 3.0 in §27.10 — subqueries in `FROM`, and
-  relational division. Each needs the owner's call: build it, or change this line.)*
+- [x] The course map's *SQL* and *Relational model* rows lose every missing item but window functions, CTEs, DDL and
+  what 3.0 decided not to build (§27.10): correlated subqueries outside `EXISTS`, subqueries in `FROM`, and relational
+  division. *(Reworded 2026-10-19 by the owner — the first wording asked for all three too — and met after S7.)*
 
 **3.1 — Theory you can see**
 - [ ] The precedence graph and the replay check agree on every Hermitage schedule, and the page names the
@@ -3086,12 +3086,16 @@ Costs are against the modules that exist today (paths checked 2026-10-18).
 | Web Worker engine (C6's deferred half) | **Still deferred** | — | Main-thread jank, or a dataset past 10,000 rows |
 | Window functions, recursive CTEs | **Still declined** (§4, §25.10) | — | A course adoption that asks for them |
 | A correlated scalar subquery | **Declined for 3.0** | — | S1 and S6 both shipped, and a lesson needs one |
+| Subqueries in `FROM`, relational division | **Declined for 3.0 (owner, 2026-10-19)** — 3.0's third criterion reworded to say so | — | A course adoption that asks for them |
 | In-app LLM explainer | **Still declined** (§25.6's kill criteria) | — | — |
 
 ### 27.10 What v3 deliberately does not add
 
 - **No window functions, no recursive CTEs, no DDL** — §4's and §25.10's reasoning stands.
 - **No correlated scalar subqueries** in 3.0; `EXISTS` and `IN` cover the correlation lesson.
+- **No subqueries in `FROM`** (derived tables) **and no relational division** in 3.0 (owner, 2026-10-19). A derived
+  table is a second planner input with its own scope; division has no SQL keyword, and a textbook writes it as a
+  double `NOT EXISTS`, which 3.0 runs (S1, S7).
 - **No real threads, no real network.** P and X run scripted schedules in the same pure-function shape as D and E.
 - **No membership changes or log compaction in Raft**, and no Paxos — one consensus protocol, honestly labelled.
 - **No bundled or local LLM, no accounts, no telemetry, no graded submission** — §25.10 unchanged.
