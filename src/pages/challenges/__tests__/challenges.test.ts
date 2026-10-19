@@ -50,6 +50,7 @@ describe('challenges', () => {
     'nobody-ordered-it': 'SELECT id FROM products EXCEPT SELECT productId FROM orders;',
     'leave-no-one-out': 'SELECT customers.name, orders.id FROM customers FULL JOIN orders ON customers.id = orders.customerId;',
     'count-each-once': 'SELECT COUNT(DISTINCT customerId) FROM orders;',
+    'above-average': 'SELECT name FROM products WHERE price > (SELECT AVG(price) FROM products);',
     'not-paris-either': "SELECT * FROM customers WHERE city <> 'Paris' OR city IS NULL;",
     'keep-the-unmatched':
       'SELECT authors.name, posts.title FROM authors LEFT JOIN posts ON authors.id = posts.authorId WHERE posts.title IS NULL;',
@@ -134,6 +135,11 @@ describe('challenges', () => {
       ['count-each-once', 'SELECT COUNT(DISTINCT productId) FROM orders;'],
       ['count-each-once', 'SELECT COUNT(DISTINCT customerId), COUNT(*) FROM orders;'],
       ['count-each-once', 'SELECT COUNT(*) FROM customers WHERE EXISTS (SELECT * FROM orders WHERE orders.customerId = customers.id);'],
+      // The average typed in, a different statistic, every product, or the wrong side of it.
+      ['above-average', 'SELECT name FROM products WHERE price > 84.625;'],
+      ['above-average', 'SELECT name FROM products WHERE price > (SELECT MIN(price) FROM products);'],
+      ['above-average', 'SELECT name FROM products;'],
+      ['above-average', 'SELECT name FROM products WHERE price < (SELECT AVG(price) FROM products);'],
       ['not-paris-either', "SELECT * FROM customers WHERE NOT (city = 'Paris');"],
       ['not-paris-either', "SELECT * FROM customers WHERE city NOT IN ('Paris');"],
       ['not-paris-either', 'SELECT * FROM customers WHERE city IS NULL;'],
@@ -207,6 +213,20 @@ describe('challenges', () => {
     }
     // The misconception's numbers: ten distinct rows, NULL among them; nine distinct values.
     expect(runOn(c, 'SELECT DISTINCT customerId FROM orders;').rows).toHaveLength(10);
+  });
+
+  it('above-average accepts the subquery on either side, more columns, and an order; WHERE … AVG is refused (plan.md §27.5 S6)', () => {
+    const c = challengeById('above-average')!;
+    for (const sql of [
+      'SELECT name, price FROM products WHERE (SELECT AVG(price) FROM products) < price ORDER BY price DESC;',
+      'SELECT name FROM products WHERE price > (SELECT SUM(price) FROM products) / (SELECT COUNT(*) FROM products);',
+    ]) {
+      const r = runOn(c, sql);
+      expect(r.error, sql).toBeUndefined();
+      expect(c.check(r, sql), sql).toBe(true);
+    }
+    // The misconception: an aggregate has nothing to read in WHERE.
+    expect(runOn(c, 'SELECT name FROM products WHERE price > AVG(price);').error?.message).toMatch(/cannot be used here/);
   });
 
   it('never-ordered accepts every honest way of asking (plan.md §27.5 S1)', () => {

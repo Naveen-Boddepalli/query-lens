@@ -840,6 +840,42 @@ export const CHALLENGES: Challenge[] = [
     ),
   },
   {
+    // plan.md §27.5 S6, on the `shop` preset: a scalar subquery, run once before planning.
+    id: 'above-average',
+    title: 'Above average',
+    brief: (
+      <>
+        Return the <code className="font-mono">name</code> of every product that costs more than the average product —
+        with the average worked out by the query itself, not typed in.
+      </>
+    ),
+    hint: (
+      <>
+        A <code className="font-mono">SELECT</code> in parentheses stands for its one value:{' '}
+        <code className="font-mono">(SELECT AVG(price) FROM products)</code> can sit wherever a number could.
+      </>
+    ),
+    starter: 'SELECT name\nFROM products\nWHERE price > 85;',
+    dataset: 'shop',
+    // The right products, and the average came from a subquery that ran — not from a number someone worked out.
+    check: (r) => {
+      if (r.error || r.rows.length === 0 || !('name' in r.rows[0]!)) return false;
+      const products = DATASETS.shop.make().tables.products!.rows;
+      const average = products.reduce((sum, p) => sum + Number(p['price']), 0) / products.length;
+      const want = products.filter((p) => Number(p['price']) > average).map((p) => String(p['name'])).sort();
+      const got = r.rows.map((row) => String(row['name'])).sort();
+      const ranOnce = r.events.some((e) => e.stage === 'plan' && /The subquery `\(SELECT .*\)` names nothing from the outer query/.test(e.label));
+      return ranOnce && got.length === want.length && got.every((name, i) => name === want[i]);
+    },
+    misconception: (
+      <>
+        <code className="font-mono">WHERE price &gt; AVG(price)</code> compares each product with the average. It cannot:
+        WHERE runs before anything is aggregated, so there is no average yet to compare with. A subquery works it out
+        first — once, before the plan is even built — and WHERE compares every row with that one number.
+      </>
+    ),
+  },
+  {
     id: 'and-before-or',
     title: 'Where the AND lands',
     brief: (

@@ -65,6 +65,9 @@ export const TONES: Record<string, string> = {
   // Shares Limit's tone — a computed value, same family as a capped result.
   Aggregate:
     'border-hue-orange/60 bg-hue-orange/10 text-hue-orange-ink hover:border-hue-orange/90 hover:bg-hue-orange/20',
+  // A scalar subquery (plan.md §27.5 S6) is a value worked out too — by a whole query, whose tree sits inside it.
+  Subquery:
+    'border-hue-orange/60 bg-hue-orange/10 text-hue-orange-ink hover:border-hue-orange/90 hover:bg-hue-orange/20',
   // Computed columns and arithmetic (plan.md §25.4 B1b) — a value the engine works out, like an aggregate.
   Expression:
     'border-hue-orange/60 bg-hue-orange/10 text-hue-orange-ink hover:border-hue-orange/90 hover:bg-hue-orange/20',

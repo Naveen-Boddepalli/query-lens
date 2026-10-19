@@ -11,6 +11,23 @@ Work toward **v3** (plan.md §27), on the branch `version/v3`.
 
 ### Added
 
+- **Scalar subqueries** (plan.md §27.5 S6) — `(SELECT one_column FROM …)` wherever a value goes: `WHERE price >
+  (SELECT AVG(price) FROM products)`, a computed column, `HAVING`, an `UPDATE … SET` value, in `SELECT`, `DELETE`
+  and `UPDATE`. Inside it, any one-column SELECT the engine runs — an aggregate, `ORDER BY … LIMIT 1`, a join,
+  another subquery. It runs once, before the outer query is planned, as its own sub-run of the engine, and the plan
+  holds its answer as a constant: constant folding can fold it, an index can serve a comparison with it
+  (`customerId = (SELECT id FROM customers WHERE name = 'alice')` becomes a B+Tree lookup), and the plan's narration
+  says what the subquery returned. No row is NULL; more than one is an error that says how many, underlines the
+  subquery and says how to fix it — PostgreSQL's rule, where SQLite takes the first row (a new ledger entry,
+  `scalar-subquery-many-rows`). It is never correlated (plan.md §27.10): a reference to the outer query's table is
+  refused, and the error points at `EXISTS`. A computed column is named by its text as written, subquery and all.
+  The parse tree draws the subquery's own tree under a *Subquery* node, `/tools/grammar` has `scalarSubquery`, and
+  `/tools/planner` now runs a query's subqueries before planning it — `IN (subquery)` too, which it never did. The
+  challenge **Above average** (`/challenges/above-average`) starts from a typed-in threshold and names the
+  `WHERE price > AVG(price)` mistake; `shop` gains an *Above average* chip. Checked by 17 unit tests (each of ten
+  mutations of the new code fails at least one), an e2e test, and the SQLite oracle, which now compares columns with
+  scalar subqueries — aggregates, and a column sorted by itself and cut to one row, a quarter of them empty — in
+  `WHERE` and `HAVING`, with NoREC computing each subquery by hand; three 10,000-case seeds are clean.
 - **`COUNT(DISTINCT x)`, and `SUM`/`AVG`/`MIN`/`MAX` with `DISTINCT`** (plan.md §27.5 S5) — each distinct non-NULL value
   of the column once, in the SELECT list, in `HAVING` and as the `ORDER BY` key, grouped or not, over joins and inside
   a compound. Two values are one exactly when `SELECT DISTINCT` would say so. The hash aggregate keeps a set of the
@@ -102,6 +119,8 @@ Work toward **v3** (plan.md §27), on the branch `version/v3`.
 
 ### Changed
 
+- **A qualifier naming a table a one-table query does not read** (`SELECT orders.id FROM customers`) is now told
+  *There is no table called `orders` in this query*, not that the column needs no table name.
 - **A `LEFT JOIN` reads ⟕ in the relational-algebra view** (and `\mathbin{⟕}` in LaTeX), not ⋈ — the symbol now says
   which rows survive. The optimizer has **eight rewrite rules**, with *product-to-join*; `/tools/planner` and the
   rule-toggling challenges list it.

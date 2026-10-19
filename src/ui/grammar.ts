@@ -251,7 +251,19 @@ export const GRAMMAR: GrammarRule[] = [
         [rule('aggregateCall')],
         // Only in a SELECT's WHERE, as a condition joined by AND (plan.md §27.5 S1).
         [lit('EXISTS'), lit('('), rule('existsSubquery'), lit(')')],
+        // A value worked out by a query of its own, run once before planning (plan.md §27.5 S6).
+        [lit('('), rule('scalarSubquery'), lit(')')],
       ),
+    ],
+  },
+  // One SELECT standing for one value (plan.md §27.5 S6): a single column, at most one row — the engine checks both —
+  // and nothing from the outer query, which it runs before.
+  {
+    name: 'scalarSubquery',
+    parts: [
+      rule('selectCore'),
+      opt(lit('ORDER'), lit('BY'), choice([rule('qualifiedColumn')], [rule('aggregateCall')]), opt(choice([lit('ASC')], [lit('DESC')]))),
+      opt(lit('LIMIT'), rule('number'), opt(lit('OFFSET'), rule('number'))),
     ],
   },
   {

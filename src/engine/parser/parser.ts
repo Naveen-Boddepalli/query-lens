@@ -158,6 +158,8 @@ interface Cursor {
   allowExists: boolean;
   /** True while an `EXISTS` subquery's `WHERE` is being parsed: no subquery may sit inside it. */
   inSubquery: boolean;
+  /** The text being parsed — a scalar subquery keeps its own slice of it (plan.md §27.5 S6). */
+  sql: string;
   peek: () => Token;
   /** `n` tokens past the current one (`peekAt(0)` is `peek()`); the EOF token once past the end. */
   peekAt: (n: number) => Token;
@@ -168,7 +170,7 @@ interface Cursor {
   expectIdentifier: (what: string) => Token;
 }
 
-function makeCursor(tokens: Token[]): Cursor {
+function makeCursor(tokens: Token[], sql: string): Cursor {
   let pos = 0;
   const peek = (): Token => tokens[pos]!;
   const peekAt = (n: number): Token => tokens[Math.min(pos + n, tokens.length - 1)]!;
@@ -203,7 +205,7 @@ function makeCursor(tokens: Token[]): Cursor {
     throw new ParseError(`Expected ${what}, found ${describe(token)}.`, token);
   }
 
-  return { allowAggregates: false, allowExists: false, inSubquery: false, peek, peekAt, next, atEnd, guardScope, expectKeyword, expectIdentifier };
+  return { allowAggregates: false, allowExists: false, inSubquery: false, sql, peek, peekAt, next, atEnd, guardScope, expectKeyword, expectIdentifier };
 }
 
 /** The v0 aggregate functions. Not tokenizer keywords — they parse as identifiers, recognised by name here. */
@@ -693,6 +695,14 @@ function checkColumnQualifier(ref: { name: string; table?: string; span: Span },
       `Write ${known.map((t) => `\`${t}.${ref.name}\``).join(' or ')}, whichever table it is actually on.`,
     );
   }
+  if (!hasJoin && ref.table !== undefined && ref.table !== from.name) {
+    // Another table altogether — inside a subquery, nearly always the outer query's (plan.md §27.5 S6).
+    throw new ParseError(
+      `There is no table called \`${ref.table}\` in this query.`,
+      ref.span,
+      `This query only reads \`${from.name}\`.`,
+    );
+  }
   if (!hasJoin && ref.table !== undefined) {
     // A single-table query's rows are never qualified — `authors.id` would
     // look up a key that does not exist, since the row is just `{id, ...}`.
@@ -772,6 +782,7 @@ function parsePrimary(c: Cursor): Expr {
       span: { from: token.from, to: token.to },
     };
   }
+  if (token.type === 'lparen' && isKeyword(c.peekAt(1), 'SELECT')) return parseScalarSubquery(c);
   if (token.type === 'lparen') {
     c.next();
     // Inside parentheses a bare value is fine — `(a + 1) * 2`; the caller decides whether it is a valid predicate.
@@ -817,9 +828,9 @@ function parsePrimary(c: Cursor): Expr {
   }
   if (isKeyword(token, 'SELECT')) {
     throw new ParseError(
-      'A subquery is not supported here.',
+      'A subquery needs parentheses.',
       token,
-      'QueryLens runs a subquery only inside `IN (SELECT …)` or `EXISTS (SELECT …)` — use one of those, write the value out, or join the two tables.',
+      'Write it as a value in parentheses — `x = (SELECT MAX(y) FROM t)` (plan.md §27.5 S6) — or use `IN (SELECT …)` or `EXISTS (SELECT …)`.',
     );
   }
   c.guardScope(token);
@@ -1428,7 +1439,65 @@ function refuseMidCompound(c: Cursor): void {
  * before compounds; `first` may be followed by a set operator, and then stops before it, as `member` — any SELECT
  * after one — always does, leaving `ORDER BY` and `LIMIT` to the compound.
  */
-function parseSelectBody(c: Cursor, mode: 'whole' | 'first' | 'member' = 'whole'): SelectStatement {
+/**
+ * `(SELECT … )` where a value goes (plan.md §27.5 S6): a whole SELECT of its own, in its own scope — the cursor's
+ * flags are the outer clause's, so they are set aside while it is read and put back after — selecting exactly one
+ * column. It may not read the outer query's tables: QueryLens runs it once, before planning, not once per row.
+ */
+function parseScalarSubquery(c: Cursor): Expr {
+  const open = c.next(); // '('
+  if (c.inSubquery) {
+    throw new ParseError(
+      'A subquery inside an EXISTS subquery is not supported yet.',
+      c.peek(),
+      'QueryLens runs one level of subquery inside EXISTS. Compute the value in the outer query instead.',
+    );
+  }
+  const outer = { allowAggregates: c.allowAggregates, allowExists: c.allowExists };
+  c.allowAggregates = false;
+  c.allowExists = false;
+  let select: SelectStatement;
+  try {
+    select = parseSelectBody(c, 'scalar');
+  } catch (err) {
+    // A table the subquery cannot see is, almost always, the outer query's: a correlated subquery.
+    if (err instanceof ParseError && /no table called/.test(err.message)) {
+      throw new ParseError(err.message, { from: err.from, to: err.to }, CORRELATED_SCALAR_HINT);
+    }
+    throw err;
+  } finally {
+    c.allowAggregates = outer.allowAggregates;
+    c.allowExists = outer.allowExists;
+  }
+  if (select.select.kind === 'star' || select.select.items.length !== 1) {
+    throw new ParseError(
+      'A subquery used as a value must select exactly one column.',
+      select.select.span,
+      'It stands for one value: select one column, or one aggregate — `(SELECT AVG(price) FROM products)`.',
+    );
+  }
+  const close = c.peek();
+  if (close.type !== 'rparen') {
+    if (isSetOp(close)) {
+      throw new ParseError(
+        `\`${close.upper}\` is not supported inside a subquery used as a value.`,
+        close,
+        'A subquery used as a value is one SELECT. Combine the results in the outer query instead.',
+      );
+    }
+    c.guardScope(close);
+    throw new ParseError(`Expected \`)\` to close the subquery, found ${describe(close)}.`, close);
+  }
+  c.next();
+  const sql = c.sql.slice(select.span.from, select.span.to).replace(/\s+/g, ' ');
+  return { kind: 'scalar', select, sql, span: { from: open.from, to: close.to } };
+}
+
+/** What a scalar subquery that names the outer query's tables is told (plan.md §27.10: none are correlated in 3.0). */
+const CORRELATED_SCALAR_HINT =
+  'A subquery used as a value runs once, on its own, before the outer query — so it cannot read the outer query’s rows. QueryLens has no correlated scalar subqueries; for a per-row test against another table, use EXISTS.';
+
+function parseSelectBody(c: Cursor, mode: 'whole' | 'first' | 'member' | 'scalar' = 'whole'): SelectStatement {
   const selectToken = c.expectKeyword('SELECT', mode === 'member' ? 'after the set operator' : 'to begin the query');
   const distinct = isKeyword(c.peek(), 'DISTINCT') ? (c.next(), true) : false;
   const select = parseSelectList(c);
@@ -1535,6 +1604,8 @@ function parseSelectBody(c: Cursor, mode: 'whole' | 'first' | 'member' = 'whole'
   }
 
   const limit = parseLimit(c);
+  // A scalar subquery (plan.md §27.5 S6) ends at its `)`, which the caller reads.
+  if (mode === 'scalar') return statement(orderBy, limit);
   refuseMidCompound(c);
   expectStatementEnd(c);
   return statement(orderBy, limit);
@@ -1885,7 +1956,7 @@ export function parseStatement(sql: string): StatementOutcome {
 function runParse<T>(sql: string, body: (c: Cursor) => T): { ok: true; ast: T } | { ok: false; error: QueryError } {
   try {
     const tokens = tokenize(sql);
-    return { ok: true, ast: body(makeCursor(tokens)) };
+    return { ok: true, ast: body(makeCursor(tokens, sql)) };
   } catch (err) {
     if (err instanceof ParseError || err instanceof TokenizeError) {
       return {

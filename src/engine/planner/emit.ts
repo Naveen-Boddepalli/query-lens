@@ -6,7 +6,7 @@ import { buildAggregatePlan, buildJoinPlan, buildPlan, buildSemiJoin, distinctNo
 import { estimatePlan, rootEstimate } from './cost.ts';
 import { costOfOrder, joinGraphFromAst, runJoinOrderDP, writtenOrderFromAst } from './joinOrder.ts';
 import { OPTIMIZER_RULES, leftmostPrefixNote, optimize } from './optimize.ts';
-import { distinctSortColumn, exprToSql, joinsIn, subqueryResolutionNotes, toPlanDisplay } from './plan.ts';
+import { distinctSortColumn, exprToSql, joinsIn, subqueryNotesText, subqueryResolutionNotes, toPlanDisplay } from './plan.ts';
 import type { Plan, ProjectList } from './plan.ts';
 
 /**
@@ -255,7 +255,7 @@ export function emitPlanEvents(
   if (ast.having) {
     current = { op: 'Having', predicate: ast.having, child: current };
     emit(
-      `HAVING becomes a Having filter above the aggregate: \`${exprToSql(ast.having)}\` is tested on each finished group, after its aggregates are computed. That is the difference from WHERE, which filters rows *before* they are grouped and so can never mention an aggregate.`,
+      `HAVING becomes a Having filter above the aggregate: \`${exprToSql(ast.having)}\` is tested on each finished group, after its aggregates are computed. That is the difference from WHERE, which filters rows *before* they are grouped and so can never mention an aggregate.${subqueryNotesText([ast.having])}`,
       { stage: 'plan', planTree: display(current) },
     );
   }
@@ -292,7 +292,7 @@ export function emitPlanEvents(
         ? `The SELECT list becomes a Project on top, keeping ${columns.names.join(', ')}.`
         : `The SELECT list becomes a Project on top that *computes* each item for every row: ${columns.items
             .map((i) => `\`${i.sql}\``)
-            .join(', ')}. Arithmetic on a NULL is NULL, and dividing by zero gives NULL.`,
+            .join(', ')}. Arithmetic on a NULL is NULL, and dividing by zero gives NULL.${subqueryNotesText(columns.items.map((i) => i.expr))}`,
     { stage: 'plan', planTree: display(current) },
   );
 

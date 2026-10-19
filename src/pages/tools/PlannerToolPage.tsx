@@ -10,6 +10,7 @@ import {
   optimize,
   parse,
   resolveExists,
+  resolveStatementSubqueries,
   runQuery,
   toPlanDisplay,
 } from '../../engine/index.ts';
@@ -92,9 +93,13 @@ export function PlannerToolPage() {
     if (validation.error) return null;
     const parsed = parse(sql);
     if (!parsed.ok) return null;
-    // An EXISTS becomes a semi- or anti-join, or a fact found once, before anything is planned (plan.md §27.5 S1) —
-    // the same step the Playground's pipeline takes, so the two never draw a different plan for one query.
-    const resolved = resolveExists(parsed.ast, (s) => runQuery(s, db, DEFAULT_ENGINE_OPTIONS));
+    // Every subquery runs first, as in the Playground's pipeline, so the two never draw a different plan for one
+    // query: an `IN (subquery)` becomes its list, a scalar one its value (plan.md §27.5 S6), and an EXISTS a semi- or
+    // anti-join, or a fact found once (S1).
+    const run = (s: string) => runQuery(s, db, DEFAULT_ENGINE_OPTIONS);
+    const subqueries = resolveStatementSubqueries(parsed.ast, sql, run);
+    if (!subqueries.ok) return null;
+    const resolved = resolveExists(subqueries.value, run);
     if (!resolved.ok) return null;
     const ast = resolved.value;
     // The rules and the cost model both key off the table the query is

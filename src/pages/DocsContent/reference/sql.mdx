@@ -100,11 +100,11 @@ A `WHERE` clause is a tree. From loosest to tightest binding: `OR`, then `AND`, 
 | `EXISTS (SELECT * FROM t [WHERE …])`, `NOT EXISTS (…)` | Whether that query returns any row at all — never UNKNOWN. Its `WHERE` may name the outer query's tables (plan.md §27.5 S1); see below. |
 | `x LIKE pattern`, `x NOT LIKE pattern` | `%` matches any run of characters, `_` exactly one. **Case-sensitive**, no escape character. |
 
-An operand is a column, a literal (number, single-quoted string, `TRUE`/`FALSE`, `NULL`), or a
-parenthesised predicate.
+An operand is a column, a literal (number, single-quoted string, `TRUE`/`FALSE`, `NULL`), a
+parenthesised predicate, or a [subquery standing for one value](#expressions) — `(SELECT AVG(price) FROM products)`.
 
-**`IN`'s subquery form** is one of the two places a `SELECT` may appear inside another query — the other
-is `EXISTS`, below; a scalar subquery (`x = (SELECT …)`) stays unsupported. It is deliberately small: exactly one plain
+**`IN`'s subquery form** is one of three places a `SELECT` may appear inside another query — the others
+are `EXISTS`, below, and a scalar subquery used as a value. It is deliberately small: exactly one plain
 column, and no `JOIN`/`GROUP BY`/`HAVING`/`ORDER BY`/`LIMIT`/`DISTINCT`/aggregate — none of those could
 change *which* values end up in the set `IN` tests membership against. It always runs exactly once,
 before the outer query is planned, and is always **uncorrelated**: its own `WHERE`, if it has one, can
@@ -261,6 +261,17 @@ UPDATE items SET qty = qty + 1, price = -price WHERE id = 5;
   reads the whole table, because the index is ordered by `id`, not by `id + 1`. Arithmetic on
   *constants* is different: the optimizer works `id = 2 + 3` out once (`constant-folding`), and the
   index can then answer `id = 5`.
+- **A subquery as a value** (plan.md §27.5 S6): `(SELECT …)` with exactly one column stands for that column's one
+  value, anywhere an operand goes — `WHERE price > (SELECT AVG(price) FROM products)`, a computed column
+  (`price - (SELECT AVG(price) FROM products) AS above`), `HAVING COUNT(*) > (SELECT COUNT(*) FROM orders) / 10`,
+  an `UPDATE … SET` value. Inside it, anything a SELECT can do: an aggregate, `ORDER BY … LIMIT 1`, a `JOIN`,
+  another subquery. It runs **once, before the outer query is planned**, as its own sub-run of the engine, and the
+  plan holds its answer as a constant — so an index can serve `customerId = (SELECT id FROM customers WHERE name =
+  'alice')`, and the plan's narration says what the subquery returned. No row is `NULL`; **more than one row is an
+  error** that says how many (PostgreSQL's rule — SQLite quietly uses the first row, see
+  [`scalar-subquery-many-rows`](/docs/reference/answers)). It is **uncorrelated**: it cannot read the outer query's
+  columns, and the error says so and points at `EXISTS`. A computed column is named by its text as written,
+  subquery and all.
 - **Not yet:** arithmetic on an aggregate (`COUNT(*) + 1`), a computed column beside `GROUP BY`, and
   arithmetic in `ORDER BY` or `GROUP BY`.
 
@@ -365,7 +376,10 @@ with a generic syntax error:
 | `INTERSECT` beside `UNION` or `EXCEPT` | *INTERSECT cannot share a query with UNION or EXCEPT* — the standard and SQLite read the same text two ways. |
 | `INTERSECT ALL`, `EXCEPT ALL` | *Not supported yet* — SQLite, which checks the answers, has neither. |
 | `SELECT n, n` | *`n` is selected twice* — a result row is keyed by column name, so alias one: `n AS n2`. |
-| A subquery anywhere but `IN` or `EXISTS`, e.g. `x = (SELECT …)` | *A subquery is not supported here — QueryLens runs a subquery only inside IN (SELECT …) or EXISTS (SELECT …).* |
+| A subquery without its parentheses, e.g. `x = SELECT …` | *A subquery needs parentheses.* — write it as a value, `x = (SELECT MAX(y) FROM t)`, or use `IN (SELECT …)` or `EXISTS (SELECT …)`. |
+| A subquery used as a value with two columns, or `*` | *A subquery used as a value must select exactly one column.* |
+| A subquery used as a value that returns two rows | *The subquery … returned 2 rows, but a subquery used as a value must return at most one.* — add an aggregate, a WHERE on a unique column, or `ORDER BY … LIMIT 1`. |
+| A subquery used as a value that reads the outer query's table | *There is no table called `customers` in this query.* — it runs once, on its own; for a per-row test, use `EXISTS`. |
 | `EXISTS` under `OR`, or in `HAVING`, `DELETE` or `UPDATE` | *EXISTS has to be one of the conditions WHERE joins with AND* — it runs as a semi-join, which keeps or drops whole rows. |
 | `BEGIN` / `COMMIT` / `ROLLBACK` | *`BEGIN`, `COMMIT` and `ROLLBACK` need two sessions to mean anything, and the Playground runs one statement at a time.* They run in [Transaction schedules](/tools/schedule). |
 | `CREATE` / `DROP` | *QueryLens only runs SELECT, DELETE, INSERT and UPDATE. Edit the seed data to change the table.* |

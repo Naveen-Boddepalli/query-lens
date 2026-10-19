@@ -11,7 +11,7 @@
 import fc from 'fast-check';
 import type { EngineOptions, IndexBuildOptions, JoinAlgorithm, ReplacementPolicyName, Row, SqlValue } from '../src/engine/types.ts';
 import { crossKeysOf, renderAgg, renderRef } from './model.ts';
-import type { AggItem, Arith, ArithOp, ColSpec, ColType, ExistsSub, GroupOrderSpec, JoinStep, MemberSelect, Op, Pred, Query, ReadQuery, Ref, SubSelect, TableSpec, WriteQuery } from './model.ts';
+import type { AggItem, Arith, ArithOp, ColSpec, ColType, ExistsSub, ScalarSub, GroupOrderSpec, JoinStep, MemberSelect, Op, Pred, Query, ReadQuery, Ref, SubSelect, TableSpec, WriteQuery } from './model.ts';
 
 /* -------------------------------------------------------------------------- */
 /* Tables                                                                      */
@@ -264,6 +264,45 @@ function subArb(outer: readonly Ref[], subs: readonly SubSource[]): fc.Arbitrary
 }
 
 /**
+ * `ref op (SELECT …)` (plan.md §27.5 S6) over every outer column and every source it can be compared with: an aggregate
+ * of the source with no GROUP BY, or one of its columns sorted by itself and cut to one row (`ScalarSub`). COUNT
+ * compares with any number; SUM and AVG only over whole numbers, so the two engines' float rounding never decides a
+ * comparison; MIN, MAX and the sorted column with a column of their own type. One in four finds no row on purpose
+ * (`id < 0`), where an aggregate is NULL — COUNT's 0 aside — and a sorted column is NULL too.
+ */
+function scalarArb(outer: readonly Ref[], subs: readonly SubSource[]): fc.Arbitrary<Pred>[] {
+  const candidates = outer.flatMap((ref) =>
+    subs.flatMap((source) => {
+      const picks: ScalarSub['pick'][] = [];
+      if (numeric(ref.type)) picks.push({ k: 'agg', agg: { fn: 'COUNT', arg: '*' } });
+      for (const col of source.refs) {
+        if (numeric(ref.type)) picks.push({ k: 'agg', agg: { fn: 'COUNT', arg: col, distinct: true } });
+        if (numeric(ref.type) && col.type === 'int') {
+          picks.push({ k: 'agg', agg: { fn: 'SUM', arg: col } }, { k: 'agg', agg: { fn: 'AVG', arg: col } });
+        }
+        if (comparable(ref, col)) {
+          picks.push({ k: 'agg', agg: { fn: 'MIN', arg: col } }, { k: 'agg', agg: { fn: 'MAX', arg: col } });
+          picks.push({ k: 'top', col: col.name, dir: 'asc' }, { k: 'top', col: col.name, dir: 'desc' });
+        }
+      }
+      return picks.map((pick) => ({ ref, source, pick }));
+    }),
+  );
+  if (candidates.length === 0) return [];
+  return [
+    fc.tuple(fc.constantFrom(...candidates), opArb).chain(([{ ref, source, pick }, op]) => {
+      const id = source.refs.find((r) => r.name === 'id')!;
+      const where: fc.Arbitrary<Pred[]> = fc.oneof(
+        { weight: 3, arbitrary: fc.constant<Pred[]>([]) },
+        { weight: 3, arbitrary: fc.array(leafArb(source.refs, source.pool), { minLength: 1, maxLength: 2 }) },
+        { weight: 2, arbitrary: fc.constant<Pred[]>([{ k: 'cmp', ref: id, op: '<', lit: 0 }]) },
+      );
+      return where.map((w): Pred => ({ k: 'scmp', ref, op, sub: { table: source.table, pick, where: w } }));
+    }),
+  ];
+}
+
+/**
  * Zero or one `[NOT] EXISTS` to add to a SELECT's `where` list (plan.md §27.5 S1), reading one of `sources` — a table
  * the outer query does not have — against `outer`, the outer query's columns, qualified (the subquery can see both).
  * Mostly correlated, through the foreign-key shape when there is one (`u.t_id = t.id`, `w.u_id = u.id`) and any
@@ -377,6 +416,7 @@ function leafArb(refs: readonly Ref[], pool: Pool, subs: readonly SubSource[] = 
     ...like,
     ...colcmp,
     ...subArb(refs, subs).map((arbitrary) => ({ weight: 2, arbitrary })),
+    ...scalarArb(refs, subs).map((arbitrary) => ({ weight: 2, arbitrary })),
   );
 }
 
@@ -620,6 +660,7 @@ function aggregateOver(
         : [{ weight: 2, arbitrary: fc.constantFrom(...group).chain((ref) => fc.tuple(opArb, literalFor(ref, pool)).map(([op, lit]): Pred => ({ k: 'cmp', ref, op, lit }))) }]),
       // A grouped column against a subquery: HAVING resolves its subqueries like WHERE does.
       ...subArb(group, subs).map((arbitrary) => ({ weight: 1, arbitrary })),
+      ...scalarArb(group, subs).map((arbitrary) => ({ weight: 1, arbitrary })),
     );
   const havingArb = (group: readonly Ref[]): fc.Arbitrary<Pred | undefined> => {
     const leaf = havingLeaf(group);

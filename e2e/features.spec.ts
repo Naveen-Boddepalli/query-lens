@@ -1564,6 +1564,17 @@ test('COUNT(DISTINCT …) runs in the Playground: nine customers, and the guests
   for (const value of ['9', '38', '40']) await expect(page.getByRole('cell', { name: value, exact: true })).toBeVisible();
 });
 
+test('a scalar subquery runs in the Playground, and the parser sandbox draws its tree inside (plan.md §27.5 S6)', async ({ page }) => {
+  await page.goto('/playground?t=shop&x=0');
+  await page.getByRole('button', { name: 'Above average', exact: true }).click();
+  await page.getByLabel('Scrub to step').press('End');
+  await expect(page.getByText('4 rows returned').first()).toBeVisible();
+
+  await page.goto(`/tools/parser?src=${encodeURIComponent('SELECT name FROM products WHERE price > (SELECT AVG(price) FROM products)')}`);
+  await expect(page.getByRole('treeitem', { name: /^Subquery/ })).toBeVisible();
+  await expect(page.getByRole('treeitem', { name: /^SELECT/ })).toHaveCount(2);
+});
+
 test('a link that names a dataset reopens on it, in the Playground and the inspector', async ({
   page,
 }) => {

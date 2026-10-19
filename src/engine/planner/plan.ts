@@ -344,6 +344,12 @@ export function conjoin(parts: Expr[]): Expr | undefined {
  * `emitDelete.ts`, `emitUpdate.ts` all share it). Empty when `where` has none — the ordinary case, and the only
  * one before this slice existed at all.
  */
+/** `subqueryResolutionNotes` over several expressions, as sentences to append to a step's narration — or `''`. */
+export function subqueryNotesText(exprs: readonly Expr[]): string {
+  const notes = exprs.flatMap(subqueryResolutionNotes);
+  return notes.length > 0 ? ` ${notes.map((n) => `${n[0]!.toUpperCase()}${n.slice(1)}.`).join(' ')}` : '';
+}
+
 export function subqueryResolutionNotes(where: Expr): string[] {
   const notes: string[] = [];
   walkExpr(where, (e) => {
@@ -354,6 +360,12 @@ export function subqueryResolutionNotes(where: Expr): string[] {
           : `finding ${e.items.length} distinct value${e.items.length === 1 ? '' : 's'}`;
       notes.push(
         `its subquery \`SELECT ${e.subquery.column.name} FROM ${e.subquery.from.name}${e.subquery.where ? ' WHERE …' : ''}\` already ran once, before this plan was built, ${found}`,
+      );
+    }
+    // A scalar subquery (plan.md §27.5 S6): one value for every row, so it ran once, and the plan holds its answer.
+    if (e.kind === 'literal' && e.scalarSubquery !== undefined) {
+      notes.push(
+        `the subquery \`(${e.scalarSubquery})\` names nothing from the outer query, so it already ran once, before this plan was built, and returned ${e.raw} — to the plan, a constant`,
       );
     }
     // An uncorrelated EXISTS (plan.md §27.5 S1): the same answer for every row, so it ran once, like an IN subquery.

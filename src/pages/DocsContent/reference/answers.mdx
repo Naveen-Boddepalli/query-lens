@@ -106,6 +106,7 @@ deliberate; **gap** means a known limit the roadmap intends to close.
 | `division-of-whole-reals` | gap | A `REAL` holding `3.0` is just `3`, so `r / 2` is whole-number division: `1` | The column really is `REAL`: `1.5` |
 | `identifier-case` | design | Column names are case-sensitive, and the error lists the real ones | Identifiers ignore case |
 | `column-selected-twice` | design | `SELECT n, n` is refused — a result row is keyed by column name, so alias one (`n AS n2`) | Both columns come back, named alike |
+| `scalar-subquery-many-rows` | design | A subquery used as a value that returns two rows is an error, as in PostgreSQL | The first row it happens to return, silently |
 
 ## Run it yourself
 

@@ -106,6 +106,8 @@ export const DATASET_CATALOGUE: Record<DatasetId, DatasetCatalogueEntry> = {
       { label: 'CROSS JOIN', sql: 'SELECT customers.name, products.name\nFROM customers\nCROSS JOIN products;' },
       // plan.md §27.5 S5: nine customers, thirty-eight orders with one, forty orders.
       { label: 'COUNT(DISTINCT)', sql: 'SELECT COUNT(DISTINCT customerId), COUNT(customerId), COUNT(*)\nFROM orders;' },
+      // plan.md §27.5 S6: a subquery as a value, run once before planning.
+      { label: 'Above average', sql: 'SELECT name, price\nFROM products\nWHERE price > (SELECT AVG(price) FROM products);' },
       {
         label: 'Orders per customer',
         sql: 'SELECT customers.name, COUNT(orders.id)\nFROM customers\nLEFT JOIN orders ON customers.id = orders.customerId\nGROUP BY customers.name\nORDER BY COUNT(orders.id) DESC;',

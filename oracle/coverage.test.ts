@@ -97,6 +97,11 @@ describe('the generators reach what the oracle is meant to check', () => {
      * strategy and whether they group — and ones whose DISTINCT aggregates read two columns, which one sort cannot order.
      */
     distinctAggregates: new Map<string, number>(),
+    /**
+     * Reads with a scalar subquery that returned rows (plan.md §27.5 S6), by what the subquery picks — an aggregate or a
+     * sorted column — and ones whose subquery found no row, so the outer comparison met a NULL (or COUNT's 0).
+     */
+    scalars: new Map<string, number>(),
   };
   // Compounds are rare in the mixed sessions on purpose; their coverage is sampled from their own generator.
   for (const [{ tables: initial, steps }, options] of fc.sample(fc.tuple(sessionArb('compound'), optionsArb), { seed: COVERAGE_SEED, numRuns: N / 3 })) {
@@ -216,6 +221,17 @@ describe('the generators reach what the oracle is meant to check', () => {
           stats.orderedGroups.set(key, (stats.orderedGroups.get(key) ?? 0) + 1);
         }
         if (q.kind === 'aggregate' && q.group.length > 0) stats.aggregates.set(options.aggregateStrategy ?? 'hash', (stats.aggregates.get(options.aggregateStrategy ?? 'hash') ?? 0) + (result.rows.length > 0 ? 1 : 0));
+        if ('where' in q && result.rows.length > 0) {
+          for (const w of [...q.where, ...(q.kind === 'aggregate' && q.having ? [q.having] : [])]) {
+            walkPred(w, (p) => {
+              if (p.k !== 'scmp') return;
+              const empty = p.sub.where.some((c) => c.k === 'cmp' && c.ref.name === 'id' && c.op === '<' && c.lit === 0);
+              for (const key of [p.sub.pick.k, ...(empty ? ['empty'] : []), ...(q.kind === 'aggregate' && q.having === w ? ['having'] : [])]) {
+                stats.scalars.set(key, (stats.scalars.get(key) ?? 0) + 1);
+              }
+            });
+          }
+        }
         if (q.kind === 'aggregate' && result.rows.length > 0) {
           const read = [...q.aggs, ...(q.order?.by.k === 'agg' ? [q.order.by.agg] : [])];
           const columns = new Set(read.flatMap((a) => (a.distinct && a.arg !== '*' ? [renderRef(a.arg)] : [])));
@@ -240,7 +256,7 @@ describe('the generators reach what the oracle is meant to check', () => {
   });
 
   it('generates every predicate form, including the negated ones and the NULL-in-list trap', () => {
-    for (const form of ['cmp', 'colcmp', 'litcmp', 'between', 'not-between', 'isnull', 'is-not-null', 'in', 'not-in', 'insub', 'not-insub', 'pnull', 'like', 'not-like', 'not', 'and', 'or', '<>', 'acmp', 'ccmp', 'hagg']) {
+    for (const form of ['cmp', 'colcmp', 'litcmp', 'between', 'not-between', 'isnull', 'is-not-null', 'in', 'not-in', 'insub', 'not-insub', 'pnull', 'like', 'not-like', 'not', 'and', 'or', '<>', 'acmp', 'ccmp', 'hagg', 'scmp']) {
       expect(stats.preds.get(form) ?? 0, `predicate form ${form}`).toBeGreaterThan(N / 30);
     }
   });
@@ -350,6 +366,12 @@ describe('the generators reach what the oracle is meant to check', () => {
     for (const key of ['cross', 'cross:comma', 'cross:keyed', 'cross:comma:keyed']) {
       expect(stats.newJoins.get(key) ?? 0, `joins with ${key}`).toBeGreaterThan(5);
     }
+  });
+
+  it('runs scalar subqueries to rows — aggregates and sorted columns, empty ones, and in HAVING (plan.md §27.5 S6)', () => {
+    // Measured with the fixed seed above: 53 aggregates, 23 sorted columns, 11 empty, 14 in HAVING.
+    const floors = { agg: 25, top: 10, empty: 5, having: 6 };
+    for (const [key, floor] of Object.entries(floors)) expect(stats.scalars.get(key) ?? 0, `scalar subqueries, ${key}`).toBeGreaterThan(floor);
   });
 
   it('runs DISTINCT aggregates to rows under both strategies, grouped and not, and over two columns (plan.md §27.5 S5)', () => {

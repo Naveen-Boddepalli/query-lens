@@ -1,5 +1,6 @@
 export { runQuery } from './runQuery.ts';
 export { resolveExists } from './exists.ts';
+export { resolveStatementSubqueries } from './subquery.ts';
 export {
   MAX_REFERENCES,
   parseReferenceScans,

@@ -111,6 +111,7 @@ describe('grammar data — every rule is demonstrated by a query the real parser
     ['predicate — LIKE and NOT LIKE', "SELECT * FROM users WHERE name LIKE 'a%' AND name NOT LIKE '%z'"],
     ['compareOp — every operator', 'SELECT * FROM users WHERE id = 1 OR id <> 2 OR id != 3 OR id < 4 OR id > 5 OR id <= 6 OR id >= 7'],
     ['primary — a parenthesised expr', 'SELECT * FROM users WHERE (id = 1 OR id = 2) AND age > 3'],
+    ['primary — a scalarSubquery', 'SELECT name, age - (SELECT AVG(age) FROM users) FROM users WHERE id = (SELECT id FROM users ORDER BY age DESC LIMIT 1)'],
     ['operand — + and - repeated', 'SELECT * FROM users WHERE age + 1 - 2 > 3'],
     ['multiplicative — * / % repeated', 'SELECT * FROM users WHERE age * 2 / 3 % 4 = 1'],
     ['unary — minus, nested', 'SELECT * FROM users WHERE age > - -5'],

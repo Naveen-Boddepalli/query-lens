@@ -171,4 +171,16 @@ export const LEDGER: Divergence[] = [
     columns: ['n', 'n'],
     expect: { querylens: { error: 'is selected twice' }, sqlite: { rows: [[1, 1]] } },
   },
+  {
+    // plan.md §27.5 S6: why the oracle only generates scalar subqueries that return one row at most.
+    id: 'scalar-subquery-many-rows',
+    title: 'A subquery used as a value returns two rows',
+    kind: 'design',
+    querylens: 'An error: a value is one row at most, as PostgreSQL says.',
+    sqlite: 'The first row the subquery happens to return, silently.',
+    tables: t([{ name: 'n', type: 'int' }], [{ n: 1 }, { n: 2 }]),
+    steps: ['SELECT n FROM t WHERE n = (SELECT n FROM t)'],
+    columns: ['n'],
+    expect: { querylens: { error: 'returned 2 rows' }, sqlite: { rows: [[1]] } },
+  },
 ];

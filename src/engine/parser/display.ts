@@ -187,6 +187,16 @@ function exprNode(expr: Expr, id: string): ASTNode {
         span: expr.span,
         children: [exprNode(expr.operand, `${id}.o`), exprNode(expr.pattern, `${id}.p`)],
       };
+    // A value worked out by a whole query of its own (plan.md §27.5 S6): that query's tree, under one node.
+    case 'scalar':
+      return {
+        id,
+        kind: 'Subquery',
+        label: 'Subquery',
+        detail: 'one value, run once before planning',
+        span: expr.span,
+        children: [withIdPrefix(toDisplayTree(expr.select), id)],
+      };
   }
 }
 

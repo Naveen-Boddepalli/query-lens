@@ -168,7 +168,7 @@ concept explanation.
 - **Always uncorrelated.** The subquery's own `WHERE`, if it has one, can only name a column on its own
   `FROM` table — the same "no table name needed" rule a bare single-table query already enforces — so
   there is no path for it to read a value from the outer query's own row. A correlated subquery is
-  `EXISTS`'s (below); a scalar subquery (`x = (SELECT …)`) stays unsupported.
+  `EXISTS`'s (below); one that stands for a single value is a scalar subquery (below).
 - **Runs exactly once, as its own complete sub-run of the engine** — its own buffer pool, its own real
   disk reads — before the outer query is planned at all, the same way `EXPLAIN`'s own inner query does.
   Its result becomes an ordinary literal list from that point on: the cost model, the executor, and every
@@ -198,6 +198,20 @@ concept explanation.
 - **Only in a `SELECT`'s `WHERE`, as a condition joined by `AND`** (or under one `NOT`). Its table must not be
   one the outer query already has, or one another `EXISTS` in the query reads — there are no table aliases yet,
   so a query cannot correlate a table with itself, and each table appears once.
+
+## Scalar subquery
+
+- **`(SELECT one_column FROM …)` where a value goes** (plan.md §27.5 S6) — `WHERE`, `HAVING`, a computed column, an
+  `UPDATE … SET` value; in `SELECT`, `DELETE` and `UPDATE`. Not inside an `EXISTS` subquery, and not as a set
+  operation (`(SELECT a … UNION SELECT b …)`). Inside, any one-column SELECT the engine runs.
+- **Runs exactly once, before planning**, its own sub-run of the engine like an `IN` subquery's, and becomes the
+  literal it returned: the planner, the cost model and every rewrite rule see a constant, so `constant-folding` can
+  fold `(SELECT MAX(qty) FROM orders) - 1` and an index can serve a comparison with it.
+- **At most one row.** No row is `NULL`; two or more is an error, as in PostgreSQL (SQLite takes the first — the
+  `scalar-subquery-many-rows` ledger entry).
+- **Never correlated** (plan.md §27.10): it cannot read the outer query's rows. A qualified reference to an outer
+  table is refused at parse time, an unqualified one when the subquery's own table has no such column, and both
+  errors point at `EXISTS`.
 
 ## UNION, INTERSECT, EXCEPT
 
@@ -484,9 +498,9 @@ decide whether the rewrite happens.
 
 ## What's out of scope entirely
 
-No subqueries anywhere but `IN (SELECT …)` (uncorrelated, plan.md §25.4 C3) and `[NOT] EXISTS` (plan.md §27.5
-S1 — correlated through one equality, as a semi- or anti-join): no scalar subquery like `x = (SELECT …)`, and no
-correlated subquery outside `EXISTS`. A SELECT list may not name one column twice (`SELECT n, n`): a result row is
+Subqueries in three places only: `IN (SELECT …)` (uncorrelated, plan.md §25.4 C3), `[NOT] EXISTS` (plan.md §27.5
+S1 — correlated through one equality, as a semi- or anti-join), and a scalar subquery used as a value (S6,
+uncorrelated). No correlated subquery outside `EXISTS`, and none in `FROM`. A SELECT list may not name one column twice (`SELECT n, n`): a result row is
 keyed by column name, so the second would overwrite the first. No `USING` or `NATURAL` join, no transactions in
 the Playground (they exist only in [Transaction schedules](/tools/schedule)), no real
 concurrency there (the Locks panel is visual only). `INTERSECT ALL` and `EXCEPT ALL` are also not accepted.

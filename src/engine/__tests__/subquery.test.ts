@@ -40,10 +40,10 @@ describe('IN (subquery) — parsing (plan.md §25.4 C3 slice c, closing C3)', ()
     expect(where.items).toHaveLength(3);
   });
 
-  it('still rejects a subquery anywhere other than IN', () => {
+  it('reads a subquery in a comparison as a scalar one (plan.md §27.5 S6), not as an IN', () => {
     const result = parseStatement('SELECT * FROM posts WHERE authorId = (SELECT id FROM authors)');
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error.message).toMatch(/subquery/i);
+    expect(result.ok).toBe(true);
+    if (result.ok && result.ast.kind === 'select') expect(result.ast.where?.kind === 'compare' && result.ast.where.right.kind).toBe('scalar');
   });
 
   it.each([

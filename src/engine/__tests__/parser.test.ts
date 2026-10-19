@@ -573,10 +573,10 @@ describe('parse — errors point at the right text', () => {
     expect(e.hint).toMatch(/AND|BETWEEN/);
   });
 
-  it('accepts an IN subquery (plan.md §25.4 C3 slice c) but rejects a subquery anywhere else, with a scope explanation', () => {
+  it('accepts an IN subquery (plan.md §25.4 C3 slice c) and a scalar one (§27.5 S6), which selects one column', () => {
     expect(parse('SELECT * FROM users WHERE id IN (SELECT id FROM users)').ok).toBe(true);
-    const e = err('SELECT * FROM users WHERE id = (SELECT id FROM users)');
-    expect(e.message).toMatch(/subquery/i);
+    expect(parse('SELECT * FROM users WHERE id = (SELECT id FROM users)').ok).toBe(true);
+    expect(err('SELECT * FROM users WHERE id = (SELECT id, age FROM users)').message).toMatch(/subquery used as a value must select exactly one column/);
   });
 
   it('every error span is inside the query and non-empty', () => {

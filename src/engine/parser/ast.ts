@@ -31,7 +31,11 @@ export type CompareOp = '=' | '<>' | '<' | '>' | '<=' | '>=';
  */
 export type Expr =
   | { kind: 'column'; name: string; table?: string; span: Span }
-  | { kind: 'literal'; value: SqlValue; raw: string; span: Span }
+  /**
+   * `scalarSubquery` marks a literal that was a scalar subquery (plan.md §27.5 S6) until `resolveStatementSubqueries`
+   * ran it — its source text, so the plan can say where the value came from while planning it as the constant it is.
+   */
+  | { kind: 'literal'; value: SqlValue; raw: string; scalarSubquery?: string; span: Span }
   | { kind: 'compare'; op: CompareOp; left: Expr; right: Expr; span: Span }
   | { kind: 'and'; left: Expr; right: Expr; span: Span }
   | { kind: 'or'; left: Expr; right: Expr; span: Span }
@@ -73,7 +77,14 @@ export type Expr =
    * what it found in `resolved`, keeping the node (as `IN (subquery)` keeps its `subquery`) so the plan can still
    * say what ran.
    */
-  | { kind: 'exists'; subquery: ExistsSubquery; resolved?: boolean; span: Span };
+  | { kind: 'exists'; subquery: ExistsSubquery; resolved?: boolean; span: Span }
+  /**
+   * `(SELECT one_column FROM …)` used as a value (plan.md §27.5 S6): `price > (SELECT AVG(price) FROM products)`.
+   * Uncorrelated by construction — `select` is a whole query of its own, parsed in its own scope, so like `exists`
+   * it has no children here. It runs exactly once, before planning (`resolveStatementSubqueries`), and becomes the
+   * literal it returned — NULL for no row, an error for more than one. `sql` is its source text, for printing.
+   */
+  | { kind: 'scalar'; select: SelectStatement; sql: string; span: Span };
 
 /**
  * The subquery inside `EXISTS (…)` (plan.md §27.5 S1): `SELECT * | value | column FROM table [WHERE expr]`. What it
@@ -405,6 +416,7 @@ export function childrenOf(expr: Expr): Expr[] {
     case 'literal':
     case 'aggregate':
     case 'exists':
+    case 'scalar':
       return [];
     case 'compare':
     case 'and':
@@ -429,6 +441,7 @@ export function mapChildren(expr: Expr, f: (child: Expr) => Expr): Expr {
     case 'literal':
     case 'aggregate':
     case 'exists':
+    case 'scalar':
       return expr;
     case 'compare':
     case 'and':

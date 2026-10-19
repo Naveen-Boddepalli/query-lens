@@ -94,6 +94,8 @@ export type Pred =
    * the outer query's.
    */
   | { k: 'insub'; ref: Ref; neg: boolean; sub: SubSelect }
+  /** `ref op (SELECT …)` (plan.md §27.5 S6): a scalar subquery, at most one row by construction (`ScalarSub`). */
+  | { k: 'scmp'; ref: Ref; op: Op; sub: ScalarSub }
   /** `(P) IS [NOT] NULL` — a predicate in a value's place, the shape that asks whether P was UNKNOWN. */
   | { k: 'pnull'; p: Pred; neg: boolean }
   /**
@@ -104,6 +106,25 @@ export type Pred =
   | { k: 'not'; p: Pred }
   | { k: 'and'; a: Pred; b: Pred }
   | { k: 'or'; a: Pred; b: Pred };
+
+/**
+ * A scalar subquery both engines answer alike (plan.md §27.5 S6): never more than one row — QueryLens refuses more,
+ * SQLite takes the first, a difference the ledger records — so either an aggregate with no GROUP BY, which is always
+ * exactly one row, or a column sorted by itself and cut to one row. That one filters out its NULLs first: the two
+ * engines sort NULLs to opposite ends (ledger: `order-by-null-placement`), and sorting by the column it returns means
+ * a tie never matters.
+ */
+export interface ScalarSub {
+  table: string;
+  pick: { k: 'agg'; agg: AggItem } | { k: 'top'; col: string; dir: 'asc' | 'desc' };
+  where: Pred[];
+}
+
+export function renderScalarSub(sub: ScalarSub): string {
+  if (sub.pick.k === 'agg') return `SELECT ${renderAgg(sub.pick.agg)} FROM ${sub.table}${renderWhere(sub.where)}`;
+  const conditions = [...sub.where.map(renderPred), `${sub.pick.col} IS NOT NULL`];
+  return `SELECT ${sub.pick.col} FROM ${sub.table} WHERE ${conditions.join(' AND ')} ORDER BY ${sub.pick.col} ${sub.pick.dir.toUpperCase()} LIMIT 1`;
+}
 
 /** The one subquery shape both engines share with QueryLens's own limits: one plain column of one table. */
 export interface SubSelect {
@@ -267,6 +288,8 @@ export function renderPred(p: Pred): string {
       return `${renderRef(p.ref)} ${p.neg ? 'NOT ' : ''}LIKE ${renderLiteral(p.pattern)}`;
     case 'insub':
       return `${renderRef(p.ref)} ${p.neg ? 'NOT ' : ''}IN (${renderSubSelect(p.sub)})`;
+    case 'scmp':
+      return `${renderRef(p.ref)} ${p.op} (${renderScalarSub(p.sub)})`;
     case 'pnull':
       return `(${renderPred(p.p)}) IS ${p.neg ? 'NOT ' : ''}NULL`;
     case 'exists':

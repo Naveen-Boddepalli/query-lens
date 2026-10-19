@@ -25,7 +25,7 @@ import { mapChildren, parse } from '../src/engine/parser/index.ts';
 import type { Expr } from '../src/engine/parser/index.ts';
 import { runQuery } from '../src/engine/runQuery.ts';
 import { DEFAULT_ENGINE_OPTIONS } from '../src/engine/types.ts';
-import type { EngineOptions, Row } from '../src/engine/types.ts';
+import type { EngineOptions, Row, SqlValue } from '../src/engine/types.ts';
 import { multisetDiff, sequenceDiff } from './compare.ts';
 import type { Tuple } from './compare.ts';
 import { ORACLE_TIMEOUT, oracleParams } from './config.ts';
@@ -63,12 +63,40 @@ function answer(tables: readonly TableSpec[], q: ReadQuery, options: EngineOptio
 function resolveForReference(expr: Expr | undefined, tables: readonly TableSpec[]): Expr | undefined {
   const walk = (e: Expr): Expr => {
     const out = mapChildren(e, walk);
+    if (out.kind === 'scalar') return { kind: 'literal', value: scalarByHand(out.select, tables), raw: '', span: out.span };
     if (out.kind !== 'in' || !out.subquery) return out;
     const { column, from, where } = out.subquery;
     const rows = tables.find((t) => t.name === from.name)!.rows.filter((row) => passes(where, row));
     return { ...out, items: rows.map((row) => ({ kind: 'literal' as const, value: row[column.name] ?? null, raw: '', span: out.span })) };
   };
   return expr && walk(expr);
+}
+
+/**
+ * The reference's own scalar subquery (plan.md §27.5 S6): its table's rows that pass its WHERE, then the one aggregate
+ * it computes, or the first value of the column it sorts — by hand, in a loop, with no planner, no sort and no pages.
+ */
+function scalarByHand(select: Extract<Expr, { kind: 'scalar' }>['select'], tables: readonly TableSpec[]): SqlValue {
+  const rows = tables.find((t) => t.name === select.from.name)!.rows.filter((row) => passes(select.where, row));
+  const item = select.select.kind === 'columns' ? select.select.items[0] : undefined;
+  if (item?.kind === 'column') {
+    const values = rows.map((r) => r[item.name] ?? null).filter((v) => v !== null);
+    if (values.length === 0) return null;
+    type Value = Exclude<SqlValue, null>;
+    const pick = (a: Value, b: Value): Value => ((select.orderBy?.direction === 'desc' ? a > b : a < b) ? a : b);
+    return values.reduce(pick);
+  }
+  if (item?.kind !== 'aggregate') throw new Error('the oracle only generates a column or an aggregate here');
+  if (item.arg.kind === 'star') return rows.length;
+  const column = item.arg.name;
+  let values = rows.map((r) => r[column] ?? null).filter((v) => v !== null);
+  if (item.arg.distinct) values = [...new Map(values.map((v) => [JSON.stringify(v), v])).values()];
+  if (item.fn === 'COUNT') return values.length;
+  if (values.length === 0) return null;
+  const sum = values.reduce<number>((a, v) => a + Number(v), 0);
+  if (item.fn === 'SUM') return sum;
+  if (item.fn === 'AVG') return sum / values.length;
+  return values.reduce((a, b) => ((item.fn === 'MIN' ? b < a : b > a) ? b : a));
 }
 
 /**

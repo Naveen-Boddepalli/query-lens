@@ -32,11 +32,13 @@ function precedence(expr: Expr): number {
       return expr.op === '+' || expr.op === '-' ? 5 : 6;
     case 'neg':
       return 7;
-    // An atom. An `exists` is one too: its parentheses are part of its syntax, so it never needs another pair.
+    // An atom. An `exists` is one too: its parentheses are part of its syntax, so it never needs another pair — and so
+    // is a scalar subquery's (plan.md §27.5 S6).
     case 'column':
     case 'literal':
     case 'aggregate':
     case 'exists':
+    case 'scalar':
       return 8;
   }
 }
@@ -52,10 +54,14 @@ export function exprToSql(expr: Expr): string {
   switch (expr.kind) {
     case 'column':
       return expr.table ? `${expr.table}.${expr.name}` : expr.name;
+    // A scalar subquery's answer prints as the subquery that produced it (plan.md §27.5 S6): a computed column keeps the
+    // name it was written with, as SQLite names it, and the text still re-parses to the same query.
     case 'literal':
-      return expr.raw;
+      return expr.scalarSubquery === undefined ? expr.raw : `(${expr.scalarSubquery})`;
     case 'aggregate':
       return aggregateKeyOf(expr.fn, expr.arg);
+    case 'scalar':
+      return `(${expr.sql})`;
     case 'compare':
       return `${at(expr.left, 5)} ${expr.op} ${at(expr.right, 5)}`;
     case 'and':

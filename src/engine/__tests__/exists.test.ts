@@ -123,9 +123,10 @@ describe('EXISTS — parsing (plan.md §27.5 S1)', () => {
     if (!result.ok) expect(result.error.message).toMatch(/`EXISTS` is not supported here/);
   });
 
-  it('still refuses a bare subquery in a comparison — EXISTS changes nothing there', () => {
-    const result = parseStatement('SELECT * FROM posts WHERE authorId = (SELECT id FROM authors)');
-    expect(result.ok).toBe(false);
+  it('a subquery in a comparison is a scalar one (plan.md §27.5 S6), and may not hold an EXISTS’s own subquery', () => {
+    expect(parseStatement('SELECT * FROM posts WHERE authorId = (SELECT id FROM authors)').ok).toBe(true);
+    const nested = parseStatement('SELECT * FROM authors WHERE EXISTS (SELECT * FROM posts WHERE posts.authorId = (SELECT MAX(id) FROM authors))');
+    expect(!nested.ok && nested.error.message).toMatch(/subquery inside an EXISTS subquery/);
   });
 });
 
