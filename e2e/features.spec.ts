@@ -1575,6 +1575,17 @@ test('a scalar subquery runs in the Playground, and the parser sandbox draws its
   await expect(page.getByRole('treeitem', { name: /^SELECT/ })).toHaveCount(2);
 });
 
+test('one table under two names: a self-join, and its own NOT EXISTS (plan.md §27.5 S7)', async ({ page }) => {
+  await page.goto('/playground?t=customers&x=0');
+  await page.getByRole('button', { name: 'Self-join', exact: true }).click();
+  await page.getByLabel('Scrub to step').press('End');
+  await expect(page.getByText('20 rows returned').first()).toBeVisible();
+
+  await page.getByRole('button', { name: 'NOT EXISTS, by alias', exact: true }).click();
+  await page.getByLabel('Scrub to step').press('End');
+  await expect(page.getByText('11 rows returned').first()).toBeVisible();
+});
+
 test('a link that names a dataset reopens on it, in the Playground and the inspector', async ({
   page,
 }) => {

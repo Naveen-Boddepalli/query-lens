@@ -87,6 +87,9 @@ export const DATASET_CATALOGUE: Record<DatasetId, DatasetCatalogueEntry> = {
       { label: '= NULL finds nothing', sql: 'SELECT *\nFROM customers\nWHERE city = NULL;' },
       { label: 'Aggregates skip NULLs', sql: 'SELECT COUNT(*), COUNT(discount), AVG(discount)\nFROM customers;' },
       { label: 'NOT IN meets a NULL', sql: 'SELECT name\nFROM customers\nWHERE id NOT IN (SELECT referrer FROM customers);' },
+      // plan.md §27.5 S7: one table under two names — joined to itself, and read again in its own NOT EXISTS.
+      { label: 'Self-join', sql: 'SELECT c.name, r.name\nFROM customers AS c\nLEFT JOIN customers AS r ON c.referrer = r.id;' },
+      { label: 'NOT EXISTS, by alias', sql: 'SELECT c.name\nFROM customers AS c\nWHERE NOT EXISTS (SELECT * FROM customers AS r WHERE r.referrer = c.id);' },
     ],
   },
   // plan.md §27.5 S2: the first preset with more than one table — joins and subqueries without the Custom editor.

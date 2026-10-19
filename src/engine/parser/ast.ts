@@ -1,7 +1,7 @@
 import type { SqlValue } from '../types.ts';
 import type { ArithOp } from '../value.ts';
 import { aggregateKeyOf, exprToSql } from './print.ts';
-export { aggregateKeyOf } from './print.ts';
+export { aggregateKeyOf, tableRefSql } from './print.ts';
 
 export interface Span {
   from: number;
@@ -165,9 +165,22 @@ export type SelectList =
   | { kind: 'star'; span: Span }
   | { kind: 'columns'; items: SelectItem[]; span: Span };
 
+/**
+ * A table a statement names. `name` is the name it goes by *in this query* — what its columns are qualified with
+ * and what the plan calls it. With an alias (plan.md §27.5 S7: `FROM employees AS e`, or `FROM employees e`) that is
+ * the alias, and `source` is the stored table it reads; so a table can appear twice under two names (a self-join),
+ * and everything that only scopes — qualifiers, the plan, the joined row's keys — never needs to know.
+ */
 export interface TableRef {
   name: string;
+  /** The stored table, when `name` is an alias for it (plan.md §27.5 S7). */
+  source?: string;
   span: Span;
+}
+
+/** The stored table a reference reads — its own name, or what its alias stands for (plan.md §27.5 S7). */
+export function baseTableOf(ref: TableRef): string {
+  return ref.source ?? ref.name;
 }
 
 /**

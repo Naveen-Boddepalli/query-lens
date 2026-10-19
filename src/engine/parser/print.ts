@@ -1,9 +1,14 @@
-import type { AggregateArg, AggregateFn, Expr } from './ast.ts';
+import type { AggregateArg, AggregateFn, Expr, TableRef } from './ast.ts';
 
 /** The canonical key an aggregate's value is stored under — `COUNT(*)`, `SUM(age)`, `SUM(t.age)`. */
 export function aggregateKeyOf(fn: AggregateFn, arg: AggregateArg): string {
   if (arg.kind === 'star') return `${fn}(*)`;
   return `${fn}(${arg.distinct ? 'DISTINCT ' : ''}${arg.table ? `${arg.table}.${arg.name}` : arg.name})`;
+}
+
+/** A table reference as SQL — `employees AS e` for an alias (plan.md §27.5 S7), or just `employees`. */
+export function tableRefSql(ref: TableRef): string {
+  return ref.source === undefined ? ref.name : `${ref.source} AS ${ref.name}`;
 }
 
 /** A string as a SQL literal: quoted, with each `'` inside doubled — the form the tokenizer reads back as the same string. */
@@ -74,13 +79,14 @@ export function exprToSql(expr: Expr): string {
       return `${at(expr.operand, 5)} IS ${expr.negated ? 'NOT ' : ''}NULL`;
     case 'in':
       return expr.subquery
-        ? `${at(expr.operand, 5)} ${expr.negated ? 'NOT ' : ''}IN (SELECT ${expr.subquery.column.name} FROM ${expr.subquery.from.name}${expr.subquery.where ? ` WHERE ${exprToSql(expr.subquery.where)}` : ''})`
+        ? `${at(expr.operand, 5)} ${expr.negated ? 'NOT ' : ''}IN (SELECT ${expr.subquery.column.name} FROM ${tableRefSql(expr.subquery.from)}${expr.subquery.where ? ` WHERE ${exprToSql(expr.subquery.where)}` : ''})`
         : `${at(expr.operand, 5)} ${expr.negated ? 'NOT ' : ''}IN (${expr.items.map((i) => at(i, 5)).join(', ')})`;
     case 'like':
       return `${at(expr.operand, 5)} ${expr.negated ? 'NOT ' : ''}LIKE ${at(expr.pattern, 5)}`;
     case 'exists': {
       const { select, from, where } = expr.subquery;
-      return `EXISTS (SELECT ${select} FROM ${from.name}${where ? ` WHERE ${exprToSql(where)}` : ''})`;
+      // The stored table and its alias (plan.md §27.5 S7), so the text re-parses to the same scope.
+      return `EXISTS (SELECT ${select} FROM ${tableRefSql(from)}${where ? ` WHERE ${exprToSql(where)}` : ''})`;
     }
     case 'arith': {
       // Left-associative: the right operand of a same-level operator needs parentheses (`a - (b - c)`).

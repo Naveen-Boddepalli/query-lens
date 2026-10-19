@@ -57,6 +57,7 @@ export {
   lookupKeysOf,
   lookupText,
   rangeOn,
+  renamesOf,
   toPlanDisplay,
 } from './plan.ts';
 export type { AggregateSpec, Plan, ProjectList, RangeBound } from './plan.ts';

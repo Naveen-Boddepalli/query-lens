@@ -12,7 +12,7 @@ import type { JoinAlgorithm, StepEventBody, Table } from '../types.ts';
 import { buildPlan } from './buildPlan.ts';
 import { estimatePlan } from './cost.ts';
 import { emitPlanEvents } from './emit.ts';
-import { toPlanDisplay } from './plan.ts';
+import { renamesOf, toPlanDisplay } from './plan.ts';
 import type { Plan } from './plan.ts';
 
 /** One SELECT of a compound, as `runQuery.ts` resolved it: its own tables, and the columns it returns, in order. */
@@ -83,7 +83,7 @@ export function emitCompoundPlanEvents(
   const allTables: Record<string, Table> = {};
   for (const m of members) Object.assign(allTables, m.joinTables, { [m.table.name]: m.table });
   const display = (plan: Plan, changed?: ReadonlySet<Plan>) =>
-    toPlanDisplay(plan, changed, estimatePlan(plan, first.table, rowsPerPage, allTables));
+    toPlanDisplay(plan, changed, estimatePlan(plan, first.table, rowsPerPage, allTables), renamesOf(Object.values(allTables)));
 
   // Each member exactly as a SELECT of its own — its steps held back, to be told in stage order below.
   const runs = members.map((m) => {

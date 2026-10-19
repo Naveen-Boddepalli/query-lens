@@ -540,9 +540,11 @@ describe('parse — errors point at the right text', () => {
   });
 
   it('rejects trailing junk', () => {
-    const e = err('SELECT * FROM users garbage');
+    // One word after the table name is an alias (plan.md §27.5 S7) — `FROM users garbage` reads `users` as `garbage`.
+    expect(parse('SELECT * FROM users garbage').ok).toBe(true);
+    const e = err('SELECT * FROM users garbage more');
     expect(e.message).toMatch(/unexpected/i);
-    expect(e.from).toBe(20);
+    expect(e.from).toBe(28);
   });
 
   it('names the scope for an operator that is still unsupported', () => {

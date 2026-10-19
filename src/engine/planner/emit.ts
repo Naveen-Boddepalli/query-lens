@@ -1,12 +1,12 @@
 import type { Emit } from '../trace.ts';
 import type { JoinAlgorithm, Table } from '../types.ts';
-import { columnKey, selectItemKey } from '../parser/index.ts';
+import { columnKey, selectItemKey, tableRefSql } from '../parser/index.ts';
 import type { SelectStatement, SemiJoinClause } from '../parser/index.ts';
 import { buildAggregatePlan, buildJoinPlan, buildPlan, buildSemiJoin, distinctNodeFor, isAggregateQuery, projectListFor } from './buildPlan.ts';
 import { estimatePlan, rootEstimate } from './cost.ts';
 import { costOfOrder, joinGraphFromAst, runJoinOrderDP, writtenOrderFromAst } from './joinOrder.ts';
 import { OPTIMIZER_RULES, leftmostPrefixNote, optimize } from './optimize.ts';
-import { distinctSortColumn, exprToSql, joinsIn, subqueryNotesText, subqueryResolutionNotes, toPlanDisplay } from './plan.ts';
+import { distinctSortColumn, exprToSql, joinsIn, renamesOf, subqueryNotesText, subqueryResolutionNotes, toPlanDisplay } from './plan.ts';
 import type { Plan, ProjectList } from './plan.ts';
 
 /**
@@ -71,8 +71,10 @@ export function emitPlanEvents(
   // own `Join` node concerns — which is `table` (the original FROM table) again once the recursion reaches the
   // bottom of the chain — so `table.name` has to resolve through this same map at every depth, not just the top.
   const otherTables = joinTables && Object.keys(joinTables).length > 0 ? { ...joinTables, [table.name]: table } : undefined;
+  // Each alias and the stored table it names, so the tree and the algebra say both (plan.md §27.5 S7).
+  const renames = renamesOf([table, ...Object.values(joinTables ?? {})]);
   const display = (plan: Plan, changed?: ReadonlySet<Plan>) =>
-    toPlanDisplay(plan, changed, estimatePlan(plan, table, rowsPerPage, otherTables));
+    toPlanDisplay(plan, changed, estimatePlan(plan, table, rowsPerPage, otherTables), renames);
 
   const leftScan: Plan = { op: 'SeqScan', table: ast.from.name };
 
@@ -99,7 +101,7 @@ export function emitPlanEvents(
   }
 
   emit(
-    `Start at the bottom: every plan begins by reading a table, so the base of the tree is a sequential scan of \`${ast.from.name}\`.`,
+    `Start at the bottom: every plan begins by reading a table, so the base of the tree is a sequential scan of \`${tableRefSql(ast.from)}\`.`,
     { stage: 'plan', planTree: display(leftScan) },
   );
 
@@ -145,7 +147,7 @@ export function emitPlanEvents(
               ? ' The comma in FROM is a cross join, written the way a textbook writes one; a WHERE equality between the two is what will turn it into a join.'
               : '';
     emit(
-      `${fallback}${join.joinType === 'cross' ? 'CROSS JOIN' : 'JOIN'} adds ${algorithm === 'index-nested-loop' ? 'an index probe on' : 'a second scan of'} \`${j.rightTable}\` and a Join above ${i === 0 ? 'that' : 'the chain so far'}: ${mechanism}.${outer}`,
+      `${fallback}${join.joinType === 'cross' ? 'CROSS JOIN' : 'JOIN'} adds ${algorithm === 'index-nested-loop' ? 'an index probe on' : 'a second scan of'} \`${tableRefSql(join.table)}\` and a Join above ${i === 0 ? 'that' : 'the chain so far'}: ${mechanism}.${outer}`,
       { stage: 'plan', planTree: display(current) },
     );
   }

@@ -494,6 +494,9 @@ export const PIPELINE_STEPS: Record<string, LessonStep[]> = {
       tryThis: (
         <>
           Add <code className="font-mono">WHERE referrer IS NOT NULL</code> inside the subquery, and the eleven come back.
+          Or ask with <code className="font-mono">NOT EXISTS</code>, which a NULL cannot trip — giving the table a second
+          name for the subquery: <code className="font-mono">FROM customers c WHERE NOT EXISTS (SELECT * FROM customers r
+          WHERE r.referrer = c.id)</code>.
         </>
       ),
     },

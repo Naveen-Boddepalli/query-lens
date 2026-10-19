@@ -11,6 +11,23 @@ Work toward **v3** (plan.md §27), on the branch `version/v3`.
 
 ### Added
 
+- **Table aliases and self-joins** (plan.md §27.5 S7) — `FROM customers AS c`, or `customers c`, anywhere a SELECT
+  names a table: `FROM`, every `JOIN` form, and the `FROM` of an `EXISTS`, `IN` or scalar subquery. The alias becomes
+  the table's only name in that query (`customers.name` is then refused, and the error says it is called `c`), so one
+  table can appear twice: a self-join, `FROM customers AS c LEFT JOIN customers AS r ON c.referrer = r.id`, or a
+  subquery on its own table — the `customers` preset's question, *who referred nobody?*, as `NOT EXISTS (SELECT *
+  FROM customers r WHERE r.referrer = c.id)`, which a NULL cannot trip the way `NOT IN` is. Every scope sees the alias;
+  only laying out pages asks what it stands for, so both names read the one heap and its indexes — a self-join's
+  second scan finds the first's pages in the pool, and an index nested-loop probes the index already built. Every
+  join algorithm, LEFT/RIGHT/FULL, grouping and compounds work over aliases. The plan says `SeqScan customers AS c`,
+  the narration *a second scan of `customers AS r`*, and relational algebra a rename, `ρ_c(customers)` (`\rho` in
+  LaTeX). A one-table query may now qualify columns with its own table's name or alias (`SELECT c.name FROM
+  customers c`); the qualifier is dropped, as its rows are unqualified. Joining a table to itself without an alias,
+  or an `EXISTS` on the outer query's own table, is refused with the alias to write. The challenge **Who referred
+  whom** (`/challenges/who-referred-whom`) runs on `customers`, which gains *Self-join* and *NOT EXISTS, by alias*
+  chips, and the NULL lesson's NOT IN step points at the NOT EXISTS that works. Checked by 30 unit tests (each of
+  twelve mutations of the new code fails at least one), an e2e test, and the SQLite oracle, which now joins a table
+  to itself and reads it again in its own `EXISTS`; three 10,000-case seeds are clean.
 - **Scalar subqueries** (plan.md §27.5 S6) — `(SELECT one_column FROM …)` wherever a value goes: `WHERE price >
   (SELECT AVG(price) FROM products)`, a computed column, `HAVING`, an `UPDATE … SET` value, in `SELECT`, `DELETE`
   and `UPDATE`. Inside it, any one-column SELECT the engine runs — an aggregate, `ORDER BY … LIMIT 1`, a join,
@@ -131,6 +148,11 @@ Work toward **v3** (plan.md §27), on the branch `version/v3`.
 
 ### Fixed
 
+- **A nested loop in a pool with too few frames answered wrongly.** A scan holds its current page pinned while the
+  scans inside a nested loop run; when every frame was pinned, the scan that needed one more quietly ended as if its
+  table had — a three-table nested loop with two frames returned no rows, and a `NOT EXISTS` whose subquery could not
+  read kept every row. It is now an error that says so, as PostgreSQL's *no unpinned buffers available* is. Found by
+  the SQLite oracle once self-joins let a query read four tables at once.
 - **The FAQ's "What SQL is missing?" was two releases stale.** It still listed subqueries, outer joins, more than one
   `JOIN`, `UNION` and `COUNT(DISTINCT …)` as missing; it now lists what is: scalar subqueries, table aliases, window
   functions, CTEs and `SELECT *, expr`.

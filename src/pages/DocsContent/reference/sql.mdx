@@ -36,6 +36,14 @@ SELECT * FROM users ORDER BY id LIMIT 10 OFFSET 20;
 - **`FROM`**: exactly one table, plus zero or more `JOIN`s, chained left-deep (plan.md §25.4 C3 slice b):
   `FROM a JOIN b ON … JOIN c ON …` joins `c` to whatever `a ⋈ b` already produced, not to `a` and `b`
   independently.
+- **Table aliases** (plan.md §27.5 S7): any table a `SELECT` reads — in `FROM`, a `JOIN`, a subquery's `FROM` — can
+  be given a name for this query, `customers AS c` or just `customers c`, and is then called by that name only
+  (`c.name`; `customers.name` is refused, and the error says it is called `c`). So one table can appear twice: a
+  **self-join**, `FROM customers AS c LEFT JOIN customers AS r ON c.referrer = r.id`, or a subquery on its own
+  table, `FROM customers c WHERE NOT EXISTS (SELECT * FROM customers r WHERE r.referrer = c.id)`. Both names read
+  the one stored table — the same pages and the same indexes — so a self-join's second scan can find the first's
+  pages in the pool. The plan and the trace call it `customers AS r`, and relational algebra a rename,
+  `ρ_r(customers)`. A write (`DELETE`, `UPDATE`, `INSERT`) names its one table plainly.
 - **`JOIN`**: `[INNER | LEFT [OUTER] | RIGHT [OUTER] | FULL [OUTER]] JOIN table ON a.col = b.col`, always an
   equality between one qualified column on each side. A bare `JOIN` and `INNER JOIN` are the same thing: a row
   from either side with no match on the other simply does not appear. `LEFT [OUTER] JOIN` (plan.md §25.4 C3)
@@ -52,11 +60,11 @@ SELECT * FROM users ORDER BY id LIMIT 10 OFFSET 20;
   optimizer's **product-to-join** rule, σ over × becomes ⋈ — so the textbook's `FROM customers, orders WHERE
   customers.id = orders.customerId` plans exactly as the `JOIN … ON` it means. The rule leaves a cross join a
   later `RIGHT` or `FULL` join pads alone: there, the `WHERE` must stay above to remove the padded rows.
-- No `USING` and no aliasing — so the same table can never be named twice in one query's chain, and
-  each `JOIN`'s `ON` must name the table it introduces on one side and some table already in the query
-  (`FROM`'s, or an earlier `JOIN`'s — not necessarily the one written just before it) on the other. Every
-  column reference is qualified (`authors.id`, not `id`) once a query has any `JOIN` — there is no
-  ambiguity resolution. `ORDER BY` sorts the joined rows, by a qualified column (`ORDER BY posts.id DESC`), and
+- No `USING`. One name appears once in a query — a table twice needs an alias for one of them — and each
+  `JOIN`'s `ON` must name the table it introduces on one side and some table already in the query (`FROM`'s, or
+  an earlier `JOIN`'s — not necessarily the one written just before it) on the other. Every column reference is
+  qualified (`authors.id`, not `id`) once a query has any `JOIN` — there is no ambiguity resolution. Without a
+  `JOIN` a qualifier is optional, and may only name the query's own table (or its alias). `ORDER BY` sorts the joined rows, by a qualified column (`ORDER BY posts.id DESC`), and
   `GROUP BY`, `HAVING` and aggregates group them: `SELECT authors.name, COUNT(posts.id) FROM authors LEFT JOIN
   posts ON authors.id = posts.authorId GROUP BY authors.name` counts each author's posts, zero for one with
   none — `COUNT(*)` would say one, counting the padded row. A `WHERE` on the table a `LEFT JOIN` introduces is never pushed below it — the classic pitfall
@@ -130,8 +138,9 @@ SELECT name FROM authors
 
 - **Every column inside it names its table.** The subquery can see two tables — its own and the outer
   query's — so, the same rule a `JOIN` follows, `posts.authorId` and `authors.id`, never a bare `authorId`.
-  Its table must be one the outer query does not already have, and not one another `EXISTS` in the same
-  query reads: with no table aliases, `authors.id` could not say which of the two it meant.
+  Its table goes by a name the outer query does not already use, and not one another `EXISTS` in the same
+  query uses — so to read the outer query's own table, give it an alias (plan.md §27.5 S7): `FROM customers c
+  WHERE NOT EXISTS (SELECT * FROM customers r WHERE r.referrer = c.id)`.
 - **It runs as a join, not once per row.** A subquery correlated through an equality between one of its
   own columns and an outer one (`posts.authorId = authors.id`) becomes a **semi-join** (⋉) for `EXISTS` —
   an outer row is kept *once* if at least one row matches, however many do — or an **anti-join** (▷) for
@@ -369,7 +378,8 @@ with a generic syntax error:
 |---|---|
 | `CROSS JOIN … ON …` | *CROSS JOIN takes no ON. — a cross join keeps every pair of rows; for a condition, write JOIN … ON, or put it in WHERE.* |
 | `JOIN ... USING (...)` | *USING is not in the v0 subset — write the equality out.* |
-| Joining the same table twice | *Already in this query — joining it again needs an alias, which v0 does not have.* |
+| Joining the same table twice, with no alias | *`customers` is already in this query.* — give one of the two its own name: `JOIN customers AS c2 ON …`. |
+| A table's own name after it has an alias | *There is no table called `customers` in this query.* — in this query it is called `c`. |
 | A `JOIN`'s `ON` naming a table not yet in the query | *There is no table called that yet in this query — it has to be named in FROM or an earlier JOIN first.* |
 | `SELECT a, DISTINCT b` | *DISTINCT applies to the whole SELECT list — write `SELECT DISTINCT a, b …` — or to an aggregate's argument, as in `COUNT(DISTINCT x)`.* |
 | `COUNT(DISTINCT *)` | *`COUNT(DISTINCT *)` is not valid SQL. — DISTINCT needs a column whose distinct values to read; to count distinct rows, write `SELECT DISTINCT …`.* |

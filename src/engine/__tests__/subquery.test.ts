@@ -55,11 +55,14 @@ describe('IN (subquery) — parsing (plan.md §25.4 C3 slice c, closing C3)', ()
     ['GROUP BY', 'SELECT id FROM authors GROUP BY id', /GROUP BY/],
     ['ORDER BY', 'SELECT id FROM authors ORDER BY id', /ORDER BY/],
     ['LIMIT', 'SELECT id FROM authors LIMIT 1', /LIMIT/],
-    ['a table-qualified column', 'SELECT authors.id FROM authors', /does not need a table name/],
   ] as const)('rejects %s inside an IN subquery', (_label, subquerySql, message) => {
     const result = parseStatement(`SELECT * FROM posts WHERE authorId IN (${subquerySql})`);
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.message).toMatch(message);
+  });
+
+  it('takes the subquery’s own table as a qualifier, as any one-table query does (plan.md §27.5 S7)', () => {
+    expect(parseStatement('SELECT * FROM posts WHERE authorId IN (SELECT authors.id FROM authors)').ok).toBe(true);
   });
 
   it('exprToSql round-trips the subquery form, not the resolved values', () => {

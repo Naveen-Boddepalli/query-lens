@@ -876,6 +876,44 @@ export const CHALLENGES: Challenge[] = [
     ),
   },
   {
+    // plan.md §27.5 S7, on the `customers` preset: one table under two names.
+    id: 'who-referred-whom',
+    title: 'Who referred whom',
+    brief: (
+      <>
+        Return every customer&rsquo;s name beside the name of the customer who referred them — NULL where nobody did.
+      </>
+    ),
+    hint: (
+      <>
+        Both names are in <code className="font-mono">customers</code>. Read it twice, under two names —{' '}
+        <code className="font-mono">FROM customers AS c … JOIN customers AS r ON …</code> — and keep the customers no one
+        referred.
+      </>
+    ),
+    starter: 'SELECT name, referrer\nFROM customers;',
+    dataset: 'customers',
+    // Twenty rows: each customer once, beside a referrer's name — in either column order.
+    check: (r) => {
+      if (r.error || r.rows.length === 0 || Object.keys(r.rows[0]!).length !== 2) return false;
+      const rows = DATASETS.customers.make().tables.customers!.rows;
+      const want = rows
+        .map((c) => `${String(c['name'])}|${String(rows.find((x) => c['referrer'] !== null && x['id'] === c['referrer'])?.['name'] ?? null)}`)
+        .sort();
+      const got = r.rows.map((row) => Object.values(row).map(String));
+      const forwards = got.map(([a, b]) => `${a!}|${b!}`).sort();
+      const backwards = got.map(([a, b]) => `${b!}|${a!}`).sort();
+      return [forwards, backwards].some((g) => g.length === want.length && g.every((v, i) => v === want[i]));
+    },
+    misconception: (
+      <>
+        A table can appear only once in a query, so finding a customer&rsquo;s referrer needs a second copy of the
+        table. It needs a second <em>name</em>: <code className="font-mono">c</code> and{' '}
+        <code className="font-mono">r</code> are two scans of the one table — the same pages, read twice.
+      </>
+    ),
+  },
+  {
     id: 'and-before-or',
     title: 'Where the AND lands',
     brief: (

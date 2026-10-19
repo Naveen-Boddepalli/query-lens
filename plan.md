@@ -2987,7 +2987,7 @@ Costs are against the modules that exist today (paths checked 2026-10-18).
 | **S4** | 3.0 | **`CROSS JOIN`, `RIGHT` and `FULL [OUTER] JOIN`** | **Built, 2026-10-19** — `RIGHT` runs natively rather than as a mirrored `LEFT` (the plan keeps the tables as written, so the trace reads the query): nested-loop, hash and sort-merge keep a set of the inner rows that matched and emit the rest last; index nested-loop gives way to nested-loop. `CROSS JOIN` and `FROM a, b` are a `Join` with `joinType: 'cross'`, nested-loop only; a new rule, `product-to-join`, makes σ over × a ⋈ — except under a later `RIGHT`/`FULL`, which the oracle's first run caught. Pushdown never filters a padded side; reordering only touches all-inner chains. Lesson `/learn/outer-joins`, challenge `/challenges/leave-no-one-out`. As first planned: × and the full outer join. `RIGHT` runs as the mirrored `LEFT`, said aloud in the plan; `FULL` needs to remember which inner rows matched — a bitmap the nested-loop and hash operators keep — which is the lesson. | 1 wk |
 | **S5** | 3.0 | **`COUNT(DISTINCT col)`** (and `SUM`/`AVG` `DISTINCT`) | **Built, 2026-10-19** — `distinct` lives on the aggregate's column argument (`AggregateArg`), so every printed key carries it; `AggregateSpec.distinct`; hash keeps a set per group, sort adds the column to its sort key when one column is all its DISTINCT aggregates read (`distinctSortColumn`) and keeps sets otherwise; values compared by `equalityKeyOf`, as `SELECT DISTINCT` does; `MIN`/`MAX` accept it too. Oracle-generated (one column aggregate in four). Challenge `/challenges/count-each-once`; no lesson of its own. As first planned: a per-group set in both aggregate strategies; the sort strategy gets it by sorting on (group, value). | 3 days |
 | **S6** | 3.0 | **Scalar subqueries** | **Built, 2026-10-19** — an `Expr` kind `scalar` (a whole `SelectStatement`, parsed in its own scope with the cursor's flags set aside, plus its source text); `resolveStatementSubqueries` runs it and leaves a literal marked `scalarSubquery`, which prints as the subquery (so computed columns keep their names) and plans as a constant (index selection, constant folding); NULL for no row, an error for two. Anything a one-column SELECT can do inside, `JOIN` and nesting included. `/tools/planner` resolves subqueries now (IN's too). Oracle: aggregates and sorted-and-cut columns, never two rows; ledger `scalar-subquery-many-rows`. Challenge `/challenges/above-average`. As first planned: `x > (SELECT AVG(price) FROM products)` — uncorrelated, run once like `IN (subquery)`, with the "returned more than one row" error a real engine raises. A correlated scalar subquery stays out (§27.10). | 3–4 days |
-| **S7** | 3.0 | **Table aliases and self-joins** | `FROM employees AS e JOIN employees AS m ON e.manager = m.id`, and a subquery correlated with its own table ("customers who referred nobody", the `customers` preset's question, written as `NOT EXISTS`). The engine keys a joined row by the name in scope, so an alias becomes that name and the base table is looked up once. | 1 wk |
+| **S7** | 3.0 | **Table aliases and self-joins** | **Built, 2026-10-19** — a `TableRef`'s `name` is the name in scope and `source` the stored table; `scope.ts`'s `scopedDatabase` gives each alias a copy of its table for the query, and runQuery lays pages out per stored table, so a self-join's scans share one heap and its indexes. A one-table query may qualify with its own name (stripped by `unqualifyOwn`). ρ in the algebra view. The oracle's first self-joins found a pre-existing bug: a `SeqScan` with every frame pinned quietly ended — now `PoolExhausted`, an error. Challenge `/challenges/who-referred-whom`. As first planned: `FROM employees AS e JOIN employees AS m ON e.manager = m.id`, and a subquery correlated with its own table ("customers who referred nobody", the `customers` preset's question, written as `NOT EXISTS`). The engine keys a joined row by the name in scope, so an alias becomes that name and the base table is looked up once. | 1 wk |
 
 #### T. Theory you can see
 
@@ -3047,10 +3047,14 @@ Costs are against the modules that exist today (paths checked 2026-10-18).
 ### 27.8 Definition of done
 
 **3.0 — The SQL a textbook asks for**
-- [ ] A query using `NOT EXISTS`, `UNION`, a `FULL JOIN`, `COUNT(DISTINCT …)` and a self-join through an alias
-  runs and narrates end to end on a preset; `sql.mdx`, `limits.mdx` and `/tools/grammar` agree.
-- [ ] The oracle generates every S shape, with coverage thresholds; three 10,000-case seeds are clean.
+- [x] A query using `NOT EXISTS`, `UNION`, a `FULL JOIN`, `COUNT(DISTINCT …)` and a self-join through an alias
+  runs and narrates end to end on a preset; `sql.mdx`, `limits.mdx` and `/tools/grammar` agree. *(2026-10-19: on
+  `customers`, held by `aliases.test.ts`'s "definition of done" test.)*
+- [x] The oracle generates every S shape, with coverage thresholds; three 10,000-case seeds are clean. *(2026-10-19,
+  after S7.)*
 - [ ] The course map's *SQL* and *Relational model* rows lose every missing item but window functions, CTEs and DDL.
+  *(Left after S7: correlated subqueries outside `EXISTS` — declined for 3.0 in §27.10 — subqueries in `FROM`, and
+  relational division. Each needs the owner's call: build it, or change this line.)*
 
 **3.1 — Theory you can see**
 - [ ] The precedence graph and the replay check agree on every Hermitage schedule, and the page names the
@@ -3075,7 +3079,7 @@ Costs are against the modules that exist today (paths checked 2026-10-18).
 | Outer-join completion (S4) | **Built, 2026-10-19** — `RIGHT`/`FULL`/`CROSS`/comma joins, run natively; `product-to-join` rewrite | now | — |
 | `COUNT(DISTINCT)` (S5) | **Built, 2026-10-19** — both strategies, sort on (group, value) | now | — |
 | Scalar subqueries (S6) | **Built, 2026-10-19** — uncorrelated, run once, planned as a constant; two rows an error | now | — |
-| Table aliases and self-joins (S7) | **Planned** | 3.0 | — |
+| Table aliases and self-joins (S7) | **Built, 2026-10-19** — aliases scope a query; one heap per stored table; ρ in the algebra | now | — |
 | Theory you can see (T1–T5) | **Planned** | 3.1 | — |
 | Parallel execution (P1–P3) | **Planned** — §25.9's *Horizon (v3)* row, now scheduled | 3.2 | — |
 | Distributed databases (X1–X4) | **Planned** — §25.9's other *Horizon (v3)* row | 3.3 | P1's scripted workers exist |

@@ -394,6 +394,9 @@ const T = (name: string): string => `src/pages/tools/${name}.tsx`;
  *    subquery's parser, resolver, errors and narration. The 19 routes that run the engine and went over — none by
  *    more than 1.8 kB — were raised, each to its measured size + 3, rounded up (/playground 348 → 352, / 173 → 177,
  *    /tools/planner 196 → 200).
+ *  - 2026-10-19, table aliases and self-joins (plan.md §27.5 S7): the engine chunk 61.6 → 62.8 kB gzip — alias
+ *    parsing and scoping, one heap per stored table, ρ in the algebra, the pinned-pool error. The two routes it took
+ *    over were raised to measured + 3, rounded up: /gallery 173 → 178 (174.1), /docs/concepts/btree 200 → 205 (201.1).
  */
 export const ROUTES: readonly RouteBudget[] = [
   { route: '/', roots: [P('LandingPage')], kb: 177, note: 'the landing page' },
@@ -403,7 +406,7 @@ export const ROUTES: readonly RouteBudget[] = [
   { route: '/learn', roots: [P('LearnPage')], kb: 113, note: 'the lesson track' },
   { route: '/learn/:id', roots: [P('LessonPage')], kb: 201, note: 'one lesson' },
   { route: '/examples', roots: [P('ExamplesPage')], kb: 110, note: 'preset queries' },
-  { route: '/gallery', roots: [P('GalleryPage')], kb: 173, note: 'named moments' },
+  { route: '/gallery', roots: [P('GalleryPage')], kb: 178, note: 'named moments' },
   { route: '/compare', roots: [P('ComparePage')], kb: 189, note: 'index vs scan, policy vs policy, hash vs sort, join algorithms, B+Tree vs. LSM' },
   { route: '/trace', roots: [P('TracePage')], kb: 180, note: 'the trace inspector' },
   { route: '/progress', roots: [P('ProgressPage')], kb: 116, note: 'the progress dashboard' },
@@ -435,7 +438,7 @@ export const ROUTES: readonly RouteBudget[] = [
   { route: '/tools/vector-index', roots: [T('VectorIndexToolPage')], kb: 115, note: 'brute force vs. IVF vs. HNSW vector search' },
   { route: '/tools/latch-crabbing', roots: [T('LatchCrabbingToolPage')], kb: 179, note: 'latch crabbing: naive vs. lock coupling vs. optimistic coupling on a scripted B+Tree workload' },
   { route: '/docs', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 174, note: 'the docs shell and every prose page (one shared chunk)' },
-  { route: '/docs/concepts/btree', roots: ['src/ui/DocsLayout.tsx', 'src/pages/DocsContent/concepts/btree.mdx'], kb: 200, note: 'a concept page with a live B+Tree widget' },
+  { route: '/docs/concepts/btree', roots: ['src/ui/DocsLayout.tsx', 'src/pages/DocsContent/concepts/btree.mdx'], kb: 205, note: 'a concept page with a live B+Tree widget' },
   { route: '/docs/essays/index-write-tax', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 174, note: 'an essay: prose, with links into the B+Tree sandbox (plan.md §25.4 H2)' },
   { route: '/docs/essays/repeatable-read', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 174, note: 'an essay: prose, with links into the isolation matrix and the schedule tool (plan.md §25.4 H2)' },
   { route: '/docs/essays/scan-resistance', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 174, note: 'an essay: prose, with links into the buffer-pool sandbox under LRU and LRU-2 (plan.md §25.4 H2)' },

@@ -14,9 +14,12 @@
 
 import type { PlanNode, RaInfo } from '../engine/index.ts';
 
+/** A leaf's relation — `users`, or `ρ_c(customers)` for a table read under an alias (plan.md §27.5 S7). */
+const relation = (ra: RaInfo): string => (ra.source === undefined ? (ra.rel ?? '') : `ρ_{${ra.rel ?? ''}}(${ra.source})`);
+
 /** A node's label in the tree view: `σ age > 30`, `π id, name`, `users`. */
 export function raLabel(ra: RaInfo): string {
-  if (ra.symbol === 'rel') return ra.rel ?? '';
+  if (ra.symbol === 'rel') return relation(ra);
   return ra.sub === undefined ? ra.symbol : `${ra.symbol} ${ra.sub}`;
 }
 
@@ -38,8 +41,8 @@ function head(ra: RaInfo): string {
 function inline(node: PlanNode): string {
   const ra = node.ra;
   if (!ra) return node.label;
-  if (ra.symbol === 'rel') return ra.rel ?? '';
-  if (isScanSelection(ra)) return `${head(ra)}(${ra.rel ?? ''})`;
+  if (ra.symbol === 'rel') return relation(ra);
+  if (isScanSelection(ra)) return `${head(ra)}(${relation(ra)})`;
 
   const [first, second] = node.children ?? [];
   if (isJoin(ra) && first && second) {
@@ -126,11 +129,15 @@ function latexHead(ra: RaInfo): string {
 
 const latexRel = (name: string): string => `\\text{${latexText(name)}}`;
 
+/** A leaf's relation in LaTeX — `\\rho_{\\text{c}}(\\text{customers})` under an alias (plan.md §27.5 S7). */
+const latexRelation = (ra: RaInfo): string =>
+  ra.source === undefined ? latexRel(ra.rel ?? '') : `\\rho_{${latexRel(ra.rel ?? '')}}\\left(${latexRel(ra.source)}\\right)`;
+
 function latexInline(node: PlanNode): string {
   const ra = node.ra;
   if (!ra) return `\\text{${latexText(node.label)}}`;
-  if (ra.symbol === 'rel') return latexRel(ra.rel ?? '');
-  if (isScanSelection(ra)) return `${latexHead(ra)}\\left(${latexRel(ra.rel ?? '')}\\right)`;
+  if (ra.symbol === 'rel') return latexRelation(ra);
+  if (isScanSelection(ra)) return `${latexHead(ra)}\\left(${latexRelation(ra)}\\right)`;
 
   const [first, second] = node.children ?? [];
   if (isJoin(ra) && first && second) {

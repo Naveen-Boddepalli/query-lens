@@ -57,7 +57,7 @@ export const GRAMMAR: GrammarRule[] = [
       opt(lit('DISTINCT')),
       rule('selectList'),
       lit('FROM'),
-      rule('identifier'),
+      rule('tableRef'),
       // Zero or more, left-deep (plan.md §25.4 C3 slice b) — concatenated directly, with no separator token
       // between one JOIN clause and the next, unlike every other `repeat` here.
       repeat(opt(), rule('join')),
@@ -96,7 +96,7 @@ export const GRAMMAR: GrammarRule[] = [
       opt(lit('DISTINCT')),
       rule('selectList'),
       lit('FROM'),
-      rule('identifier'),
+      rule('tableRef'),
       repeat(opt(), rule('join')),
       opt(lit('WHERE'), rule('expr')),
       opt(lit('GROUP'), lit('BY'), rule('qualifiedColumn'), repeat(lit(','), rule('qualifiedColumn'))),
@@ -111,17 +111,20 @@ export const GRAMMAR: GrammarRule[] = [
         [
           opt(choice([lit('INNER')], [lit('LEFT'), opt(lit('OUTER'))], [lit('RIGHT'), opt(lit('OUTER'))], [lit('FULL'), opt(lit('OUTER'))])),
           lit('JOIN'),
-          rule('identifier'),
+          rule('tableRef'),
           lit('ON'),
           rule('qualifiedColumn'),
           lit('='),
           rule('qualifiedColumn'),
         ],
-        [lit('CROSS'), lit('JOIN'), rule('identifier')],
-        [lit(','), rule('identifier')],
+        [lit('CROSS'), lit('JOIN'), rule('tableRef')],
+        [lit(','), rule('tableRef')],
       ),
     ],
   },
+  // A table a SELECT reads, and the name the query gives it (plan.md §27.5 S7): `employees AS e`, or `employees e` —
+  // so one table can be joined to itself, or read again in its own subquery. A write names its table plainly.
+  { name: 'tableRef', parts: [rule('identifier'), opt(opt(lit('AS')), rule('identifier'))] },
   {
     name: 'delete',
     parts: [lit('DELETE'), lit('FROM'), rule('identifier'), opt(lit('WHERE'), rule('expr')), opt(lit(';'))],
@@ -208,7 +211,7 @@ export const GRAMMAR: GrammarRule[] = [
   // DISTINCT/aggregate, none of which could change *which* values end up in the set IN tests against.
   {
     name: 'inSubquery',
-    parts: [lit('SELECT'), rule('identifier'), lit('FROM'), rule('identifier'), opt(lit('WHERE'), rule('expr'))],
+    parts: [lit('SELECT'), rule('qualifiedColumn'), lit('FROM'), rule('tableRef'), opt(lit('WHERE'), rule('expr'))],
   },
   // The subquery EXISTS takes (plan.md §27.5 S1): what it selects is never read, and its WHERE may name the outer
   // query's tables — every column there qualified. Only in a SELECT's WHERE, as a condition joined by AND.
@@ -218,7 +221,7 @@ export const GRAMMAR: GrammarRule[] = [
       lit('SELECT'),
       choice([lit('*')], [rule('value')], [rule('qualifiedColumn')]),
       lit('FROM'),
-      rule('identifier'),
+      rule('tableRef'),
       opt(lit('WHERE'), rule('expr')),
     ],
   },

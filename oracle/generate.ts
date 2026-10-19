@@ -232,9 +232,22 @@ const computedArb = (refs: readonly Ref[]): fc.Arbitrary<{ e: Arith; alias: stri
 /** A table an `IN (subquery)` may read: its columns unqualified, and literals drawn from its own rows. */
 export interface SubSource {
   table: string;
+  /** The stored table, when `table` is an alias for it (plan.md §27.5 S7). */
+  source?: string;
   refs: Ref[];
   pool: Pool;
 }
+
+/**
+ * The names `t` goes by when a query reads it twice (plan.md §27.5 S7): joined to itself, and in its own `EXISTS`.
+ * Distinct, so a self-join and a same-table EXISTS can share a query.
+ */
+export const SELF_JOIN = 'ts';
+export const SELF_EXISTS = 'tx';
+
+/** `pool`, reading an alias of `t` as `t` itself — the values its columns hold are `t`'s. */
+export const aliasAwarePool = (pool: Pool, t: string): Pool => (ref) =>
+  pool(ref.table === SELF_JOIN || ref.table === SELF_EXISTS ? { ...ref, table: t } : ref);
 
 export function subSources(tables: readonly TableSpec[], pool: Pool): SubSource[] {
   return tables.map((t) => ({ table: t.name, refs: refsOf(t, false), pool: (ref) => pool({ name: ref.name, table: t.name }) }));
@@ -334,7 +347,7 @@ export function existsArb(outer: readonly Ref[], sources: readonly SubSource[]):
             { weight: 1, arbitrary: fc.tuple(fc.constantFrom(...pairs), opArb).map(([{ inner: a, outer: b }, op]): Pred[] => [{ k: 'colcmp', a, op, b }]) },
           );
     return key.chain((k) =>
-      fc.tuple(own, residual(k)).map(([o, r]): Pred => ({ k: 'exists', neg, sub: { table: source.table, ...(k ? { key: k } : {}), where: [...o, ...r] } })),
+      fc.tuple(own, residual(k)).map(([o, r]): Pred => ({ k: 'exists', neg, sub: { table: source.table, ...(source.source ? { source: source.source } : {}), ...(k ? { key: k } : {}), where: [...o, ...r] } })),
     );
   });
   // One read in four: an EXISTS is one more condition a row must pass, and every one makes an empty answer likelier
@@ -759,12 +772,29 @@ function chainArb(t: TableSpec, u: TableSpec, w: TableSpec): fc.Arbitrary<{ join
   return chain.map((joins) => ({ joins, all: joins.length === 1 ? [...tRefs, ...uRefs] : [...tRefs, ...uRefs, ...wRefs] }));
 }
 
-/** The `EXISTS` sources a join query may read (plan.md §27.5 S1): those its chain does not already have. */
+/**
+ * The `EXISTS` sources a join query may read: those its chain does not already name — and none at all after two
+ * steps. A nested loop holds a pinned page per table it reads at once, and the smallest pool here has three frames:
+ * a fourth table makes QueryLens stop with `PoolExhausted`, as a real engine does (a unit test holds that), which is
+ * a refusal, not an answer to compare. Before self-joins (plan.md §27.5 S7) a two-step chain had used every table.
+ */
 const outsideChain = (exists: readonly SubSource[], left: string, joins: readonly JoinStep[]): SubSource[] =>
-  exists.filter((source) => source.table !== left && !joins.some((j) => j.table === source.table));
+  joins.length >= 2 ? [] : exists.filter((source) => source.table !== left && !joins.some((j) => j.table === source.table));
+
+/**
+ * `chainArb`, and one time in five a self-join (plan.md §27.5 S7): `t` joined to itself under another name, `ts`, in the
+ * place of `u` — on any comparable pair of its columns, a step `w` may then join to as it would to `u`.
+ */
+function chainOrSelfArb(t: TableSpec, u: TableSpec, w: TableSpec): fc.Arbitrary<{ joins: JoinStep[]; all: Ref[] }> {
+  const self = chainArb(t, { ...t, name: SELF_JOIN }, w).map(({ joins, all }) => ({
+    joins: joins.map((j): JoinStep => (j.table === SELF_JOIN ? { ...j, source: t.name } : j)),
+    all,
+  }));
+  return fc.oneof({ weight: 4, arbitrary: chainArb(t, u, w) }, { weight: 1, arbitrary: self });
+}
 
 export function joinArb(t: TableSpec, u: TableSpec, w: TableSpec, pool: Pool, subs: readonly SubSource[] = [], exists: readonly SubSource[] = []): fc.Arbitrary<Query> {
-  return chainArb(t, u, w).chain(({ joins, all }) => {
+  return chainOrSelfArb(t, u, w).chain(({ joins, all }) => {
     return fc
       .record({
         proj: uniqueRefs(all, 1, 5),
@@ -798,7 +828,7 @@ export function joinArb(t: TableSpec, u: TableSpec, w: TableSpec, pool: Pool, su
 
 /** `GROUP BY` / aggregates / `HAVING` / `ORDER BY` over a join chain (plan.md §26 Feature 1, slice c). */
 export function joinAggregateArb(t: TableSpec, u: TableSpec, w: TableSpec, pool: Pool, subs: readonly SubSource[] = [], exists: readonly SubSource[] = []): fc.Arbitrary<Query> {
-  return chainArb(t, u, w).chain(({ joins, all }) =>
+  return chainOrSelfArb(t, u, w).chain(({ joins, all }) =>
     aggregateOver(all, pool, subs, { table: t.name, joins }, existsArb(all, outsideChain(exists, t.name, joins)).map((e) => [...crossKeysOf(joins), ...e])),
   );
 }
@@ -1023,11 +1053,15 @@ export const tablesArb: fc.Arbitrary<[TableSpec, TableSpec, TableSpec]> = tableT
 
 export const sessionArb = (final: 'select' | 'aggregate' | 'join' | 'join-aggregate' | 'compound' | 'any' = 'any'): fc.Arbitrary<Session> =>
   tablesArb.chain(([t, u, w]) => {
-    const pool = poolOf([t, u, w]);
+    const pool = aliasAwarePool(poolOf([t, u, w]), t.name);
     // An `IN (subquery)` may read any of the three — `t` itself included, which is still uncorrelated.
     const subs = subSources([u, w, t], pool);
-    // An `EXISTS` (plan.md §27.5 S1) reads a table the outer query does not have: no aliases, so never `t` itself.
-    const exists = subSources([u, w], pool);
+    // An `EXISTS` (plan.md §27.5 S1) reads a table the outer query does not have — or `t` itself under another name
+    // (S7), which is how a subquery is correlated with its own table.
+    const exists: SubSource[] = [
+      ...subSources([u, w], pool),
+      { table: SELF_EXISTS, source: t.name, refs: refsOf(t, false), pool: (ref) => pool({ name: ref.name, table: t.name }) },
+    ];
     const write = fc.oneof(insertArb(t), updateArb(t, pool, subs), deleteArb(t, pool, subs));
     const read: fc.Arbitrary<ReadQuery> = (
       final === 'select'

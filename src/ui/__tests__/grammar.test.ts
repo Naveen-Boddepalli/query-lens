@@ -73,6 +73,8 @@ describe('grammar data — every rule is demonstrated by a query the real parser
     ['join — RIGHT and RIGHT OUTER', 'SELECT * FROM authors RIGHT JOIN posts ON authors.id = posts.authorId RIGHT OUTER JOIN tags ON posts.id = tags.postId'],
     ['join — FULL and FULL OUTER', 'SELECT * FROM authors FULL JOIN posts ON authors.id = posts.authorId FULL OUTER JOIN tags ON posts.id = tags.postId'],
     ['join — CROSS, and a comma', 'SELECT * FROM authors CROSS JOIN posts, tags'],
+    ['tableRef — AS and bare aliases, a self-join', 'SELECT a.name, b.name FROM authors AS a JOIN authors b ON a.id = b.id CROSS JOIN posts p, tags t'],
+    ['tableRef — in EXISTS and IN subqueries', 'SELECT name FROM authors a WHERE NOT EXISTS (SELECT * FROM authors b WHERE b.id = a.id) AND id IN (SELECT authorId FROM posts p)'],
     ['join', 'SELECT * FROM authors JOIN posts ON authors.id = posts.authorId'],
     [
       'join — chained, left-deep (plan.md §25.4 C3 slice b)',

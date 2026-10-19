@@ -18,7 +18,7 @@
  */
 
 import { conjoin, conjuncts } from './planner/plan.ts';
-import { mapChildren, walkExpr } from './parser/ast.ts';
+import { baseTableOf, mapChildren, walkExpr } from './parser/ast.ts';
 import type { Expr, SelectStatement, SemiJoinClause } from './parser/ast.ts';
 import { exprToSql } from './parser/print.ts';
 import type { QueryError, RunResult } from './types.ts';
@@ -94,7 +94,8 @@ export function resolveExists(ast: SelectStatement, run: (sql: string) => RunRes
 
     if (!correlated) {
       const where = node.subquery.where ? ` WHERE ${exprToSql(unqualified(node.subquery.where))}` : '';
-      const result = run(`SELECT * FROM ${inner}${where} LIMIT 1`);
+      // The stored table, not an alias for it (plan.md §27.5 S7) — the WHERE is unqualified, so it needs no name of its own.
+      const result = run(`SELECT * FROM ${baseTableOf(node.subquery.from)}${where} LIMIT 1`);
       if (result.error) {
         return {
           ok: false,

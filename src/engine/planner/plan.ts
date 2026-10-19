@@ -4,10 +4,10 @@
  * what the optimizer actually chooses (plan.md §7.2–7.4).
  */
 
-import type { JoinAlgorithm, PlanNode, RaInfo, SqlValue } from '../types.ts';
+import type { JoinAlgorithm, PlanNode, RaInfo, SqlValue, Table } from '../types.ts';
 import { columnsOfIndex } from '../index/spec.ts';
 import { exprToSql } from '../parser/print.ts';
-import { walkExpr } from '../parser/index.ts';
+import { tableRefSql, walkExpr } from '../parser/index.ts';
 import type { AggregateFn, CompareOp, Expr, SetOperator } from '../parser/index.ts';
 import type { PlanCost } from './cost.ts';
 
@@ -359,7 +359,7 @@ export function subqueryResolutionNotes(where: Expr): string[] {
           ? `finding no values at all — so \`${e.negated ? 'NOT IN' : 'IN'}\` is ${e.negated ? 'TRUE' : 'FALSE'} for every row, even one whose value is NULL`
           : `finding ${e.items.length} distinct value${e.items.length === 1 ? '' : 's'}`;
       notes.push(
-        `its subquery \`SELECT ${e.subquery.column.name} FROM ${e.subquery.from.name}${e.subquery.where ? ' WHERE …' : ''}\` already ran once, before this plan was built, ${found}`,
+        `its subquery \`SELECT ${e.subquery.column.name} FROM ${tableRefSql(e.subquery.from)}${e.subquery.where ? ' WHERE …' : ''}\` already ran once, before this plan was built, ${found}`,
       );
     }
     // A scalar subquery (plan.md §27.5 S6): one value for every row, so it ran once, and the plan holds its answer.
@@ -371,7 +371,7 @@ export function subqueryResolutionNotes(where: Expr): string[] {
     // An uncorrelated EXISTS (plan.md §27.5 S1): the same answer for every row, so it ran once, like an IN subquery.
     if (e.kind === 'exists' && e.resolved !== undefined) {
       notes.push(
-        `its \`EXISTS (SELECT ${e.subquery.select} FROM ${e.subquery.from.name}${e.subquery.where ? ' WHERE …' : ''})\` names nothing from the outer query, so its answer is the same for every row: it already ran once, before this plan was built, stopping at the first row, and ${e.resolved ? `found one — EXISTS is TRUE` : `found none — EXISTS is FALSE`} for every row`,
+        `its \`EXISTS (SELECT ${e.subquery.select} FROM ${tableRefSql(e.subquery.from)}${e.subquery.where ? ' WHERE …' : ''})\` names nothing from the outer query, so its answer is the same for every row: it already ran once, before this plan was built, stopping at the first row, and ${e.resolved ? `found one — EXISTS is TRUE` : `found none — EXISTS is FALSE`} for every row`,
       );
     }
   });
@@ -468,8 +468,34 @@ export function toPlanDisplay(
   plan: Plan,
   changed: ReadonlySet<Plan> = new Set(),
   estimates?: PlanCost,
+  /** Each alias the query uses and the stored table it names (plan.md §27.5 S7) — `renamesOf`. */
+  renames?: ReadonlyMap<string, string>,
 ): PlanNode {
-  return convert(plan, 'p', changed, estimates);
+  const node = convert(plan, 'p', changed, estimates);
+  return renames && renames.size > 0 ? withRenames(node, renames) : node;
+}
+
+/** Every alias among `tables` and the stored table it names (plan.md §27.5 S7). */
+export function renamesOf(tables: Iterable<Table>): Map<string, string> {
+  const renames = new Map<string, string>();
+  for (const t of tables) if (t.source !== undefined) renames.set(t.name, t.source);
+  return renames;
+}
+
+/**
+ * `node` with each leaf that reads an alias saying what it renames (plan.md §27.5 S7): `ρ_c(customers)` in the
+ * algebra, `SeqScan customers AS c` on the tree. Done over the finished display, since the plan itself only ever needs
+ * the query's own names.
+ */
+function withRenames(node: PlanNode, renames: ReadonlyMap<string, string>): PlanNode {
+  const rel = node.ra?.rel;
+  const source = rel === undefined ? undefined : renames.get(rel);
+  return {
+    ...node,
+    ...(source !== undefined && node.op === 'SeqScan' ? { label: `SeqScan ${source} AS ${rel!}` } : {}),
+    ...(source !== undefined && node.ra ? { ra: { ...node.ra, source } } : {}),
+    ...(node.children ? { children: node.children.map((child) => withRenames(child, renames)) } : {}),
+  };
 }
 
 /** A predicate over `column` for a range bound, as SQL — `age >= 30`. */

@@ -140,6 +140,8 @@ export interface SubSelect {
  */
 export interface ExistsSub {
   table: string;
+  /** The stored table, when `table` is an alias for it (plan.md §27.5 S7) — the outer query's own table, read again. */
+  source?: string;
   key?: { inner: Ref; outer: Ref };
   where: Pred[];
 }
@@ -154,6 +156,8 @@ export interface JoinStep {
   comma?: boolean;
   /** A cross join whose `on` is added to WHERE — the shape QueryLens's `product-to-join` rule turns into a join. */
   keyInWhere?: boolean;
+  /** The stored table, when `table` is an alias for it (plan.md §27.5 S7): a self-join, `t JOIN t AS ts ON …`. */
+  source?: string;
 }
 
 /** One SELECT of a compound query (plan.md §27.5 S3): plain columns of one table, filtered, maybe DISTINCT. */
@@ -308,7 +312,7 @@ export const renderSubSelect = (sub: SubSelect): string => `SELECT ${sub.col} FR
 
 /** `SELECT * FROM table WHERE inner = outer AND …` — the correlation key first, as a reader would write it. */
 export const renderExistsSub = (sub: ExistsSub): string =>
-  `SELECT * FROM ${sub.table}${renderWhere([...(sub.key ? [{ k: 'colcmp', a: sub.key.inner, op: '=', b: sub.key.outer } satisfies Pred] : []), ...sub.where])}`;
+  `SELECT * FROM ${sub.source ? `${sub.source} AS ${sub.table}` : sub.table}${renderWhere([...(sub.key ? [{ k: 'colcmp', a: sub.key.inner, op: '=', b: sub.key.outer } satisfies Pred] : []), ...sub.where])}`;
 
 const renderComputed = (computed: { e: Arith; alias: string }[] | undefined): string[] =>
   (computed ?? []).map((c) => `${renderArith(c.e)} AS ${c.alias}`);
@@ -375,13 +379,14 @@ export type Dialect = 'querylens' | 'sqlite';
 const JOIN_WORDS: Record<JoinStep['type'], string> = { inner: '', left: 'LEFT ', right: 'RIGHT ', full: 'FULL ', cross: 'CROSS ' };
 const renderJoins = (joins: readonly JoinStep[] | undefined): string =>
   (joins ?? [])
-    .map((j) =>
-      j.type === 'cross'
+    .map((j) => {
+      const table = j.source ? `${j.source} AS ${j.table}` : j.table;
+      return j.type === 'cross'
         ? j.comma
-          ? `, ${j.table}`
-          : ` CROSS JOIN ${j.table}`
-        : ` ${JOIN_WORDS[j.type]}JOIN ${j.table} ON ${renderRef(j.on.l)} = ${renderRef(j.on.r)}`,
-    )
+          ? `, ${table}`
+          : ` CROSS JOIN ${table}`
+        : ` ${JOIN_WORDS[j.type]}JOIN ${table} ON ${renderRef(j.on.l)} = ${renderRef(j.on.r)}`;
+    })
     .join('');
 
 /** The keys cross joins with `keyInWhere` state in WHERE instead of ON (plan.md §27.5 S4). */

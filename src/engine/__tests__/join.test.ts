@@ -52,10 +52,15 @@ describe('JOIN — parsing', () => {
     if (!parsed.ok) expect(parsed.error.message).toMatch(/needs a table name/);
   });
 
-  it('rejects a table qualifier on a query with no JOIN at all', () => {
-    const parsed = parse('SELECT authors.name FROM authors');
-    expect(parsed.ok).toBe(false);
-    if (!parsed.ok) expect(parsed.error.message).toMatch(/does not need a table name/);
+  it('takes its own table as a qualifier with no JOIN, and drops it — but no other table (plan.md §27.5 S7)', () => {
+    const parsed = parse('SELECT authors.name FROM authors WHERE authors.id > 1');
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      expect(parsed.ast.select.kind === 'columns' && parsed.ast.select.items[0]).toMatchObject({ kind: 'column', name: 'name' });
+      expect(parsed.ast.select.kind === 'columns' && parsed.ast.select.items[0]).not.toHaveProperty('table');
+    }
+    const other = parse('SELECT posts.title FROM authors');
+    expect(!other.ok && other.error.message).toMatch(/no table called `posts`/);
   });
 
   it('rejects a qualifier naming a table the query never mentions', () => {
@@ -980,7 +985,8 @@ describe('ORDER BY above a JOIN (plan.md §26 Feature 1, slice b)', () => {
     expect(run(`${base} name`).error?.message).toMatch(/needs a table name/);
     expect(run(`${base} nope.name`).error?.message).toMatch(/no table called `nope`/);
     expect(run(`${base} posts.nope`).error?.message).toMatch(/`posts` has no column called `nope`/);
-    expect(run('SELECT name FROM authors ORDER BY authors.name').error?.message).toMatch(/does not need a table name/);
+    // With no JOIN, the one table's own name is allowed, and dropped (plan.md §27.5 S7).
+    expect(run('SELECT name FROM authors ORDER BY authors.name').error).toBeUndefined();
   });
 
   it('SELECT DISTINCT sorts only by a selected column', () => {

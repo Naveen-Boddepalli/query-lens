@@ -66,7 +66,7 @@ function resolveForReference(expr: Expr | undefined, tables: readonly TableSpec[
     if (out.kind === 'scalar') return { kind: 'literal', value: scalarByHand(out.select, tables), raw: '', span: out.span };
     if (out.kind !== 'in' || !out.subquery) return out;
     const { column, from, where } = out.subquery;
-    const rows = tables.find((t) => t.name === from.name)!.rows.filter((row) => passes(where, row));
+    const rows = tables.find((t) => t.name === (from.source ?? from.name))!.rows.filter((row) => passes(where, row));
     return { ...out, items: rows.map((row) => ({ kind: 'literal' as const, value: row[column.name] ?? null, raw: '', span: out.span })) };
   };
   return expr && walk(expr);
@@ -77,7 +77,7 @@ function resolveForReference(expr: Expr | undefined, tables: readonly TableSpec[
  * it computes, or the first value of the column it sorts — by hand, in a loop, with no planner, no sort and no pages.
  */
 function scalarByHand(select: Extract<Expr, { kind: 'scalar' }>['select'], tables: readonly TableSpec[]): SqlValue {
-  const rows = tables.find((t) => t.name === select.from.name)!.rows.filter((row) => passes(select.where, row));
+  const rows = tables.find((t) => t.name === (select.from.source ?? select.from.name))!.rows.filter((row) => passes(select.where, row));
   const item = select.select.kind === 'columns' ? select.select.items[0] : undefined;
   if (item?.kind === 'column') {
     const values = rows.map((r) => r[item.name] ?? null).filter((v) => v !== null);
@@ -109,7 +109,8 @@ function existsForRow(expr: Expr | undefined, row: Row, outer: string, tables: r
   const walk = (e: Expr): Expr => {
     if (e.kind !== 'exists') return mapChildren(e, walk);
     const { from, where } = e.subquery;
-    const found = tables.find((t) => t.name === from.name)!.rows.some((inner) => passes(where, { ...qualified(outer, row), ...qualified(from.name, inner) }));
+    // The stored table, read under the subquery's own name (plan.md §27.5 S7).
+    const found = tables.find((t) => t.name === (from.source ?? from.name))!.rows.some((inner) => passes(where, { ...qualified(outer, row), ...qualified(from.name, inner) }));
     return { ...e, resolved: found };
   };
   return expr && walk(expr);

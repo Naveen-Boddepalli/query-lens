@@ -13,6 +13,12 @@ concept explanation.
   [challenges](/challenges) and [Compare](/compare) modes, to make an algorithm's actual behaviour
   visible rather than hidden by a pool big enough to cache everything.
 - **4 rows per page.**
+- **A plan cannot pin more pages than the pool has frames.** A scan holds the page it is reading pinned while the
+  scans inside a nested loop run, so a nested loop over *n* tables needs *n* frames at once. With fewer, the query
+  stops with an error that says so — as PostgreSQL stops with *no unpinned buffers available* — rather than
+  answering: until plan.md §27.5 S7 the scan that found no free frame quietly ended, as if its table had, and a
+  three-table nested loop in a two-frame pool returned no rows. A hash or sort-merge join reads one side whole first
+  and needs fewer.
 - **Eight replacement policies**, all implemented in the engine itself: LRU, clock sweep, FIFO,
   second-chance, optimal (unbuildable for real; the fewest-misses bound the others are measured
   against), midpoint LRU (what InnoDB does), and the two scan-resistant ones, LRU-2 and 2Q. The
@@ -110,8 +116,9 @@ concept explanation.
   [OUTER] | FULL [OUTER]] JOIN table ON a.col = b.col`, always an equality between one qualified column from each side, one of which
   must name the table this `JOIN` introduces and the other some table already in the query — `FROM`'s,
   or an earlier `JOIN`'s, not necessarily the one written just before it. `FROM a JOIN b ON … JOIN c ON
-  …` joins `c` against whatever `a ⋈ b` already produced, never against `a` and `b` independently. No
-  aliasing, so the same table can never appear twice in one chain. A bare `JOIN`/`INNER JOIN` drops an
+  …` joins `c` against whatever `a ⋈ b` already produced, never against `a` and `b` independently. A table
+  can appear twice under two names (plan.md §27.5 S7): `customers AS c JOIN customers AS r ON …` — two scans of one
+  heap, which share its pages in the pool and its indexes. A bare `JOIN`/`INNER JOIN` drops an
   unmatched row on either side; `LEFT [OUTER] JOIN` (plan.md §25.4 C3) keeps every row on the *other*
   side of that one join, NULL-padding the introduced table's columns when nothing on it matches —
   including when the join column itself is NULL, since NULL never matches NULL there either. A chain may
@@ -196,8 +203,8 @@ concept explanation.
 - **Uncorrelated, it runs once**, as `SELECT * FROM table WHERE … LIMIT 1`, its own sub-run of the engine; the
   WHERE clause's narration says what it found.
 - **Only in a `SELECT`'s `WHERE`, as a condition joined by `AND`** (or under one `NOT`). Its table must not be
-  one the outer query already has, or one another `EXISTS` in the query reads — there are no table aliases yet,
-  so a query cannot correlate a table with itself, and each table appears once.
+  one the outer query already has, or one another `EXISTS` in the query reads — by name: an alias (plan.md §27.5
+  S7) lets a subquery read the outer query's own table, `FROM customers r WHERE r.referrer = c.id`.
 
 ## Scalar subquery
 

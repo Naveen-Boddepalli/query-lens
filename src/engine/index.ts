@@ -1,6 +1,7 @@
 export { runQuery } from './runQuery.ts';
 export { resolveExists } from './exists.ts';
 export { resolveStatementSubqueries } from './subquery.ts';
+export { scopedDatabase } from './scope.ts';
 export {
   MAX_REFERENCES,
   parseReferenceScans,
@@ -32,6 +33,7 @@ export {
   exprToSql,
   optimize,
   OPTIMIZER_RULES,
+  renamesOf,
   rootEstimate,
   selectivityOf,
   toPlanDisplay,

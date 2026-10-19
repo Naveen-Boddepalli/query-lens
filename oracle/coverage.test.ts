@@ -102,6 +102,8 @@ describe('the generators reach what the oracle is meant to check', () => {
      * sorted column — and ones whose subquery found no row, so the outer comparison met a NULL (or COUNT's 0).
      */
     scalars: new Map<string, number>(),
+    /** Reads that name a table twice through an alias and returned rows (plan.md §27.5 S7): self-joins, and EXISTS. */
+    aliases: new Map<string, number>(),
   };
   // Compounds are rare in the mixed sessions on purpose; their coverage is sampled from their own generator.
   for (const [{ tables: initial, steps }, options] of fc.sample(fc.tuple(sessionArb('compound'), optionsArb), { seed: COVERAGE_SEED, numRuns: N / 3 })) {
@@ -221,6 +223,14 @@ describe('the generators reach what the oracle is meant to check', () => {
           stats.orderedGroups.set(key, (stats.orderedGroups.get(key) ?? 0) + 1);
         }
         if (q.kind === 'aggregate' && q.group.length > 0) stats.aggregates.set(options.aggregateStrategy ?? 'hash', (stats.aggregates.get(options.aggregateStrategy ?? 'hash') ?? 0) + (result.rows.length > 0 ? 1 : 0));
+        if (result.rows.length > 0) {
+          const steps = q.kind === 'join' || q.kind === 'aggregate' ? (q.joins ?? []) : [];
+          const keys = [
+            ...(steps.some((j) => j.source) ? [q.kind === 'aggregate' ? 'self-join:grouped' : 'self-join'] : []),
+            ...('where' in q ? q.where.flatMap((w) => (w.k === 'exists' && w.sub.source ? [w.neg ? 'self-not-exists' : 'self-exists'] : [])) : []),
+          ];
+          for (const key of keys) stats.aliases.set(key, (stats.aliases.get(key) ?? 0) + 1);
+        }
         if ('where' in q && result.rows.length > 0) {
           for (const w of [...q.where, ...(q.kind === 'aggregate' && q.having ? [q.having] : [])]) {
             walkPred(w, (p) => {
@@ -366,6 +376,12 @@ describe('the generators reach what the oracle is meant to check', () => {
     for (const key of ['cross', 'cross:comma', 'cross:keyed', 'cross:comma:keyed']) {
       expect(stats.newJoins.get(key) ?? 0, `joins with ${key}`).toBeGreaterThan(5);
     }
+  });
+
+  it('reads a table twice under two names — joined to itself and in its own EXISTS — to rows (plan.md §27.5 S7)', () => {
+    // Measured with the fixed seed above: 45 self-joins and 57 grouped ones, 32 same-table EXISTS and 50 NOT EXISTS.
+    const floors = { 'self-join': 20, 'self-join:grouped': 25, 'self-exists': 15, 'self-not-exists': 25 };
+    for (const [key, floor] of Object.entries(floors)) expect(stats.aliases.get(key) ?? 0, `aliases, ${key}`).toBeGreaterThan(floor);
   });
 
   it('runs scalar subqueries to rows — aggregates and sorted columns, empty ones, and in HAVING (plan.md §27.5 S6)', () => {

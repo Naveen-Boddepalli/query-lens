@@ -11,7 +11,9 @@ import {
   parse,
   resolveExists,
   resolveStatementSubqueries,
+  renamesOf,
   runQuery,
+  scopedDatabase,
   toPlanDisplay,
 } from '../../engine/index.ts';
 import type { Database, Plan, Table } from '../../engine/index.ts';
@@ -104,17 +106,19 @@ export function PlannerToolPage() {
     const ast = resolved.value;
     // The rules and the cost model both key off the table the query is
     // actually against — `users` by default, but `authors`/`posts` once a
-    // typed query names one of those instead (plan.md §22.2's JOIN).
-    const fromTable = db.tables[ast.from.name] ?? table;
+    // typed query names one of those instead (plan.md §22.2's JOIN) — each by the
+    // name the query gives it, an alias included (plan.md §27.5 S7).
+    const scoped = scopedDatabase(parsed.ast, db);
+    const fromTable = scoped.tables[ast.from.name] ?? table;
     const canonical = buildPlan(ast);
     const rpp = DEFAULT_ENGINE_OPTIONS.rowsPerPage;
-    const steps = optimize(canonical, fromTable, rpp, db.tables, rules);
+    const steps = optimize(canonical, fromTable, rpp, scoped.tables, rules);
     const last = steps.at(-1);
     const optimised = last ? last.plan : canonical;
     const lastChanged: ReadonlySet<Plan> = last ? last.changed : new Set<Plan>();
     return {
-      canonical: toPlanDisplay(canonical, new Set<Plan>(), estimatePlan(canonical, fromTable, rpp, db.tables)),
-      optimised: toPlanDisplay(optimised, lastChanged, estimatePlan(optimised, fromTable, rpp, db.tables)),
+      canonical: toPlanDisplay(canonical, new Set<Plan>(), estimatePlan(canonical, fromTable, rpp, scoped.tables), renamesOf(Object.values(scoped.tables))),
+      optimised: toPlanDisplay(optimised, lastChanged, estimatePlan(optimised, fromTable, rpp, scoped.tables), renamesOf(Object.values(scoped.tables))),
       firedRules: new Set(steps.map((s) => s.rule)),
       steps,
     };

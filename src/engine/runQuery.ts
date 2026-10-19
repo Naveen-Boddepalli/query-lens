@@ -34,12 +34,12 @@ import {
   reorderJoinsIfCheaper,
 } from './planner/index.ts';
 import type { CompoundMember, Plan } from './planner/index.ts';
-import { buildHeap, createBufferPool } from './storage/index.ts';
+import { buildHeap, createBufferPool, PoolExhausted } from './storage/index.ts';
 import { controlKindOf } from './transactionControl.ts';
-import { buildIndexes, describeUniqueKey, findIndexSpec, indexSpecsOf, pageCountFor } from './index/index.ts';
+import { buildIndexes, describeUniqueKey, findIndexSpec, indexNameOf, indexSpecsOf, pageCountFor } from './index/index.ts';
 import type { BPlusTree } from './index/index.ts';
 import type { Heap } from './storage/index.ts';
-import { walkExpr } from './parser/index.ts';
+import { baseTableOf, walkExpr } from './parser/index.ts';
 import { execute } from './exec/index.ts';
 import type { ExecContext } from './exec/operators.ts';
 import { executeDelete } from './exec/delete.ts';
@@ -51,6 +51,7 @@ import { createLockManager } from './locks/index.ts';
 import { explainResult } from './explain.ts';
 import { resolveStatementSubqueries } from './subquery.ts';
 import { existsNodesIn, resolveExists } from './exists.ts';
+import { scopedDatabase, storedTable } from './scope.ts';
 import { createTracer } from './trace.ts';
 import { DEFAULT_ENGINE_OPTIONS } from './types.ts';
 import type { Database, EngineOptions, QueryError, Row, RunResult, Table } from './types.ts';
@@ -107,16 +108,17 @@ function applyCostOrder(
   return reordered ? { ast: { ...ast, from: reordered.from, joins: reordered.joins }, writtenOrder: names } : { ast };
 }
 
-/** "There is no table called X", pointing at the reference that named it. */
+/** "There is no table called X", pointing at the reference that named it — the stored table, not an alias for it. */
 function noSuchTable(ref: TableRef, db: Database): QueryError {
-  const known = Object.keys(db.tables);
+  const known = Object.keys(db.tables).filter((name) => db.tables[name]!.source === undefined);
   return {
-    message: `There is no table called \`${ref.name}\`.`,
+    message: `There is no table called \`${baseTableOf(ref)}\`.`,
     hint: known.length === 1 ? `The only table is \`${known[0]}\`.` : `Tables: ${known.join(', ')}.`,
     from: ref.span.from,
     to: ref.span.to,
   };
 }
+
 
 /**
  * Every table a SELECT reads besides its `FROM` table, by name — each `JOIN`'s (plan.md §25.4 C3 slice b) and each
@@ -141,7 +143,8 @@ function unknownColumnError(ast: Exclude<Statement, { kind: 'explain' | 'compoun
   if (!unknownColumn) return null;
   const named = (unknownColumn.table ? db.tables[unknownColumn.table] : table)!;
   return {
-    message: `\`${named.name}\` has no column called \`${unknownColumn.name}\`.`,
+    // The stored table, which is what lacks the column, whatever the query calls it (plan.md §27.5 S7).
+    message: `\`${named.source ?? named.name}\` has no column called \`${unknownColumn.name}\`.`,
     hint: `Columns: ${named.columns.join(', ')}.`,
     from: unknownColumn.span.from,
     to: unknownColumn.span.to,
@@ -237,6 +240,9 @@ export function runQuery(
   if (parsedAst.kind === 'compound') {
     return runCompound(sql, parsedAst, db, options, { emit, drain, poolFor });
   }
+  // A SELECT's aliases (plan.md §27.5 S7) name copies of their tables in `scoped`; the real `db` stays for subqueries
+  // and for laying out pages.
+  const scoped = parsedAst.kind === 'select' ? scopedDatabase(parsedAst, db) : db;
   // A chain of 2+ plain inner JOINs may cost less in a different order (plan.md §25.4 C5 slice 3) — resolved here,
   // before any table is looked up for real, so every later step (table/column validation, the heap, the plan
   // itself) already sees whichever order will actually run. Left exactly as written when it is not eligible (a
@@ -245,11 +251,11 @@ export function runQuery(
   // ever set alongside a real change, and is threaded through to `emitPlanEvents` so the trace can say so.
   const { ast, writtenOrder: writtenJoinOrder } =
     parsedAst.kind === 'select'
-      ? applyCostOrder(parsedAst, db, options.rowsPerPage)
+      ? applyCostOrder(parsedAst, scoped, options.rowsPerPage)
       : { ast: parsedAst, writtenOrder: undefined };
   const tableRef = ast.kind === 'insert' ? ast.into : ast.kind === 'update' || ast.kind === 'analyze' ? ast.table : ast.from;
 
-  const table = db.tables[tableRef.name];
+  const table = scoped.tables[tableRef.name];
   if (!table) return { events: drain(), rows: [], error: noSuchTable(tableRef, db) };
 
   // ANALYZE (plan.md §25.4 C1): a real scan, nothing to plan or optimize, and no join/column checks below apply.
@@ -268,11 +274,11 @@ export function runQuery(
   // FROM/INTO table above, so all of them go through the same "no table called X" shape. So is every EXISTS
   // subquery's table (plan.md §27.5 S1): a correlated one is joined like the rest.
   const joins = ast.kind === 'select' ? (ast.joins ?? []) : [];
-  const partners = ast.kind === 'select' ? partnerTablesOf(ast, db) : { ok: true as const, tables: {} };
+  const partners = ast.kind === 'select' ? partnerTablesOf(ast, scoped) : { ok: true as const, tables: {} };
   if (!partners.ok) return { events: drain(), rows: [], error: partners.error };
   const joinTables: Record<string, Table> = partners.tables;
 
-  const unknownColumn = unknownColumnError(ast, db, table);
+  const unknownColumn = unknownColumnError(ast, scoped, table);
   if (unknownColumn) return { events: drain(), rows: [], error: unknownColumn };
 
   if (ast.kind === 'insert' && !ast.columns && ast.values.items.length !== table.columns.length) {
@@ -290,7 +296,8 @@ export function runQuery(
     };
   }
 
-  const heap = buildHeap(table, options.rowsPerPage);
+  // Laid out as the stored table: an alias reads that table's own pages (plan.md §27.5 S7).
+  const heap = buildHeap(storedTable(table, db), options.rowsPerPage);
   const trees = buildIndexes(heap, indexSpecsOf(table), undefined, undefined, options.indexBuild, table.clusteredKey);
   const locks = createLockManager(emit);
 
@@ -435,21 +442,38 @@ export function runQuery(
   // heap and every earlier probe index, so nothing collides.
   const joinHeaps: Record<string, Heap> = {};
   let pageBase = pageCountFor(heap, trees);
-  // The partners every Join reads: each JOIN's table, then each semi-joined subquery table (plan.md §27.5 S1).
+  // The partners every Join reads: each JOIN's table, then each semi-joined subquery table (plan.md §27.5 S1). Each
+  // stored table is laid out once: a self-join's second name (plan.md §27.5 S7) reads the first one's very pages, so
+  // its second scan can find them already in the pool.
   const partnerNames = [...joins.map((j) => j.table.name), ...semiTables];
+  const heapsByStore = new Map<string, Heap>([[storedTable(table, db).name, heap]]);
   for (const name of partnerNames) {
-    const jHeap = buildHeap(joinTables[name]!, options.rowsPerPage, pageBase);
+    const store = storedTable(joinTables[name]!, db);
+    let jHeap = heapsByStore.get(store.name);
+    if (!jHeap) {
+      jHeap = buildHeap(store, options.rowsPerPage, pageBase);
+      heapsByStore.set(store.name, jHeap);
+      pageBase += jHeap.pages.length;
+    }
     joinHeaps[name] = jHeap;
-    pageBase += jHeap.pages.length;
   }
   const joinTrees: Record<string, Record<string, BPlusTree>> = {};
+  // Indexes too, once per stored table: the FROM table's are all built already, so probing its other name builds none.
+  const treesByStore = new Map<string, Record<string, BPlusTree>>([[storedTable(table, db).name, trees]]);
   for (const ij of findIndexNestedLoopJoins(plan)) {
     if (ij.right.op !== 'IndexProbe') continue; // unreachable: an index-nested-loop Join's own inner side is always a probe
     const jTable = joinTables[ij.rightTable]!;
     const probeIndex = findIndexSpec(jTable, ij.right.column);
     if (!probeIndex) continue; // unreachable: effectiveJoinAlgorithm already confirmed this index exists
+    const store = storedTable(jTable, db).name;
+    const built = treesByStore.get(store);
+    if (built?.[indexNameOf(probeIndex.columns)]) {
+      joinTrees[ij.rightTable] = built;
+      continue;
+    }
     const jTrees = buildIndexes(joinHeaps[ij.rightTable]!, [probeIndex], undefined, pageBase, options.indexBuild, jTable.clusteredKey);
     joinTrees[ij.rightTable] = jTrees;
+    treesByStore.set(store, { ...built, ...jTrees });
     pageBase = pageCountFor(joinHeaps[ij.rightTable]!, jTrees);
   }
 
@@ -478,7 +502,7 @@ export function runQuery(
   const distinctBase = sortBase + spillFor(findSort(plan) !== null);
   const pool = poolFor(distinctBase + spillFor(findSortDistinct(plan) !== null));
 
-  const rows = execute(plan, {
+  return whilePoolLasts({ emit, drain }, options, () => execute(plan, {
     emit,
     pool,
     locks,
@@ -500,9 +524,30 @@ export function runQuery(
         }
       : {}),
     ...(sortMergeBases.size > 0 ? { sortMergeBases } : {}),
-  });
+  }));
+}
 
-  return { events: drain(), rows };
+/**
+ * `run`'s rows — or, when a scan found every frame pinned (`PoolExhausted`, plan.md §27.5 S7), the error a real engine
+ * stops with, said in the trace and returned, instead of the rows a scan that quietly stopped would have left.
+ */
+function whilePoolLasts(
+  tracer: { emit: ReturnType<typeof createTracer>['emit']; drain: () => RunResult['events'] },
+  options: EngineOptions,
+  run: () => Row[],
+): RunResult {
+  try {
+    const rows = run();
+    return { events: tracer.drain(), rows };
+  } catch (e) {
+    if (!(e instanceof PoolExhausted)) throw e;
+    const error: QueryError = {
+      message: `Every one of the buffer pool's ${String(options.bufferFrames)} frames is pinned, so page ${String(e.pageId)} has nowhere to be read into.`,
+      hint: 'In a nested loop each scan holds the page it is reading while the scans inside it run, so this plan needs a frame for every table it reads at once. Give the pool more frames, or a join that reads one side whole first (hash, sort-merge). PostgreSQL stops the same way: "no unpinned buffers available".',
+    };
+    tracer.emit(`The query stops: ${error.message}`, { stage: 'result', rows: [] });
+    return { events: tracer.drain(), rows: [], error };
+  }
 }
 
 interface ColumnRef {
@@ -600,12 +645,14 @@ function runCompound(
 
   const prepared: CompoundMember[] = [];
   for (const member of compound.members) {
-    const { ast, writtenOrder } = applyCostOrder(member, db, options.rowsPerPage);
-    const table = db.tables[ast.from.name];
+    // Each SELECT scopes its own aliases (plan.md §27.5 S7).
+    const scoped = scopedDatabase(member, db);
+    const { ast, writtenOrder } = applyCostOrder(member, scoped, options.rowsPerPage);
+    const table = scoped.tables[ast.from.name];
     if (!table) return fail(noSuchTable(ast.from, db));
-    const partners = partnerTablesOf(ast, db);
+    const partners = partnerTablesOf(ast, scoped);
     if (!partners.ok) return fail(partners.error);
-    const unknownColumn = unknownColumnError(ast, db, table);
+    const unknownColumn = unknownColumnError(ast, scoped, table);
     if (unknownColumn) return fail(unknownColumn);
     prepared.push({
       ast,
@@ -652,10 +699,12 @@ function runCompound(
 
   const planned = emitCompoundPlanEvents(emit, compound, prepared, options.rowsPerPage, options.aggregateStrategy ?? 'hash', options.joinStrategy);
 
-  // Every table once: its heap, then all its indexes — a FROM table needs them, and an index nested-loop probes one.
+  // Every stored table once: its heap, then all its indexes — a FROM table needs them, and an index nested-loop probes
+  // one. A table read under an alias (plan.md §27.5 S7) reads the stored table's pages; `scopedAs` gives it its name.
   const placed = new Map<string, { table: Table; heap: Heap; trees: Record<string, BPlusTree> }>();
   let pageBase = 0;
-  const place = (t: Table): void => {
+  const place = (scopedTable: Table): void => {
+    const t = storedTable(scopedTable, db);
     if (placed.has(t.name)) return;
     const heap = buildHeap(t, options.rowsPerPage, pageBase);
     const heapEnd = pageBase + heap.pages.length;
@@ -663,6 +712,7 @@ function runCompound(
     pageBase = Math.max(heapEnd, ...Object.values(trees).map((tree) => tree.nextPageId));
     placed.set(t.name, { table: t, heap, trees });
   };
+  const scopedAs = (scopedTable: Table) => ({ ...placed.get(storedTable(scopedTable, db).name)!, table: scopedTable });
   for (const m of prepared) {
     place(m.table);
     for (const t of Object.values(m.joinTables)) place(t);
@@ -684,12 +734,12 @@ function runCompound(
     const partnerNames = [...(m.ast.joins ?? []).map((j) => j.table.name), ...(m.ast.semiJoins ?? []).map((sj) => sj.table.name)];
     return {
       plan,
-      from: placed.get(m.table.name)!,
+      from: scopedAs(m.table),
       aggregateSortBase,
       sortBase,
       distinctBase,
       ...(reserved.bases.size > 0 ? { sortMergeBases: reserved.bases } : {}),
-      joinPartners: Object.fromEntries(partnerNames.map((name) => [name, placed.get(name)!])),
+      joinPartners: Object.fromEntries(partnerNames.map((name) => [name, scopedAs(m.joinTables[name]!)])),
       worst,
     };
   });
@@ -718,8 +768,12 @@ function runCompound(
     options,
     sortBase: topSortBase,
     ...(distinctBases.length > 0 ? { distinctBase: distinctBases.at(-1)! } : {}),
-    // Every table, for the result's estimate; the members' own partners are in their own contexts.
-    joinPartners: Object.fromEntries(placed),
+    // Every table, for the result's estimate, by every name a member gives it (plan.md §27.5 S7) as well as its own;
+    // the members' own partners are in their own contexts.
+    joinPartners: Object.fromEntries([
+      ...placed,
+      ...memberParts.flatMap((part) => [[part.from.table.name, part.from] as const, ...Object.entries(part.joinPartners)]),
+    ]),
     members: contexts,
   };
   for (const part of memberParts) {
@@ -741,8 +795,7 @@ function runCompound(
   planned.distincts.forEach((d, i) => contexts.set(d, { ...top, distinctBase: distinctBases[i]! }));
 
   // No "how many rows" prompt: its options are framed as a share of one table, and a compound reads several.
-  const rows = execute(planned.plan, top, null);
-  return { events: drain(), rows };
+  return whilePoolLasts({ emit, drain }, options, () => execute(planned.plan, top, null));
 }
 
 /** Builds the new row: every table column defaults to `null`, then the given values overwrite it. */

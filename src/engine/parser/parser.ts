@@ -110,7 +110,7 @@ import type {
   UpdateAssignment,
   UpdateStatement,
 } from './ast.ts';
-import { aggregateKeyOf, columnKey, selectItemKey, walkExpr } from './ast.ts';
+import { aggregateKeyOf, baseTableOf, columnKey, mapChildren, selectItemKey, walkExpr } from './ast.ts';
 import { exprToSql, sqlString } from './print.ts';
 import { arithmetic, negate } from '../value.ts';
 import { TokenizeError, tokenize } from './tokenizer.ts';
@@ -517,14 +517,18 @@ function parseOrderKey(
       );
     }
     if (arg.kind === 'column') checkColumnQualifier(arg, joins, from);
-    const aggregate = { kind: 'aggregate' as const, fn: upper as AggregateFn, arg, span };
-    return { column: aggregateKeyOf(aggregate.fn, arg), aggregate, span };
+    // The query's one table named, as `unqualifyOwn` drops it everywhere else (plan.md §27.5 S7).
+    const own = joins.length === 0 && arg.kind === 'column' && arg.table === from.name ? withoutTable(arg) : arg;
+    const aggregate = { kind: 'aggregate' as const, fn: upper as AggregateFn, arg: own, span };
+    return { column: aggregateKeyOf(aggregate.fn, own), aggregate, span };
   }
 
   const first = c.expectIdentifier('a column name to sort by');
-  const ref = parseQualifiedColumnTail(c, first);
-  const span = { from: ref.from, to: ref.to };
-  checkColumnQualifier({ name: ref.name, ...(ref.table === undefined ? {} : { table: ref.table }), span }, joins, from);
+  const written = parseQualifiedColumnTail(c, first);
+  const span = { from: written.from, to: written.to };
+  checkColumnQualifier({ name: written.name, ...(written.table === undefined ? {} : { table: written.table }), span }, joins, from);
+  // The query's one table named, as `unqualifyOwn` drops it everywhere else (plan.md §27.5 S7).
+  const ref: { name: string; table?: string } = joins.length === 0 && written.table === from.name ? withoutTable(written) : written;
   const column = ref.table === undefined ? ref.name : `${ref.table}.${ref.name}`;
   if (grouping && !(groupBy?.columns.some((g) => columnKey(g) === column) ?? false)) {
     throw new ParseError(
@@ -538,9 +542,20 @@ function parseOrderKey(
   return { column, ...(ref.table === undefined ? {} : { table: ref.table }), span };
 }
 
-function parseTableRef(c: Cursor): TableRef {
+/**
+ * A table name — and, where a SELECT names a table (`aliases`), an alias after it (plan.md §27.5 S7): `employees AS
+ * e`, or `employees e`. Nothing but an alias can follow a table name as a plain identifier, so the bare form is safe to
+ * read. The alias becomes the name the query uses; the stored table goes in `source`. A write names one table, and
+ * takes none.
+ */
+function parseTableRef(c: Cursor, aliases = false): TableRef {
   const token = c.expectIdentifier('a table name');
-  return { name: token.value, span: { from: token.from, to: token.to } };
+  const span = { from: token.from, to: token.to };
+  if (!aliases) return { name: token.value, span };
+  const as = isKeyword(c.peek(), 'AS') ? c.next() : undefined;
+  if (!as && c.peek().type !== 'identifier') return { name: token.value, span };
+  const alias = c.expectIdentifier(`a name for \`${token.value}\` after AS`);
+  return { name: alias.value, source: token.value, span: { from: token.from, to: alias.to } };
 }
 
 /** `[INNER | LEFT [OUTER]] JOIN identifier ON qualifiedColumn '=' qualifiedColumn`, if present (plan.md §25.4 C3). */
@@ -549,7 +564,7 @@ function parseJoin(c: Cursor): JoinClause | undefined {
   // `FROM a, b` (plan.md §27.5 S4): a cross join, written as a textbook writes one — a WHERE then says how they match.
   if (first.type === 'comma') {
     c.next();
-    const table = parseTableRef(c);
+    const table = parseTableRef(c, true);
     return { table, joinType: 'cross', comma: true, span: { from: first.from, to: table.span.to } };
   }
   const word = isKeyword(first, 'LEFT', 'RIGHT', 'FULL', 'CROSS', 'INNER') ? first.upper : null;
@@ -565,7 +580,7 @@ function parseJoin(c: Cursor): JoinClause | undefined {
     else if (word === 'CROSS') joinType = 'cross';
   }
   c.expectKeyword('JOIN', word !== null ? `after ${word}` : 'to begin a join');
-  const table = parseTableRef(c);
+  const table = parseTableRef(c, true);
   if (joinType === 'cross') {
     if (isKeyword(c.peek(), 'ON')) {
       throw new ParseError(
@@ -620,7 +635,7 @@ function checkJoinChain(join: JoinClause, known: ReadonlySet<string>): void {
     throw new ParseError(
       `\`${newTable}\` is already in this query.`,
       join.table.span,
-      'Joining the same table twice needs an alias, which v0 does not have — give the table a different name in a copy of the data instead.',
+      `To join a table to itself, give one of the two its own name — \`JOIN ${baseTableOf(join.table)} AS ${baseTableOf(join.table).slice(0, 1)}2 ON …\` — and qualify its columns with that name (plan.md §27.5 S7).`,
     );
   }
   if (!join.on) return; // a cross join has no ON to check (plan.md §27.5 S4)
@@ -695,12 +710,18 @@ function checkColumnQualifier(ref: { name: string; table?: string; span: Span },
       `Write ${known.map((t) => `\`${t}.${ref.name}\``).join(' or ')}, whichever table it is actually on.`,
     );
   }
+  // A stored table's own name, where the query calls it by an alias (plan.md §27.5 S7): say what it is called here.
+  const renamed = [from, ...joins.map((j) => j.table)].find((t) => t.source === ref.table);
+  const aliasHint = renamed ? `In this query \`${ref.table}\` is called \`${renamed.name}\` — write \`${renamed.name}.${ref.name}\`.` : undefined;
+  // The query's one table, by its own name or its alias (plan.md §27.5 S7): `SELECT c.name FROM customers c`. Fine —
+  // `unqualifyOwn` drops the qualifier, since a one-table query's rows are never qualified.
+  if (!hasJoin && ref.table === from.name) return;
   if (!hasJoin && ref.table !== undefined && ref.table !== from.name) {
     // Another table altogether — inside a subquery, nearly always the outer query's (plan.md §27.5 S6).
     throw new ParseError(
       `There is no table called \`${ref.table}\` in this query.`,
       ref.span,
-      `This query only reads \`${from.name}\`.`,
+      aliasHint ?? `This query only reads \`${from.name}\`.`,
     );
   }
   if (!hasJoin && ref.table !== undefined) {
@@ -718,7 +739,7 @@ function checkColumnQualifier(ref: { name: string; table?: string; span: Span },
     throw new ParseError(
       `There is no table called \`${ref.table}\` in this query.`,
       ref.span,
-      `This query only knows about ${known.map((t) => `\`${t}\``).join(', ')}.`,
+      aliasHint ?? `This query only knows about ${known.map((t) => `\`${t}\``).join(', ')}.`,
     );
   }
 }
@@ -1062,7 +1083,7 @@ function parseInSubquery(c: Cursor): { subquery: InSubquery; close: Token } {
     );
   }
   c.expectKeyword('FROM', "after the subquery's column");
-  const from = parseTableRef(c);
+  const from = parseTableRef(c, true);
   const afterFrom = c.peek();
   if (isKeyword(afterFrom, 'JOIN') || isKeyword(afterFrom, 'LEFT') || isKeyword(afterFrom, 'INNER')) {
     throw new ParseError(
@@ -1157,7 +1178,7 @@ function parseExistsSubquery(c: Cursor): { subquery: ExistsSubquery; close: Toke
     );
   }
   c.expectKeyword('FROM', "after what the subquery selects");
-  const from = parseTableRef(c);
+  const from = parseTableRef(c, true);
   const afterFrom = c.peek();
   if (isKeyword(afterFrom, 'JOIN') || isKeyword(afterFrom, 'LEFT') || isKeyword(afterFrom, 'INNER')) {
     throw new ParseError(
@@ -1247,7 +1268,7 @@ function checkExistsSubqueries(where: Expr, known: readonly string[]): void {
       throw new ParseError(
         `The subquery's table \`${inner.name}\` is already in the outer query.`,
         inner.span,
-        `Without table aliases (not supported yet) \`${inner.name}.column\` could not say which of the two it means. Use a different table in the subquery.`,
+        `\`${inner.name}.column\` could not say which of the two it means. Give the subquery's table its own name — \`FROM ${baseTableOf(inner)} AS ${baseTableOf(inner).slice(0, 1)}2\` — and qualify its columns with that (plan.md §27.5 S7).`,
       );
     }
     // A table appears once per query — no aliases, so two of its scans could not be told apart in the plan.
@@ -1255,7 +1276,7 @@ function checkExistsSubqueries(where: Expr, known: readonly string[]): void {
       throw new ParseError(
         `\`${inner.name}\` is already read by another EXISTS subquery in this query.`,
         inner.span,
-        'Without table aliases (not supported yet) two scans of one table could not be told apart. Put both conditions in one subquery if they are about the same row.',
+        'Two scans under one name could not be told apart. Give one of them its own name with AS — or put both conditions in one subquery, if they are about the same row.',
       );
     }
     used.add(inner.name);
@@ -1439,6 +1460,36 @@ function refuseMidCompound(c: Cursor): void {
  * before compounds; `first` may be followed by a set operator, and then stops before it, as `member` — any SELECT
  * after one — always does, leaving `ORDER BY` and `LIMIT` to the compound.
  */
+/** `ref` without its table qualifier. */
+function withoutTable<T extends { table?: string }>(ref: T): Omit<T, 'table'> {
+  const { table: _table, ...rest } = ref;
+  return rest;
+}
+
+/**
+ * `expr` with every column qualified by `table` — a one-table query's own table, by its name or its alias (plan.md
+ * §27.5 S7) — written plainly, as that query's rows are keyed. An `EXISTS` or scalar subquery is a scope of its own and
+ * is not entered: there, `c.id` is the outer query's column, and keeps its name.
+ */
+function unqualifyOwn(expr: Expr, table: string): Expr {
+  if (expr.kind === 'column') return expr.table === table ? withoutTable(expr) : expr;
+  if (expr.kind === 'aggregate' && expr.arg.kind === 'column' && expr.arg.table === table) return { ...expr, arg: withoutTable(expr.arg) };
+  return mapChildren(expr, (child) => unqualifyOwn(child, table));
+}
+
+/** `unqualifyOwn` over a SELECT list's items. */
+function unqualifySelectList(select: SelectList, table: string): SelectList {
+  if (select.kind === 'star') return select;
+  return {
+    ...select,
+    items: select.items.map((item): SelectItem => {
+      if (item.kind === 'column') return item.table === table ? withoutTable(item) : item;
+      if (item.kind === 'expression') return { ...item, expr: unqualifyOwn(item.expr, table) };
+      return item.arg.kind === 'column' && item.arg.table === table ? { ...item, arg: withoutTable(item.arg) } : item;
+    }),
+  };
+}
+
 /**
  * `(SELECT … )` where a value goes (plan.md §27.5 S6): a whole SELECT of its own, in its own scope — the cursor's
  * flags are the outer clause's, so they are set aside while it is read and put back after — selecting exactly one
@@ -1500,9 +1551,9 @@ const CORRELATED_SCALAR_HINT =
 function parseSelectBody(c: Cursor, mode: 'whole' | 'first' | 'member' | 'scalar' = 'whole'): SelectStatement {
   const selectToken = c.expectKeyword('SELECT', mode === 'member' ? 'after the set operator' : 'to begin the query');
   const distinct = isKeyword(c.peek(), 'DISTINCT') ? (c.next(), true) : false;
-  const select = parseSelectList(c);
+  let select = parseSelectList(c);
   c.expectKeyword('FROM', 'after the column list');
-  const from = parseTableRef(c);
+  const from = parseTableRef(c, true);
   const joins: JoinClause[] = [];
   const known = new Set([from.name]);
   for (;;) {
@@ -1522,11 +1573,18 @@ function parseSelectBody(c: Cursor, mode: 'whole' | 'first' | 'member' | 'scalar
     c.allowExists = false;
   }
   if (where) checkExistsSubqueries(where, [...known]);
-  const groupBy = parseGroupBy(c);
+  let groupBy = parseGroupBy(c);
   // Qualifiers first, so `GROUP BY name` in a join is told it needs a table name rather than that `authors.name`
   // is not grouped.
   checkJoinValidity(select, joins, where, from);
   for (const column of groupBy?.columns ?? []) checkColumnQualifier(column, joins, from);
+  // A one-table query may qualify its columns with its table's name (plan.md §27.5 S7); its rows are not qualified,
+  // so the qualifier goes — before anything compares one clause's columns with another's.
+  if (!hasJoin) {
+    select = unqualifySelectList(select, from.name);
+    if (where) where = unqualifyOwn(where, from.name);
+    if (groupBy) groupBy = { ...groupBy, columns: groupBy.columns.map((col) => (col.table === from.name ? withoutTable(col) : col)) };
+  }
   checkGroupingValidity(select, groupBy);
 
   let having: Expr | undefined;
@@ -1542,6 +1600,7 @@ function parseSelectBody(c: Cursor, mode: 'whole' | 'first' | 'member' | 'scalar
       if (e.kind === 'column') checkColumnQualifier(e, joins, from);
       else if (e.kind === 'aggregate' && e.arg.kind === 'column') checkColumnQualifier(e.arg, joins, from);
     });
+    if (!hasJoin) having = unqualifyOwn(having, from.name);
     checkHavingValidity(having, select, groupBy, havingToken);
   }
 

@@ -26,7 +26,7 @@ import type {
   UpdateAssignment,
   UpdateStatement,
 } from './ast.ts';
-import { columnKey, selectItemKey } from './ast.ts';
+import { columnKey, selectItemKey, tableRefSql } from './ast.ts';
 import { aggregateKeyOf, exprToSql } from './print.ts';
 
 function selectItemNode(item: SelectItem, id: string): ASTNode {
@@ -88,9 +88,9 @@ function fromNode(from: TableRef): ASTNode {
     id: 'from',
     kind: 'From',
     label: 'FROM',
-    detail: from.name,
+    detail: tableRefSql(from),
     span: from.span,
-    children: [{ id: 'from.table', kind: 'Table', label: from.name, span: from.span }],
+    children: [{ id: 'from.table', kind: 'Table', label: tableRefSql(from), span: from.span }],
   };
 }
 
@@ -140,7 +140,7 @@ function exprNode(expr: Expr, id: string): ASTNode {
             id,
             kind: 'In',
             label: expr.negated ? 'NOT IN' : 'IN',
-            detail: `subquery — SELECT ${expr.subquery.column.name} FROM ${expr.subquery.from.name}`,
+            detail: `subquery — SELECT ${expr.subquery.column.name} FROM ${tableRefSql(expr.subquery.from)}`,
             span: expr.span,
             children: [exprNode(expr.operand, `${id}.o`)],
           }
@@ -172,10 +172,10 @@ function exprNode(expr: Expr, id: string): ASTNode {
         id,
         kind: 'Exists',
         label: 'EXISTS',
-        detail: `subquery — SELECT ${expr.subquery.select} FROM ${expr.subquery.from.name}${expr.subquery.where ? ' WHERE …' : ''}`,
+        detail: `subquery — SELECT ${expr.subquery.select} FROM ${tableRefSql(expr.subquery.from)}${expr.subquery.where ? ' WHERE …' : ''}`,
         span: expr.span,
         children: [
-          { id: `${id}.from`, kind: 'Table', label: expr.subquery.from.name, span: expr.subquery.from.span },
+          { id: `${id}.from`, kind: 'Table', label: tableRefSql(expr.subquery.from), span: expr.subquery.from.span },
           ...(expr.subquery.where ? [exprNode(expr.subquery.where, `${id}.w`)] : []),
         ],
       };

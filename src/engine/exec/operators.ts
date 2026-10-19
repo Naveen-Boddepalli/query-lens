@@ -14,7 +14,7 @@ import type { Expr } from '../parser/index.ts';
 import { distinctSortColumn, lookupKeysOf } from '../planner/index.ts';
 import type { AggregateSpec, Plan, ProjectList, RangeBound } from '../planner/index.ts';
 import type { BufferPool, Heap, ScanRing } from '../storage/index.ts';
-import { scanUsesRing } from '../storage/index.ts';
+import { PoolExhausted, scanUsesRing } from '../storage/index.ts';
 import type { LockManager } from '../locks/index.ts';
 import type { BPlusTree, RowPointer } from '../index/index.ts';
 import { columnsOfIndex, emitIndexLookup, emitRangeStart, nextInRange, pageCountFor, resolveClustered } from '../index/index.ts';
@@ -135,7 +135,8 @@ function seqScan(plan: Extract<Plan, { op: 'SeqScan' }>, ctx: ExecContext): Oper
           lockedPage = page.pageId;
           // The heap's pages end where this table's last page does: that is the scan's extent for read-ahead.
           const fetched = ctx.pool.fetch(page.pageId, ring, lastHeapPage + 1);
-          if (!fetched) return null;
+          // Never the end of the table: a page it cannot read is an error (plan.md §27.5 S7).
+          if (!fetched) throw new PoolExhausted(page.pageId, ctx.options.bufferFrames);
           // Held while its rows are read; released when we move on. Only an
           // unpinned frame can be evicted.
           pinnedFrame = fetched.frameId;

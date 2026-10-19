@@ -51,6 +51,7 @@ describe('challenges', () => {
     'leave-no-one-out': 'SELECT customers.name, orders.id FROM customers FULL JOIN orders ON customers.id = orders.customerId;',
     'count-each-once': 'SELECT COUNT(DISTINCT customerId) FROM orders;',
     'above-average': 'SELECT name FROM products WHERE price > (SELECT AVG(price) FROM products);',
+    'who-referred-whom': 'SELECT c.name, r.name FROM customers c LEFT JOIN customers r ON c.referrer = r.id;',
     'not-paris-either': "SELECT * FROM customers WHERE city <> 'Paris' OR city IS NULL;",
     'keep-the-unmatched':
       'SELECT authors.name, posts.title FROM authors LEFT JOIN posts ON authors.id = posts.authorId WHERE posts.title IS NULL;',
@@ -140,6 +141,12 @@ describe('challenges', () => {
       ['above-average', 'SELECT name FROM products WHERE price > (SELECT MIN(price) FROM products);'],
       ['above-average', 'SELECT name FROM products;'],
       ['above-average', 'SELECT name FROM products WHERE price < (SELECT AVG(price) FROM products);'],
+      // The referred only, the referrer's id, the other direction, every pair, or a third column.
+      ['who-referred-whom', 'SELECT c.name, r.name FROM customers c JOIN customers r ON c.referrer = r.id;'],
+      ['who-referred-whom', 'SELECT name, referrer FROM customers;'],
+      ['who-referred-whom', 'SELECT c.name, r.name FROM customers c LEFT JOIN customers r ON c.id = r.referrer;'],
+      ['who-referred-whom', 'SELECT c.name, r.name FROM customers c CROSS JOIN customers r;'],
+      ['who-referred-whom', 'SELECT c.name, r.name, c.id FROM customers c LEFT JOIN customers r ON c.referrer = r.id;'],
       ['not-paris-either', "SELECT * FROM customers WHERE NOT (city = 'Paris');"],
       ['not-paris-either', "SELECT * FROM customers WHERE city NOT IN ('Paris');"],
       ['not-paris-either', 'SELECT * FROM customers WHERE city IS NULL;'],
@@ -227,6 +234,18 @@ describe('challenges', () => {
     }
     // The misconception: an aggregate has nothing to read in WHERE.
     expect(runOn(c, 'SELECT name FROM products WHERE price > AVG(price);').error?.message).toMatch(/cannot be used here/);
+  });
+
+  it('who-referred-whom accepts either column order, RIGHT JOIN the other way round, and AS (plan.md §27.5 S7)', () => {
+    const c = challengeById('who-referred-whom')!;
+    for (const sql of [
+      'SELECT r.name, c.name FROM %s ORDER BY c.name;',
+      'SELECT c.name, r.name FROM customers AS r RIGHT JOIN customers AS c ON c.referrer = r.id;',
+    ]) {
+      const r = runOn(c, sql.replace('%s', 'customers c LEFT JOIN customers r ON c.referrer = r.id'));
+      expect(r.error, sql).toBeUndefined();
+      expect(c.check(r, sql), sql).toBe(true);
+    }
   });
 
   it('never-ordered accepts every honest way of asking (plan.md §27.5 S1)', () => {
