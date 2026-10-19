@@ -14,6 +14,7 @@ const IDS = [
   'enough-buckets',
   'outrun-the-slow-worker',
   'meet-the-rows',
+  'efficiency-floor',
   'tightest-page',
   'split-the-other-bucket',
   'cheap-writes-cheap-reads',

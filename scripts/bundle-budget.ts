@@ -424,6 +424,9 @@ const T = (name: string): string => `src/pages/tools/${name}.tsx`;
  *  - 2026-10-19, exchange operators (plan.md §27.5 P2), on the same page: /tools/parallel 132.6 kB → 136, its checks
  *    5.2 kB → 9 (the join challenge), and the docs chunk 178.5 kB with the parallel-execution section in
  *    reference/limits → /docs and its three essays 178 → 182, each measured + 3, rounded up.
+ *  - 2026-10-19, serial against parallel (plan.md §27.5 P3): Compare's new mode carries the morsel model, 4.5 kB that
+ *    put /compare at 193.5 of 189. It is loaded only when chosen instead — a new opt-in chunk, 5.6 kB → 9 — and
+ *    /compare is 188.9 again.
  */
 export const ROUTES: readonly RouteBudget[] = [
   { route: '/', roots: [P('LandingPage')], kb: 177, note: 'the landing page' },
@@ -509,6 +512,7 @@ export const OPT_IN: readonly { key: string; kb: number; note: string; after?: s
   { key: '_html-to-image', kb: 8, note: 'panel PNG export (§20.3) — fetched on the first click of Download PNG' },
   { key: 'src/perf/inp.ts', kb: 2, note: 'the opt-in INP recorder for the §9 study (§25.4 A6) — fetched only after a participant opts in' },
   { key: 'src/ui/WorkspaceDialog.tsx', kb: 6, after: 'src/pages/PlaygroundPage.tsx', note: 'the Workspaces dialog (§H7) — fetched only when Custom mode\'s Workspaces button is pressed' },
+  { key: 'src/ui/ParallelCompare.tsx', kb: 9, after: 'src/pages/ComparePage.tsx', note: 'Compare’s serial-against-parallel mode (plan.md §27.5 P3): the morsel model and its scaling table — fetched only when that mode is chosen' },
   { key: 'src/ui/DurabilityDialog.tsx', kb: 17, after: 'src/pages/PlaygroundPage.tsx', note: 'the Durability dialog (§25.4 E4): the write-ahead-log machine, crash and recovery — fetched only when the Playground\'s Durability button is pressed' },
   { key: 'src/pages/challenges/ScriptChallengeView.tsx', kb: 35, after: 'src/pages/ChallengePage.tsx', note: 'a transaction or durability challenge: the schedule runner, the protocol comparison and the log machine — fetched only when one of those challenges is opened' },
   { key: 'src/pages/challenges/SettingsChallengeView.tsx', kb: 8, after: 'src/pages/ChallengePage.tsx', note: 'a storage, execution or isolation challenge: the form and the runner — no driver; each tool\'s own checks are the rows below, fetched when one of its challenges is opened' },

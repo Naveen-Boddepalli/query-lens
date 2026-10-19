@@ -1,6 +1,8 @@
 /** The parallel-execution challenge (plan.md §27.5 P1), run by the engine's own morsel model, as the tool runs it. */
 
 import type { JoinExchange } from '../../../engine/exchange.ts';
+import { DATASETS } from '../../../engine/datasets.ts';
+import { scaling } from '../../../engine/parallel.ts';
 import { joinHref, joinRun } from '../../../ui/exchangePresets.ts';
 import { isDispatch, parallelHref, parallelRun } from '../../../ui/parallelPresets.ts';
 import { fixed, num, str } from './shared.ts';
@@ -55,3 +57,26 @@ export const CHECKERS: Checkers = {
 
 /** The join challenge's workers. */
 export const JOIN_WORKERS = 8;
+
+/** The efficiency challenge's bar (plan.md §27.5 P3): each worker worth at least four fifths of one. */
+export const EFFICIENCY_FLOOR = 0.8;
+
+const BY_ACCOUNT = 'SELECT account, COUNT(*), SUM(amount) FROM transactions GROUP BY account';
+
+CHECKERS['efficiency-floor'] = (v) => {
+  const workers = num(v, 'workers');
+  const s = scaling(BY_ACCOUNT, DATASETS.transactions.make(), { dispatch: 'stealing', morselPages: 16, rowsPerPage: 4 }, 8);
+  if ('ok' in s) throw new Error(s.error);
+  const at = s.points[workers - 1]!;
+  const next = s.points[workers];
+  const passed = at.efficiency >= EFFICIENCY_FLOOR && (next === undefined || next.efficiency < EFFICIENCY_FLOOR);
+  return {
+    passed,
+    facts: [
+      { label: `${String(workers)} workers`, value: `${fixed(at.speedup)}×, ${(at.efficiency * 100).toFixed(0)}% efficient` },
+      ...(next ? [{ label: `${String(workers + 1)} workers`, value: `${fixed(next.speedup)}×, ${(next.efficiency * 100).toFixed(0)}% efficient` }] : []),
+      { label: 'Karp–Flatt serial fraction', value: at.karpFlatt === null ? '—' : fixed(at.karpFlatt, 3) },
+    ],
+    toolHref: '/compare?mode=parallel&q=account',
+  };
+};

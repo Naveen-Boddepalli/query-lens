@@ -11,6 +11,16 @@ Work toward **v3** (plan.md §27), on the branch `version/v3`.
 
 ### Added
 
+- **Serial against parallel** (plan.md §27.5 P3) — a new [Compare](/compare?mode=parallel) mode, *Serial vs.
+  parallel*: one query on the transactions preset run once by the engine (its own plan shown) and by up to eight
+  workers in the morsel model, the ticks side by side, and a table for one to eight workers of the speedup,
+  efficiency, what Amdahl's law predicts from the one-worker run's serial fraction, and the Karp–Flatt serial
+  fraction measured from each speedup. Grouped by `id`, Amdahl's law predicts the run within 3%; grouped by account,
+  the merge grows with the workers and Karp–Flatt climbs from 0.054 to 0.102 — 4.66× on eight against Amdahl's 7.46.
+  Compare now opens a mode from its link (`?mode=…&q=…`). A fifth step in the parallel lesson, *Amdahl's ceiling*,
+  and a challenge, *Where a worker stops paying*. With P1 and P2, the course map's *Parallel execution* row is
+  *Partly*: plan.md's 3.2 criterion is met.
+
 - **Exchange operators** (plan.md §27.5 P2) — [Parallel execution](/tools/parallel) gains a second section: a
   parallel hash join on one to eight workers, by **broadcast** (copy the smaller side to every worker) or
   **repartition** (hash both sides to the join key's worker), with a **gather** at the end. It shows the rows each

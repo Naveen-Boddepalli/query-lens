@@ -3005,7 +3005,7 @@ Costs are against the modules that exist today (paths checked 2026-10-18).
 |---|---|---|---|---|
 | **P1** | 3.2 | **`/tools/parallel` — morsel-driven execution** | **Built, 2026-10-19** — `engine/parallel.ts` (`runParallel`): pages from the real heap, work = 1 tick a page + 1 per passing row, × the worker's scripted speed; pages homed in *N* equal ranges, a remote read +1 tick; dispatch 1 tick, steal 2, merge 1 per group per partial. Dispatchers `static`, `shared`, `stealing`. Merged partials = the serial engine's rows (fuzz); timeline invariants (fuzz). `ui/parallelPresets.ts`, the page with a Gantt timeline (table view) and a 1–8 workers sweep; lesson `parallel`, settings challenge `outrun-the-slow-worker` (≥ 3× with a ×3 fourth worker: stealing only). Course map row now *Partly*. As first planned: A scan and an aggregate split into morsels of pages, handed to *N* workers by a dispatcher. Worker speeds are a **scripted profile** (an input, Q7) — never threads or timers. Speedup, skew and work stealing measured in ticks. | 1.5 wk |
 | **P2** | 3.2 | **Exchange operators** | **Built, 2026-10-19** — `engine/exchange.ts` (`runParallelJoin`, `hashWorker`): one equi-join of two tables (`SELECT *` or `COUNT(*)`), tables homed in equal ranges, build on the smaller side; broadcast or repartition, then a local hash join, then a gather (rows or partial counts); ticks per row moved/built/probed/matched, phases barrier-timed. `ui/exchangePresets.ts` (join-order demo tables + generated orders 2,000 / payments 3,000), `ui/ExchangeSection.tsx` on `/tools/parallel` (traffic matrix, phases, the other strategy), lesson `exchange`, settings challenge `meet-the-rows`. One P tool, as §27.7 asks. As first planned: Gather, repartition (by hash) and broadcast; a parallel hash join's two strategies compared by rows moved and ticks. | 1.5 wk |
-| **P3** | 3.2 | **Serial vs parallel in `/compare`** | The same query's plan run serially and with *N* workers: ticks, and Amdahl's serial fraction measured from the run. | 4 days |
+| **P3** | 3.2 | **Serial vs parallel in `/compare`** | **Built, 2026-10-19** — `parallel.ts`: `amdahlSpeedup`, `karpFlatt`, `scaling` (1–8 workers against the same query on one; serial fraction = the one-worker run's merge share). `ui/parallelComparison.ts` + `ui/ParallelCompare.tsx`, Compare mode `parallel` (now opened by `?mode=…&q=…`): the engine's serial plan and ticks beside N workers, and the scaling table. By id: Amdahl within 3%; by account: Karp–Flatt 0.054 → 0.102, 4.66× vs 7.46. Lesson step *Amdahl's ceiling*, challenge `efficiency-floor` (answer 4). As first planned: The same query's plan run serially and with *N* workers: ticks, and Amdahl's serial fraction measured from the run. | 4 days |
 
 #### X. Distributed databases (the course map's other *Not covered* row)
 
@@ -3071,7 +3071,10 @@ Costs are against the modules that exist today (paths checked 2026-10-18).
   so no cell there could show one without misdescribing InnoDB.)*
 
 **3.2 — Parallel execution**
-- [ ] The course map's *Parallel execution* row is at least *Partly*: morsels, exchange and a measured speedup.
+- [x] The course map's *Parallel execution* row is at least *Partly*: morsels, exchange and a measured speedup.
+  *(2026-10-19, P1–P3: morsel-driven execution with three dispatchers on `/tools/parallel`, broadcast/repartition/
+  gather and a parallel hash join beside it, and serial against parallel in Compare with Amdahl and Karp–Flatt —
+  all in ticks over scripted workers, each held to the serial engine's answer. The row reads* Partly*.)*
 
 **3.3 — Distributed databases**
 - [ ] The course map's *Distributed databases* row is at least *Partly*: partitioning, 2PC and Raft, each with
@@ -3097,7 +3100,7 @@ Costs are against the modules that exist today (paths checked 2026-10-18).
 | Remaining v3 on `version/v3-remaining` | **Decided, 2026-10-19 (owner)** — "continue with remaining one by one by commiting and pushing to new branch" | now | — |
 | Morsel-driven execution (P1) | **Built, 2026-10-19** — ticks, scripted speeds, NUMA-style homes; static, shared and stealing dispatch | now | — |
 | Exchange operators (P2) | **Built, 2026-10-19** — broadcast, repartition, gather; on the parallel tool, not a tool of their own | now | — |
-| Serial vs parallel in Compare (P3) | **Planned** | 3.2 | — |
+| Serial vs parallel in Compare (P3) | **Built, 2026-10-19** — Amdahl from the one-worker merge, Karp–Flatt per N. 3.2 is complete | now | — |
 | Distributed databases (X1–X4) | **Planned** — §25.9's other *Horizon (v3)* row | 3.3 | P1's scripted workers exist |
 | Web Worker engine (C6's deferred half) | **Still deferred** | — | Main-thread jank, or a dataset past 10,000 rows |
 | Window functions, recursive CTEs | **Still declined** (§4, §25.10) | — | A course adoption that asks for them |

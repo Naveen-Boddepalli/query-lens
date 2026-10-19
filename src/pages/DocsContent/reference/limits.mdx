@@ -342,6 +342,15 @@ index entries of the rows it touches.
   repartition big with big, and a key with five values cannot fill eight workers however it is hashed. The count is
   held to the engine's own over every preset join, strategy and worker count, and to a nested loop's over random
   tables.
+- **Serial against parallel** (plan.md §27.5 P3) is a mode of [Compare](/compare?mode=parallel): one query on the
+  transactions preset, run once by the engine as its own plan says, and by 1 to 8 full-speed workers in the morsel
+  model — the ticks side by side, and a table of speedup, efficiency, what **Amdahl's law** predicts from the
+  one-worker run's serial fraction (its merge), and the **Karp–Flatt** serial fraction each measured speedup implies.
+  Grouped by status (2 groups) it scales nearly linearly; by `id` (3,000 groups) the merge is 44% of the work, the
+  same however many workers, and Amdahl's law predicts the run within 3%; by account (40 groups) every worker meets
+  every group, the merge grows with the workers, and the Karp–Flatt fraction climbs — 4.66× on eight against Amdahl's
+  7.46. The speedup is against the same query on one worker under the same dispatcher and morsel size, so dispatching
+  counts on both sides.
 - **Not modelled:** contention for the shared queue (taking a morsel costs the same however many workers want one),
   the memory each partial result takes, caches, and any operator past the aggregate. A join, `ORDER BY` or `LIMIT` is
   refused rather than run serially in disguise.

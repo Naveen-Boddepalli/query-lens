@@ -2239,3 +2239,15 @@ test('the parallel tool’s exchange section joins by broadcast or repartition, 
   await expect.poll(() => page.url()).toContain('jq=few-keys');
   await expect(section.getByRole('table', { name: /Rows sent in the exchange/ })).toBeVisible();
 });
+
+test('Compare runs one query serially and on one to eight workers, against Amdahl’s law', async ({ page }) => {
+  await page.goto('/compare?mode=parallel&q=account');
+  await expect(page.getByRole('radio', { name: 'Serial vs. parallel' })).toHaveAttribute('aria-checked', 'true');
+  await expect(page.getByText('Project ← HashAggregate ← SeqScan transactions')).toBeVisible();
+  await expect(page.getByRole('status')).toHaveText('4.66×');
+  const table = page.getByRole('table', { name: /serial fraction measured from the one-worker run/ });
+  await expect(table.getByRole('row', { name: /^8 / })).toContainText('7.46×');
+  await expect(page.getByText(/Here it climbs as workers are added/)).toBeVisible();
+  await page.getByRole('radio', { name: 'By id (3,000 groups)' }).click();
+  await expect(page.getByText(/Here it stays close to flat/)).toBeVisible();
+});

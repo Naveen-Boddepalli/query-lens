@@ -326,6 +326,35 @@ export const SETTINGS_CHALLENGES: SettingsChallenge[] = [
     ),
   },
   {
+    id: 'efficiency-floor',
+    title: 'Where a worker stops paying',
+    group: 'storage',
+    tool: 'parallel',
+    brief: (
+      <>
+        The transactions totalled by account — 40 groups — by full-speed workers stealing morsels of 16 pages. A
+        worker&rsquo;s efficiency is the speedup divided by the number of workers: 100% if every worker counts in full.
+        What is the most workers, one to eight, at which every one is still at least 80% efficient?
+      </>
+    ),
+    hint: (
+      <>
+        Compare&rsquo;s <em>Serial vs. parallel</em> mode runs this query on one to eight workers. Each worker meets all 40
+        accounts, so the merge at the end has one more partial result to fold in for every worker you add.
+      </>
+    ),
+    needs: 'the largest number of workers still at least 80% efficient',
+    controls: [{ kind: 'number', key: 'workers', label: 'Workers', min: 1, max: 8 }],
+    starter: { workers: '8' },
+    misconception: (
+      <>
+        Twice the workers, half the time. Only while nothing grows with the workers: here the merge does, one partial
+        result per worker, and dispatching and the last uneven morsels add their share — past four workers each new one
+        is worth less than four fifths of the first.
+      </>
+    ),
+  },
+  {
     id: 'tightest-page',
     title: 'Find the smallest page that holds the rows',
     group: 'storage',

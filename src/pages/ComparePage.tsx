@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { lazy, Suspense, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   createJoinCompareDatabase,
@@ -86,7 +86,18 @@ import { ScrollRegion } from '../ui/ScrollRegion.tsx';
  *    measured cost (with the filter) is usually lower.
  */
 
-type Mode = 'policies' | 'index' | 'build' | 'aggregate' | 'join' | 'lsm' | 'vectorize';
+type Mode = 'policies' | 'index' | 'build' | 'aggregate' | 'join' | 'lsm' | 'vectorize' | 'parallel';
+const MODES: readonly Mode[] = ['policies', 'index', 'build', 'aggregate', 'join', 'lsm', 'vectorize', 'parallel'];
+
+/** The serial-against-parallel mode (plan.md §27.5 P3) carries the morsel model: fetched only when it is chosen. */
+const ParallelCompare = lazy(() => import('../ui/ParallelCompare.tsx').then((m) => ({ default: m.ParallelCompare })));
+
+/** `?mode=…` opens one comparison (plan.md §27.5 P3 links to the parallel one); `?q=…` its query, where it has one. */
+function readInitial(): { mode: Mode; query: string | undefined } {
+  const p = new URLSearchParams(typeof location === 'undefined' ? '' : location.search);
+  const mode = p.get('mode');
+  return { mode: MODES.includes(mode as Mode) ? (mode as Mode) : 'policies', query: p.get('q') ?? undefined };
+}
 
 /* -------------------------------------------------------------------------- */
 /* Replacement-policy comparison                                              */
@@ -1419,7 +1430,8 @@ function VectorizeCompare() {
 }
 
 export function ComparePage() {
-  const [mode, setMode] = useState<Mode>('policies');
+  const [initial] = useState(readInitial);
+  const [mode, setMode] = useState<Mode>(initial.mode);
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-4 p-6 sm:p-8">
@@ -1437,6 +1449,7 @@ export function ComparePage() {
             ['join', 'JOIN algorithms'],
             ['lsm', 'B+Tree vs. LSM tree'],
             ['vectorize', 'Tuple-at-a-time vs. batched'],
+            ['parallel', 'Serial vs. parallel'],
           ] as const
         ).map(([value, label]) => (
           <button
@@ -1464,6 +1477,10 @@ export function ComparePage() {
         <JoinCompare />
       ) : mode === 'lsm' ? (
         <LsmCompare />
+      ) : mode === 'parallel' ? (
+        <Suspense fallback={<p className="text-label text-ink-dim">Loading the parallel model…</p>}>
+          <ParallelCompare initialQuery={initial.query} />
+        </Suspense>
       ) : (
         <VectorizeCompare />
       )}

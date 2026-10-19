@@ -26,6 +26,7 @@ import { demoWrites as lsmWrites, LSM_LIMITS, planLsm } from '../../../ui/lsm.ts
 import { estimateAt, HISTOGRAM_LIMITS, isColumnId } from '../../../ui/histogramColumns.ts';
 import { parallelRun } from '../../../ui/parallelPresets.ts';
 import { joinRun } from '../../../ui/exchangePresets.ts';
+import { PARALLEL_COMPARE_QUERIES, parallelComparison } from '../../../ui/parallelComparison.ts';
 import { PARALLEL_LIMITS } from '../../../engine/parallel.ts';
 import { layOutPage } from '../../../ui/slottedPage.ts';
 import { planVectorIndex, VECTOR_LIMITS } from '../../../ui/vectorIndex.ts';
@@ -117,7 +118,8 @@ describe('the storage and execution lessons are wired into the track', () => {
     const within = (v: number, lo: number, hi: number) => v >= lo && v <= hi;
     for (const s of Object.values(STORAGE_SCENARIOS) as StorageScenario[]) {
       const url = new URL(storageHref(s), 'https://x');
-      expect(url.pathname).toBe(`/tools/${s.tool}`);
+      // Every scenario opens its tool, but Compare's mode (plan.md §27.5 P3), which is a page of its own.
+      expect(url.pathname).toBe(s.tool === 'compare-parallel' ? '/compare' : `/tools/${s.tool}`);
       switch (s.tool) {
         case 'lsm':
           expect(within(s.n, LSM_LIMITS.minWrites, LSM_LIMITS.maxWrites)).toBe(true);
@@ -167,6 +169,11 @@ describe('the storage and execution lessons are wired into the track', () => {
           break;
         case 'join-order':
           expect(url.search).toBe('');
+          break;
+        case 'compare-parallel':
+          expect(url.pathname).toBe('/compare');
+          expect(url.searchParams.get('mode')).toBe('parallel');
+          expect(PARALLEL_COMPARE_QUERIES.map((q) => q.id)).toContain(s.q);
           break;
         case 'parallel':
           expect(within(s.w, PARALLEL_LIMITS.minWorkers, PARALLEL_LIMITS.maxWorkers)).toBe(true);
@@ -310,6 +317,13 @@ describe('lesson: parallel execution', () => {
     expect(at(STORAGE_SCENARIOS.parallelSlowShared).speedup.toFixed(2)).toBe('2.67');
     const stealing = at(STORAGE_SCENARIOS.parallelSlowStealing);
     expect([stealing.ticks, stealing.speedup.toFixed(2), stealing.steals]).toEqual([1213, '3.09', 6]);
+  });
+
+  it('by account on eight in Compare: 4.66× where Amdahl promises 7.46 from a 1.04% merge; Karp–Flatt 0.054 → 0.102', () => {
+    const { scaling } = parallelComparison(STORAGE_SCENARIOS.compareByAccount.q, 'stealing', 16);
+    const eight = scaling.points[7]!;
+    expect([eight.speedup.toFixed(2), eight.amdahl.toFixed(2), (scaling.serialFraction * 100).toFixed(2)]).toEqual(['4.66', '7.46', '1.04']);
+    expect([scaling.points[1]!.karpFlatt!.toFixed(3), eight.karpFlatt!.toFixed(3)]).toEqual(['0.054', '0.102']);
   });
 
   it('one corner: static 1.71×, stealing 3.22×; one-page morsels steal 93 times', () => {

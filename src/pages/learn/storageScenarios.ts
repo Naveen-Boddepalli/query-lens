@@ -96,6 +96,12 @@ export interface ParallelScenario {
   jx?: 'broadcast' | 'repartition';
 }
 
+/** `/compare`'s serial-against-parallel mode on one of its queries (plan.md §27.5 P3). */
+export interface CompareParallelScenario {
+  tool: 'compare-parallel';
+  q: 'status' | 'account' | 'id';
+}
+
 /** A column, a bucket count and a range (plan.md §27.5 T5). */
 export interface HistogramScenario {
   tool: 'histograms';
@@ -116,7 +122,8 @@ export type StorageScenario =
   | HashJoinScenario
   | JoinOrderScenario
   | HistogramScenario
-  | ParallelScenario;
+  | ParallelScenario
+  | CompareParallelScenario;
 
 const LSM = { tool: 'lsm', n: 60, mem: 4, trigger: 3, base: 8, mult: 2, seed: 1 } as const;
 const HASH = { tool: 'hash-index', n: 60, cap: 4, init: 2, seed: 1 } as const;
@@ -178,6 +185,7 @@ export const STORAGE_SCENARIOS = {
   joinSmallBroadcast: { tool: 'parallel', q: 'grouped', w: 4, d: 'stealing', m: 16, s: [1, 1, 1, 3], jq: 'small-big', jw: 4, jx: 'broadcast' },
   joinSmallRepartition: { tool: 'parallel', q: 'grouped', w: 4, d: 'stealing', m: 16, s: [1, 1, 1, 3], jq: 'small-big', jw: 4, jx: 'repartition' },
   joinBigRepartition: { tool: 'parallel', q: 'grouped', w: 4, d: 'stealing', m: 16, s: [1, 1, 1, 3], jq: 'big-big', jw: 4, jx: 'repartition' },
+  compareByAccount: { tool: 'compare-parallel', q: 'account' },
   joinFewKeys: { tool: 'parallel', q: 'grouped', w: 4, d: 'stealing', m: 16, s: [1, 1, 1, 3], jq: 'few-keys', jw: 8, jx: 'repartition' },
 } as const satisfies Record<string, StorageScenario>;
 
@@ -185,6 +193,7 @@ export type StorageScenarioName = keyof typeof STORAGE_SCENARIOS;
 
 /** `/tools/…?…` for a scenario, in the URL scheme the tool itself writes. */
 export function storageHref(scenario: StorageScenario): string {
+  if (scenario.tool === 'compare-parallel') return `/compare?mode=parallel&q=${scenario.q}`;
   const p = new URLSearchParams();
   switch (scenario.tool) {
     case 'lsm':

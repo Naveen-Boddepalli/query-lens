@@ -243,6 +243,19 @@ export const EXECUTION_STEPS: Record<string, LessonStep[]> = {
         </>
       ),
     },
+    {
+      heading: 'Amdahl’s ceiling',
+      body: (
+        <>
+          Total by account instead — 40 groups — on eight full-speed workers, in Compare: <strong>4.66×</strong>.
+          Amdahl&rsquo;s law, given the one-worker run&rsquo;s serial part (its merge, 1.04% of the ticks), promises 7.46.
+          The serial part is not fixed: every worker meets all 40 accounts, so the merge folds in one partial result per
+          worker and grows with them. The Karp–Flatt column, the serial fraction each speedup implies, climbs from 0.054
+          to 0.102 to say so.
+        </>
+      ),
+      link: to('compareByAccount', 'Compare serial and parallel'),
+    },
   ],
   exchange: [
     {

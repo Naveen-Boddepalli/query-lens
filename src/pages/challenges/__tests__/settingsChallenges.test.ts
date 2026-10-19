@@ -83,7 +83,7 @@ describe('settings challenges', () => {
         'vector-index',
       ].sort(),
     );
-    expect(SETTINGS_CHALLENGES.length).toBe(20);
+    expect(SETTINGS_CHALLENGES.length).toBe(21);
     expect(SETTINGS_CHALLENGES.filter((c) => c.group === 'transactions').map((c) => c.id)).toEqual([
       'same-level-different-promise',
     ]);
@@ -150,6 +150,7 @@ describe('settings challenges', () => {
       'third-level': { fanout: [3, 6], keys: [1, 200] },
       'enough-buckets': { buckets: [HISTOGRAM_LIMITS.minBuckets, HISTOGRAM_LIMITS.maxBuckets] },
       'outrun-the-slow-worker': { morsel: [PARALLEL_LIMITS.minMorselPages, PARALLEL_LIMITS.maxMorselPages] },
+      'efficiency-floor': { workers: [PARALLEL_LIMITS.minWorkers, PARALLEL_LIMITS.maxWorkers] },
     };
     for (const c of SETTINGS_CHALLENGES) {
       const want = ranges[c.id] ?? {};
@@ -208,6 +209,7 @@ describe('settings challenges', () => {
     ['outrun-the-slow-worker', { dispatch: 'stealing', morsel: 16 }],
     ['outrun-the-slow-worker', { dispatch: 'stealing', morsel: 4 }],
     ['meet-the-rows', { smallBig: 'broadcast', bigBig: 'repartition', fiveKeys: 'broadcast' }],
+    ['efficiency-floor', { workers: 4 }],
     ['tightest-page', { page: 0, bytes: 202 }],
     ['tightest-page', { page: 5, bytes: 200 }],
     ['split-the-other-bucket', { n: 40, strategy: 'linear', cap: 4, init: 2 }],
@@ -268,6 +270,9 @@ describe('settings challenges', () => {
       ['enough-buckets', 'a hundred: close enough, but too many', { buckets: 100 }],
       ['outrun-the-slow-worker', 'static ranges: everyone waits for the slow quarter', {}],
       ['meet-the-rows', 'repartition everything', {}],
+      ['efficiency-floor', 'eight: 58%', {}],
+      ['efficiency-floor', 'five: 75%', { workers: 5 }],
+      ['efficiency-floor', 'three: still efficient, but not the most', { workers: 3 }],
       ['meet-the-rows', 'broadcast everything', { smallBig: 'broadcast', bigBig: 'broadcast', fiveKeys: 'broadcast' }],
       ['meet-the-rows', 'repartition on five keys', { smallBig: 'broadcast', bigBig: 'repartition', fiveKeys: 'repartition' }],
       ['outrun-the-slow-worker', 'a shared queue: balanced, but its reads are remote', { dispatch: 'shared' }],

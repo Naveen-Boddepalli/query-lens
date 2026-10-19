@@ -327,3 +327,57 @@ export function runParallel(sql: string, db: Database, options: ParallelOptions)
     rows,
   };
 }
+
+/**
+ * Amdahl's law (plan.md §27.5 P3): the speedup `n` workers can reach when a fraction `serial` of the one-worker run can
+ * only ever be done by one of them.
+ */
+export function amdahlSpeedup(serial: number, workers: number): number {
+  return 1 / (serial + (1 - serial) / workers);
+}
+
+/**
+ * The Karp–Flatt metric: the serial fraction a measured speedup implies, `(1/S − 1/n) / (1 − 1/n)`. Flat as `n` grows,
+ * Amdahl's law accounts for the run; climbing, something grows with the workers — here the merge, one partial result
+ * per worker, and the dispatching. Undefined for one worker.
+ */
+export function karpFlatt(speedup: number, workers: number): number | null {
+  return workers <= 1 ? null : (1 / speedup - 1 / workers) / (1 - 1 / workers);
+}
+
+export interface ScalingPoint {
+  workers: number;
+  ticks: number;
+  /** Against the same query on one worker under the same dispatcher and morsels: `T(1) / T(n)`. */
+  speedup: number;
+  efficiency: number;
+  /** What Amdahl's law predicts from the one-worker run's serial fraction. */
+  amdahl: number;
+  karpFlatt: number | null;
+}
+
+export interface Scaling {
+  /** The one-worker run's serial fraction: its merge, which no second worker could share, over its ticks. */
+  serialFraction: number;
+  points: ScalingPoint[];
+}
+
+/** One query on 1 to `maxWorkers` full-speed workers, measured against itself on one (plan.md §27.5 P3). */
+export function scaling(sql: string, db: Database, options: Omit<ParallelOptions, 'workers' | 'speeds'>, maxWorkers: number): Scaling | ParallelError {
+  const runs: ParallelResult[] = [];
+  for (let n = 1; n <= maxWorkers; n++) {
+    const r = runParallel(sql, db, { ...options, workers: n, speeds: Array.from({ length: n }, () => 1) });
+    if (!r.ok) return r;
+    runs.push(r);
+  }
+  const one = runs[0]!;
+  const serialFraction = one.ticks === 0 ? 0 : (one.merge.end - one.merge.start) / one.ticks;
+  return {
+    serialFraction,
+    points: runs.map((r, i) => {
+      const n = i + 1;
+      const speedup = r.ticks === 0 ? 1 : one.ticks / r.ticks;
+      return { workers: n, ticks: r.ticks, speedup, efficiency: speedup / n, amdahl: amdahlSpeedup(serialFraction, n), karpFlatt: karpFlatt(speedup, n) };
+    }),
+  };
+}
