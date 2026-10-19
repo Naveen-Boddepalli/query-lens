@@ -69,7 +69,8 @@ SELECT * FROM users ORDER BY id LIMIT 10 OFFSET 20;
 - **`DISTINCT`**: `SELECT DISTINCT a, b …` returns each distinct combination once — see
   [DISTINCT](#distinct) below.
 - **`GROUP BY`**: one or more columns — qualified in a query with a `JOIN`. Aggregates: `COUNT(*)`,
-  `COUNT`/`SUM`/`AVG`/`MIN`/`MAX` over a column. Every plain column in the SELECT list must be grouped or
+  `COUNT`/`SUM`/`AVG`/`MIN`/`MAX` over a column, or over its distinct values — `COUNT(DISTINCT col)`, see
+  [DISTINCT](#distinct). Every plain column in the SELECT list must be grouped or
   wrapped in an aggregate — and with `HAVING` but no `GROUP BY` the whole table is one group, so the list can
   only hold aggregates.
 - **`HAVING`**: a predicate over the *groups*, after `GROUP BY` — see [HAVING](#having) below.
@@ -193,7 +194,8 @@ SELECT COUNT(*) FROM emp HAVING COUNT(*) > 3;
   last example, which returns one row or none).
 - An aggregate that is NULL for a group makes the comparison UNKNOWN, and the group is dropped — under the
   predicate and under its `NOT`.
-- An aggregate in a `WHERE` is an error that points here. `COUNT(DISTINCT x)` is not supported yet.
+- An aggregate in a `WHERE` is an error that points here. A `DISTINCT` one works here too: `HAVING COUNT(DISTINCT
+  productId) >= 4`.
 - In the plan it is its own `Having` node above the aggregate. The optimizer still moves your `WHERE`
   *below* the aggregate (an index lookup, a pushdown) and never touches the `HAVING`.
 
@@ -219,7 +221,14 @@ SELECT DISTINCT customer, status FROM orders ORDER BY customer LIMIT 5;
   them all. [Compare](/compare)'s aggregate mode forces each side on the same query.
 - Values that are equal under `=` are one value: `1`, `'1'` and `TRUE` collapse together. (SQLite keeps `1`
   and `'1'` apart — a column that mixes types is the corner where they differ.)
-- Not yet: `COUNT(DISTINCT x)` — `DISTINCT` inside an aggregate.
+- **Inside an aggregate** (plan.md §27.5 S5): `COUNT(DISTINCT x)` counts each distinct non-NULL value of `x` once,
+  and `SUM`, `AVG`, `MIN` and `MAX` take `DISTINCT` too — `SELECT COUNT(DISTINCT customerId) FROM orders` on the
+  `shop` preset is 9, where `COUNT(customerId)` is 38 and `SELECT DISTINCT customerId` returns ten rows, one of them
+  the guests' NULL. Values are the same value exactly when `SELECT DISTINCT` would say so. The hash aggregate keeps a
+  set of the values each group has seen; the sort aggregate sorts on the group *and* the value, so a repeat sits right
+  after what it repeats — unless two `DISTINCT` aggregates read different columns, which one sort cannot order, and
+  then it keeps sets too. Either way the trace says how many values it read and kept. `COUNT(DISTINCT *)` is not
+  SQL, and is refused.
 
 ## Expressions
 
@@ -351,7 +360,8 @@ with a generic syntax error:
 | `JOIN ... USING (...)` | *USING is not in the v0 subset — write the equality out.* |
 | Joining the same table twice | *Already in this query — joining it again needs an alias, which v0 does not have.* |
 | A `JOIN`'s `ON` naming a table not yet in the query | *There is no table called that yet in this query — it has to be named in FROM or an earlier JOIN first.* |
-| `SELECT a, DISTINCT b`, `COUNT(DISTINCT x)` | *DISTINCT applies to the whole SELECT list — write `SELECT DISTINCT a, b …`. Inside an aggregate it is not supported yet.* |
+| `SELECT a, DISTINCT b` | *DISTINCT applies to the whole SELECT list — write `SELECT DISTINCT a, b …` — or to an aggregate's argument, as in `COUNT(DISTINCT x)`.* |
+| `COUNT(DISTINCT *)` | *`COUNT(DISTINCT *)` is not valid SQL. — DISTINCT needs a column whose distinct values to read; to count distinct rows, write `SELECT DISTINCT …`.* |
 | `INTERSECT` beside `UNION` or `EXCEPT` | *INTERSECT cannot share a query with UNION or EXCEPT* — the standard and SQLite read the same text two ways. |
 | `INTERSECT ALL`, `EXCEPT ALL` | *Not supported yet* — SQLite, which checks the answers, has neither. |
 | `SELECT n, n` | *`n` is selected twice* — a result row is keyed by column name, so alias one: `n AS n2`. |

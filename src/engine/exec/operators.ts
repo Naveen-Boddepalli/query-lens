@@ -11,7 +11,7 @@
 import type { Emit } from '../trace.ts';
 import type { EngineOptions, Row, SqlValue, Table } from '../types.ts';
 import type { Expr } from '../parser/index.ts';
-import { lookupKeysOf } from '../planner/index.ts';
+import { distinctSortColumn, lookupKeysOf } from '../planner/index.ts';
 import type { AggregateSpec, Plan, ProjectList, RangeBound } from '../planner/index.ts';
 import type { BufferPool, Heap, ScanRing } from '../storage/index.ts';
 import { scanUsesRing } from '../storage/index.ts';
@@ -451,14 +451,30 @@ function groupKeyOf(row: Row, groupBy: readonly string[]): string {
   return JSON.stringify(groupBy.map((col) => row[col] ?? null));
 }
 
-function computeAggregate(spec: AggregateSpec, rows: readonly Row[]): SqlValue {
-  if (spec.fn === 'COUNT') {
-    return spec.column === null
-      ? rows.length
-      : rows.filter((r) => (r[spec.column!] ?? null) !== null).length;
-  }
-
+/**
+ * The non-NULL values `spec` reads from `rows` — each distinct one once, for a DISTINCT aggregate (plan.md §27.5 S5).
+ * `adjacent` says the rows are sorted on the column, so a repeat sits right after the value it repeats and comparing
+ * with the one before finds it (the sort strategy); otherwise a set remembers every value seen (the hash strategy).
+ */
+function aggregateValues(spec: AggregateSpec, rows: readonly Row[], adjacent: boolean): SqlValue[] {
   const values = rows.map((r) => r[spec.column!] ?? null).filter((v) => v !== null);
+  if (!spec.distinct) return values;
+  // Two values are one exactly when `SELECT DISTINCT` would say so — the same key its hash set and its sort compare.
+  const keys = values.map((v) => equalityKeyOf(v));
+  if (adjacent) return values.filter((_, i) => i === 0 || keys[i] !== keys[i - 1]);
+  const seen = new Set<string>();
+  return values.filter((_, i) => {
+    const key = keys[i]!;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function computeAggregate(spec: AggregateSpec, rows: readonly Row[], adjacent = false): SqlValue {
+  if (spec.fn === 'COUNT' && spec.column === null) return rows.length;
+  const values = aggregateValues(spec, rows, adjacent);
+  if (spec.fn === 'COUNT') return values.length;
   if (values.length === 0) return null;
 
   switch (spec.fn) {
@@ -475,6 +491,33 @@ function computeAggregate(spec: AggregateSpec, rows: readonly Row[]): SqlValue {
     case 'MAX':
       return values.reduce((max, v) => (compare('>', v, max) === true ? v : max));
   }
+}
+
+/**
+ * What a DISTINCT aggregate did, for the narration (plan.md §27.5 S5) — `COUNT(DISTINCT customerId) read 38 values
+ * and kept 9`, summed over the groups — or `null` when no aggregate is DISTINCT.
+ */
+function distinctNote(rows: readonly Row[], groupBy: readonly string[], aggregates: readonly AggregateSpec[]): string | null {
+  const specs = aggregates.filter((a) => a.distinct);
+  if (specs.length === 0) return null;
+  const groups = new Map<string, Row[]>();
+  for (const row of rows) {
+    const key = groupKeyOf(row, groupBy);
+    const group = groups.get(key);
+    if (group) group.push(row);
+    else groups.set(key, [row]);
+  }
+  return specs
+    .map((spec) => {
+      let read = 0;
+      let kept = 0;
+      for (const group of groups.values()) {
+        read += aggregateValues({ ...spec, distinct: false }, group, false).length;
+        kept += aggregateValues(spec, group, false).length;
+      }
+      return `${spec.key} read ${String(read)} value${read === 1 ? '' : 's'} and kept ${String(kept)}${groups.size > 1 ? ` across ${String(groups.size)} groups` : ''}`;
+    })
+    .join('; ');
 }
 
 /** Groups `rows` by `groupBy` (or one group over everything, if empty) and computes each aggregate per group. */
@@ -535,6 +578,13 @@ function hashAggregate(plan: Extract<Plan, { op: 'HashAggregate' }>, child: Oper
         }
         child.close();
         rows = runHashAggregate(materialised, plan.groupBy, plan.aggregates);
+        const distinct = distinctNote(materialised, plan.groupBy, plan.aggregates);
+        if (distinct) {
+          ctx.emit(
+            `HashAggregate kept a set of the values ${plan.groupBy.length > 0 ? 'each group had' : 'it had'} seen, so ${distinct} — a value counts the first time only, and a NULL never.`,
+            { stage: 'execute', op: 'HashAggregate', rowsProduced: 0 },
+          );
+        }
       }
 
       const row = rows[index];
@@ -555,22 +605,27 @@ function hashAggregate(plan: Extract<Plan, { op: 'HashAggregate' }>, child: Oper
   };
 }
 
-/** One streaming pass over rows already sorted by `groupBy`: each run of equal keys collapses into one group. */
+/**
+ * One streaming pass over rows already sorted by `groupBy` — and by `sortedOn` within each group, when a DISTINCT
+ * aggregate reads it (plan.md §27.5 S5): each run of equal keys collapses into one group.
+ */
 function collapseSortedGroups(
   sorted: readonly Row[],
   groupBy: readonly string[],
   aggregates: readonly AggregateSpec[],
+  sortedOn: string | null = null,
 ): Row[] {
+  const compute = (spec: AggregateSpec, rows: readonly Row[]) => computeAggregate(spec, rows, spec.column === sortedOn);
   if (groupBy.length === 0) {
     const groupRow: Row = {};
-    for (const spec of aggregates) groupRow[spec.key] = computeAggregate(spec, sorted);
+    for (const spec of aggregates) groupRow[spec.key] = compute(spec, sorted);
     return [groupRow];
   }
 
   const finishBucket = (bucket: readonly Row[]): Row => {
     const groupRow: Row = {};
     for (const col of groupBy) groupRow[col] = bucket[0]![col] ?? null;
-    for (const spec of aggregates) groupRow[spec.key] = computeAggregate(spec, bucket);
+    for (const spec of aggregates) groupRow[spec.key] = compute(spec, bucket);
     return groupRow;
   };
 
@@ -627,9 +682,13 @@ function sortAggregate(
         }
         child.close();
 
+        // A DISTINCT aggregate's column joins the sort key (plan.md §27.5 S5): sorted on (group, value), a repeat sits
+        // right after the value it repeats.
+        const sortedOn = distinctSortColumn(plan.aggregates);
+        const sortKey = sortedOn === null ? plan.groupBy : [...plan.groupBy, sortedOn];
         const sorted = externalMergeSort(
           materialised,
-          (r) => plan.groupBy.map((col) => r[col] ?? null),
+          (r) => sortKey.map((col) => r[col] ?? null),
           'asc',
           {
             pool: ctx.pool,
@@ -641,7 +700,16 @@ function sortAggregate(
           'SortAggregate',
           'SortAggregate',
         );
-        rows = collapseSortedGroups(sorted, plan.groupBy, plan.aggregates);
+        rows = collapseSortedGroups(sorted, plan.groupBy, plan.aggregates, sortedOn);
+        const distinct = distinctNote(materialised, plan.groupBy, plan.aggregates);
+        if (distinct) {
+          ctx.emit(
+            sortedOn === null
+              ? `SortAggregate sorted on the groups alone: its DISTINCT aggregates read different columns, and one sort cannot order both, so each kept a set of the values seen, as a hash aggregate does — ${distinct}.`
+              : `SortAggregate sorted on (${sortKey.join(', ')}), so within each group equal ${sortedOn} values sit side by side: a value counts only where it differs from the one before — no set to keep — and ${distinct}.`,
+            { stage: 'execute', op: 'SortAggregate', rowsProduced: 0 },
+          );
+        }
       }
 
       const row = rows[index];

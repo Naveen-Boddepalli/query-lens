@@ -805,6 +805,41 @@ export const CHALLENGES: Challenge[] = [
     ),
   },
   {
+    // plan.md §27.5 S5, on the `shop` preset: COUNT(DISTINCT x), and the NULL it never counts.
+    id: 'count-each-once',
+    title: 'Count each customer once',
+    brief: (
+      <>
+        How many different customers have placed an order? Answer from <code className="font-mono">orders</code> alone:
+        one row, one number.
+      </>
+    ),
+    hint: (
+      <>
+        <code className="font-mono">COUNT(customerId)</code> counts every order that has a customer, so a customer with
+        seven orders counts seven times. Put <code className="font-mono">DISTINCT</code> inside the call — and see what
+        happens to the guests&rsquo; NULL.
+      </>
+    ),
+    starter: 'SELECT COUNT(customerId)\nFROM orders;',
+    dataset: 'shop',
+    // One value, nine — and a DISTINCT aggregate kept those nine, rather than a subquery over customers.
+    check: (r) => {
+      if (r.error || r.rows.length !== 1) return false;
+      const values = Object.values(r.rows[0]!);
+      const keptNine = r.events.some((e) => e.stage === 'execute' && /read \d+ values? and kept 9\b/.test(e.label));
+      return values.length === 1 && values[0] === 9 && keptNine;
+    },
+    misconception: (
+      <>
+        <code className="font-mono">SELECT DISTINCT customerId</code> returns ten rows — one of them the guests&rsquo;
+        NULL — so <code className="font-mono">COUNT(DISTINCT customerId)</code> must be ten. It is nine: no aggregate
+        but <code className="font-mono">COUNT(*)</code> ever counts a NULL, with <code className="font-mono">DISTINCT</code>{' '}
+        or without.
+      </>
+    ),
+  },
+  {
     id: 'and-before-or',
     title: 'Where the AND lands',
     brief: (

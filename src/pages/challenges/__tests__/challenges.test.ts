@@ -49,6 +49,7 @@ describe('challenges', () => {
     'never-ordered': 'SELECT name FROM customers WHERE NOT EXISTS (SELECT * FROM orders WHERE orders.customerId = customers.id);',
     'nobody-ordered-it': 'SELECT id FROM products EXCEPT SELECT productId FROM orders;',
     'leave-no-one-out': 'SELECT customers.name, orders.id FROM customers FULL JOIN orders ON customers.id = orders.customerId;',
+    'count-each-once': 'SELECT COUNT(DISTINCT customerId) FROM orders;',
     'not-paris-either': "SELECT * FROM customers WHERE city <> 'Paris' OR city IS NULL;",
     'keep-the-unmatched':
       'SELECT authors.name, posts.title FROM authors LEFT JOIN posts ON authors.id = posts.authorId WHERE posts.title IS NULL;',
@@ -126,6 +127,13 @@ describe('challenges', () => {
       ],
       ['leave-no-one-out', 'SELECT customers.name, orders.id FROM customers FULL JOIN orders ON customers.id = orders.customerId WHERE orders.id IS NOT NULL;'],
       ['leave-no-one-out', 'SELECT customers.name FROM customers FULL JOIN orders ON customers.id = orders.customerId;'],
+      // Every order, every order with a customer, the right rows uncounted, another column, or nine without DISTINCT.
+      ['count-each-once', 'SELECT COUNT(*) FROM orders;'],
+      ['count-each-once', 'SELECT COUNT(customerId) FROM orders;'],
+      ['count-each-once', 'SELECT DISTINCT customerId FROM orders;'],
+      ['count-each-once', 'SELECT COUNT(DISTINCT productId) FROM orders;'],
+      ['count-each-once', 'SELECT COUNT(DISTINCT customerId), COUNT(*) FROM orders;'],
+      ['count-each-once', 'SELECT COUNT(*) FROM customers WHERE EXISTS (SELECT * FROM orders WHERE orders.customerId = customers.id);'],
       ['not-paris-either', "SELECT * FROM customers WHERE NOT (city = 'Paris');"],
       ['not-paris-either', "SELECT * FROM customers WHERE city NOT IN ('Paris');"],
       ['not-paris-either', 'SELECT * FROM customers WHERE city IS NULL;'],
@@ -184,6 +192,21 @@ describe('challenges', () => {
     // The stacked version the misconception describes: every matched pair twice.
     const stacked = runOn(c, `SELECT customers.name, orders.id FROM customers LEFT JOIN orders ON ${'customers.id = orders.customerId'} UNION ALL SELECT customers.name, orders.id FROM customers RIGHT JOIN orders ON customers.id = orders.customerId;`);
     expect(stacked.rows).toHaveLength(38 * 2 + 3 + 2);
+  });
+
+  it('count-each-once accepts a NULL filter, a LIMIT, and either aggregate strategy (plan.md §27.5 S5)', () => {
+    const c = challengeById('count-each-once')!;
+    for (const [sql, options] of [
+      ['SELECT COUNT(DISTINCT customerId) FROM orders LIMIT 1;', challengeOptions(c)],
+      ['SELECT COUNT(DISTINCT customerId) FROM orders WHERE customerId IS NOT NULL;', challengeOptions(c)],
+      ['SELECT COUNT(DISTINCT customerId) FROM orders;', { ...challengeOptions(c), aggregateStrategy: 'sort' as const }],
+    ] as const) {
+      const r = runQuery(sql, challengeDatabase(c), options);
+      expect(r.error, sql).toBeUndefined();
+      expect(c.check(r, sql), sql).toBe(true);
+    }
+    // The misconception's numbers: ten distinct rows, NULL among them; nine distinct values.
+    expect(runOn(c, 'SELECT DISTINCT customerId FROM orders;').rows).toHaveLength(10);
   });
 
   it('never-ordered accepts every honest way of asking (plan.md §27.5 S1)', () => {

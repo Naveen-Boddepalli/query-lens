@@ -43,6 +43,7 @@ export {
   childOf,
   conjoin,
   conjuncts,
+  distinctSortColumn,
   equalityOn,
   exprToSql,
   findIndexNestedLoopJoins,

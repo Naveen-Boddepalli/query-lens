@@ -133,7 +133,7 @@ class ParseError extends Error {
 /** Keywords that tokenise cleanly but land outside the v0 subset. */
 const OUT_OF_SCOPE: Record<string, string> = {
   USING: 'USING is not in the v0 subset — write the equality out: JOIN t ON a.x = t.y.',
-  DISTINCT: 'DISTINCT applies to the whole SELECT list — write `SELECT DISTINCT a, b …`. Inside an aggregate, `COUNT(DISTINCT x)` is not supported yet.',
+  DISTINCT: 'DISTINCT applies to the whole SELECT list — write `SELECT DISTINCT a, b …` — or to an aggregate\'s argument, as in `COUNT(DISTINCT x)`.',
   CREATE: 'QueryLens only runs SELECT, DELETE, INSERT and UPDATE. Edit the seed data to change the table.',
   DROP: 'QueryLens only runs SELECT, DELETE, INSERT and UPDATE. Edit the seed data to change the table.',
 };
@@ -278,19 +278,22 @@ function parseAggregateArgs(c: Cursor, upper: string): { arg: AggregateArg; clos
     }
     arg = { kind: 'star', span: { from: argToken.from, to: argToken.to } };
   } else {
-    if (isKeyword(argToken, 'DISTINCT')) {
+    // `COUNT(DISTINCT x)` (plan.md §27.5 S5): each distinct non-NULL value once.
+    const distinct = isKeyword(argToken, 'DISTINCT') ? c.next() : undefined;
+    if (distinct && c.peek().type === 'star') {
       throw new ParseError(
-        '`COUNT(DISTINCT …)` is not supported yet.',
-        argToken,
-        '`SELECT DISTINCT` is supported; inside an aggregate it is not — count the distinct rows another way.',
+        `\`${upper}(DISTINCT *)\` is not valid SQL.`,
+        c.peek(),
+        `DISTINCT needs a column whose distinct values to read — \`${upper}(DISTINCT col)\`. To count distinct rows, write \`SELECT DISTINCT …\`.`,
       );
     }
-    const colToken = c.expectIdentifier(`a column name, or \`*\` for COUNT`);
+    const colToken = c.expectIdentifier(distinct ? 'a column name after DISTINCT' : `a column name, or \`*\` for COUNT`);
     const ref = parseQualifiedColumnTail(c, colToken);
     arg = {
       kind: 'column',
       name: ref.name,
       ...(ref.table === undefined ? {} : { table: ref.table }),
+      ...(distinct ? { distinct: true } : {}),
       span: { from: ref.from, to: ref.to },
     };
   }

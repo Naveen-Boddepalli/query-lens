@@ -105,11 +105,12 @@ fit for the browser (bundle weight, and 256 colours wreck the palette). Contribu
 
 ## What SQL is missing?
 
-Less than it used to be. `JOIN` (three algorithms), `GROUP BY` with aggregates and `HAVING`, `DISTINCT`, `ORDER BY`
-with `LIMIT`/`OFFSET`, `OR`/`NOT`/`IN`/`LIKE`/`IS NULL` with real three-valued logic, arithmetic and computed
-columns, and `INSERT`/`UPDATE`/`DELETE` all run. What does not, yet: **subqueries**, **outer joins** and more than
-one `JOIN` per query, **window functions**, `UNION`, `COUNT(DISTINCT …)`, and `SELECT *, expr`. They are out of
-scope for this release, not forgotten — see [Supported SQL](/docs/reference/sql) for what runs today.
+Less than it used to be. Chains of `JOIN` — inner, `LEFT`, `RIGHT`, `FULL` and `CROSS` — under four algorithms;
+`GROUP BY` with aggregates (`COUNT(DISTINCT …)` included) and `HAVING`; `DISTINCT`; `ORDER BY` with
+`LIMIT`/`OFFSET`; `UNION`, `INTERSECT` and `EXCEPT`; `IN (subquery)` and correlated `[NOT] EXISTS`;
+`OR`/`NOT`/`IN`/`LIKE`/`IS NULL` with real three-valued logic; arithmetic and computed columns; and
+`INSERT`/`UPDATE`/`DELETE` all run. What does not, yet: **scalar subqueries**, **table aliases** (so no self-join),
+**window functions**, CTEs, and `SELECT *, expr`. They are out of scope for this release, not forgotten — see [Supported SQL](/docs/reference/sql) for what runs today.
 QueryLens's parser recognises the keywords for most of them and tells you so directly rather than failing with a
 generic syntax error, which is usually the fastest way to find out whether a query you typed is simply not
 supported yet.

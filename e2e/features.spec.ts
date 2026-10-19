@@ -1556,6 +1556,14 @@ test('RIGHT, FULL and CROSS JOIN run in the Playground, and a FULL JOIN reads �
   await expect(page.locator('.react-flow__node').getByText(/⟗/).first()).toBeVisible();
 });
 
+test('COUNT(DISTINCT …) runs in the Playground: nine customers, and the guests’ NULL never counted (plan.md §27.5 S5)', async ({ page }) => {
+  await page.goto('/playground?t=shop&x=0');
+  await page.getByRole('button', { name: 'COUNT(DISTINCT)', exact: true }).click();
+  await page.getByLabel('Scrub to step').press('End');
+  await expect(page.getByText('1 row returned').first()).toBeVisible();
+  for (const value of ['9', '38', '40']) await expect(page.getByRole('cell', { name: value, exact: true })).toBeVisible();
+});
+
 test('a link that names a dataset reopens on it, in the Playground and the inspector', async ({
   page,
 }) => {

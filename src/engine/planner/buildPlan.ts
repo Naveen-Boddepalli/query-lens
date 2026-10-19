@@ -13,9 +13,9 @@
  * legible when the two are shown side by side.
  */
 
-import type { DeleteStatement, Expr, JoinClause, SelectStatement, SemiJoinClause, UpdateStatement } from '../parser/index.ts';
+import type { AggregateArg, AggregateFn, DeleteStatement, Expr, JoinClause, SelectStatement, SemiJoinClause, UpdateStatement } from '../parser/index.ts';
 import { exprToSql } from '../parser/print.ts';
-import { aggregateKeyOf, columnKey, selectItemArgColumn, selectItemKey, walkExpr } from '../parser/index.ts';
+import { aggregateKeyOf, columnKey, selectItemKey, walkExpr } from '../parser/index.ts';
 import type { AggregateSpec, Plan, ProjectList } from './plan.ts';
 import type { JoinAlgorithm, Table } from '../types.ts';
 import { indexNameOf, joinIndexFor } from '../index/spec.ts';
@@ -57,24 +57,26 @@ export function isAggregateQuery(ast: SelectStatement): boolean {
  */
 export function aggregateSpecsOf(ast: SelectStatement): AggregateSpec[] {
   const specs = new Map<string, AggregateSpec>();
+  const add = (fn: AggregateFn, arg: AggregateArg) => {
+    const key = aggregateKeyOf(fn, arg);
+    if (specs.has(key)) return;
+    specs.set(key, {
+      key,
+      fn,
+      column: arg.kind === 'star' ? null : columnKey(arg),
+      ...(arg.kind === 'column' && arg.distinct ? { distinct: true } : {}),
+    });
+  };
   if (ast.select.kind === 'columns') {
-    for (const item of ast.select.items) {
-      if (item.kind !== 'aggregate') continue;
-      const key = selectItemKey(item);
-      specs.set(key, { key, fn: item.fn, column: selectItemArgColumn(item) });
-    }
+    for (const item of ast.select.items) if (item.kind === 'aggregate') add(item.fn, item.arg);
   }
   if (ast.having) {
     walkExpr(ast.having, (e) => {
-      if (e.kind !== 'aggregate') return;
-      const key = aggregateKeyOf(e.fn, e.arg);
-      if (!specs.has(key)) specs.set(key, { key, fn: e.fn, column: e.arg.kind === 'star' ? null : columnKey(e.arg) });
+      if (e.kind === 'aggregate') add(e.fn, e.arg);
     });
   }
   const sortBy = ast.orderBy?.aggregate;
-  if (sortBy && !specs.has(ast.orderBy!.column)) {
-    specs.set(ast.orderBy!.column, { key: ast.orderBy!.column, fn: sortBy.fn, column: sortBy.arg.kind === 'star' ? null : columnKey(sortBy.arg) });
-  }
+  if (sortBy) add(sortBy.fn, sortBy.arg);
   return [...specs.values()];
 }
 

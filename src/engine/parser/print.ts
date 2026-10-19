@@ -2,7 +2,8 @@ import type { AggregateArg, AggregateFn, Expr } from './ast.ts';
 
 /** The canonical key an aggregate's value is stored under — `COUNT(*)`, `SUM(age)`, `SUM(t.age)`. */
 export function aggregateKeyOf(fn: AggregateFn, arg: AggregateArg): string {
-  return `${fn}(${arg.kind === 'star' ? '*' : arg.table ? `${arg.table}.${arg.name}` : arg.name})`;
+  if (arg.kind === 'star') return `${fn}(*)`;
+  return `${fn}(${arg.distinct ? 'DISTINCT ' : ''}${arg.table ? `${arg.table}.${arg.name}` : arg.name})`;
 }
 
 /** A string as a SQL literal: quoted, with each `'` inside doubled — the form the tokenizer reads back as the same string. */

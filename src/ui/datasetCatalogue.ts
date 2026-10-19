@@ -104,6 +104,8 @@ export const DATASET_CATALOGUE: Record<DatasetId, DatasetCatalogueEntry> = {
       // plan.md §27.5 S4: every customer and every order, each unmatched row once; then every pair.
       { label: 'FULL JOIN', sql: 'SELECT customers.name, orders.id\nFROM customers\nFULL JOIN orders ON customers.id = orders.customerId;' },
       { label: 'CROSS JOIN', sql: 'SELECT customers.name, products.name\nFROM customers\nCROSS JOIN products;' },
+      // plan.md §27.5 S5: nine customers, thirty-eight orders with one, forty orders.
+      { label: 'COUNT(DISTINCT)', sql: 'SELECT COUNT(DISTINCT customerId), COUNT(customerId), COUNT(*)\nFROM orders;' },
       {
         label: 'Orders per customer',
         sql: 'SELECT customers.name, COUNT(orders.id)\nFROM customers\nLEFT JOIN orders ON customers.id = orders.customerId\nGROUP BY customers.name\nORDER BY COUNT(orders.id) DESC;',

@@ -671,6 +671,8 @@ const AGGREGATE_PRESETS = [
   // plan.md §25.4 B2: SELECT DISTINCT rides on the same strategy setting as GROUP BY.
   { label: 'SELECT DISTINCT a low-cardinality column', sql: 'SELECT DISTINCT status FROM orders' },
   { label: 'SELECT DISTINCT a high-cardinality column', sql: 'SELECT DISTINCT customer FROM orders' },
+  // plan.md §27.5 S5: a set per group against a sort on (group, value).
+  { label: 'COUNT(DISTINCT …) per group', sql: 'SELECT status, COUNT(DISTINCT customer) FROM orders GROUP BY status' },
 ] as const;
 
 interface AggregateScorecard {

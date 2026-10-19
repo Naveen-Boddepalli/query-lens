@@ -10,7 +10,7 @@
 
 import fc from 'fast-check';
 import type { EngineOptions, IndexBuildOptions, JoinAlgorithm, ReplacementPolicyName, Row, SqlValue } from '../src/engine/types.ts';
-import { crossKeysOf, renderRef } from './model.ts';
+import { crossKeysOf, renderAgg, renderRef } from './model.ts';
 import type { AggItem, Arith, ArithOp, ColSpec, ColType, ExistsSub, GroupOrderSpec, JoinStep, MemberSelect, Op, Pred, Query, ReadQuery, Ref, SubSelect, TableSpec, WriteQuery } from './model.ts';
 
 /* -------------------------------------------------------------------------- */
@@ -587,12 +587,17 @@ function aggregateOver(
   exists: fc.Arbitrary<Pred[]> = fc.constant([]),
 ): fc.Arbitrary<Query> {
   const numericRefs = refs.filter((r) => numeric(r.type));
-  const agg: fc.Arbitrary<AggItem> = fc.oneof(
+  const plainAgg: fc.Arbitrary<AggItem> = fc.oneof(
     fc.constant<AggItem>({ fn: 'COUNT', arg: '*' }),
     fc.constantFrom(...refs).map((arg): AggItem => ({ fn: 'COUNT', arg })),
     fc.tuple(fc.constantFrom('SUM', 'AVG'), fc.constantFrom(...numericRefs)).map(([fn, arg]): AggItem => ({ fn, arg })),
     fc.tuple(fc.constantFrom('MIN', 'MAX'), fc.constantFrom(...refs)).map(([fn, arg]): AggItem => ({ fn, arg })),
   );
+  // One column argument in four is DISTINCT (plan.md §27.5 S5) — the collision-heavy pools make repeats, and NULLs,
+  // common enough that a DISTINCT aggregate rarely equals its plain one.
+  const agg: fc.Arbitrary<AggItem> = fc
+    .tuple(plainAgg, fc.integer({ min: 0, max: 3 }))
+    .map(([a, n]): AggItem => (a.arg !== '*' && n === 0 ? { ...a, distinct: true } : a));
   const groupCandidates = refs.filter((r) => r.type !== 'real'); // grouping by a REAL is legal but adds nothing the others don't
   // HAVING (plan.md §25.4 B2): a predicate over the groups. Its aggregates need not be in the SELECT list, and its
   // plain columns must be grouped ones — so the leaves are drawn from the group columns chosen *for this query*.
@@ -626,7 +631,7 @@ function aggregateOver(
       { weight: 1, arbitrary: leaf.map((p): Pred => ({ k: 'not', p })) },
     );
   };
-  const aggKey = (a: AggItem): string => `${a.fn}(${a.arg === '*' ? '*' : renderRef(a.arg)})`;
+  const aggKey = renderAgg;
   const dirArb = fc.constantFrom<'asc' | 'desc'>('asc', 'desc');
   // ORDER BY over the groups (plan.md §26 Feature 1, slice a): a grouped column — shown or not — or any aggregate,
   // selected or not. With a LIMIT this is "the top n groups", which is what the order is for.

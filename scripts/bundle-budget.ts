@@ -385,6 +385,10 @@ const T = (name: string): string => `src/pages/tools/${name}.tsx`;
  *    compound parser, planner, runner and set-operation operator, with their narration — and the docs chunk 1.4 kB with
  *    the reference's new section (the shop preset, S2, added nothing to either). The 28 routes that went over were
  *    raised, each to its measured size + 3, rounded up (/playground 343 → 348, /docs 170 → 174).
+ *  - 2026-10-19, `COUNT(DISTINCT x)` (plan.md §27.5 S5): the challenge data, which S4's lesson and challenge had
+ *    already filled to within a kilobyte of three ceilings, gained *Count each customer once*, and the engine its
+ *    DISTINCT aggregation and narration. The three that went over were raised, each to its measured size + 3, rounded
+ *    up: /learn/:id 197 → 201 (197.3), /challenges 190 → 194 (190.6), /challenges/:id 311 → 315 (311.5).
  */
 export const ROUTES: readonly RouteBudget[] = [
   { route: '/', roots: [P('LandingPage')], kb: 173, note: 'the landing page' },
@@ -392,15 +396,15 @@ export const ROUTES: readonly RouteBudget[] = [
   { route: '/stages', roots: ['src/ui/StagesLayout.tsx', P('StagesIndex')], kb: 173, note: 'the stage explainers, index' },
   { route: '/stages/:id', roots: ['src/ui/StagesLayout.tsx', P('StagePage')], kb: 209, note: 'one stage explainer' },
   { route: '/learn', roots: [P('LearnPage')], kb: 113, note: 'the lesson track' },
-  { route: '/learn/:id', roots: [P('LessonPage')], kb: 197, note: 'one lesson' },
+  { route: '/learn/:id', roots: [P('LessonPage')], kb: 201, note: 'one lesson' },
   { route: '/examples', roots: [P('ExamplesPage')], kb: 110, note: 'preset queries' },
   { route: '/gallery', roots: [P('GalleryPage')], kb: 173, note: 'named moments' },
   { route: '/compare', roots: [P('ComparePage')], kb: 185, note: 'index vs scan, policy vs policy, hash vs sort, join algorithms, B+Tree vs. LSM' },
   { route: '/trace', roots: [P('TracePage')], kb: 176, note: 'the trace inspector' },
   { route: '/progress', roots: [P('ProgressPage')], kb: 116, note: 'the progress dashboard' },
   { route: '/practice', roots: [P('PracticePage')], kb: 186, note: 'generated questions with engine-computed answers, and a Leitner schedule' },
-  { route: '/challenges', roots: [P('ChallengesPage')], kb: 190, note: 'challenge index' },
-  { route: '/challenges/:id', roots: [P('ChallengePage')], kb: 311, note: 'one challenge' },
+  { route: '/challenges', roots: [P('ChallengesPage')], kb: 194, note: 'challenge index' },
+  { route: '/challenges/:id', roots: [P('ChallengePage')], kb: 315, note: 'one challenge' },
   { route: '/settings', roots: [P('SettingsPage')], kb: 111, note: 'preferences' },
   { route: '/study', roots: [P('StudyPage')], kb: 117, note: 'the §9 study runner (unlisted); the instrument travels in the link, not the bundle (§25.4 A2)' },
   { route: '/assignments/new', roots: [P('AssignmentsNewPage')], kb: 174, note: 'assignment-link builder' },

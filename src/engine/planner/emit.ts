@@ -6,7 +6,7 @@ import { buildAggregatePlan, buildJoinPlan, buildPlan, buildSemiJoin, distinctNo
 import { estimatePlan, rootEstimate } from './cost.ts';
 import { costOfOrder, joinGraphFromAst, runJoinOrderDP, writtenOrderFromAst } from './joinOrder.ts';
 import { OPTIMIZER_RULES, leftmostPrefixNote, optimize } from './optimize.ts';
-import { exprToSql, joinsIn, subqueryResolutionNotes, toPlanDisplay } from './plan.ts';
+import { distinctSortColumn, exprToSql, joinsIn, subqueryResolutionNotes, toPlanDisplay } from './plan.ts';
 import type { Plan, ProjectList } from './plan.ts';
 
 /**
@@ -218,18 +218,36 @@ export function emitPlanEvents(
         ? current.aggregates.map((a) => a.key).join(', ')
         : '';
     const nodeName = aggregateStrategy === 'sort' ? 'SortAggregate' : 'HashAggregate';
+    // `COUNT(DISTINCT x)` (plan.md §27.5 S5): the hash strategy keeps a set per group; the sort strategy sorts on
+    // (group, x) instead, when one column is all its DISTINCT aggregates read.
+    const specs = current.op === 'HashAggregate' || current.op === 'SortAggregate' ? current.aggregates : [];
+    const distinctKeys = specs.filter((a) => a.distinct).map((a) => a.key);
+    const sortedOn = aggregateStrategy === 'sort' ? distinctSortColumn(specs) : null;
+    const sortKey = sortedOn === null ? groupBy : [...groupBy, sortedOn];
     const mechanism =
       aggregateStrategy === 'sort'
-        ? `by sorting on ${groupBy.join(', ') || 'nothing'} first — spilling through the buffer pool exactly as ORDER BY's Sort does — then collapsing runs of equal keys in one pass`
+        ? `by sorting on ${sortKey.join(', ') || 'nothing'} first — spilling through the buffer pool exactly as ORDER BY's Sort does — then collapsing runs of equal keys in one pass`
         : 'with a hash table keyed on the group';
+    const distinctNote =
+      distinctKeys.length === 0
+        ? ''
+        : aggregateStrategy === 'hash'
+          ? ` For ${distinctKeys.join(' and ')}, each group also keeps a set of the values it has seen, so a repeat counts once and a NULL never.`
+          : sortedOn !== null
+            ? ` For ${distinctKeys.join(' and ')}, ${groupBy.length > 0 ? `\`${sortedOn}\` joins the sort key, so within a group` : 'the sort puts'} equal values ${groupBy.length > 0 ? 'land ' : ''}side by side${groupBy.length > 0 ? ' and' : ', so'} a repeat is spotted against the value before it — no set to keep.`
+            : ` Its DISTINCT aggregates read different columns, and one sort cannot order both, so each keeps a set of the values seen, as a hash aggregate would.`;
     emit(
       groupBy.length > 0
         ? `GROUP BY becomes a ${nodeName} above that: rows are grouped by ${groupBy.join(', ')}${
             aggregateLabels ? `, computing ${aggregateLabels} per group` : ''
-          }, ${mechanism}. Like Sort, it cannot produce a row until it has seen every one — the last group is not known to be complete until the input runs out.`
+          }, ${mechanism}. Like Sort, it cannot produce a row until it has seen every one — the last group is not known to be complete until the input runs out.${distinctNote}`
         : `${aggregateLabels} becomes a ${nodeName} above that: with no GROUP BY, the whole ${ast.joins ? 'joined result' : 'table'} is one group, so it collapses every row into one${
-            aggregateStrategy === 'sort' ? ', sorting first even though there is only ever one group to produce' : ''
-          }. Like Sort, it cannot produce a row until it has seen all of them.`,
+            aggregateStrategy === 'sort'
+              ? sortedOn === null
+                ? ', sorting first even though there is only ever one group to produce'
+                : `, sorting on ${sortedOn} first`
+              : ''
+          }. Like Sort, it cannot produce a row until it has seen all of them.${distinctNote}`,
       { stage: 'plan', planTree: display(current) },
     );
   }

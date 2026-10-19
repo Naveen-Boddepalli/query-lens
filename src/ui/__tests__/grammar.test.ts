@@ -87,6 +87,7 @@ describe('grammar data — every rule is demonstrated by a query the real parser
     ['selectList — repeated selectItem', 'SELECT id, name, age FROM users'],
     ['selectItem — aggregateCall', 'SELECT COUNT(*) FROM users'],
     ['aggregateCall — every function', 'SELECT COUNT(id), SUM(age), AVG(age), MIN(age), MAX(age) FROM users'],
+    ['aggregateCall — DISTINCT', 'SELECT age, COUNT(DISTINCT name), SUM(DISTINCT id) FROM users GROUP BY age HAVING AVG(DISTINCT id) > 2'],
     ['expr', 'SELECT * FROM users WHERE id = 5'],
     ['orExpr — OR repeated', 'SELECT * FROM users WHERE id = 1 OR id = 2 OR id = 3'],
     ['andExpr — AND repeated', 'SELECT * FROM users WHERE id = 5 AND age > 1 AND age < 99'],

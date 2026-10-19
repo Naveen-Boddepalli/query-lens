@@ -33,6 +33,20 @@ export interface AggregateSpec {
   fn: AggregateFn;
   /** The column it reads, or `null` only for `COUNT(*)`. */
   column: string | null;
+  /** `COUNT(DISTINCT x)` (plan.md §27.5 S5): each distinct non-NULL value of `column` counts once. */
+  distinct?: boolean;
+}
+
+/**
+ * The column a `SortAggregate` sorts on after its groups (plan.md §27.5 S5). When every DISTINCT aggregate reads one
+ * column, sorting on (group, value) puts equal values side by side, so each counts only where it differs from the one
+ * before — no set of seen values. `null` with no DISTINCT aggregate, or with two reading different columns: one sort
+ * cannot order both, so those keep a set, as the hash strategy always does.
+ */
+export function distinctSortColumn(aggregates: readonly AggregateSpec[]): string | null {
+  const columns = new Set(aggregates.filter((a) => a.distinct).map((a) => a.column));
+  const [only] = columns;
+  return columns.size === 1 && only !== undefined ? only : null;
 }
 
 export type Plan =
@@ -697,12 +711,18 @@ function convertBody(
         id,
         op: plan.op,
         label: plan.op,
-        detail:
+        detail: `${
           plan.groupBy.length > 0
             ? `GROUP BY ${plan.groupBy.join(', ')}${
                 plan.aggregates.length > 0 ? `; ${plan.aggregates.map((a) => a.key).join(', ')}` : ''
               }`
-            : plan.aggregates.map((a) => a.key).join(', '),
+            : plan.aggregates.map((a) => a.key).join(', ')
+        }${
+          // A sort strategy's DISTINCT column joins its sort key (plan.md §27.5 S5) — said on the node, where it shows.
+          plan.op === 'SortAggregate' && distinctSortColumn(plan.aggregates) !== null
+            ? `; sorted on ${[...plan.groupBy, distinctSortColumn(plan.aggregates)!].join(', ')}`
+            : ''
+        }`,
         ...(highlight ? { highlight } : {}),
         ...cost,
         children: kid(plan.child),

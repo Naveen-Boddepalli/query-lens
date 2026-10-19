@@ -19,7 +19,7 @@ import { runQuery } from '../src/engine/runQuery.ts';
 import { optionsArb, sessionArb } from './generate.ts';
 import { toDatabase } from './harness.ts';
 import { applyWrite } from './harness.ts';
-import { isWrite, renderQuery, walkPred } from './model.ts';
+import { isWrite, renderQuery, renderRef, walkPred } from './model.ts';
 import type { TableSpec } from './model.ts';
 
 const N = 3000;
@@ -92,6 +92,11 @@ describe('the generators reach what the oracle is meant to check', () => {
     newJoins: new Map<string, number>(),
     selfCompounds: 0,
     orderedCompounds: 0,
+    /**
+     * Aggregate reads with a DISTINCT aggregate in the SELECT list or ORDER BY that returned rows (plan.md §27.5 S5), by
+     * strategy and whether they group — and ones whose DISTINCT aggregates read two columns, which one sort cannot order.
+     */
+    distinctAggregates: new Map<string, number>(),
   };
   // Compounds are rare in the mixed sessions on purpose; their coverage is sampled from their own generator.
   for (const [{ tables: initial, steps }, options] of fc.sample(fc.tuple(sessionArb('compound'), optionsArb), { seed: COVERAGE_SEED, numRuns: N / 3 })) {
@@ -211,6 +216,15 @@ describe('the generators reach what the oracle is meant to check', () => {
           stats.orderedGroups.set(key, (stats.orderedGroups.get(key) ?? 0) + 1);
         }
         if (q.kind === 'aggregate' && q.group.length > 0) stats.aggregates.set(options.aggregateStrategy ?? 'hash', (stats.aggregates.get(options.aggregateStrategy ?? 'hash') ?? 0) + (result.rows.length > 0 ? 1 : 0));
+        if (q.kind === 'aggregate' && result.rows.length > 0) {
+          const read = [...q.aggs, ...(q.order?.by.k === 'agg' ? [q.order.by.agg] : [])];
+          const columns = new Set(read.flatMap((a) => (a.distinct && a.arg !== '*' ? [renderRef(a.arg)] : [])));
+          if (columns.size > 0) {
+            const key = `${options.aggregateStrategy ?? 'hash'}:${q.group.length > 0 ? 'grouped' : 'whole'}`;
+            stats.distinctAggregates.set(key, (stats.distinctAggregates.get(key) ?? 0) + 1);
+            if (columns.size > 1) stats.distinctAggregates.set('two-columns', (stats.distinctAggregates.get('two-columns') ?? 0) + 1);
+          }
+        }
       }
     }
   }
@@ -336,6 +350,14 @@ describe('the generators reach what the oracle is meant to check', () => {
     for (const key of ['cross', 'cross:comma', 'cross:keyed', 'cross:comma:keyed']) {
       expect(stats.newJoins.get(key) ?? 0, `joins with ${key}`).toBeGreaterThan(5);
     }
+  });
+
+  it('runs DISTINCT aggregates to rows under both strategies, grouped and not, and over two columns (plan.md §27.5 S5)', () => {
+    // Measured with the fixed seed above: 32–42 per strategy and shape, 27 reading two DISTINCT columns.
+    for (const key of ['hash:grouped', 'hash:whole', 'sort:grouped', 'sort:whole']) {
+      expect(stats.distinctAggregates.get(key) ?? 0, `DISTINCT aggregates, ${key}`).toBeGreaterThan(15);
+    }
+    expect(stats.distinctAggregates.get('two-columns') ?? 0, 'DISTINCT aggregates over two columns').toBeGreaterThan(12);
   });
 
   it('runs every set operator to rows, UNION under both distinct strategies, a table against itself, and ordered (plan.md §27.5 S3)', () => {

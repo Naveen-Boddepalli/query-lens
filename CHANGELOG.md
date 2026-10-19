@@ -11,6 +11,20 @@ Work toward **v3** (plan.md §27), on the branch `version/v3`.
 
 ### Added
 
+- **`COUNT(DISTINCT x)`, and `SUM`/`AVG`/`MIN`/`MAX` with `DISTINCT`** (plan.md §27.5 S5) — each distinct non-NULL value
+  of the column once, in the SELECT list, in `HAVING` and as the `ORDER BY` key, grouped or not, over joins and inside
+  a compound. Two values are one exactly when `SELECT DISTINCT` would say so. The hash aggregate keeps a set of the
+  values each group has seen; the sort aggregate adds the column to its sort key — (group, value) — so a repeat sits
+  right after what it repeats and is spotted against the value before it, with no set at all, unless two `DISTINCT`
+  aggregates read different columns, which one sort cannot order (then it keeps sets too, and says why). The plan says
+  which, the sort node's detail reads *sorted on customerId, productId*, and the trace counts what each read and kept
+  (*COUNT(DISTINCT customerId) read 38 values and kept 9*). `COUNT(DISTINCT *)` is refused as the invalid SQL it is.
+  The grammar diagram, the parse tree, the algebra view's γ and EXPLAIN all show it. The challenge **Count each
+  customer once** (`/challenges/count-each-once`) starts from `COUNT(customerId)`'s 38 and wants the 9 — not the 10
+  rows `SELECT DISTINCT customerId` returns, one of them the guests' NULL. `shop` gains a *COUNT(DISTINCT)* chip and
+  [Compare](/compare)'s aggregate mode a *COUNT(DISTINCT …) per group* query. Checked by 24 unit tests (each of nine
+  mutations of the new code fails at least one), an e2e test, and the SQLite oracle, which now makes one column
+  aggregate in four `DISTINCT`, in the SELECT list, `HAVING` and `ORDER BY`; three 10,000-case seeds are clean.
 - **`RIGHT [OUTER] JOIN`, `FULL [OUTER] JOIN`, `CROSS JOIN` and `FROM a, b`** (plan.md §27.5 S4) — the joins a
   textbook writes, ⟖ ⟗ and ×. `RIGHT` keeps every row of the table it introduces and pads every column of the rows so
   far with NULL; `FULL` keeps both sides, each unmatched row exactly once; a chain mixes them with inner and `LEFT`
@@ -98,6 +112,9 @@ Work toward **v3** (plan.md §27), on the branch `version/v3`.
 
 ### Fixed
 
+- **The FAQ's "What SQL is missing?" was two releases stale.** It still listed subqueries, outer joins, more than one
+  `JOIN`, `UNION` and `COUNT(DISTINCT …)` as missing; it now lists what is: scalar subqueries, table aliases, window
+  functions, CTEs and `SELECT *, expr`.
 - **On a phone, a docs heading reached by its anchor landed under the sticky header.** The header wraps to about 167px
   at 360px wide, and headings kept only a fixed `5rem` clear of the top, so a jump left the heading 80px down — behind
   it. The page now pads its scroll area by the header's measured height (WCAG 2.4.11's technique C43), so anything

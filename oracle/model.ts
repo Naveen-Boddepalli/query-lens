@@ -147,6 +147,8 @@ export type AggFn = 'COUNT' | 'SUM' | 'AVG' | 'MIN' | 'MAX';
 export interface AggItem {
   fn: AggFn;
   arg: Ref | '*';
+  /** `COUNT(DISTINCT x)` (plan.md §27.5 S5): only ever on a column argument. */
+  distinct?: boolean;
 }
 
 export interface OrderSpec {
@@ -301,7 +303,7 @@ export function walkPred(p: Pred, visit: (p: Pred) => void): void {
 export const renderWhere = (where: readonly Pred[]): string =>
   where.length === 0 ? '' : ` WHERE ${where.map(renderPred).join(' AND ')}`;
 
-const renderAgg = (a: AggItem): string => `${a.fn}(${a.arg === '*' ? '*' : renderRef(a.arg)})`;
+export const renderAgg = (a: AggItem): string => `${a.fn}(${a.arg === '*' ? '*' : `${a.distinct ? 'DISTINCT ' : ''}${renderRef(a.arg)}`})`;
 
 /** The key an ORDER BY sorts on, as the SELECT list names it — `null` without one. */
 export function orderKeyOf(q: ReadQuery): string | null {

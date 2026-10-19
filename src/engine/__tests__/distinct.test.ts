@@ -62,10 +62,11 @@ describe('parsing', () => {
     expect(!out.ok && out.error.hint).toMatch(/no one value to sort it by/);
   });
 
-  it('a stray DISTINCT names the two places it is supported and not', () => {
+  it('a stray DISTINCT names the two places it goes: the SELECT list, and an aggregate’s argument', () => {
     const out = parse('SELECT a, DISTINCT b FROM t');
     expect(!out.ok && out.error.hint).toMatch(/SELECT DISTINCT a, b/);
-    expect(parse('SELECT COUNT(DISTINCT a) FROM t').ok).toBe(false);
+    expect(!out.ok && out.error.hint).toMatch(/COUNT\(DISTINCT x\)/);
+    expect(parse('SELECT COUNT(DISTINCT a) FROM t').ok).toBe(true);
   });
 });
 

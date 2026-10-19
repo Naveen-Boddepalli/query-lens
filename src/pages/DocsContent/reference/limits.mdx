@@ -213,10 +213,13 @@ concept explanation.
 
 ## GROUP BY and aggregates
 
-- `COUNT(*)`, and `COUNT`/`SUM`/`AVG`/`MIN`/`MAX` over a column.
+- `COUNT(*)`, and `COUNT`/`SUM`/`AVG`/`MIN`/`MAX` over a column — each with `DISTINCT` if you like (plan.md §27.5
+  S5), which reads each distinct non-NULL value once.
 - **Two strategies** — a hash aggregate (default) and a sort aggregate, which sorts the input on
   the `GROUP BY` columns first, spilling through the buffer pool exactly as `ORDER BY` does. Same
-  groups out either way; [Compare](/compare)'s aggregate mode scores the difference in I/O.
+  groups out either way; [Compare](/compare)'s aggregate mode scores the difference in I/O. For a `DISTINCT`
+  aggregate the hash one keeps a set of values per group, and the sort one adds the column to its sort key — (group,
+  value) — so repeats sit together; two `DISTINCT` aggregates over different columns make it keep sets as well.
 - **`ORDER BY` sorts the groups**, by a grouped column or an aggregate, in a `Sort` above the aggregate. It is
   never dropped, even when a sort aggregate has already left the groups in that order: the plan stays a literal
   reading of the query. A sort aggregate and the `Sort` above it each spill to scratch pages of their own.
@@ -486,7 +489,6 @@ S1 — correlated through one equality, as a semi- or anti-join): no scalar subq
 correlated subquery outside `EXISTS`. A SELECT list may not name one column twice (`SELECT n, n`): a result row is
 keyed by column name, so the second would overwrite the first. No `USING` or `NATURAL` join, no transactions in
 the Playground (they exist only in [Transaction schedules](/tools/schedule)), no real
-concurrency there (the Locks panel is visual only). `COUNT(DISTINCT …)`, `INTERSECT ALL` and `EXCEPT ALL` are also
-not accepted.
+concurrency there (the Locks panel is visual only). `INTERSECT ALL` and `EXCEPT ALL` are also not accepted.
 These are deliberate exclusions for this release, not bugs — see the parser's own error messages in
 [Supported SQL](/docs/reference/sql) for exactly which keywords are recognised and rejected.

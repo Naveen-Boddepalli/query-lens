@@ -107,8 +107,14 @@ export interface SemiJoinClause {
   source: Expr;
 }
 
-/** What an aggregate reads: `*` (only `COUNT`) or one column. */
-export type AggregateArg = { kind: 'star'; span: Span } | { kind: 'column'; name: string; table?: string; span: Span };
+/**
+ * What an aggregate reads: `*` (only `COUNT`) or one column — each distinct non-NULL value of it once, with `distinct`
+ * (`COUNT(DISTINCT x)`, plan.md §27.5 S5). The quantifier belongs to the argument, as in SQL's own grammar, so every
+ * key printed from an argument (`aggregateKeyOf`) carries it.
+ */
+export type AggregateArg =
+  | { kind: 'star'; span: Span }
+  | { kind: 'column'; name: string; table?: string; distinct?: boolean; span: Span };
 
 
 /** The aggregate functions v0 supports (plan.md §22.2). */
@@ -135,11 +141,6 @@ export type SelectItem =
 /** A qualified reference's row key — `authors.id` — or the bare name when unqualified. */
 export function columnKey(ref: { name: string; table?: string }): string {
   return ref.table ? `${ref.table}.${ref.name}` : ref.name;
-}
-
-/** The row key an aggregate reads, or `null` for `COUNT(*)`. */
-export function selectItemArgColumn(item: Extract<SelectItem, { kind: 'aggregate' }>): string | null {
-  return item.arg.kind === 'star' ? null : columnKey(item.arg);
 }
 
 /** Canonical display key for a SELECT item — its own name, or e.g. `COUNT(*)`, `SUM(age)`. */
@@ -175,9 +176,9 @@ export interface InSubquery {
 }
 
 /**
- * `[INNER | LEFT [OUTER]] JOIN table ON t1.col = t2.col` (plan.md §22.2, `LEFT` since §25.4 C3). `on` is always a
- * single equality between one qualified column from each side — checked at parse time (`checkJoinOn`), so the
- * planner never has to. `RIGHT`/`FULL`/`CROSS` stay out of scope. `ORDER BY`, `GROUP BY`, `HAVING` and aggregates
+ * `[INNER | LEFT [OUTER]] JOIN table ON t1.col = t2.col` (plan.md §22.2, `LEFT` since §25.4 C3; `RIGHT`, `FULL` and
+ * `CROSS` since §27.5 S4). `on` is always a single equality between one qualified column from each side — checked at
+ * parse time (`checkJoinOn`), so the planner never has to — and absent only on a cross join. `ORDER BY`, `GROUP BY`, `HAVING` and aggregates
  * all work over the joined rows (plan.md §26 Feature 1, slices b and c), each column qualified.
  *
  * A `SelectStatement` may chain several of these (plan.md §25.4 C3 slice b), left-deep: `FROM a JOIN b ON … JOIN c

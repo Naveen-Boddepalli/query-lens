@@ -16,7 +16,7 @@ export {
   toDisplayTree,
   updateDisplayTree,
 } from './display.ts';
-export { aggregateKeyOf, childrenOf, columnKey, columnsIn, mapChildren, selectItemArgColumn, selectItemKey, walkExpr } from './ast.ts';
+export { aggregateKeyOf, childrenOf, columnKey, columnsIn, mapChildren, selectItemKey, walkExpr } from './ast.ts';
 export type {
   AggregateArg,
   AggregateFn,

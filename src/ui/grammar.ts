@@ -167,12 +167,13 @@ export const GRAMMAR: GrammarRule[] = [
     name: 'selectItem',
     parts: [choice([rule('aggregateCall')], [rule('expr'), opt(lit('AS'), rule('identifier'))])],
   },
+  // DISTINCT inside the call since plan.md §27.5 S5: each distinct non-NULL value of the column once.
   {
     name: 'aggregateCall',
     parts: [
       choice([lit('COUNT')], [lit('SUM')], [lit('AVG')], [lit('MIN')], [lit('MAX')]),
       lit('('),
-      choice([lit('*')], [rule('qualifiedColumn')]),
+      choice([lit('*')], [opt(lit('DISTINCT')), rule('qualifiedColumn')]),
       lit(')'),
     ],
   },
