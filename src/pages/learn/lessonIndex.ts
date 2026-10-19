@@ -285,6 +285,12 @@ export const LESSON_GROUPS: readonly LessonGroup[] = [
         minutes: 5,
         summary: 'Spread a table over four nodes, add a fifth, and count the rows that have to move under each scheme.',
       },
+      {
+        id: 'two-phase-commit',
+        title: 'Two-phase commit: in doubt',
+        minutes: 6,
+        summary: 'Every machine commits or none does: votes, one log record that decides, and the wait when the coordinator fails.',
+      },
     ],
   },
 ];

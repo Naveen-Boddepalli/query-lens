@@ -135,6 +135,13 @@ const TOOLS = [
     available: true,
   },
   {
+    title: 'Two-phase commit',
+    href: '/tools/2pc',
+    description:
+      'A coordinator and its participants commit one transaction across machines, with presumed abort. Crash the coordinator at any point of the protocol, crash a participant, or lose a message, and watch who is left in doubt — voted yes, holding locks, waiting to be told — and for how long.',
+    available: true,
+  },
+  {
     title: 'LSM tree',
     href: '/tools/lsm',
     description:

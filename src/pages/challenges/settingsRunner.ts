@@ -29,6 +29,7 @@ const LOADERS: Record<SettingsTool, () => Promise<{ CHECKERS: Checkers }>> = {
   histograms: () => import('./settings/histograms.ts'),
   parallel: () => import('./settings/parallel.ts'),
   partitioning: () => import('./settings/partitioning.ts'),
+  'two-phase-commit': () => import('./settings/two-phase-commit.ts'),
   page: () => import('./settings/page.ts'),
   'hash-index': () => import('./settings/hash-index.ts'),
   lsm: () => import('./settings/lsm.ts'),

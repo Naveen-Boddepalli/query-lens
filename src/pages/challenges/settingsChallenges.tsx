@@ -29,6 +29,7 @@ export type SettingsTool =
   | 'histograms'
   | 'parallel'
   | 'partitioning'
+  | 'two-phase-commit'
   | 'page'
   | 'hash-index'
   | 'lsm'
@@ -394,6 +395,50 @@ export const SETTINGS_CHALLENGES: SettingsChallenge[] = [
         An even spread is all a partitioning scheme needs. All three can spread rows evenly; what tells them apart is
         what a change costs. Hash moves nearly everything, range moves little but unevenly, and consistent hashing moves
         about one node&rsquo;s fair share — once each node has enough points on the ring.
+      </>
+    ),
+  },
+  {
+    id: 'commit-after-the-wait',
+    title: 'Commit after the wait',
+    group: 'transactions',
+    tool: 'two-phase-commit',
+    brief: (
+      <>
+        Three participants, every one voting yes. Crash the coordinator somewhere in the protocol, and bring it back
+        after some ticks, so that the participants spend at least ten ticks in doubt — voted, locks held, not yet told —
+        and still all commit in the end.
+      </>
+    ),
+    hint: (
+      <>
+        After a crash, the coordinator decides by what its log says. Which crash leaves COMMIT in the log, and which
+        leaves nothing — so that recovery presumes abort?
+      </>
+    ),
+    needs: 'every participant committed, after at least 10 ticks in doubt',
+    controls: [
+      {
+        kind: 'select',
+        key: 'crash',
+        label: 'The coordinator crashes',
+        options: [
+          { value: 'none', label: 'never' },
+          { value: 'before-prepare', label: 'before sending PREPARE' },
+          { value: 'after-prepare', label: 'after sending PREPARE' },
+          { value: 'after-votes', label: 'with every vote in, before deciding' },
+          { value: 'after-decision', label: 'after logging COMMIT, before sending it' },
+          { value: 'after-first-commit', label: 'after sending COMMIT to the first participant' },
+        ],
+      },
+      { kind: 'number', key: 'recover', label: 'Ticks until it recovers (0: never)', min: 0, max: 40 },
+    ],
+    starter: { crash: 'after-votes', recover: '10' },
+    misconception: (
+      <>
+        A participant that voted yes has committed. It has only promised to: until the coordinator writes COMMIT, the
+        transaction can still abort — a crash a moment before that write ends in abort, a moment after in commit, and the
+        participants wait the same either way.
       </>
     ),
   },

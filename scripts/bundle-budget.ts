@@ -433,6 +433,11 @@ const T = (name: string): string => `src/pages/tools/${name}.tsx`;
  *    progress marks (`learnProgress`, 3.4 kB), and the lessons themselves in /learn/:id: /playground 352 → 356, /learn/:id
  *    205 → 209, /compare 189 → 193, /trace 180 → 184, /practice 189 → 193, /tools/latch-crabbing 179 → 183, each
  *    measured + 3, rounded up. (The lesson links the tool through `partitionLinks.ts`, which carries none of the model.)
+ *  - 2026-10-19, two-phase commit (plan.md §27.5 X2): /tools/2pc is a new route, 113.0 kB → 116, its challenge's checks
+ *    3.4 → 7. Its route put the entry chunk at the 24 kB cap again; the simple pages are a table now too (`PAGES`), and
+ *    the footer — below the fold, with the docs navigation it maps — is fetched after the page instead of with the
+ *    shell: a new opt-in row, 2.0 kB → 5, and the entry chunk is 22.8 kB. That also pulled /challenges, /challenges/:id
+ *    and /tools/planner, each 0.1 kB over, back under.
  */
 export const ROUTES: readonly RouteBudget[] = [
   { route: '/', roots: [P('LandingPage')], kb: 177, note: 'the landing page' },
@@ -468,6 +473,7 @@ export const ROUTES: readonly RouteBudget[] = [
   { route: '/tools/grammar', roots: [T('GrammarToolPage')], kb: 112, note: 'the SQL grammar diagram' },
   { route: '/tools/hash-join', roots: [T('HashJoinToolPage')], kb: 114, note: 'Grace hash join' },
   { route: '/tools/join-order', roots: [T('JoinOrderToolPage')], kb: 183, note: 'Selinger join-order search over the subset lattice' },
+  { route: '/tools/2pc', roots: [T('TwoPhaseCommitToolPage')], kb: 116, note: 'two-phase commit with presumed abort; crashes and lost messages scripted (plan.md §27.5 X2)' },
   { route: '/tools/partitioning', roots: [T('PartitioningToolPage')], kb: 119, note: 'partitioning by hash, range and consistent hashing; rows moved when a node joins or leaves (plan.md §27.5 X1)' },
   { route: '/tools/parallel', roots: [T('ParallelToolPage')], kb: 136, note: 'morsel-driven parallel execution and exchange operators, worker speeds scripted (plan.md §27.5 P1)' },
   { route: '/tools/histograms', roots: [T('HistogramToolPage')], kb: 182, note: 'equi-depth histograms: ANALYZE with a bucket count, and a range estimate’s q-error (plan.md §27.5 T5)' },
@@ -494,6 +500,7 @@ const SETTINGS_TOOL_CHECKS: readonly (readonly [string, number, string])[] = [
   ['sort', 6, 'the external merge sort driver'],
   ['hash-join', 6, 'the Grace hash join driver'],
   ['join-order', 4, 'the join-order graph and the Selinger search'],
+  ['two-phase-commit', 7, 'the two-phase commit model (plan.md §27.5 X2)'],
   ['partitioning', 6, 'the partitioning model and the transactions preset (plan.md §27.5 X1)'],
   ['parallel', 9, 'the morsel and exchange models and the transactions preset (plan.md §27.5 P1)'],
   ['histograms', 5, 'the histogram columns, ANALYZE and the range estimate (plan.md §27.5 T5)'],
@@ -520,6 +527,7 @@ export const OPT_IN: readonly { key: string; kb: number; note: string; after?: s
   { key: '_html-to-image', kb: 8, note: 'panel PNG export (§20.3) — fetched on the first click of Download PNG' },
   { key: 'src/perf/inp.ts', kb: 2, note: 'the opt-in INP recorder for the §9 study (§25.4 A6) — fetched only after a participant opts in' },
   { key: 'src/ui/WorkspaceDialog.tsx', kb: 6, after: 'src/pages/PlaygroundPage.tsx', note: 'the Workspaces dialog (§H7) — fetched only when Custom mode\'s Workspaces button is pressed' },
+  { key: 'src/ui/Footer.tsx', kb: 5, after: 'index.html', note: 'the footer and the docs navigation it maps — below the fold on every page, so fetched after the page itself, not with the shell (§25.4 H8)' },
   { key: 'src/ui/ParallelCompare.tsx', kb: 9, after: 'src/pages/ComparePage.tsx', note: 'Compare’s serial-against-parallel mode (plan.md §27.5 P3): the morsel model and its scaling table — fetched only when that mode is chosen' },
   { key: 'src/ui/DurabilityDialog.tsx', kb: 17, after: 'src/pages/PlaygroundPage.tsx', note: 'the Durability dialog (§25.4 E4): the write-ahead-log machine, crash and recovery — fetched only when the Playground\'s Durability button is pressed' },
   { key: 'src/pages/challenges/ScriptChallengeView.tsx', kb: 35, after: 'src/pages/ChallengePage.tsx', note: 'a transaction or durability challenge: the schedule runner, the protocol comparison and the log machine — fetched only when one of those challenges is opened' },

@@ -62,9 +62,20 @@ function IndexRoute() {
 const StagesLayout = page(() => import('./ui/StagesLayout.tsx'), 'StagesLayout');
 const StagesIndex = page(() => import('./pages/StagesIndex.tsx'), 'StagesIndex');
 const StagePage = page(() => import('./pages/StagePage.tsx'), 'StagePage');
-const ExamplesPage = page(() => import('./pages/ExamplesPage.tsx'), 'ExamplesPage');
-const GalleryPage = page(() => import('./pages/GalleryPage.tsx'), 'GalleryPage');
 const ToolsIndexPage = page(() => import('./pages/ToolsIndexPage.tsx'), 'ToolsIndexPage');
+/** The pages with no nested routes, by path, each its own lazy chunk: a table for the same reason as `TOOL_PAGES`. */
+const PAGES: Record<string, ComponentType> = {
+  examples: page(() => import('./pages/ExamplesPage.tsx'), 'ExamplesPage'),
+  gallery: page(() => import('./pages/GalleryPage.tsx'), 'GalleryPage'),
+  compare: page(() => import('./pages/ComparePage.tsx'), 'ComparePage'),
+  trace: page(() => import('./pages/TracePage.tsx'), 'TracePage'),
+  progress: page(() => import('./pages/ProgressPage.tsx'), 'ProgressPage'),
+  practice: page(() => import('./pages/PracticePage.tsx'), 'PracticePage'),
+  settings: page(() => import('./pages/SettingsPage.tsx'), 'SettingsPage'),
+  study: page(() => import('./pages/StudyPage.tsx'), 'StudyPage'),
+  'assignments/new': page(() => import('./pages/AssignmentsNewPage.tsx'), 'AssignmentsNewPage'),
+};
+
 /** Every tool page, by its path under `/tools`, each its own lazy chunk. A table, not 22 routes written out: the
  *  entry chunk every page pays carries it (plan.md §25.4 H8 keeps that under 24 kB). */
 const TOOL_PAGES: Record<string, ComponentType> = {
@@ -86,25 +97,19 @@ const TOOL_PAGES: Record<string, ComponentType> = {
   histograms: page(() => import('./pages/tools/HistogramToolPage.tsx'), 'HistogramToolPage'),
   parallel: page(() => import('./pages/tools/ParallelToolPage.tsx'), 'ParallelToolPage'),
   partitioning: page(() => import('./pages/tools/PartitioningToolPage.tsx'), 'PartitioningToolPage'),
+  '2pc': page(() => import('./pages/tools/TwoPhaseCommitToolPage.tsx'), 'TwoPhaseCommitToolPage'),
   lsm: page(() => import('./pages/tools/LsmToolPage.tsx'), 'LsmToolPage'),
   'hash-index': page(() => import('./pages/tools/HashIndexToolPage.tsx'), 'HashIndexToolPage'),
   columnar: page(() => import('./pages/tools/ColumnarToolPage.tsx'), 'ColumnarToolPage'),
   'latch-crabbing': page(() => import('./pages/tools/LatchCrabbingToolPage.tsx'), 'LatchCrabbingToolPage'),
   'vector-index': page(() => import('./pages/tools/VectorIndexToolPage.tsx'), 'VectorIndexToolPage'),
 };
-const ComparePage = page(() => import('./pages/ComparePage.tsx'), 'ComparePage');
-const TracePage = page(() => import('./pages/TracePage.tsx'), 'TracePage');
 const LearnPage = page(() => import('./pages/LearnPage.tsx'), 'LearnPage');
-const ProgressPage = page(() => import('./pages/ProgressPage.tsx'), 'ProgressPage');
-const PracticePage = page(() => import('./pages/PracticePage.tsx'), 'PracticePage');
 const ChallengesPage = page(() => import('./pages/ChallengesPage.tsx'), 'ChallengesPage');
 const ChallengePage = page(() => import('./pages/ChallengePage.tsx'), 'ChallengePage');
 const LessonPage = page(() => import('./pages/LessonPage.tsx'), 'LessonPage');
-const SettingsPage = page(() => import('./pages/SettingsPage.tsx'), 'SettingsPage');
 // Unlisted (plan.md §25.4 A2): the §9 study kit's runner. Inert without a pack
 // in the link's fragment; not in `routes.ts`, so no nav or footer entry.
-const StudyPage = page(() => import('./pages/StudyPage.tsx'), 'StudyPage');
-const AssignmentsNewPage = page(() => import('./pages/AssignmentsNewPage.tsx'), 'AssignmentsNewPage');
 const NotFoundPage = page(() => import('./pages/NotFoundPage.tsx'), 'NotFoundPage');
 const DocsLayout = page(() => import('./ui/DocsLayout.tsx'), 'DocsLayout');
 
@@ -153,20 +158,14 @@ export default function App() {
               <Route index element={suspended(LearnPage)} />
               <Route path=":lessonId" element={suspended(LessonPage)} />
             </Route>
-
-            <Route path="examples" element={suspended(ExamplesPage)} />
-            <Route path="gallery" element={suspended(GalleryPage)} />
-            <Route path="compare" element={suspended(ComparePage)} />
-            <Route path="trace" element={suspended(TracePage)} />
-            <Route path="progress" element={suspended(ProgressPage)} />
-              <Route path="practice" element={suspended(PracticePage)} />
             <Route path="challenges">
               <Route index element={suspended(ChallengesPage)} />
               <Route path=":challengeId" element={suspended(ChallengePage)} />
             </Route>
-            <Route path="settings" element={suspended(SettingsPage)} />
-            <Route path="study" element={suspended(StudyPage)} />
-            <Route path="assignments/new" element={suspended(AssignmentsNewPage)} />
+
+            {Object.entries(PAGES).map(([path, Page]) => (
+              <Route key={path} path={path} element={suspended(Page)} />
+            ))}
 
             <Route path="tools">
               <Route index element={suspended(ToolsIndexPage)} />

@@ -368,6 +368,20 @@ index entries of the rows it touches.
   range partitioning by `id`, all on the last node. The hash is FNV-1a with MurmurHash3's finalizer, so alike strings
   land far apart on the ring. A property test holds that range and consistent hashing only ever move rows onto a
   joining node or off a leaving one. A node is a number: there is no network, no replication, and nothing fails.
+- **[Two-phase commit](/tools/2pc)** (plan.md §27.5 X2) runs one transaction's commit across a coordinator and 2
+  to 5 participants, with **presumed abort**, as a script: each participant's vote, a crash of the coordinator at one
+  of five points (before PREPARE, after it, with every vote in, after logging COMMIT, after telling one participant),
+  a crash of a participant before or after its vote, each back after some ticks or never, and one lost message. A
+  message takes a tick; one that reaches a machine that is down is lost too. A participant forces PREPARED before it
+  votes yes and is **in doubt** from then until it learns the decision; the coordinator forces COMMIT, which is the
+  moment of commit, and writes END once every acknowledgement is in. An abort is never forced or acknowledged: a
+  coordinator that recovers to a log with no decision has forgotten the transaction, and answers anyone who asks
+  with ABORT. Timers: votes 5 ticks, a participant's question every 4, COMMIT resent every 4, a participant that
+  never heard PREPARE gives up at tick 12, and the run ends at 60. The page draws each machine's lane, every message,
+  log write and crash, and each participant's time in doubt. Two property tests over random scripts hold it **atomic**
+  — no participant commits where another aborts, and none commits before the coordinator's COMMIT — and **live**
+  whenever every crashed machine comes back. A coordinator that logs COMMIT and never returns leaves every participant
+  in doubt for good: two-phase commit's blocking, drawn, not fixed (three-phase commit is not modelled).
 
 ## Locks
 

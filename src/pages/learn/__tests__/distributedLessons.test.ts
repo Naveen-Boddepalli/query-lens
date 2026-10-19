@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { PARTITION_LIMITS } from '../../../engine/partitioning.ts';
 import { PARTITION_LINK_LIMITS } from '../../../ui/partitionLinks.ts';
 import { partitionRun, readPartitionSettings } from '../../../ui/partitionPresets.ts';
+import { readTpcSettings } from '../../../ui/tpcLinks.ts';
+import { tpcRun } from '../../../ui/tpcRun.ts';
 import { DISTRIBUTED_SCENARIOS, distributedHref } from '../distributedScenarios.ts';
 import { LESSONS } from '../lessons.tsx';
 
@@ -11,16 +13,16 @@ const lesson = (id: string) => LESSONS.find((l) => l.id === id)!;
 
 describe('the distributed lessons link the tools as they are', () => {
   it('every step links a scenario, every scenario has a step, and each link reads back as itself', () => {
-    const used = new Set(['partitioning'].flatMap((id) => lesson(id).steps.map((s) => s.link!.href)));
+    const used = new Set(['partitioning', 'two-phase-commit'].flatMap((id) => lesson(id).steps.map((s) => s.link!.href)));
     const hrefs = Object.values(DISTRIBUTED_SCENARIOS).map((s) => distributedHref(s));
     expect([...used].sort()).toEqual([...hrefs].sort());
     expect(PARTITION_LINK_LIMITS).toEqual(PARTITION_LIMITS);
     for (const s of Object.values(DISTRIBUTED_SCENARIOS)) {
       const url = new URL(distributedHref(s), 'https://x');
-      expect(url.pathname).toBe('/tools/partitioning');
+      expect(url.pathname).toBe(`/tools/${s.tool}`);
       const { tool: _tool, ...settings } = s;
-      expect(readPartitionSettings(url.search)).toEqual(settings);
-      expect(s.nodes).toBeGreaterThanOrEqual(PARTITION_LIMITS.minNodes);
+      if (s.tool === 'partitioning') expect(readPartitionSettings(url.search)).toEqual(settings);
+      else expect(readTpcSettings(url.search)).toEqual(settings);
     }
   });
 });
@@ -46,5 +48,33 @@ describe('lesson: partitioning', () => {
   it('by account: 525/975/450/1,050 under hash, skew 1.40', () => {
     const r = partitionRun({ ...DISTRIBUTED_SCENARIOS.hashGrows, key: 'account', change: 'none' });
     expect([r.before.counts.join('/'), r.before.skew.toFixed(2)]).toEqual(['525/975/450/1050', '1.40']);
+  });
+});
+
+describe('lesson: two-phase commit', () => {
+  it('a clean commit: COMMIT logged at tick 2, every participant told at 3', () => {
+    const r = tpcRun(DISTRIBUTED_SCENARIOS.tpcCommit);
+    expect([r.decision?.outcome, r.decision?.t, r.final.map((f) => `${f.state}@${String(f.t)}`).join(',')]).toEqual(['commit', 2, 'committed@3,committed@3,committed@3']);
+  });
+
+  it('one no: the voter aborts at once, the rest are told ABORT, and nobody acknowledges', () => {
+    const r = tpcRun(DISTRIBUTED_SCENARIOS.tpcOneNo);
+    expect(r.final.every((f) => f.state === 'aborted')).toBe(true);
+    expect(r.messages.some((m) => m.kind === 'ACK')).toBe(false);
+  });
+
+  it('a crash after COMMIT is logged: 12 ticks in doubt, everyone commits at 13', () => {
+    const r = tpcRun(DISTRIBUTED_SCENARIOS.tpcAfterDecision);
+    expect([r.inDoubt.map((d) => d.to - d.from).join(','), r.final.map((f) => `${f.state}@${String(f.t)}`).join(',')]).toEqual(['12,12,12', 'committed@13,committed@13,committed@13']);
+  });
+
+  it('a crash before it: presumed abort, everyone aborts at 15', () => {
+    const r = tpcRun(DISTRIBUTED_SCENARIOS.tpcBeforeDecision);
+    expect(r.final.map((f) => `${f.state}@${String(f.t)}`).join(',')).toBe('aborted@15,aborted@15,aborted@15');
+  });
+
+  it('no recovery: every participant still in doubt at the end', () => {
+    const r = tpcRun(DISTRIBUTED_SCENARIOS.tpcNeverReturns);
+    expect(r.final.map((f) => f.state)).toEqual(['in doubt', 'in doubt', 'in doubt']);
   });
 });

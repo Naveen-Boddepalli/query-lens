@@ -89,7 +89,8 @@ test('the challenge index has the two groups and a count over all of them', asyn
   await expect(page.getByRole('heading', { name: 'Queries', level: 2 })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Transactions and durability', level: 2 })).toBeVisible();
   const section = page.getByRole('region', { name: 'Transactions and durability' });
-  await expect(section.getByRole('listitem')).toHaveCount(16);
+  // Sixteen, and two-phase commit's since plan.md §27.5 X2.
+  await expect(section.getByRole('listitem')).toHaveCount(17);
   await section.getByRole('link', { name: /Read a value that never existed/ }).click();
   await expect(page).toHaveURL(/\/challenges\/read-the-unreal$/);
   // Twenty-seven query challenges come first, then two lock scripts, so this one is the thirtieth.

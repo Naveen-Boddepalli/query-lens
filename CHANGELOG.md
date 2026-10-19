@@ -11,6 +11,17 @@ Work toward **v3** (plan.md §27), on the branch `version/v3`.
 
 ### Added
 
+- **Two-phase commit** (plan.md §27.5 X2) — a new tool, [Two-phase commit](/tools/2pc): a coordinator and two to
+  five participants commit one transaction with presumed abort, and you script what goes wrong — the votes, a crash
+  of the coordinator at one of five points or of a participant before or after voting, each back after some ticks or
+  never, and a lost message. The page draws each machine's lane with every message (lost ones crossed), every log
+  write and crash, and shades each participant's time in doubt; a table view lists it all. A crash after COMMIT is
+  logged keeps three participants in doubt for 12 ticks and then commits them; a crash a moment before, with nothing
+  logged, ends in a presumed abort; a coordinator that never comes back leaves them in doubt for good. Nine named
+  scenarios, a lesson, *Two-phase commit: in doubt*, and a challenge, *Commit after the wait*. Property tests over
+  random scripts hold the protocol atomic, and live whenever every crashed machine comes back. The tool-coverage test
+  now reads tool paths with digits in them.
+
 - **Partitioning** (plan.md §27.5 X1) — a new tool, [Partitioning](/tools/partitioning): the transactions preset's rows
   spread over two to ten nodes by **hash**, by **range**, or by **consistent hashing** with up to 64 virtual nodes each.
   Add a node or take one away, and the page counts the rows that move against the least any change must, draws each

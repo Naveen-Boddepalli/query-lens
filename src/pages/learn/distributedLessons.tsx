@@ -65,4 +65,69 @@ export const DISTRIBUTED_STEPS: Record<string, LessonStep[]> = {
       ),
     },
   ],
+  'two-phase-commit': [
+    {
+      heading: 'Everyone votes yes',
+      body: (
+        <>
+          The coordinator sends PREPARE to three participants. Each writes PREPARED to its log and votes yes — and from
+          that moment it is <em>in doubt</em>: it has promised to commit if told to, and may not abort on its own. All three
+          yeses in, the coordinator writes COMMIT at tick 2; that write is the commit. Each participant hears at tick 3, two
+          ticks after it voted.
+        </>
+      ),
+      link: to('tpcCommit', 'Open a clean commit'),
+    },
+    {
+      heading: 'One no is enough',
+      body: (
+        <>
+          The second participant votes no. It aborts at once — having never promised anything — and the coordinator,
+          hearing the no, decides ABORT. Under <em>presumed abort</em> it writes nothing it must force and asks for no
+          acknowledgements: if it forgets the transaction, the answer to anyone who asks is abort anyway.
+        </>
+      ),
+      link: to('tpcOneNo', 'Open a no vote'),
+    },
+    {
+      heading: 'A crash after the decision',
+      body: (
+        <>
+          The coordinator writes COMMIT and crashes before telling anyone. The participants voted yes, so they can only
+          wait — holding their locks — and ask, every four ticks, into silence. Ten ticks later the coordinator recovers,
+          finds COMMIT in its log, and sends it again: everyone commits at tick 13, after <strong>12</strong> ticks in
+          doubt.
+        </>
+      ),
+      link: to('tpcAfterDecision', 'Open the crash after the decision'),
+    },
+    {
+      heading: 'A crash before it',
+      body: (
+        <>
+          Crash the coordinator a moment earlier — every vote in, nothing yet written. It recovers to an empty log: no
+          decision was ever made, so it presumes abort, and tells each participant so when it asks. They wait just as long,
+          and then abort at tick 15. Whether a transaction committed is decided by one log record on one machine.
+        </>
+      ),
+      link: to('tpcBeforeDecision', 'Open the crash before the decision'),
+    },
+    {
+      heading: 'When the coordinator never comes back',
+      body: (
+        <>
+          The same crash after COMMIT, and no recovery. The participants are in doubt when the run ends, and would be
+          forever: they cannot commit, since they were never told; they cannot abort, since the coordinator may have
+          committed. This is why two-phase commit is called <em>blocking</em> — and why consensus (Raft, Paxos) exists.
+        </>
+      ),
+      link: to('tpcNeverReturns', 'Open the coordinator that never returns'),
+      tryThis: (
+        <>
+          Lose one participant&rsquo;s vote instead: the coordinator&rsquo;s five-tick timeout decides ABORT for everyone. Lose a
+          COMMIT: the coordinator sends it again until it is acknowledged.
+        </>
+      ),
+    },
+  ],
 };

@@ -1,8 +1,14 @@
+import { lazy, Suspense } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import { DisclaimerBanner } from './DisclaimerBanner.tsx';
 import { FirstVisitHint } from './FirstVisitHint.tsx';
 import { TopNav } from './TopNav.tsx';
-import { Footer } from './Footer.tsx';
+
+/**
+ * The footer is below the fold on every page, and carries the docs site's navigation: fetched after the page itself,
+ * not as part of the shell every route waits for (plan.md §25.4 H8 keeps that under 24 kB).
+ */
+const Footer = lazy(() => import('./Footer.tsx').then((m) => ({ default: m.Footer })));
 
 /**
  * Root layout shell — persistent across all pages: disclaimer bar, top nav, the
@@ -58,7 +64,11 @@ export function Layout() {
           <Outlet />
         </div>
       </div>
-      {!isStudy && <Footer />}
+      {!isStudy && (
+        <Suspense fallback={null}>
+          <Footer />
+        </Suspense>
+      )}
     </div>
   );
 }

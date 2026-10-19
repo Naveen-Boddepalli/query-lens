@@ -2268,3 +2268,28 @@ test('the partitioning tool counts the rows a new node moves under hash, range a
   await page.getByRole('button', { name: 'Show as table' }).first().click();
   await expect(page.getByRole('table').filter({ hasText: 'Before' })).toBeVisible();
 });
+
+test('the two-phase commit tool draws who is left in doubt, and a coordinator that never returns blocks them', async ({ page }) => {
+  await page.goto('/tools/2pc');
+  await expect(page.getByRole('heading', { name: 'Two-phase commit', exact: true })).toBeVisible();
+  await expect(page.getByRole('status')).toHaveText('The coordinator decided COMMIT at tick 2');
+  await expect(page.getByText(/The longest time in doubt: 12 ticks/)).toBeVisible();
+  await page.getByRole('button', { name: 'Coordinator crashes before deciding' }).click();
+  await expect(page.getByRole('status')).toHaveText('No decision was ever logged');
+  await expect(page.getByText(/P1 aborted at 15/)).toBeVisible();
+  await page.getByRole('button', { name: 'Coordinator never comes back' }).click();
+  await expect(page.getByText(/3 participants are still in doubt when the run ends/)).toBeVisible();
+  await expect.poll(() => page.url()).toContain('cr=0');
+  await page.getByRole('button', { name: 'Show as table' }).first().click();
+  await expect(page.getByRole('table').filter({ hasText: 'writes COMMIT to its log' })).toBeVisible();
+});
+
+test('commit after the wait: a crash after COMMIT is logged keeps them waiting, and still commits', async ({ page }) => {
+  await page.goto('/challenges/commit-after-the-wait');
+  await page.getByRole('button', { name: 'Run & check' }).click();
+  await expect(page.getByText(/Not there yet/)).toBeVisible();
+  await page.getByLabel('The coordinator crashes').selectOption('after-decision');
+  await page.getByRole('button', { name: 'Run & check' }).click();
+  await expect(page.getByText('✓ Solved.')).toBeVisible();
+  await expect(page.getByRole('link', { name: /Open this run in its tool/ })).toHaveAttribute('href', /\/tools\/2pc\?/);
+});
