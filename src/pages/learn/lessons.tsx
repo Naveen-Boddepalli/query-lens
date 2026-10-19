@@ -9,6 +9,7 @@ import { encodeShareState } from '../../ui/urlState.ts';
 import { LESSON_INDEX } from './lessonIndex.ts';
 import type { LessonMeta } from './lessonIndex.ts';
 import { SANDBOX_STEPS } from './sandboxLessons.tsx';
+import { DISTRIBUTED_STEPS } from './distributedLessons.tsx';
 import { EXECUTION_STEPS, STORAGE_STEPS } from './storageLessons.tsx';
 import { TRANSACTION_STEPS } from './transactionLessons.tsx';
 
@@ -815,6 +816,7 @@ const STEPS: Readonly<Record<string, LessonStep[]>> = {
   ...EXECUTION_STEPS,
   ...STORAGE_STEPS,
   ...TRANSACTION_STEPS,
+  ...DISTRIBUTED_STEPS,
 };
 
 /** The ids that have steps, whether or not the index lists them: what `lessonIndex.test.ts` holds against it. */

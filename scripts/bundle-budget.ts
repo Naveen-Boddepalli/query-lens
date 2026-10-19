@@ -427,20 +427,26 @@ const T = (name: string): string => `src/pages/tools/${name}.tsx`;
  *  - 2026-10-19, serial against parallel (plan.md §27.5 P3): Compare's new mode carries the morsel model, 4.5 kB that
  *    put /compare at 193.5 of 189. It is loaded only when chosen instead — a new opt-in chunk, 5.6 kB → 9 — and
  *    /compare is 188.9 again.
+ *  - 2026-10-19, partitioning (plan.md §27.5 X1): /tools/partitioning is a new route, 115.6 kB → 119, its checks 2.4
+ *    → 6. Its route put the entry chunk at 24.0 kB again, so the docs routes are a table too (`DOC_PAGES`): 23.9. The
+ *    new lesson group's titles and summaries live in the lesson manifest, a chunk nearly every page loads for its
+ *    progress marks (`learnProgress`, 3.4 kB), and the lessons themselves in /learn/:id: /playground 352 → 356, /learn/:id
+ *    205 → 209, /compare 189 → 193, /trace 180 → 184, /practice 189 → 193, /tools/latch-crabbing 179 → 183, each
+ *    measured + 3, rounded up. (The lesson links the tool through `partitionLinks.ts`, which carries none of the model.)
  */
 export const ROUTES: readonly RouteBudget[] = [
   { route: '/', roots: [P('LandingPage')], kb: 177, note: 'the landing page' },
-  { route: '/playground', roots: [P('PlaygroundPage')], kb: 352, note: 'the Playground: the editor, every stage panel, the engine — the heaviest route, and the one most people land on' },
+  { route: '/playground', roots: [P('PlaygroundPage')], kb: 356, note: 'the Playground: the editor, every stage panel, the engine — the heaviest route, and the one most people land on' },
   { route: '/stages', roots: ['src/ui/StagesLayout.tsx', P('StagesIndex')], kb: 177, note: 'the stage explainers, index' },
   { route: '/stages/:id', roots: ['src/ui/StagesLayout.tsx', P('StagePage')], kb: 213, note: 'one stage explainer' },
   { route: '/learn', roots: [P('LearnPage')], kb: 113, note: 'the lesson track' },
-  { route: '/learn/:id', roots: [P('LessonPage')], kb: 205, note: 'one lesson' },
+  { route: '/learn/:id', roots: [P('LessonPage')], kb: 209, note: 'one lesson' },
   { route: '/examples', roots: [P('ExamplesPage')], kb: 110, note: 'preset queries' },
   { route: '/gallery', roots: [P('GalleryPage')], kb: 178, note: 'named moments' },
-  { route: '/compare', roots: [P('ComparePage')], kb: 189, note: 'index vs scan, policy vs policy, hash vs sort, join algorithms, B+Tree vs. LSM' },
-  { route: '/trace', roots: [P('TracePage')], kb: 180, note: 'the trace inspector' },
+  { route: '/compare', roots: [P('ComparePage')], kb: 193, note: 'index vs scan, policy vs policy, hash vs sort, join algorithms, B+Tree vs. LSM' },
+  { route: '/trace', roots: [P('TracePage')], kb: 184, note: 'the trace inspector' },
   { route: '/progress', roots: [P('ProgressPage')], kb: 116, note: 'the progress dashboard' },
-  { route: '/practice', roots: [P('PracticePage')], kb: 189, note: 'generated questions with engine-computed answers, and a Leitner schedule' },
+  { route: '/practice', roots: [P('PracticePage')], kb: 193, note: 'generated questions with engine-computed answers, and a Leitner schedule' },
   { route: '/challenges', roots: [P('ChallengesPage')], kb: 198, note: 'challenge index' },
   { route: '/challenges/:id', roots: [P('ChallengePage')], kb: 319, note: 'one challenge' },
   { route: '/settings', roots: [P('SettingsPage')], kb: 111, note: 'preferences' },
@@ -462,13 +468,14 @@ export const ROUTES: readonly RouteBudget[] = [
   { route: '/tools/grammar', roots: [T('GrammarToolPage')], kb: 112, note: 'the SQL grammar diagram' },
   { route: '/tools/hash-join', roots: [T('HashJoinToolPage')], kb: 114, note: 'Grace hash join' },
   { route: '/tools/join-order', roots: [T('JoinOrderToolPage')], kb: 183, note: 'Selinger join-order search over the subset lattice' },
+  { route: '/tools/partitioning', roots: [T('PartitioningToolPage')], kb: 119, note: 'partitioning by hash, range and consistent hashing; rows moved when a node joins or leaves (plan.md §27.5 X1)' },
   { route: '/tools/parallel', roots: [T('ParallelToolPage')], kb: 136, note: 'morsel-driven parallel execution and exchange operators, worker speeds scripted (plan.md §27.5 P1)' },
   { route: '/tools/histograms', roots: [T('HistogramToolPage')], kb: 182, note: 'equi-depth histograms: ANALYZE with a bucket count, and a range estimate’s q-error (plan.md §27.5 T5)' },
   { route: '/tools/lsm', roots: [T('LsmToolPage')], kb: 116, note: 'log-structured merge-tree sandbox' },
   { route: '/tools/hash-index', roots: [T('HashIndexToolPage')], kb: 115, note: 'extendible and linear hashing sandbox' },
   { route: '/tools/columnar', roots: [T('ColumnarToolPage')], kb: 114, note: 'NSM/DSM/PAX row vs. column storage sandbox' },
   { route: '/tools/vector-index', roots: [T('VectorIndexToolPage')], kb: 115, note: 'brute force vs. IVF vs. HNSW vector search' },
-  { route: '/tools/latch-crabbing', roots: [T('LatchCrabbingToolPage')], kb: 179, note: 'latch crabbing: naive vs. lock coupling vs. optimistic coupling on a scripted B+Tree workload' },
+  { route: '/tools/latch-crabbing', roots: [T('LatchCrabbingToolPage')], kb: 183, note: 'latch crabbing: naive vs. lock coupling vs. optimistic coupling on a scripted B+Tree workload' },
   { route: '/docs', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 182, note: 'the docs shell and every prose page (one shared chunk)' },
   { route: '/docs/concepts/btree', roots: ['src/ui/DocsLayout.tsx', 'src/pages/DocsContent/concepts/btree.mdx'], kb: 205, note: 'a concept page with a live B+Tree widget' },
   { route: '/docs/essays/index-write-tax', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 182, note: 'an essay: prose, with links into the B+Tree sandbox (plan.md §25.4 H2)' },
@@ -487,6 +494,7 @@ const SETTINGS_TOOL_CHECKS: readonly (readonly [string, number, string])[] = [
   ['sort', 6, 'the external merge sort driver'],
   ['hash-join', 6, 'the Grace hash join driver'],
   ['join-order', 4, 'the join-order graph and the Selinger search'],
+  ['partitioning', 6, 'the partitioning model and the transactions preset (plan.md §27.5 X1)'],
   ['parallel', 9, 'the morsel and exchange models and the transactions preset (plan.md §27.5 P1)'],
   ['histograms', 5, 'the histogram columns, ANALYZE and the range estimate (plan.md §27.5 T5)'],
   ['page', 5, 'the slotted-page layout'],

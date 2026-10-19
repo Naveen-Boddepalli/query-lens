@@ -355,6 +355,20 @@ index entries of the rows it touches.
   the memory each partial result takes, caches, and any operator past the aggregate. A join, `ORDER BY` or `LIMIT` is
   refused rather than run serially in disguise.
 
+## Distributed databases
+
+- **[Partitioning](/tools/partitioning)** (plan.md §27.5 X1) spreads the transactions preset's 3,000 rows over 2 to
+  10 nodes by `id` (every key different) or `account` (40 keys of 75 rows). **Hash** puts a row on node
+  `hash(key) mod n`; **range** cuts the keys into one equal-depth range per node, and a node that joins takes the
+  upper half of the fullest range while one that leaves hands its range to a neighbour; **consistent hashing** puts
+  each node on a ring at 1 to 64 points and gives a row to the first point clockwise from its key's hash. Add a node
+  or take one away and the page counts the rows that move, against the least any change must move (a newcomer's fair
+  share, or every row of the node that leaves), shows each node's rows before and after with the skew (the fullest
+  node over the average), draws the ring or lists the ranges, and says where the next 300 rows would land — under
+  range partitioning by `id`, all on the last node. The hash is FNV-1a with MurmurHash3's finalizer, so alike strings
+  land far apart on the ring. A property test holds that range and consistent hashing only ever move rows onto a
+  joining node or off a leaving one. A node is a number: there is no network, no replication, and nothing fails.
+
 ## Locks
 
 - **Page-level**, coarse-grained: one shared read lock per page, taken and released as a scan or

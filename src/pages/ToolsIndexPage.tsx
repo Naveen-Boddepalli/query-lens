@@ -128,6 +128,13 @@ const TOOLS = [
     available: true,
   },
   {
+    title: 'Partitioning',
+    href: '/tools/partitioning',
+    description:
+      'A table spread over nodes by hash, by range, or by consistent hashing with virtual nodes. Add a node or take one away and count the rows that have to move; see how even each scheme leaves the nodes, and where the next inserts land.',
+    available: true,
+  },
+  {
     title: 'LSM tree',
     href: '/tools/lsm',
     description:

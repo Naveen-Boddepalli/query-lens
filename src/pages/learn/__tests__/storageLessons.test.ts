@@ -77,8 +77,8 @@ const count = <T>(items: readonly T[], test: (item: T) => boolean) => items.filt
 
 describe('the storage and execution lessons are wired into the track', () => {
   it('sit in the pipeline group and a group of their own, before the transactions, with unique ids', () => {
-    expect(LESSON_GROUPS.map((g) => g.id)).toEqual(['pipeline', 'storage', 'transactions']);
-    expect(LESSONS).toEqual([...lessonsOf('pipeline'), ...lessonsOf('storage'), ...lessonsOf('transactions')]);
+    expect(LESSON_GROUPS.map((g) => g.id)).toEqual(['pipeline', 'storage', 'transactions', 'distributed']);
+    expect(LESSONS).toEqual([...lessonsOf('pipeline'), ...lessonsOf('storage'), ...lessonsOf('transactions'), ...lessonsOf('distributed')]);
     // The sort, the hash join, the join order and the histograms (plan.md §27.5 T5) close the pipeline group.
     expect(lessonsOf('pipeline').slice(-EXECUTION_IDS.length).map((l) => l.id)).toEqual(EXECUTION_IDS);
     const ids = LESSONS.map((l) => l.id);

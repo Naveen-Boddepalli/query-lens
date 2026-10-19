@@ -2251,3 +2251,20 @@ test('Compare runs one query serially and on one to eight workers, against Amdah
   await page.getByRole('radio', { name: 'By id (3,000 groups)' }).click();
   await expect(page.getByText(/Here it stays close to flat/)).toBeVisible();
 });
+
+test('the partitioning tool counts the rows a new node moves under hash, range and the ring', async ({ page }) => {
+  await page.goto('/tools/partitioning');
+  await expect(page.getByRole('heading', { name: 'Partitioning', exact: true })).toBeVisible();
+  await page.getByRole('radio', { name: 'Hash', exact: true }).click();
+  await expect(page.getByRole('status')).toHaveText('2,399 rows move (80% of the table)');
+  await page.getByRole('radio', { name: 'Range' }).click();
+  await expect(page.getByRole('status')).toHaveText('375 rows move (13% of the table)');
+  await expect(page.getByText(/Every one lands on the last range/)).toBeVisible();
+  await page.getByRole('radio', { name: 'Consistent hashing' }).click();
+  await page.getByLabel('Virtual nodes each').fill('64');
+  await expect(page.getByRole('status')).toHaveText('590 rows move (20% of the table)');
+  await page.getByRole('radio', { name: 'Remove a node' }).click();
+  await expect.poll(() => page.url()).toContain('c=remove');
+  await page.getByRole('button', { name: 'Show as table' }).first().click();
+  await expect(page.getByRole('table').filter({ hasText: 'Before' })).toBeVisible();
+});

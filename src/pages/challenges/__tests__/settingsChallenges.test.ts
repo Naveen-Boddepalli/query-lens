@@ -9,6 +9,7 @@ import { demoWrites as hashWrites, HASH_LIMITS, planHashIndex } from '../../../u
 import { DEMO_INITIAL_KEYS, demoScripts, LATCH_LIMITS, planLatchCrabbing } from '../../../ui/latchCrabbing.ts';
 import { demoWrites as lsmWrites, LSM_LIMITS, planLsm } from '../../../ui/lsm.ts';
 import { PARALLEL_LIMITS } from '../../../engine/parallel.ts';
+import { PARTITION_LIMITS } from '../../../engine/partitioning.ts';
 import { HISTOGRAM_LIMITS } from '../../../ui/histogramColumns.ts';
 import { layOutPage } from '../../../ui/slottedPage.ts';
 import { planVectorIndex, VECTOR_LIMITS } from '../../../ui/vectorIndex.ts';
@@ -78,12 +79,13 @@ describe('settings challenges', () => {
         'lsm',
         'page',
         'parallel',
+        'partitioning',
         'planner',
         'sort',
         'vector-index',
       ].sort(),
     );
-    expect(SETTINGS_CHALLENGES.length).toBe(21);
+    expect(SETTINGS_CHALLENGES.length).toBe(22);
     expect(SETTINGS_CHALLENGES.filter((c) => c.group === 'transactions').map((c) => c.id)).toEqual([
       'same-level-different-promise',
     ]);
@@ -151,6 +153,7 @@ describe('settings challenges', () => {
       'enough-buckets': { buckets: [HISTOGRAM_LIMITS.minBuckets, HISTOGRAM_LIMITS.maxBuckets] },
       'outrun-the-slow-worker': { morsel: [PARALLEL_LIMITS.minMorselPages, PARALLEL_LIMITS.maxMorselPages] },
       'efficiency-floor': { workers: [PARALLEL_LIMITS.minWorkers, PARALLEL_LIMITS.maxWorkers] },
+      'grow-without-churn': { virtual: [PARTITION_LIMITS.minVirtual, PARTITION_LIMITS.maxVirtual] },
     };
     for (const c of SETTINGS_CHALLENGES) {
       const want = ranges[c.id] ?? {};
@@ -210,6 +213,8 @@ describe('settings challenges', () => {
     ['outrun-the-slow-worker', { dispatch: 'stealing', morsel: 4 }],
     ['meet-the-rows', { smallBig: 'broadcast', bigBig: 'repartition', fiveKeys: 'broadcast' }],
     ['efficiency-floor', { workers: 4 }],
+    ['grow-without-churn', { scheme: 'consistent', virtual: 64 }],
+    ['grow-without-churn', { scheme: 'consistent', virtual: 40 }],
     ['tightest-page', { page: 0, bytes: 202 }],
     ['tightest-page', { page: 5, bytes: 200 }],
     ['split-the-other-bucket', { n: 40, strategy: 'linear', cap: 4, init: 2 }],
@@ -271,6 +276,10 @@ describe('settings challenges', () => {
       ['outrun-the-slow-worker', 'static ranges: everyone waits for the slow quarter', {}],
       ['meet-the-rows', 'repartition everything', {}],
       ['efficiency-floor', 'eight: 58%', {}],
+      ['grow-without-churn', 'hash: 2,399 rows move', {}],
+      ['grow-without-churn', 'range: 375 move, but skew 1.25', { scheme: 'range' }],
+      ['grow-without-churn', 'a ring of one point each: 1,459 move', { scheme: 'consistent', virtual: 1 }],
+      ['grow-without-churn', 'sixteen points each: 799 move', { scheme: 'consistent', virtual: 16 }],
       ['efficiency-floor', 'five: 75%', { workers: 5 }],
       ['efficiency-floor', 'three: still efficient, but not the most', { workers: 3 }],
       ['meet-the-rows', 'broadcast everything', { smallBig: 'broadcast', bigBig: 'broadcast', fiveKeys: 'broadcast' }],

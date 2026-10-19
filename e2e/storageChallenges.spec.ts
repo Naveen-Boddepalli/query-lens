@@ -15,6 +15,7 @@ const IDS = [
   'outrun-the-slow-worker',
   'meet-the-rows',
   'efficiency-floor',
+  'grow-without-churn',
   'tightest-page',
   'split-the-other-bucket',
   'cheap-writes-cheap-reads',

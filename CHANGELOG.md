@@ -11,6 +11,16 @@ Work toward **v3** (plan.md §27), on the branch `version/v3`.
 
 ### Added
 
+- **Partitioning** (plan.md §27.5 X1) — a new tool, [Partitioning](/tools/partitioning): the transactions preset's rows
+  spread over two to ten nodes by **hash**, by **range**, or by **consistent hashing** with up to 64 virtual nodes each.
+  Add a node or take one away, and the page counts the rows that move against the least any change must, draws each
+  node's rows before and after with the skew, shows the ring or the ranges, and says where the next 300 rows would
+  land. Adding a fifth node to four moves 2,399 of 3,000 rows under hash, 375 under range (leaving two nodes half
+  full, and every new id on the last node), and 590 under consistent hashing with 64 points each, all of them to the
+  newcomer. A new lesson group, *Distributed databases*, opens with *Partitioning: hash, range and the ring*, and a
+  challenge, *Grow without the churn*. A property test holds that range and consistent hashing move rows only onto a
+  joining node or off a leaving one.
+
 - **Serial against parallel** (plan.md §27.5 P3) — a new [Compare](/compare?mode=parallel) mode, *Serial vs.
   parallel*: one query on the transactions preset run once by the engine (its own plan shown) and by up to eight
   workers in the morsel model, the ticks side by side, and a table for one to eight workers of the speedup,

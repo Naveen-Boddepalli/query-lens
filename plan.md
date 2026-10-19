@@ -3011,7 +3011,7 @@ Costs are against the modules that exist today (paths checked 2026-10-18).
 
 | ID | Rel. | Item | Shape | Cost |
 |---|---|---|---|---|
-| **X1** | 3.3 | **`/tools/partitioning`** | Hash, range and consistent hashing (with virtual nodes) over one table; add or remove a node and count the rows that move; skew. | 1 wk |
+| **X1** | 3.3 | **`/tools/partitioning`** | **Built, 2026-10-19** — `engine/partitioning.ts` (`partition`, `fnv` = FNV-1a + MurmurHash3 fmix32 — plain FNV-1a left a 64-point ring with an empty node): hash mod n; range (equal-depth, a joiner splits the fullest range, a leaver merges into its neighbour); consistent hashing (1–64 points per node). Rows moved vs the least a change must move, skew, the next 300 inserts. `ui/partitionPresets.ts`, the page (bars, ring, ranges; table view); a new lesson group *Distributed databases* (`distributedLessons.tsx`, `distributedScenarios.ts`) with lesson `partitioning`; settings challenge `grow-without-churn` (consistent with ≳ 37 points passes). Course map row *Partly*. As first planned: Hash, range and consistent hashing (with virtual nodes) over one table; add or remove a node and count the rows that move; skew. | 1 wk |
 | **X2** | 3.3 | **`/tools/2pc` — two-phase commit** | A coordinator and participants; failures as inputs (a crash before or after the vote, a lost message); the blocking window drawn; presumed abort. | 1.5 wk |
 | **X3** | 3.3 | **`/tools/raft` — consensus** | Leader election and log replication over a scripted message schedule (delays, drops and partitions are inputs). Election safety, log matching and leader completeness asserted by property tests over seeded random schedules. No membership changes, no snapshots — labelled. | 2–3 wk |
 | **X4** | 3.3 | **Distributed join** | Broadcast against shuffle across X1's partitions, priced in rows over the network. | 1 wk |
@@ -3101,7 +3101,8 @@ Costs are against the modules that exist today (paths checked 2026-10-18).
 | Morsel-driven execution (P1) | **Built, 2026-10-19** — ticks, scripted speeds, NUMA-style homes; static, shared and stealing dispatch | now | — |
 | Exchange operators (P2) | **Built, 2026-10-19** — broadcast, repartition, gather; on the parallel tool, not a tool of their own | now | — |
 | Serial vs parallel in Compare (P3) | **Built, 2026-10-19** — Amdahl from the one-worker merge, Karp–Flatt per N. 3.2 is complete | now | — |
-| Distributed databases (X1–X4) | **Planned** — §25.9's other *Horizon (v3)* row | 3.3 | P1's scripted workers exist |
+| Partitioning (X1) | **Built, 2026-10-19** — hash, range, consistent hashing; rows moved, skew, inserts; a new lesson group | now | — |
+| Distributed databases (X2–X4) | **Planned** — 2PC, Raft, a distributed join | 3.3 | — |
 | Web Worker engine (C6's deferred half) | **Still deferred** | — | Main-thread jank, or a dataset past 10,000 rows |
 | Window functions, recursive CTEs | **Still declined** (§4, §25.10) | — | A course adoption that asks for them |
 | A correlated scalar subquery | **Declined for 3.0** | — | S1 and S6 both shipped, and a lesson needs one |

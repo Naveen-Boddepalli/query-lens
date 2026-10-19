@@ -28,6 +28,7 @@ export type SettingsTool =
   | 'join-order'
   | 'histograms'
   | 'parallel'
+  | 'partitioning'
   | 'page'
   | 'hash-index'
   | 'lsm'
@@ -351,6 +352,48 @@ export const SETTINGS_CHALLENGES: SettingsChallenge[] = [
         Twice the workers, half the time. Only while nothing grows with the workers: here the merge does, one partial
         result per worker, and dispatching and the last uneven morsels add their share — past four workers each new one
         is worth less than four fifths of the first.
+      </>
+    ),
+  },
+  {
+    id: 'grow-without-churn',
+    title: 'Grow without the churn',
+    group: 'storage',
+    tool: 'partitioning',
+    brief: (
+      <>
+        The transactions preset&rsquo;s 3,000 rows are partitioned by {code('id')} over four nodes, and a fifth joins. Choose
+        a scheme, and for consistent hashing how many points each node gets on the ring, so that at most a quarter of the
+        rows move and the five nodes end up within a fifth of even (skew at most 1.2).
+      </>
+    ),
+    hint: (
+      <>
+        Hash partitioning changes every row&rsquo;s remainder when the divisor changes. Range partitioning moves little, but
+        splits one range and leaves two nodes half-full. On a ring, a node with few points owns a few long arcs; with many,
+        many short ones.
+      </>
+    ),
+    needs: 'at most 750 rows moved, and a skew of at most 1.2 after',
+    controls: [
+      {
+        kind: 'select',
+        key: 'scheme',
+        label: 'Scheme',
+        options: [
+          { value: 'hash', label: 'Hash' },
+          { value: 'range', label: 'Range' },
+          { value: 'consistent', label: 'Consistent hashing' },
+        ],
+      },
+      { kind: 'number', key: 'virtual', label: 'Virtual nodes each', min: 1, max: 64 },
+    ],
+    starter: { scheme: 'hash', virtual: '1' },
+    misconception: (
+      <>
+        An even spread is all a partitioning scheme needs. All three can spread rows evenly; what tells them apart is
+        what a change costs. Hash moves nearly everything, range moves little but unevenly, and consistent hashing moves
+        about one node&rsquo;s fair share — once each node has enough points on the ring.
       </>
     ),
   },

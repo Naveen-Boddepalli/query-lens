@@ -13,6 +13,7 @@ const LESSON_IDS = [
   'histograms',
   'parallel',
   'exchange',
+  'partitioning',
   'slotted-page',
   'hash-index',
   'lsm-tree',
@@ -23,7 +24,7 @@ const LESSON_IDS = [
 
 test('the learn track groups the pipeline, the storage structures and the transactions', async ({ page }) => {
   await page.goto('/learn');
-  const names = ['The query pipeline', 'Storage engines and access methods', 'Transactions and durability'];
+  const names = ['The query pipeline', 'Storage engines and access methods', 'Transactions and durability', 'Distributed databases'];
   for (const name of names) await expect(page.getByRole('heading', { name, level: 2 })).toBeVisible();
 
   // The sort, the hash join, the join order, the histograms, parallel execution and exchange sit with the pipeline; the six structures have their own group.
@@ -33,7 +34,7 @@ test('the learn track groups the pipeline, the storage structures and the transa
   const storage = page.getByRole('region', { name: 'Storage engines and access methods' });
   await expect(storage.getByRole('listitem')).toHaveCount(6);
   await expect(storage.getByRole('link', { name: /Write fast, pay later/ })).toBeVisible();
-  await expect(page.getByText(/^0 of 37 complete$/)).toBeVisible();
+  await expect(page.getByText(/^0 of 38 complete$/)).toBeVisible();
 });
 
 for (const id of LESSON_IDS) {

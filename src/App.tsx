@@ -85,6 +85,7 @@ const TOOL_PAGES: Record<string, ComponentType> = {
   'join-order': page(() => import('./pages/tools/JoinOrderToolPage.tsx'), 'JoinOrderToolPage'),
   histograms: page(() => import('./pages/tools/HistogramToolPage.tsx'), 'HistogramToolPage'),
   parallel: page(() => import('./pages/tools/ParallelToolPage.tsx'), 'ParallelToolPage'),
+  partitioning: page(() => import('./pages/tools/PartitioningToolPage.tsx'), 'PartitioningToolPage'),
   lsm: page(() => import('./pages/tools/LsmToolPage.tsx'), 'LsmToolPage'),
   'hash-index': page(() => import('./pages/tools/HashIndexToolPage.tsx'), 'HashIndexToolPage'),
   columnar: page(() => import('./pages/tools/ColumnarToolPage.tsx'), 'ColumnarToolPage'),
@@ -111,24 +112,28 @@ const DocsLayout = page(() => import('./ui/DocsLayout.tsx'), 'DocsLayout');
 // each has a default export. Lazy so they form their own async chunk — folded
 // into one `docs-*.js` by vite.config.ts — rather than first-paint weight.
 const DocsIndex = lazy(() => import('./pages/DocsContent/index.mdx'));
-const DocsGettingStarted = lazy(() => import('./pages/DocsContent/getting-started.mdx'));
-const DocsFaq = lazy(() => import('./pages/DocsContent/faq.mdx'));
-const DocsArchitecture = lazy(() => import('./pages/DocsContent/architecture.mdx'));
-const DocsBufferPool = lazy(() => import('./pages/DocsContent/concepts/buffer-pool.mdx'));
-const DocsBTree = lazy(() => import('./pages/DocsContent/concepts/btree.mdx'));
-const DocsEssayIndexWriteTax = lazy(() => import('./pages/DocsContent/essays/index-write-tax.mdx'));
-const DocsEssayScanResistance = lazy(() => import('./pages/DocsContent/essays/scan-resistance.mdx'));
-const DocsEssayRepeatableRead = lazy(() => import('./pages/DocsContent/essays/repeatable-read.mdx'));
-const DocsAccessibility = lazy(() => import('./pages/DocsContent/accessibility.mdx'));
-const DocsManualEviction = lazy(() => import('./pages/DocsContent/manual/eviction.mdx'));
-const DocsManualBTreeSplit = lazy(() => import('./pages/DocsContent/manual/btree-split.mdx'));
-const DocsCourseMap = lazy(() => import('./pages/DocsContent/study/course-map.mdx'));
-const DocsInterviewRoadmap = lazy(() => import('./pages/DocsContent/study/interview-roadmap.mdx'));
-const DocsSql = lazy(() => import('./pages/DocsContent/reference/sql.mdx'));
-const DocsUrlParameters = lazy(() => import('./pages/DocsContent/reference/url-parameters.mdx'));
-const DocsShortcuts = lazy(() => import('./pages/DocsContent/reference/shortcuts.mdx'));
-const DocsLimits = lazy(() => import('./pages/DocsContent/reference/limits.mdx'));
-const DocsAnswers = lazy(() => import('./pages/DocsContent/reference/answers.mdx'));
+/** Every docs page but the index, by its path under `/docs`: MDX, each its own lazy chunk. A table for the same reason
+ *  as `TOOL_PAGES`. */
+const DOC_PAGES: Record<string, ComponentType> = {
+  'getting-started': lazy(() => import('./pages/DocsContent/getting-started.mdx')),
+  'faq': lazy(() => import('./pages/DocsContent/faq.mdx')),
+  'concepts/buffer-pool': lazy(() => import('./pages/DocsContent/concepts/buffer-pool.mdx')),
+  'concepts/btree': lazy(() => import('./pages/DocsContent/concepts/btree.mdx')),
+  'essays/index-write-tax': lazy(() => import('./pages/DocsContent/essays/index-write-tax.mdx')),
+  'essays/scan-resistance': lazy(() => import('./pages/DocsContent/essays/scan-resistance.mdx')),
+  'essays/repeatable-read': lazy(() => import('./pages/DocsContent/essays/repeatable-read.mdx')),
+  'accessibility': lazy(() => import('./pages/DocsContent/accessibility.mdx')),
+  'manual/eviction': lazy(() => import('./pages/DocsContent/manual/eviction.mdx')),
+  'manual/btree-split': lazy(() => import('./pages/DocsContent/manual/btree-split.mdx')),
+  'study/course-map': lazy(() => import('./pages/DocsContent/study/course-map.mdx')),
+  'study/interview-roadmap': lazy(() => import('./pages/DocsContent/study/interview-roadmap.mdx')),
+  'reference/sql': lazy(() => import('./pages/DocsContent/reference/sql.mdx')),
+  'reference/url-parameters': lazy(() => import('./pages/DocsContent/reference/url-parameters.mdx')),
+  'reference/shortcuts': lazy(() => import('./pages/DocsContent/reference/shortcuts.mdx')),
+  'reference/limits': lazy(() => import('./pages/DocsContent/reference/limits.mdx')),
+  'reference/answers': lazy(() => import('./pages/DocsContent/reference/answers.mdx')),
+  'architecture': lazy(() => import('./pages/DocsContent/architecture.mdx')),
+};
 
 export default function App() {
   return (
@@ -172,24 +177,9 @@ export default function App() {
 
             <Route path="docs" element={suspended(DocsLayout)}>
               <Route index element={<DocsIndex />} />
-              <Route path="getting-started" element={<DocsGettingStarted />} />
-              <Route path="faq" element={<DocsFaq />} />
-              <Route path="concepts/buffer-pool" element={<DocsBufferPool />} />
-              <Route path="concepts/btree" element={<DocsBTree />} />
-              <Route path="essays/index-write-tax" element={<DocsEssayIndexWriteTax />} />
-              <Route path="essays/scan-resistance" element={<DocsEssayScanResistance />} />
-              <Route path="essays/repeatable-read" element={<DocsEssayRepeatableRead />} />
-              <Route path="accessibility" element={<DocsAccessibility />} />
-              <Route path="manual/eviction" element={<DocsManualEviction />} />
-              <Route path="manual/btree-split" element={<DocsManualBTreeSplit />} />
-              <Route path="study/course-map" element={<DocsCourseMap />} />
-              <Route path="study/interview-roadmap" element={<DocsInterviewRoadmap />} />
-              <Route path="reference/sql" element={<DocsSql />} />
-              <Route path="reference/url-parameters" element={<DocsUrlParameters />} />
-              <Route path="reference/shortcuts" element={<DocsShortcuts />} />
-              <Route path="reference/limits" element={<DocsLimits />} />
-              <Route path="reference/answers" element={<DocsAnswers />} />
-              <Route path="architecture" element={<DocsArchitecture />} />
+              {Object.entries(DOC_PAGES).map(([path, Doc]) => (
+                <Route key={path} path={path} element={<Doc />} />
+              ))}
             </Route>
 
             <Route path="*" element={suspended(NotFoundPage)} />

@@ -10,7 +10,7 @@
  * Order matters: it is the order of the track, and the order lessons are numbered in.
  */
 
-export type LessonGroupId = 'pipeline' | 'storage' | 'transactions';
+export type LessonGroupId = 'pipeline' | 'storage' | 'transactions' | 'distributed';
 
 export interface LessonMeta {
   id: string;
@@ -271,6 +271,19 @@ export const LESSON_GROUPS: readonly LessonGroup[] = [
         title: 'Survive a crash',
         minutes: 5,
         summary: 'Analysis, redo and undo on a real log — then a crash in the middle of recovery itself.',
+      },
+    ],
+  },
+  {
+    id: 'distributed',
+    title: 'Distributed databases',
+    about: 'One table on many machines (plan.md §27.5 X1–X4): where each row lives, and what it costs when the machines change.',
+    lessons: [
+      {
+        id: 'partitioning',
+        title: 'Partitioning: hash, range and the ring',
+        minutes: 5,
+        summary: 'Spread a table over four nodes, add a fifth, and count the rows that have to move under each scheme.',
       },
     ],
   },
