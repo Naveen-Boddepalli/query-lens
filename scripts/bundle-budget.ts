@@ -404,6 +404,11 @@ const T = (name: string): string => `src/pages/tools/${name}.tsx`;
  *    reference/limits and a sentence in the course map — so /docs and the three essays that share it were raised to
  *    measured + 3, rounded up: 174 → 178. The lock table's five modes, the computed matrix and `combine` reach
  *    `ScriptChallengeView` through the lock scripts: 31.1 kB, raised 31 → 35.
+ *  - 2026-10-19, next-key locks (plan.md §27.5 T3): the schedule engine every transaction route shares grew by the
+ *    next-key footprint, insert intentions and the leaf rows (and now imports `finalPlan`), and /tools/schedule adds
+ *    the leaf view. Each route over was raised to measured + 3, rounded up: /tools/schedule 200 → 205 (201.7),
+ *    /tools/isolation 189 → 194 (190.1), /tools/concurrency 191 → 196 (192.5), and the isolation challenges' checks
+ *    16 → 20 (16.1).
  */
 export const ROUTES: readonly RouteBudget[] = [
   { route: '/', roots: [P('LandingPage')], kb: 177, note: 'the landing page' },
@@ -431,11 +436,11 @@ export const ROUTES: readonly RouteBudget[] = [
   { route: '/tools/sort', roots: [T('SortToolPage')], kb: 113, note: 'external merge sort' },
   { route: '/tools/planner', roots: [T('PlannerToolPage')], kb: 200, note: 'planner sandbox' },
   { route: '/tools/locks', roots: [T('LocksToolPage')], kb: 114, note: 'lock simulator' },
-  { route: '/tools/isolation', roots: [T('IsolationToolPage')], kb: 189, note: 'the Hermitage isolation matrix (both engines, computed)' },
+  { route: '/tools/isolation', roots: [T('IsolationToolPage')], kb: 194, note: 'the Hermitage isolation matrix (both engines, computed)' },
   { route: '/tools/recovery', roots: [T('RecoveryToolPage')], kb: 126, note: 'crash recovery: checkpoints, a crash, and ARIES analysis, redo and undo' },
   { route: '/tools/wal', roots: [T('WalToolPage')], kb: 126, note: 'write-ahead log: a pool, a disk, a log and the rule between them' },
-  { route: '/tools/concurrency', roots: [T('ConcurrencyToolPage')], kb: 191, note: 'one schedule under five concurrency-control protocols, each really run' },
-  { route: '/tools/schedule', roots: [T('ScheduleToolPage')], kb: 200, note: 'transaction schedules (the engine, a shared database, two sessions)' },
+  { route: '/tools/concurrency', roots: [T('ConcurrencyToolPage')], kb: 196, note: 'one schedule under five concurrency-control protocols, each really run' },
+  { route: '/tools/schedule', roots: [T('ScheduleToolPage')], kb: 205, note: 'transaction schedules (the engine, a shared database, two sessions)' },
   { route: '/tools/grammar', roots: [T('GrammarToolPage')], kb: 112, note: 'the SQL grammar diagram' },
   { route: '/tools/hash-join', roots: [T('HashJoinToolPage')], kb: 114, note: 'Grace hash join' },
   { route: '/tools/join-order', roots: [T('JoinOrderToolPage')], kb: 178, note: 'Selinger join-order search over the subset lattice' },
@@ -471,7 +476,7 @@ const SETTINGS_TOOL_CHECKS: readonly (readonly [string, number, string])[] = [
   ['buffer-pool', 5, 'the buffer-pool trace and its policies'],
   ['planner', 4, 'the planner’s rewrite-rule pipeline'],
   ['btree', 5, 'the B+Tree insert and invariants'],
-  ['isolation', 16, 'the Hermitage suite on both isolation engines'],
+  ['isolation', 20, 'the Hermitage suite on both isolation engines'],
 ];
 
 /** What is already loaded when a settings challenge fetches its tool's checks: the page and the view. */

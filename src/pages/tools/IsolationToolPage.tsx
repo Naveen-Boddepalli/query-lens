@@ -43,7 +43,7 @@ const ENGINES: { kind: EngineKind; title: string; blurb: string; reference: stri
     kind: 'innodb',
     title: 'InnoDB (MySQL)',
     blurb:
-      'READ COMMITTED is a snapshot for each statement. REPEATABLE READ is one snapshot for plain reads and the latest committed row for writes, so a lost update gets through. SERIALIZABLE turns every read into a locking read. MySQL published only some of these cells; the rest are marked.',
+      'READ COMMITTED is a snapshot for each statement. REPEATABLE READ is one snapshot for plain reads and the latest committed row for writes, so a lost update gets through. SERIALIZABLE turns every read into a locking read, with next-key locks on the gaps between index keys. MySQL published only some of these cells; the rest are marked.',
     reference: 'MySQL 5.6, the cells its page ran',
   },
 ];

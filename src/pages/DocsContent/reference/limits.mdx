@@ -343,6 +343,21 @@ index entries of the rows it touches.
   `WHERE` as a **predicate lock** until the transaction ends: a write that would add a matching row waits for
   it, whatever level the writer runs at. The schedule has a default level, and a transaction may ask for its
   own with `BEGIN ISOLATION LEVEL …`. The page names each anomaly when it happens.
+- **Next-key locks** (plan.md §27.5 T3) are InnoDB's answer to the phantom, under row locks with *Gap locks: Next-key*
+  (`g=1` in the link). At `REPEATABLE READ` and `SERIALIZABLE` a statement locks each index record it reads — S to
+  read, X to change, the record that ends its range included — **and the gap below it**, and the gap past the last
+  key when it reads to the end. A full scan walks the table's first unique index, so it locks every record and every
+  gap; a range scan locks only its own; a lookup of a whole unique key that finds its row locks just the row, since
+  no other row can ever have that key. An `INSERT` — or an `UPDATE` that moves a key — asks for **X on the gap** its
+  new key goes into, in every index, and waits for any S another transaction holds there: so a row cannot appear
+  where a transaction read, and `REPEATABLE READ` has no phantom. Gap locks never wait for one another, and two
+  inserts into one gap do not either: each holds its X only while it inserts, then gives it back — or back to the S
+  it already had, and then its new key has split the gap and it holds both halves. A deleted key stays in the index
+  until the schedule ends, so a gap never widens out from under a lock on it. `SERIALIZABLE` takes no predicate lock
+  here — the gaps already do its work — and `READ COMMITTED` and below lock no gaps, as in InnoDB, though their
+  inserts still wait for others' gap locks. Each step draws the locks on the index's leaf level, keys in order with a
+  gap between every two. A test holds it to the precedence graph: no fuzzed schedule at either level has a cycle,
+  a phantom or a changed re-read.
 - **With versions (MVCC)** a row is a chain of versions, each stamped with the transaction that made it (`xmin`)
   and the one that deleted or replaced it (`xmax`), and a reader takes **no lock at all**: it sees, for every
   row, the version its *snapshot* can see — one created by a transaction that had committed when the snapshot was
@@ -368,7 +383,8 @@ index entries of the rows it touches.
   aborted and intermediate reads, circular information flow, observed-transaction-vanishes,
   predicate-many-preceders, lost update, read skew, and write skew on an item and on a predicate — at the four
   levels on three engines: locks, snapshots, and InnoDB, which is built from the other two level by level — and,
-  at `REPEATABLE READ`, lets a write work from the latest committed row where PostgreSQL's refuses it. Each cell is
+  at `REPEATABLE READ`, lets a write work from the latest committed row where PostgreSQL's refuses it, and at
+  `SERIALIZABLE` keeps phantoms out with next-key locks rather than the locks engine's predicate lock. Each cell is
   a three-transaction schedule that was *run*, and the anomaly is judged by what its transactions saw and wrote.
   The results are held, in a test, against what PostgreSQL (for versions), SQL Server's locking levels (for locks)
   and MySQL (for InnoDB) publish: 79 of 80 cells agree for the first two, and the one that does not — `OTV` at
@@ -418,8 +434,9 @@ index entries of the rows it touches.
   executor reading them (it does not skip invisible tuples, and the index has no entries for dead versions),
   and a wait for another session's uncommitted row on a `UNIQUE` key — a duplicate is rejected at once, where a
   real engine would wait to find out whether the other insert commits. The predicate lock is a *toy*: it
-  matches a `WHERE` against the rows a write would add, which is enough for these tables and nothing like an
-  index-range or next-key lock.
+  matches a `WHERE` against the rows a write would add, which is enough for these tables; next-key locks are the
+  real thing, and replace it where they are on. They are not modelled under versions: InnoDB's `REPEATABLE READ`
+  writes take next-key locks too, and the matrix's InnoDB column does not.
 - A statement outside `BEGIN … COMMIT` is its own transaction. A statement that fails changes nothing and
   leaves the transaction open, as MySQL does; PostgreSQL would instead refuse everything until
   `ROLLBACK`. There are no savepoints.

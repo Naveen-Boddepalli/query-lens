@@ -22,6 +22,11 @@
  * an insert that would match it has to wait — the only level that stops a phantom. Write locks are held to the end at
  * every level. A level is the schedule's default, or one transaction's own through `BEGIN ISOLATION LEVEL …`.
  *
+ * **Next-key locks** (plan.md §27.5 T3, `nextKey`, row locks only) are InnoDB's answer to the phantom, in place of the
+ * predicate lock: at `REPEATABLE READ` and above a statement locks each index record it reads *and the gap below it*,
+ * and an insert must wait for every lock another transaction holds on the gap it goes into. A gap lock is S on the
+ * gap, so gap locks never wait for one another; an insert's intention is X on it, held only while the insert runs.
+ *
  * **With `mvcc`** (D4) a row is a chain of versions (`mvcc.ts`) and a reader takes no lock at all: it sees the versions
  * its snapshot can see. `READ COMMITTED` takes a fresh snapshot per statement, so a repeated read can change;
  * `REPEATABLE READ` takes one for the transaction, which is snapshot isolation — no dirty, non-repeatable or phantom
@@ -37,11 +42,13 @@
 
 import { passes } from './exec/evaluate.ts';
 import { indexNameOf, indexSpecsOf } from './index/spec.ts';
-import { combine, emptyTable, forget, heldBy, holds, modePhrase, release, releaseAll, request } from './locks/lockTable.ts';
+import { finalPlan } from './explain.ts';
+import { keyValuesOf } from './index/build.ts';
+import { combine, downgrade, emptyTable, forget, heldBy, holds, modePhrase, release, releaseAll, request } from './locks/lockTable.ts';
 import type { LockMode, LockTableState } from './locks/lockTable.ts';
-import { parseStatement, walkExpr } from './parser/index.ts';
+import { baseTableOf, parseStatement, walkExpr } from './parser/index.ts';
 import type { Expr } from './parser/index.ts';
-import { exprToSql } from './planner/index.ts';
+import { conjuncts, equalityOn, exprToSql, indexLabel, lookupText, rangeOn } from './planner/index.ts';
 import { runQuery } from './runQuery.ts';
 import { buildHeap } from './storage/index.ts';
 import { ISOLATION_LABELS } from './isolation.ts';
@@ -50,7 +57,8 @@ import type { Version } from './mvcc.ts';
 import { controlKindOf, isolationLevelOf } from './transactionControl.ts';
 import type { ControlKind, IsolationLevel } from './transactionControl.ts';
 import { DEFAULT_ENGINE_OPTIONS } from './types.ts';
-import type { Database, EngineOptions, Row, RunResult, Table } from './types.ts';
+import type { Database, EngineOptions, PlanNode, Row, RunResult, SqlValue, Table } from './types.ts';
+import { compareValues } from './value.ts';
 
 export interface ScheduleStep {
   session: string;
@@ -95,6 +103,27 @@ export interface LockingOptions {
    * locking out every other transaction's intention on that table. Off when absent.
    */
   escalateAt?: number;
+  /**
+   * Next-key locking (plan.md §27.5 T3), InnoDB's: at `REPEATABLE READ` and `SERIALIZABLE` a statement locks every
+   * index record it reads and the gap below it, so a row inserted where it read has to wait — the phantom is stopped at
+   * `REPEATABLE READ`, and `SERIALIZABLE` takes no predicate lock. `READ COMMITTED` and below lock no gaps, as in
+   * InnoDB, but an insert at any level waits for the gap locks others hold. Row locks only; ignored otherwise.
+   */
+  nextKey?: boolean;
+}
+
+/**
+ * One next-key lock, placed on its index for the leaf view (plan.md §27.5 T3): a record — a row, at its key in each
+ * index of its table — or the gap below `key` (`null`: the gap above the last key). An index named `''` is a table with
+ * none, whose rows go in insert order, so its only gap is the one at the end.
+ */
+export interface KeyLock {
+  table: string;
+  index: string;
+  key: SqlValue[] | null;
+  part: 'record' | 'gap';
+  holders: { session: string; mode: LockMode }[];
+  waiters: { session: string; mode: LockMode }[];
 }
 
 /** What a write did to one row, in the terms needed to put it back. Rows are identified by reference, not by value. */
@@ -183,6 +212,8 @@ export interface ScheduleStepResult {
   sessions: SessionSnapshot[];
   /** The lock table after this record. Empty without `locking`. */
   locks: LockRow[];
+  /** Under next-key locking, the same locks placed on the index keys and gaps they cover. Absent otherwise. */
+  keyLocks?: KeyLock[];
   /** Every version in the store after this record. Empty without `mvcc`. */
   versions: VersionRow[];
 }
@@ -370,11 +401,82 @@ function targetOf(
   const parsed = parseStatement(sql);
   if (!parsed.ok) return null;
   const ast = parsed.ast;
-  if (ast.kind === 'select') return { table: ast.from.name, kind: 'select', where: ast.where };
-  if (ast.kind === 'insert') return { table: ast.into.name, kind: 'insert', where: undefined };
-  if (ast.kind === 'update') return { table: ast.table.name, kind: 'update', where: ast.where };
-  if (ast.kind === 'delete') return { table: ast.from.name, kind: 'delete', where: ast.where };
+  // The stored table, not an alias for it (plan.md §27.5 S7): a lock is on what is stored.
+  if (ast.kind === 'select') return { table: baseTableOf(ast.from), kind: 'select', where: ast.where };
+  if (ast.kind === 'insert') return { table: baseTableOf(ast.into), kind: 'insert', where: undefined };
+  if (ast.kind === 'update') return { table: baseTableOf(ast.table), kind: 'update', where: ast.where };
+  if (ast.kind === 'delete') return { table: baseTableOf(ast.from), kind: 'delete', where: ast.where };
   return null;
+}
+
+/** Index keys in index order: column by column, a shorter key first when it is a prefix of the longer. */
+function compareKeys(a: readonly SqlValue[], b: readonly SqlValue[]): number {
+  for (let i = 0; i < Math.min(a.length, b.length); i += 1) {
+    const c = compareValues(a[i] ?? null, b[i] ?? null);
+    if (c !== 0) return c;
+  }
+  return a.length - b.length;
+}
+
+/** An index a gap is in. `name` is `''` for a table with no index at all. */
+interface GapIndex {
+  name: string;
+  columns: string[];
+  unique: boolean;
+}
+
+/** What a statement's index lookup or range asks of an index: equalities on its leading columns, then bounds on the next. */
+interface KeyRange {
+  prefix: SqlValue[];
+  bounds: { op: '<' | '>' | '<=' | '>='; value: SqlValue }[];
+}
+
+const SCAN_OPS = new Set(['SeqScan', 'IndexScan', 'IndexOnlyScan', 'IndexRangeScan']);
+
+/** The scan a statement's plan reads its table with. */
+function scanOf(run: RunResult): PlanNode | null {
+  const walk = (n: PlanNode | null | undefined): PlanNode | null => {
+    if (!n) return null;
+    if (SCAN_OPS.has(n.op)) return n;
+    for (const child of n.children ?? []) {
+      const found = walk(child);
+      if (found) return found;
+    }
+    return null;
+  };
+  return walk(finalPlan(run.events));
+}
+
+/** The part of `where` an index on `index.columns` answers: the lookup's equalities, and a range scan's bounds. */
+function rangeOf(index: GapIndex, where: Expr, ranged: boolean): KeyRange {
+  const parts = conjuncts(where);
+  const prefix: SqlValue[] = [];
+  for (const column of index.columns) {
+    const value = parts.map((c) => equalityOn(c, column)).find((v) => v !== undefined);
+    if (value === undefined) break;
+    prefix.push(value);
+  }
+  const column = index.columns[prefix.length];
+  const bounds = ranged && column !== undefined ? parts.flatMap((c) => rangeOn(c, column) ?? []) : [];
+  return { prefix, bounds };
+}
+
+/** Where `key` sits against `range`: before it (-1), in it (0), or after it (1). The keys in it are contiguous. */
+function positionIn(key: readonly SqlValue[], range: KeyRange): -1 | 0 | 1 {
+  for (let i = 0; i < range.prefix.length; i += 1) {
+    const c = compareValues(key[i] ?? null, range.prefix[i] ?? null);
+    if (c !== 0) return c < 0 ? -1 : 1;
+  }
+  const v = key[range.prefix.length] ?? null;
+  for (const { op, value } of range.bounds) {
+    const c = compareValues(v, value);
+    if ((op === '>' || op === '>=') && (c < 0 || (c === 0 && op === '>'))) return -1;
+  }
+  for (const { op, value } of range.bounds) {
+    const c = compareValues(v, value);
+    if ((op === '<' || op === '<=') && (c > 0 || (c === 0 && op === '<'))) return 1;
+  }
+  return 0;
 }
 
 export function runSchedule(
@@ -432,6 +534,14 @@ export function runSchedule(
   /** Whether a statement writes: the three that do are the ones a current read applies to. */
   const writesRows = (text: string): boolean => /^\s*(update|delete|insert)\b/i.test(text);
   const rowLevel = mvcc || timestamped || locking?.granularity === 'row';
+  // Next-key locking (plan.md §27.5 T3): row locks only, and only where reads take locks.
+  const nextKey = locking?.nextKey === true && locking.granularity === 'row' && !mvcc && !timestamped;
+  /** Every row image a write has made, per table: with the start, every key an index has ever held (`keysEver`). */
+  const writtenRows = new Map<string, Row[]>();
+  /** What each gap resource is, for the leaf view: its table, its index, and the key it sits below (null: above the last). */
+  const gapInfo = new Map<string, { table: string; index: string; before: SqlValue[] | null }>();
+  /** The gaps a session held S on when its insert asked for X there, kept across a wait, to be handed back after. */
+  const gapStash = new Map<string, Set<string>>();
   // Timestamp ordering: the newest timestamp that read and that wrote each row, by row identity.
   const stamps = new Map<number, { read: number; write: number }>();
   // Timestamp ordering: what a row looked like before a transaction changed or removed it, and that transaction's
@@ -538,6 +648,7 @@ export function runSchedule(
       ...(parts.saw ? { saw: parts.saw } : {}),
       sessions: snapshots(),
       locks: lockRows(),
+      ...(nextKey ? { keyLocks: keyLockRows() } : {}),
       versions: mvcc ? versionRows() : [],
     });
   }
@@ -560,7 +671,10 @@ export function runSchedule(
     const intent = (mode: LockMode): LockMode => (mode === 'exclusive' ? 'intention-exclusive' : 'intention-shared');
     const parse = (key: string) => {
       const m = /^(.+)\/(row|page)\/(\d+)$/.exec(key);
-      return m ? { table: m[1]!, level: m[2] as 'row' | 'page', id: Number(m[3]) } : null;
+      if (m) return { table: m[1]!, level: m[2] as 'row' | 'page' | 'gap', id: Number(m[3]) };
+      // A gap (plan.md §27.5 T3) is in an index, not on a page: its intention goes on the table alone.
+      const gap = gapInfo.get(key);
+      return gap ? { table: gap.table, level: 'gap' as const, id: -1 } : null;
     };
     const covered = (table: string, mode: LockMode) => holds(locks, session, tableKey(table), mode === 'exclusive' ? 'exclusive' : 'shared');
 
@@ -761,12 +875,251 @@ export function runSchedule(
       .map((p) => ({ key: p.key, label: `the rows ${p.text} that ${p.session} read`, mode: 'shared' as const }));
   }
 
+  /** The indexes a gap can be in; a table with none keeps its rows in insert order, so its one gap is at the end. */
+  function gapIndexesOf(table: string): GapIndex[] {
+    const definition = template.tables[table];
+    const specs = definition ? indexSpecsOf(definition) : [];
+    if (specs.length === 0) return [{ name: '', columns: [], unique: false }];
+    return specs.map((spec) => ({ name: indexNameOf(spec.columns), columns: spec.columns, unique: spec.unique === true }));
+  }
+
+  /** The index a full scan walks, as InnoDB walks its clustered one: the table's first unique index, else its first. */
+  function primaryOf(table: string): GapIndex {
+    const all = gapIndexesOf(table);
+    return all.find((i) => i.unique) ?? all[0]!;
+  }
+
+  /**
+   * Every key `index` has held since the schedule began, in index order. A deleted key stays, so a gap never widens
+   * out from under a lock on it when the key above it goes; InnoDB gets the same by handing a purged key's gap locks
+   * to the key above it.
+   */
+  function keysEver(table: string, index: GapIndex): SqlValue[][] {
+    const seen = new Map<string, SqlValue[]>();
+    for (const row of [...(db.tables[table]?.rows ?? []), ...(writtenRows.get(table) ?? [])]) {
+      const key = keyValuesOf(row, index.columns);
+      if (key[0] === null) continue;
+      seen.set(JSON.stringify(key), key);
+    }
+    return [...seen.values()].sort(compareKeys);
+  }
+
+  /** The lock resource for the gap below `before` in `index` (`null`: above its last key), named for the lock lists. */
+  function gapNeed(table: string, index: GapIndex, before: SqlValue[] | null, mode: LockMode): Need {
+    const key = `${table}/gap/${index.name}/${before === null ? '+' : JSON.stringify(before)}`;
+    gapInfo.set(key, { table, index: index.name, before });
+    const where = `${table}.${indexLabel(index.name)}`;
+    const label =
+      index.name === ''
+        ? `the end of ${table}, where a new row goes (it has no index)`
+        : before === null
+          ? `the gap above the last key in ${where}`
+          : `the gap below ${lookupText(index.name, before)} in ${where}`;
+    return { key, label, mode };
+  }
+
+  /** The gap a row with `key` goes into: the one below the first key above it that the index has ever held. */
+  function gapFor(table: string, index: GapIndex, key: SqlValue[]): Need {
+    if (index.name === '') return gapNeed(table, index, null, 'exclusive');
+    const above = keysEver(table, index).find((k) => compareKeys(k, key) > 0) ?? null;
+    return gapNeed(table, index, above, 'exclusive');
+  }
+
+  /** A lock on one row, named the way every row lock is. */
+  function rowNeed(table: string, row: Row, mode: LockMode): Need {
+    const first = template.tables[table]?.columns[0];
+    return {
+      key: `${table}/row/${String(ridOf(row))}`,
+      label: `the row of ${table} with ${first ?? 'id'} = ${first === undefined ? '' : String(row[first] ?? 'NULL')}`,
+      mode,
+    };
+  }
+
+  /** The old images of rows an open transaction has deleted or changed: still in the index until it ends. */
+  function stonesOf(table: string, rows: readonly Row[]): Row[] {
+    const out: Row[] = [];
+    for (const open of transactions.values()) {
+      for (const { entry } of open.log) {
+        if (entry.table !== table) continue;
+        if (entry.kind === 'delete') out.push(entry.row);
+        if (entry.kind === 'update' && rows.includes(entry.after)) out.push(entry.before);
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Next-key locks (plan.md §27.5 T3), for a statement at `REPEATABLE READ` or `SERIALIZABLE`: every index record it
+   * reads — S to read, X to change, the record that ends its range included — and the gap below each, and the gap above
+   * the last key when it reads to the end. A full scan walks the table's first unique index, so it locks all of it. A
+   * lookup of a whole unique key that finds its row locks only the row, as InnoDB's does: no other row can have that
+   * key, so there is no gap to guard. Null for an `INSERT`, which reads no range.
+   */
+  function nextKeyFootprint(sql: string, run: RunResult, view: Database): Need[] | null {
+    const target = targetOf(sql);
+    if (!target || target.kind === 'insert') return null;
+    const table = view.tables[target.table];
+    if (!table) return null;
+    const mode: LockMode = target.kind === 'select' ? 'shared' : 'exclusive';
+    const rows = [...table.rows, ...stonesOf(target.table, table.rows)];
+    let index = primaryOf(target.table);
+    let range: KeyRange | null = null;
+    const scan = scanOf(run);
+    const named = scan ? /\.(\([^.]*\)|[^.]+)$/.exec(scan.label) : null;
+    if (scan && scan.op !== 'SeqScan' && named && target.where && !opaque(target.where)) {
+      const name = named[1]!.replace(/^\((.*)\)$/, '$1');
+      const used = gapIndexesOf(target.table).find((i) => i.name === name);
+      if (used) {
+        index = used;
+        range = rangeOf(used, target.where, scan.op === 'IndexRangeScan');
+      }
+    }
+
+    const out = new Map<string, Need>();
+    const add = (need: Need) => {
+      if (!out.has(need.key)) out.set(need.key, need);
+    };
+    const keyOf = (row: Row) => keyValuesOf(row, index.columns);
+    const recordsAt = (key: readonly SqlValue[]) => {
+      for (const row of rows) if (compareKeys(keyOf(row), key) === 0) add(rowNeed(target.table, row, mode));
+    };
+    if (index.name === '') {
+      for (const row of rows) add(rowNeed(target.table, row, mode));
+      add(gapNeed(target.table, index, null, 'shared'));
+      return [...out.values()];
+    }
+    const keys = keysEver(target.table, index);
+    if (range === null) {
+      for (const key of keys) {
+        add(gapNeed(target.table, index, key, 'shared'));
+        recordsAt(key);
+      }
+      add(gapNeed(target.table, index, null, 'shared'));
+      // A row whose leading key is NULL is not in the index, but a full scan reads it all the same.
+      for (const row of rows) add(rowNeed(target.table, row, mode));
+      return [...out.values()];
+    }
+    const examined = keys.filter((k) => positionIn(k, range) === 0);
+    const after = keys.find((k) => positionIn(k, range) === 1) ?? null;
+    if (index.unique && range.prefix.length === index.columns.length) {
+      const hit = rows.filter((row) => compareKeys(keyOf(row), range.prefix) === 0);
+      if (hit.length > 0) {
+        for (const row of hit) add(rowNeed(target.table, row, mode));
+        return [...out.values()];
+      }
+      // Not there: the gap it would be in, so it cannot appear.
+      add(gapNeed(target.table, index, after, 'shared'));
+      return [...out.values()];
+    }
+    for (const key of examined) {
+      add(gapNeed(target.table, index, key, 'shared'));
+      recordsAt(key);
+    }
+    add(gapNeed(target.table, index, after, 'shared'));
+    if (after !== null) recordsAt(after);
+    return [...out.values()];
+  }
+
+  /**
+   * An insert — or an update that moves a row's key — asks for X on the gap each new key goes into, in every index
+   * (plan.md §27.5 T3): InnoDB's insert intention. It conflicts with the S gap locks other transactions hold there, so
+   * the insert waits for them; two inserts into one gap do not wait for each other, because each holds it only while
+   * it runs.
+   */
+  function intentionNeeds(run: RunResult, view: Database): Need[] {
+    if (!run.write || run.write.kind === 'delete') return [];
+    const table = run.write.table;
+    const entries = entriesOf(run.write.kind, table, view.tables[table]?.rows ?? [], run.write.rows, ridOf);
+    const out = new Map<string, Need>();
+    for (const index of gapIndexesOf(table)) {
+      for (const entry of entries) {
+        if (entry.kind === 'delete') continue;
+        const image = entry.kind === 'insert' ? entry.row : entry.after;
+        const key = keyValuesOf(image, index.columns);
+        if (index.name !== '' && key[0] === null) continue;
+        if (entry.kind === 'update' && JSON.stringify(keyValuesOf(entry.before, index.columns)) === JSON.stringify(key)) continue;
+        const need = gapFor(table, index, key);
+        out.set(need.key, need);
+      }
+    }
+    return [...out.values()];
+  }
+
+  /**
+   * After the insert: each gap's X goes, back to the S the transaction held there if it held one — and then its new key
+   * has split that gap in two, and the transaction's lock must still cover both halves.
+   */
+  function settleIntentions(session: string, intentions: readonly Need[], own: readonly Need[], images: readonly Row[]): void {
+    const keep = new Set([
+      ...(gapStash.get(session) ?? []),
+      ...own.filter((n) => n.mode === 'shared' && gapInfo.has(n.key)).map((n) => n.key),
+    ]);
+    gapStash.delete(session);
+    for (const need of intentions) {
+      if (!holds(locks, session, need.key, 'exclusive')) continue;
+      if (!keep.has(need.key)) {
+        locks = release(locks, session, need.key, 'exclusive', labelOf).state;
+        continue;
+      }
+      locks = downgrade(locks, session, need.key, 'shared', labelOf).state;
+      const info = gapInfo.get(need.key)!;
+      const index = gapIndexesOf(info.table).find((i) => i.name === info.index);
+      if (!index || index.name === '') continue;
+      for (const image of images) {
+        const key = keyValuesOf(image, index.columns);
+        if (key[0] === null || gapFor(info.table, index, key).key !== need.key) continue;
+        const below = gapNeed(info.table, index, key, 'shared');
+        labels.set(below.key, below.label);
+        locks = request(locks, session, below.key, 'shared', labelOf).state;
+      }
+    }
+  }
+
+  /** The lock table placed on index keys and gaps, for the leaf view (plan.md §27.5 T3). */
+  function keyLockRows(): KeyLock[] {
+    const out: KeyLock[] = [];
+    const keys = new Set([...Object.keys(locks.holders), ...Object.keys(locks.waiters)]);
+    for (const key of keys) {
+      const holders = (locks.holders[key] ?? []).map((h) => ({ session: h.transaction, mode: h.mode }));
+      const waiters = (locks.waiters[key] ?? []).map((w) => ({ session: w.transaction, mode: w.mode }));
+      if (holders.length === 0 && waiters.length === 0) continue;
+      const gap = gapInfo.get(key);
+      if (gap) {
+        out.push({ table: gap.table, index: gap.index, key: gap.before, part: 'gap', holders, waiters });
+        continue;
+      }
+      const m = /^(.+)\/row\/(\d+)$/.exec(key);
+      if (!m) continue;
+      const table = m[1]!;
+      const rid = Number(m[2]);
+      const rows = current.tables[table]?.rows ?? [];
+      const row = [...rows, ...stonesOf(table, rows)].find((r) => ridOf(r) === rid);
+      if (!row) continue;
+      for (const index of gapIndexesOf(table)) {
+        if (index.name === '') continue;
+        out.push({ table, index: index.name, key: keyValuesOf(row, index.columns), part: 'record', holders, waiters });
+      }
+    }
+    return out;
+  }
+
   /** Lets go of everything `session` holds, so whatever was waiting on it can be promoted. */
   function endLocks(session: string, notes: string[]): void {
     if (!locking) return;
+    gapStash.delete(session);
     const released = releaseAll(locks, session, labelOf);
     locks = forget(released.state, session);
-    notes.push(...released.narration);
+    // Gap locks come by the dozen, so their release is told once, where the first one was (plan.md §27.5 T3).
+    const gapLines = new Set([...gapInfo.keys()].map((k) => `${session}'s lock on ${labelOf(k)} is released.`));
+    const told: string[] = [];
+    let gaps = 0;
+    let first = -1;
+    for (const line of released.narration) {
+      if (!gapLines.has(line)) told.push(line);
+      else if (gaps++ === 0) first = told.push('') - 1;
+    }
+    if (first >= 0) told[first] = `${session}'s ${plural(gaps, 'gap lock')} ${gaps === 1 ? 'is' : 'are'} released.`;
+    notes.push(...told);
     for (let at = predicates.length - 1; at >= 0; at -= 1) {
       if (predicates[at]!.session === session) predicates.splice(at, 1);
     }
@@ -810,6 +1163,7 @@ export function runSchedule(
 
   /** Ends `session`'s transaction by rolling it back, as a deadlock victim's is. Returns the notes. */
   function rollBackTransaction(session: string): string[] {
+    gapStash.delete(session);
     const txn = transactions.get(session);
     if (!txn) return [];
     if (mvcc) {
@@ -1156,9 +1510,13 @@ export function runSchedule(
     // Under locking, take every lock the statement needs before it runs, holding each to the end of the transaction.
     let needs: Need[] = [];
     let escalated: Need[] = [];
+    let intentions: Need[] = [];
     const heldShared = new Set<string>();
     if (locking) {
-      needs = footprint(sql, run, view);
+      // Next-key locks at REPEATABLE READ and above (plan.md §27.5 T3); below that, InnoDB locks no gaps.
+      const ranged =
+        nextKey && (isolation === 'repeatable-read' || isolation === 'serializable') ? nextKeyFootprint(sql, run, view) : null;
+      needs = ranged ?? footprint(sql, run, view);
       if (optimistic && txn?.workspace) {
         for (const n of needs) (n.mode === 'exclusive' ? txn.workspace.writes : txn.workspace.reads).add(ridOfKey(n.key));
       }
@@ -1195,6 +1553,15 @@ export function runSchedule(
       // Any write waits for a predicate another session is holding that it would change, whatever level the writer
       // runs at: a lock is not optional for the one it is taken against.
       if (!mvcc) needs = [...needs, ...predicateNeeds(session, sql, run)];
+      // And under next-key locking, for the gap each new key goes into, last — at every level, for the same reason.
+      if (nextKey) {
+        intentions = intentionNeeds(run, view);
+        if (intentions.length > 0 && !gapStash.has(session)) {
+          const own = heldBy(locks, session).filter((h) => h.mode === 'shared' && gapInfo.has(h.resource));
+          gapStash.set(session, new Set(own.map((h) => h.resource)));
+        }
+        needs = [...needs, ...intentions];
+      }
       // Intention locks above every page and row lock, and escalation past the threshold (plan.md §27.5 T2).
       const layered = hierarchical(session, sql, needs, view);
       needs = layered.needs;
@@ -1202,17 +1569,39 @@ export function runSchedule(
       for (const n of needs) {
         if (n.mode === 'shared' && holds(locks, session, n.key, 'shared')) heldShared.add(n.key);
       }
+      // Gap locks come by the dozen, so they are told once, not one by one (plan.md §27.5 T3).
+      const gapsTaken = new Set<string>();
+      const tellGaps = (): void => {
+        if (gapsTaken.size === 0) return;
+        const where = [...new Set([...gapsTaken].map((k) => gapInfo.get(k)!).map((g) => `${g.table}.${indexLabel(g.index)}`))];
+        notes.push(
+          `${session} also locks ${plural(gapsTaken.size, 'gap')} in ${where.join(' and ')} — below each key it read, and the one just past them — so no other transaction can insert a row into the range it read.`,
+        );
+        gapsTaken.clear();
+      };
       for (const need of needs) {
         labels.set(need.key, need.label);
         const outcome = request(locks, session, need.key, need.mode, labelOf);
         locks = outcome.state;
-        if (outcome.kind === 'granted') notes.push(...outcome.narration);
+        const gap = gapInfo.has(need.key);
+        if (outcome.kind === 'granted') {
+          if (gap && need.mode === 'shared') gapsTaken.add(need.key);
+          else if (gap) notes.push(`${session}'s insert goes into ${need.label}, which no other transaction has locked.`);
+          else notes.push(...outcome.narration);
+        }
         if (outcome.kind === 'granted' || outcome.kind === 'already-held') continue;
+        tellGaps();
 
         if (outcome.kind === 'blocked') {
           blocked.set(session, { ...step, need });
           record(step, 'statement', 'blocked', {
-            notes: [...notes, ...outcome.narration],
+            notes: [
+              ...notes,
+              ...outcome.narration,
+              ...(gap && need.mode === 'exclusive'
+                ? ['An insert waits for every lock another transaction holds on the gap it goes into: that is how a next-key lock keeps a phantom out.']
+                : []),
+            ],
             waitingOn: outcome.waitingOn ?? [],
           });
           return 'blocked';
@@ -1254,12 +1643,15 @@ export function runSchedule(
           return execute(step, resumed);
         }
       }
+      tellGaps();
     }
 
     // An escalated table lock is held now: the row and page locks it covers go (plan.md §27.5 T2).
     for (const e of escalated) {
       const table = e.key.slice(0, -'/table'.length);
-      const finer = heldBy(locks, session).filter((h) => h.resource.startsWith(`${table}/row/`) || h.resource.startsWith(`${table}/page/`));
+      const finer = heldBy(locks, session).filter(
+        (h) => h.resource.startsWith(`${table}/row/`) || h.resource.startsWith(`${table}/page/`) || h.resource.startsWith(`${table}/gap/`),
+      );
       for (const h of finer) locks = release(locks, session, h.resource, h.mode, labelOf).state;
       notes.push(
         `${session} would hold more than ${String(locking?.escalateAt)} locks on ${table}, so it escalates: it holds ${modePhrase(e.mode)} lock on the whole table instead, and lets its ${plural(finer.length, 'finer lock')} go.`,
@@ -1291,6 +1683,12 @@ export function runSchedule(
       const { table, rows: written } = run.write;
       const before = view.tables[table]?.rows ?? [];
       const entries = entriesOf(run.write.kind, table, before, written, ridOf);
+
+      // Every key a write makes stays a key of its index for the rest of the schedule (`keysEver`).
+      if (nextKey) {
+        const made = entries.flatMap((e) => (e.kind === 'insert' ? [e.row] : e.kind === 'update' ? [e.after] : []));
+        writtenRows.set(table, [...(writtenRows.get(table) ?? []), ...made]);
+      }
 
       // Carry each updated row's identity across to the row that replaced it, and number a new row at once, so that
       // id order keeps meaning table order.
@@ -1437,6 +1835,15 @@ export function runSchedule(
           locks = request(locks, session, key, 'exclusive', labelOf).state;
         }
       }
+      // The insert is in: its X on each gap goes, or back to the S it had there (plan.md §27.5 T3).
+      if (intentions.length > 0) {
+        settleIntentions(
+          session,
+          intentions,
+          needs,
+          entries.flatMap((e) => (e.kind === 'insert' ? [e.row] : e.kind === 'update' ? [e.after] : [])),
+        );
+      }
       const verb = run.write.kind === 'insert' ? 'inserted' : run.write.kind === 'delete' ? 'deleted' : 'updated';
       if (txn) {
         for (const entry of entries) txn.log.push({ step: index, session, entry });
@@ -1560,7 +1967,7 @@ export function runSchedule(
             }.`,
           );
         }
-      } else if (isolation === 'serializable' && !mvcc) {
+      } else if (isolation === 'serializable' && !mvcc && !nextKey) {
         // SERIALIZABLE keeps the read's WHERE as a lock until the transaction ends, against inserts that would match.
         const target = targetOf(sql);
         if (target && target.kind !== 'insert') {

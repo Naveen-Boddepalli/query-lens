@@ -1722,3 +1722,17 @@ describe('bugs a fuzz found while comparing protocols (plan.md §25.4 D6)', () =
     expect(result.steps.some((s) => s.session === 'B' && s.phase === 'blocked')).toBe(true);
   });
 });
+
+describe('a table read under an alias (plan.md §27.5 S7, found in T3)', () => {
+  it('is locked as the stored table it is', () => {
+    const result = runSchedule(
+      steps(['A', 'BEGIN'], ['A', 'SELECT a.balance FROM accounts AS a WHERE a.id = 1'], ['B', 'UPDATE accounts SET balance = 0 WHERE id = 1']),
+      createAccountsDatabase(20),
+      undefined,
+      { granularity: 'row', isolation: 'repeatable-read' },
+    );
+    expect(result.steps[1]!.error).toBeUndefined();
+    expect(result.steps[1]!.locks.map((l) => l.resource)).toContain('the row of accounts with id = 1');
+    expect(result.steps[2]!.phase).toBe('blocked');
+  });
+});

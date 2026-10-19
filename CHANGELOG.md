@@ -11,6 +11,21 @@ Work toward **v3** (plan.md §27), on the branch `version/v3`.
 
 ### Added
 
+- **Next-key (gap) locks** (plan.md §27.5 T3) — InnoDB's answer to the phantom, on
+  [Transaction schedules](/tools/schedule) under row locks with *Gap locks: Next-key* (`g=1` in the link). At
+  `REPEATABLE READ` and `SERIALIZABLE` a statement locks each index record it reads and the gap below it — a full scan
+  every record and gap of the table's first unique index, a range only its own, a whole unique key that is there just
+  its row — and an `INSERT`, or an `UPDATE` that moves a key, asks for X on the gap its new key goes into and waits for
+  anyone's S there. So the *Phantom* example's insert now waits and the re-read finds the same rows; `SERIALIZABLE`
+  takes no predicate lock, and `READ COMMITTED` locks no gaps. Gap locks never wait for each other, two inserts into
+  one gap don't either, and a transaction that inserts into its own gap keeps both halves. Each step draws the locks
+  on the index's leaf level, keys in order with the gaps between, open where an insert waits; the new *Gap lock*
+  example shows a range read leaving a row outside it free and an insert past it waiting. The
+  [isolation matrix](/tools/isolation)'s InnoDB column now runs `SERIALIZABLE` on next-key locks (its published cells
+  still agree: write skew on a predicate deadlocks on one gap). Checked by 16 unit tests — one a fuzz of 300 random
+  three-transaction schedules, none of which leaves a cycle in the precedence graph, a phantom or a changed re-read —
+  each of twelve mutations failing at least one, and two e2e tests.
+
 - **Multi-granularity locking** (plan.md §27.5 T2) — the lock table has five modes, **IS, IX, S, SIX and X**, over a
   table → page → row hierarchy. Their compatibility matrix is computed, not typed in: each mode is what it lets its
   holder do to the whole resource and below it, and two modes conflict when one writes something the other reads or
@@ -177,6 +192,10 @@ Work toward **v3** (plan.md §27), on the branch `version/v3`.
   record the difference.
 
 ### Fixed
+
+- **A read under an alias took no locks.** Since aliases (S7), the schedule engine looked an aliased table up by its
+  alias and found nothing, so `SELECT … FROM accounts AS a` under locking locked no row. It locks the stored table now
+  (plan.md §27.5 T3).
 
 - **A nested loop in a pool with too few frames answered wrongly.** A scan holds its current page pinned while the
   scans inside a nested loop run; when every frame was pinned, the scan that needed one more quietly ended as if its

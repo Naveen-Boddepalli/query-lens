@@ -24,6 +24,7 @@ import {
   segOn,
 } from '../../ui/primitives.ts';
 import { modeName } from '../../engine/locks/lockTable.ts';
+import { GapLocksView } from '../../ui/GapLocksView.tsx';
 import { PrecedencePanel } from '../../ui/PrecedencePanel.tsx';
 import { ScrollRegion } from '../../ui/ScrollRegion.tsx';
 import { useAddressBarQuery } from '../../ui/addressBar.ts';
@@ -64,6 +65,8 @@ interface Preset {
   rows: TableSize;
   isolation?: IsolationLevel;
   escalation?: Escalation;
+  /** Next-key locks (plan.md §27.5 T3), under row locks. */
+  nextKey?: boolean;
 }
 
 const PRESETS: Preset[] = [
@@ -148,6 +151,23 @@ const PRESETS: Preset[] = [
       { session: 'A', sql: 'SELECT * FROM accounts WHERE balance > 50' },
       { session: 'B', sql: "INSERT INTO accounts VALUES (30, 'zed', 100)" },
       { session: 'A', sql: 'SELECT * FROM accounts WHERE balance > 50' },
+      { session: 'A', sql: 'COMMIT' },
+    ],
+  },
+  {
+    // plan.md §27.5 T3: a range read locks its keys and the gaps between them; a row outside it is free, an insert past
+    // it waits — and the re-read finds the same rows.
+    label: 'Gap lock',
+    locking: 'row',
+    rows: 20,
+    isolation: 'repeatable-read',
+    nextKey: true,
+    steps: [
+      { session: 'A', sql: 'BEGIN' },
+      { session: 'A', sql: 'SELECT * FROM accounts WHERE id > 18' },
+      { session: 'B', sql: 'UPDATE accounts SET balance = 0 WHERE id = 5' },
+      { session: 'B', sql: "INSERT INTO accounts VALUES (25, 'zed', 100)" },
+      { session: 'A', sql: 'SELECT * FROM accounts WHERE id > 18' },
       { session: 'A', sql: 'COMMIT' },
     ],
   },
@@ -247,13 +267,21 @@ const CONTROL: { label: string; sql: string }[] = [
   { label: 'ROLLBACK', sql: 'ROLLBACK' },
 ];
 
-function readInitial(): { steps: ScheduleStep[]; locking: LockingMode; rows: TableSize; isolation: IsolationLevel; escalation: Escalation } {
+function readInitial(): {
+  steps: ScheduleStep[];
+  locking: LockingMode;
+  rows: TableSize;
+  isolation: IsolationLevel;
+  escalation: Escalation;
+  nextKey: boolean;
+} {
   const params = new URLSearchParams(typeof location === 'undefined' ? '' : location.search);
   const steps = decodeSchedule(params.get('s'));
   const lockingRaw = params.get('l');
   const rowsRaw = Number(params.get('n'));
   const isolationRaw = params.get('i');
   const escalation: Escalation = ESCALATIONS.find((e) => e > 0 && String(e) === params.get('e')) ?? 0;
+  const nextKey = params.get('g') === '1';
   const locking: LockingMode =
     lockingRaw === 'page' || lockingRaw === 'row' || lockingRaw === 'mvcc' ? lockingRaw : 'none';
   const rows: TableSize = rowsRaw === 20 ? 20 : 3;
@@ -267,9 +295,10 @@ function readInitial(): { steps: ScheduleStep[]; locking: LockingMode; rows: Tab
       rows: first.rows,
       isolation: first.isolation ?? DEFAULT_ISOLATION,
       escalation: first.escalation ?? 0,
+      nextKey: first.nextKey ?? false,
     };
   }
-  return { steps, locking, rows, isolation, escalation };
+  return { steps, locking, rows, isolation, escalation, nextKey };
 }
 
 const INITIAL = readInitial();
@@ -569,6 +598,14 @@ function StepCard({
         </details>
       )}
 
+      {/* plan.md §27.5 T3: the same locks on the index they cover, open where an insert is waiting for a gap. */}
+      {step.keyLocks?.some((k) => k.part === 'gap') && (
+        <details className="mt-2" open={step.phase === 'blocked' && step.keyLocks.some((k) => k.part === 'gap' && k.waiters.length > 0)}>
+          <summary className="cursor-pointer text-label text-ink-dim">Gap locks on the index after this step</summary>
+          <GapLocksView keyLocks={step.keyLocks} db={step.after} rowsPerPage={DEFAULT_ENGINE_OPTIONS.rowsPerPage} />
+        </details>
+      )}
+
       {step.versions.length > 0 && (
         <details className="mt-2">
           <summary className="cursor-pointer text-label text-ink-dim">Row versions after this step</summary>
@@ -602,6 +639,7 @@ export function ScheduleToolPage() {
   const [rows, setRows] = useState<TableSize>(INITIAL.rows);
   const [isolation, setIsolation] = useState<IsolationLevel>(INITIAL.isolation);
   const [escalation, setEscalation] = useState<Escalation>(INITIAL.escalation);
+  const [nextKey, setNextKey] = useState(INITIAL.nextKey);
   const [session, setSession] = useState<SessionName>('A');
   const [sql, setSql] = useState('');
 
@@ -615,8 +653,9 @@ export function ScheduleToolPage() {
             isolation,
             ...(locking === 'mvcc' ? { mvcc: true } : {}),
             ...(escalation > 0 ? { escalateAt: escalation } : {}),
+            ...(locking === 'row' && nextKey ? { nextKey: true } : {}),
           },
-    [locking, isolation, escalation],
+    [locking, isolation, escalation, nextKey],
   );
   const result = useMemo(
     () => runSchedule(steps, database, undefined, lockingOptions),
@@ -631,8 +670,9 @@ export function ScheduleToolPage() {
     if (rows !== 3) params.set('n', String(rows));
     if (locking !== 'none' && isolation !== DEFAULT_ISOLATION) params.set('i', isolation);
     if (locking !== 'none' && escalation > 0) params.set('e', String(escalation));
+    if (locking === 'row' && nextKey) params.set('g', '1');
     return params.toString();
-  }, [steps, locking, rows, isolation, escalation]);
+  }, [steps, locking, rows, isolation, escalation, nextKey]);
   useAddressBarQuery(shareQuery);
 
   function add(statement: string) {
@@ -785,6 +825,25 @@ export function ScheduleToolPage() {
             </div>
           </div>
         )}
+        {locking === 'row' && (
+          <div className="flex flex-col gap-1 text-label text-ink-dim">
+            Gap locks
+            <div className="flex gap-1" role="radiogroup" aria-label="Gap locks">
+              {[false, true].map((on) => (
+                <button
+                  key={String(on)}
+                  type="button"
+                  role="radio"
+                  aria-checked={nextKey === on}
+                  onClick={() => { setNextKey(on); }}
+                  className={`${segBase} ${nextKey === on ? segOn : segOff}`}
+                >
+                  {on ? 'Next-key' : 'Off'}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         <div className="flex flex-col gap-1 text-label text-ink-dim">
           Accounts
           <div className="flex gap-1" role="radiogroup" aria-label="Number of accounts">
@@ -823,10 +882,16 @@ export function ScheduleToolPage() {
                 isolation === 'read-uncommitted'
                   ? 'Read uncommitted takes no read locks, so it reads changes that are not committed.'
                   : isolation === 'read-committed'
-                    ? 'Read committed gives each read lock back as the statement ends, so a repeated read can change.'
-                    : isolation === 'repeatable-read'
-                      ? 'Repeatable read holds read locks to the end, but locks only rows that exist: a new matching row can still appear.'
-                      : 'Serializable also holds each read’s WHERE as a lock, so an insert that would match it waits.'
+                    ? `Read committed gives each read lock back as the statement ends, so a repeated read can change.${
+                        locking === 'row' && nextKey ? ' It locks no gaps, but its inserts still wait for the gap locks of others.' : ''
+                      }`
+                    : locking === 'row' && nextKey
+                      ? isolation === 'repeatable-read'
+                        ? 'Repeatable read holds read locks to the end, and a next-key lock covers the gap below its key too: a row inserted where a transaction read has to wait, so no phantom appears. That is InnoDB’s answer.'
+                        : 'Serializable needs no predicate lock here: next-key locks already keep phantoms out. (InnoDB’s serializable only turns its snapshot reads into locking ones.)'
+                      : isolation === 'repeatable-read'
+                        ? 'Repeatable read holds read locks to the end, but locks only rows that exist: a new matching row can still appear — unless gap locks are on.'
+                        : 'Serializable also holds each read’s WHERE as a lock, so an insert that would match it waits.'
               }`}
           {/* plan.md §27.5 T2: the hierarchy above every lock, and what escalation trades. */}
           {locking !== 'none' &&
@@ -852,6 +917,7 @@ export function ScheduleToolPage() {
               setRows(p.rows);
               setIsolation(p.isolation ?? DEFAULT_ISOLATION);
               setEscalation(p.escalation ?? 0);
+              setNextKey(p.nextKey ?? false);
             }}
             className={btnSecondary}
           >

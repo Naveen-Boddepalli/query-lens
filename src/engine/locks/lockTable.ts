@@ -377,6 +377,32 @@ export function release(
 }
 
 /**
+ * Trades the lock `transaction` holds on `resource` for a weaker one it covers — an insert's X on a gap back to the S
+ * gap lock its transaction already had there (plan.md §27.5 T3) — and promotes whoever that makes room for. Unlike a
+ * release followed by a fresh request, nobody can slip in between and take the resource away.
+ */
+export function downgrade(
+  state: LockTableState,
+  transaction: string,
+  resource: string,
+  to: LockMode,
+  label: Label,
+): { state: LockTableState; narration: string[]; promoted: string[] } {
+  const held = state.holders[resource] ?? [];
+  const own = held.find((h) => h.transaction === transaction);
+  if (!own || own.mode === to || !covers(own.mode, to)) {
+    return { state, narration: [], promoted: [] };
+  }
+  let next = clone(state);
+  next.holders[resource] = held.map((h) => (h.transaction === transaction ? { transaction, mode: to } : h));
+  const narration = [`${transaction} keeps only ${modePhrase(to)} lock on ${label(resource)}.`];
+  const result = promoteWaiters(next, resource, label);
+  next = result.state;
+  narration.push(...result.narration);
+  return { state: next, narration, promoted: result.promoted };
+}
+
+/**
  * Forgets that `transaction` was aborted or ever requested anything, so the same session can begin a new one. A
  * deadlock victim's name is not reusable in the sandbox (it simply stops); a schedule's *session* is not a
  * transaction, and goes on to run its next statement as a fresh, and therefore youngest, transaction.
