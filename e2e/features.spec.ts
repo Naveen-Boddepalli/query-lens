@@ -2338,3 +2338,33 @@ test('join in place: partition both tables by the same hash of the join key', as
   await page.getByRole('button', { name: 'Run & check' }).click();
   await expect(page.getByText('✓ Solved.')).toBeVisible();
 });
+
+test('the narration tells a step at three levels of detail, and Settings picks the default (plan.md §27.5 L2)', async ({ page }) => {
+  const at = '/playground?q=SELECT+*%0AFROM+users%0AWHERE+id+%3D+5%3B&p=lru&x=0&s=1';
+  await page.goto(`${at}&detail=novice`);
+  const narration = page.locator('[data-tour="narration"] p');
+  const level = (name: string) => page.getByRole('radiogroup', { name: 'Narration detail' }).getByRole('radio', { name });
+  await expect(level('Novice')).toHaveAttribute('aria-checked', 'true');
+  await expect(narration).toContainText('Read the SELECT list');
+  await expect(narration).toContainText('Parsing turns the SQL text into a tree');
+  await level('Expert').click();
+  await expect(narration).toContainText('parse · `*` at 7–8');
+  await expect.poll(() => page.url()).toContain('detail=expert');
+  await page.goto(`${at.replace('s=1', 's=33')}&detail=expert`);
+  await expect(narration).toContainText('result · 1 row · 4 misses, 0 hits, 0 evictions');
+  await level('Standard').click();
+  await expect(narration).toContainText('1 row returned');
+  await expect.poll(() => page.url()).not.toContain('detail=');
+
+  // A stored default applies to a link without `detail`; a link's own `detail` still wins.
+  await page.goto('/settings');
+  await page.getByRole('radiogroup', { name: 'Default narration detail' }).getByRole('radio', { name: 'Expert' }).click();
+  await page.goto(at);
+  await expect(narration).toContainText('parse · `*` at 7–8');
+  await page.goto(`${at}&detail=novice`);
+  await expect(narration).toContainText('Parsing turns the SQL text into a tree');
+  await page.goto('/settings');
+  await page.getByRole('button', { name: 'Reset to engine defaults' }).click();
+  await page.goto(at);
+  await expect(level('Standard')).toHaveAttribute('aria-checked', 'true');
+});

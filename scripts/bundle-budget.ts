@@ -445,6 +445,10 @@ const T = (name: string): string => `src/pages/tools/${name}.tsx`;
  *    brought the parser and the exchange model, 131.0 kB; its challenge's checks are 3.9 kB, under their 6. The four
  *    distributed lessons' text and the challenges' put /learn/:id at 209.7, /challenges at 198.0 and /challenges/:id at
  *    319.0: 209 → 213, 198 → 202, 319 → 323, each measured + 3, rounded up.
+ *  - 2026-10-20, narration detail levels (plan.md §27.5 L2): the novice and expert lines and `eventKey` put
+ *    /playground at 355.9 kB of its 356 while they sat in the route, so they are now an opt-in chunk,
+ *    `narrationDetail.ts` (4.0 kB → 7), fetched when one of those levels is chosen. The route keeps the Narration
+ *    box's level control and is 352.0. Nothing else moved over its ceiling.
  */
 export const ROUTES: readonly RouteBudget[] = [
   { route: '/', roots: [P('LandingPage')], kb: 177, note: 'the landing page' },
@@ -538,6 +542,7 @@ export const OPT_IN: readonly { key: string; kb: number; note: string; after?: s
   { key: 'src/ui/WorkspaceDialog.tsx', kb: 6, after: 'src/pages/PlaygroundPage.tsx', note: 'the Workspaces dialog (§H7) — fetched only when Custom mode\'s Workspaces button is pressed' },
   { key: 'src/ui/Footer.tsx', kb: 5, after: 'index.html', note: 'the footer and the docs navigation it maps — below the fold on every page, so fetched after the page itself, not with the shell (§25.4 H8)' },
   { key: 'src/ui/ParallelCompare.tsx', kb: 9, after: 'src/pages/ComparePage.tsx', note: 'Compare’s serial-against-parallel mode (plan.md §27.5 P3): the morsel model and its scaling table — fetched only when that mode is chosen' },
+  { key: 'src/ui/narrationDetail.ts', kb: 7, after: 'src/pages/PlaygroundPage.tsx', note: 'the narration\'s novice and expert lines (plan.md §27.5 L2) and the event keys they are looked up by — fetched only when one of those levels is chosen' },
   { key: 'src/ui/DurabilityDialog.tsx', kb: 17, after: 'src/pages/PlaygroundPage.tsx', note: 'the Durability dialog (§25.4 E4): the write-ahead-log machine, crash and recovery — fetched only when the Playground\'s Durability button is pressed' },
   { key: 'src/pages/challenges/ScriptChallengeView.tsx', kb: 35, after: 'src/pages/ChallengePage.tsx', note: 'a transaction or durability challenge: the schedule runner, the protocol comparison and the log machine — fetched only when one of those challenges is opened' },
   { key: 'src/pages/challenges/SettingsChallengeView.tsx', kb: 8, after: 'src/pages/ChallengePage.tsx', note: 'a storage, execution or isolation challenge: the form and the runner — no driver; each tool\'s own checks are the rows below, fetched when one of its challenges is opened' },

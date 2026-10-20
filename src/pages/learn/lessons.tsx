@@ -6,6 +6,7 @@ import type { ReactNode } from 'react';
 import { createSeedDatabase, DATASETS, DEFAULT_ENGINE_OPTIONS, runQuery } from '../../engine/index.ts';
 import type { DatasetId, ReplacementPolicyName, StepEvent } from '../../engine/index.ts';
 import { encodeShareState } from '../../ui/urlState.ts';
+import type { DetailLevel } from '../../ui/detailLevel.ts';
 import { LESSON_INDEX } from './lessonIndex.ts';
 import type { LessonMeta } from './lessonIndex.ts';
 import { SANDBOX_STEPS } from './sandboxLessons.tsx';
@@ -53,6 +54,8 @@ interface OpenSpec {
   dataset?: DatasetId;
   policy?: ReplacementPolicyName;
   predictOn?: boolean;
+  /** The narration's detail level (plan.md §27.5 L2); standard when absent. */
+  detail?: DetailLevel;
   /** Returns the 0-based event index to land *after*; `at` adds 1. */
   find: (events: readonly StepEvent[]) => number;
   label?: string;
@@ -91,7 +94,8 @@ export function stepLink(spec: OpenSpec): { href: string; label: string } {
     { sql: spec.sql, policy, predictOn: spec.predictOn ?? false, step, ...(spec.dataset ? { dataset: spec.dataset } : {}) },
     undefined,
   );
-  return { href: `/playground?${query}`, label: spec.label ?? 'Open this in the Playground' };
+  const detail = spec.detail && spec.detail !== 'standard' ? `&detail=${spec.detail}` : '';
+  return { href: `/playground?${query}${detail}`, label: spec.label ?? 'Open this in the Playground' };
 }
 
 /** The query pipeline: the Playground, the planner, the buffer pool and the B+Tree. */
@@ -118,6 +122,29 @@ export const PIPELINE_STEPS: Record<string, LessonStep[]> = {
         </>
       ),
       open: { sql: POINT_LOOKUP, find: (e) => at(e, (x) => x.stage === 'index'), label: 'Jump to the index descent' },
+    },
+    {
+      heading: 'Choose how much it tells you',
+      body: (
+        <>
+          The Narration box has three levels. <strong>Novice</strong> adds a sentence in plain words
+          the first time each kind of step happens — what a buffer miss is, why an index helps.{' '}
+          <strong>Expert</strong> trades each line for the step&apos;s own numbers: the page, the frame, the key, the
+          plan on one line. <strong>Standard</strong>, in between, is where it starts; Settings can change that.
+        </>
+      ),
+      open: {
+        sql: POINT_LOOKUP,
+        detail: 'novice',
+        find: (e) => at(e, (x) => x.stage === 'buffer' && x.action === 'miss'),
+        label: 'Open at the first buffer miss, in novice',
+      },
+      tryThis: (
+        <>
+          Switch to Expert and step down the B+Tree: which child does each node send the search for{' '}
+          <code className="font-mono">5</code> to?
+        </>
+      ),
     },
     {
       heading: 'Read the result',

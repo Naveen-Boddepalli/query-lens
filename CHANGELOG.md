@@ -11,6 +11,17 @@ Work toward **v3** (plan.md §27), on the branch `version/v3`.
 
 ### Added
 
+- **Narration detail levels** (plan.md §27.5 L2, G5 carried over) — the Playground's Narration box gains *Novice*,
+  *Standard* and *Expert*. Novice keeps the engine's sentence and adds one in plain words the first time each kind of
+  step happens in a trace: what a buffer miss is, why an index helps, what a rewrite never changes. Expert replaces
+  the sentence with a terse line of the step's own fields (`read · page 20 → frame 0`, `n8 · key 5 → child 0`, the
+  plan on one line, the counters at the result). Chosen in the box, by `?detail=novice|expert`, or as a default in
+  Settings; a link's own `detail` wins. Both are looked up by a new `eventKey(event)` in the engine. It derives
+  `{key, params}` from each event's structured body, not from each of the engine's emit sites: the half of H5's
+  event-label refactor that L2 shares. A test holds every kind of step in a broad corpus to a novice line of its
+  own. A step in the first lesson opens at the first buffer miss in novice. There is no challenge: a level changes
+  how a step is told, not what there is to solve.
+
 - **A join across the nodes** (plan.md §27.5 X4) — [Partitioning](/tools/partitioning) gains a second section:
   2,000 orders and 3,000 payments, each partitioned as you choose, joined on `orders.id = payments.orderId` over two
   to ten nodes, and priced in rows over the network three ways — co-located (nothing moves, when both tables are

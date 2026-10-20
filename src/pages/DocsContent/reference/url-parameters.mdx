@@ -21,6 +21,7 @@ the current one. This page is for building one by hand.
 | `d` | Custom row data, only present when the seed rows have been edited | *(generated, not hand-written — see below)* |
 | `d.<table>` | The same, for one of a multi-table preset's other tables — `d.orders` on `shop` | *(generated — see below)* |
 | `present` | `present=1` opens **presenter mode** — a full-viewport view of the current stage for a lecture hall, keyboard-driven, with prediction suppressed. `Esc` leaves it | `present=1` |
+| `detail` | `detail=novice` or `detail=expert` tells the trace's narration at that level of detail. Novice adds a plain-words sentence the first time each kind of step happens; expert gives a terse line of the step's own fields. Absent means standard, or the default chosen in Settings. A view flag, like `present`: written back when you change it, not part of the moment | `detail=novice` |
 | `tour` | `tour=1` opens the **60-second tour** on load — five spotlights over the real interface, for a course link or a first walkthrough. `Esc` or *Skip* leaves it; it is not written back into the URL | `tour=1` |
 
 A link that omits a parameter falls back to that setting's default, so the shortest working link is

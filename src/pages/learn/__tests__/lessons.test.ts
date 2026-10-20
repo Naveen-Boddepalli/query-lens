@@ -38,6 +38,17 @@ describe('learn lessons', () => {
     }
   });
 
+  it('the first lesson opens the Playground in novice detail, at the first buffer miss (plan.md §27.5 L2)', () => {
+    const step = lessonById('first-query')!.steps.find((s) => s.open?.detail === 'novice')!;
+    const url = new URL(stepLink(step.open!).href, 'https://x');
+    expect(url.searchParams.get('detail')).toBe('novice');
+    const events = runQuery(url.searchParams.get('q')!, DATASETS.users.make()).events;
+    const landed = events[Number(url.searchParams.get('s')) - 1]!;
+    expect(landed.stage === 'buffer' && landed.action).toBe('miss');
+    // A standard link carries no `detail` at all.
+    expect(new URL(stepLink(lessonById('first-query')!.steps[0]!.open!).href, 'https://x').searchParams.has('detail')).toBe(false);
+  });
+
   it('at least one lesson opens a step with prediction on', () => {
     const any = LESSONS.some((l) => l.steps.some((s) => s.open?.predictOn));
     expect(any).toBe(true);

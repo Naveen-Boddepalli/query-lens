@@ -665,6 +665,25 @@ constant folding, predicate pushdown, join predicate pushdown, and the index-onl
 structural match alone; the cost estimates shown beside those plans only justify the narration, they do not
 decide whether the rewrite happens.
 
+## Narration detail
+
+The Playground's narration has three levels (plan.md §27.5 L2), chosen in the Narration box, by `detail=` in a link,
+or as a default in [Settings](/settings):
+
+- **Standard** is the engine's own sentence for each step.
+- **Novice** adds a sentence in plain words, but only on the first step of each kind in a trace: the first buffer
+  miss, the first index descent, the first rewrite of each rule. Later steps of that kind are told as standard.
+- **Expert** replaces the sentence with a line built from the step's recorded fields alone: page and frame numbers,
+  the key a node compared, the plan on one line, the counters at the result. It says nothing the event did not
+  record, so it is terser than standard, and sometimes less. A traverse step's separators, or the rows a scan has
+  rejected so far, are in the sentence and not in the event.
+
+Only the Playground's narration line (and its presenter view) changes. [The trace inspector](/trace), the
+transcript and the printed worksheet are always told as standard. The levels change words only: what a step
+shows, and every panel, is the same at all three. There is no translation. The `{key, params}` the levels are
+looked up by is the half of plan.md §25.4 H5's refactor that L2 shares, and a locale would still need the
+parameters that today appear only in a sentence.
+
 ## What's out of scope entirely
 
 Subqueries in three places only: `IN (SELECT …)` (uncorrelated, plan.md §25.4 C3), `[NOT] EXISTS` (plan.md §27.5

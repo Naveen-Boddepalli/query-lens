@@ -42,10 +42,14 @@ import { ShortcutHints } from '../ui/ShortcutHints.tsx';
 import { WhyNotNote } from '../ui/WhyNotNote.tsx';
 import { recordPrediction, recordStages } from '../ui/progress.ts';
 import { stepAnnouncement } from '../ui/stepAnnouncement.ts';
-import { btnPrimary, btnSecondary, panelSurface } from '../ui/primitives.ts';
+import { btnPrimary, btnSecondary, panelSurface, segOff, segOn } from '../ui/primitives.ts';
 import { useThemeContext } from '../ui/ThemeContext.tsx';
 import { RUN_HINT, useIsTouch } from '../ui/platform.ts';
-import { readDefaultPolicy, readDefaultPredictOn } from '../ui/preferences.ts';
+import { readDefaultDetail, readDefaultPolicy, readDefaultPredictOn } from '../ui/preferences.ts';
+import { DETAIL_LABELS, DETAIL_LEVELS, readDetailParam } from '../ui/detailLevel.ts';
+import type { DetailLevel } from '../ui/detailLevel.ts';
+import type * as NarrationDetail from '../ui/narrationDetail.ts';
+import type { Narrated } from '../ui/narrationDetail.ts';
 import { StageDetail } from '../ui/panels/StageDetail.tsx';
 import { TraceDiffNote } from '../ui/panels/TraceDiffNote.tsx';
 import { diffRuns, readLastRuns, summarize, writeLastRun } from '../ui/traceDiff.ts';
@@ -107,6 +111,9 @@ const PRESENT_INITIAL = new URLSearchParams(SEARCH).get('present') === '1';
  *  rendered before the Playground's. */
 const TOUR_INITIAL = new URLSearchParams(SEARCH).get('tour') === '1';
 
+/** plan.md §27.5 L2: `?detail=novice|expert`, else the `/settings` default, else the engine's own words. */
+const DETAIL_INITIAL: DetailLevel = readDetailParam(SEARCH) ?? readDefaultDetail() ?? 'standard';
+
 const START = {
   sql: SHARED.sql ?? CATALOGUE.starterSql,
   // The URL wins when present; a `/settings` preference (plan.md §21.3) is the
@@ -119,10 +126,20 @@ const START = {
   edited: new Set([...(SHARED.rows ? [DATASET.table] : []), ...Object.keys(SHARED.otherRows ?? {})]),
 };
 
-const INITIAL_RESULT = runQuery(START.sql, START.db, {
+/**
+ * The SQL each run was of (plan.md §27.5 L2): the expert narration quotes the text a parse step read, and the editor
+ * may have moved on since the run it is narrating.
+ */
+const RAN_SQL = new WeakMap<RunResult, string>();
+function ran(sqlText: string, result: RunResult): RunResult {
+  RAN_SQL.set(result, sqlText);
+  return result;
+}
+
+const INITIAL_RESULT = ran(START.sql, runQuery(START.sql, START.db, {
   ...DEFAULT_ENGINE_OPTIONS,
   policy: START.policy,
-});
+}));
 
 const WorkspaceDialog = lazy(() =>
   import('../ui/WorkspaceDialog.tsx').then((m) => ({ default: m.WorkspaceDialog })),
@@ -161,6 +178,16 @@ export function PlaygroundPage() {
 
   const [predictOn, setPredictOn] = useState(START.predictOn);
   const [presenting, setPresenting] = useState(PRESENT_INITIAL);
+  const [detail, setDetail] = useState<DetailLevel>(DETAIL_INITIAL);
+  // plan.md §27.5 L2: the novice and expert lines are fetched once one of those levels is first chosen — most visits
+  // stay at standard, the engine's own words, and never need them.
+  const [narrator, setNarrator] = useState<typeof NarrationDetail | null>(null);
+  useEffect(() => {
+    if (detail === 'standard' || narrator) return;
+    let live = true;
+    void import('../ui/narrationDetail.ts').then((m) => { if (live) setNarrator(m); });
+    return () => { live = false; };
+  }, [detail, narrator]);
   // A request already waiting opens the tour on the first render (only *looked at* here — a render may be thrown
   // away); `listenForTour` below is what answers it.
   const [tourOpen, setTourOpen] = useState(() => TOUR_INITIAL || hasPendingTour());
@@ -252,12 +279,22 @@ export function PlaygroundPage() {
   // below is the live region and is kept permanently mounted for it — the
   // prediction card renders alongside rather than in its place, so the region
   // is never re-created with the very text it needed to announce.
+  // plan.md §27.5 L2: the step told at the chosen level of detail — a novice's plain-words line on the first step of
+  // each kind, or an expert's terse one.
+  const firsts = useMemo(() => narrator?.firstOfEachKind(result.events), [narrator, result]);
+  const narrated: Narrated =
+    narrator && firsts && detail !== 'standard'
+      ? narrator.narrationAt(state, detail, RAN_SQL.get(result) ?? sql, firsts)
+      : { text: state.narration, terse: false };
   const announcement = stepAnnouncement({
-    narration: state.narration,
+    narration: narrated.text,
     // A statement rejected part-way (a UNIQUE key already taken) has a trace to read; only one that never ran has none.
     error: result.error !== undefined && result.events.length === 0,
     prediction: prompt && upcoming ? { prompt, answer: answers[upcoming.id] } : undefined,
   });
+  // Only while the line on show is the step's own: a prediction or an error takes the narration's place.
+  const terse = narrated.terse && announcement === narrated.text;
+  const gloss = announcement === narrated.text ? narrated.gloss : undefined;
 
   const visited = useMemo(() => {
     const seen = new Set<Stage>();
@@ -318,7 +355,8 @@ export function PlaygroundPage() {
 
   // `present` is a view flag, not part of the shared moment — appended after
   // `encodeShareState` so a copied link still opens the presenter.
-  useAddressBarQuery(presenting ? `${shareQuery}&present=1` : shareQuery);
+  // `detail` (plan.md §27.5 L2) is one too: how the moment is told, not which moment it is.
+  useAddressBarQuery([shareQuery, presenting ? 'present=1' : '', detail === 'standard' ? '' : `detail=${detail}`].filter(Boolean).join('&'));
 
   // plan.md §25.4 A3 — everything a "confusing step" report needs, from state
   // the page already holds. Read at render, not from `location`, which trails
@@ -349,7 +387,7 @@ export function PlaygroundPage() {
 
   const run = useCallback(
     (database: Database = db) => {
-      const next = runQuery(sql, database, options);
+      const next = ran(sql, runQuery(sql, database, options));
       setResult(next);
       if (next.error) {
         setTraceDiff({ sql, diff: null });
@@ -416,7 +454,7 @@ export function PlaygroundPage() {
   /** A preset chip: load the query and run it in one click (plan.md §19.2). */
   function loadPreset(presetSql: string) {
     setSql(presetSql);
-    const next = runQuery(presetSql, db, options);
+    const next = ran(presetSql, runQuery(presetSql, db, options));
     setResult(next);
     setPinnedStage(null);
     setAnswers({});
@@ -441,7 +479,7 @@ export function PlaygroundPage() {
     setEditTableName(DATASETS[id].table);
     setEditingData(false);
     setSql(nextSql);
-    const next = runQuery(nextSql, nextDb, options);
+    const next = ran(nextSql, runQuery(nextSql, nextDb, options));
     setResult(next);
     setPinnedStage(null);
     setAnswers({});
@@ -459,7 +497,7 @@ export function PlaygroundPage() {
       setEditedTables(new Set());
       setEditingData(false);
       setSql(CUSTOM_STARTER_SQL);
-      const next = runQuery(CUSTOM_STARTER_SQL, nextDb, options);
+      const next = ran(CUSTOM_STARTER_SQL, runQuery(CUSTOM_STARTER_SQL, nextDb, options));
       setResult(next);
       setPinnedStage(null);
       setAnswers({});
@@ -521,7 +559,7 @@ export function PlaygroundPage() {
   function applyTraceState(t: TraceState) {
     const spec = DATASETS[t.dataset];
     const nextDb = presetWithRows(spec.make(), spec.table, t.rows, t.otherRows);
-    const nextResult = runQuery(t.sql, nextDb, { ...DEFAULT_ENGINE_OPTIONS, policy: t.policy });
+    const nextResult = ran(t.sql, runQuery(t.sql, nextDb, { ...DEFAULT_ENGINE_OPTIONS, policy: t.policy }));
     const step = Math.min(t.step, nextResult.events.length);
 
     setSql(t.sql);
@@ -873,18 +911,40 @@ export function PlaygroundPage() {
             }
           >
             {!prompt && (
-              <div className="mb-1 flex items-center justify-between gap-2">
+              <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
                 <h2 className="text-label font-medium tracking-[0.12em] text-ink-dim uppercase">
                   Narration
                 </h2>
-                <ReportStepLink moment={moment} />
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                  {/* plan.md §27.5 L2: how much each step tells you. */}
+                  <div role="radiogroup" aria-label="Narration detail" className="flex gap-1">
+                    {DETAIL_LEVELS.map((level) => (
+                      <button
+                        key={level}
+                        type="button"
+                        role="radio"
+                        aria-checked={detail === level}
+                        onClick={() => { setDetail(level); }}
+                        className={`rounded-md border px-2 py-1 text-label transition ${detail === level ? segOn : segOff}`}
+                      >
+                        {DETAIL_LABELS[level]}
+                      </button>
+                    ))}
+                  </div>
+                  <ReportStepLink moment={moment} />
+                </div>
               </div>
             )}
-            <p className="min-h-10 text-body leading-relaxed" aria-live="polite" aria-atomic="true">
+            <p
+              className={`min-h-10 leading-relaxed ${terse ? 'font-mono text-label break-words' : 'text-body'}`}
+              aria-live="polite"
+              aria-atomic="true"
+            >
               <span className="sr-only">
                 Step {playback.step} of {result.events.length}.{' '}
               </span>
               {announcement}
+              {gloss !== undefined && <span className="mt-1.5 block text-label text-ink-dim">{gloss}</span>}
             </p>
           </div>
 
@@ -954,7 +1014,7 @@ export function PlaygroundPage() {
               setDurable((log) => carryOn(log, recovered, heap));
               setDurabilityOpen(false);
               // A read can show the recovered rows at once; a write must not be run a second time.
-              const again = runQuery(sql, recovered, options);
+              const again = ran(sql, runQuery(sql, recovered, options));
               if (!again.write) {
                 setResult(again);
                 setPinnedStage(null);
@@ -986,7 +1046,7 @@ export function PlaygroundPage() {
           activeSpan={activeSpan}
           currentStage={state?.stage ?? null}
           visited={visited}
-          narration={announcement}
+          narration={gloss === undefined ? announcement : `${announcement} ${gloss}`}
           onExit={() => { setPresenting(false); }}
         />
       )}
