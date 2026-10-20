@@ -4,6 +4,8 @@ import { PARTITION_SCHEMES } from '../../../engine/partitioning.ts';
 import type { PartitionScheme } from '../../../engine/partitioning.ts';
 import { partitionHref, partitionRun, PARTITION_ROWS } from '../../../ui/partitionPresets.ts';
 import type { PartitionSettings } from '../../../ui/partitionPresets.ts';
+import { joinPartitionHref } from '../../../ui/joinPartitionLinks.ts';
+import { joinPartitionRun } from '../../../ui/joinPartitionRun.ts';
 import { fixed, num, str } from './shared.ts';
 import type { Checkers } from './shared.ts';
 
@@ -28,4 +30,20 @@ export const CHECKERS: Checkers = {
       toolHref: partitionHref(settings),
     };
   },
+};
+
+// plan.md §27.5 X4: partition both tables so the join moves nothing.
+CHECKERS['join-in-place'] = (v) => {
+  const settings = { nodes: 4, orders: str(v, 'orders'), payments: str(v, 'payments') };
+  const r = joinPartitionRun(settings);
+  const cheapest = r.strategies.filter((s) => s.possible).reduce((a, b) => (b.moved < a.moved ? b : a));
+  return {
+    passed: r.colocated,
+    facts: [
+      { label: 'co-located', value: r.colocated ? 'yes' : 'no' },
+      { label: 'the cheapest way', value: `${cheapest.strategy}, ${cheapest.moved.toLocaleString('en-US')} rows over the network` },
+      { label: 'matches', value: r.serialMatches.toLocaleString('en-US') },
+    ],
+    toolHref: joinPartitionHref(settings),
+  };
 };

@@ -16,6 +16,7 @@ const LESSON_IDS = [
   'partitioning',
   'two-phase-commit',
   'raft',
+  'distributed-join',
   'slotted-page',
   'hash-index',
   'lsm-tree',
@@ -36,7 +37,7 @@ test('the learn track groups the pipeline, the storage structures and the transa
   const storage = page.getByRole('region', { name: 'Storage engines and access methods' });
   await expect(storage.getByRole('listitem')).toHaveCount(6);
   await expect(storage.getByRole('link', { name: /Write fast, pay later/ })).toBeVisible();
-  await expect(page.getByText(/^0 of 40 complete$/)).toBeVisible();
+  await expect(page.getByText(/^0 of 41 complete$/)).toBeVisible();
 });
 
 for (const id of LESSON_IDS) {

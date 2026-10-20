@@ -6,6 +6,8 @@ import { readTpcSettings } from '../../../ui/tpcLinks.ts';
 import { tpcRun } from '../../../ui/tpcRun.ts';
 import { readRaftSettings } from '../../../ui/raftLinks.ts';
 import { raftRun } from '../../../ui/raftRun.ts';
+import { readJoinPartitionSettings } from '../../../ui/joinPartitionLinks.ts';
+import { joinPartitionRun } from '../../../ui/joinPartitionRun.ts';
 import { electionSafety, leaderCompleteness, logAt, logMatching, stateMachineSafety } from '../../../engine/raft.ts';
 import { DISTRIBUTED_SCENARIOS, distributedHref } from '../distributedScenarios.ts';
 import { LESSONS } from '../lessons.tsx';
@@ -16,17 +18,18 @@ const lesson = (id: string) => LESSONS.find((l) => l.id === id)!;
 
 describe('the distributed lessons link the tools as they are', () => {
   it('every step links a scenario, every scenario has a step, and each link reads back as itself', () => {
-    const used = new Set(['partitioning', 'two-phase-commit', 'raft'].flatMap((id) => lesson(id).steps.map((s) => s.link!.href)));
+    const used = new Set(['partitioning', 'two-phase-commit', 'raft', 'distributed-join'].flatMap((id) => lesson(id).steps.map((s) => s.link!.href)));
     const hrefs = Object.values(DISTRIBUTED_SCENARIOS).map((s) => distributedHref(s));
     expect([...used].sort()).toEqual([...hrefs].sort());
     expect(PARTITION_LINK_LIMITS).toEqual(PARTITION_LIMITS);
     for (const s of Object.values(DISTRIBUTED_SCENARIOS)) {
       const url = new URL(distributedHref(s), 'https://x');
-      expect(url.pathname).toBe(`/tools/${s.tool}`);
+      expect(url.pathname).toBe(`/tools/${s.tool === 'partitioning-join' ? 'partitioning' : s.tool}`);
       const { tool: _tool, ...settings } = s;
       if (s.tool === 'partitioning') expect(readPartitionSettings(url.search)).toEqual(settings);
       else if (s.tool === '2pc') expect(readTpcSettings(url.search)).toEqual(settings);
-      else expect(readRaftSettings(url.search)).toEqual(settings);
+      else if (s.tool === 'raft') expect(readRaftSettings(url.search)).toEqual(settings);
+      else expect(readJoinPartitionSettings(url.search)).toEqual(settings);
     }
   });
 });
@@ -108,5 +111,26 @@ describe('lesson: raft', () => {
     const r = raftRun(DISTRIBUTED_SCENARIOS.raftLossy);
     expect(r.leaders.map((l) => [l.server, l.term])).toEqual([[2, 1], [3, 2]]);
     expect([electionSafety(r), logMatching(r), leaderCompleteness(r), stateMachineSafety(r)]).toEqual([true, true, true, true]);
+  });
+});
+
+describe('lesson: joining across nodes', () => {
+  const moved = (s: { nodes: number; orders: string; payments: string }) => Object.fromEntries(joinPartitionRun(s).strategies.map((x) => [x.strategy, x.possible ? x.moved : null]));
+
+  it('co-located: no rows move, all 3,000 payments match', () => {
+    const r = joinPartitionRun(DISTRIBUTED_SCENARIOS.joinColocated);
+    expect([r.colocated, r.serialMatches, moved(DISTRIBUTED_SCENARIOS.joinColocated)['co-located']]).toEqual([true, 3000, 0]);
+  });
+
+  it('the wrong column: broadcast 6,000, shuffle 2,224; on eight nodes 14,000 against 2,627', () => {
+    expect(moved(DISTRIBUTED_SCENARIOS.joinWrongColumn)).toMatchObject({ broadcast: 6000, shuffle: 2224 });
+    expect(moved(DISTRIBUTED_SCENARIOS.joinWrongColumnEight)).toMatchObject({ broadcast: 14000, shuffle: 2627 });
+  });
+
+  it('ranges: not co-located, a shuffle of 3,749; the ring co-located, its busiest node 1,630 against 1,307', () => {
+    expect(moved(DISTRIBUTED_SCENARIOS.joinRanges)).toEqual({ 'co-located': null, broadcast: 6000, shuffle: 3749 });
+    const ring = joinPartitionRun({ nodes: 4, orders: 'consistent-id', payments: 'consistent-orderId' });
+    const hash = joinPartitionRun(DISTRIBUTED_SCENARIOS.joinColocated);
+    expect([Math.max(...ring.strategies[0]!.perNode), Math.max(...hash.strategies[0]!.perNode)]).toEqual([1630, 1307]);
   });
 });

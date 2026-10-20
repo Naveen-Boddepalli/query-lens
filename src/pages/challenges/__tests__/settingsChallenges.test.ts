@@ -88,7 +88,7 @@ describe('settings challenges', () => {
         'vector-index',
       ].sort(),
     );
-    expect(SETTINGS_CHALLENGES.length).toBe(24);
+    expect(SETTINGS_CHALLENGES.length).toBe(25);
     expect(SETTINGS_CHALLENGES.filter((c) => c.group === 'transactions').map((c) => c.id)).toEqual([
       'commit-after-the-wait',
       'lost-in-the-minority',
@@ -225,6 +225,8 @@ describe('settings challenges', () => {
     ['commit-after-the-wait', { crash: 'after-first-commit', recover: 12 }],
     ['lost-in-the-minority', { side: '12', window: 'middle' }],
     ['lost-in-the-minority', { side: '345', window: 'middle' }],
+    ['join-in-place', { orders: 'hash-id', payments: 'hash-orderId' }],
+    ['join-in-place', { orders: 'consistent-id', payments: 'consistent-orderId' }],
     ['tightest-page', { page: 0, bytes: 202 }],
     ['tightest-page', { page: 5, bytes: 200 }],
     ['split-the-other-bucket', { n: 40, strategy: 'linear', cap: 4, init: 2 }],
@@ -289,6 +291,9 @@ describe('settings challenges', () => {
       ['grow-without-churn', 'hash: 2,399 rows move', {}],
       ['commit-after-the-wait', 'a crash before the decision: presumed abort', {}],
       ['lost-in-the-minority', 'a follower cut off: the leader keeps its majority', {}],
+      ['join-in-place', 'payments by their own id', {}],
+      ['join-in-place', 'ranges on both: they never line up', { orders: 'range-id', payments: 'range-orderId' }],
+      ['join-in-place', 'the right key, different schemes', { orders: 'hash-id', payments: 'consistent-orderId' }],
       ['lost-in-the-minority', 'server 1 alone: a follower again', { side: '1' }],
       ['lost-in-the-minority', 'the leader’s side, but after the last command', { side: '12', window: 'late' }],
       ['commit-after-the-wait', 'a crash after it, but back too soon', { crash: 'after-decision', recover: 5 }],

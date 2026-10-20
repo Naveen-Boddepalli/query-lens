@@ -186,4 +186,58 @@ export const DISTRIBUTED_STEPS: Record<string, LessonStep[]> = {
       ),
     },
   ],
+  'distributed-join': [
+    {
+      heading: 'Co-located: the join where the rows already are',
+      body: (
+        <>
+          2,000 orders and 3,000 payments, joined on {code('orders.id = payments.orderId')}, over four nodes. Spread the
+          orders by a hash of {code('id')} and the payments by the same hash of {code('orderId')}, and every order already
+          shares a node with its payments: each node joins what it holds, all 3,000 payments find their order, and{' '}
+          <strong>no rows</strong> cross the network.
+        </>
+      ),
+      link: to('joinColocated', 'Open the co-located join'),
+    },
+    {
+      heading: 'Partitioned by the wrong column',
+      body: (
+        <>
+          Spread the payments by their own {code('id')} instead. Now an order&rsquo;s payments are anywhere. A broadcast copies
+          the 2,000 orders to the three other nodes — <strong>6,000</strong> rows; a shuffle sends each payment to the node
+          its {code('orderId')} hashes to — <strong>2,224</strong>, about three in four, while the orders already sit where
+          the hash of their key puts them and stay.
+        </>
+      ),
+      link: to('joinWrongColumn', 'Open the misplaced payments'),
+    },
+    {
+      heading: 'More nodes, dearer broadcasts',
+      body: (
+        <>
+          On eight nodes the broadcast copies the orders seven times — <strong>14,000</strong> rows — while the shuffle
+          grows only to 2,627: seven in eight payments move instead of three in four. A broadcast pays per node, a shuffle
+          per row.
+        </>
+      ),
+      link: to('joinWrongColumnEight', 'Open eight nodes'),
+    },
+    {
+      heading: 'Ranges never line up',
+      body: (
+        <>
+          Partition both by range — orders by {code('id')}, payments by {code('orderId')}. Each table&rsquo;s ranges are cut from
+          its own keys, so their boundaries differ, and a join cannot assume they match: the cheapest way is a shuffle of
+          <strong> 3,749</strong> rows. Co-location needs the same function of the same key on both sides.
+        </>
+      ),
+      link: to('joinRanges', 'Open range partitioning'),
+      tryThis: (
+        <>
+          Put both on the ring — consistent hashing by {code('id')} and by {code('orderId')}. They are co-located again, but
+          the busiest node now joins 1,630 rows where an even hash gave 1,307: the ring with sixteen points each is less even.
+        </>
+      ),
+    },
+  ],
 };

@@ -1,6 +1,7 @@
 import { runParallelJoin } from '../engine/exchange.ts';
 import type { JoinExchange, ParallelJoinResult } from '../engine/exchange.ts';
 import { createJoinOrderDemoDatabase } from '../engine/seed.ts';
+import { ordersAndPayments } from './bigJoinTables.ts';
 import type { Database } from '../engine/types.ts';
 
 /**
@@ -54,17 +55,7 @@ export function exchangeDatabase(): Database {
     db = {
       tables: {
         ...base.tables,
-        orders: {
-          name: 'orders',
-          columns: ['id', 'customer'],
-          rows: Array.from({ length: 2000 }, (_, i) => ({ id: i + 1, customer: (i * 37) % 300 })),
-        },
-        payments: {
-          name: 'payments',
-          columns: ['id', 'orderId'],
-          // Every order once, and every other order twice.
-          rows: Array.from({ length: 3000 }, (_, i) => ({ id: i + 1, orderId: i < 2000 ? i + 1 : (i - 2000) * 2 + 1 })),
-        },
+        ...ordersAndPayments(),
       },
     };
   }

@@ -81,7 +81,15 @@ export function fnv(text: string): number {
   return h >>> 0;
 }
 
-const keyText = (v: SqlValue): string => (typeof v === 'string' ? v : JSON.stringify(v));
+/**
+ * The text a key is hashed by: the engine's `=` key (`exec/evaluate.ts`'s `equalityKeyOf`, mirrored rather than
+ * imported, which would bring the parser into the partitioning tool's chunk), so values `=` calls equal — `'1'` and
+ * `1`, `true` and `1` — land on one node, and a join of two tables hashed alike finds them together (plan.md §27.5
+ * X4). NULL, which equals nothing, still has to live somewhere: it hashes as `'null'`. A test holds the two keys to
+ * each other.
+ */
+export const hashKeyOf = (v: SqlValue): string => (v === null ? 'null' : typeof v === 'boolean' ? String(Number(v)) : String(v));
+const keyText = hashKeyOf;
 const TWO32 = 2 ** 32;
 
 function summarize(nodes: number[], rowNode: number[], extra: Partial<Placement> = {}): Placement {

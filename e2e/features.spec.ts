@@ -2256,13 +2256,13 @@ test('the partitioning tool counts the rows a new node moves under hash, range a
   await page.goto('/tools/partitioning');
   await expect(page.getByRole('heading', { name: 'Partitioning', exact: true })).toBeVisible();
   await page.getByRole('radio', { name: 'Hash', exact: true }).click();
-  await expect(page.getByRole('status')).toHaveText('2,399 rows move (80% of the table)');
+  await expect(page.getByRole('status').first()).toHaveText('2,399 rows move (80% of the table)');
   await page.getByRole('radio', { name: 'Range' }).click();
-  await expect(page.getByRole('status')).toHaveText('375 rows move (13% of the table)');
+  await expect(page.getByRole('status').first()).toHaveText('375 rows move (13% of the table)');
   await expect(page.getByText(/Every one lands on the last range/)).toBeVisible();
   await page.getByRole('radio', { name: 'Consistent hashing' }).click();
   await page.getByLabel('Virtual nodes each').fill('64');
-  await expect(page.getByRole('status')).toHaveText('590 rows move (20% of the table)');
+  await expect(page.getByRole('status').first()).toHaveText('590 rows move (20% of the table)');
   await page.getByRole('radio', { name: 'Remove a node' }).click();
   await expect.poll(() => page.url()).toContain('c=remove');
   await page.getByRole('button', { name: 'Show as table' }).first().click();
@@ -2314,6 +2314,27 @@ test('lost in the minority: cut the leader off while it takes commands, and lose
   await page.getByRole('button', { name: 'Run & check' }).click();
   await expect(page.getByText(/Not there yet/)).toBeVisible();
   await page.getByLabel('Cut off').selectOption('12');
+  await page.getByRole('button', { name: 'Run & check' }).click();
+  await expect(page.getByText('✓ Solved.')).toBeVisible();
+});
+
+test('the partitioning tool joins across the nodes: co-located, broadcast or shuffled, in rows over the network', async ({ page }) => {
+  await page.goto('/tools/partitioning');
+  const section = page.getByRole('region', { name: 'Joining across the nodes' });
+  await expect(section.getByRole('status')).toHaveText('Cheapest: shuffle, 2,224 rows over the network');
+  await section.getByLabel('Payments partitioned by').selectOption('hash-orderId');
+  await expect(section.getByRole('status')).toHaveText('Co-located: no rows cross the network');
+  await section.getByLabel('Join nodes').selectOption('8');
+  await section.getByLabel('Payments partitioned by').selectOption('hash-id');
+  await expect(section.getByRole('row', { name: /Broadcast orders/ })).toContainText('14,000');
+  await expect.poll(() => page.url()).toContain('jn=8');
+});
+
+test('join in place: partition both tables by the same hash of the join key', async ({ page }) => {
+  await page.goto('/challenges/join-in-place');
+  await page.getByRole('button', { name: 'Run & check' }).click();
+  await expect(page.getByText(/Not there yet/)).toBeVisible();
+  await page.getByLabel('Payments partitioned by').selectOption('hash-orderId');
   await page.getByRole('button', { name: 'Run & check' }).click();
   await expect(page.getByText('✓ Solved.')).toBeVisible();
 });

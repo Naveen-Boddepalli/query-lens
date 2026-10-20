@@ -11,6 +11,17 @@ Work toward **v3** (plan.md §27), on the branch `version/v3`.
 
 ### Added
 
+- **A join across the nodes** (plan.md §27.5 X4) — [Partitioning](/tools/partitioning) gains a second section:
+  2,000 orders and 3,000 payments, each partitioned as you choose, joined on `orders.id = payments.orderId` over two
+  to ten nodes, and priced in rows over the network three ways — co-located (nothing moves, when both tables are
+  spread by the same hash or ring of their join columns), a broadcast of the smaller table, or a shuffle of both by
+  the join key. With payments spread by their own id, four nodes cost 6,000 rows by broadcast against 2,224 by
+  shuffle, and eight nodes 14,000 against 2,627; ranges never line up. A lesson, *Joining across nodes*, and a
+  challenge, *Join in place*. Every strategy's matches are held to a join in one place by a property test. Keys
+  are hashed and matched as the engine's `=` compares them (`'1'` and `TRUE` both equal `1`; NULL equals nothing and
+  stays put in a shuffle) — partitioning had hashed `TRUE` apart from `1`. The parallel tool's payments are now numbered apart from the orders (their own `id` from 10,001), which changes none of
+  its figures.
+
 - **Raft** (plan.md §27.5 X3) — a new tool, [Raft](/tools/raft): leader election and log replication on three or
   five servers, after the paper's Figure 2, over a schedule you script — a seed for the timeouts and message delays,
   a share of messages lost, a partition and a crash. The page draws each server's role over time with its term, every

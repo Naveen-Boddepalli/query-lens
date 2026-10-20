@@ -2,6 +2,9 @@ import { useMemo, useState } from 'react';
 import { PARTITION_LIMITS, PARTITION_SCHEMES } from '../../engine/partitioning.ts';
 import type { Placement, PartitionScheme } from '../../engine/partitioning.ts';
 import { DataView } from '../../ui/DataView.tsx';
+import { DistributedJoinSection } from '../../ui/DistributedJoinSection.tsx';
+import { readJoinPartitionSettings } from '../../ui/joinPartitionLinks.ts';
+import type { JoinPartitionSettings } from '../../ui/joinPartitionLinks.ts';
 import { PageHeader } from '../../ui/PageHeader.tsx';
 import {
   PARTITION_KEYS,
@@ -19,10 +22,12 @@ import { useAddressBarQuery } from '../../ui/addressBar.ts';
  * by consistent hashing, and what adding a node or taking one away costs in rows that move. `engine/partitioning.ts`
  * is the model.
  *
- * URL state: `k` (key), `p` (scheme), `n` (nodes), `v` (virtual nodes), `c` (change), `r` (the node that leaves).
+ * URL state: `k` (key), `p` (scheme), `n` (nodes), `v` (virtual nodes), `c` (change), `r` (the node that leaves); and for
+ * the join section (plan.md §27.5 X4), `jn` (nodes), `jo` and `jp` (how orders and payments are partitioned).
  */
 
 const INITIAL = readPartitionSettings(typeof location === 'undefined' ? '' : location.search);
+const INITIAL_JOIN = readJoinPartitionSettings(typeof location === 'undefined' ? '' : location.search);
 const fmt = (n: number) => n.toLocaleString('en-US');
 const pct = (n: number) => `${((n / Math.max(1, PARTITION_ROWS)) * 100).toFixed(0)}%`;
 const HUES = ['bg-hue-sky', 'bg-hue-violet', 'bg-hue-amber', 'bg-hue-emerald', 'bg-hue-orange', 'bg-accent', 'bg-hit', 'bg-miss', 'bg-evict', 'bg-node-internal', 'bg-node-leaf'];
@@ -78,6 +83,7 @@ export function PartitioningToolPage() {
   const [s, setS] = useState<PartitionSettings>(INITIAL);
   const set = (over: Partial<PartitionSettings>) => { setS((cur) => ({ ...cur, ...over, leaving: Math.min(over.leaving ?? cur.leaving, over.nodes ?? cur.nodes) })); };
   const r = useMemo(() => partitionRun(s), [s]);
+  const [join, setJoin] = useState<JoinPartitionSettings>(INITIAL_JOIN);
 
   const shareQuery = useMemo(() => {
     const p = new URLSearchParams();
@@ -87,8 +93,11 @@ export function PartitioningToolPage() {
     p.set('v', String(s.virtualNodes));
     p.set('c', s.change);
     if (s.change === 'remove') p.set('r', String(s.leaving));
+    p.set('jn', String(join.nodes));
+    p.set('jo', join.orders);
+    p.set('jp', join.payments);
     return p.toString();
-  }, [s]);
+  }, [s, join]);
   useAddressBarQuery(shareQuery);
 
   const top = Math.max(...r.before.counts, ...(r.after?.counts ?? []), 1);
@@ -254,6 +263,9 @@ export function PartitioningToolPage() {
           </table>
         </div>
       )}
+
+      {/* plan.md §27.5 X4: a join across the partitions, priced in rows over the network. */}
+      <DistributedJoinSection settings={join} onChange={setJoin} />
 
       <div className={`${panelSurface} p-4`}>
         <h2 className="mb-1 text-body font-semibold text-ink">Where the next {r.inserts.rows} rows go</h2>

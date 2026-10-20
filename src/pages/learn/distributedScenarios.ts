@@ -1,5 +1,7 @@
 import { partitionHref } from '../../ui/partitionLinks.ts';
 import type { PartitionSettings } from '../../ui/partitionLinks.ts';
+import { joinPartitionHref } from '../../ui/joinPartitionLinks.ts';
+import type { JoinPartitionSettings } from '../../ui/joinPartitionLinks.ts';
 import { RAFT_SCENARIOS, raftHref } from '../../ui/raftLinks.ts';
 import type { RaftSettings } from '../../ui/raftLinks.ts';
 import { TPC_SCENARIOS, tpcHref } from '../../ui/tpcLinks.ts';
@@ -22,7 +24,12 @@ export interface RaftScenario extends RaftSettings {
   tool: 'raft';
 }
 
-export type DistributedScenario = PartitionScenario | TpcScenario | RaftScenario;
+/** The partitioning page's join section (plan.md §27.5 X4). */
+export interface JoinPartitionScenario extends JoinPartitionSettings {
+  tool: 'partitioning-join';
+}
+
+export type DistributedScenario = PartitionScenario | TpcScenario | RaftScenario | JoinPartitionScenario;
 
 const raft = (id: string): RaftScenario => ({ tool: 'raft', ...RAFT_SCENARIOS.find((s) => s.id === id)!.settings });
 
@@ -44,6 +51,10 @@ export const DISTRIBUTED_SCENARIOS = {
   raftLeaderCrash: raft('leader-crash'),
   raftMinority: raft('minority-leader'),
   raftLossy: raft('lossy'),
+  joinColocated: { tool: 'partitioning-join', nodes: 4, orders: 'hash-id', payments: 'hash-orderId' },
+  joinWrongColumn: { tool: 'partitioning-join', nodes: 4, orders: 'hash-id', payments: 'hash-id' },
+  joinWrongColumnEight: { tool: 'partitioning-join', nodes: 8, orders: 'hash-id', payments: 'hash-id' },
+  joinRanges: { tool: 'partitioning-join', nodes: 4, orders: 'range-id', payments: 'range-orderId' },
 } as const satisfies Record<string, DistributedScenario>;
 
 export type DistributedScenarioName = keyof typeof DISTRIBUTED_SCENARIOS;
@@ -51,5 +62,6 @@ export type DistributedScenarioName = keyof typeof DISTRIBUTED_SCENARIOS;
 export function distributedHref(scenario: DistributedScenario): string {
   if (scenario.tool === '2pc') return tpcHref(scenario);
   if (scenario.tool === 'raft') return raftHref(scenario);
+  if (scenario.tool === 'partitioning-join') return joinPartitionHref(scenario);
   return partitionHref(scenario);
 }

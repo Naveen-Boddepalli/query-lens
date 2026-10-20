@@ -297,6 +297,12 @@ export const LESSON_GROUPS: readonly LessonGroup[] = [
         minutes: 6,
         summary: 'Elect a leader, replicate a log, crash the leader, cut it off — and check the four promises on every run.',
       },
+      {
+        id: 'distributed-join',
+        title: 'Joining across nodes',
+        minutes: 4,
+        summary: 'Co-located, broadcast or shuffled: the same join, priced in rows sent over the network.',
+      },
     ],
   },
 ];

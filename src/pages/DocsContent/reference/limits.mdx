@@ -368,6 +368,14 @@ index entries of the rows it touches.
   range partitioning by `id`, all on the last node. The hash is FNV-1a with MurmurHash3's finalizer, so alike strings
   land far apart on the ring. A property test holds that range and consistent hashing only ever move rows onto a
   joining node or off a leaving one. A node is a number: there is no network, no replication, and nothing fails.
+- **A join across the nodes** (plan.md §27.5 X4) is the same page's second section: 2,000 orders and 3,000 payments
+  (the parallel tool's two big tables), each partitioned as you choose — by hash, range or the ring, of the join
+  column or another — joined on `orders.id = payments.orderId` over 2 to 10 nodes, and priced in **rows over the
+  network** three ways. **Co-located** — both tables spread by the same hash (or the same ring) of their own join
+  columns — moves nothing; ranges never count, since each table's ranges are cut from its own keys. A **broadcast**
+  copies the smaller table to every other node; a **shuffle** sends each row whose key hashes to another node. The
+  page shows each strategy's rows moved, its busiest node's share, and its matches, which a property test holds to a
+  join of the two tables in one place for every strategy and partitioning.
 - **[Two-phase commit](/tools/2pc)** (plan.md §27.5 X2) runs one transaction's commit across a coordinator and 2
   to 5 participants, with **presumed abort**, as a script: each participant's vote, a crash of the coordinator at one
   of five points (before PREPARE, after it, with every vote in, after logging COMMIT, after telling one participant),

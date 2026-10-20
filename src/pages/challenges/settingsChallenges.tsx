@@ -400,6 +400,58 @@ export const SETTINGS_CHALLENGES: SettingsChallenge[] = [
     ),
   },
   {
+    id: 'join-in-place',
+    title: 'Join in place',
+    group: 'storage',
+    tool: 'partitioning',
+    brief: (
+      <>
+        2,000 orders and 3,000 payments over four nodes, joined on {code('orders.id = payments.orderId')}. Choose how to
+        partition each table so the join sends no rows over the network at all.
+      </>
+    ),
+    hint: (
+      <>
+        Rows with the same key must meet on one node. They already do when both tables put a key on a node by the same
+        function of it — which column must each table be partitioned by, and which schemes put equal keys in the same
+        place?
+      </>
+    ),
+    needs: 'a co-located join: no rows over the network',
+    controls: [
+      {
+        kind: 'select',
+        key: 'orders',
+        label: 'Orders partitioned by',
+        options: [
+          { value: 'hash-id', label: 'hash of id' },
+          { value: 'hash-customer', label: 'hash of customer' },
+          { value: 'range-id', label: 'ranges of id' },
+          { value: 'consistent-id', label: 'the ring, by id' },
+        ],
+      },
+      {
+        kind: 'select',
+        key: 'payments',
+        label: 'Payments partitioned by',
+        options: [
+          { value: 'hash-id', label: 'hash of its own id' },
+          { value: 'hash-orderId', label: 'hash of orderId' },
+          { value: 'range-orderId', label: 'ranges of orderId' },
+          { value: 'consistent-orderId', label: 'the ring, by orderId' },
+        ],
+      },
+    ],
+    starter: { orders: 'hash-id', payments: 'hash-id' },
+    misconception: (
+      <>
+        Partitioning both tables evenly is enough for a cheap join. Even is not aligned: unless both are spread by the same
+        function of their join columns, every order&rsquo;s payments are somewhere else, and the join pays to bring them
+        together — a broadcast per node, or a shuffle of most rows.
+      </>
+    ),
+  },
+  {
     id: 'commit-after-the-wait',
     title: 'Commit after the wait',
     group: 'transactions',

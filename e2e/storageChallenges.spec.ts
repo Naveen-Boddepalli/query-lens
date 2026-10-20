@@ -16,6 +16,7 @@ const IDS = [
   'meet-the-rows',
   'efficiency-floor',
   'grow-without-churn',
+  'join-in-place',
   'tightest-page',
   'split-the-other-bucket',
   'cheap-writes-cheap-reads',
