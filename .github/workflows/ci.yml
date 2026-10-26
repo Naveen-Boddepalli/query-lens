@@ -159,10 +159,22 @@ jobs:
       - name: CLI JSON Mode
         run: pnpm querylens "SELECT * FROM orders WHERE id = 1" --dataset orders --json
 
+  # Three shards, each on its own runner. One runner ran all ~600 tests on a single worker (a private
+  # repository's runner has 2 vCPUs, so Playwright starts one) and sat at this job's 20 minutes: after
+  # the v2 merge most runs timed out at ~560 of 608 tests, and Playwright 1.64 made each test about a
+  # third slower again. A shard builds and installs for itself — about the same runner minutes in all,
+  # a third of the wall time, and the 20 minutes is headroom again. `ci-gate` still needs `e2e-test`,
+  # which succeeds only when every shard does; `fail-fast: false` lets the other shards finish and
+  # report when one fails. Which test runs in which shard is `e2e/support/shards.ts`'s: it deals them
+  # out in turn, so the slow axe audits are spread over all three instead of filling one.
   e2e-test:
-    name: E2E & Accessibility (Playwright & Axe)
+    name: E2E & Accessibility (Playwright & Axe) ${{ matrix.shard }}/3
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -190,15 +202,56 @@ jobs:
         run: pnpm exec playwright install --with-deps chromium
 
       - name: End-to-end smoke test
-        run: pnpm test:e2e
+        env:
+          SHARD: ${{ matrix.shard }}/3
+        run: pnpm test:e2e --shard="$SHARD"
 
       - name: Upload Playwright report
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: playwright-report
+          name: playwright-report-${{ matrix.shard }}
           path: playwright-report/
           retention-days: 7
+
+  # plan.md §25.4 A4 / §25.5 rule 4. Not a gate — it cannot know whether a preview
+  # deploy was checked — but the first deploy failed three ways on config no
+  # local check could see, so a change to that config is surfaced on the PR
+  # instead of being one more line in a diff. Deliberately outside `ci-gate`'s
+  # `needs`: it informs, it never blocks.
+  deploy-config-notice:
+    name: Deploy config changed?
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+
+      - name: Look for deploy-config changes
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          changed="$(git diff --name-only "origin/${BASE_REF}...HEAD")"
+          hits="$(echo "$changed" | xargs node --experimental-strip-types scripts/deploy-config.ts)"
+          if [ -n "$hits" ]; then
+            echo "$hits" | while IFS=$'\t' read -r file why; do
+              echo "::warning file=${file},title=Deploy config changed::${why}. Verify on a preview deploy before merging (RELEASING.md)."
+            done
+            echo "### Deploy config changed" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "$hits" | awk -F'\t' '{ printf "- \`%s\` — %s\n", $1, $2 }' >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "Tick the preview-deploy item in the PR checklist once you have looked at it (see RELEASING.md)." >> "$GITHUB_STEP_SUMMARY"
+          fi
 
   ci-gate:
     name: All CI Tests Passed

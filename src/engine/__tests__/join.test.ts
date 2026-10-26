@@ -5,7 +5,7 @@ import { parse, parseStatement } from '../parser/index.ts';
 import { buildPlan } from '../planner/buildPlan.ts';
 import { rootEstimate } from '../planner/cost.ts';
 import { DEFAULT_ENGINE_OPTIONS } from '../types.ts';
-import type { Database, EngineOptions } from '../types.ts';
+import type { Database, EngineOptions, PlanNode, Row } from '../types.ts';
 
 const db = () => createJoinDemoDatabase();
 const run = (sql: string, database: Database = db(), options: EngineOptions = DEFAULT_ENGINE_OPTIONS) =>
@@ -19,9 +19,9 @@ describe('JOIN — parsing', () => {
   it('parses a qualified ON clause into a JoinClause', () => {
     const parsed = parse('SELECT * FROM authors JOIN posts ON authors.id = posts.authorId');
     if (!parsed.ok) throw new Error(parsed.error.message);
-    expect(parsed.ast.join).toBeDefined();
-    expect(parsed.ast.join?.table.name).toBe('posts');
-    expect(parsed.ast.join?.on.op).toBe('=');
+    expect(parsed.ast.joins).toBeDefined();
+    expect(parsed.ast.joins?.[0]?.table.name).toBe('posts');
+    expect(parsed.ast.joins?.[0]?.on.op).toBe('=');
   });
 
   it('accepts the ON equality in either order', () => {
@@ -76,30 +76,34 @@ describe('JOIN — parsing', () => {
     if (!parsed.ok) expect(parsed.error.message).toMatch(/qualified column/);
   });
 
-  it('rejects an aggregate SELECT item combined with JOIN', () => {
-    const parsed = parse('SELECT COUNT(*) FROM authors JOIN posts ON authors.id = posts.authorId');
-    expect(parsed.ok).toBe(false);
-    if (!parsed.ok) expect(parsed.error.message).toMatch(/aggregate function is not supported/);
+  it('takes an aggregate over a JOIN, its argument qualified', () => {
+    expect(parse('SELECT COUNT(*), MAX(posts.id) FROM authors JOIN posts ON authors.id = posts.authorId').ok).toBe(true);
+    const bare = parse('SELECT COUNT(id) FROM authors JOIN posts ON authors.id = posts.authorId');
+    expect(!bare.ok && bare.error.message).toMatch(/`id` needs a table name/);
   });
 
-  it('rejects GROUP BY combined with JOIN', () => {
-    const parsed = parse(
-      'SELECT authors.name FROM authors JOIN posts ON authors.id = posts.authorId GROUP BY authors.name',
-    );
-    expect(parsed.ok).toBe(false);
-    if (!parsed.ok) expect(parsed.error.message).toMatch(/GROUP BY is not supported yet in a query with JOIN/);
+  it('takes GROUP BY with JOIN, by a qualified column — the key a joined row is stored under', () => {
+    const parsed = parse('SELECT authors.name FROM authors JOIN posts ON authors.id = posts.authorId GROUP BY authors.name');
+    if (!parsed.ok) throw new Error(parsed.error.message);
+    expect(parsed.ast.groupBy?.columns).toMatchObject([{ name: 'name', table: 'authors' }]);
   });
 
-  it('rejects ORDER BY combined with JOIN', () => {
-    const parsed = parse(
-      'SELECT * FROM authors JOIN posts ON authors.id = posts.authorId ORDER BY authors.name',
-    );
-    expect(parsed.ok).toBe(false);
-    if (!parsed.ok) expect(parsed.error.message).toMatch(/ORDER BY is not supported yet in a query with JOIN/);
+  it('takes ORDER BY with JOIN, by a qualified column — the key a joined row is stored under', () => {
+    const parsed = parse('SELECT * FROM authors JOIN posts ON authors.id = posts.authorId ORDER BY authors.name DESC');
+    if (!parsed.ok) throw new Error(parsed.error.message);
+    expect(parsed.ast.orderBy).toMatchObject({ column: 'authors.name', table: 'authors', direction: 'desc' });
   });
 
-  it.each(['INNER', 'LEFT', 'RIGHT', 'OUTER', 'FULL', 'CROSS'])(
-    '%s JOIN stays out of scope — only a bare, implicit inner JOIN parses',
+  it.each(['INNER JOIN', 'LEFT JOIN', 'LEFT OUTER JOIN'])(
+    '%s parses (plan.md §25.4 C3)',
+    (words) => {
+      const parsed = parse(`SELECT * FROM authors ${words} posts ON authors.id = posts.authorId`);
+      expect(parsed.ok, !parsed.ok ? parsed.error.message : undefined).toBe(true);
+    },
+  );
+
+  it.each(['RIGHT', 'FULL', 'CROSS'])(
+    '%s JOIN stays out of scope',
     (word) => {
       const parsed = parse(`SELECT * FROM authors ${word} JOIN posts ON authors.id = posts.authorId`);
       expect(parsed.ok).toBe(false);
@@ -196,6 +200,26 @@ describe('JOIN — plan and cost', () => {
     // authors: 2 heap pages + 2*ceil(5/4)=2*2 spill; posts: 3 heap pages + 2*ceil(10/4)=2*3 spill.
     expect(est.estPages).toBe(2 + 3 + 2 * 2 + 2 * 3);
   });
+
+  it('with no joinStrategy requested, the default run chooses hash by cost (plan.md §25.4 C5 slice 2)', () => {
+    const { events } = run('SELECT * FROM authors JOIN posts ON authors.id = posts.authorId');
+    const rules = events.flatMap((e) => (e.stage === 'optimize' ? [e.rule] : []));
+    expect(rules).toContain('join-algorithm-selection');
+    const optimizeEvents = events.filter((e): e is Extract<typeof events[number], { stage: 'optimize' }> => e.stage === 'optimize');
+    expect(optimizeEvents.at(-1)!.after.children![0]!.label).toContain('Join (hash)');
+  });
+
+  it('an explicit joinStrategy is never overridden by cost, even though hash would be cheaper here', () => {
+    const { events } = run(
+      'SELECT * FROM authors JOIN posts ON authors.id = posts.authorId',
+      db(),
+      { ...DEFAULT_ENGINE_OPTIONS, joinStrategy: 'nested-loop' },
+    );
+    const rules = events.flatMap((e) => (e.stage === 'optimize' ? [e.rule] : []));
+    expect(rules).not.toContain('join-algorithm-selection');
+    const optimizeEvents = events.filter((e): e is Extract<typeof events[number], { stage: 'optimize' }> => e.stage === 'optimize');
+    expect(optimizeEvents.at(-1)!.after.children![0]!.label).toContain('Join (nested-loop)');
+  });
 });
 
 describe('JOIN — pipeline correctness', () => {
@@ -254,11 +278,19 @@ describe('JOIN — pipeline correctness', () => {
     );
     expect(restated.rows.length).toBe(all.rows.length);
     const rules = restated.events.flatMap((e) => (e.stage === 'optimize' ? [e.rule] : []));
-    expect(rules).toEqual(['none']);
+    // Nothing to push down — `join-algorithm-selection` (plan.md §25.4 C5 slice 2) still runs independently and
+    // may well fire (hash beats nested-loop on this data), which is correct and orthogonal to this test's point.
+    expect(rules).not.toContain('join-predicate-pushdown');
   });
 
   it('LIMIT caps the joined result and short-circuits the nested loop', () => {
-    const { rows, events } = run('SELECT * FROM authors JOIN posts ON authors.id = posts.authorId LIMIT 1');
+    // Forced (plan.md §25.4 C5 slice 2 would otherwise pick hash on this data) — the mechanic under test is
+    // specifically nested-loop's own short-circuiting, not whichever algorithm cost happens to prefer here.
+    const { rows, events } = run(
+      'SELECT * FROM authors JOIN posts ON authors.id = posts.authorId LIMIT 1',
+      db(),
+      { ...DEFAULT_ENGINE_OPTIONS, joinStrategy: 'nested-loop' },
+    );
     expect(rows).toHaveLength(1);
     const joinEvents = events.filter((e) => e.stage === 'execute' && e.op === 'Join');
     expect(joinEvents).toHaveLength(1);
@@ -338,7 +370,7 @@ describe('JOIN — predicate pushdown into a Join\'s own children', () => {
     expect(rows.length).toBeGreaterThan(0);
 
     const rules = events.flatMap((e) => (e.stage === 'optimize' ? [e.rule] : []));
-    expect(rules).toEqual(['join-predicate-pushdown']);
+    expect(rules).toContain('join-predicate-pushdown');
     const tree = events.find((e) => e.stage === 'optimize')!.after;
     const rightScan = tree.children![0]!.children![1]!;
     expect(rightScan.label).toBe('SeqScan posts');
@@ -364,7 +396,7 @@ describe('JOIN — predicate pushdown into a Join\'s own children', () => {
     const sql = 'SELECT * FROM authors JOIN posts ON authors.id = posts.authorId WHERE authors.id = posts.authorId';
     const { events } = run(sql);
     const rules = events.flatMap((e) => (e.stage === 'optimize' ? [e.rule] : []));
-    expect(rules).toEqual(['none']);
+    expect(rules).not.toContain('join-predicate-pushdown');
   });
 
   it('cost estimates the Join against the filtered left side\'s row count, not the whole table', () => {
@@ -421,10 +453,13 @@ describe('JOIN — the pipeline narrates it', () => {
     expect(structuredClone(events)).toEqual(events);
   });
 
-  it('no optimizer rule fires on an unfiltered JOIN — nothing to push down with no WHERE clause', () => {
+  it('no predicate-pushdown rule fires on an unfiltered JOIN — nothing to push down with no WHERE clause', () => {
     const { events } = run('SELECT * FROM authors JOIN posts ON authors.id = posts.authorId');
     const rules = events.flatMap((e) => (e.stage === 'optimize' ? [e.rule] : []));
-    expect(rules).toEqual(['none']);
+    // `join-algorithm-selection` (plan.md §25.4 C5 slice 2) is independent of the WHERE clause and does fire —
+    // hash beats nested-loop on this data — which is correct and orthogonal to this test's point about pushdown.
+    expect(rules).not.toContain('join-predicate-pushdown');
+    expect(rules).not.toContain('none');
   });
 });
 
@@ -609,5 +644,425 @@ describe('JOIN — sort-merge join (the third algorithm)', () => {
     const a = run('SELECT * FROM authors JOIN posts ON authors.id = posts.authorId', db(), SORT_MERGE);
     const b = run('SELECT * FROM authors JOIN posts ON authors.id = posts.authorId', db(), SORT_MERGE);
     expect(JSON.stringify(a.events)).toEqual(JSON.stringify(b.events));
+  });
+});
+
+describe('LEFT JOIN (plan.md §25.4 C3)', () => {
+  // `barbara` (id 5) has no posts at all — seed.ts's own foreign-key shape, built for exactly this.
+  const LEFT_SQL = 'SELECT authors.name, posts.title FROM authors LEFT JOIN posts ON authors.id = posts.authorId';
+  const INDEX_NESTED_LOOP = { ...DEFAULT_ENGINE_OPTIONS, joinStrategy: 'index-nested-loop' } as const;
+
+  it('parses joinType onto the JoinClause, and a plain JOIN carries none', () => {
+    const left = parse('SELECT * FROM authors LEFT JOIN posts ON authors.id = posts.authorId');
+    if (!left.ok) throw new Error(left.error.message);
+    expect(left.ast.joins?.[0]?.joinType).toBe('left');
+
+    const inner = parse('SELECT * FROM authors JOIN posts ON authors.id = posts.authorId');
+    if (!inner.ok) throw new Error(inner.error.message);
+    expect(inner.ast.joins?.[0]?.joinType).toBeUndefined();
+  });
+
+  it('keeps every author, NULL-padding the one with no posts — an inner JOIN would drop her', () => {
+    const left = run(LEFT_SQL).rows;
+    expect(left).toHaveLength(11); // 10 posts + barbara's one padded row
+    expect(left.filter((r) => r['authors.name'] === 'barbara')).toEqual([{ 'authors.name': 'barbara', 'posts.title': null }]);
+
+    const inner = run(LEFT_SQL.replace('LEFT JOIN', 'JOIN')).rows;
+    expect(inner).toHaveLength(10);
+    expect(inner.some((r) => r['authors.name'] === 'barbara')).toBe(false);
+  });
+
+  it('every matched author still shows her real posts, not NULLs', () => {
+    const rows = run(LEFT_SQL).rows;
+    const adas = rows.filter((r) => r['authors.name'] === 'ada');
+    expect(adas).toHaveLength(3);
+    expect(adas.every((r) => typeof r['posts.title'] === 'string')).toBe(true);
+  });
+
+  it('agrees across all four join algorithms — nested-loop, hash, sort-merge and index-nested-loop', () => {
+    const asBag = (rows: readonly Record<string, unknown>[]) => sortRows(rows).map((r) => JSON.stringify(r));
+    const nested = asBag(run(LEFT_SQL).rows);
+    expect(asBag(run(LEFT_SQL, db(), HASH).rows)).toEqual(nested);
+    expect(asBag(run(LEFT_SQL, db(), SORT_MERGE).rows)).toEqual(nested);
+    expect(asBag(run(LEFT_SQL, db(), INDEX_NESTED_LOOP).rows)).toEqual(nested);
+  });
+
+  it('a NULL join key on the left is also kept, padded, by every algorithm — not silently dropped', () => {
+    // NULL never matches NULL, so an author whose own join column is NULL could not match a post even if one
+    // existed for it — an inner join drops the row entirely; a LEFT JOIN must still keep it, NULL-padded.
+    const database = db();
+    database.tables.authors!.rows.push({ id: null, name: 'null-key-author' });
+    const sql = "SELECT authors.name, posts.title FROM authors LEFT JOIN posts ON authors.id = posts.authorId WHERE authors.name = 'null-key-author'";
+    for (const options of [DEFAULT_ENGINE_OPTIONS, HASH, SORT_MERGE, INDEX_NESTED_LOOP] as const) {
+      const rows = run(sql, database, options).rows;
+      expect(rows, JSON.stringify(options)).toEqual([{ 'authors.name': 'null-key-author', 'posts.title': null }]);
+    }
+  });
+
+  it("a WHERE on the joined table is never pushed below the LEFT JOIN — it would silently turn it into an inner join", () => {
+    // The classic pitfall: filtering `posts` down to nothing with a null title *before* the join would make every
+    // author look unmatched. Pushed correctly, the join runs first and the residual Filter sees the real rows.
+    const rows = run(`${LEFT_SQL} WHERE posts.title IS NULL`).rows;
+    expect(rows).toEqual([{ 'authors.name': 'barbara', 'posts.title': null }]);
+  });
+
+  it('a WHERE on the outer (left) table is still pushed — filtering it first is always safe', () => {
+    const { events, rows } = run(`${LEFT_SQL} WHERE authors.name = 'barbara'`);
+    expect(rows).toEqual([{ 'authors.name': 'barbara', 'posts.title': null }]);
+    const pushdown = events.find((e) => e.stage === 'optimize' && e.rule === 'join-predicate-pushdown');
+    expect(pushdown?.label).toMatch(/moves into that scan/);
+    expect(pushdown?.label).not.toMatch(/residual/); // nothing left to recheck once the whole predicate is pushed
+  });
+
+  it('the plan and the narration both say LEFT JOIN, not an ordinary join', () => {
+    const { events } = run(LEFT_SQL);
+    const planStep = events.find((e) => e.stage === 'plan' && /JOIN adds/.test(e.label));
+    expect(planStep?.label).toMatch(/This is a LEFT JOIN/);
+  });
+
+  it("the cost model's estimate is at least the outer table's own row count — an inner-join guess would undercount it", () => {
+    const { events } = run(LEFT_SQL);
+    const planStep = events.filter((e) => e.stage === 'plan').at(-1)!;
+    if (planStep.stage !== 'plan') throw new Error('unreachable');
+    const joinNode = planStep.planTree.children?.find((n) => n.op === 'Join') ?? planStep.planTree;
+    expect(joinNode.estRows).toBeGreaterThanOrEqual(5); // 5 authors, every one of them kept
+  });
+
+  it('RIGHT and FULL stay out of scope, with a hint pointing at LEFT JOIN or an inner one', () => {
+    const right = parseStatement('SELECT * FROM authors RIGHT JOIN posts ON authors.id = posts.authorId');
+    expect(right.ok).toBe(false);
+    const full = parseStatement('SELECT * FROM authors FULL JOIN posts ON authors.id = posts.authorId');
+    expect(full.ok).toBe(false);
+  });
+});
+
+describe('multi-join (plan.md §25.4 C3 slice b)', () => {
+  // A third table, local to this file — the seed's own authors/posts pair (seed.ts) is documented as staying a
+  // pair, so a chain's third table is added here instead of growing that shared fixture. `postId` is deliberately
+  // *not* indexed — every existing index lives on `posts` (`id`, `title`, `authorId`) — so a chain that asks for
+  // `index-nested-loop` has to fall back to nested-loop at exactly this one step, proving the fallback is decided
+  // per join step, not once for the whole query.
+  const threeTableDb = (commentsCount = 3): Database => {
+    const database = db();
+    const rows: Row[] = [
+      { id: 1, postId: 1, body: 'nice' }, // ada's post 1
+      { id: 2, postId: 1, body: 'great' }, // ada's post 1, a second comment
+      { id: 3, postId: 4, body: 'cool' }, // donald's post 10 (POST_AUTHORS[3]=2 → post id 4 is alan's post 4)
+    ];
+    // Padding beyond the real 3 (plan.md §25.4 C5 slice 3, for the specific test below that needs it): a
+    // `postId` far outside any real post's `id` never matches anything, so every other test's own correctness
+    // assertions are untouched — it only weighs in on whether cost-based reordering finds it worth starting from.
+    for (let i = rows.length; i < commentsCount; i++) rows.push({ id: i + 1, postId: 9999 + i, body: 'filler' });
+    database.tables.comments = { name: 'comments', columns: ['id', 'postId', 'body'], rows };
+    return database;
+  };
+  const CHAIN_SQL =
+    'SELECT authors.name, posts.title, comments.body FROM authors JOIN posts ON authors.id = posts.authorId JOIN comments ON posts.id = comments.postId';
+  const INDEX_NESTED_LOOP = { ...DEFAULT_ENGINE_OPTIONS, joinStrategy: 'index-nested-loop' } as const;
+
+  it('parses a chain of JOINs into `joins`, in source order', () => {
+    const parsed = parse(CHAIN_SQL);
+    if (!parsed.ok) throw new Error(parsed.error.message);
+    expect(parsed.ast.joins).toHaveLength(2);
+    expect(parsed.ast.joins?.map((j) => j.table.name)).toEqual(['posts', 'comments']);
+  });
+
+  it('rejects joining the same table twice — no aliasing to tell the two apart', () => {
+    const result = parseStatement(
+      'SELECT * FROM authors JOIN posts ON authors.id = posts.authorId JOIN authors ON posts.id = authors.id',
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.message).toMatch(/already in this query/);
+  });
+
+  it("rejects an ON clause that names neither the table it introduces nor a table already in scope", () => {
+    // Both `authors` and `posts` are already known by the time `comments` joins in — neither side of this ON
+    // names `comments` at all.
+    const result = parseStatement(
+      'SELECT * FROM authors JOIN posts ON authors.id = posts.authorId JOIN comments ON authors.id = posts.id',
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.message).toMatch(/Neither side of ON names `comments`/);
+  });
+
+  it('rejects an ON clause naming a table not yet in the query', () => {
+    const result = parseStatement('SELECT * FROM authors JOIN posts ON posts.authorId = missing.id');
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.message).toMatch(/no table called `missing` yet/);
+  });
+
+  it("a later JOIN's ON may name an earlier table in the chain, not just the one just before it", () => {
+    // `comments` joins against `authors.id`, skipping over `posts` entirely — still valid: `authors` is already
+    // in scope by then, exactly as `posts` would be.
+    const sql =
+      'SELECT authors.name, comments.body FROM authors JOIN posts ON authors.id = posts.authorId JOIN comments ON authors.id = comments.postId';
+    const { rows, error } = run(sql, threeTableDb());
+    expect(error).toBeUndefined();
+    // authors.id=1 (ada) has 3 posts × comments.postId=1's 2 comments = 6 rows.
+    expect(rows.filter((r) => r['authors.name'] === 'ada')).toHaveLength(6);
+  });
+
+  it('joins three tables correctly — a real foreign-key chain, not just two joins bolted together', () => {
+    const { rows, error } = run(CHAIN_SQL, threeTableDb());
+    expect(error).toBeUndefined();
+    expect(sortRows(rows)).toEqual(
+      sortRows([
+        { 'authors.name': 'ada', 'posts.title': "ada's post 1", 'comments.body': 'nice' },
+        { 'authors.name': 'ada', 'posts.title': "ada's post 1", 'comments.body': 'great' },
+        { 'authors.name': 'alan', 'posts.title': "alan's post 4", 'comments.body': 'cool' },
+      ]),
+    );
+  });
+
+  it('agrees across all four join algorithms on the same three-table chain', () => {
+    const asBag = (rows: readonly Record<string, unknown>[]) => sortRows(rows).map((r) => JSON.stringify(r));
+    const nested = asBag(run(CHAIN_SQL, threeTableDb()).rows);
+    expect(nested.length).toBeGreaterThan(0);
+    expect(asBag(run(CHAIN_SQL, threeTableDb(), HASH).rows)).toEqual(nested);
+    expect(asBag(run(CHAIN_SQL, threeTableDb(), SORT_MERGE).rows)).toEqual(nested);
+    expect(asBag(run(CHAIN_SQL, threeTableDb(), INDEX_NESTED_LOOP).rows)).toEqual(nested);
+  });
+
+  it('falls back per join step — the indexed step runs index-nested-loop, the unindexed one runs nested-loop', () => {
+    // Padded so cost-based reordering (plan.md §25.4 C5 slice 3) keeps `comments` from simply moving first to
+    // dodge the unindexed probe it would otherwise need — with a real fallback still unavoidable somewhere, the
+    // reordered chain actually run is `posts → comments → authors`, not the written `authors → posts → comments`.
+    const { events } = run(CHAIN_SQL, threeTableDb(30), INDEX_NESTED_LOOP);
+    const planStep = events.filter((e) => e.stage === 'plan').at(-1)!;
+    if (planStep.stage !== 'plan') throw new Error('unreachable');
+    const joinsInTree = (node: PlanNode): PlanNode[] => [
+      ...(node.op === 'Join' ? [node] : []),
+      ...(node.children ?? []).flatMap(joinsInTree),
+    ];
+    const joins = joinsInTree(planStep.planTree);
+    expect(joins).toHaveLength(2);
+    expect(joins.find((j) => j.label.includes('comments'))?.label).toMatch(/\(nested-loop\)/);
+    expect(joins.find((j) => j.label.includes('authors'))?.label).toMatch(/index-nested-loop/);
+  });
+
+  it('a chain of LEFT JOINs NULL-pads at every level independently', () => {
+    const sql = CHAIN_SQL.replace(/JOIN/g, 'LEFT JOIN');
+    const rows = run(sql, threeTableDb()).rows;
+    // barbara: no posts at all → both posts.title and comments.body NULL.
+    expect(rows.filter((r) => r['authors.name'] === 'barbara')).toEqual([
+      { 'authors.name': 'barbara', 'posts.title': null, 'comments.body': null },
+    ]);
+    // grace has posts but none of them have comments → posts.title real, comments.body NULL.
+    const graceRows = rows.filter((r) => r['authors.name'] === 'grace');
+    expect(graceRows.length).toBeGreaterThan(0);
+    expect(graceRows.every((r) => typeof r['posts.title'] === 'string' && r['comments.body'] === null)).toBe(true);
+  });
+
+  it('a mixed chain — inner then LEFT — only pads the LEFT step', () => {
+    const sql = 'SELECT authors.name, posts.title, comments.body FROM authors JOIN posts ON authors.id = posts.authorId LEFT JOIN comments ON posts.id = comments.postId';
+    const rows = run(sql, threeTableDb()).rows;
+    // barbara has no posts, so an inner JOIN on posts drops her entirely — even though the second join is LEFT.
+    expect(rows.some((r) => r['authors.name'] === 'barbara')).toBe(false);
+    // every post without a comment still survives, NULL-padded, since that step is a LEFT JOIN.
+    expect(rows.some((r) => r['posts.title'] === "grace's post 6" && r['comments.body'] === null)).toBe(true);
+  });
+
+  it('GROUP BY, an aggregate and ORDER BY all parse over a chain of two JOINs', () => {
+    const base = 'FROM authors JOIN posts ON authors.id = posts.authorId JOIN comments ON posts.id = comments.postId';
+    expect(parseStatement(`SELECT COUNT(*) ${base}`).ok).toBe(true);
+    expect(parseStatement(`SELECT authors.name ${base} GROUP BY authors.name`).ok).toBe(true);
+    expect(parseStatement(`SELECT authors.name ${base} ORDER BY comments.id`).ok).toBe(true);
+  });
+
+  it('EXPLAIN and EXPLAIN ANALYZE both narrate a chain without crashing — a chain-wide cost-model regression check', () => {
+    // The cost model's own recursion (cost.ts) has to resolve *every* table in the chain by name at every nesting
+    // depth, including the original FROM table once the recursion reaches the bottom — a real crash this exact
+    // test caught during development (`otherTables` only carried the join partners, not the FROM table itself).
+    const plain = run(`EXPLAIN ${CHAIN_SQL}`, threeTableDb());
+    expect(plain.error).toBeUndefined();
+    expect(plain.rows.length).toBeGreaterThan(3);
+    const analyzed = run(`EXPLAIN ANALYZE ${CHAIN_SQL}`, threeTableDb());
+    expect(analyzed.error).toBeUndefined();
+    expect(analyzed.rows.some((r) => String(r['QUERY PLAN']).includes('Result: 3 rows'))).toBe(true);
+  });
+
+  it('DISTINCT still works above a chain, and by both strategies', () => {
+    const sql = `SELECT DISTINCT authors.name ${'FROM authors JOIN posts ON authors.id = posts.authorId JOIN comments ON posts.id = comments.postId'}`;
+    const hash = run(sql, threeTableDb()).rows;
+    const sorted = run(sql, threeTableDb(), { ...DEFAULT_ENGINE_OPTIONS, aggregateStrategy: 'sort' }).rows;
+    expect(sortRows(hash)).toEqual(sortRows([{ 'authors.name': 'ada' }, { 'authors.name': 'alan' }]));
+    expect(sortRows(sorted)).toEqual(sortRows(hash));
+  });
+
+  it('a chain of two or more plain JOINs is genuinely reordered when cost says so (plan.md §25.4 C5 slice 3)', () => {
+    const { events, rows } = run(CHAIN_SQL, threeTableDb());
+    const note = events.find((e) => e.stage === 'plan' && e.label.includes("JOINs run in a different order than written"));
+    expect(note?.label).toMatch(/chose `comments → posts → authors` over the written `authors → posts → comments`/);
+    // The "Why not?" panel (plan.md §25.4 C5, fourth slice): the written order is the runner-up here — the one
+    // genuinely not taken, named the same way the narration above already names it in prose.
+    const whyNot = note?.stage === 'plan' ? note.whyNot : undefined;
+    expect(whyNot?.chosen.label).toBe('comments → posts → authors');
+    expect(whyNot?.runnerUp.label).toBe('authors → posts → comments');
+    expect(whyNot!.chosen.estPages).toBeLessThan(whyNot!.runnerUp.estPages);
+    // The parse stage still narrates the query exactly as typed — only the plan/execution changed.
+    expect(events.find((e) => e.stage === 'parse' && /Read the FROM clause/.test(e.label))?.label).toContain('`authors`');
+    // The rows are unaffected either way — the point of associativity is that this is the same answer, cheaper.
+    expect(sortRows(rows)).toEqual(
+      sortRows([
+        { 'authors.name': 'ada', 'posts.title': "ada's post 1", 'comments.body': 'nice' },
+        { 'authors.name': 'ada', 'posts.title': "ada's post 1", 'comments.body': 'great' },
+        { 'authors.name': 'alan', 'posts.title': "alan's post 4", 'comments.body': 'cool' },
+      ]),
+    );
+  });
+
+  it('a chain with a LEFT JOIN in it still only gets an informational second opinion (plan.md §25.4 C4) — never reordered for real', () => {
+    const sql = CHAIN_SQL.replace('JOIN comments', 'LEFT JOIN comments');
+    const { events, rows } = run(sql, threeTableDb());
+    const note = events.find((e) => e.stage === 'plan' && e.label.includes('cost-based join-order search'));
+    expect(note?.label).toMatch(/would instead join these 3 tables as comments → posts → authors: an estimated \d+ pages, against the \d+/);
+    expect(note?.label).toMatch(/never reordered for real.*LEFT JOIN is not commutative/);
+    // The "Why not?" panel (plan.md §25.4 C5, fourth slice): here the written order is `chosen` (it is what
+    // actually ran) and the cheaper order LEFT JOIN blocked is the `runnerUp` — the opposite pairing from the
+    // real-reordering test above, since nothing was actually rewritten this time.
+    const whyNot = note?.stage === 'plan' ? note.whyNot : undefined;
+    expect(whyNot?.chosen.label).toBe('authors → posts → comments');
+    expect(whyNot?.runnerUp.label).toBe('comments → posts → authors');
+    expect(whyNot!.chosen.estPages).toBeGreaterThan(whyNot!.runnerUp.estPages);
+    // The query really did still run in the written order — the note is commentary, not a rewrite.
+    expect(events[0]).toBeDefined();
+    expect(events.find((e) => e.stage === 'plan' && /Start at the bottom/.test(e.label))?.label).toContain('`authors`');
+    expect(rows.length).toBeGreaterThan(0);
+  });
+
+  it('a single JOIN gets no join-order note at all — there is only one order to have', () => {
+    const { events } = run('SELECT authors.name, posts.title FROM authors JOIN posts ON authors.id = posts.authorId');
+    expect(events.some((e) => e.stage === 'plan' && e.label.includes('cost-based join-order search'))).toBe(false);
+    expect(events.some((e) => e.stage === 'plan' && e.label.includes("JOINs run in a different order than written"))).toBe(false);
+  });
+});
+
+describe('ORDER BY above a JOIN (plan.md §26 Feature 1, slice b)', () => {
+  const ALGORITHMS = [undefined, 'nested-loop', 'hash', 'sort-merge', 'index-nested-loop'] as const;
+
+  it.each(ALGORITHMS)('sorts the joined rows the same way whichever algorithm joins them (%s)', (joinStrategy) => {
+    const options = { ...DEFAULT_ENGINE_OPTIONS, bufferFrames: 4, ...(joinStrategy ? { joinStrategy } : {}) };
+    const { rows, error } = run(
+      'SELECT authors.name, posts.title FROM authors LEFT JOIN posts ON authors.id = posts.authorId ORDER BY posts.title DESC LIMIT 4',
+      db(),
+      options,
+    );
+    expect(error).toBeUndefined();
+    // Descending puts NULL first — barbara has no posts, so the LEFT JOIN padded her row.
+    expect(rows).toEqual([
+      { 'authors.name': 'barbara', 'posts.title': null },
+      { 'authors.name': 'grace', 'posts.title': "grace's post 9" },
+      { 'authors.name': 'grace', 'posts.title': "grace's post 8" },
+      { 'authors.name': 'grace', 'posts.title': "grace's post 7" },
+    ]);
+  });
+
+  it('plans the Sort above the Join, under the Project', () => {
+    const { events } = run('SELECT authors.name FROM authors JOIN posts ON authors.id = posts.authorId WHERE posts.id > 2 ORDER BY posts.id');
+    const plan = [...events].reverse().find((e) => e.stage === 'plan')!;
+    expect(JSON.stringify(plan.planTree)).toMatch(/"op":"Project".*"op":"Sort".*"op":"Join"/);
+  });
+
+  it('asks for a table name, and checks it, as every other column in a JOIN query does', () => {
+    const base = 'SELECT authors.name FROM authors JOIN posts ON authors.id = posts.authorId ORDER BY';
+    expect(run(`${base} name`).error?.message).toMatch(/needs a table name/);
+    expect(run(`${base} nope.name`).error?.message).toMatch(/no table called `nope`/);
+    expect(run(`${base} posts.nope`).error?.message).toMatch(/`posts` has no column called `nope`/);
+    expect(run('SELECT name FROM authors ORDER BY authors.name').error?.message).toMatch(/does not need a table name/);
+  });
+
+  it('SELECT DISTINCT sorts only by a selected column', () => {
+    const base = 'SELECT DISTINCT authors.name FROM authors JOIN posts ON authors.id = posts.authorId ORDER BY';
+    expect(run(`${base} posts.id`).error?.message).toMatch(/must appear in the select list/);
+    expect(run(`${base} authors.name`).rows.map((r) => r['authors.name'])).toEqual(['ada', 'alan', 'donald', 'grace']);
+  });
+
+  it('reserves a sort above a big join enough scratch pages: every page it writes is a counted write', () => {
+    // 160 × 160 rows all share a key: 25,600 joined rows, past the 20,000 the reservation was once capped at, where
+    // the pool stopped counting the spill's reads and writes.
+    const big = (name: string) => ({ name, columns: ['id', 'g'], rows: Array.from({ length: 160 }, (_, i) => ({ id: i, g: 1 })) });
+    const options = { ...DEFAULT_ENGINE_OPTIONS, joinStrategy: 'hash' as const };
+    const { events, rows } = run('SELECT a.id, b.id FROM a JOIN b ON a.g = b.g ORDER BY b.id DESC LIMIT 1', { tables: { a: big('a'), b: big('b') } }, options);
+    expect(rows).toEqual([{ 'a.id': 0, 'b.id': 159 }]);
+    const start = events.findIndex((e) => e.stage === 'execute' && e.op === 'Sort');
+    const runGeneration = events.find((e, i) => i > start && e.label.startsWith('Run generation:'))!;
+    const pages = Number(/(\d+) pages total/.exec(runGeneration.label)?.[1]);
+    // Every pass rewrites all 25,600 rows, in runs whose sizes are all whole pages here — so each pass writes 6,400.
+    const passes = 1 + events.filter((e, i) => i > start && e.label.startsWith('Merge pass')).length;
+    const writes = events.slice(start).filter((e) => e.stage === 'buffer' && e.action === 'write').length;
+    expect(pages).toBe(6400);
+    expect(passes).toBeGreaterThan(2);
+    expect(writes).toBe(pages * passes);
+  });
+
+  it('a LEFT JOIN onto an empty table still reserves room for the rows it pads, so a sort-merge step after it keeps its two sorts apart', () => {
+    const t = (name: string, n: number) => ({ name, columns: ['id', 'k'], rows: Array.from({ length: n }, (_, i) => ({ id: i, k: i % 7 })) });
+    const options = { ...DEFAULT_ENGINE_OPTIONS, bufferFrames: 3, rowsPerPage: 2, joinStrategy: 'sort-merge' as const };
+    const { events, rows } = run(
+      'SELECT a.id, c.id FROM a LEFT JOIN b ON a.id = b.id LEFT JOIN c ON a.k = c.k',
+      { tables: { a: t('a', 60), b: t('b', 0), c: t('c', 30) } },
+      options,
+    );
+    expect(rows).toHaveLength(258);
+    const starts = events.flatMap((e, i) => (e.stage === 'execute' && e.label.includes('has to see every row') ? [i] : []));
+    const bounds = [...starts, events.length];
+    const written = starts.map((s, k) => new Set(events.slice(s, bounds[k + 1]).flatMap((e) => (e.stage === 'buffer' && e.action === 'write' ? [e.pageId] : []))));
+    expect(written).toHaveLength(4);
+    for (let x = 0; x < written.length; x++) {
+      for (let y = x + 1; y < written.length; y++) expect([...written[x]!].filter((p) => written[y]!.has(p)), `sorts ${x} and ${y}`).toEqual([]);
+    }
+  });
+});
+
+describe('GROUP BY, HAVING and aggregates above a JOIN (plan.md §26 Feature 1, slice c)', () => {
+  const ALGORITHMS = [undefined, 'nested-loop', 'hash', 'sort-merge', 'index-nested-loop'] as const;
+  const POSTS_PER_AUTHOR =
+    'SELECT authors.name, COUNT(posts.id) FROM authors LEFT JOIN posts ON authors.id = posts.authorId GROUP BY authors.name ORDER BY COUNT(posts.id) DESC';
+
+  it.each(ALGORITHMS.flatMap((j) => (['hash', 'sort'] as const).map((a) => [j, a] as const)))(
+    'counts posts per author the same way under any join (%s) and aggregate (%s) strategy',
+    (joinStrategy, aggregateStrategy) => {
+      const options = { ...DEFAULT_ENGINE_OPTIONS, bufferFrames: 4, aggregateStrategy, ...(joinStrategy ? { joinStrategy } : {}) };
+      const { rows, error } = run(POSTS_PER_AUTHOR, db(), options);
+      expect(error).toBeUndefined();
+      // barbara has no posts: the LEFT JOIN pads her row, and COUNT of a NULL column is 0 — COUNT(*) would say 1.
+      expect(rows).toEqual([
+        { 'authors.name': 'grace', 'COUNT(posts.id)': 4 },
+        { 'authors.name': 'ada', 'COUNT(posts.id)': 3 },
+        { 'authors.name': 'alan', 'COUNT(posts.id)': 2 },
+        { 'authors.name': 'donald', 'COUNT(posts.id)': 1 },
+        { 'authors.name': 'barbara', 'COUNT(posts.id)': 0 },
+      ]);
+    },
+  );
+
+  it('filters the groups with HAVING, and aggregates a whole join into one row with no GROUP BY', () => {
+    const base = 'FROM authors JOIN posts ON authors.id = posts.authorId';
+    expect(run(`SELECT authors.name, COUNT(*) ${base} GROUP BY authors.name HAVING COUNT(*) > 2 ORDER BY authors.name`).rows).toEqual([
+      { 'authors.name': 'ada', 'COUNT(*)': 3 },
+      { 'authors.name': 'grace', 'COUNT(*)': 4 },
+    ]);
+    expect(run(`SELECT COUNT(*), MAX(posts.id) ${base}`).rows).toEqual([{ 'COUNT(*)': 10, 'MAX(posts.id)': 10 }]);
+  });
+
+  it('plans the aggregate above the Join and the Sort above both', () => {
+    const plan = [...run(POSTS_PER_AUTHOR).events].reverse().find((e) => e.stage === 'plan')!;
+    expect(JSON.stringify(plan.planTree)).toMatch(/"op":"Project".*"op":"Sort".*"op":"HashAggregate".*"op":"Join"/);
+  });
+
+  it('estimates the groups from the grouped column’s own table, not the FROM table', () => {
+    // posts.authorId has 4 distinct values; looked up in `authors`, where it does not exist, it would come out as 1.
+    const sql = 'SELECT posts.authorId, COUNT(*) FROM authors JOIN posts ON authors.id = posts.authorId GROUP BY posts.authorId';
+    const explained = run(`EXPLAIN ${sql}`).rows.map((r) => String(r['QUERY PLAN']));
+    expect(explained.find((l) => l.includes('HashAggregate'))).toMatch(/est ~4 rows/);
+  });
+
+  it('asks for table names in GROUP BY, HAVING and an aggregate’s argument, and checks grouping by the qualified name', () => {
+    const base = 'FROM authors JOIN posts ON authors.id = posts.authorId';
+    expect(run(`SELECT authors.name ${base} GROUP BY name`).error?.message).toMatch(/`name` needs a table name/);
+    expect(run(`SELECT authors.name, COUNT(*) ${base} GROUP BY authors.id`).error?.message).toMatch(/`authors.name` is not aggregated/);
+    expect(run(`SELECT authors.name ${base} GROUP BY authors.name HAVING MAX(id) > 1`).error?.message).toMatch(/`id` needs a table name/);
+    expect(run(`SELECT authors.name ${base} GROUP BY authors.name ORDER BY SUM(id)`).error?.message).toMatch(/`id` needs a table name/);
+    expect(run(`SELECT authors.name ${base} GROUP BY authors.name ORDER BY posts.title`).error?.message).toMatch(/`posts.title` is not aggregated/);
   });
 });

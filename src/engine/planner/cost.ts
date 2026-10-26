@@ -15,12 +15,19 @@
 
 import type { CompareOp, Expr } from '../parser/index.ts';
 import type { Row, SqlValue, Table } from '../types.ts';
+import { columnsOfIndex } from '../index/spec.ts';
+import { lookupKeysOf } from './plan.ts';
 import type { Plan } from './plan.ts';
 
 /** Default selectivity for an open range with no usable min/max (Selinger et al., 1979). */
 export const OPEN_RANGE_SELECTIVITY = 1 / 3;
 /** Default equality selectivity when a column has no distinct-value stats. */
 export const NO_STATS_EQ_SELECTIVITY = 0.1;
+/**
+ * `LIKE` has no honest closed form without a histogram of prefixes — a guess of
+ * one row in ten, the classic optimizer default. Named as a default on the node.
+ */
+export const LIKE_SELECTIVITY = 0.1;
 /** B+Tree fan-out — `DEFAULT_MAX_KEYS` in src/engine/index/btree.ts. */
 const FANOUT = 4;
 
@@ -36,11 +43,36 @@ export interface CostEstimate {
 /** Per-node estimates for one plan tree, keyed by node identity. */
 export type PlanCost = Map<Plan, CostEstimate>;
 
-/** Exported for `optimize.ts`'s `index-selection` rule — the same selectivity fact, reused to pick the more selective of two candidate indexes rather than re-deriving it. */
-export function ndistinct(rows: readonly Row[], column: string): number {
+/**
+ * How selective an equality lookup on the first `width` columns of the index `name` is: `distinct` is the number of
+ * distinct keys it assumes (each column's distinct count multiplied — independence, the same assumption an `AND`
+ * makes), so `rows / distinct` rows match on average. For a plain index that is `ndistinct` of its one column.
+ */
+function lookupSelectivity(table: Table, name: string, width: number): { distinct: number; basis: string } {
+  const columns = columnsOfIndex(name).slice(0, width);
+  const counts = columns.map((column) => ndistinct(table, column));
+  const distinct = counts.reduce((product, n) => product * n, 1);
+  return {
+    distinct,
+    basis: columns.length === 1 ? `1/${String(distinct)} on ${name}` : `${counts.map((n) => `1/${String(n)}`).join(' × ')} on ${columns.join(', ')}`,
+  };
+}
+
+function liveNdistinct(rows: readonly Row[], column: string): number {
   const seen = new Set<SqlValue>();
   for (const row of rows) seen.add(row[column] ?? null);
   return Math.max(seen.size, 1);
+}
+
+/**
+ * Exported for `optimize.ts`'s `index-selection` rule — the same selectivity fact, reused to pick the more
+ * selective of two candidate indexes rather than re-deriving it. Reads `table.stats` when `ANALYZE` has set it
+ * (plan.md §25.4 C1) — a real count, but possibly a stale one, exactly the way a real optimizer's is — and
+ * otherwise scans the live rows, today's (unconditionally accurate, unconditionally *unrealistic*) behaviour.
+ */
+export function ndistinct(table: Table, column: string): number {
+  const stat = table.stats?.columns[column];
+  return stat ? Math.max(stat.nDistinct, 1) : liveNdistinct(table.rows, column);
 }
 
 function columnName(expr: Expr): string | null {
@@ -63,22 +95,51 @@ interface Selectivity {
   basis: string;
 }
 
-function equalitySelectivity(column: string | null, table: Table): Selectivity {
+/**
+ * `column = literal`'s selectivity. Without statistics this is the textbook `1/ndistinct` — every distinct value
+ * assumed equally likely. With them (plan.md §25.4 C1), a `literal` that is itself one of the column's own
+ * most-common values gets its *real* frequency instead of the average; any other value gets the average
+ * frequency of everything the most-common list does *not* already cover, which is closer to `1/ndistinct` the
+ * less skewed the column turns out to be and further from it the more skewed.
+ */
+function equalitySelectivity(column: string | null, table: Table, literal: SqlValue | null = null): Selectivity {
   if (!column || !table.columns.includes(column)) {
     return { fraction: NO_STATS_EQ_SELECTIVITY, basis: '0.1 default' };
   }
-  const distinct = ndistinct(table.rows, column);
+  const stat = table.stats?.columns[column];
+  const rowCount = table.stats?.rowCount ?? 0;
+  if (stat && rowCount > 0) {
+    const mcv = literal !== null ? stat.mostCommonValues.find((m) => m.value === literal) : undefined;
+    if (mcv) {
+      return { fraction: mcv.frequency / rowCount, basis: `${String(mcv.frequency)}/${String(rowCount)} on ${column} (its most common value, ANALYZE)` };
+    }
+    const coveredFraction = stat.mostCommonValues.reduce((sum, m) => sum + m.frequency, 0) / rowCount;
+    const remainingDistinct = Math.max(1, stat.nDistinct - stat.mostCommonValues.length);
+    return {
+      fraction: Math.max(0, 1 - coveredFraction) / remainingDistinct,
+      basis: `1/${String(remainingDistinct)} of the rest on ${column} (ANALYZE)`,
+    };
+  }
+  const distinct = ndistinct(table, column);
   return { fraction: 1 / distinct, basis: `1/${String(distinct)} on ${column}` };
 }
 
 function rangeSelectivity(
   column: string | null,
-  op: Exclude<CompareOp, '='>,
+  op: Exclude<CompareOp, '=' | '<>'>,
   literal: SqlValue | null,
   table: Table,
 ): Selectivity {
   const fallback: Selectivity = { fraction: OPEN_RANGE_SELECTIVITY, basis: '⅓ default' };
   if (!column || typeof literal !== 'number') return fallback;
+
+  // A single bound is a half-open BETWEEN — `boundedRangeSelectivity` already has the ANALYZE-aware histogram
+  // logic (plan.md §25.4 C1), so a bound with statistics behind it is handed straight to it rather than
+  // duplicating that logic here. One without statistics falls through to this function's own min/max fallback,
+  // unchanged, so every query a table without `ANALYZE` ever ran keeps exactly the estimate it always got.
+  if (table.stats?.columns[column]) {
+    return op === '>' || op === '>=' ? boundedRangeSelectivity(column, literal, null, table) : boundedRangeSelectivity(column, null, literal, table);
+  }
 
   const values = table.rows
     .map((row) => row[column])
@@ -92,6 +153,29 @@ function rangeSelectivity(
   const above = (max - literal) / (max - min);
   const fraction = Math.min(1, Math.max(0, op === '>' ? above : 1 - above));
   return { fraction, basis: `~${String(Math.round(fraction * 100))}% by range` };
+}
+
+/**
+ * Fraction of an equi-depth histogram's own rows (plan.md §25.4 C1) that fall within `[low, high]` — each bucket
+ * assumed to hold an equal share of them, and each bucket's own share assumed spread evenly between its two
+ * boundaries. Numeric boundaries only; a text histogram (still useful for `mostCommonValues`, never for this)
+ * falls back to the classic ⅓ default, same as no histogram at all.
+ */
+function histogramFraction(bounds: readonly SqlValue[], low: number | null, high: number | null): number {
+  if (bounds.length < 2 || !bounds.every((b) => typeof b === 'number')) return OPEN_RANGE_SELECTIVITY;
+  const numeric = bounds as number[];
+  const buckets = numeric.length - 1;
+  let covered = 0;
+  for (let i = 0; i < buckets; i++) {
+    const bucketLow = numeric[i]!;
+    const bucketHigh = numeric[i + 1]!;
+    const width = bucketHigh - bucketLow;
+    const effLow = low === null ? bucketLow : Math.max(bucketLow, low);
+    const effHigh = high === null ? bucketHigh : Math.min(bucketHigh, high);
+    const overlap = width <= 0 ? (effHigh >= effLow ? 1 : 0) : Math.max(0, effHigh - effLow) / width;
+    covered += overlap / buckets;
+  }
+  return Math.min(1, Math.max(0, covered));
 }
 
 /**
@@ -120,6 +204,20 @@ export function boundedRangeSelectivity(
   };
   if (!column) return fallback;
 
+  const stat = table.stats?.columns[column];
+  if (stat && table.stats!.rowCount > 0) {
+    const rowCount = table.stats!.rowCount;
+    const mcvInRange = stat.mostCommonValues.filter(
+      (m) => typeof m.value === 'number' && (low === null || m.value >= low) && (high === null || m.value <= high),
+    );
+    const mcvInRangeFraction = mcvInRange.reduce((sum, m) => sum + m.frequency, 0) / rowCount;
+    const mcvTotalFraction = stat.mostCommonValues.reduce((sum, m) => sum + m.frequency, 0) / rowCount;
+    const histFraction = histogramFraction(stat.histogramBounds, low, high);
+    const fraction = clampFraction(mcvInRangeFraction + (1 - mcvTotalFraction) * histFraction);
+    const boundsLabel = `${low === null ? 'no lower bound' : `≥${String(low)}`}, ${high === null ? 'no upper bound' : `≤${String(high)}`}`;
+    return { fraction, basis: `~${String(Math.round(fraction * 100))}% by histogram (${boundsLabel}, ANALYZE)` };
+  }
+
   const values = table.rows
     .map((row) => row[column])
     .filter((value): value is number => typeof value === 'number');
@@ -138,7 +236,35 @@ export function boundedRangeSelectivity(
   return { fraction, basis: `~${String(Math.round(fraction * 100))}% by range (${boundsLabel})` };
 }
 
-/** Selectivity of a predicate, with the heuristic that produced it. */
+/** The fraction of `column`'s values that are NULL — from `ANALYZE`'s stats when it has run (plan.md §25.4 C1;
+ *  possibly stale), otherwise counted from the live data. */
+function nullSelectivity(column: string | null, table: Table): Selectivity {
+  if (!column || !table.columns.includes(column)) {
+    return { fraction: NO_STATS_EQ_SELECTIVITY, basis: '0.1 default' };
+  }
+  const stat = table.stats?.columns[column];
+  if (stat) {
+    const rowCount = table.stats!.rowCount;
+    const nulls = Math.round(stat.nullFraction * rowCount);
+    return { fraction: stat.nullFraction, basis: `${String(nulls)}/${String(rowCount)} NULL in ${column} (ANALYZE)` };
+  }
+  if (table.rows.length === 0) return { fraction: NO_STATS_EQ_SELECTIVITY, basis: '0.1 default' };
+  const nulls = table.rows.filter((row) => (row[column] ?? null) === null).length;
+  return { fraction: nulls / table.rows.length, basis: `${String(nulls)}/${String(table.rows.length)} NULL in ${column}` };
+}
+
+/** The column an operand names, when it is a bare column reference. */
+const columnOf = (expr: Expr): string | null => (expr.kind === 'column' ? expr.name : null);
+
+const clampFraction = (f: number): number => Math.min(1, Math.max(0, f));
+
+/**
+ * Selectivity of a predicate, with the heuristic that produced it.
+ *
+ * `OR` uses inclusion–exclusion (`a + b − a·b`) and, like `AND`'s product,
+ * assumes the two parts are independent; `NOT` is the complement. Both are
+ * exactly the assumptions plan.md §25.4 C2 later sets out to break on purpose.
+ */
 export function selectivityOf(expr: Expr, table: Table): Selectivity {
   switch (expr.kind) {
     case 'and': {
@@ -149,10 +275,46 @@ export function selectivityOf(expr: Expr, table: Table): Selectivity {
         basis: `${left.basis} × ${right.basis}`,
       };
     }
-    case 'compare':
-      return expr.op === '='
-        ? equalitySelectivity(columnName(expr), table)
-        : rangeSelectivity(columnName(expr), expr.op, literalValue(expr), table);
+    case 'or': {
+      const left = selectivityOf(expr.left, table);
+      const right = selectivityOf(expr.right, table);
+      return {
+        fraction: clampFraction(left.fraction + right.fraction - left.fraction * right.fraction),
+        basis: `${left.basis} ∪ ${right.basis}`,
+      };
+    }
+    case 'not': {
+      const inner = selectivityOf(expr.operand, table);
+      return { fraction: clampFraction(1 - inner.fraction), basis: `1 − (${inner.basis})` };
+    }
+    case 'isNull': {
+      const nulls = nullSelectivity(columnOf(expr.operand), table);
+      return expr.negated
+        ? { fraction: clampFraction(1 - nulls.fraction), basis: `1 − ${nulls.basis}` }
+        : nulls;
+    }
+    case 'in': {
+      const one = equalitySelectivity(columnOf(expr.operand), table);
+      const k = expr.items.length;
+      const fraction = clampFraction(k * one.fraction);
+      return {
+        fraction: expr.negated ? clampFraction(1 - fraction) : fraction,
+        basis: `${expr.negated ? '1 − ' : ''}${String(k)} × ${one.basis}`,
+      };
+    }
+    case 'like':
+      return {
+        fraction: expr.negated ? 1 - LIKE_SELECTIVITY : LIKE_SELECTIVITY,
+        basis: expr.negated ? '0.9 default (NOT LIKE)' : '0.1 default (LIKE)',
+      };
+    case 'compare': {
+      if (expr.op === '=') return equalitySelectivity(columnName(expr), table, literalValue(expr));
+      if (expr.op === '<>') {
+        const eq = equalitySelectivity(columnName(expr), table, literalValue(expr));
+        return { fraction: clampFraction(1 - eq.fraction), basis: `1 − ${eq.basis}` };
+      }
+      return rangeSelectivity(columnName(expr), expr.op, literalValue(expr), table);
+    }
     default:
       return { fraction: 1, basis: 'no predicate' };
   }
@@ -201,10 +363,28 @@ function estimateNode(
       // equality WHERE already makes, just applied to a join key instead of a
       // literal. Row count never depends on the algorithm — only the page
       // cost does.
-      const rightDistinct = ndistinct(tableNamed(plan.rightTable).rows, plan.rightColumn);
-      const estRows = clampRows((left.estRows * right.estRows) / rightDistinct);
-      const rowsBasis = `${String(left.estRows)} × ${String(right.estRows)} / ndistinct(${plan.rightTable}.${plan.rightColumn})`;
+      const rightDistinct = ndistinct(tableNamed(plan.rightTable), plan.rightColumn);
+      // An `IndexProbe`'s own estimate is *per outer row*, so the full inner size comes from the table itself.
+      const rightRows = plan.algorithm === 'index-nested-loop' ? tableNamed(plan.rightTable).rows.length : right.estRows;
+      const innerEstimate = clampRows((left.estRows * rightRows) / rightDistinct);
+      // A LEFT JOIN (plan.md §25.4 C3) never drops a left row — the equi-join estimate is a floor, not the answer,
+      // whenever it would otherwise guess fewer rows than the outer side alone already has.
+      const estRows = plan.joinType === 'left' ? Math.max(left.estRows, innerEstimate) : innerEstimate;
+      const rowsBasis =
+        plan.joinType === 'left' && estRows === left.estRows && left.estRows > innerEstimate
+          ? `${String(left.estRows)} (every ${plan.leftTable} row survives a LEFT JOIN; the equi-join estimate alone was only ${String(innerEstimate)})`
+          : `${String(left.estRows)} × ${String(rightRows)} / ndistinct(${plan.rightTable}.${plan.rightColumn})`;
       switch (plan.algorithm) {
+        case 'index-nested-loop':
+          estimate = {
+            // The outer is read once; then each outer row pays one probe — the descent, any extra leaves the run of
+            // equal keys spans, and a heap page per match (`right` is that per-probe estimate). This is the number
+            // that beats a rescan whenever the outer is small and the inner is big.
+            estRows,
+            estPages: left.estPages + left.estRows * right.estPages,
+            basis: `${rowsBasis}; index nested-loop reads ${plan.leftTable} once, then probes ${plan.rightTable}'s index on ${plan.rightColumn} once per row`,
+          };
+          break;
         case 'hash':
           estimate = {
             // Build the right side into a hash table once, then probe with
@@ -253,19 +433,36 @@ function estimateNode(
       }
       break;
     }
+    case 'IndexProbe': {
+      // One probe of `table`'s index for one outer row: the per-probe cost, which the Join multiplies by its outer rows.
+      const inner = tableNamed(plan.table);
+      const distinct = ndistinct(inner, plan.column);
+      const matches = Math.max(clampRows(inner.rows.length / distinct), 1);
+      const extraLeaves = Math.max(0, Math.ceil(matches / FANOUT) - 1);
+      estimate = {
+        estRows: matches,
+        estPages: estimateIndexLevels(inner.rows.length) + extraLeaves + matches,
+        basis: `per outer row: 1/${String(distinct)} on ${plan.column}; ${String(estimateIndexLevels(inner.rows.length))} to descend, ${String(matches)} heap page${matches === 1 ? '' : 's'}`,
+      };
+      break;
+    }
     case 'IndexScan': {
-      const distinct = ndistinct(table.rows, plan.column);
+      const { distinct, basis: lookupBasis } = lookupSelectivity(table, plan.column, lookupKeysOf(plan).length);
       let fraction = 1 / distinct;
-      let basis = `1/${String(distinct)} on ${plan.column}`;
+      let basis = lookupBasis;
       if (plan.residual) {
         const residual = selectivityOf(plan.residual, table);
         fraction *= residual.fraction;
         basis += ` + recheck ${residual.basis}`;
       }
       const levels = estimateIndexLevels(rowCount);
+      // A repeated value is one entry per row: the lookup may read a few more leaves along the run, and each match
+      // costs its own heap page. For a unique value that is zero extra leaves and one page — the +1 it always was.
+      const matches = Math.max(clampRows(rowCount / distinct), 1);
+      const extraLeaves = Math.max(0, Math.ceil(matches / FANOUT) - 1);
       estimate = {
         estRows: Math.max(clampRows(rowCount * fraction), plan.residual ? 0 : 1),
-        estPages: levels + 1,
+        estPages: levels + extraLeaves + matches,
         basis,
       };
       break;
@@ -273,14 +470,18 @@ function estimateNode(
     case 'IndexRangeScan': {
       const low = plan.low && typeof plan.low.value === 'number' ? plan.low.value : null;
       const high = plan.high && typeof plan.high.value === 'number' ? plan.high.value : null;
+      const prefixLength = plan.prefix?.length ?? 0;
+      const rangeColumn = columnsOfIndex(plan.column)[prefixLength] ?? plan.column;
       const { fraction: rangeFraction, basis: rangeBasis } = boundedRangeSelectivity(
-        plan.column,
+        rangeColumn,
         low,
         high,
         table,
       );
-      let fraction = rangeFraction;
-      let basis = rangeBasis;
+      // Within a composite index's equality prefix the range narrows only that run.
+      const within = prefixLength > 0 ? lookupSelectivity(table, plan.column, prefixLength) : null;
+      let fraction = within ? rangeFraction / within.distinct : rangeFraction;
+      let basis = within ? `${within.basis} × ${rangeBasis}` : rangeBasis;
       if (plan.residual) {
         const residual = selectivityOf(plan.residual, table);
         fraction *= residual.fraction;
@@ -303,14 +504,15 @@ function estimateNode(
       break;
     }
     case 'IndexOnlyScan': {
-      // Same unique-column assumption as IndexScan (v0 indexes are unique),
-      // but the page cost is the honest difference: the tree levels alone,
-      // no +1 for a heap page this scan never fetches.
-      const distinct = ndistinct(table.rows, plan.column);
+      // The tree levels alone — no heap page, the honest difference from IndexScan — plus any further leaves a
+      // repeated value's run spans.
+      const { distinct, basis: lookupBasis } = lookupSelectivity(table, plan.column, lookupKeysOf(plan).length);
+      const matches = Math.max(clampRows(rowCount / distinct), 1);
+      const extraLeaves = Math.max(0, Math.ceil(matches / FANOUT) - 1);
       estimate = {
-        estRows: 1,
-        estPages: estimateIndexLevels(rowCount),
-        basis: `1/${String(distinct)} on ${plan.column} — index-only, no heap page`,
+        estRows: matches,
+        estPages: estimateIndexLevels(rowCount) + extraLeaves,
+        basis: `${lookupBasis} — index-only, no heap page`,
       };
       break;
     }
@@ -318,6 +520,37 @@ function estimateNode(
       const child = estimateNode(plan.child, table, rowsPerPage, into, otherTables);
       const { fraction, basis } = selectivityOf(plan.predicate, table);
       estimate = { estRows: clampRows(child.estRows * fraction), estPages: child.estPages, basis };
+      break;
+    }
+    case 'HashDistinct':
+    case 'SortDistinct': {
+      const child = estimateNode(plan.child, table, rowsPerPage, into, otherTables);
+      // How many distinct rows: bounded by the input, and — when the projection is plain columns — by the product
+      // of their distinct-value counts (the same independence assumption an AND makes). An expression, `*` or a
+      // column the table does not know has no statistic, so the input size stands.
+      const project = plan.child.op === 'Project' ? plan.child.columns : null;
+      let bound = child.estRows;
+      let basis = 'no distinct-value statistic for this list';
+      if (project?.kind === 'columns' && project.names.every((n) => table.columns.includes(n))) {
+        const distinct = project.names.reduce((product, n) => product * ndistinct(table, n), 1);
+        bound = Math.min(child.estRows, distinct);
+        basis = `min(${String(child.estRows)}, ${project.names.map((n) => `${String(ndistinct(table, n))} distinct ${n}`).join(' × ')})`;
+      }
+      // A sort-based DISTINCT spills exactly like `Sort`: every row written once and read back once.
+      const spill = plan.op === 'SortDistinct' ? 2 * Math.max(1, Math.ceil(child.estRows / rowsPerPage)) : 0;
+      estimate = {
+        estRows: clampRows(bound),
+        estPages: child.estPages + spill,
+        basis: plan.op === 'SortDistinct' ? `${basis}; sorted first (${String(spill)} spill pages)` : basis,
+      };
+      break;
+    }
+    case 'Having': {
+      const child = estimateNode(plan.child, table, rowsPerPage, into, otherTables);
+      // Aggregate values have no column statistics to consult, so every comparison against one falls to the
+      // range/equality *defaults* (`selectivityOf` finds no column) — honest, and labelled as such.
+      const { fraction, basis } = selectivityOf(plan.predicate, table);
+      estimate = { estRows: clampRows(child.estRows * fraction), estPages: child.estPages, basis: `HAVING: ${basis}` };
       break;
     }
     case 'HashAggregate':
@@ -345,7 +578,14 @@ function estimateNode(
         // Textbook independence assumption, same as an AND's selectivity:
         // the product of each column's distinct-value count, capped at the
         // rows actually going in — there cannot be more groups than rows.
-        const groups = plan.groupBy.reduce((product, col) => product * ndistinct(table.rows, col), 1);
+        // A group column after a JOIN is keyed `table.column` (plan.md §26 Feature 1, slice c): count it in its own table.
+        const ndistinctOf = (key: string): number => {
+          const dot = key.indexOf('.');
+          if (dot < 0) return ndistinct(table, key);
+          const owner = key.slice(0, dot) === table.name ? table : otherTables[key.slice(0, dot)];
+          return owner ? ndistinct(owner, key.slice(dot + 1)) : 1;
+        };
+        const groups = plan.groupBy.reduce((product, col) => product * ndistinctOf(col), 1);
         const groupBasis = `${plan.groupBy.map((c) => `ndistinct(${c})`).join(' × ')}, capped at the input`;
         estimate = {
           estRows: Math.max(1, Math.min(child.estRows, clampRows(groups))),
@@ -378,10 +618,14 @@ function estimateNode(
     }
     case 'Limit': {
       const child = estimateNode(plan.child, table, rowsPerPage, into, otherTables);
+      const offset = plan.offset ?? 0;
       estimate = {
-        estRows: Math.min(child.estRows, plan.count),
+        estRows: Math.min(Math.max(0, child.estRows - offset), plan.count),
         estPages: child.estPages,
-        basis: `min(${String(child.estRows)}, LIMIT ${String(plan.count)})`,
+        basis:
+          offset > 0
+            ? `min(${String(child.estRows)} − ${String(offset)} skipped, LIMIT ${String(plan.count)})`
+            : `min(${String(child.estRows)}, LIMIT ${String(plan.count)})`,
       };
       break;
     }

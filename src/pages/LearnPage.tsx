@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { LESSONS, type LessonCategory } from './learn/lessons.tsx';
+import { LESSON_GROUPS, LESSON_INDEX, type LessonGroupId } from './learn/lessonIndex.ts';
 import { clearCompleted, readCompleted } from '../ui/learnProgress.ts';
 import { PageHeader } from '../ui/PageHeader.tsx';
 import { btnGhost, cardInteractive, eyebrow } from '../ui/primitives.ts';
@@ -17,33 +17,32 @@ const ArrowRightIcon = ({ className = 'h-3.5 w-3.5' }: { className?: string }) =
   </svg>
 );
 
-const CATEGORIES: ('All' | LessonCategory)[] = [
-  'All',
-  'Foundations',
-  'Storage',
-  'Optimizer',
-  'Workflows',
+const TRACK_FILTERS: { id: 'All' | LessonGroupId; label: string }[] = [
+  { id: 'All', label: 'All Tracks' },
+  { id: 'pipeline', label: 'Query Pipeline' },
+  { id: 'storage', label: 'Storage Engine' },
+  { id: 'transactions', label: 'Transactions & WAL' },
 ];
 
 export function LearnPage() {
   const [done, setDone] = useState<ReadonlySet<string>>(() => readCompleted());
-  const [selectedCategory, setSelectedCategory] = useState<'All' | LessonCategory>('All');
+  const [selectedGroup, setSelectedGroup] = useState<'All' | LessonGroupId>('All');
 
-  const completeCount = useMemo(() => LESSONS.filter((l) => done.has(l.id)).length, [done]);
-  const totalMinutes = useMemo(() => LESSONS.reduce((acc, l) => acc + l.minutes, 0), []);
+  const completeCount = useMemo(() => LESSON_INDEX.filter((l) => done.has(l.id)).length, [done]);
+  const totalMinutes = useMemo(() => LESSON_INDEX.reduce((acc, l) => acc + l.minutes, 0), []);
   const remainingMinutes = useMemo(
-    () => LESSONS.filter((l) => !done.has(l.id)).reduce((acc, l) => acc + l.minutes, 0),
+    () => LESSON_INDEX.filter((l) => !done.has(l.id)).reduce((acc, l) => acc + l.minutes, 0),
     [done],
   );
 
-  const percentComplete = Math.round((completeCount / LESSONS.length) * 100);
+  const percentComplete = Math.round((completeCount / LESSON_INDEX.length) * 100);
 
-  const filteredLessons = useMemo(
+  const visibleGroups = useMemo(
     () =>
-      selectedCategory === 'All'
-        ? LESSONS
-        : LESSONS.filter((l) => l.category === selectedCategory),
-    [selectedCategory],
+      selectedGroup === 'All'
+        ? LESSON_GROUPS
+        : LESSON_GROUPS.filter((g) => g.id === selectedGroup),
+    [selectedGroup],
   );
 
   return (
@@ -64,7 +63,7 @@ export function LearnPage() {
           <div className="space-y-1">
             <div className="flex items-center gap-2">
               <span className="font-mono text-heading font-semibold text-ink tabular-nums">
-                {completeCount} / {LESSONS.length}
+                {completeCount} / {LESSON_INDEX.length}
               </span>
               <span className="text-label text-ink-dim font-medium">lessons completed</span>
               <span className="rounded-full border border-edge bg-surface-3 px-2 py-0.5 font-mono text-micro text-ink tabular-nums">
@@ -101,15 +100,15 @@ export function LearnPage() {
         {/* Filter Chips */}
         <div className="mt-5 flex flex-wrap items-center gap-1.5 border-t border-edge/60 pt-4">
           <span className="mr-2 font-mono text-micro uppercase tracking-wider text-ink-dim">
-            Filter:
+            Track:
           </span>
-          {CATEGORIES.map((cat) => {
-            const active = selectedCategory === cat;
+          {TRACK_FILTERS.map((filter) => {
+            const active = selectedGroup === filter.id;
             return (
               <button
-                key={cat}
+                key={filter.id}
                 type="button"
-                onClick={() => setSelectedCategory(cat)}
+                onClick={() => setSelectedGroup(filter.id)}
                 aria-pressed={active}
                 className={`rounded-lg border px-2.5 py-1 text-label font-medium transition duration-150 select-none ${
                   active
@@ -117,96 +116,104 @@ export function LearnPage() {
                     : 'border-edge bg-surface-2/60 text-ink-dim hover:border-ink-dim/40 hover:text-ink hover:bg-surface-3 shadow-neu-rest'
                 }`}
               >
-                {cat}
+                {filter.label}
               </button>
             );
           })}
         </div>
       </section>
 
-      {/* Curriculum Roadmap List */}
-      <div className="relative mt-8">
-        <div
-          aria-hidden="true"
-          className="absolute top-6 bottom-6 left-5 hidden w-px bg-edge sm:block"
-        />
+      {/* Curriculum Groups */}
+      <div className="mt-10 space-y-12">
+        {visibleGroups.map((group) => {
+          const lessons = group.lessons;
+          const first = LESSON_INDEX.findIndex((l) => l.id === lessons[0]!.id);
 
-        <ol className="space-y-3.5">
-          {filteredLessons.map((lesson) => {
-            const originalIndex = LESSONS.findIndex((l) => l.id === lesson.id);
-            const isComplete = done.has(lesson.id);
+          return (
+            <section key={group.id} aria-labelledby={`track-${group.id}`} className="relative">
+              <div className="mb-4">
+                <h2 id={`track-${group.id}`} className="text-heading font-semibold text-ink">
+                  {group.title}
+                </h2>
+                <p className="mt-1 text-label text-ink-dim leading-relaxed">{group.about}</p>
+              </div>
 
-            return (
-              <li key={lesson.id} className="relative sm:pl-12">
-                {/* Roadmap Milestone Marker */}
+              {/* Roadmap line */}
+              <div className="relative mt-6">
                 <div
                   aria-hidden="true"
-                  className={`absolute top-4 left-2.5 hidden h-5 w-5 -translate-x-1/2 items-center justify-center rounded-full border text-micro font-mono sm:flex ${
-                    isComplete
-                      ? 'border-hit/60 bg-hit/15 text-hit'
-                      : 'border-edge bg-surface-3 text-ink-dim'
-                  }`}
-                >
-                  {isComplete ? <CheckIcon className="h-3 w-3" /> : originalIndex + 1}
-                </div>
+                  className="absolute top-6 bottom-6 left-5 hidden w-px bg-edge sm:block"
+                />
 
-                <Link
-                  to={`/learn/${lesson.id}`}
-                  className={`${cardInteractive} flex flex-col gap-2.5 group`}
-                >
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <span className="flex h-5 w-5 items-center justify-center rounded-full border border-edge bg-surface-3 font-mono text-micro text-ink-dim sm:hidden">
-                        {originalIndex + 1}
-                      </span>
-                      <span
-                        className={`rounded border px-2 py-0.5 font-mono text-micro uppercase tracking-wider ${
-                          lesson.difficulty === 'Beginner'
-                            ? 'border-edge bg-surface-3/80 text-ink-dim'
-                            : lesson.difficulty === 'Intermediate'
-                              ? 'border-accent/40 bg-accent/10 text-accent'
-                              : 'border-hue-violet-ink/30 bg-hue-violet-soft text-ink'
-                        }`}
-                      >
-                        {lesson.difficulty}
-                      </span>
-                      <span className="rounded border border-edge bg-surface-3/80 px-2 py-0.5 font-mono text-micro text-ink-dim">
-                        {lesson.category}
-                      </span>
-                    </div>
+                <ol className="space-y-3.5">
+                  {lessons.map((lesson, i) => {
+                    const lessonIndex = first + i;
+                    const isComplete = done.has(lesson.id);
 
-                    <div className="flex items-center gap-2 font-mono text-micro text-ink-dim">
-                      <span>~{lesson.minutes} min</span>
-                      {isComplete && (
-                        <span className="inline-flex items-center gap-1 rounded-full border border-hit/40 bg-hit/10 px-2 py-0.5 font-medium text-hit">
-                          <CheckIcon className="h-3 w-3" />
-                          Complete
-                        </span>
-                      )}
-                    </div>
-                  </div>
+                    return (
+                      <li key={lesson.id} className="relative sm:pl-12">
+                        {/* Roadmap Milestone Marker */}
+                        <div
+                          aria-hidden="true"
+                          className={`absolute top-4 left-2.5 hidden h-5 w-5 -translate-x-1/2 items-center justify-center rounded-full border text-micro font-mono sm:flex ${
+                            isComplete
+                              ? 'border-hit/60 bg-hit/15 text-hit'
+                              : 'border-edge bg-surface-3 text-ink-dim'
+                          }`}
+                        >
+                          {isComplete ? <CheckIcon className="h-3 w-3" /> : lessonIndex + 1}
+                        </div>
 
-                  <div>
-                    <h3 className="text-body font-semibold text-ink group-hover:text-accent transition-colors">
-                      {lesson.title}
-                    </h3>
-                    <p className="mt-1 text-label leading-relaxed text-ink-dim">
-                      {lesson.summary}
-                    </p>
-                  </div>
+                        <Link
+                          to={`/learn/${lesson.id}`}
+                          className={`${cardInteractive} flex flex-col gap-2.5 group`}
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="flex items-center gap-2">
+                              <span className="flex h-5 w-5 items-center justify-center rounded-full border border-edge bg-surface-3 font-mono text-micro text-ink-dim sm:hidden">
+                                {lessonIndex + 1}
+                              </span>
+                              <span className="rounded border border-edge bg-surface-3/80 px-2 py-0.5 font-mono text-micro text-ink-dim">
+                                {group.title}
+                              </span>
+                            </div>
 
-                  <div className="flex items-center justify-between border-t border-edge/40 pt-2 text-micro text-ink-dim">
-                    <span className="font-mono">{lesson.steps.length} interactive steps</span>
-                    <span className="inline-flex items-center gap-1 font-medium text-ink group-hover:text-accent transition-colors">
-                      {isComplete ? 'Review lesson' : 'Start lesson'}
-                      <ArrowRightIcon className="h-3 w-3 transition-transform group-hover:translate-x-0.5" />
-                    </span>
-                  </div>
-                </Link>
-              </li>
-            );
-          })}
-        </ol>
+                            <div className="flex items-center gap-2 font-mono text-micro text-ink-dim">
+                              <span>~{lesson.minutes} min</span>
+                              {isComplete && (
+                                <span className="inline-flex items-center gap-1 rounded-full border border-hit/40 bg-hit/10 px-2 py-0.5 font-medium text-hit">
+                                  <CheckIcon className="h-3 w-3" />
+                                  Complete
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          <div>
+                            <h3 className="text-body font-semibold text-ink group-hover:text-accent transition-colors">
+                              {lesson.title}
+                            </h3>
+                            <p className="mt-1 text-label leading-relaxed text-ink-dim">
+                              {lesson.summary}
+                            </p>
+                          </div>
+
+                          <div className="flex items-center justify-between border-t border-edge/40 pt-2 text-micro text-ink-dim">
+                            <span className="font-mono">Interactive guided track</span>
+                            <span className="inline-flex items-center gap-1 font-medium text-ink group-hover:text-accent transition-colors">
+                              {isComplete ? 'Review lesson' : 'Start lesson'}
+                              <ArrowRightIcon className="h-3 w-3 transition-transform group-hover:translate-x-0.5" />
+                            </span>
+                          </div>
+                        </Link>
+                      </li>
+                    );
+                  })}
+                </ol>
+              </div>
+            </section>
+          );
+        })}
       </div>
     </div>
   );

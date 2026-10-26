@@ -8,6 +8,19 @@ import './index.css';
 installGlobalErrorHandlers();
 logBuildBanner();
 
+// plan.md §25.4 A6. Only for someone who ticked the study's optional "record how
+// responsive the app felt" box — `querylens:perf-optin` holds the *deadline* the
+// opt-in lapses at, so it stops by itself — and never on `/study` itself, where
+// typing an answer is not the app's responsiveness. The module is its own lazy
+// chunk, so everyone else downloads none of it.
+try {
+  if (location.pathname !== '/study' && Number(localStorage.getItem('querylens:perf-optin')) > Date.now()) {
+    void import('./perf/inp.ts').then((m) => m.startInpObserver());
+  }
+} catch {
+  // Storage blocked or the chunk failed to load: no measurement, and nothing else is affected.
+}
+
 const rootEl = document.getElementById('root');
 if (!rootEl) throw new Error('#root missing from index.html');
 
@@ -30,3 +43,12 @@ createRoot(rootEl, {
     </ErrorBoundary>
   </StrictMode>,
 );
+
+// plan.md §H1. Production only: in dev the worker would hold files that change on every save.
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch((error: unknown) => {
+      console.warn('[QueryLens] offline support unavailable', error);
+    });
+  });
+}

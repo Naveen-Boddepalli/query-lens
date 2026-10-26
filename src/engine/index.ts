@@ -1,12 +1,19 @@
 export { runQuery } from './runQuery.ts';
 export {
   MAX_REFERENCES,
+  parseReferenceScans,
   parseReferenceString,
   randomReferenceString,
   runBufferTrace,
 } from './bufferTrace.ts';
-export type { BufferTraceResult } from './bufferTrace.ts';
-export { createJoinDemoDatabase, createSeedDatabase } from './seed.ts';
+export type { BufferTraceResult, ScanSpan } from './bufferTrace.ts';
+export {
+  createAccountsDatabase,
+  createJoinCompareDatabase,
+  createJoinDemoDatabase,
+  createJoinOrderDemoDatabase,
+  createSeedDatabase,
+} from './seed.ts';
 export {
   DATASETS,
   DATASET_IDS,
@@ -29,6 +36,16 @@ export {
 } from './planner/index.ts';
 export type { CostEstimate, PlanCost } from './planner/index.ts';
 export {
+  costOfOrder,
+  isReorderableChain,
+  joinGraphFromAst,
+  rebuildJoinsForOrder,
+  reorderJoinsIfCheaper,
+  runJoinOrderDP,
+  writtenOrderFromAst,
+} from './planner/joinOrder.ts';
+export type { JoinOrderCandidate, JoinOrderEdge, JoinOrderNode, JoinOrderResult, SubsetPlan } from './planner/joinOrder.ts';
+export {
   buildHeap,
   createBufferPool,
   policyFor,
@@ -36,6 +53,7 @@ export {
   REPLACEMENT_POLICY_NAMES,
   USAGE_COUNT_CAP,
 } from './storage/index.ts';
+export { isReplacementPolicyName } from './types.ts';
 export type { BufferPool, Frame as BufferPoolFrame, Heap, Page } from './storage/index.ts';
 export {
   allKeys,
@@ -45,10 +63,14 @@ export {
   deleteKey,
   descend,
   height,
+  columnsOfIndex,
+  indexNameOf,
+  indexSpecsOf,
   insert,
   keyList,
   search,
   toIndexDisplay,
+  uniqueViolation,
   validate,
 } from './index/index.ts';
 export type {
@@ -72,23 +94,33 @@ export {
 } from './viewState.ts';
 export type { BufferFrame, LockHeld, TraceProjector, ViewState } from './viewState.ts';
 export { DEFAULT_ENGINE_OPTIONS, IMPLEMENTED_STAGES, STAGES } from './types.ts';
+export { analyzeTable, statsToRows } from './stats.ts';
+export { finalPlan, nodeKey } from './explain.ts';
 export type {
   ASTNode,
+  ColumnStats,
+  CostAlternative,
   Database,
   EngineOptions,
   EventOf,
+  IndexBuildOptions,
   IndexNode,
+  IndexSpec,
+  JoinAlgorithm,
   PlanNode,
   PredictionOption,
   PredictionPrompt,
   QueryError,
+  RaInfo,
   ReplacementPolicyName,
   Row,
   RunResult,
+  TableStats,
   Span,
   SqlValue,
   Stage,
   StepEvent,
   StepEventBody,
   Table,
+  WhyNot,
 } from './types.ts';

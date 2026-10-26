@@ -18,8 +18,18 @@ export function execute(plan: Plan, ctx: ExecContext): Row[] {
   }
   root.close();
 
-  const { hits, misses, evictions } = ctx.pool.stats;
-  const otherTables = ctx.joinRight ? { [ctx.joinRight.table.name]: ctx.joinRight.table } : undefined;
+  // A disk read is a miss or a page read ahead of the request: both are I/O the query paid for.
+  const { hits, evictions } = ctx.pool.stats;
+  const misses = ctx.pool.stats.misses + ctx.pool.stats.prefetches;
+  // Every table this query names, including `ctx.table` itself — a chain's own cost-model recursion (plan.md
+  // §25.4 C3 slice b) needs to resolve it by name again once it reaches the bottom of the chain, not just at the
+  // top (see emit.ts's identical build for the fuller explanation).
+  const otherTables = ctx.joinPartners
+    ? {
+        ...Object.fromEntries(Object.entries(ctx.joinPartners).map(([name, partner]) => [name, partner.table])),
+        [ctx.table.name]: ctx.table,
+      }
+    : undefined;
   const estimate = rootEstimate(plan, ctx.table, ctx.options.rowsPerPage, otherTables);
   const reconcile =
     estimate.estRows === rows.length

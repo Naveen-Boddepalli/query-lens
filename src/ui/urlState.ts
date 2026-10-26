@@ -1,4 +1,5 @@
 import { DEFAULT_DATASET, isDatasetId } from '../engine/index.ts';
+import { isReplacementPolicyName } from '../engine/types.ts';
 import type { DatasetId, ReplacementPolicyName, Row, SqlValue, Table } from '../engine/index.ts';
 
 /**
@@ -117,7 +118,7 @@ export function readShareState(
   if (sql !== null && sql.length > 0 && sql.length <= MAX_SQL) state.sql = sql;
 
   const policy = params.get(PARAM.policy);
-  if (policy === 'lru' || policy === 'clock') state.policy = policy;
+  if (isReplacementPolicyName(policy)) state.policy = policy;
 
   const predict = params.get(PARAM.predict);
   if (predict === '0' || predict === '1') state.predictOn = predict === '1';
@@ -164,19 +165,6 @@ export function encodeShareState(state: ShareState, table: Table | undefined): s
   // URL saying "unchanged".
   if (state.rows && table) params.set(PARAM.rows, encodeRows({ ...table, rows: state.rows }));
   return params.toString();
-}
-
-/**
- * Writes the moment into the address bar.
- *
- * `replaceState`, never `pushState`: stepping a 33-event trace would otherwise
- * bury the previous page under 33 history entries and make Back useless.
- */
-export function writeShareState(query: string): void {
-  if (typeof history === 'undefined') return;
-  const next = `${location.pathname}${query ? `?${query}` : ''}${location.hash}`;
-  if (next === `${location.pathname}${location.search}${location.hash}`) return;
-  history.replaceState(history.state, '', next);
 }
 
 /**

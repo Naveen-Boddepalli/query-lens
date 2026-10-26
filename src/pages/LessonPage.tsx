@@ -4,6 +4,7 @@ import {
   createSeedDatabase,
   DEFAULT_ENGINE_OPTIONS,
   runQuery,
+  type ReplacementPolicyName,
   type StepEvent,
 } from '../engine/index.ts';
 import { LESSONS, lessonById, stepLink } from './learn/lessons.tsx';
@@ -55,7 +56,7 @@ function EmbeddedLiveVisualizer({
   deepLinkLabel,
 }: {
   sql: string;
-  policy?: 'lru' | 'clock' | 'fifo' | 'second-chance' | 'optimal' | 'midpoint' | undefined;
+  policy?: ReplacementPolicyName | undefined;
   targetStepFinder?: ((events: readonly StepEvent[]) => number) | undefined;
   deepLinkHref?: string | undefined;
   deepLinkLabel?: string | undefined;

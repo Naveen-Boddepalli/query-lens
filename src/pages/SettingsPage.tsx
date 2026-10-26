@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { REPLACEMENT_POLICY_LABELS, REPLACEMENT_POLICY_NAMES } from '../engine/types.ts';
 import type { ReplacementPolicyName } from '../engine/index.ts';
 import {
   readDefaultPolicy,
@@ -43,7 +44,7 @@ function SettingSection<T extends string>({ title, desc, label, value, onChange,
     <section className={card}>
       <h3 className="mb-1 text-body font-semibold text-ink">{title}</h3>
       <p className="mb-3 text-label text-ink-dim leading-relaxed">{desc}</p>
-      <div className={segmentedTrack} role="radiogroup" aria-label={label}>
+      <div className={`${segmentedTrack} flex flex-wrap gap-1.5`} role="radiogroup" aria-label={label}>
         {options.map(([val, text]) => (
           <button
             key={val}
@@ -69,8 +70,7 @@ const THEME_OPTIONS = [
 
 const POLICY_OPTIONS = [
   ['default', 'Engine default (LRU)'],
-  ['lru', 'LRU'],
-  ['clock', 'Clock sweep'],
+  ...REPLACEMENT_POLICY_NAMES.map((name) => [name, REPLACEMENT_POLICY_LABELS[name]] as const),
 ] as const;
 
 const PREDICT_OPTIONS = [
@@ -163,8 +163,6 @@ export function SettingsPage() {
           options={SPEED_OPTIONS}
         />
       </div>
-
-
 
       <div className="mt-6 flex items-center justify-between border-t border-edge pt-4">
         <button

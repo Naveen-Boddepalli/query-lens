@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.node.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "allowImportingTsExtensions": false,
+    "rewriteRelativeImportExtensions": true,
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "outDir": "dist",
+    "rootDir": "../..",
+    "lib": ["ES2023"],
+    "types": ["node"],
+    "tsBuildInfoFile": null
+  },
+  "include": ["../../bin/querylens.ts", "../../src/engine/**/*.ts"],
+  "exclude": ["../../src/engine/**/__tests__/**"]
+}

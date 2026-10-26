@@ -1,11 +1,12 @@
 import type { Emit } from '../trace.ts';
-import type { Table } from '../types.ts';
+import type { JoinAlgorithm, Table } from '../types.ts';
+import { columnKey, selectItemKey } from '../parser/index.ts';
 import type { SelectStatement } from '../parser/index.ts';
-import { selectItemKey } from '../parser/index.ts';
-import { buildAggregatePlan, buildJoinPlan, buildPlan, isAggregateQuery } from './buildPlan.ts';
+import { buildAggregatePlan, buildJoinPlan, buildPlan, distinctNodeFor, isAggregateQuery, projectListFor } from './buildPlan.ts';
 import { estimatePlan, rootEstimate } from './cost.ts';
-import { optimize } from './optimize.ts';
-import { exprToSql, toPlanDisplay } from './plan.ts';
+import { costOfOrder, joinGraphFromAst, runJoinOrderDP, writtenOrderFromAst } from './joinOrder.ts';
+import { OPTIMIZER_RULES, leftmostPrefixNote, optimize } from './optimize.ts';
+import { exprToSql, joinsIn, subqueryResolutionNotes, toPlanDisplay } from './plan.ts';
 import type { Plan, ProjectList } from './plan.ts';
 
 /**
@@ -15,24 +16,88 @@ import type { Plan, ProjectList } from './plan.ts';
  *
  * Every emitted tree carries the cost model's per-node estimates (plan.md
  * §22.2), which is also why `rowsPerPage` is threaded down: a scan's estimated
- * page count depends on it. `joinTable` is the `JOIN`'d table's own data,
- * needed only so the cost model can estimate that side of a `Join` too —
- * `undefined` for every query without one.
+ * page count depends on it. `joinTables` is every `JOIN`'d table's own data,
+ * keyed by name, needed only so the cost model can estimate that side of each
+ * `Join` too — `undefined` for every query without one.
  */
+/** Does any node of `plan` read through an index? */
+function usesIndex(plan: Plan): boolean {
+  if (plan.op === 'IndexScan' || plan.op === 'IndexRangeScan' || plan.op === 'IndexOnlyScan' || plan.op === 'IndexProbe') return true;
+  if (plan.op === 'Join') return usesIndex(plan.left) || usesIndex(plan.right);
+  return 'child' in plan ? usesIndex(plan.child) : false;
+}
+
+/** A join algorithm as a phrase for the "nothing to rewrite" note. */
+function describeJoin(algorithm: JoinAlgorithm, outer: string, inner: string): string {
+  switch (algorithm) {
+    case 'hash':
+      return 'a hash join over two full scans';
+    case 'sort-merge':
+      return 'a sort-merge join over two full scans';
+    case 'index-nested-loop':
+      return `an index nested-loop join — a full scan of ${outer}, then a B+Tree probe of ${inner} for each row`;
+    case 'nested-loop':
+      return 'a nested-loop join over two full scans';
+  }
+}
+
 export function emitPlanEvents(
   emit: Emit,
   ast: SelectStatement,
   table: Table,
   rowsPerPage: number,
   aggregateStrategy: 'hash' | 'sort' = 'hash',
-  joinTable?: Table,
-  joinStrategy: 'nested-loop' | 'hash' | 'sort-merge' = 'nested-loop',
+  joinTables?: Record<string, Table>,
+  /**
+   * `undefined` (the shipped default, plan.md §25.4 C5 slice 2) means every `JOIN`'s algorithm is chosen by
+   * cost — `join-algorithm-selection` runs in the optimize stage below. An explicit value means the caller is
+   * forcing one, `/compare`'s and `/tools/planner`'s whole reason for setting this at all, and that rule is left
+   * out of `enabled` entirely so it can never override the forced choice. Either way the plan stage below still
+   * builds every step structurally as `nested-loop` first, the same cost-oblivious starting point a bare `SeqScan`
+   * already is for `index-selection` — only `structuralJoinStrategy` (the resolved, concrete value) drives it.
+   */
+  joinStrategy?: JoinAlgorithm,
+  /**
+   * The table order this query was actually *typed* in — passed only when real execution (plan.md §25.4 C5
+   * slice 3) chose a different one, in which case `ast.from`/`ast.joins` below already reflect the chosen order,
+   * not the written one; `runQuery.ts`'s `applyCostOrder` is the only caller that ever sets this.
+   */
+  writtenJoinOrder?: readonly string[],
 ): Plan {
-  const otherTables = joinTable ? { [joinTable.name]: joinTable } : undefined;
+  const structuralJoinStrategy = joinStrategy ?? 'nested-loop';
+  // Every table this query names, keyed by name — including `table` itself. A single join only ever needed the
+  // *other* one (the recursion's own `table` param always being the right one to check first), but a chain
+  // (plan.md §25.4 C3 slice b) re-derives that check at every nesting level against whatever table THAT level's
+  // own `Join` node concerns — which is `table` (the original FROM table) again once the recursion reaches the
+  // bottom of the chain — so `table.name` has to resolve through this same map at every depth, not just the top.
+  const otherTables = joinTables && Object.keys(joinTables).length > 0 ? { ...joinTables, [table.name]: table } : undefined;
   const display = (plan: Plan, changed?: ReadonlySet<Plan>) =>
     toPlanDisplay(plan, changed, estimatePlan(plan, table, rowsPerPage, otherTables));
 
   const leftScan: Plan = { op: 'SeqScan', table: ast.from.name };
+
+  // Said up front, before the trace below starts naming a different FROM table than the one typed (plan.md
+  // §25.4 C5 slice 3): real execution reordered this chain because it was honestly cheaper to.
+  if (writtenJoinOrder && writtenJoinOrder.length >= 2 && joinTables) {
+    const allTables: Record<string, Table> = { ...joinTables, [table.name]: table };
+    const { nodes, edges } = joinGraphFromAst(ast, allTables, rowsPerPage);
+    const chosenOrder = [ast.from.name, ...(ast.joins ?? []).map((j) => j.table.name)];
+    const writtenCost = costOfOrder(nodes, edges, writtenJoinOrder);
+    const chosenCost = costOfOrder(nodes, edges, chosenOrder);
+    const ratio = writtenCost.pages / Math.max(1, chosenCost.pages);
+    emit(
+      `This query's JOINs run in a different order than written (plan.md §25.4 C5 slice 3): a cost-based join-order search chose \`${chosenOrder.join(' → ')}\` over the written \`${writtenJoinOrder.join(' → ')}\` — an estimated ${String(chosenCost.pages)} pages against ${String(writtenCost.pages)}, about ${ratio.toFixed(1)}× cheaper. Unlike the algorithm each step runs (plan.md §25.4 C5 slice 2), there is no "declines but stays" version of this: every left-deep order of the same tables returns the same rows, so the cheaper one always wins.`,
+      {
+        stage: 'plan',
+        planTree: display(leftScan),
+        whyNot: {
+          chosen: { label: chosenOrder.join(' → '), estPages: chosenCost.pages },
+          runnerUp: { label: writtenJoinOrder.join(' → '), estPages: writtenCost.pages },
+        },
+      },
+    );
+  }
+
   emit(
     `Start at the bottom: every plan begins by reading a table, so the base of the tree is a sequential scan of \`${ast.from.name}\`.`,
     { stage: 'plan', planTree: display(leftScan) },
@@ -40,32 +105,88 @@ export function emitPlanEvents(
 
   let current: Plan = leftScan;
 
-  if (ast.join) {
-    current = buildJoinPlan(ast.join, ast.from.name, joinStrategy);
-    const join = current.op === 'Join' ? current : undefined;
+  const allJoins = ast.joins ?? [];
+  for (let i = 0; i < allJoins.length; i++) {
+    const join = allJoins[i]!;
+    // Rebuilt from scratch each step (cheap — a handful of tables at most) rather than grown incrementally, so this
+    // stays the one place that knows how to fold a JOIN chain and never drifts from `buildJoinPlan` itself.
+    current = buildJoinPlan(allJoins.slice(0, i + 1), ast.from.name, structuralJoinStrategy, joinTables);
+    const j = current as Extract<Plan, { op: 'Join' }>;
+    const algorithm = j.algorithm;
+    // Asked for an index join, but this step's inner table has no index on the join column: say so, and run the plain one.
+    const fallback =
+      structuralJoinStrategy === 'index-nested-loop' && algorithm !== 'index-nested-loop'
+        ? `You asked for an index nested-loop join, but \`${join.table.name}\` has no index on \`${j.rightColumn}\` for it to probe — so this runs as an ordinary nested-loop. `
+        : '';
     const mechanism =
-      joinStrategy === 'hash'
-        ? `it builds an in-memory hash table over all of \`${ast.join.table.name}\`, keyed on \`${join?.rightColumn}\`, once — then probes it with each \`${ast.from.name}\` row's \`${join?.leftColumn}\`, reading \`${ast.join.table.name}\` exactly once regardless of how many rows \`${ast.from.name}\` has`
-        : joinStrategy === 'sort-merge'
-          ? `it sorts both \`${ast.from.name}\` and \`${ast.join.table.name}\` on the join key, then merges the two sorted lists in a single pass — no per-row rescan and no table held in memory, at the cost of sorting both sides first`
-          : `for every row \`${ast.from.name}\` produces, it rescans all of \`${ast.join.table.name}\` looking for a match on \`${join?.leftColumn}\` = \`${join?.rightColumn}\` — nested-loop, the simplest join algorithm, and the most expensive once neither side has an index to speed the inner scan up`;
+      algorithm === 'index-nested-loop'
+        ? `for every row \`${j.leftTable}\` produces, it descends \`${j.rightTable}\`'s B+Tree on \`${j.rightColumn}\` with that row's \`${j.leftColumn}\` — a few page reads per outer row instead of a rescan of the whole inner table, which is why a small outer over a big indexed inner is where this algorithm wins`
+        : algorithm === 'hash'
+        ? `it builds an in-memory hash table over all of \`${j.rightTable}\`, keyed on \`${j.rightColumn}\`, once — then probes it with each \`${j.leftTable}\` row's \`${j.leftColumn}\`, reading \`${j.rightTable}\` exactly once regardless of how many rows \`${j.leftTable}\` has`
+        : algorithm === 'sort-merge'
+          ? `it sorts both \`${j.leftTable}\` and \`${j.rightTable}\` on the join key, then merges the two sorted lists in a single pass — no per-row rescan and no table held in memory, at the cost of sorting both sides first`
+          : `for every row \`${j.leftTable}\` produces, it rescans all of \`${j.rightTable}\` looking for a match on \`${j.leftColumn}\` = \`${j.rightColumn}\` — nested-loop, the simplest join algorithm, and the most expensive once neither side has an index to speed the inner scan up`;
+    const outer = join.joinType === 'left'
+      ? ` This is a LEFT JOIN: every row from \`${j.leftTable}\` survives even when nothing on \`${j.rightTable}\` matches it, with \`${j.rightTable}\`'s columns NULL.`
+      : '';
     emit(
-      `JOIN adds a second scan of \`${ast.join.table.name}\` and a Join above both: ${mechanism}.`,
+      `${fallback}JOIN adds ${algorithm === 'index-nested-loop' ? 'an index probe on' : 'a second scan of'} \`${j.rightTable}\` and a Join above ${i === 0 ? 'that' : 'the chain so far'}: ${mechanism}.${outer}`,
       { stage: 'plan', planTree: display(current) },
+    );
+  }
+
+  // A second opinion on join *order* (plan.md §25.4 C4), for two or more JOINs only — a single one has no other
+  // order to consider, and a chain `writtenJoinOrder` already reordered for real has nothing left to say here
+  // (the note above already said it). Otherwise informational: this never changes `current` or what actually
+  // executes, only what gets said about it — the same "estimate beside the real plan, never a decision" stance
+  // C1's stats and C2's q-error already take, and (plan.md §25.4 C5 slice 3) still the only stance a chain with a
+  // `LEFT JOIN` in it ever gets, since that is never reordered for real. `/tools/join-order` is the same search,
+  // with the whole subset lattice visible.
+  if (allJoins.length >= 2 && joinTables && !writtenJoinOrder) {
+    const allTables: Record<string, Table> = { ...joinTables, [table.name]: table };
+    const { nodes, edges } = joinGraphFromAst(ast, allTables, rowsPerPage);
+    const dp = runJoinOrderDP(nodes, edges);
+    const written = writtenOrderFromAst(ast);
+    const writtenCost = costOfOrder(nodes, edges, written);
+    const ratio = writtenCost.pages / dp.winner.pages;
+    const hasLeftJoin = allJoins.some((j) => j.joinType === 'left');
+    emit(
+      ratio >= 1.05
+        ? `A cost-based join-order search (plan.md §25.4 C4) would instead join these ${String(nodes.length)} tables as ${dp.winner.tables.join(' → ')}: an estimated ${String(dp.winner.pages)} pages, against the ${String(writtenCost.pages)} the order actually written above costs — about ${ratio.toFixed(1)}× cheaper.${
+            hasLeftJoin
+              ? ' This chain is never reordered for real (plan.md §25.4 C5 slice 3): a LEFT JOIN is not commutative or associative in general, so the order above is what actually runs.'
+              : ' This query still runs in the order it was written; nothing here changes that.'
+          }`
+        : `A cost-based join-order search (plan.md §25.4 C4) agrees with the order written above — among left-deep orderings of these ${String(nodes.length)} tables, this is already about as cheap as it gets.`,
+      {
+        stage: 'plan',
+        planTree: display(current),
+        ...(ratio >= 1.05
+          ? {
+              whyNot: {
+                chosen: { label: written.join(' → '), estPages: writtenCost.pages },
+                runnerUp: { label: dp.winner.tables.join(' → '), estPages: dp.winner.pages },
+              },
+            }
+          : {}),
+      },
     );
   }
 
   if (ast.where) {
     current = { op: 'Filter', predicate: ast.where, child: current };
+    const subqueryNotes = subqueryResolutionNotes(ast.where);
     emit(
-      `The WHERE clause becomes a Filter sitting above the scan: \`${exprToSql(ast.where)}\`.`,
+      `The WHERE clause becomes a Filter sitting above the scan: \`${exprToSql(ast.where)}\`.${
+        subqueryNotes.length > 0 ? ` ${subqueryNotes.map((n) => `${n[0]!.toUpperCase()}${n.slice(1)}.`).join(' ')}` : ''
+      }`,
       { stage: 'plan', planTree: display(current) },
     );
   }
 
   if (isAggregateQuery(ast)) {
     current = buildAggregatePlan(ast, current, aggregateStrategy);
-    const groupBy = ast.groupBy?.columns.map((c) => c.name) ?? [];
+    const groupBy = ast.groupBy?.columns.map(columnKey) ?? [];
     const aggregateLabels =
       current.op === 'HashAggregate' || current.op === 'SortAggregate'
         ? current.aggregates.map((a) => a.key).join(', ')
@@ -80,9 +201,17 @@ export function emitPlanEvents(
         ? `GROUP BY becomes a ${nodeName} above that: rows are grouped by ${groupBy.join(', ')}${
             aggregateLabels ? `, computing ${aggregateLabels} per group` : ''
           }, ${mechanism}. Like Sort, it cannot produce a row until it has seen every one — the last group is not known to be complete until the input runs out.`
-        : `${aggregateLabels} becomes a ${nodeName} above that: with no GROUP BY, the whole table is one group, so it collapses every row into one${
+        : `${aggregateLabels} becomes a ${nodeName} above that: with no GROUP BY, the whole ${ast.joins ? 'joined result' : 'table'} is one group, so it collapses every row into one${
             aggregateStrategy === 'sort' ? ', sorting first even though there is only ever one group to produce' : ''
           }. Like Sort, it cannot produce a row until it has seen all of them.`,
+      { stage: 'plan', planTree: display(current) },
+    );
+  }
+
+  if (ast.having) {
+    current = { op: 'Having', predicate: ast.having, child: current };
+    emit(
+      `HAVING becomes a Having filter above the aggregate: \`${exprToSql(ast.having)}\` is tested on each finished group, after its aggregates are computed. That is the difference from WHERE, which filters rows *before* they are grouped and so can never mention an aggregate.`,
       { stage: 'plan', planTree: display(current) },
     );
   }
@@ -94,49 +223,76 @@ export function emitPlanEvents(
       direction: ast.orderBy.direction,
       child: current,
     };
+    const grouped = isAggregateQuery(ast);
     emit(
-      `ORDER BY becomes a Sort above that: every row, ordered by \`${ast.orderBy.column}\` ${
+      `ORDER BY becomes a Sort above that: every ${grouped ? 'group' : 'row'}, ordered by \`${ast.orderBy.column}\` ${
         ast.orderBy.direction === 'asc' ? 'ascending' : 'descending'
-      }. Unlike everything below it, Sort cannot produce a row until it has seen all of them.`,
+      }.${
+        grouped
+          ? ast.orderBy.aggregate && !(ast.select.kind === 'columns' && ast.select.items.some((i) => selectItemKey(i) === ast.orderBy!.column))
+            ? ` The aggregate computes \`${ast.orderBy.column}\` for each group even though nothing selects it, so there is something to sort by; the Project above drops it.`
+            : ' It sorts what the aggregate produced, so it only has as many rows to order as there are groups.'
+          : ''
+      } Unlike everything below it, Sort cannot produce a row until it has seen all of them.`,
       { stage: 'plan', planTree: display(current) },
     );
   }
 
-  const columns: ProjectList =
-    ast.select.kind === 'star'
-      ? { kind: 'star' }
-      : { kind: 'columns', names: ast.select.items.map(selectItemKey) };
+  const columns: ProjectList = projectListFor(ast.select);
 
   current = { op: 'Project', columns, child: current };
   emit(
     columns.kind === 'star'
       ? 'The SELECT list becomes a Project on top. `*` keeps every column, so it passes rows through unchanged.'
-      : `The SELECT list becomes a Project on top, keeping ${columns.names.join(', ')}.`,
+      : columns.kind === 'columns'
+        ? `The SELECT list becomes a Project on top, keeping ${columns.names.join(', ')}.`
+        : `The SELECT list becomes a Project on top that *computes* each item for every row: ${columns.items
+            .map((i) => `\`${i.sql}\``)
+            .join(', ')}. Arithmetic on a NULL is NULL, and dividing by zero gives NULL.`,
     { stage: 'plan', planTree: display(current) },
   );
 
+  if (ast.distinct) {
+    current = distinctNodeFor(ast, current, aggregateStrategy);
+    emit(
+      aggregateStrategy === 'sort'
+        ? `DISTINCT becomes a SortDistinct above the Project: it sorts every projected row${ast.orderBy ? ` (by \`${ast.orderBy.column}\` first, so your ORDER BY survives)` : ''} — spilling through the buffer pool exactly as ORDER BY's Sort does — so equal rows sit next to each other, then keeps one of each run. Like Sort it cannot produce a row until it has seen all of them.`
+        : 'DISTINCT becomes a HashDistinct above the Project: it remembers every row it has passed in an in-memory hash set and drops a repeat the moment it sees one. It streams — the first new row comes out immediately, and a LIMIT above it can stop the scan early.',
+      { stage: 'plan', planTree: display(current) },
+    );
+  }
+
   if (ast.limit !== undefined) {
     const count = ast.limit.value;
-    current = { op: 'Limit', count, child: current };
+    const offset = ast.limit.offset ?? 0;
+    current = { op: 'Limit', count, ...(offset > 0 ? { offset } : {}), child: current };
     emit(
-      `LIMIT becomes a Limit on top: it stops pulling rows once ${plural(count, 'row')} ${
-        count === 1 ? 'has' : 'have'
-      } come through — whatever is beneath it is never asked for the rest.`,
+      offset > 0
+        ? `LIMIT ... OFFSET becomes a Limit on top: it discards the first ${plural(offset, 'row')} that come through, then passes ${plural(count, 'row')} and stops. The discarded rows are still produced by everything beneath — an OFFSET saves the client nothing, only the network.`
+        : `LIMIT becomes a Limit on top: it stops pulling rows once ${plural(count, 'row')} ${
+            count === 1 ? 'has' : 'have'
+          } come through — whatever is beneath it is never asked for the rest.`,
       { stage: 'plan', planTree: display(current) },
     );
   }
 
   // The canonical plan is a direct translation of the query text. Everything
   // below is the optimizer earning its keep.
-  const canonical = buildPlan(ast, aggregateStrategy, joinStrategy);
+  const canonical = buildPlan(ast, aggregateStrategy, structuralJoinStrategy, joinTables);
   let optimised = canonical;
   let before = canonical;
 
-  for (const step of optimize(canonical, table)) {
+  // `join-algorithm-selection` is the one rule left out when the caller forced a specific `joinStrategy` — see
+  // this function's own parameter doc above.
+  const enabledRules =
+    joinStrategy === undefined ? new Set(OPTIMIZER_RULES) : new Set(OPTIMIZER_RULES.filter((r) => r !== 'join-algorithm-selection'));
+
+  for (const step of optimize(canonical, table, rowsPerPage, otherTables ?? {}, enabledRules)) {
     emit(
-      step.rule === 'index-selection' ||
+      (step.rule === 'index-selection' ||
         step.rule === 'range-index-selection' ||
-        step.rule === 'index-only-scan'
+        step.rule === 'index-only-scan') &&
+        step.changed.size > 0
         ? withCostJustification(step.label, step.plan)
         : step.label,
       {
@@ -144,6 +300,7 @@ export function emitPlanEvents(
         rule: step.rule,
         before: display(before),
         after: display(step.plan, step.changed),
+        ...(step.whyNot ? { whyNot: step.whyNot } : {}),
       },
       step.prompt ? { predictable: step.prompt } : undefined,
     );
@@ -153,11 +310,19 @@ export function emitPlanEvents(
 
   if (optimised === canonical) {
     const rows = rootEstimate(canonical, table, rowsPerPage, otherTables).estRows;
-    const note = ast.join
-      ? `No rewrite rule reaches into a JOIN yet — ${joinStrategy === 'hash' ? 'a hash join over two full scans' : 'nested-loop over two full scans'} is what runs.`
-      : ast.where
-        ? `The cost model estimates about ${plural(rows, 'row')} out of ${String(table.rows.length)}, and no access path beats reading the table.`
-        : 'With no WHERE there is nothing to narrow the scan — every row is returned.';
+    const chainJoins = joinsIn(canonical);
+    const note =
+      chainJoins.length === 1
+        ? `No rewrite rule applies to this JOIN — ${describeJoin(chainJoins[0]!.algorithm, chainJoins[0]!.leftTable, chainJoins[0]!.rightTable)} is what runs.`
+        : chainJoins.length > 1
+          ? `No rewrite rule applies to this chain of ${String(chainJoins.length)} JOINs — ${chainJoins
+              .map((j) => `\`${j.leftTable}\` × \`${j.rightTable}\` runs as ${describeJoin(j.algorithm, j.leftTable, j.rightTable)}`)
+              .join('; ')}.`
+          : ast.where
+            ? `The cost model estimates about ${plural(rows, 'row')} out of ${String(table.rows.length)}, and no access path beats reading the table.${
+                leftmostPrefixNote(table, ast.where) ? ` ${leftmostPrefixNote(table, ast.where)!}` : ''
+              }`
+            : 'With no WHERE there is nothing to narrow the scan — every row is returned.';
     emit(
       `No rewrite rule fires on this plan — the optimizer leaves it exactly as written. ${note}`,
       {
@@ -169,14 +334,36 @@ export function emitPlanEvents(
     );
   }
 
+  // Rules fired, but none of them could use an index the table has: if that is because a composite index cannot be
+  // entered, say so here — the "nothing fired" note above never runs once, say, predicate pushdown has.
+  if (optimised !== canonical && allJoins.length === 0 && !usesIndex(optimised)) {
+    const unusable = leftmostPrefixNote(table, ast.where);
+    if (unusable) {
+      emit(`No index is used. ${unusable}`, {
+        stage: 'optimize',
+        rule: 'none',
+        before: display(optimised),
+        after: display(optimised),
+      });
+    }
+  }
+
   return optimised;
 
-  /** Appends the scan-vs-index page estimate that makes the rewrite a decision, not a reflex. */
+  /**
+   * Appends the scan-vs-index page estimate that makes an accepted rewrite's cost visible, not just asserted. Only
+   * ever called for a step that actually changed the plan: `index-selection` and `range-index-selection` already
+   * decline anything that would not be cheaper (plan.md §25.4 C5 — see their own doc comments in `optimize.ts`), and
+   * `index-only-scan` only ever narrows an `IndexScan` the gate already accepted, never chosen on its own, so it can
+   * only be cheaper still. The comparison below is therefore always a confirmation, never a surprise — a second,
+   * independent read of the same numbers `optimize.ts`'s own gate already compared, not a competing judgment.
+   */
   function withCostJustification(label: string, chosen: Plan): string {
     const scanPages = Math.max(1, Math.ceil(table.rows.length / rowsPerPage));
     const rows = rootEstimate(canonical, table, rowsPerPage, otherTables).estRows;
     const indexPages = rootEstimate(chosen, table, rowsPerPage, otherTables).estPages;
-    return `${label} Estimated cost decides it: the sequential scan reads all ${String(scanPages)} pages to return about ${plural(rows, 'row')}; the index lookup reads about ${String(indexPages)}.`;
+    const facts = `the sequential scan reads all ${String(scanPages)} pages to return about ${plural(rows, 'row')}; the index lookup reads about ${String(indexPages)}`;
+    return `${label} Estimated cost agrees: ${facts}.`;
   }
 }
 

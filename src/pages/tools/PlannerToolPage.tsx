@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   buildPlan,
@@ -16,6 +16,8 @@ import type { Database, Plan, Table } from '../../engine/index.ts';
 import { PlanTree } from '../../ui/panels/PlanTree.tsx';
 import { PageHeader } from '../../ui/PageHeader.tsx';
 import { inputField, panelSurface } from '../../ui/primitives.ts';
+import { WhyNotNote } from '../../ui/WhyNotNote.tsx';
+import { useAddressBarQuery } from '../../ui/addressBar.ts';
 
 /**
  * The optimizer standalone (plan.md §22.3). The rewrite rules already exist
@@ -94,11 +96,11 @@ export function PlannerToolPage() {
     // typed query names one of those instead (plan.md §22.2's JOIN).
     const fromTable = db.tables[parsed.ast.from.name] ?? table;
     const canonical = buildPlan(parsed.ast);
-    const steps = optimize(canonical, fromTable, rules);
+    const rpp = DEFAULT_ENGINE_OPTIONS.rowsPerPage;
+    const steps = optimize(canonical, fromTable, rpp, db.tables, rules);
     const last = steps.at(-1);
     const optimised = last ? last.plan : canonical;
     const lastChanged: ReadonlySet<Plan> = last ? last.changed : new Set<Plan>();
-    const rpp = DEFAULT_ENGINE_OPTIONS.rowsPerPage;
     return {
       canonical: toPlanDisplay(canonical, new Set<Plan>(), estimatePlan(canonical, fromTable, rpp, db.tables)),
       optimised: toPlanDisplay(optimised, lastChanged, estimatePlan(optimised, fromTable, rpp, db.tables)),
@@ -107,17 +109,14 @@ export function PlannerToolPage() {
     };
   }, [validation.error, sql, db, table, rules]);
 
-  useEffect(() => {
-    const t = window.setTimeout(() => {
-      const p = new URLSearchParams();
-      p.set('q', sql);
-      p.set('idx', indexed ? '1' : '0');
-      p.set('rules', [...rules].join(','));
-      const next = `${location.pathname}?${p.toString()}`;
-      if (next !== `${location.pathname}${location.search}`) history.replaceState(null, '', next);
-    }, 250);
-    return () => { window.clearTimeout(t); };
+  const shareQuery = useMemo(() => {
+    const p = new URLSearchParams();
+    p.set('q', sql);
+    p.set('idx', indexed ? '1' : '0');
+    p.set('rules', [...rules].join(','));
+    return p.toString();
   }, [sql, indexed, rules]);
+  useAddressBarQuery(shareQuery);
 
   function toggleRule(name: string) {
     setRules((cur) => {
@@ -168,10 +167,8 @@ export function PlannerToolPage() {
           />
           <span className="font-mono text-ink font-medium">users.id index</span>
         </label>
-
         <span className="hidden h-5 w-px bg-edge sm:inline-block" aria-hidden="true" />
         <span className="font-mono text-[0.72rem] uppercase tracking-wider text-ink-dim/80">Rules:</span>
-
         {OPTIMIZER_RULES.map((name) => (
           <label key={name} className="flex items-center gap-2 text-ink-dim cursor-pointer select-none">
             <input
@@ -246,7 +243,7 @@ export function PlannerToolPage() {
             </figure>
           </div>
 
-          <div className="ql-sheen rounded-xl border border-edge bg-surface-2/80 p-4 shadow-neu-rest backdrop-blur-sm">
+          <div className="ql-sheen rounded-xl border border-edge bg-surface-2/80 p-4 shadow-neu-rest backdrop-blur-md">
             <h3 className="mb-3 font-mono text-[0.75rem] uppercase tracking-wider text-ink-dim">
               Optimizer Rule Verification
             </h3>
@@ -256,28 +253,35 @@ export function PlannerToolPage() {
                 const fired = plans.firedRules.has(name);
                 const step = plans.steps.find((s) => s.rule === name);
                 return (
-                  <li key={name} className="flex items-center gap-2.5 text-label leading-relaxed">
-                    <span
-                      aria-hidden="true"
-                      className={`shrink-0 rounded px-1.5 py-0.5 font-mono text-[0.68rem] uppercase tracking-wider ${
-                        off
-                          ? 'border border-edge/60 bg-surface-3 text-ink-dim/50'
-                          : fired
-                            ? 'border border-hit/40 bg-hit/10 text-hit'
-                            : 'border border-edge bg-surface-2 text-ink-dim'
-                      }`}
-                    >
-                      {off ? 'off' : fired ? 'fired' : 'skip'}
-                    </span>
-                    <span className={off ? 'text-ink-dim/60' : 'text-ink-dim'}>
-                      <span className="font-mono text-ink font-medium">{name}</span>
-                      {' &mdash; '}
-                      {off
-                        ? 'rule disabled'
-                        : fired && step
-                          ? step.label
-                          : 'no candidate pattern matched on this plan'}
-                    </span>
+                  <li key={name} className="flex flex-col gap-1 text-label leading-relaxed">
+                    <div className="flex items-center gap-2.5">
+                      <span
+                        aria-hidden="true"
+                        className={`shrink-0 rounded px-1.5 py-0.5 font-mono text-[0.68rem] uppercase tracking-wider ${
+                          off
+                            ? 'border border-edge/60 bg-surface-3 text-ink-dim/50'
+                            : fired
+                              ? 'border border-hit/40 bg-hit/10 text-hit'
+                              : 'border border-edge bg-surface-2 text-ink-dim'
+                        }`}
+                      >
+                        {off ? 'off' : fired ? 'fired' : 'skip'}
+                      </span>
+                      <span className={off ? 'text-ink-dim/60' : 'text-ink-dim'}>
+                        <span className="font-mono text-ink font-medium">{name}</span>
+                        {' — '}
+                        {off
+                          ? 'rule disabled'
+                          : fired && step
+                            ? step.label
+                            : 'no candidate pattern matched on this plan'}
+                      </span>
+                    </div>
+                    {!off && fired && step?.whyNot && (
+                      <div className="pl-6 mt-1">
+                        <WhyNotNote whyNot={step.whyNot} />
+                      </div>
+                    )}
                   </li>
                 );
               })}

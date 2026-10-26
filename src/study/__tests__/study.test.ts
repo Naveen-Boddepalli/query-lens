@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { MAX_INFLATED_BYTES, pack as packJson, unpack } from '../codec.ts';
 import { decodePack, encodePack, packCodeFromHash, validatePack } from '../pack.ts';
 import type { StudyPack } from '../pack.ts';
-import { decodeResult, encodeResult, MAX_ANSWER, RESULT_PREFIX } from '../result.ts';
+import { decodeResult, encodeResult, MAX_ANSWER, parsePerf, RESULT_PREFIX } from '../result.ts';
 import {
   agree, canStartTest, finish, formatClock, materialLeft, newSession, parseSession, secondsLeft,
   setAnswer, startTest, testLeft, tick, toResult,
@@ -166,6 +166,55 @@ describe('results', () => {
       answers: [{ id: 'q1', text: 'x'.repeat(MAX_ANSWER + 1) }],
     });
     expect((await decodeResult(RESULT_PREFIX + long)).ok).toBe(false);
+  });
+});
+
+describe('opt-in responsiveness timing (plan.md §25.4 A6)', () => {
+  const PERF = { inp: 240, interactions: 88, cores: 8, viewportPx: 1280, touch: false };
+  const done = (optIn: boolean) => {
+    let s = agree(newSession('code', PACK), 1_000, optIn);
+    s = startTest(s, 61_000);
+    return finish(s, 91_000, false);
+  };
+
+  it('is off unless the participant ticked the separate box', () => {
+    expect(newSession('c', PACK).perfOptIn).toBe(false);
+    expect(agree(newSession('c', PACK), 1_000).perfOptIn).toBe(false);
+    expect(agree(newSession('c', PACK), 1_000, true).perfOptIn).toBe(true);
+  });
+
+  it('adds a perf block to the result only for an opted-in participant who has a captured reading', () => {
+    expect(toResult(done(true), 'b', PERF)?.perf).toEqual(PERF);
+    expect(toResult(done(true), 'b', null)).not.toHaveProperty('perf');
+    expect(toResult(done(true), 'b')).not.toHaveProperty('perf');
+    // A reading passed for someone who did not opt in must never leak into the code.
+    expect(toResult(done(false), 'b', PERF)).not.toHaveProperty('perf');
+  });
+
+  it('round-trips through the result code, and a result without one still decodes', async () => {
+    const withPerf = toResult(done(true), 'b', PERF)!;
+    expect(await decodeResult(await encodeResult(withPerf))).toEqual({ ok: true, result: withPerf });
+    const without = toResult(done(false), 'b')!;
+    expect(await decodeResult(await encodeResult(without))).toEqual({ ok: true, result: without });
+  });
+
+  it('accepts "no INP" (nothing measured) but rejects a malformed block outright', async () => {
+    expect(parsePerf({ ...PERF, inp: null })).toEqual({ ...PERF, inp: null });
+    for (const bad of [null, 'x', { ...PERF, inp: -1 }, { ...PERF, inp: 'fast' }, { ...PERF, cores: 1e9 }, { ...PERF, touch: 'yes' }, { inp: 1 }]) {
+      expect(parsePerf(bad)).toBeNull();
+    }
+    const base = toResult(done(true), 'b', PERF)!;
+    const tampered = await packJson({ ...base, perf: { ...PERF, inp: -5 } });
+    expect((await decodeResult(RESULT_PREFIX + tampered)).ok).toBe(false);
+  });
+
+  it('a session saved before A6 (no opt-in field) still loads, as not opted in', () => {
+    const { perfOptIn: _optIn, ...legacy } = newSession('c', PACK);
+    expect(parseSession(JSON.parse(JSON.stringify(legacy)))).toMatchObject({ perfOptIn: false });
+  });
+
+  it('survives a save and reload with its opt-in', () => {
+    expect(parseSession(JSON.parse(JSON.stringify(done(true))))).toMatchObject({ perfOptIn: true });
   });
 });
 

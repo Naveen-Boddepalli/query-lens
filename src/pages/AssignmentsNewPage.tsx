@@ -4,6 +4,7 @@ import {
   DEFAULT_ENGINE_OPTIONS,
   runQuery,
 } from '../engine/index.ts';
+import { REPLACEMENT_POLICY_LABELS, REPLACEMENT_POLICY_NAMES } from '../engine/types.ts';
 import type { ReplacementPolicyName } from '../engine/index.ts';
 import { encodeShareState } from '../ui/urlState.ts';
 import { serializeSet, worksheet } from '../ui/assignmentSet.ts';
@@ -154,8 +155,11 @@ export function AssignmentsNewPage() {
               onChange={(e) => { setPolicy(e.target.value as ReplacementPolicyName); }}
               className={inputField}
             >
-              <option value="lru">LRU</option>
-              <option value="clock">Clock sweep</option>
+              {REPLACEMENT_POLICY_NAMES.map((name) => (
+                <option key={name} value={name}>
+                  {REPLACEMENT_POLICY_LABELS[name]}
+                </option>
+              ))}
             </select>
           </label>
 

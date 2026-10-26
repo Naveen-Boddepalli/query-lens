@@ -7,7 +7,497 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0-rc.3] - 2026-10-18
+
+The third release candidate for 2.0: rc.2 and what its first days in production turned up. Two bugs a visitor
+could meet are fixed — hashed assets were never cached for long, so a browser revalidated every chunk on every
+load, and a page's parameters could land on the page you had just gone to. Every route that draws no tree is
+about 16 kB lighter than in rc.2 (`/settings` 123.5 → 107.7 kB, the landing page 176.5 → 160.7), and the six
+that draw one carry flowinger 1.0's extra 2.5 kB; the editor runs the CodeMirror its `package.json` names, and
+CI fits its time limit again, in three shards. No new features; 2.0.0 still waits on the 2.0 checklist's launch
+item (plan.md §25.8).
+
+### Changed
+
+- **Dependency updates** (Dependabot #22, the codemirror group): `@codemirror/language` 6.12.4 → 6.13.1 (it
+  now depends on the new `@codemirror/streamparser` 6.0.0; QueryLens has no stream-parsed language),
+  `@lezer/highlight` 1.2.3 → 1.2.5, and `@codemirror/view` → 6.43.14 with `@codemirror/state` → 6.7.6 —
+  from 6.43.10 and 6.7.2, not from the 6.43.13 and 6.7.6 the PR shows, for the reason under *Fixed*. The
+  lockfile is regenerated and deduplicated here rather than taken from the PR. Typecheck, lint, all 2,783
+  unit tests, the build, the budget (`/playground` 332.1 / 340 kB) and all 609 Playwright tests pass.
+- **Dependency updates** (Dependabot #24, the dev group): `vite` 8.3.0 → 8.3.4, `@vitejs/plugin-react` 6.1.1 →
+  6.1.2, `@playwright/test` 1.63.0 → 1.64.0 (Chromium build 1248), `eslint` 10.11.0 → 10.12.0, `globals`
+  17.12.0 → 17.13.0, `jsdom` 30.1.1 → 30.1.2. Lockfile regenerated and deduplicated here, as above. Typecheck,
+  lint, all 2,783 unit tests, the build, the budget (`/playground` 332.3 / 340 kB) and all 609 Playwright tests
+  pass unchanged.
+- **Dependency update** (Dependabot #25): `@types/node` 26.4.1 → 26.6.5, which brings `undici-types` 8.3.0 →
+  8.9.0. Types only; nothing in the bundle changes.
+- **flowinger 0.3.0 → 1.0.1**, the library every tree is drawn with (our own; 1.0.1 is a patch over 1.0.0, whose
+  code is the same as the `1.0.0-rc.1` its authors asked QueryLens to try). Of 1.0's two breaking changes, the
+  first — `<ReactFlow>` taking React Flow's defaults — does not reach QueryLens, which renders `<FlowingerCore>`
+  and keeps flowinger's. The second does: an edge no longer meets a side guessed from its handle's name before
+  the node's `<Handle>` has registered, so `FlowTree` now lists each node's four handles (`in` top, `prev` left,
+  `out` bottom, `next` right) in `handles`, and the first paint draws the sides every later paint does. Checked in
+  the browser against production on 0.3.0: the B+Tree sandbox's 5 tree edges and 4 sibling-chain edges meet the
+  same handles, a tree is still one tab stop with no `role="application"`, and the dev build logs no flowinger
+  warning. The `flow` chunk grew from 19.9 to 22.9 kB gzip, and as the entry chunk imports from it, every route
+  pays that: 36 route ceilings raised, each to its measured size + 3 (recorded in `scripts/bundle-budget.ts`).
+  The release-age exemption in `pnpm-workspace.yaml` now names 1.0.1 and expires 2026-10-24. Typecheck, lint,
+  2,783 unit tests, the build, the budget and all 609 Playwright tests pass.
+
+### Fixed
+
+- **The editor shipped older CodeMirror than `package.json` said.** The overrides that keep exactly one copy
+  of `@codemirror/view` and `@codemirror/state` live in `pnpm-workspace.yaml`, pinned to 6.43.10 and 6.7.2;
+  a second copy of them in `package.json`'s `pnpm` field, which pnpm 11 does not read, is the one Dependabot
+  kept raising. So `package.json` claimed 6.43.13 and 6.7.6 while production ran 6.43.10 and 6.7.2. The
+  workspace overrides now name `$@codemirror/view` and `$@codemirror/state` — whatever `package.json` depends
+  on — and the unread block is gone, so a bump there is the bump that installs.
+- **Two copies of `@lezer/common` (1.5.2, 1.5.3) and of `style-mod` (4.1.3, 4.1.4) were bundled.** A plain
+  install keeps an old resolution beside a new one when a caret range allows both — this update's own install
+  left two `@codemirror/language`s — and `pnpm dedupe` leaves one of each. The codemirror chunk is
+  6.4 kB smaller gzipped than production's (125.6 → 119.1 kB at `gzip -9`).
+- **CI's e2e job ran out of time.** It ran every Playwright test on one runner, on a single worker (a
+  private repository's runner has 2 vCPUs), against a 20-minute limit. After the v2 merge most runs were
+  cancelled there at about 560 of 608 tests, and Playwright 1.64 made each test about a third slower again
+  (the runs on it reached 400–479 of 609). The job is now a three-way matrix, `--shard=1/3` to `3/3`, 203
+  tests each, every shard building and installing for itself. `ci-gate` still waits on all three, and a
+  failing shard uploads its own `playwright-report-<shard>`.
+- **One e2e shard ran twice as long as the other two** (CI #145: 6m34s, 11m57s, 6m31s). Playwright's own
+  sharding gives each shard a run of consecutive tests, counted in tests, and the axe audits come first in
+  file order. So shard 2 got all 68 of `auditStates.spec.ts`'s tests, each worth three or four ordinary
+  ones. A reporter, `e2e/support/shards.ts`, now does the sharding instead, through Playwright 1.64's
+  `preprocess` and `testRun.skipSharding()`: it deals the tests out in turn, so every shard gets a third of
+  every file (92 route audits, 22–23 control audits) and stays even as files grow, and a `test.describe`
+  block goes whole to one shard. Still 203 tests a shard, and together exactly the 609. Summed test time is
+  5.8, 4.8 and 4.9 minutes locally, against 4.3, 7.0 and 4.1 for the old split timed the same way. On CI
+  (#146) the shard jobs took 7m 9s, 8m 32s and 8m 28s, and the whole run 8m 40s, against #145's 12m 5s.
+- **Every route downloaded flowinger and d3, tree or no tree.** The two names the app shell imported from the
+  `flow` chunk were `react` and `react/jsx-runtime`: a `codeSplitting` group in `vite.config.ts` also takes its
+  modules' dependencies (rolldown's `includeDependenciesRecursively`, on by default), groups claim modules in
+  order, and `flow`, listed before `react`, took React's main module, the JSX runtime and `react-dom`'s entry as
+  flowinger's dependencies. Every component imports React, so every route loaded `flow` too. The `react` group now
+  has `priority: 1` and claims them first. As Vite prints them, `flow` is now 19.0 kB gzip (was 22.9) and `react`
+  68.3 (was 64.8), and only `FlowTree` and `StageDetail` import `flow`. The 39 routes that draw no tree are each
+  about 18.7 kB lighter (`/settings` 126.4 → 107.7 kB, the landing page 179.4 → 160.7), and the six that draw one
+  are 0.4 kB lighter. 40 route ceilings lowered, each to measured + 3, rounded up (recorded in
+  `scripts/bundle-budget.ts`). Typecheck, lint, all 2,783 unit tests, the build, the budget and all 609
+  Playwright tests pass.
+- **Hashed assets were never cached for long.** Both `public/_headers` rules matched `/assets/*`, and a header two
+  matching rules set is joined with a comma, so every chunk went out as `Cache-Control: public, max-age=0,
+  must-revalidate, public, max-age=31536000, immutable` (seen on production). A cache that meets two `max-age`
+  values must use the first or treat the response as stale, so browsers revalidated every chunk on every load; the
+  service worker hid most of it from returning visitors. The `/*` rule no longer sets `Cache-Control`: everything
+  else gets Cloudflare's default, which is the same `public, max-age=0, must-revalidate`, and `/assets/*` is the
+  one rule that sets it, replacing that default. The test in `bin/__tests__/securityHeaders.test.ts` used to
+  check the file's text, which passed throughout; it now works out each path's headers the way Cloudflare's
+  asset worker does (workers-sdk's `asset-worker/src/utils/headers.ts`), with the rules in either order, and
+  fails on the old file with exactly the header production sent. Also: plan.md §25.9's SQL tier 2 (B1, B2) row
+  said "Planned" for work built on 2026-09-25.
+- **A page's parameters could land on the page you had just gone to.** The Playground, the trace page and 18 tools
+  write their state into the address bar after a change, 250 ms later or straight from the effect, and each
+  write took the path from `location.pathname` at the moment it ran. React Router renders a navigation as a
+  transition: a nav-link click moves the address bar at once, and the page it leaves keeps running until the
+  transition commits and its effects are cleaned up. A write that fell in that gap put the old page's parameters on
+  the new one, and the tour e2e test saw `/tools?q=SELECT+*…&p=lru&x=1&s=1` about one run in twenty. Every write
+  now goes through `writeAddressBar` in the new `src/ui/addressBar.ts`, usually by way of its
+  `useAddressBarQuery` hook. It is given the page's own path from `useLocation()`, which still names the old page
+  during that gap, and it drops any write whose path is no longer the one in the address bar. The module imports
+  nothing from the engine: the Playground's old `writeShareState` lived in `urlState.ts`, which does, and routing
+  every tool through that file put nine tools about 50 kB over budget. A unit test fails if any other module
+  calls `history.replaceState` or `pushState`. As a side effect, the tools' writes now keep the history entry's
+  state and the URL's hash, as the Playground's always did; before, they cleared both. New tests in
+  `e2e/regressions.spec.ts` hold the gap open: the clicks and the page's pending debounce all run before the page
+  yields a task. They failed on the old code for the Playground, the B+Tree sandbox and the WAL tool in 30 runs out
+  of 30. Typecheck, lint, 2,790 unit tests, the build, the budget and all 612 Playwright tests pass, and the tour
+  test passes 40 runs out of 40.
+
+## [2.0.0-rc.2] - 2026-10-15
+
+The release candidate for 2.0: everything built on `version/v2` since 1.0.0, merged with `main`. (It is the second
+candidate: the first, rc.1, was deployed and withdrawn — see the first entry under *Fixed*.) It is a candidate,
+not 2.0.0, because RELEASING.md holds 2.0.0 for the whole of plan.md §25.8's 2.0 checklist, and one item there —
+the custom domain, the launch post, and the CLI, engine and MCP packages on npm — is still open (the owner's
+decision, 2026-10-15). In short:
+
+- **Answers checked against SQLite** — a differential oracle, metamorphic and ternary-logic tests, and a ledger of
+  where the two dialects really differ (*How we know the answers are right*).
+- **More SQL** — expressions, `OR`/`NOT`/`IN`/`LIKE`/`IS NULL`, `DISTINCT`, `HAVING`, `OFFSET`, `LEFT JOIN`,
+  chains of joins, an uncorrelated `IN (subquery)`, and every clause combining with the others; non-unique,
+  composite, unique and clustered indexes; `EXPLAIN [ANALYZE]` and the plan as relational algebra.
+- **An optimizer that counts** — `ANALYZE` statistics, q-error, cost-based choices with a *Why not?*, and a
+  Selinger join-order search.
+- **Transactions and durability** — two-session schedules, locks and deadlocks, MVCC snapshots, the Hermitage
+  isolation matrix against PostgreSQL's, SQL Server's and InnoDB's published results, five concurrency-control
+  protocols, a write-ahead log and ARIES recovery.
+- **Storage engines** — LSM trees, hash indexes, row vs. column layouts, latch crabbing, vector indexes, read-ahead
+  and scan-resistant pools, each a sandbox with a lesson and a challenge.
+- **A learning layer** — 31 lessons, 53 challenges, generated practice questions, a course map and an interview
+  roadmap; an installable, offline-capable app; per-page titles and an automated accessibility audit of every
+  route; a CLI and an MCP server over the same engine.
+
 ### Added
+- **A preset with NULLs: `customers`, with a lesson and a challenge** (plan.md §26, Feature 3). No preset row held
+  a NULL, so three-valued logic only showed after editing data — which is how `NULL NOT IN (∅)` stayed wrong until
+  the oracle found it. `customers` is 20 hand-placed rows with no city for five, no referrer for eight and no
+  discount for seven (and a discount of 0 for one). Its presets: `IS NULL`, `= NULL` finding nothing, `COUNT` and
+  `AVG` skipping NULLs, and `NOT IN` meeting the NULL among the referrers and returning no one. The lesson *NULL is
+  not a value* (`/learn/nulls`, five steps, each opening the Playground on `customers`, its numbers held by tests)
+  and the challenge *Everyone not in Paris* (`/challenges/not-paris-either`: `city <> 'Paris'` loses the five with
+  no city). The `employees` blurb said 200 rows; it has 250.
+- **All eight replacement policies in the Playground** (plan.md §26, Feature 2). The *Eviction* picker, a shared
+  link's `p=`, a saved default in Settings, a downloaded trace file and an assignment link now take FIFO,
+  second-chance, optimal, midpoint LRU, LRU-2 and 2Q as well as LRU and clock sweep — the eviction narration
+  and the buffer panel's note already explained each one.
+- **`GROUP BY`, `HAVING` and aggregates over a `JOIN`** (plan.md §26, Feature 1 slice c — the last refusal between
+  clauses the engine already had). `SELECT authors.name, COUNT(posts.id) FROM authors LEFT JOIN posts ON authors.id
+  = posts.authorId GROUP BY authors.name ORDER BY COUNT(posts.id) DESC` counts each author's posts, zero for one
+  with none, under every join algorithm and both aggregate strategies. Grouped columns, `HAVING` and an aggregate's
+  argument are qualified, like every column in a join query. The cost model counts a grouped column's distinct
+  values in its own table. All eight optional parts of a `SELECT` now run together; the grammar diagram lets
+  `GROUP BY` and `ORDER BY` take a qualified column, and the grammar lesson and the *Seven clauses* challenge say
+  what still refuses a query — meaning, not combination. The SQLite oracle generates grouped joins.
+- **`ORDER BY` with `JOIN`** (plan.md §26, Feature 1 slice b). A query with a `JOIN` — a chain, `LEFT` steps
+  included — can sort its rows by a qualified column: `SELECT authors.name, posts.title FROM authors LEFT JOIN
+  posts ON authors.id = posts.authorId ORDER BY posts.title DESC` puts the author with no posts first, NULL
+  descending as PostgreSQL does. The Sort sits above the whole chain, under the Project, whichever algorithm joins
+  it; an unqualified or unknown key is refused the way any other column in a join query is. The SQLite oracle
+  sorts its generated joins under every algorithm.
+- **`ORDER BY` with `GROUP BY`** (plan.md §26, Feature 1 slice a). A query that groups can now sort its groups, by a
+  grouped column or an aggregate — selected or not: `SELECT account FROM transactions GROUP BY account ORDER BY
+  SUM(amount) DESC LIMIT 5` is the five biggest accounts. The plan puts the `Sort` above the aggregate and its
+  `HAVING`, and says it is ordering groups (and, for an aggregate nobody selected, that the aggregate computes it
+  so there is something to sort by). A sort aggregate and the `Sort` above it spill to scratch pages of their own.
+  `ORDER BY` on a column the groups do not have one value of is refused the way PostgreSQL refuses it, and so is
+  an aggregate in `ORDER BY` with nothing to group. The SQLite oracle generates these queries under both
+  aggregate strategies. The *Six clauses in one SELECT* challenge becomes *Seven clauses* (`/challenges/every-clause`).
+- **Recovery as a trace in three stages** (plan.md §25.4 E3). `/tools/recovery` and the Playground's Durability dialog show analysis, redo and undo as a strip of stages with a slider that walks a recovery one row at a time, in the order the machine took them, saying what each step was and marking it in the passes below. It rests at the end, where the three panels have always been.
+- **An InnoDB column in the isolation matrix** (plan.md §25.4 D5). `/tools/isolation` runs the ten Hermitage anomalies on a third engine, built level by level from what MySQL's InnoDB does: dirty reads under locks at `READ UNCOMMITTED`, a snapshot for each statement at `READ COMMITTED`, and at `REPEATABLE READ` one snapshot for plain reads but the latest committed row for writes, so a lost update gets through where snapshots refuse it. It is held against what MySQL publishes — 19 of the 40 cells; the others are computed and marked *not published* — and agrees on all but one, declared.
+- **An accessibility audit of each page's states, in both themes and at phone width** (plan.md §H6). `e2e/auditStates.spec.ts` presses Run on thirty-four pages, shows each chart as a table, and chooses each radio button and tab in turn, scanning with axe after every one. The route audit (`e2e/audit.spec.ts`) now runs each route in the light and the dark palette at 1280 and 360 px.
+- **Optimistic lock coupling in `/tools/latch-crabbing`** (plan.md §25.4 F5). A third protocol beside naive latching and crabbing, on the same scripted inserts and the same real B+Tree: a thread reads each page on the way down without a latch, checks the parent it came through, and latches only the pages it will change; if a page it read has changed, or the one it wants is held, the insert restarts from the root, and the timeline says which. On four threads of six inserts it spends 18 ticks blocked where crabbing spends 148, for 8 restarts; with two threads on wide pages it loses, because a restart is a whole descent. The lesson has two more steps and there is a challenge, *Win despite the restarts*.
+- **Read-ahead in the policy comparison** (plan.md §25.4 F7). `/compare`'s *policy vs. policy* mode takes the same read-ahead depth the buffer-pool sandbox does (off, 1, 2 or 4 pages) and gives it to both policies, so two replacement policies can be stepped side by side under prefetching, with each side's prefetched pages shown.
+- **Lessons and challenges for the remaining tools** (plan.md release checklist §2.4). Five lessons: replaying a page-reference string through the buffer pool (a loop one page too big, what the optimal policy would do, more frames and more misses, a scan sweeping the hot set); from text to tokens to a tree (and why `AND` binds tighter than `OR`); reading the grammar diagram (and what the engine refuses that the grammar reads); why planner rewrite rules need each other; and the lock table (readers share, a writer waits and is promoted, a circle of waits, a deadlock on one page). Ten challenges: two lock scripts (a deadlock that uses only one page, and taking pages in the same order so nobody is aborted), six settings (a bigger pool with more misses, a clock that is not LRU, a scan that leaves the hot set alone, the lookup with two rewrite rules, a tree's third level from twelve keys or fewer, and the one anomaly the two engines disagree on at one isolation level) and two queries (where the `AND` lands, and six clauses in one `SELECT`) — the last two link to the Parser and to the select rule of the Grammar. The challenge index now groups by subject: the isolation-matrix challenge is listed with the transactions, not with the storage tools. Every number a lesson quotes, and every solution, near-miss and link, is run on the tool's own engine in the tests.
+- **Challenges for the storage and execution tools** (plan.md release checklist §2.4). Ten, in a *Storage and execution* group on `/challenges`: sort in a single merge pass, give a hash join more memory and make it slower, pick the join order, find the smallest page that holds the rows, split a bucket that did not overflow, cheap writes and cheap reads, write less than you were asked to, make the column store pay off, make crabbing save a fifth of the time, and beat brute force four to one. Each one is a few numbers — the ones the tool itself takes — in a form, checked against what the tool's own driver makes of them, and a solved one links to the tool on the settings you chose. Each carries the belief it checks.
+- **Lessons for the sort, the hash join, the join order and the storage structures** (plan.md release checklist §2.4). Nine lessons: how an external merge sort spends passes and what memory buys; what a Grace hash join costs when it fits and when it spills; why the same four tables cost five times as much in the order they were written; where a row lives on a page; what a hash index gives up (ranges) for one hop; the LSM tree's write, space and read amplification, tiered compaction and the Bloom filter; rows against columns, encodings and late materialization; latch crabbing; and exact, clustered and graph nearest-neighbour search. The index groups them into the pipeline, *Storage engines and access methods* and *Transactions and durability*. Every number a lesson quotes is run on the tool's own driver in the tests.
+- **Lessons and challenges for the transaction and durability tools** (plan.md release checklist §2.4). Seven lessons — a dirty read and the locks that stop it, reading the isolation matrix, snapshots, the five concurrency-control protocols, why the log goes first, steal and force, and surviving a crash — and thirteen challenges, in a *Transactions and durability* group on `/learn` and `/challenges`. A challenge is a script rather than a query: a schedule of two sessions, or a write-ahead-log script, one step to a line, run on the engine and checked by what the engine did with it — read a value that never existed, make A the deadlock victim, commit what no serial order explains, make recovery redo a commit, start redo in the middle of the log. Each carries the belief it checks, shown once it is solved. Every link in a lesson is run on the real engine in the tests, against the sentence it supports.
+- **Table views for the transaction and durability tools** (plan.md §H6). The same *Show as table* toggle the storage tools have, on the schedule lanes, the isolation matrix (all eighty cells as rows, with the published result beside each), the concurrency compare's run, a write-ahead-log step's effects, and a recovery's three passes as one table in the order they ran — in the Durability dialog too. A table wider than its panel is now reachable from the keyboard.
+- **Practice**, `/practice` (plan.md §25.4 G4). Questions made fresh from a seed, each answered by the engine itself — which page the clock hand evicts, which key a B+Tree split copies up, which scan the planner picks, whether a row version is visible, what recovery's redo re-applies and which transactions it undoes — scheduled by a five-box Leitner rule kept in this browser. It is an experiment and says so: its only measurement is how you did the first time a skill came up against every later time. None of the questions is one the project's own study asks.
+- **An essay on `REPEATABLE READ`** (plan.md §25.4 H2), `/docs/essays/repeatable-read`. The same level name keeps its promise two ways: with locks it lets phantoms through and not write skew, with snapshots the reverse. The table is read from the isolation matrix, each cell links to the run behind it, and the write-skew and phantom schedules open in the transaction tool under each engine. A test holds every claim in it against the engine.
+- **Crash and recover from the Playground** (plan.md §25.4 E4). A *Durability* button keeps every `INSERT`, `UPDATE` and `DELETE` run there as the log a write-ahead log would have written for it. Commit one, leave another open, write a page, take a checkpoint, then crash: the pool, the log buffer and every open statement are gone, and a recovery rebuilds the table from the disk and the durable log. The dialog shows each row that differs between what the Playground held, what recovery rebuilt and what committed, and can replace the Playground's table with the rebuilt one.
+- **Crash recovery**, `/tools/recovery` (plan.md §25.4 E3). Fuzzy checkpoints, a crash button that drops the pool, the log buffer and every transaction and keeps the disk and the durable log, and ARIES: analysis rebuilds the dirty page table and the transaction table from the last checkpoint and names the losers, redo repeats history and says which records it skipped and why, undo rolls the losers back writing a compensation record for each. A crash *during* recovery is resumed by the next restart, which follows the compensation records it finds and undoes nothing twice. With the log-before-data rule off the page shows a change recovery cannot undo.
+- **Steal and force**, on the write-ahead log page (plan.md §25.4 E2). Two toggles — may the pool write a page that holds an uncommitted change, and does a commit write the pages it changed — and for any step the page says what a crash at that moment would find: cells on disk that nobody committed (to undo, which steal causes) and committed values that never reached disk (to redo, which no-force owes). The same script runs under all four combinations side by side. Under no-steal a transaction with changes on every frame cannot read another page; under force a commit pays for every page it touched.
+- **A write-ahead log**, `/tools/wal` (plan.md §25.4 E1), the first piece of the durability subject. A disk, a buffer pool and a log, and the rule that ties them: a page may not reach disk before the log records that describe it are durable. Write a script of changes, commits and rollbacks and watch each step append a record (LSN, prevLSN), force the log at commit without writing a data page, flush the log through a page's LSN before the page is written, and undo with compensation records. Switch the rule off and the page names the change that reached disk with nothing to record it.
+- **A concurrency-control compare**, `/tools/concurrency` (plan.md §25.4 D6). One schedule under five protocols — two-phase locking, timestamp ordering, optimistic validation, snapshots and serializable snapshots — each really running it, read back as a bill: who committed, who was aborted and why, who waited, how much work went with an abort, and what reached a transaction that was not aborted. *One at a time?* is computed by replaying the committed transactions serially in whatever order explains what each one read and wrote, so write skew is caught by what was read, not only by the table it leaves. Timestamp ordering and optimistic validation are new protocols in the schedule runner; neither ever waits.
+- **An isolation matrix**, `/tools/isolation` (plan.md §25.4 D5). Ten anomalies from the Hermitage suite, each a schedule of three transactions, run at four isolation levels on both engines, so every cell is computed rather than looked up and opens the run behind it. A test holds the results against what PostgreSQL and SQL Server publish: 79 of 80 cells agree, and the one that does not is marked and explained.
+- **Versions and snapshots in transaction schedules** (plan.md §25.4 D4). A third way to run a schedule: every row is a chain of versions stamped with the transaction that made (`xmin`) and removed (`xmax`) it, and readers take no lock — they see the versions their snapshot can see. Read committed takes a snapshot per statement; repeatable read takes one per transaction (snapshot isolation: reads repeat, no phantoms, first committer wins, write skew gets through); serializable checks at commit that nothing read has changed. A rollback undoes nothing, it just hides the versions, which stay as dead tuples until `VACUUM`. The page shows every version's `xmin` and `xmax`, asks *can this session see this version?* before revealing the answer against its snapshot, and runs three scans of the heap through the real buffer pool to show what the dead versions cost, as they are and after a `VACUUM`.
+- **Isolation levels in transaction schedules** (plan.md §25.4 D3). Read uncommitted, read committed, repeatable read and serializable, defined the textbook way as how long a transaction holds its locks, and chosen for the whole schedule or per transaction with `BEGIN ISOLATION LEVEL …`. The page names each anomaly a level lets through: dirty reads, non-repeatable reads, lost updates and phantoms. Serializable adds a toy predicate lock, so an insert that would match another session's read waits. A lookup for a row another open transaction deleted or re-keyed now waits instead of reading an uncommitted change.
+- **Enforced locking in transaction schedules** (plan.md §25.4 D2). Choose page or row locks and the same schedule runs under strict two-phase locking, enforced by the engine's lock table: a statement takes shared locks to read and exclusive locks to change, holds them to `COMMIT` or `ROLLBACK`, and waits when it cannot get one, with its session's later steps queued behind it. Two sessions waiting on each other is a deadlock, and the youngest is rolled back. At three accounts the planner scans, so a row lock covers the whole table; at twenty an id lookup touches one row and its neighbours are free. The locks sandbox's rules moved into the engine (`engine/locks/lockTable.ts`) and the sandbox is an adapter over them.
+- **Transaction schedules**, `/tools/schedule` (plan.md §25.4 D1), the first piece of the transactions subject. Two sessions share one `accounts` table and you choose the interleaving: `BEGIN`, `COMMIT` and `ROLLBACK`, each transaction with a real undo log. There is no concurrency control yet, so one session can read another's uncommitted change or write over it, and the page names both (a dirty read, a dirty write). The schedule is the URL. `runSchedule` is a pure engine function; locks that block, isolation levels and MVCC build on it. In the Playground, `BEGIN` now says where transactions work instead of a parse error.
+- **A scan-resistant ring buffer** (plan.md §25.4 F7). With `scanRing` set, a sequential scan of a table bigger than a quarter of the pool reads through its own few frames and reuses its oldest page for each new one, as PostgreSQL's bulk-read strategy does, instead of evicting everything else. Off by default, so no existing run changes. In the buffer-pool sandbox a range such as `10-50` in the reference string is one marked scan, with a *Scan ring* control. `0 1 2 3 4 10-50 0 1 2 3 4` at eight frames is 51 disk reads under LRU without a ring and 46 with one; inside a single query it changes little, and takes FIFO from 45 to 33 on a join of `comments` and `posts`.
+- **Sequential read-ahead** in the buffer-pool sandbox (plan.md §25.4 F7). A scan that reads pages in order has the next pages read early, shown as prefetches with their I/O counted as disk reads; a later request for one is a hit.
+- **Accessibility page and audit** (plan.md §H6). `/docs/accessibility` says what has been checked for WCAG 2.2 AA, how, and what has not; it is not a conformance claim. An automated audit of 50 routes runs in the test suite.
+- **Three publishable packages, not yet published** (plan.md §H3). `@querylens/engine`, the `querylens` terminal CLI and `@querylens/mcp` build into their own `dist` directories and install cleanly from their tarballs. A tag-triggered workflow publishes them with provenance once the npm organisation and trusted publishing are in place.
+- **2Q buffer replacement policy** (plan.md §25.4 F7, slice 2). A small FIFO for pages read once, promotion only on a re-read after leaving it, available in the buffer-pool sandbox, the pipeline and `/compare`. Its correlated-reference limit is recorded in the tests and the plan.
+- **Saved queries** (plan.md §H7). The Workspaces dialog in Custom mode keeps a named copy of the editor's SQL in this browser, and loads it back into the editor without running it.
+- **Table views of the v2 tools** (plan.md §H6). Hash index, LSM tree, join order and columnar storage each get a `Show as table` toggle with the same numbers as a real table that a screen reader can walk.
+- **Named workspaces** (plan.md §H7). In Custom mode, a Workspaces dialog saves a database under a name in this browser's IndexedDB, opens or deletes it, and downloads it as a `.querylens.json` file that another browser can open. A file is checked in full before anything is opened. The live autosave still lives in `localStorage`.
+- **Keyboard navigation for tree diagrams** (plan.md §H6). The parse tree, query plan and B+Tree are reachable from the keyboard: Tab enters one, the arrow keys walk its nodes and the view follows, and a screen reader announces each node's level and place among its siblings.
+- **Two essays** (plan.md §H2): *An index is a tax on every write* and *One scan can empty the cache*, with measured page counts for the B+Tree and LRU against LRU-2 on one trace, and links into the sandboxes that replay them. In-page embeds are not built.
+- **Installable, and works offline after a first visit** (plan.md §H1). A hand-written service worker caches the app's own files, so the Playground, the docs and every tool open with no network. The web manifest names install icons. Only the app's files are cached, never your queries or data. A new version applies once no open tab is still running the old one.
+- **Confidence ratings on predictions** (plan.md §G2) — "How sure?" before each prediction is committed, and a Calibration section on `/progress` showing how often rated predictions came true at each level. The rating is optional, so answering without one still reveals and counts toward the overall record.
+- **Six misconception challenges** (plan.md §G3) — each names a wrong belief about SQL (a filter the index cannot serve, an expression around an indexed column, `= NULL`, `COUNT(*)` vs `COUNT(col)`, `NOT IN` with a NULL, a WHERE on a LEFT JOIN's inner side) and reveals it once solved. The checks read the parsed predicate, so a query with the right rows and the wrong shape does not pass.
+- **A trace diff in the Playground** (plan.md G6) — re-running a query shows what changed since its last run: each measured number that moved, and whether the optimizer's plan changed shape. The numbers are `/compare`'s own scorecard.
+- **LRU-2 buffer replacement** (plan.md §25.4 F7, slice 1) — a scan-resistant policy, selectable in the buffer-pool sandbox and the Compare policy picker. It evicts by each page's second-most-recent reference, so a one-pass scan no longer flushes a hot set of pages that are reused. The default policy is unchanged.
+- **A vector-index sandbox**, `/tools/vector-index` (plan.md §25.4 F6) — brute force, IVF and HNSW answering the
+  same nearest-neighbour question, scored by distances computed and recall over seeded queries. HNSW is a real layered
+  graph; at this size its recall-per-distance is not better than IVF's, and the page says so.
+- **A latch-crabbing sandbox**, `/tools/latch-crabbing` (plan.md §25.4 F5) — the same scripted concurrent inserts
+  run under naive page latching and under lock coupling, side by side on the real engine B+Tree. Crabbing releases
+  each ancestor once the child below is safe, so threads block far less. Optimistic lock coupling is not included.
+- **A tuple-at-a-time vs. batched `/compare` mode** (plan.md §25.4 F4) — runs one real query and counts the
+  `next()` calls each operator makes, per row, against the calls a batched engine would make for the same rows at a
+  batch size you pick. Nothing re-executes; the counts come from the run's own trace.
+- **A row-vs-column storage sandbox**, `/tools/columnar` (plan.md §25.4 F3, sandbox slice) — NSM (row store), DSM
+  (column store) and PAX (the hybrid) laying out the same table three ways, with real compressed-size counters
+  for dictionary, RLE, delta and bit-packing encodings, and the late-vs-early materialization trade-off that
+  decides whether a column store's own layout advantage actually pays off for a given query.
+- **An extendible/linear hashing sandbox**, `/tools/hash-index` (plan.md §25.4 F2) — pick a scheme and watch it
+  grow: extendible hashing's directory doubles only when a full bucket has no spare depth to split into; linear
+  hashing's round-robin split pointer grows the bucket array one at a time, decoupled from which bucket actually
+  overflowed. A live demo shows exactly why neither scheme can answer a range query — ten consecutive keys
+  scatter across several unrelated buckets, with no sorted chain to walk the way a B+Tree's leaf chain provides.
+- **A B+Tree-vs-LSM `/compare` mode, closing out the LSM-tree sandbox work** (plan.md §25.4 F1, fourth and
+  closing slice) — the exact same write sequence fed into a real B+Tree and into the LSM-tree model, side by
+  side, with write and read amplification reported from real counters on both sides (not estimates). The units
+  are deliberately different — index pages touched for the B+Tree, raw entries rewritten for the LSM tree —
+  because that difference is the actual structural contrast: a B+Tree updates in place, so its write cost stays
+  small and roughly constant as data grows; an LSM tree defers writes and pays for it later in compaction, so
+  its write cost measurably grows with data size instead.
+- **A tiered compaction strategy for the LSM-tree sandbox** (plan.md §25.4 F1, third slice) — alongside the
+  existing leveled strategy, pick "Tiered" to see the real RocksDB-style alternative: merges accumulate into one
+  unsplit table per tier instead of re-splitting into non-overlapping ranges, so any level can hold several
+  overlapping SSTables, not just L0. The trade-off is real and measured, not cosmetic: tiered costs less write
+  amplification than leveled for the identical writes, but more worst-case read amplification — both directions
+  shown live when you switch strategies on the same demo.
+- **A Bloom filter for the LSM-tree sandbox** (plan.md §25.4 F1, second slice) — every SSTable now carries its
+  own filter, sized by a tunable bits-per-key (2–20), and a real `lookupKey` read path checks it before ever
+  touching a table: look up any key and watch which SSTables it actually checked, highlighted green for the
+  real hit and amber for a filter false positive. Read amplification and the false-positive rate are measured
+  by running real lookups against every written key plus a sample of guaranteed misses, not estimated from the
+  textbook formula — closing the honesty gap the first slice named explicitly.
+- **An LSM-tree sandbox**, `/tools/lsm` (plan.md §25.4 F1, first slice) — writes buffer in a memtable, flush to
+  disk as an immutable, sorted SSTable, then compact into fewer, larger files at the next level down. Change the
+  memtable size or a level's capacity and watch the cascade, the non-overlapping key ranges it produces below
+  L0, and the write, space and read amplification it costs — including the non-obvious case where write
+  amplification drops *below* 1×, when the memtable itself coalesces an overwrite before it is ever flushed.
+- **A `transactions` preset dataset** (plan.md §25.4 C6, first slice) — 3,000 rows, indexed on `id`, built for a
+  genuinely deep B+Tree (height 7, measured — two levels past any existing preset) and a scan that evicts hard
+  enough to be dramatic: the "Eviction storm" preset drives the buffer pool to a 0% hit rate. A point lookup or
+  a narrow indexed range stays a short trace regardless of table size; only the deliberately unindexed presets
+  cost what a full scan over 3,000 rows really costs.
+- **A "Why not?" panel** (plan.md §25.4 C5, fourth and closing slice) — every cost-based decision (index vs.
+  scan, join algorithm, join order) already compared its chosen option against the one it beat; a small panel
+  in the Playground and `/tools/planner` now shows that same comparison structured — "Why not a sequential
+  scan? An estimated 12 pages — against `id` index lookup's 4 pages, the one actually chosen" — rather than
+  leaving it for a reader to parse out of the step's own sentence. No new cost math: the same numbers the
+  narration already named.
+- **Join order chosen by cost** (plan.md §25.4 C5, third slice) — a chain of 2+ plain inner `JOIN`s now
+  actually runs in whichever left-deep order C4's own Selinger-style search finds cheapest, not necessarily
+  the order it was written in. Every original `JOIN` predicate is reused unchanged — reordering only ever
+  decides *which table joins when*, never invents a new condition. A chain with a `LEFT JOIN` anywhere in
+  it is never reordered, on purpose: `LEFT JOIN` is not commutative or associative in general, so doing so
+  could silently change which rows get NULL-padded, not just the cost. The plan-stage narration says up
+  front when a query's `JOIN`s run in a different order than typed, and why; `/tools/join-order` and the
+  Playground's "second opinion" note still exist for the one case that keeps needing them — a chain with a
+  `LEFT JOIN` in it.
+- **Join algorithm chosen by cost** (plan.md §25.4 C5, second slice) — a `JOIN`'s physical algorithm is no
+  longer always nested-loop by default. `EngineOptions.joinStrategy` left unset now means every algorithm
+  that could run each step — nested-loop, hash, sort-merge, and index nested-loop when the inner table has a
+  usable index — is priced with the same per-algorithm formulas `EXPLAIN` already showed, and the cheapest
+  one runs, chain-aware and bottom-up for a multi-join query. `/compare` and `/tools/planner` are unaffected:
+  both already force a specific algorithm explicitly for every run, which this never overrides. Unlike
+  index-vs-scan (C5's first slice), there is no "declines but stays" outcome here — every candidate is a
+  real, working plan, so the rule always ends up choosing one.
+- **Index vs. scan chosen by cost** (plan.md §25.4 C5, first slice) — `index-selection` and
+  `range-index-selection` no longer take an index just because it matches the predicate's shape: once the
+  most-selective candidate is picked, its own estimated page cost is compared against the scan it would
+  replace, the same formula `EXPLAIN` already shows. A candidate that would not actually be cheaper — a
+  low-selectivity index, or any index at all on a table too small for a B+Tree's own overhead to pay for
+  itself — is declined, and the step says what it considered and why: "matches the predicate, but the
+  estimated cost disagrees … no cheaper, so the scan stays." This retires `limits.mdx`'s "no cost-based
+  query optimization" line for these two rules; every other rewrite still fires on structural match alone,
+  and the join algorithm and join order (`/tools/join-order`) are still never chosen by cost. Twelve test
+  files needed their fixture tables sized up to stay meaningful under honest cost accounting, since this
+  engine's deliberately tiny constants meant most existing tables were too small for any index to ever win —
+  a real, if unglamorous, consequence of a cost comparison finally having teeth.
+- **Join ordering by dynamic programming** (plan.md §25.4 C4) — a new standalone, `/tools/join-order`,
+  teaches Selinger's System R algorithm over the *subset lattice*: for `n` tables in a `JOIN` chain, the
+  cheapest left-deep way to join every table in each of the `2^n - 1` subsets, built up bottom-up from
+  smaller subsets, with every candidate the search tried for each subset visible, not just the winner. A
+  new demo dataset (`departments`/`employees`/`projects`/`timesheets`, a tree rather than a chain) shows a
+  natural-looking "hub, then each branch" order costing 5.2× the DP-optimal one. A multi-join query in the
+  Playground gets the same search as an informational note on its own plan-stage narration — what a
+  cost-based search would have joined the tables as, and its estimated cost next to the written order's.
+  Deliberately visualization-only: a query still always executes in the order it was written; nothing here
+  changes what runs, only what gets said about it.
+- **`IN (subquery)`** (plan.md §25.4 C3, third slice, closing C3) — `x [NOT] IN (SELECT column FROM table
+  [WHERE …])`, the one place a `SELECT` may appear inside another query. Always uncorrelated (the subquery's
+  own `WHERE` can only name a column on its own table) and always exactly one plain column — no `JOIN`,
+  `GROUP BY`, `HAVING`, `ORDER BY`, `LIMIT`, `DISTINCT` or aggregate, since none of those could change which
+  values end up in the set `IN` tests membership against. Resolved exactly once, as its own real sub-run of the
+  engine (its own buffer pool, its own disk reads), before the outer query — in `SELECT`, `DELETE` or
+  `UPDATE`'s `WHERE` — is planned; from that point on it is an ordinary value list, so the cost model, the
+  executor and every optimizer rule need no new cases at all, and the classic `NOT IN` NULL trap applies to a
+  subquery-sourced list exactly as sharply as a hand-written one.
+- **Multi-join** (plan.md §25.4 C3, second slice) — zero or more `JOIN`s chained left-deep:
+  `FROM a JOIN b ON … JOIN c ON …` joins `c` against whatever `a ⋈ b` already produced, not against `a` and `b`
+  independently. Each `JOIN`'s `ON` must name the table it introduces on one side and some table already in the
+  query — `FROM`'s, or an earlier `JOIN`'s, not necessarily the one written just before it — on the other; the
+  same table can never appear twice (no aliasing to tell two copies apart). All four join algorithms chain
+  correctly, and `index-nested-loop`'s per-table fallback now applies **per step**, so one step in a chain can run
+  as an index join while another, on an unindexed table, quietly runs as nested-loop instead. `LEFT` and inner
+  joins mix freely within one chain, NULL-padding independently at each step.
+- **`LEFT JOIN`** (plan.md §25.4 C3, first slice) — `[INNER | LEFT [OUTER]] JOIN table ON a.col = b.col`. A bare
+  `JOIN`/`INNER JOIN` behaves exactly as before; `LEFT [OUTER] JOIN` keeps every row of the `FROM` table, even one
+  that matches nothing (or whose join column is itself NULL), NULL-padding the joined table's columns instead of
+  dropping the row. Built for **all four join algorithms** — nested-loop, hash, sort-merge and index-nested-loop —
+  which must all agree on the padded rows the same way they already had to agree on matched ones. The classic
+  pitfall is closed: a `WHERE` on the joined table is never pushed below a `LEFT JOIN` (that would filter rows out
+  before the join can find out they would not have matched, silently turning it back into an inner join), so
+  `… LEFT JOIN posts ON … WHERE posts.title IS NULL` correctly finds only the rows that got NULL-padded. `RIGHT`,
+  `FULL` and `CROSS` stay out of scope.
+- **A correlated dataset, and q-error** (plan.md §25.4 C2) — a fourth preset dataset, `employees`: `department`
+  and `office` are perfectly correlated (every department occupies exactly one office), which is exactly the
+  independence assumption every `AND` in a `WHERE` clause makes and exactly where it can badly fail.
+  `WHERE department = 'x' AND office = 'y'` is no narrower than `department = 'x'` alone, but the optimizer
+  estimates it as if the two columns were unrelated. `EXPLAIN ANALYZE` now names the gap as **q-error**
+  (`max(est/actual, actual/est)`, the metric Leis et al.'s cardinality-estimation paper uses) beside any operator
+  whose estimate is off by 2× or more; the `employees` headline query measures **11.0×**, produced by ordinary
+  correlated data, not a contrived worst case. An ordinary, well-estimated query shows nothing extra.
+- **`ANALYZE` and real statistics** (plan.md §25.4 C1) — `ANALYZE table` is a real statement: a real scan of the
+  real table, producing per-column statistics shaped after PostgreSQL's own `pg_stats` (distinct count, null
+  fraction, most-common values with their real frequencies, an equi-depth histogram, and correlation between a
+  column's own order and the table's physical row order). Its own answer is one row per column, shown in the
+  same Result panel any other query's is — there is no separate stats panel to build. The cost model reads a
+  table's statistics when `ANALYZE` has set them, in place of scanning the live rows: an equality on a most-common
+  value gets its real frequency, a range reads the histogram's real bucket overlaps. They are a **snapshot**, not
+  a live fact — a table's writes never touch them, so a table that grows a new common value without a fresh
+  `ANALYZE` gets a stale, sometimes wildly wrong, estimate (a real q-error over 20× is one `INSERT` away). A table
+  that has never been `ANALYZE`d keeps exactly today's behaviour, unconditionally accurate and unconditionally
+  unrealistic — the entire existing test suite passed unmodified.
+- **An MCP server, and `llms.txt`** (plan.md §25.4 H4) — `mcp/server.ts` exposes three tools to the user's own
+  coding assistant, each grounded in a real run of the actual engine rather than a description of one: `run_query`
+  (rows, disk-read/hit/eviction counts, and the full step-by-step narration), `explain_trace` (a PostgreSQL-shaped
+  plan, optionally `ANALYZE`d against a real run), and `compare_policies` (the same query under LRU and clock
+  eviction, side by side). Runs locally over stdio (`pnpm mcp`) against three preset datasets; no hosted service.
+  `public/llms.txt` is a machine-readable docs index generated from the docs' own navigation and frontmatter
+  (`pnpm llms-txt`), checked for staleness on every test run. Publishing `@querylens/mcp` to npm still needs the
+  organisation plan.md §25.4 H3 does.
+- **Clustered (index-organized) tables** (plan.md §25.4 B3, fifth and final slice) — a table may be stored *in* one
+  of its own `UNIQUE` indexes' key order rather than insertion order, so a range on that key reads pages in
+  sequence: measured, **6 disk reads clustered vs 8 for the same rows unclustered** on a small, scrambled table.
+  Every *other* index on a clustered table then carries the row's clustering key instead of its physical address —
+  a clustered leaf moves rows between pages the way any leaf does, and a stored address would go stale — so an
+  equality lookup through one costs a second, real descent, through the clustered index itself; a covering query
+  still costs only one, and a range scan or an index-nested-loop join never chooses a clustered table's secondary
+  index at all. Checked by a standalone oracle that runs the same random session of writes and reads against two
+  databases differing only in whether they are clustered, asserting every result and every write's index soundness
+  agree — clustering is a purely physical fact, so identical answers are the only correct outcome. Not yet exposed
+  in the Custom database editor.
+- **Course map and interview roadmap** (plan.md §25.4 G1) — two pages under a new *Study* section of the docs.
+  The **course map** lines a typical database course up against QueryLens topic by topic, marking each *covered*,
+  *partly* or *not covered* in words, with where to practise it and what is missing — including the large part
+  (transactions, recovery, MVCC, column stores, LSM trees) it does not touch. The **interview roadmap** is a
+  six-week path through the site: watch, explain out loud, and check with the challenges. Neither is affiliated with
+  a course, university or employer, and says so first.
+- **Bulk-loaded indexes, and an *Index build* comparison** (plan.md §25.4 B3, fourth slice) — an index can be
+  built by sorting the entries and packing the leaves to a fill factor instead of inserting one row at a time. It
+  is a smaller, often shallower tree with identical answers: over 400 rows a point lookup costs **5 disk reads**
+  bulk-loaded and **7** built the old way (whose leaves come out three-quarters full — the split rule at work),
+  and 7 again when the leaves are packed only half full. `/compare` has a fourth mode that runs the same query
+  over the three builds and scores tree height, index pages and disk reads.
+- **`UNIQUE` indexes** (plan.md §25.4 B3, third slice) — declare one in the Custom database's *Manage tables*
+  (`email, team+role`). A unique constraint is an index lookup made before a key goes in: `INSERT` and `UPDATE`
+  ask the index whether the key is already there, and if it is the statement is rejected with the key and the
+  row that holds it, and changes nothing. The Playground keeps the trace of a rejected statement — the lookup that
+  found the duplicate — rather than saying the query did not run. NULLs never conflict. Checked against SQLite's own
+  `UNIQUE INDEX` on random sequences of writes.
+- **Composite indexes** (plan.md §25.4 B3, second slice) — one B+Tree over several columns, entered through a
+  *leftmost prefix*: an index on `(city, age)` answers `city = 'oslo'` and `city = 'oslo' AND age = 30`, but not
+  `age = 30` alone, because its entries are ordered by `city` first. The plan says so when it declines one, and a
+  new predict-then-reveal question asks it before the answer. A query that reads only the index's columns is
+  *covered*: an index-only scan answers it from the entries without touching the heap. Writes maintain the
+  entries, an index join can probe one through its leading column, and the Custom database's *Manage tables*
+  takes `city+age`. A range on the column after an equality prefix (`city = 'oslo' AND age > 30`) walks just
+  that run of entries.
+- **Index nested-loop join** (plan.md §25.4 B4) — the fourth join algorithm. Instead of rescanning the inner table
+  for every outer row, it descends the inner table's own B+Tree on the join column: a few page reads per outer
+  row, whatever the inner table's size. The plan gains an `IndexProbe` node for the inner side. It needs an
+  index on the inner join column and, without one, runs as a plain nested-loop and says why. **`/compare`'s JOIN
+  mode is now four-way**, with a larger `comments` table and a new preset — *a tiny outer over a big indexed
+  inner*, where one outer row costs 23 disk reads against 33 for nested-loop and hash — and it shows the other
+  half too: with every post as the outer, the index join needs 202 reads to hash's 33.
+- **Indexes on columns that repeat** (plan.md §25.4 B3, first slice) — an index entry is now the value plus the
+  row's own address, so two rows with the same `authorId` are two entries side by side in the leaves instead of
+  one silently overwriting the other. An equality finds every match: it descends toward the *first* entry (going
+  left of a separator that equals the value, because a run can straddle one), reads along the leaf, and hops to the
+  sibling leaf only when the leaf's high key says the value continues. Each match costs its own heap page, pulled
+  as the row is asked for — a `LIMIT` stops the walk early. `DELETE` and `UPDATE` drop and re-add exactly the
+  entry that belongs to each row. `posts.authorId` is indexed in the join demo, the case v1 could not handle.
+- **Bundle budgets by route** (plan.md §25.4 H8) — `pnpm budget` now prices **each of 30 routes, every page and every
+  tool, by what a visitor to it downloads**: the entry chunk, that route's own lazy chunk and every static
+  dependency of either, read from Vite's manifest. A change that grows the Playground can only raise the
+  Playground's row; a chunk no route reaches fails the build, so a new tool must bring its own row. It also says
+  something the old group sums never did: the landing page costs **147 kB** gzip, the Playground **296 kB**
+  (CodeMirror is 116 of it), and every route pays a **110 kB floor** (React, the app shell and CSS). The single
+  424 kB sum is printed as information, no longer a gate.
+- **`EXPLAIN` and `EXPLAIN ANALYZE` as SQL** (plan.md §25.4 B6) — type it in the editor. `EXPLAIN SELECT …` returns a
+  `QUERY PLAN` result, one line per operator with the cost model's `est ~N rows`, and **executes nothing** — no page
+  is read. `EXPLAIN ANALYZE SELECT …` runs the query for real (the trace you step through is that run) and puts the
+  executor's `actual N rows` beside every estimate, then the result size and what the buffer pool did. No timings:
+  the engine makes no latency claim. `SELECT` only — `EXPLAIN ANALYZE DELETE` would perform the delete, and says so.
+  An `EXPLAIN ANALYZE` chip joins the Playground's presets.
+- **The plan as relational algebra** (plan.md §25.4 B5) — the notation a database course opens with, derived from
+  the plan the engine actually built. A **Show as → Relational algebra** toggle on the Planner and Optimizer
+  panels rewrites each node as `σ` (selection), `π` (projection), `⋈` (join), `γ` (grouping), `τ` (order), `δ`
+  (distinct) or `λ` (limit), keeping the physical operator underneath — so a filtered `SeqScan` and an
+  `IndexScan` both read `σ_{id = 5}(users)`: *what* is computed beside *how*. **Copy as relational algebra**
+  (`π_{name}(σ_{age > 30}(users))`) and **Copy as LaTeX** put the whole plan on the clipboard for a homework
+  answer or a slide.
+- **`SELECT DISTINCT`** (plan.md §25.4 B2, second slice) — each distinct row once, NULLs counted as equal, applied
+  after `WHERE`/`GROUP BY`/`HAVING` and before `LIMIT`/`OFFSET`. Two strategies on the setting `GROUP BY` already
+  uses: a streaming **`HashDistinct`** (a hash set of rows seen, no I/O, and a `LIMIT` above it can stop the scan
+  early) and a blocking **`SortDistinct`** (sorts everything through the buffer pool, then keeps one of each
+  run). `/compare`'s aggregate mode gains `SELECT DISTINCT` presets, so the contrast is measured, not asserted.
+  With `ORDER BY`, the sort column must be in the select list (PostgreSQL's rule). `COUNT(DISTINCT x)` is not
+  supported yet.
+- **`HAVING`** (plan.md §25.4 B2, first slice) — filter *groups* after their aggregates are computed:
+  `GROUP BY dept HAVING COUNT(*) > 2 AND SUM(pay) < 500`. `WHERE` filters rows before grouping and so can
+  never mention an aggregate; an aggregate in a `WHERE` is now an error that points at `HAVING`. A `HAVING`
+  predicate is built like a `WHERE` one (`AND`, `OR`, `NOT`, `IN`, arithmetic…) over aggregates and grouped
+  columns, may use aggregates the `SELECT` list does not, and works on a whole-table aggregate too. In the
+  plan it is its own `Having` node above the aggregate; the optimizer still pushes a `WHERE` below it.
+- **`LIMIT n OFFSET m`** (plan.md §25.4 B1, third and last slice) — page through an ordered result. The trace
+  is honest about the cost most tutorials leave out: the skipped rows are still produced by everything beneath
+  the `Limit` and then thrown away, so `OFFSET 30` visibly reads more of the table than `OFFSET 0`, and the cost
+  model and the plan node say so. An `OFFSET` needs its `LIMIT` (SQLite's rule), and both must be whole numbers.
+- **Arithmetic and computed columns** (plan.md §25.4 B1, second slice) — `+ - * / %`, unary minus and
+  parentheses in `SELECT`, `WHERE` and `UPDATE … SET`, and `AS` to name a computed column
+  (`SELECT price * qty AS total`). NULL in, NULL out; `x / 0` is NULL; whole-number `/` truncates toward zero.
+  `UPDATE … SET n = n + 1` reads the row as it was, so `SET a = b, b = a` swaps the two. `INSERT` accepts
+  `-5` and arithmetic on literals. The optimizer works constant arithmetic out once (`id = 2 + 3` becomes
+  `id = 5`, and *then* uses the index), while `id + 1 = 6` correctly cannot — the index is ordered by `id`.
+  Not yet: arithmetic on an aggregate, beside `GROUP BY` or in `ORDER BY`; `SELECT *, x` (found by the
+  oracle — SQLite accepts it, QueryLens needs `*` alone). Two ledger entries record the deliberate
+  differences from SQLite: arithmetic on text, and dividing a REAL that holds a whole number.
+- **Richer `WHERE`: `OR`, `NOT`, parentheses, `<>`, `IS [NOT] NULL`, `IN`, `LIKE`** (plan.md §25.4 B1, first slice) —
+  the ceiling a sceptical student hit in ten minutes. A predicate is now a tree (`OR` binds loosest, then `AND`,
+  then `NOT`, then one test on an operand) with real three-valued logic: `NOT` of UNKNOWN stays UNKNOWN, so
+  `NOT (age > 40)` does not return the NULL-age rows, and `x NOT IN (1, NULL)` is never true — the trap, modelled
+  rather than papered over. `[NOT] BETWEEN`, `!=` (as `<>`) and `[NOT] LIKE` (`%` and `_`, case-sensitive,
+  PostgreSQL's rule) come with them. An `OR` is one opaque conjunct, so `id = 5 AND (a OR b)` still becomes an
+  index lookup; `OR`, `NOT`, `IN`, `LIKE` and `<>` are never index candidates. The plan and AST trees show every
+  new node, the cost model estimates each one (and names the heuristic), and the Supported SQL page has the truth
+  tables. Checked by a new **ternary-logic-partitioning** suite (a predicate, its negation and its `IS NULL`
+  must partition every table — no external oracle needed) and by the SQLite differential run.
+- **Opt-in field performance in the study kit** (plan.md §25.4 A6) — §14.2's open question, *does it feel fast
+  on a lecture-hall laptop?*, cannot be answered by telemetry the project refuses to have, so it can only be
+  *volunteered*. The study's consent screen gains a separate, unticked box: record this device's **INP**
+  (Interaction to Next Paint) while the session runs and add it to the result code, with cores, screen width and
+  touch as context. It measures in the lesson tabs (not on `/study`), in the participant's own browser, lapses
+  after three hours by itself and is deleted when the session ends; the code page says so when it is included.
+  A lazy 1.1 kB chunk that nobody else downloads. `pnpm study collate` writes it to the private map (never the
+  blind scoring sheet) and `report` adds a responsiveness table — median, worst, good / needs-work / poor —
+  with the caveat that a handful of devices is an anecdote. Verified end to end in Chromium (a deliberately slow
+  click in the lesson tab arrives in the result code).
+- **Release discipline** (plan.md §25.4 A4). `RELEASING.md` writes down how a release is cut — one commit, the
+  tag on that commit (1.0.0's tag sits on the deployed commit and its `package.json` still says `0.0.0`) — and
+  what to check after a deploy. `pnpm release-notes [version]` derives the GitHub release body from
+  `CHANGELOG.md`, so release notes are written once. A list of files whose effect only a real deploy can judge
+  (`wrangler.jsonc`, `public/`, `index.html`, `pnpm-workspace.yaml`, `.node-version`) drives a non-blocking CI
+  job that annotates a pull request touching them, and a new pull-request checklist item: the first deploy
+  needed three fixes no local check could find, and the answer is to look at a preview deploy first.
+- **"Report a confusing step"** (plan.md §25.4 A3) — QueryLens has no telemetry by decision, so the only
+  signal about *which moment confused someone* is one they choose to send. A link under the Playground's
+  narration opens a prefilled GitHub issue form (`confusing_step.yml`) carrying the build, the step and stage,
+  what the narration said, the query, and a link that reopens the exact moment. It is a plain link — nothing
+  is sent until the reader presses Submit on GitHub, where every field can be edited or deleted — and it
+  degrades (drops the edited rows, then the link, then the query text) rather than overrun GitHub's URL limit.
+- **A SQLite oracle and a divergence ledger** (plan.md §25.4 A1) — the engine's *rows* are now checked
+  against an outside authority on every build. `oracle/` drives `node:sqlite` (Node's built-in; no new
+  dependency, nothing in the bundle) with `fast-check`: generated typed tables and grammar-derived statements
+  — `SELECT` with `WHERE` / `ORDER BY` / `LIMIT`, aggregates and `GROUP BY`, `JOIN`, and short sessions of
+  `INSERT` / `UPDATE` / `DELETE` followed by a read — run in both engines and must agree, with buffer size,
+  page size, policy, join algorithm and aggregate strategy drawn at random so every physical strategy is
+  checked. Beside it, metamorphic properties inside QueryLens (physical choices never change the rows; the
+  optimized plan agrees with a direct evaluation of the predicate; index and heap agree after writes; the
+  trace is deterministic), and a coverage suite that **fails the build if the generators stop reaching**
+  every optimizer rule, join algorithm, aggregate strategy, empty table, NULL and row-changing write. Seven
+  documented differences from SQLite live in `oracle/ledger.ts` as *executable* entries that assert both
+  answers and that they still differ, so a closed gap expires its own entry. CI runs it seeded and bounded
+  as part of `pnpm test`; a weekly read-only workflow (`.github/workflows/oracle.yml`) runs 20,000 cases per
+  property with a fresh, printed seed. A new docs page, **How we know the answers are right**, explains what
+  it proves and — as importantly — what it does not.
 - **The §9 study kit** (plan.md §25.4 A2) — the validation study can now be run end to end without a
   server. `/study` is an unlisted, `noindex`, kiosk-mode runner (no nav, footer or docs links, so a
   control-arm participant is not one click from the app's own explanation of the material): consent →
@@ -27,12 +517,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a `study` bundle row (5.4 kB gzip, its own lazy chunk), six Playwright tests, and STUDY.md §4.
 
 ### Changed
+- **A flaky end-to-end test now fails CI instead of passing on its retry.** CI retries a failed Playwright test
+  once; a test that then passed went green unnoticed, which is how the tour's hand-off race (*Fixed*, below) hid
+  for a run in twenty-five. `failOnFlakyTests` is on in CI, and the job writes an HTML report beside the GitHub
+  annotations, so the `playwright-report/` it already uploads on failure exists, with the retry's trace in it
+  (with only the `github` reporter that folder was never written). Checked with a deliberately flaky test under
+  `CI=1`: the run fails and says "1 flaky"; with the option off it passes.
+- **The SQLite oracle now checks outer joins, join chains and subqueries.** Its generators built only a single
+  inner `t JOIN u`; they now also build `LEFT JOIN`, two-step chains over a third table `w` (each step inner or
+  left, either side of the `ON` first), `[NOT] IN (SELECT col FROM … [WHERE …])` as a predicate anywhere a WHERE
+  or HAVING takes one — a quarter of them deliberately empty — and `(P) IS [NOT] NULL`. The NoREC reference
+  resolves subqueries by filtering rows itself, without the planner, and the ternary-logic partitioning draws
+  subqueries too. The coverage suite fails the build if LEFT joins, chains or empty subqueries stop returning
+  rows. This found the two bugs under *Fixed*; with either fix reverted, two to four suites fail.
+- **A settings challenge fetches only its own tool's checks.** The runner for the storage, execution and isolation challenges is split by tool (`src/pages/challenges/settings/*.ts`), and a challenge loads its tool's module when it opens, instead of every driver at once: the form and runner are 4.6 kB (they were 32.3 together with the drivers), and the largest single tool, the isolation matrix, is 12.4 kB. Running a challenge is asynchronous; if a tool's checks cannot be loaded the page says so and the next run asks again.
+- **The lock sandbox keeps its script in the address.** What was requested and released is a list of steps (`?s=`), replayed into the same lock table on a reload or a pasted link, instead of only the state it ended in; the page reads the address defensively (at most 40 steps, four pages, two transactions, and a value that is not a script is no script). Lessons and challenges open the sandbox on the script they name.
+- **`/learn` and `/progress` no longer load the lessons.** They list lessons from a small manifest (`src/pages/learn/lessonIndex.ts`: title, length, summary, group) and import neither the twenty-five lessons' steps nor the engine behind their Playground links. `/learn` drops from 182 to 116 kB gzip and `/progress` from 184 to 118. A lesson page still loads the steps, and the manifest is the one place a lesson's title and summary are written.
+- The custom database's working copy autosaves to IndexedDB instead of `localStorage`, so it is no longer capped at about 5 MB. A copy from the old key moves across once, the first time it loads.
+- **`DELETE` and `UPDATE` can find their rows by a range of an index.** `DELETE FROM users WHERE id > 40` walks the
+  leaf chain instead of scanning the table (a write could only use an equality lookup before); the rows it touches
+  are locked and their index entries dropped or moved exactly as before.
+- The oracle's default run is now **1,000 cases per property** (was 200), about two seconds: injected bugs in rare
+  query shapes survived 200 and 400 and die at 800.
 - `package.json` now carries a description, homepage, repository, bugs and keywords (it had none), and
   the README title reads "QueryLens — a database internals visualizer". The name is shared with at least
   five unrelated products (RESEARCH.md §45); the decision is to keep it and always pair it with the
   descriptor, which the site's `<title>` and `og:title` already did.
 - The README's CI badge pointed at the old `QueryLens` repository name; it now points at `query-lens`.
-- Vitest also runs tests under `scripts/`.
+- Vitest also runs tests under `scripts/` and `oracle/`; `oracle/` joins `tsconfig.node.json`.
 - **Dependency updates** (Dependabot #4, #10): `react`/`react-dom` 19.2.8 → 19.3.0 (with their `@types`),
   `vite` 8.2.2 → 8.3.0, `vitest` 5.0.0 → 5.0.1, `jsdom` 30.0.1 → 30.1.0, `eslint-plugin-react-refresh`
   0.5.6 → 0.5.7. Typecheck, lint, all unit tests, the CLI smoke steps and all 85 Playwright tests pass
@@ -42,6 +554,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   beside it. Total is 392.2 of 424 kB.
 
 ### Fixed
+- **`pnpm release-notes` cut its output at 64 kB when piped.** It wrote the notes and called `process.exit()`, which
+  ends the process before a pipe has taken more than its first 64 kB — and these notes are 76 kB, so `… | gh release
+  create --notes-file -` would have published two thirds of them. It now sets the exit code and lets the write finish.
+- **Every visit after the first failed to load.** The service worker precached the app's shell as `/index.html` and
+  answered every navigation with it. Cloudflare answers `/index.html` with a redirect to `/`, so what was cached was a
+  redirect, and a browser refuses a redirected response for a navigation: once the worker had installed, the next
+  load of any page ended in a network error. Every test passed, because they run against `vite preview`, which never
+  redirects. The worker now caches the shell as `/`, never hands a navigation a redirected response, and leaves the
+  platform's own `404.html` uncached; the preview server now redirects `/name.html` the way Cloudflare does, so the
+  offline tests reproduce the failure with the old worker (all three failed with `net::ERR_FAILED`) and pass with
+  the new one, and a new test holds that nothing the worker precaches is an `.html` path. A browser holding the
+  broken worker fetches the new one on its next navigation (`sw.js` is served `max-age=0`) and recovers.
+- **A query under the optimal policy behaved as FIFO, while its narration said otherwise.** Bélády's policy evicts
+  the page whose next use is farthest away, so it needs the future; the sandbox is handed a reference string, but a
+  query had none, and the policy fell back to evicting the oldest page — with every eviction still narrated as "its
+  next use is farthest away". `/compare`, `/trace`, the CLI and the MCP server all offered it. A query under
+  optimal is now run twice: once to record the pages it reads, in order (a query's reads come from its plan, so they
+  are the same under any policy — a test holds this for all eight), and once for real, evicting by that record. On
+  `SELECT * FROM orders WHERE total > 500 ORDER BY total` with four frames it misses 63 times; every other policy,
+  and optimal before, 75. Read-ahead keeps to a scan's own pages under it, as under any other policy.
+- **`SELECT name FROM users HAVING COUNT(*) > 1` answered with one row holding `name: null`.** `HAVING` with no
+  `GROUP BY` makes the whole table one group, so a plain column beside it has no one value; the check that refuses
+  `SELECT name, COUNT(*) FROM users` only looked at the SELECT list's own aggregates, not `HAVING`'s. It is now
+  refused the way PostgreSQL refuses it (SQLite answers with an arbitrary row).
+- **A sort's scratch pages could run past the buffer pool unseen.** The block of page ids reserved for a sort
+  after a `JOIN` was sized for at most 20,000 rows, and the pool ignores a read or write past its last page, so a
+  sort over a bigger join — a sort-based `DISTINCT`, then — gave the right rows with buffer counts that left out
+  much of its spill (a 25,600-row sort lost about 35,000 events). The cap is gone; a block is only a range of ids.
+  Separately, a `LEFT JOIN` onto an empty table reserved room for no rows in the step after it, though it still
+  passes every row through padded, so a `sort-merge` step there sorted both its sides into the same page ids.
+- **Docs the merge from `main` left behind.** `frontend.md` still described the per-chunk-group budget (a `react`
+  ceiling of 63 kB, a 424 kB total) that the per-route budget replaced; it now says what `pnpm budget` checks. A
+  comment in `scripts/bundle-budget.ts` had lost the end of a sentence in the merge, and gave the `react` chunk's
+  growth as 54.2 → 64.8 kB, mixing the script's own measure (gzip level 9, in KiB: 62.5) with Vite's printout
+  (64.8). The URL-parameter reference and `frontend.md` listed three preset datasets for `t=`; there are five.
+- **Every page had the same browser title.** All sixty-seven routes kept `index.html`'s *QueryLens — watch a SQL
+  query become a B+Tree traversal*, so tabs, history and bookmarks could not tell them apart and a screen reader
+  announced the same name on every page (WCAG 2.4.2, *Page Titled*; axe does not flag it, because a `<title>`
+  exists). Each page now names itself, then its section, then the site: *Crash recovery · Tools · QueryLens*,
+  *FAQ · Docs · QueryLens*. `PageHeader` sets it from the heading it already shows (`src/ui/documentTitle.ts`);
+  the docs use their sidebar label, and the landing page keeps the original. `e2e/titles.spec.ts` walks every
+  audited route and fails on a default or a repeated title.
+- **"Take the 60-second tour" was sometimes ignored, and a tour once taken could open again by itself.** The
+  first-visit hint and the Playground hand the request over with a window event and a `sessionStorage` flag. The
+  Playground read the flag while it rendered and started listening for the event only after it had committed, so
+  a click in between reached neither: the tour did not open, and the flag stayed set. Separately, a request the
+  Playground answered live never cleared the flag. Either way the tour then opened unprompted on the next visit
+  to the Playground in that tab. `listenForTour` (`src/ui/firstVisit.ts`) now listens first and takes the flag
+  second, and a live request takes its own flag, so every request is answered exactly once. The end-to-end test
+  that tripped on the race about one run in twenty-five now passes repeatedly under CPU throttling; a new one
+  covers the reopening.
+- **`x NOT IN (subquery)` kept no NULL rows when the subquery found nothing.** SQL's rule is that an empty list
+  holds nothing to be unknown against, so `NULL IN (∅)` is FALSE and `NULL NOT IN (∅)` is TRUE; the evaluator
+  called a NULL operand UNKNOWN before looking at the list, so `DELETE FROM b WHERE y NOT IN (SELECT x FROM a)`
+  with `a` empty left the rows whose `y` is NULL behind. A literal `IN ()` does not parse, and none of the preset
+  datasets holds a NULL, so only a subquery over a custom database could show it. The WHERE narration now says
+  what an empty subquery means for every row.
+- **An `IN (subquery)` outside `AND`/`OR`/`NOT` in a WHERE clause was never run.** The parser accepts one under
+  `IS [NOT] NULL`, inside a comparison, in a computed column, in `HAVING` and in an `UPDATE`'s `SET`, but only
+  the WHERE clause's boolean connectives were searched for subqueries to resolve; the others ran as an empty list.
+  `SELECT … WHERE (n IN (SELECT n FROM u)) IS NULL`, `… HAVING n IN (SELECT …)` and `SELECT n IN (SELECT …) AS x`
+  all answered wrongly. Every expression in the statement is now searched, and a failing subquery in any of them
+  is reported against its own text.
 - **The 60-second tour's spotlight pointed at the wrong region, and the page scrolled to the bottom
   behind it.** `index.css` sets `scroll-behavior: smooth` on `<html>`, which `scrollIntoView` honours,
   so the tour read the target's rect while the scroll was still in flight and parked the spotlight where
@@ -52,6 +627,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   shifts (it glides on a step change but snaps while the page moves, so it never trails the content).
   Adds an e2e test at a phone viewport that asserts, for all five steps, that the spotlight's box is the
   target's box.
+- **The route audit was sometimes scanning a loading screen, and ten real accessibility failures were behind it.** The scan waited for the page's outer shell, which is on screen before a lazy route's own content, so for some routes it passed for the wrong reason (and failed on the runs where the page was quick). It now waits for the network to settle and the page's first heading. Scanning properly, in both themes and at 360 px, found: the tables and code blocks of `/tools/page`, `/tools/latch-crabbing`, `/tools/vector-index`, `/tools/join-order`, `/examples`, `/docs/reference/sql` and `/docs/reference/url-parameters` that scroll but could not be reached from the keyboard (tables are now labelled, focusable regions, long code wraps, and a docs code block is a tab stop); an unnamed drop-down for a column's encoding on `/tools/columnar`; the planner's `rules:` label at a contrast of 2.9:1; and the check boxes of a challenge at 13 px, under the 24 px minimum target.
+- **The “Solved” banner on a challenge page had too little contrast in the light theme** (4.28:1, against the 4.5:1 WCAG AA asks of body text). Found by running axe over a *solved* result, which nothing had done before; the banner's text is now the ordinary ink colour on the green border and tint, on the query, schedule, log and settings challenge pages alike.
+- **Read-ahead in a query no longer reads past the heap into the index's pages.** A scan's last heap page prefetched the pages numbered after it, which are index pages, so `SELECT * FROM users` with read-ahead on read 14 pages for a 12-page heap. A sequential scan now says where its pages end and nothing reads ahead beyond that; a query that names no extent reads nothing ahead. Nothing in the app turned read-ahead on for a query, so no one saw it.
+- **A lock upgrade could never be granted** in `/tools/locks`: a transaction holding a shared lock that asked for an exclusive one, once the other readers had let go, stayed waiting forever, because its own shared lock counted as a conflict. Found while moving the lock rules into the engine; fixed there, with a test.
+- **A query run with read-ahead on now counts the pages it read ahead as disk reads** in the result it narrates (a `SELECT`'s, and an `INSERT`'s, `DELETE`'s and `UPDATE`'s). They said "from N disk reads" counting only requested pages, so the sentence disagreed with the panel and the scorecard. Nothing in the app turns read-ahead on for a query yet.
+- **The buffer-pool concept page no longer says QueryLens has two replacement policies.** It has eight; the Playground's dropdown offers LRU and clock sweep, and the sandbox, Trace and Compare offer all of them. The page now names LRU-2 and 2Q, and Compare's "any two of the six" is "any two of the eight".
+- **The Engine limits and Supported SQL pages no longer make claims the engine has outgrown.** They said an indexed column could never be `UNIQUE`, that an equality beat a range "by rule order, not a cost comparison", that cost estimates only justify narration, that two replacement policies exist, and that `DELETE`/`UPDATE` use an index only for an equality. Each is now stated as it is: cost declines an index that would not beat the scan, picks a join's algorithm and a chain's order, eight policies run, and the seed-table list includes `employees` and `transactions`.
+- HNSW's layer-0 graph could leave points unreachable from the entry point, so a full-width search missed true neighbours. Layer 0 is now undirected and joined into one component. Found by a property test over random inputs.
+- Midpoint LRU caps its young sublist at five-eighths of the buffer pool, as InnoDB does. Before, re-used pages could fill the pool and the policy became plain LRU on long traces.
+- **EXPLAIN ANALYZE no longer undercounts an operator whose last candidate fails a residual check.** An index
+  scan whose final candidate failed its extra predicate reported the discarded candidate's `0` as its row count, even
+  when it had already returned rows. The plan now reports the largest count each operator reached.
+- **`EXPLAIN ANALYZE`'s actual row count mixed up two nodes that shared an operator.** Its lookup kept one
+  count per operator *name* (`SeqScan`, `Join`, …), so a multi-join chain's several `SeqScan`s or `Join`s all
+  reported whichever one's count happened to be recorded last — an `authors` scan that really produced 5 rows
+  could show `posts`'s 50 instead. Flagged, but deliberately left unfixed, while building multi-join (plan.md
+  §25.4 C3 slice b); fixed now. `execute` events and the plan node they annotate both gained an optional
+  `table` (a scan's own table, or a `Join`'s `rightTable`) that tells one node of the same kind apart from
+  another in the same plan — always enough, since the parser never lets a query name the same table twice.
+- **The optimizer claimed "estimated cost decides it" when it does not.** Its rules fire on the shape of the
+  predicate, so an index over a repeated value could be chosen and cost more than the scan it replaced. The note
+  now says whether the estimate agrees or disagrees and, when it disagrees, that the index was taken anyway.
+- **The plan stage said "nested-loop" for a sort-merge join.** When no rewrite rule applied, its note named the wrong
+  algorithm; it now names the one that runs.
+- **A range scan now reads the leaves it walks.** Each hop along the sibling chain fetches that leaf through the
+  buffer pool, as the cost model already assumed — so an `EXPLAIN ANALYZE` estimate and its actual agree on how
+  many leaves a range touched.
+- **The FAQ still asked "Why no joins, subqueries, or `GROUP BY`?"** — a question the product stopped deserving
+  several releases ago. It is now "What SQL is missing?", and lists what really is.
+- **The crash report's "Open an issue" and the footer's "Report an issue" opened a blank form.** Both used
+  `issues/new?body=…`, but the repository disables blank issues, and with blank issues off GitHub sends a bare
+  `issues/new` to the template chooser — dropping the prefilled body. They now name a template
+  (`bug_report.yml` with its `description` / `repro` / `error-boundary` fields; the footer goes to the chooser).
+  Three issue templates also still linked to the repository's old `QueryLens` name.
+- **`WHERE id > NULL` (and `>=`, `<`, `<=`, `BETWEEN … NULL …`, `= NULL`) on an indexed column returned
+  rows.** A comparison with `NULL` is UNKNOWN and matches nothing, but the index rules read a `NULL` literal
+  as "no bound" and walked the whole index. A `NULL` literal is now never an index key or bound; the
+  comparison stays in the filter, where it is UNKNOWN. Found by the oracle.
+- **`DELETE FROM t WHERE k = k` deleted the rows where `k` is `NULL`.** `constant-folding` folded a column
+  compared with itself to "always true" and dropped it; under three-valued logic it is UNKNOWN on a `NULL`
+  row, and only TRUE passes a filter — so `SELECT`s returned, and `DELETE`s destroyed, rows the predicate
+  excludes. Only two-literal comparisons fold now. Found by the oracle; an existing unit test that asserted
+  the old behaviour was rewritten.
+
+## [2.0.0-rc.1] - 2026-10-15
+
+Deployed to production at `c2b79e8` and withdrawn within the hour, never tagged or published: its service worker broke
+every visit after the first. Everything it held is in 2.0.0-rc.2, above, with that fixed.
 
 ## [1.0.0] - 2026-09-23
 
@@ -887,6 +1510,9 @@ the plan for what comes next is §25. (The tag marks the deployed commit; this v
 - Tested CSP security headers
 - 326 unit tests, 14 end-to-end tests
 
-[Unreleased]: https://github.com/Naveen-Boddepalli/query-lens/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/Naveen-Boddepalli/query-lens/compare/v2.0.0-rc.3...HEAD
+[2.0.0-rc.3]: https://github.com/Naveen-Boddepalli/query-lens/releases/tag/v2.0.0-rc.3
+[2.0.0-rc.2]: https://github.com/Naveen-Boddepalli/query-lens/releases/tag/v2.0.0-rc.2
+[2.0.0-rc.1]: https://github.com/Naveen-Boddepalli/query-lens/commit/c2b79e8
 [1.0.0]: https://github.com/Naveen-Boddepalli/query-lens/releases/tag/v1.0.0
 [0.1.0]: https://github.com/Naveen-Boddepalli/QueryLens/releases/tag/v0.1.0

@@ -1,11 +1,15 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
+  describeIndexes,
   isValidName,
-  loadCustomDatabase,
+  databaseOrStarter,
   parseColumnList,
-  saveCustomDatabase,
+  parseCompositeIndexes,
+  parseUniqueIndexes,
   starterCustomDatabase,
+  validateCompositeIndexes,
   validateNewTable,
+  validateUniqueRows,
 } from '../customDatabase.ts';
 import type { Database } from '../../engine/index.ts';
 
@@ -26,6 +30,66 @@ describe('parseColumnList', () => {
 
   it('an empty string yields no columns', () => {
     expect(parseColumnList('')).toEqual([]);
+  });
+});
+
+describe('composite indexes (plan.md §25.4 B3b)', () => {
+  it('parses columns joined by + into one index each, and drops a single column (that is the ordinary index)', () => {
+    expect(parseCompositeIndexes('a+b, c + d + e, f')).toEqual([['a', 'b'], ['c', 'd', 'e']]);
+    expect(parseCompositeIndexes('')).toEqual([]);
+  });
+
+  it('accepts columns the table has, in any order, and refuses the rest with a reason', () => {
+    expect(validateCompositeIndexes(['a', 'b', 'c'], [['b', 'a']])).toBeNull();
+    expect(validateCompositeIndexes(['a', 'b'], [['a', 'z']])).toContain('"z"');
+    expect(validateCompositeIndexes(['a', 'b'], [['a', 'a']])).toContain('twice');
+    expect(validateCompositeIndexes(['a', 'b'], [['a', 'b'], ['a', 'b']])).toContain('declared twice');
+  });
+
+  it('describes a table\'s indexes, plain and composite', () => {
+    expect(describeIndexes({})).toBe('');
+    expect(describeIndexes({ indexedColumns: ['id'] })).toBe('indexed on id');
+    expect(describeIndexes({ indexedColumns: ['id'], indexes: [{ columns: ['a', 'b'] }] })).toBe('indexed on id · composite (a, b)');
+    expect(describeIndexes({ indexes: [{ columns: ['a', 'b'] }, { columns: ['c', 'd', 'e'] }] })).toBe('composite (a, b), (c, d, e)');
+  });
+
+  it('UNIQUE indexes use the same syntax, and one column is enough', () => {
+    expect(parseUniqueIndexes('email, team + role,')).toEqual([['email'], ['team', 'role']]);
+    expect(describeIndexes({ indexedColumns: ['id'], indexes: [{ columns: ['email'], unique: true }, { columns: ['a', 'b'] }] })).toBe(
+      'indexed on id · composite (a, b) · unique (email)',
+    );
+    // A column declared both plain and unique is described once, as unique.
+    expect(describeIndexes({ indexedColumns: ['email'], indexes: [{ columns: ['email'], unique: true }] })).toBe('unique (email)');
+  });
+
+  it('rows that repeat a unique key are refused with the key; NULLs never conflict', () => {
+    const table = (rows: Database['tables'][string]['rows']) => ({
+      tables: { t: { name: 't', columns: ['id', 'email'], rows, indexes: [{ columns: ['email'], unique: true }] } },
+    });
+    expect(validateUniqueRows(table([{ id: 1, email: 'a' }, { id: 2, email: 'b' }]))).toBeNull();
+    expect(validateUniqueRows(table([{ id: 1, email: null }, { id: 2, email: null }]))).toBeNull();
+    expect(validateUniqueRows(table([{ id: 1, email: 'a' }, { id: 2, email: 'a' }]))).toContain("(email) = ('a')");
+  });
+
+  describe('a stored database with composite indexes', () => {
+    const withIndexes = (indexes: unknown): unknown => ({
+      tables: { t: { name: 't', columns: ['a', 'b'], rows: [], indexes } },
+    });
+
+    it('round-trips', () => {
+      const db: Database = { tables: { t: { name: 't', columns: ['a', 'b'], rows: [{ a: 1, b: 2 }], indexes: [{ columns: ['a', 'b'] }] } } };
+      expect(databaseOrStarter(db)).toEqual(db);
+    });
+
+    it.each([
+      ['a column the table lacks', [{ columns: ['a', 'zzz'] }]],
+      ['no columns', [{ columns: [] }]],
+      ['a repeated column', [{ columns: ['a', 'a'] }]],
+      ['the same index twice', [{ columns: ['a', 'b'] }, { columns: ['a', 'b'] }]],
+      ['a non-array', 'a+b'],
+    ])('falls back to the starter for %s', (_, indexes) => {
+      expect(Object.keys(databaseOrStarter(withIndexes(indexes)).tables).sort()).toEqual(['authors', 'posts']);
+    });
   });
 });
 
@@ -77,11 +141,10 @@ describe('validateNewTable', () => {
   });
 });
 
-describe('loadCustomDatabase / saveCustomDatabase', () => {
-  beforeEach(() => { localStorage.clear(); });
+describe('databaseOrStarter', () => {
 
   it('falls back to the starter when nothing is stored', () => {
-    expect(loadCustomDatabase()).toEqual(starterCustomDatabase());
+    expect(databaseOrStarter(undefined)).toEqual(starterCustomDatabase());
   });
 
   it('round-trips a saved database', () => {
@@ -90,44 +153,26 @@ describe('loadCustomDatabase / saveCustomDatabase', () => {
         widgets: { name: 'widgets', columns: ['id', 'label'], rows: [{ id: 1, label: 'x' }], indexedColumns: ['id', 'label'] },
       },
     };
-    saveCustomDatabase(db);
-    expect(loadCustomDatabase()).toEqual(db);
+    expect(databaseOrStarter(db)).toEqual(db);
   });
 
   it('falls back to the starter on corrupt JSON', () => {
-    localStorage.setItem('querylens.customDatabase.v1', '{not json');
-    expect(loadCustomDatabase()).toEqual(starterCustomDatabase());
+    expect(databaseOrStarter('{not json')).toEqual(starterCustomDatabase());
   });
 
   it('rejects the whole thing on a single bad row rather than half-loading it', () => {
-    localStorage.setItem(
-      'querylens.customDatabase.v1',
-      JSON.stringify({ tables: { widgets: { name: 'widgets', columns: ['id'], rows: [{ id: 1, extra: 2 }] } } }),
-    );
-    expect(loadCustomDatabase()).toEqual(starterCustomDatabase());
+    expect(databaseOrStarter({ tables: { widgets: { name: 'widgets', columns: ['id'], rows: [{ id: 1, extra: 2 }] } } })).toEqual(starterCustomDatabase());
   });
 
   it("rejects a table whose declared name doesn't match its own key", () => {
-    localStorage.setItem(
-      'querylens.customDatabase.v1',
-      JSON.stringify({ tables: { widgets: { name: 'gadgets', columns: ['id'], rows: [] } } }),
-    );
-    expect(loadCustomDatabase()).toEqual(starterCustomDatabase());
+    expect(databaseOrStarter({ tables: { widgets: { name: 'gadgets', columns: ['id'], rows: [] } } })).toEqual(starterCustomDatabase());
   });
 
   it('rejects an indexedColumns entry that names a column the table does not have', () => {
-    localStorage.setItem(
-      'querylens.customDatabase.v1',
-      JSON.stringify({ tables: { widgets: { name: 'widgets', columns: ['id'], rows: [], indexedColumns: ['bogus'] } } }),
-    );
-    expect(loadCustomDatabase()).toEqual(starterCustomDatabase());
+    expect(databaseOrStarter({ tables: { widgets: { name: 'widgets', columns: ['id'], rows: [], indexedColumns: ['bogus'] } } })).toEqual(starterCustomDatabase());
   });
 
   it('rejects a repeated column in indexedColumns', () => {
-    localStorage.setItem(
-      'querylens.customDatabase.v1',
-      JSON.stringify({ tables: { widgets: { name: 'widgets', columns: ['id'], rows: [], indexedColumns: ['id', 'id'] } } }),
-    );
-    expect(loadCustomDatabase()).toEqual(starterCustomDatabase());
+    expect(databaseOrStarter({ tables: { widgets: { name: 'widgets', columns: ['id'], rows: [], indexedColumns: ['id', 'id'] } } })).toEqual(starterCustomDatabase());
   });
 });

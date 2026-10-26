@@ -6,7 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Feature requests help shape the project's direction. Please check the [plan.md](https://github.com/Naveen-Boddepalli/QueryLens/blob/main/plan.md) to see if your idea is already planned.
+        Feature requests help shape the project's direction. Please check the [plan.md](https://github.com/Naveen-Boddepalli/query-lens/blob/main/plan.md) to see if your idea is already planned.
   - type: textarea
     id: problem
     attributes:

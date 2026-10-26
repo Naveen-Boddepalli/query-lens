@@ -1,5 +1,5 @@
 /**
- * Colour by syntactic category, so shape and colour reinforce each other.
+ * Colour tones for AST tree nodes.
  *
  * The `hover:` half is plan.md §16.2 item 4's tinted rule: fill one step
  * deeper, border one step brighter, in the node's own hue rather than a shared
@@ -18,6 +18,8 @@ const VIOLET_50 =
 const VIOLET_60 =
   'border-hue-violet/60 bg-hue-violet/10 text-hue-violet-ink hover:border-hue-violet/90 hover:bg-hue-violet/20';
 const NEUTRAL = 'border-edge bg-surface-3 text-ink hover:border-ink-dim/50 hover:bg-surface-4';
+const ORANGE_50 =
+  'border-hue-orange/50 bg-hue-orange/5 text-hue-orange-ink hover:border-hue-orange/80 hover:bg-hue-orange/15';
 const ORANGE_60 =
   'border-hue-orange/60 bg-hue-orange/10 text-hue-orange-ink hover:border-hue-orange/90 hover:bg-hue-orange/20';
 const EMERALD_50 =
@@ -38,7 +40,13 @@ export const TONES: Record<string, string> = {
   From: VIOLET_60,
   Into: VIOLET_60,
   Where: AMBER_60,
+  Having: AMBER_60,
   And: AMBER_50,
+  Or: AMBER_50,
+  Not: AMBER_50,
+  IsNull: AMBER_50,
+  In: AMBER_50,
+  Like: AMBER_50,
   Compare: AMBER_50,
   Column: EMERALD_50,
   Table: VIOLET_50,
@@ -46,6 +54,8 @@ export const TONES: Record<string, string> = {
   Star: NEUTRAL,
   Limit: ORANGE_60,
   Aggregate: ORANGE_60,
+  Expression: ORANGE_60,
+  Arith: ORANGE_50,
   OrderBy: EMERALD_60,
   GroupBy: EMERALD_60,
 };

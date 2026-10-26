@@ -42,26 +42,37 @@ const repeat = (separator: GrammarPart, ...parts: GrammarPart[]): GrammarPart =>
 export const GRAMMAR: GrammarRule[] = [
   {
     name: 'statement',
-    parts: [choice([rule('select')], [rule('delete')], [rule('insert')], [rule('update')])],
+    parts: [
+      choice([rule('explain')], [rule('analyze')], [rule('select')], [rule('delete')], [rule('insert')], [rule('update')]),
+    ],
   },
+  { name: 'explain', parts: [lit('EXPLAIN'), opt(lit('ANALYZE')), rule('select')] },
+  { name: 'analyze', parts: [lit('ANALYZE'), rule('identifier'), opt(lit(';'))] },
   {
     name: 'select',
     parts: [
       lit('SELECT'),
+      opt(lit('DISTINCT')),
       rule('selectList'),
       lit('FROM'),
       rule('identifier'),
-      opt(rule('join')),
+      // Zero or more, left-deep (plan.md §25.4 C3 slice b) — concatenated directly, with no separator token
+      // between one JOIN clause and the next, unlike every other `repeat` here.
+      repeat(opt(), rule('join')),
       opt(lit('WHERE'), rule('expr')),
-      opt(lit('GROUP'), lit('BY'), rule('identifier'), repeat(lit(','), rule('identifier'))),
-      opt(lit('ORDER'), lit('BY'), rule('identifier'), opt(choice([lit('ASC')], [lit('DESC')]))),
-      opt(lit('LIMIT'), rule('number')),
+      // Columns are qualified (`posts.authorId`) in a query with a JOIN, here as everywhere (plan.md §26 Feature 1).
+      opt(lit('GROUP'), lit('BY'), rule('qualifiedColumn'), repeat(lit(','), rule('qualifiedColumn'))),
+      opt(lit('HAVING'), rule('expr')),
+      // An aggregate call sorts the groups (plan.md §26 Feature 1, slice a); the engine then checks the query groups.
+      opt(lit('ORDER'), lit('BY'), choice([rule('qualifiedColumn')], [rule('aggregateCall')]), opt(choice([lit('ASC')], [lit('DESC')]))),
+      opt(lit('LIMIT'), rule('number'), opt(lit('OFFSET'), rule('number'))),
       opt(lit(';')),
     ],
   },
   {
     name: 'join',
     parts: [
+      opt(choice([lit('INNER')], [lit('LEFT'), opt(lit('OUTER'))])),
       lit('JOIN'),
       rule('identifier'),
       lit('ON'),
@@ -98,18 +109,23 @@ export const GRAMMAR: GrammarRule[] = [
       opt(lit(';')),
     ],
   },
-  { name: 'assignment', parts: [rule('identifier'), lit('='), rule('value')] },
+  { name: 'assignment', parts: [rule('identifier'), lit('='), rule('expr')] },
   { name: 'columnList', parts: [lit('('), rule('identifier'), repeat(lit(','), rule('identifier')), lit(')')] },
   { name: 'valueList', parts: [lit('('), rule('value'), repeat(lit(','), rule('value')), lit(')')] },
+  // An INSERT value: a literal, optionally negated. (Arithmetic on literals is accepted too and folded to
+  // one value at parse time; a column is rejected — there is no row to read it from.)
   {
     name: 'value',
-    parts: [choice([rule('number')], [rule('string')], [lit('NULL')], [lit('TRUE')], [lit('FALSE')])],
+    parts: [choice([opt(lit('-')), rule('number')], [rule('string')], [lit('NULL')], [lit('TRUE')], [lit('FALSE')])],
   },
   {
     name: 'selectList',
     parts: [choice([lit('*')], [rule('selectItem'), repeat(lit(','), rule('selectItem'))])],
   },
-  { name: 'selectItem', parts: [choice([rule('qualifiedColumn')], [rule('aggregateCall')])] },
+  {
+    name: 'selectItem',
+    parts: [choice([rule('aggregateCall')], [rule('expr'), opt(lit('AS'), rule('identifier'))])],
+  },
   {
     name: 'aggregateCall',
     parts: [
@@ -119,13 +135,55 @@ export const GRAMMAR: GrammarRule[] = [
       lit(')'),
     ],
   },
-  { name: 'expr', parts: [rule('comparison'), repeat(lit('AND'), rule('comparison'))] },
+  // A predicate, loosest binding first: OR, then AND, then NOT, then one test on an operand (plan.md §25.4 B1).
+  { name: 'expr', parts: [rule('orExpr')] },
+  { name: 'orExpr', parts: [rule('andExpr'), repeat(lit('OR'), rule('andExpr'))] },
+  { name: 'andExpr', parts: [rule('notExpr'), repeat(lit('AND'), rule('notExpr'))] },
+  { name: 'notExpr', parts: [choice([lit('NOT'), rule('notExpr')], [rule('predicate')])] },
   {
-    name: 'comparison',
-    parts: [rule('operand'), choice([lit('=')], [lit('<')], [lit('>')]), rule('operand')],
+    name: 'predicate',
+    parts: [
+      rule('operand'),
+      opt(
+        choice(
+          [rule('compareOp'), rule('operand')],
+          [opt(lit('NOT')), lit('BETWEEN'), rule('operand'), lit('AND'), rule('operand')],
+          [lit('IS'), opt(lit('NOT')), lit('NULL')],
+          [
+            opt(lit('NOT')),
+            lit('IN'),
+            lit('('),
+            choice([rule('operand'), repeat(lit(','), rule('operand'))], [rule('inSubquery')]),
+            lit(')'),
+          ],
+          [opt(lit('NOT')), lit('LIKE'), rule('operand')],
+        ),
+      ),
+    ],
+  },
+  // The one shape IN accepts besides a literal list (plan.md §25.4 C3 slice c, closing C3) — always exactly one
+  // plain column, uncorrelated, and much smaller than `select` itself: no JOIN/GROUP BY/HAVING/ORDER BY/LIMIT/
+  // DISTINCT/aggregate, none of which could change *which* values end up in the set IN tests against.
+  {
+    name: 'inSubquery',
+    parts: [lit('SELECT'), rule('identifier'), lit('FROM'), rule('identifier'), opt(lit('WHERE'), rule('expr'))],
   },
   {
+    name: 'compareOp',
+    parts: [choice([lit('=')], [lit('<>')], [lit('!=')], [lit('<')], [lit('>')], [lit('<=')], [lit('>=')])],
+  },
+  // Arithmetic (plan.md §25.4 B1b): `+ -` over `* / %` over unary minus over a primary.
+  {
     name: 'operand',
+    parts: [rule('multiplicative'), repeat(choice([lit('+')], [lit('-')]), rule('multiplicative'))],
+  },
+  {
+    name: 'multiplicative',
+    parts: [rule('unary'), repeat(choice([lit('*')], [lit('/')], [lit('%')]), rule('unary'))],
+  },
+  { name: 'unary', parts: [choice([lit('-'), rule('unary')], [rule('primary')])] },
+  {
+    name: 'primary',
     parts: [
       choice(
         [rule('qualifiedColumn')],
@@ -134,6 +192,9 @@ export const GRAMMAR: GrammarRule[] = [
         [lit('NULL')],
         [lit('TRUE')],
         [lit('FALSE')],
+        [lit('('), rule('expr'), lit(')')],
+        // Only inside HAVING — an aggregate has no group to read in a WHERE.
+        [rule('aggregateCall')],
       ),
     ],
   },

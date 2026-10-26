@@ -25,6 +25,8 @@ const POLICY_LABEL: Record<ReplacementPolicyName, string> = {
   'second-chance': 'second-chance',
   optimal: 'the optimal policy',
   midpoint: 'midpoint LRU',
+  'lru-k': 'LRU-2',
+  'two-q': '2Q',
 };
 
 const POLICY_WHY: Record<ReplacementPolicyName, string> = {
@@ -38,6 +40,10 @@ const POLICY_WHY: Record<ReplacementPolicyName, string> = {
     'The optimal policy evicts the page whose next use is farthest in the future. It cannot be built for real — nothing knows the future — but it is the fewest-misses bound every real policy is judged against.',
   midpoint:
     'Midpoint LRU keeps an "old" sublist of pages read but not yet re-used. New pages land there, and eviction takes the least-recently-used one — so a one-pass scan flushes only itself, never the hot pages in the young sublist.',
+  'lru-k':
+    'LRU-2 evicts by the time of each page\'s second-most-recent reference. A page touched only once has no second reference at all, so it goes first, and a page touched twice survives a one-pass scan.',
+  'two-q':
+    '2Q keeps the pages read only once in a small FIFO and promotes a page only when it is read again after leaving that FIFO. A one-pass scan fills the FIFO and evicts only its own pages, so the hot set stays.',
 };
 
 /** "Which frame gets evicted?" — the canonical prompt from the research. */
@@ -92,9 +98,9 @@ export function traversalPrompt(
 }
 
 /** "Where does the filter end up?" — asked before the optimizer rewrites. */
-export function indexSelectionPrompt(column: string, key: SqlValue): PredictionPrompt {
+export function indexSelectionPrompt(column: string, key: SqlValue, predicate = `${column} = ${format(key)}`): PredictionPrompt {
   return {
-    question: `There is a B+Tree index on \`${column}\`, and the predicate is \`${column} = ${format(key)}\`. What should the optimizer do?`,
+    question: `There is a B+Tree index on ${column.startsWith('(') ? column : `\`${column}\``}, and the predicate is \`${predicate}\`. What should the optimizer do?`,
     options: [
       { id: 'keep', label: 'Leave it as a full sequential scan' },
       { id: 'push', label: 'Turn the scan into an index lookup on that key' },
@@ -103,6 +109,25 @@ export function indexSelectionPrompt(column: string, key: SqlValue): PredictionP
     correctOptionId: 'push',
     explanation:
       'The index finds the matching row directly, so the other pages are never read. Dropping the filter would be wrong in general: an index narrows the search, it does not verify the whole predicate — anything the index cannot answer is rechecked on each row it returns.',
+  };
+}
+
+/**
+ * "Can the index answer this?" — asked when a composite index is entered through only some of its leading columns
+ * (plan.md §25.4 B3): the leftmost-prefix rule. The wrong answers are the two natural mistakes: that the index needs
+ * *every* column to be constrained, and that it can serve a predicate on any one of its columns.
+ */
+export function leftmostPrefixPrompt(index: string, columns: readonly string[], named: readonly string[]): PredictionPrompt {
+  const missing = columns.filter((c) => !named.includes(c));
+  return {
+    question: `There is one B+Tree index on (${columns.join(', ')}), and the predicate is an equality on ${named.map((c) => `\`${c}\``).join(' and ')} only. Can the optimizer use the index?`,
+    options: [
+      { id: 'yes', label: `Yes — ${named.length === 1 ? 'that is the index\'s leftmost column' : 'those are its leftmost columns'}, so it can be entered there and read along the matching run` },
+      { id: 'no-all', label: `No — a composite index only helps when every one of its columns is constrained` },
+      { id: 'no-scan', label: `No — an index on several columns is only used for a full scan of the table anyway` },
+    ],
+    correctOptionId: 'yes',
+    explanation: `The entries are ordered by \`${columns[0]}\` first, then by the next column within each value of the one before. An equality on the leading column${named.length > 1 ? 's' : ''} selects one contiguous run of entries, so \`${index}\` is usable — the columns it does not name (${missing.map((c) => `\`${c}\``).join(', ')}) only order the entries inside that run. The reverse is not true: an equality on \`${missing[0]}\` alone matches entries scattered through the whole index, so it could not be used.`,
   };
 }
 

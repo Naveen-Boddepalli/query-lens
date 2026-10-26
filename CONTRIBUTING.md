@@ -13,7 +13,7 @@ pnpm dev          # http://localhost:5173
 
 ### Prerequisites
 
-- **Node.js** — `>=22.13.0` (pinned in `.node-version`)
+- **Node.js** — `>=22.13.0` (pinned in `.node-version`); `>=22.16` to run the `oracle/` suites, which use `node:sqlite`
 - **pnpm** — `11.1.2` (pinned in `package.json`)
 
 ### Verify your setup
@@ -21,9 +21,9 @@ pnpm dev          # http://localhost:5173
 ```bash
 pnpm typecheck    # TypeScript
 pnpm lint         # ESLint + jsx-a11y
-pnpm test         # 326 unit tests (vitest)
+pnpm test         # unit tests + the seeded SQLite oracle (vitest)
 pnpm build        # production build
-pnpm budget       # gzip bundle budget
+pnpm budget       # gzip bundle budget, per route (what a visitor to each route downloads)
 pnpm test:e2e     # Playwright (needs: pnpm exec playwright install chromium)
 ```
 
@@ -41,6 +41,13 @@ CI runs exactly this sequence. If it passes locally, it will pass in CI.
    - `src/ui/` — a renderer of engine state, nothing more.
 
 3. **Write tests.** Engine changes need unit tests. UI changes need UI tests (Testing Library) and, for visual or interactive changes, an end-to-end test (Playwright).
+
+   Engine changes are also checked against SQLite by the **oracle** (`oracle/`, run by `pnpm test`): generated
+   statements must return the same rows in both. If you add SQL the engine understands, teach the generators in
+   `oracle/generate.ts` (and `oracle/model.ts`) about it in the same commit — the coverage suite fails if a rule
+   or algorithm goes unreached. Where QueryLens *should* differ from SQLite, add an entry to `oracle/ledger.ts`
+   rather than skipping a test. To hunt harder: `ORACLE_RUNS=20000 ORACLE_SEED=42 pnpm exec vitest run oracle`.
+   See [How we know the answers are right](https://query-lens.1234naveenboddepalli.workers.dev/docs/reference/answers).
 
 4. **Commit.** Use [Conventional Commits](https://www.conventionalcommits.org/):
    - `feat:` — a new feature
@@ -75,6 +82,20 @@ See [plan.md](plan.md) for the full design and [RESEARCH.md](RESEARCH.md) for th
 - Events are deltas, not snapshots — the UI folds them to derive state
 - Playback is an index into an array
 - The engine is worker-ready but runs on the main thread (see plan.md §5)
+
+## Bundle budgets
+
+`pnpm budget` prices **each route by what a visitor to it downloads** — the entry chunk, that route's own lazy
+chunk and every static dependency of either, read from Vite's manifest — against a ceiling in
+`scripts/bundle-budget.ts`. There is no shared group to squeeze into: a change that grows the Playground can only
+raise the Playground's row. **A new page or tool needs its own row** (the script fails on a chunk no route
+reaches), and raising a ceiling is a deliberate act with a comment saying why. Fonts and images are not counted.
+
+## Releases and deploy config
+
+Releases are cut as one commit with the tag on it, and notes are derived from `CHANGELOG.md` (`pnpm release-notes`).
+A change to `public/`, `wrangler.jsonc`, `index.html`, `pnpm-workspace.yaml` or `.node-version` needs a look at a
+preview deploy before it merges — CI flags those files. Both are in [RELEASING.md](RELEASING.md).
 
 ## Release-Age Floor
 

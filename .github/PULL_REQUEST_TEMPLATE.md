@@ -33,3 +33,4 @@ Fixes #
 - [ ] New tests added for changed behavior
 - [ ] Documentation updated (if applicable)
 - [ ] No new lint warnings introduced
+- [ ] **If this touches `public/`, `wrangler.jsonc`, `index.html`, `pnpm-workspace.yaml` or `.node-version`:** I looked at a preview deploy, not just `pnpm preview` — see [RELEASING.md](../RELEASING.md). (CI flags these files; it cannot check this for you.)

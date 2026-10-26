@@ -61,18 +61,61 @@ export interface IndexNode {
   children?: IndexNode[];
 }
 
+/**
+ * A plan node's *logical* meaning in relational algebra (plan.md §25.4 B5) — the
+ * on-ramp from "Filter above SeqScan" to σ, π, ⋈, γ. It is derived from the real
+ * plan, not parsed back out of the label, so `IndexScan users.id` and `SeqScan
+ * users` with a filter both read as the same `σ_{id = 5}(users)`: what differs is
+ * the *physical* operator, which stays in `label`/`detail`.
+ *
+ *   rel  a relation (a table, with no selection applied)     users
+ *   σ    selection            π  projection       ⋈  join
+ *   γ    grouping/aggregation τ  ordering         λ  limit (an extension)
+ *   δ    duplicate elimination
+ */
+export interface RaInfo {
+  symbol: 'rel' | 'σ' | 'π' | '⋈' | 'γ' | 'τ' | 'λ' | 'δ';
+  /** What sits in the subscript: the predicate, the columns, the join condition. */
+  sub?: string;
+  /** The relation a leaf reads — set on scans, whether or not they carry a σ. */
+  rel?: string;
+}
+
+/** One option a cost-based decision weighed, named and priced the same way `EXPLAIN` already prices a plan. */
+export interface CostAlternative {
+  label: string;
+  estPages: number;
+}
+
+/**
+ * The "Why not?" panel's own data (plan.md §25.4 C5, fourth and final slice): a cost-based decision's chosen
+ * option next to the one it beat, both priced the same `rootEstimate`/`costOfOrder` way `EXPLAIN` already shows —
+ * never a new number invented for the comparison. Every C5 mechanism already computes both sides of this
+ * narration in prose (`index-selection`'s scan-vs-index, `join-algorithm-selection`'s cheapest-vs-the-rest,
+ * join order's chosen-vs-written); this is that same comparison, structured, so a panel can show it without
+ * re-parsing a sentence.
+ */
+export interface WhyNot {
+  chosen: CostAlternative;
+  runnerUp: CostAlternative;
+}
+
 export interface PlanNode {
   /** Stable across a rewrite, so before/after trees can be compared. */
   id: string;
   op: string;
   label: string;
   detail?: string;
+  /** The node's meaning in relational algebra (plan.md §25.4 B5). */
+  ra?: RaInfo;
   /** Set on the nodes a rewrite rule produced. */
   highlight?: boolean;
   /** Cost model's estimated output rows for this node (plan.md §22.2). */
   estRows?: number;
   /** The heuristic behind `estRows`, in a few words. */
   estBasis?: string;
+  /** The same disambiguator a matching `execute` event's own `table` carries — see its doc comment. */
+  table?: string;
   children?: PlanNode[];
 }
 
@@ -118,10 +161,23 @@ interface StepEventBase {
 
 export type StepEventBody =
   | { stage: 'parse'; ast: ASTNode; span?: Span }
-  | { stage: 'plan'; planTree: PlanNode }
-  | { stage: 'optimize'; rule: string; before: PlanNode; after: PlanNode }
-  | { stage: 'execute'; op: string; rowsProduced: number }
-  | { stage: 'buffer'; action: 'hit' | 'load'; pageId: number; frameId: number }
+  /** `whyNot` is set only on the two join-order narration steps (plan.md §25.4 C5, fourth slice) — see `WhyNot`'s own doc comment. */
+  | { stage: 'plan'; planTree: PlanNode; whyNot?: WhyNot }
+  /** `whyNot` is set only for a step a cost-based rule produced — `index-selection`, `range-index-selection`, `join-algorithm-selection` (plan.md §25.4 C5, fourth slice); see `WhyNot`'s own doc comment. */
+  | { stage: 'optimize'; rule: string; before: PlanNode; after: PlanNode; whyNot?: WhyNot }
+  /**
+   * `table` disambiguates two nodes of the same `op` in one plan — a multi-join chain's several `SeqScan`s, or
+   * its several `Join`s — so `explain.ts`'s EXPLAIN ANALYZE can key its "actual rows" lookup by more than `op`
+   * alone (plan.md §25.4 C3 slice b flagged this; every table name in a query is unique, parser-enforced, so
+   * `table` — the scan's own table, or a `Join`'s `rightTable` — is always enough). Absent for the operators
+   * that can only ever appear once per query (`Filter`, `Project`, `Sort`, …), which never needed it.
+   */
+  | { stage: 'execute'; op: string; rowsProduced: number; table?: string }
+  /**
+   * `prefetch` is a read the engine made before anything asked for the page, because the scan before it was
+   * sequential (plan.md §25.4 F7). It costs the same I/O as a `load`; a later request for the page is a `hit`.
+   */
+  | { stage: 'buffer'; action: 'hit' | 'load' | 'prefetch'; pageId: number; frameId: number }
   /** A miss names no frame: nothing has been chosen to hold the page yet. */
   | { stage: 'buffer'; action: 'miss'; pageId: number }
   /** A page a `Sort` produced (a run, or a merge-pass output) rather than read off disk. */
@@ -136,6 +192,8 @@ export type StepEventBody =
       clockHand?: number;
       /** The victim was dirty, so eviction cost a writeback, not just a discard. */
       writtenBack?: boolean;
+      /** A scan reused a frame from its own ring (plan.md §25.4 F7); the policy was not asked for a victim. */
+      ring?: boolean;
     }
   /**
    * One tick of the clock-sweep hand. Emitted only by the `clock` policy, so
@@ -198,6 +256,82 @@ export interface Table {
    * query, by which is more selective.
    */
   indexedColumns?: string[];
+  /**
+   * Indexes that are more than one plain column (plan.md §25.4 B3): a **composite** index over several columns, in
+   * key order. It is searched through a *leftmost prefix* of its columns — an equality on `a`, or on `a` and `b`,
+   * can enter an index on `(a, b)`; an equality on `b` alone cannot, because the entries are ordered by `a` first.
+   * Declared alongside `indexedColumns` (the one-column shorthand), and `indexSpecsOf` merges the two.
+   */
+  indexes?: IndexSpec[];
+  /**
+   * A CLUSTERED (index-organized) table (plan.md §25.4 B3e): its own UNIQUE index's columns, in key order — must
+   * match one of `indexes` exactly. Rows are stored in that key's order rather than insertion order (`buildHeap`
+   * sorts them), so the clustering key's own lookups need no separate structure to find a row by it, and a range on
+   * it reads pages in sequence instead of wherever insertion happened to leave them. Every OTHER index then carries
+   * the clustering key instead of the row's address, because a clustered leaf can split and move rows between pages
+   * while the clustering key never does — finding a row through one costs a second real descent, through the
+   * clustered index itself. That second hop is built only for an equality lookup (`IndexScan`/`IndexOnlyScan`); a
+   * range scan or an index-nested-loop join never chooses a clustered table's secondary index, and falls back to a
+   * plan that does not need one.
+   */
+  clusteredKey?: string[];
+  /**
+   * What `ANALYZE` last found (plan.md §25.4 C1) — a snapshot, not a live fact: it is whatever the table looked
+   * like at the moment `ANALYZE <table>` ran, and stays exactly that until it is run again, even if the table
+   * has since been written to. `planner/cost.ts` reads it in place of scanning the live rows when it is present,
+   * falling back to a live scan (today's behaviour, unconditionally accurate but not how a real optimizer works)
+   * when it is absent.
+   */
+  stats?: TableStats;
+}
+
+/**
+ * One column's statistics, the way `ANALYZE` (plan.md §25.4 C1) computes them and PostgreSQL's own `pg_stats`
+ * names them: how many distinct values, what fraction are NULL, which values come up most, roughly how the rest
+ * are distributed, and whether the column's own order tracks the table's physical row order at all.
+ */
+export interface ColumnStats {
+  /** Distinct non-NULL values. */
+  nDistinct: number;
+  /** Fraction of rows whose value is NULL, 0–1. */
+  nullFraction: number;
+  /** The most frequent values, most frequent first — an equality on one of these reads its real frequency instead
+   *  of assuming every distinct value is equally likely. */
+  mostCommonValues: { value: SqlValue; frequency: number }[];
+  /**
+   * Equi-depth histogram boundaries over every value `mostCommonValues` does not already account for — `n + 1`
+   * values bounding `n` buckets, each holding (as close as an integer row count allows) the same number of rows,
+   * the way PostgreSQL's own `histogram_bounds` does. A range's selectivity is then the width of the buckets it
+   * overlaps, not a linear guess between the column's min and max. Empty when there is nothing left to bucket
+   * (every distinct value already made `mostCommonValues`) or too few rows to make bucketing worthwhile.
+   */
+  histogramBounds: SqlValue[];
+  /**
+   * -1 to 1: how much this column's value order tracks the table's own physical row order (a Pearson correlation
+   * between each row's position and its value's rank among all of them) — PostgreSQL's own `pg_stats.correlation`.
+   * 1 means the table is effectively clustered on this column already (plan.md §25.4 B3e achieves exactly that,
+   * deliberately); near 0 means the column's values are scattered through the table with no relation to where the
+   * rows physically sit.
+   */
+  correlation: number;
+}
+
+/** What `ANALYZE <table>` computed — one `ColumnStats` per column, and how many rows it saw. */
+export interface TableStats {
+  rowCount: number;
+  columns: Record<string, ColumnStats>;
+}
+
+/** One index a table declares — its columns in key order. More than one column makes it composite. */
+export interface IndexSpec {
+  columns: string[];
+  /**
+   * A `UNIQUE` index (plan.md §25.4 B3c): at most one row may hold any given key. `INSERT` and `UPDATE` look the new
+   * key up in the index first and reject the statement if it is already there — that lookup *is* the enforcement,
+   * which is why a unique constraint is always backed by an index. A key with a NULL in it never conflicts (NULL is
+   * not equal to NULL), so any number of rows may hold NULL.
+   */
+  unique?: boolean;
 }
 
 /**
@@ -214,11 +348,52 @@ export type ReplacementPolicyName =
   | 'fifo'
   | 'second-chance'
   | 'optimal'
-  | 'midpoint';
+  | 'midpoint'
+  | 'lru-k'
+  | 'two-q';
+
+/** Display order for policy pickers — here rather than beside the policies, so UI code can import it without the engine. */
+export const REPLACEMENT_POLICY_NAMES = [
+  'lru',
+  'clock',
+  'fifo',
+  'second-chance',
+  'optimal',
+  'midpoint',
+  'lru-k',
+  'two-q',
+] as const satisfies readonly ReplacementPolicyName[];
+
+/** Short label for each policy, for `<select>`s and column headers. */
+export const REPLACEMENT_POLICY_LABELS: Record<ReplacementPolicyName, string> = {
+  lru: 'LRU',
+  clock: 'Clock sweep',
+  fifo: 'FIFO',
+  'second-chance': 'Second-chance',
+  optimal: 'Optimal (Bélády)',
+  midpoint: 'Midpoint LRU (InnoDB)',
+  'lru-k': 'LRU-2 (scan-resistant)',
+  'two-q': '2Q (scan-resistant)',
+};
+
+/** Whether `value` names a policy — for anything read from a URL, a stored preference or a file. */
+export function isReplacementPolicyName(value: unknown): value is ReplacementPolicyName {
+  return typeof value === 'string' && (REPLACEMENT_POLICY_NAMES as readonly string[]).includes(value);
+}
 
 export interface Database {
   tables: Record<string, Table>;
 }
+
+/** How indexes are built — see `EngineOptions.indexBuild`. */
+export interface IndexBuildOptions {
+  method: 'incremental' | 'bulk';
+  /** Bulk only: how full each node is packed, 0.5–1. */
+  fillFactor?: number;
+}
+
+/** The physical algorithms a `JOIN` can run — see `EngineOptions.joinStrategy`. */
+export type JoinAlgorithm = 'nested-loop' | 'hash' | 'sort-merge' | 'index-nested-loop';
 
 export interface EngineOptions {
   /** Buffer frames available. Small on purpose so eviction is visible. */
@@ -226,6 +401,17 @@ export interface EngineOptions {
   /** Rows stored per simulated page. Small on purpose. */
   rowsPerPage: number;
   policy: ReplacementPolicyName;
+  /**
+   * Sequential read-ahead depth (plan.md §25.4 F7): after a request for page p that follows page p-1, the pool reads up to
+   * this many pages after p that are not yet resident. Absent or 0 means no read-ahead, which is every existing run.
+   */
+  readAhead?: number;
+  /**
+   * Scan-resistant ring buffer (plan.md §25.4 F7): a `SeqScan` of a table larger than a quarter of the pool, as
+   * PostgreSQL's bulk-read strategy does, claims at most this many frames and reuses its own oldest page for each new
+   * one, so the scan cannot flush the pool. Absent or 0 means no ring, which is every existing run.
+   */
+  scanRing?: number;
   /**
    * Which physical strategy a `GROUP BY` / aggregate query uses — `hash`
    * (the default, when absent) builds an in-memory hash table; `sort` sorts
@@ -241,12 +427,24 @@ export interface EngineOptions {
    * hash table over the right table once, then probes it with the left
    * table streamed a row at a time; `sort-merge` sorts both sides on the
    * join key (spilling through the real buffer pool exactly as `ORDER BY`'s
-   * `Sort` does) and then merges the two sorted lists in one pass. Same rows
-   * out either way; nothing in the pipeline picks between them on its own —
-   * this is how `/compare`'s join mode forces each side explicitly, the same
-   * way `aggregateStrategy` above does for `GROUP BY` (plan.md §22.2).
+   * `Sort` does) and then merges the two sorted lists in one pass;
+   * `index-nested-loop` probes the right table's own B+Tree on the join
+   * column once per left row (plan.md §25.4 B4) — which needs that index, and
+   * quietly becomes a plain `nested-loop` (the plan says so) when it is
+   * missing. Same rows out either way; nothing in the pipeline picks between
+   * them on its own — this is how `/compare`'s join mode forces each side
+   * explicitly, the same way `aggregateStrategy` above does for `GROUP BY`
+   * (plan.md §22.2).
    */
-  joinStrategy?: 'nested-loop' | 'hash' | 'sort-merge';
+  joinStrategy?: JoinAlgorithm;
+  /**
+   * How a table's indexes are built before the query runs (plan.md §25.4 B3d). `incremental` (the default, when
+   * absent) inserts the entries one at a time in row order, splitting nodes as they overflow — which, for keys arriving
+   * in order, leaves every left leaf about three-quarters full at the default fan-out. `bulk` sorts the entries and packs the leaves left to right up to
+   * `fillFactor` (a fraction from 0.5 to 1, default 1), building each level from the one below with no splits: a
+   * smaller, often shallower tree, so a lookup reads fewer pages. The answers are identical either way.
+   */
+  indexBuild?: IndexBuildOptions;
 }
 
 export const DEFAULT_ENGINE_OPTIONS: EngineOptions = {
@@ -268,7 +466,9 @@ export interface RunResult {
   events: StepEvent[];
   /**
    * `SELECT`'s result rows; the rows a `DELETE` removed, an `INSERT` added,
-   * or an `UPDATE` changed (after values), for `write`.
+   * or an `UPDATE` changed (after values), for `write`. `ANALYZE`'s own
+   * statistics, one row per column, formatted to read — see `analyze`
+   * for the structured version a caller actually persists.
    */
   rows: Row[];
   error?: QueryError;
@@ -279,6 +479,12 @@ export interface RunResult {
    * a write has any effect beyond its own trace.
    */
   write?: WriteOutcome;
+  /**
+   * Present only for a successful `ANALYZE` (plan.md §25.4 C1). The caller persists `stats` onto the table the
+   * same way `write.rows` replaces its rows — nothing in the engine holds state between calls, so an `ANALYZE`
+   * a caller never re-attaches has no effect beyond its own trace and `rows`' one-time printout.
+   */
+  analyze?: { table: string; stats: TableStats };
 }
 
 export type WriteOutcome =

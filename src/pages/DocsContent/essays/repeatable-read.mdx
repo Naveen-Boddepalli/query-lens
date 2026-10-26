@@ -1,0 +1,77 @@
+---
+title: REPEATABLE READ means two different things
+description: Two engines in QueryLens both offer REPEATABLE READ, and the anomalies each lets through are opposites — computed from the isolation matrix, and held by a test.
+---
+
+Ask for `REPEATABLE READ` and you are promised that a row you read once will read the same again. What you are *not*
+promised, by the name, is which other things can still go wrong. That depends on how the engine keeps the promise, and
+there are two common ways. QueryLens has both, and at `REPEATABLE READ` they let through opposite anomalies.
+
+## Two ways to keep one promise
+
+**Locks.** The engine takes a shared lock on every row a transaction reads and holds it to the end. Nobody can change
+a row you have read, so reading it again gives the same answer. But a lock covers a row that *exists*. A row that is
+inserted afterwards was not there to be locked, so a query that read "every account over 50" can find one more the
+second time. That is a *phantom*.
+
+**Snapshots.** The engine takes no read locks. A transaction reads from one moment, so nothing that commits after it
+began can show up in it, new rows included. But two transactions that each read the same rows from the same moment,
+and each write a *different* row on the strength of what they read, do not touch each other's rows, so neither is
+stopped. That is *write skew*.
+
+## What the matrix says
+
+The [isolation matrix](/tools/isolation) runs each of the ten anomalies as a schedule against each engine at each level.
+At `REPEATABLE READ` the cells that differ are these; each links to the run behind it.
+
+| Anomaly | Two-phase locking | Versions and snapshots |
+| --- | --- | --- |
+| [Phantom](/tools/isolation?c=locks.PMP.repeatable-read) (predicate-many-preceders) | happens | [prevented](/tools/isolation?c=mvcc.PMP.repeatable-read) |
+| [Write skew](/tools/isolation?c=locks.G2-item.repeatable-read) (G2-item) | prevented | [happens](/tools/isolation?c=mvcc.G2-item.repeatable-read) |
+| Lost update | prevented | prevented |
+| Read skew | prevented | prevented |
+| Anti-dependency cycle (G2) | happens | happens |
+
+At `SERIALIZABLE` neither engine lets any of the ten through. Each gets there by a different road: the locking engine
+adds a lock on the *condition* a read used, so an insert that would match it has to wait; the snapshot engine checks
+at `COMMIT` that nothing the transaction read has changed since its snapshot, and refuses it if it has.
+
+## Write skew, run both ways
+
+The same eight steps, two sessions, two rows: each reads both rows, then each sets a *different* one to zero. If both
+commit, the table has lost something neither session would have done alone.
+
+- [Under row locks at `REPEATABLE READ`](/tools/schedule?s=%5B%5B%22A%22%2C%22BEGIN%22%5D%2C%5B%22B%22%2C%22BEGIN%22%5D%2C%5B%22A%22%2C%22SELECT+%2A+FROM+accounts+WHERE+id+%3C%3D+2%22%5D%2C%5B%22B%22%2C%22SELECT+%2A+FROM+accounts+WHERE+id+%3C%3D+2%22%5D%2C%5B%22A%22%2C%22UPDATE+accounts+SET+balance+%3D+0+WHERE+id+%3D+1%22%5D%2C%5B%22B%22%2C%22UPDATE+accounts+SET+balance+%3D+0+WHERE+id+%3D+2%22%5D%2C%5B%22A%22%2C%22COMMIT%22%5D%2C%5B%22B%22%2C%22COMMIT%22%5D%5D&l=row&n=20&i=repeatable-read): each session holds a read lock on both
+  rows, so each one's update waits for the other's lock. That is a deadlock, and the youngest session is rolled back.
+  One zero is written. The table ends with `0` and `100`.
+- [Under snapshots at `REPEATABLE READ`](/tools/schedule?s=%5B%5B%22A%22%2C%22BEGIN%22%5D%2C%5B%22B%22%2C%22BEGIN%22%5D%2C%5B%22A%22%2C%22SELECT+%2A+FROM+accounts+WHERE+id+%3C%3D+2%22%5D%2C%5B%22B%22%2C%22SELECT+%2A+FROM+accounts+WHERE+id+%3C%3D+2%22%5D%2C%5B%22A%22%2C%22UPDATE+accounts+SET+balance+%3D+0+WHERE+id+%3D+1%22%5D%2C%5B%22B%22%2C%22UPDATE+accounts+SET+balance+%3D+0+WHERE+id+%3D+2%22%5D%2C%5B%22A%22%2C%22COMMIT%22%5D%2C%5B%22B%22%2C%22COMMIT%22%5D%5D&l=mvcc&n=20&i=repeatable-read): nobody waits, nobody conflicts, and both
+  commit. The table ends with `0` and `0`.
+- [Under snapshots at `SERIALIZABLE`](/tools/schedule?s=%5B%5B%22A%22%2C%22BEGIN%22%5D%2C%5B%22B%22%2C%22BEGIN%22%5D%2C%5B%22A%22%2C%22SELECT+%2A+FROM+accounts+WHERE+id+%3C%3D+2%22%5D%2C%5B%22B%22%2C%22SELECT+%2A+FROM+accounts+WHERE+id+%3C%3D+2%22%5D%2C%5B%22A%22%2C%22UPDATE+accounts+SET+balance+%3D+0+WHERE+id+%3D+1%22%5D%2C%5B%22B%22%2C%22UPDATE+accounts+SET+balance+%3D+0+WHERE+id+%3D+2%22%5D%2C%5B%22A%22%2C%22COMMIT%22%5D%2C%5B%22B%22%2C%22COMMIT%22%5D%5D&l=mvcc&n=20&i=serializable): the second commit is refused, because
+  something it read has changed. The table ends with `0` and `100`.
+
+## And the phantom, run both ways
+
+One session reads the accounts over 50 twice; another inserts an account of 100 in between.
+
+- [Under row locks at `REPEATABLE READ`](/tools/schedule?s=%5B%5B%22A%22%2C%22BEGIN%22%5D%2C%5B%22A%22%2C%22SELECT+%2A+FROM+accounts+WHERE+balance+%3E+50%22%5D%2C%5B%22B%22%2C%22INSERT+INTO+accounts+VALUES+%2830%2C+%27zed%27%2C+100%29%22%5D%2C%5B%22A%22%2C%22SELECT+%2A+FROM+accounts+WHERE+balance+%3E+50%22%5D%2C%5B%22A%22%2C%22COMMIT%22%5D%5D&l=row&n=20&i=repeatable-read): the insert goes through, and the second
+  read has one row more.
+- [Under snapshots at `REPEATABLE READ`](/tools/schedule?s=%5B%5B%22A%22%2C%22BEGIN%22%5D%2C%5B%22A%22%2C%22SELECT+%2A+FROM+accounts+WHERE+balance+%3E+50%22%5D%2C%5B%22B%22%2C%22INSERT+INTO+accounts+VALUES+%2830%2C+%27zed%27%2C+100%29%22%5D%2C%5B%22A%22%2C%22SELECT+%2A+FROM+accounts+WHERE+balance+%3E+50%22%5D%2C%5B%22A%22%2C%22COMMIT%22%5D%5D&l=mvcc&n=20&i=repeatable-read): the second read is the same as the first.
+
+## What this does not show
+
+- **These are two small engines, not two products.** PostgreSQL's `REPEATABLE READ` is snapshot isolation, and SQL
+  Server's is locking, which is why the same name behaves differently between them. MySQL's InnoDB is a hybrid of the
+  two — a snapshot for plain reads, the latest committed row for writes — and the matrix has a third column for it,
+  built from the two engines level by level; MySQL published only some of its cells, and the others carry no claim.
+- **The standard's wording is why this happens.** SQL defines each level by which anomalies it must not allow, and
+  names only a few. An engine may prevent more than a level requires, and different engines prevent different extras.
+- **The `SERIALIZABLE` of the snapshot engine is not PostgreSQL's.** It checks everything a transaction read, which
+  refuses more than it needs to; PostgreSQL tracks only the read-write dependencies that can form a cycle.
+- **Ten anomalies are a sample.** The suite is [Hermitage](https://github.com/ept/hermitage), and its authors list
+  more than QueryLens runs.
+
+## Try this
+
+- Open the [isolation matrix](/tools/isolation) and read down the `REPEATABLE READ` column for each engine.
+- Build a schedule of your own in the [transaction schedule tool](/tools/schedule), or run one under every protocol at
+  once in the [concurrency compare](/tools/concurrency).

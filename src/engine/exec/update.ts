@@ -16,15 +16,20 @@
  * while applying) that `DELETE` and `INSERT` already use.
  */
 
-import type { Row, SqlValue } from '../types.ts';
+import type { Row } from '../types.ts';
 import type { Expr, UpdateAssignment } from '../parser/index.ts';
 import type { Plan } from '../planner/index.ts';
 import type { ExecContext } from './operators.ts';
-import { passes } from './evaluate.ts';
-import { deleteKey, emitIndexLookup, height, insert } from '../index/index.ts';
+import { enforceUniqueOnUpdate } from './unique.ts';
+import { indexLookupMatches, indexRangeMatches } from './writeScan.ts';
+import type { Match, WriteVerb } from './writeScan.ts';
+import { evaluateValue, passes } from './evaluate.ts';
+import { deleteKey, entryFor, height, indexNameOf, indexSpecsOf, insert, keyText, keyValuesOf } from '../index/index.ts';
 import type { RowPointer } from '../index/index.ts';
 import { summarizeSteps } from './delete.ts';
 import { summarizeInsert } from './insert.ts';
+
+const UPDATE: WriteVerb = { name: 'UPDATE', does: 'modify' };
 
 export interface UpdateOutcome {
   /** The matched rows before the update — value-identical to their entry in `table.rows`. */
@@ -33,57 +38,61 @@ export interface UpdateOutcome {
   after: Row[];
 }
 
-interface Match {
-  row: Row;
-  pointer: RowPointer;
-}
 
-/** `row` with every SET assignment applied — a new object; `row` itself is untouched. */
+/**
+ * `row` with every SET assignment applied — a new object; `row` itself is
+ * untouched. Every value is evaluated against the row *as it was*, so
+ * `SET a = b, b = a` swaps the two rather than copying one over the other
+ * (standard SQL, and what plan.md §25.4 B1b's `SET n = n + 1` relies on).
+ */
 function applyAssignments(row: Row, assignments: UpdateAssignment[]): Row {
   const next: Row = { ...row };
-  for (const a of assignments) next[a.column] = a.value.value;
+  for (const a of assignments) next[a.column] = evaluateValue(a.value, row);
   return next;
 }
 
 /**
- * Moves `pointer`'s key from `beforeKey` to `afterKey` in each index whose
- * own column actually changed. NULLs are never indexed, so a key on either
- * side that is NULL just drops the delete or the insert half. A table can
- * have several indexes; an assignment only reindexes the ones whose column
- * it touched, one sentence each.
+ * Moves the row's entry from its old values to its new ones in each index whose own columns actually changed.
+ * A NULL leading column is never indexed, so on either side it just drops the delete or the insert half. A table
+ * can have several indexes; an assignment only reindexes the ones whose columns it touched, one sentence each.
  */
 function reindexRow(ctx: ExecContext, before: Row, after: Row, pointer: RowPointer): string | null {
   const sentences: string[] = [];
 
-  for (const column of ctx.table.indexedColumns ?? []) {
-    const tree = ctx.trees[column];
+  for (const spec of indexSpecsOf(ctx.table)) {
+    const name = indexNameOf(spec.columns);
+    const tree = ctx.trees[name];
     if (!tree) continue;
-    const beforeKey: SqlValue = before[column] ?? null;
-    const afterKey: SqlValue = after[column] ?? null;
-    if (beforeKey === afterKey) continue; // this index's own column did not change
+    const beforeValues = keyValuesOf(before, spec.columns);
+    const afterValues = keyValuesOf(after, spec.columns);
+    if (beforeValues.every((v, i) => v === afterValues[i])) continue; // none of this index's columns changed
 
     const parts: string[] = [];
 
-    if (beforeKey !== null) {
-      const removed = deleteKey(tree, beforeKey);
+    if (beforeValues[0] !== null) {
+      const { key } = entryFor(spec.columns, before, pointer, ctx.table.clusteredKey);
+      const removed = deleteKey(tree, key);
       if (removed.found) {
-        parts.push(`drops key ${JSON.stringify(beforeKey)} — ${summarizeSteps(removed.steps)}`);
+        parts.push(`drops key ${keyText(beforeValues)} — ${summarizeSteps(removed.steps)}`);
       }
     }
 
-    if (afterKey !== null) {
+    if (afterValues[0] !== null) {
+      // Its old entry is out, so what remains is everyone else's: a UNIQUE index must not already hold the new key.
+      enforceUniqueOnUpdate(ctx, spec, afterValues);
       const nodesBefore = Object.keys(tree.nodes).length;
       const heightBefore = height(tree);
-      insert(tree, afterKey, pointer);
+      const { key, pointer: stored } = entryFor(spec.columns, after, pointer, ctx.table.clusteredKey);
+      insert(tree, key, stored);
       const nodesAfter = Object.keys(tree.nodes).length;
       const heightAfter = height(tree);
       parts.push(
-        `adds key ${JSON.stringify(afterKey)} — ${summarizeInsert(nodesBefore, nodesAfter, heightBefore, heightAfter)}`,
+        `adds key ${keyText(afterValues)} — ${summarizeInsert(nodesBefore, nodesAfter, heightBefore, heightAfter)}`,
       );
     }
 
     if (parts.length > 0) {
-      sentences.push(`Because \`${column}\` changed, its B+Tree ${parts.join(', then ')}.`);
+      sentences.push(`Because \`${name}\` changed, its B+Tree ${parts.join(', then ')}.`);
     }
   }
 
@@ -124,49 +133,13 @@ function scanForMatches(ctx: ExecContext, filter: Expr | undefined): Match[] {
   return matched;
 }
 
-/** Finds the one row an equality lookup points at, if it passes any residual predicate. */
-function indexScanForMatch(ctx: ExecContext, plan: Extract<Plan, { op: 'IndexScan' }>): Match[] {
-  const emit = ctx.emit;
-  const tree = ctx.trees[plan.column];
-  if (!tree) return [];
-
-  const { pointer } = emitIndexLookup(emit, tree, plan.key, ctx.pool, plan.column, ctx.locks);
-  if (!pointer) return [];
-
-  const page = ctx.heap.pages.find((p) => p.pageId === pointer.pageId);
-  const row = page?.rows[pointer.slot];
-  if (!row) return [];
-
-  if (!passes(plan.residual, row)) {
-    emit('The row the index found fails the rest of the predicate, so UPDATE leaves it alone.', {
-      stage: 'execute',
-      op: 'IndexScan',
-      rowsProduced: 0,
-    });
-    return [];
-  }
-
-  ctx.locks.acquire(
-    pointer.pageId,
-    'exclusive',
-    `Upgrade to an exclusive lock on heap page ${String(pointer.pageId)} — UPDATE is about to modify the row it holds.`,
-  );
-  ctx.pool.markDirty(pointer.pageId);
-  emit('IndexScan finds the one row UPDATE will modify.', {
-    stage: 'execute',
-    op: 'IndexScan',
-    rowsProduced: 1,
-  });
-  ctx.locks.release(pointer.pageId, 'exclusive');
-
-  return [{ row, pointer }];
-}
-
 export function executeUpdate(plan: Plan, assignments: UpdateAssignment[], ctx: ExecContext): UpdateOutcome {
   const matches =
     plan.op === 'IndexScan'
-      ? indexScanForMatch(ctx, plan)
-      : scanForMatches(ctx, plan.op === 'SeqScan' ? plan.filter : undefined);
+      ? indexLookupMatches(ctx, plan, UPDATE)
+      : plan.op === 'IndexRangeScan'
+        ? indexRangeMatches(ctx, plan, UPDATE)
+        : scanForMatches(ctx, plan.op === 'SeqScan' ? plan.filter : undefined);
 
   const before: Row[] = [];
   const after: Row[] = [];

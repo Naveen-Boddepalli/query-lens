@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   createTraceProjector,
   DEFAULT_ENGINE_OPTIONS,
-  parseReferenceString,
+  parseReferenceScans,
   randomReferenceString,
   REPLACEMENT_POLICY_LABELS,
   REPLACEMENT_POLICY_NAMES,
@@ -15,6 +15,7 @@ import { PlaybackControls } from '../../ui/PlaybackControls.tsx';
 import { usePlayback, usePlaybackShortcuts } from '../../ui/usePlayback.ts';
 import { PageHeader } from '../../ui/PageHeader.tsx';
 import { btnPrimary, btnSecondary, inputField, panelSurface } from '../../ui/primitives.ts';
+import { useAddressBarQuery } from '../../ui/addressBar.ts';
 
 /**
  * The OS-course standalone (plan.md §20.4, §21.3): the buffer pool with no
@@ -33,12 +34,16 @@ import { btnPrimary, btnSecondary, inputField, panelSurface } from '../../ui/pri
 const DEFAULT_REF = '0 1 2 3 4 0 1 2 3 4';
 const MIN_FRAMES = 2;
 const MAX_FRAMES = 8;
+const MAX_READ_AHEAD = 4;
+const MAX_SCAN_RING = 4;
 
 function readInitial() {
   const params = new URLSearchParams(typeof location === 'undefined' ? '' : location.search);
   const ref = params.get('ref');
   const framesRaw = Number(params.get('frames'));
   const policyRaw = params.get('policy');
+  const readAheadRaw = Number(params.get('ra'));
+  const scanRingRaw = Number(params.get('sr'));
   const policy = (REPLACEMENT_POLICY_NAMES as readonly string[]).includes(policyRaw ?? '')
     ? (policyRaw as ReplacementPolicyName)
     : 'lru';
@@ -49,6 +54,8 @@ function readInitial() {
         ? framesRaw
         : 4,
     policy,
+    readAhead: Number.isInteger(readAheadRaw) && readAheadRaw >= 0 && readAheadRaw <= MAX_READ_AHEAD ? readAheadRaw : 0,
+    scanRing: Number.isInteger(scanRingRaw) && scanRingRaw >= 0 && scanRingRaw <= MAX_SCAN_RING ? scanRingRaw : 0,
   };
 }
 
@@ -58,14 +65,17 @@ export function BufferPoolToolPage() {
   const [refInput, setRefInput] = useState(INITIAL.refInput);
   const [frames, setFrames] = useState(INITIAL.frames);
   const [policy, setPolicy] = useState<ReplacementPolicyName>(INITIAL.policy);
+  const [readAhead, setReadAhead] = useState(INITIAL.readAhead);
+  const [scanRing, setScanRing] = useState(INITIAL.scanRing);
 
   const options = useMemo(
-    () => ({ ...DEFAULT_ENGINE_OPTIONS, bufferFrames: frames, policy }),
-    [frames, policy],
+    () => ({ ...DEFAULT_ENGINE_OPTIONS, bufferFrames: frames, policy, readAhead, scanRing }),
+    [frames, policy, readAhead, scanRing],
   );
 
-  const [refs, setRefs] = useState<number[]>(() => parseReferenceString(INITIAL.refInput));
-  const result = useMemo(() => runBufferTrace(refs, options), [refs, options]);
+  const [parsed, setParsed] = useState(() => parseReferenceScans(INITIAL.refInput));
+  const { refs, scans } = parsed;
+  const result = useMemo(() => runBufferTrace(refs, options, scans), [refs, scans, options]);
   const projector = useMemo(() => createTraceProjector(result.events, options), [result, options]);
   const dwells = useMemo(() => result.events.map((e) => e.dwell ?? 1), [result]);
 
@@ -74,27 +84,26 @@ export function BufferPoolToolPage() {
 
   const state = projector.at(playback.step);
 
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      const params = new URLSearchParams();
-      params.set('ref', refInput);
-      params.set('frames', String(frames));
-      params.set('policy', policy);
-      const next = `${location.pathname}?${params.toString()}`;
-      if (next !== `${location.pathname}${location.search}`) history.replaceState(null, '', next);
-    }, 250);
-    return () => { window.clearTimeout(timer); };
-  }, [refInput, frames, policy]);
+  const shareQuery = useMemo(() => {
+    const params = new URLSearchParams();
+    params.set('ref', refInput);
+    params.set('frames', String(frames));
+    params.set('policy', policy);
+    if (readAhead > 0) params.set('ra', String(readAhead));
+    if (scanRing > 0) params.set('sr', String(scanRing));
+    return params.toString();
+  }, [refInput, frames, policy, readAhead, scanRing]);
+  useAddressBarQuery(shareQuery);
 
   function run() {
-    setRefs(parseReferenceString(refInput));
+    setParsed(parseReferenceScans(refInput));
     playback.reset();
   }
 
   function generate() {
     const generated = randomReferenceString(20, Math.max(frames + 2, 6));
     setRefInput(generated.join(' '));
-    setRefs(generated);
+    setParsed({ refs: generated, scans: [] });
     playback.reset();
   }
 
@@ -110,13 +119,14 @@ export function BufferPoolToolPage() {
         <Link to="/playground" className="underline underline-offset-2 hover:text-ink">
           Playground
         </Link>
-        , driven directly with five policies: LRU, clock sweep, FIFO, second-chance, and the optimal bound.
+        , driven directly — with every replacement policy the engine has, and the read-ahead and
+        scan-ring options the Playground does not expose.
       </PageHeader>
 
       {/* Control Toolbar */}
       <div className="ql-sheen flex flex-wrap items-end gap-3 rounded-xl border border-edge bg-surface-2/80 p-4 shadow-neu-rest backdrop-blur-md">
         <label className="flex flex-1 min-w-64 flex-col gap-1.5 text-label text-ink-dim">
-          <span>Reference string <span className="text-ink-dim/60 font-mono text-[0.75rem]">(space or comma separated)</span></span>
+          <span>Reference string <span className="text-ink-dim/60 font-mono text-[0.75rem]">(page numbers, space/comma separated, or ranges like 10-50)</span></span>
           <input
             type="text"
             value={refInput}
@@ -153,6 +163,34 @@ export function BufferPoolToolPage() {
                 {REPLACEMENT_POLICY_LABELS[name]}
               </option>
             ))}
+          </select>
+        </label>
+
+        <label className="flex flex-col gap-1.5 text-label text-ink-dim">
+          <span>Read-ahead</span>
+          <select
+            value={readAhead}
+            onChange={(e) => { setReadAhead(Number(e.target.value)); }}
+            className={inputField}
+          >
+            <option value={0}>off</option>
+            <option value={1}>1 page</option>
+            <option value={2}>2 pages</option>
+            <option value={4}>4 pages</option>
+          </select>
+        </label>
+
+        <label className="flex flex-col gap-1.5 text-label text-ink-dim">
+          <span>Scan ring</span>
+          <select
+            value={scanRing}
+            onChange={(e) => { setScanRing(Number(e.target.value)); }}
+            className={inputField}
+          >
+            <option value={0}>off</option>
+            <option value={2}>2 frames</option>
+            <option value={3}>3 frames</option>
+            <option value={4}>4 frames</option>
           </select>
         </label>
 

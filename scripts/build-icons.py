@@ -13,6 +13,8 @@ once and the script asserts it still matches the SVG's numbers.
 
 Outputs:
   public/apple-touch-icon.png   180×180, no alpha, square (iOS masks corners)
+  public/icon-192.png           192×192 and 512×512: the manifest's install icons (plan.md §H1)
+  public/icon-512.png
   build/icon-16.png             a legibility check, not shipped
 
 Requires Pillow, which is also what the check renders through. No rasteriser
@@ -150,6 +152,12 @@ def main() -> None:
     touch = PUBLIC / "apple-touch-icon.png"
     render(180, rounded=False).save(touch, optimize=True)
     print(f"  ✓ {touch.relative_to(ROOT)}  {touch.stat().st_size / 1024:.1f} kB")
+
+    # Chrome asks for both sizes before it will offer an install; the manifest names them.
+    for size in (192, 512):
+        out = PUBLIC / f"icon-{size}.png"
+        render(size, rounded=False).save(out, optimize=True)
+        print(f"  ✓ {out.relative_to(ROOT)}  {out.stat().st_size / 1024:.1f} kB")
 
     # plan.md §16.2 item 8 asks for a check that the mark still reads at 16px —
     # "most marks do not". Written where it can be looked at, not shipped.

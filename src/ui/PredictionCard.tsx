@@ -1,10 +1,12 @@
 import { useState } from 'react';
 import type { PredictionPrompt } from '../engine/index.ts';
+import { CONFIDENCE_LABELS, CONFIDENCE_LEVELS } from './progress.ts';
+import type { Confidence } from './progress.ts';
 
 export interface PredictionCardProps {
   prompt: PredictionPrompt;
   answer: string | undefined;
-  onAnswer: (optionId: string) => void;
+  onAnswer: (optionId: string, confidence: Confidence | undefined) => void;
   onSkip: () => void;
   canSkip?: boolean;
 }
@@ -26,6 +28,7 @@ export function PredictionCard({
   canSkip = true,
 }: PredictionCardProps) {
   const [hovered, setHovered] = useState<string | null>(null);
+  const [confidence, setConfidence] = useState<Confidence | undefined>(undefined);
   const answered = answer !== undefined;
   const correct = answer === prompt.correctOptionId;
 
@@ -52,6 +55,28 @@ export function PredictionCard({
 
       <p className="text-body font-medium leading-relaxed text-ink">{prompt.question}</p>
 
+      {!answered && (
+        <div role="group" aria-label="How sure are you?" className="mt-3 flex flex-wrap items-center gap-1.5">
+          <span className="text-label text-ink-dim">How sure?</span>
+          {CONFIDENCE_LEVELS.map((level) => (
+            <button
+              key={level}
+              type="button"
+              aria-pressed={confidence === level}
+              onClick={() => { setConfidence(confidence === level ? undefined : level); }}
+              className={[
+                'rounded-full border px-2.5 py-0.5 text-label transition',
+                confidence === level
+                  ? 'border-accent bg-accent-soft text-accent'
+                  : 'border-edge text-ink-dim hover:border-accent/70 hover:text-ink',
+              ].join(' ')}
+            >
+              {CONFIDENCE_LABELS[level]}
+            </button>
+          ))}
+        </div>
+      )}
+
       <ul className="mt-3.5 space-y-1.5">
         {prompt.options.map((option) => {
           const isCorrect = option.id === prompt.correctOptionId;
@@ -71,9 +96,9 @@ export function PredictionCard({
               <button
                 type="button"
                 disabled={answered}
-                onClick={() => onAnswer(option.id)}
-                onMouseEnter={() => setHovered(option.id)}
-                onMouseLeave={() => setHovered(null)}
+                onClick={() => { onAnswer(option.id, confidence); }}
+                onMouseEnter={() => { setHovered(option.id); }}
+                onMouseLeave={() => { setHovered(null); }}
                 className={`flex w-full items-center justify-between gap-3 rounded-lg border px-2.5 py-1.5 text-left font-mono text-label transition select-none shadow-e1 ${tone} ${
                   !answered && hovered === option.id ? 'bg-surface-4' : ''
                 } ${answered ? 'cursor-default' : 'cursor-pointer active:scale-[0.99] active:shadow-neu-pressed'}`}
@@ -100,6 +125,7 @@ export function PredictionCard({
         <div className={`mt-3 space-y-1.5 p-3 ${card}`}>
           <p className={`text-label font-semibold ${correct ? 'text-hit' : 'text-evict'}`}>
             {correct ? 'Right.' : 'Not quite.'}
+            {confidence && <span className="font-normal text-ink-dim"> You were {CONFIDENCE_LABELS[confidence].toLowerCase()}.</span>}
           </p>
           <p className="text-label leading-relaxed text-ink-dim">{prompt.explanation}</p>
           <p className="text-label text-ink-dim/80">

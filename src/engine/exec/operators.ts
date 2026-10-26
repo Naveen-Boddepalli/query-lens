@@ -11,13 +11,15 @@
 import type { Emit } from '../trace.ts';
 import type { EngineOptions, Row, SqlValue, Table } from '../types.ts';
 import type { Expr } from '../parser/index.ts';
-import type { AggregateSpec, Plan, ProjectList } from '../planner/index.ts';
-import type { BufferPool, Heap } from '../storage/index.ts';
+import { lookupKeysOf } from '../planner/index.ts';
+import type { AggregateSpec, Plan, ProjectList, RangeBound } from '../planner/index.ts';
+import type { BufferPool, Heap, ScanRing } from '../storage/index.ts';
+import { scanUsesRing } from '../storage/index.ts';
 import type { LockManager } from '../locks/index.ts';
-import type { BPlusTree } from '../index/index.ts';
-import { emitIndexLookup, emitRangeStart, nextInRange, pageCountFor } from '../index/index.ts';
-import { compare, equalityKeyOf, passes } from './evaluate.ts';
-import { externalMergeSort, sortTempPageCount } from './sort.ts';
+import type { BPlusTree, RowPointer } from '../index/index.ts';
+import { columnsOfIndex, emitIndexLookup, emitRangeStart, nextInRange, pageCountFor, resolveClustered } from '../index/index.ts';
+import { compare, equalityKeyOf, evaluateValue, passes } from './evaluate.ts';
+import { externalMergeSort } from './sort.ts';
 
 export interface Operator {
   readonly name: string;
@@ -37,23 +39,41 @@ export interface ExecContext {
   table: Table;
   options: EngineOptions;
   /**
-   * A `Join`'s right-hand table (plan.md §22.2) — its own heap, page ids
-   * numbered right after `heap`'s so both share the one real buffer pool.
-   * `trees` is always empty here: none of the three join algorithms consults
-   * either side's own index yet (an index-aware join is a later strategy),
-   * so the right side's indexes, if it has any, are never built at all.
-   * `undefined` for every query without a `Join`, which is every operator
-   * here except `join()` itself.
+   * Every table a `Join` in this query's chain introduces (plan.md §22.2, plural since §25.4 C3 slice b), keyed by
+   * table name — each one's own heap, page ids numbered right after whatever came before, so all of them share the
+   * one real buffer pool. `trees` is empty unless that table's own join step runs `index-nested-loop` (plan.md
+   * §25.4 B4); no algorithm ever consults any other index a joined table might have. A `Join` node looks up its own
+   * `rightTable` here to find its partner — `undefined` for every query without a `JOIN` at all, which is every
+   * operator here except the four join operators themselves.
    */
-  joinRight?: { table: Table; heap: Heap; trees: Record<string, BPlusTree> };
+  joinPartners?: Record<string, { table: Table; heap: Heap; trees: Record<string, BPlusTree> }>;
+  /**
+   * Each `sort-merge` `Join` in the chain's own two spill-block page ids (plan.md §25.4 C3 slice b), keyed by that
+   * `Join`'s own plan node identity — `runQuery.ts` computes these up front, in chain order, since a later join's
+   * own worst-case row count depends on every earlier one's. `undefined` unless the plan has at least one.
+   */
+  sortMergeBases?: Map<Plan, { leftBase: number; rightBase: number }>;
+  /**
+   * First page id of each sort's own spill block — a `SortAggregate`'s, ORDER BY's `Sort`'s (plan.md §26 Feature 1)
+   * and a `SortDistinct`'s (plan.md §25.4 B2) — laid out one after another past every heap, index and sort-merge
+   * block, so two sorts never share scratch pages. Set by `runQuery.ts`, which sized the buffer pool for them.
+   */
+  aggregateSortBase?: number;
+  sortBase?: number;
+  distinctBase?: number;
 }
 
-/** Counts rows an operator has produced, so `execute` events stay cumulative. */
-function counter(ctx: ExecContext, name: string) {
+/**
+ * Counts rows an operator has produced, so `execute` events stay cumulative. `table` disambiguates this specific
+ * node from another one with the same `name` elsewhere in the plan — a multi-join chain's several `SeqScan`s or
+ * `Join`s — so EXPLAIN ANALYZE's actual-row lookup (`explain.ts`) does not mix up two nodes that share an `op`;
+ * see `StepEventBody`'s own doc comment. Omitted for operators that can only appear once per query.
+ */
+function counter(ctx: ExecContext, name: string, table?: string) {
   let produced = 0;
   return (label: string) => {
     produced += 1;
-    ctx.emit(label, { stage: 'execute', op: name, rowsProduced: produced });
+    ctx.emit(label, { stage: 'execute', op: name, rowsProduced: produced, ...(table === undefined ? {} : { table }) });
   };
 }
 
@@ -65,7 +85,11 @@ function seqScan(plan: Extract<Plan, { op: 'SeqScan' }>, ctx: ExecContext): Oper
   let pinnedFrame: number | null = null;
   let lockedPage: number | null = null;
   let skipped = 0;
-  const produced = counter(ctx, 'SeqScan');
+  // The scan's own claim on the pool (plan.md §25.4 F7). Made on the first `open` and kept across a nested-loop join's
+  // rescans, as PostgreSQL keeps its strategy across a rescan, so every pass reuses the same few frames.
+  let ring: ScanRing | undefined;
+  const lastHeapPage = ctx.heap.pages[ctx.heap.pages.length - 1]?.pageId ?? -1;
+  const produced = counter(ctx, 'SeqScan', plan.table);
 
   function releasePage(): void {
     if (pinnedFrame !== null) {
@@ -83,6 +107,9 @@ function seqScan(plan: Extract<Plan, { op: 'SeqScan' }>, ctx: ExecContext): Oper
     open() {
       pageIndex = 0;
       rowIndex = 0;
+      if (ring === undefined && scanUsesRing(ctx.heap.pages.length, ctx.options)) {
+        ring = ctx.pool.beginScan(ctx.options.scanRing ?? 0);
+      }
     },
     next() {
       for (;;) {
@@ -100,7 +127,8 @@ function seqScan(plan: Extract<Plan, { op: 'SeqScan' }>, ctx: ExecContext): Oper
             `Take a shared lock on page ${String(page.pageId)} before reading its rows.`,
           );
           lockedPage = page.pageId;
-          const fetched = ctx.pool.fetch(page.pageId);
+          // The heap's pages end where this table's last page does: that is the scan's extent for read-ahead.
+          const fetched = ctx.pool.fetch(page.pageId, ring, lastHeapPage + 1);
           if (!fetched) return null;
           // Held while its rows are read; released when we move on. Only an
           // unpinned frame can be evicted.
@@ -128,50 +156,122 @@ function seqScan(plan: Extract<Plan, { op: 'SeqScan' }>, ctx: ExecContext): Oper
         return row;
       }
     },
-    close: releasePage,
+    close() {
+      releasePage();
+      if (ring) {
+        ctx.pool.endScan(ring);
+        ring = undefined;
+      }
+    },
   };
 }
 
+/**
+ * Follows one index entry to its row's heap page: a shared lock, a pool fetch, a release — the real price of an
+ * index scan, paid once per match. Exported for the write paths, which read every page they may modify.
+ */
+export function fetchHeapPage(ctx: ExecContext, pointer: RowPointer): void {
+  ctx.locks.acquire(
+    pointer.pageId,
+    'shared',
+    `Lock heap page ${String(pointer.pageId)}, where the matching row lives.`,
+  );
+  const fetched = ctx.pool.fetch(pointer.pageId);
+  if (fetched) ctx.pool.unpin(fetched.frameId);
+  ctx.locks.release(pointer.pageId, 'shared');
+}
+
+/**
+ * Does `row` satisfy the range `plan` scans? The walk already stays inside it, so this is a second, independent
+ * check on the row itself — with `compare`'s own rules, not the index's. It matters inside a composite index, where a
+ * NULL in the range column sorts among the entries but never satisfies a range, and it means a mixed-type
+ * comparison the index orders one way and SQL another can only ever lose a row, never invent one.
+ */
+export function rangeHolds(row: Row, plan: { column: string; prefix?: SqlValue[]; low?: RangeBound; high?: RangeBound }): boolean {
+  const column = columnsOfIndex(plan.column)[plan.prefix?.length ?? 0];
+  if (column === undefined) return true;
+  const value = row[column] ?? null;
+  if (plan.low && compare(plan.low.inclusive ? '>=' : '>', value, plan.low.value) !== true) return false;
+  if (plan.high && compare(plan.high.inclusive ? '<=' : '<', value, plan.high.value) !== true) return false;
+  return true;
+}
+
+/** The row an index entry points at, read out of `heap` — this query's own, unless a join's other side is meant. */
+export function rowAt(ctx: ExecContext, pointer: RowPointer, heap: Heap = ctx.heap): Row | null {
+  const page = heap.pages.find((p) => p.pageId === pointer.pageId);
+  return page?.rows[pointer.slot] ?? null;
+}
+
+/**
+ * An equality lookup. The index may hold several entries for the value (a
+ * non-unique column, plan.md §25.4 B3), so this pulls one row per entry: the
+ * lookup itself fetched the first match's heap page, and each later one is
+ * fetched here as its row is asked for.
+ */
 function indexScan(plan: Extract<Plan, { op: 'IndexScan' }>, ctx: ExecContext): Operator {
-  let row: Row | null = null;
-  let done = false;
-  const produced = counter(ctx, 'IndexScan');
+  let pointers: RowPointer[] = [];
+  let clusterKeys: (readonly SqlValue[])[] | undefined;
+  let clusteredTree: BPlusTree | undefined;
+  let clusteringColumn = '';
+  let cursor = 0;
+  const produced = counter(ctx, 'IndexScan', plan.table);
 
   return {
     name: 'IndexScan',
     open() {
       const tree = ctx.trees[plan.column];
       if (!tree) return;
-      const { pointer } = emitIndexLookup(
-        ctx.emit,
-        tree,
-        plan.key,
-        ctx.pool,
-        plan.column,
-        ctx.locks,
-      );
-      if (!pointer) return;
-
-      const page = ctx.heap.pages.find((p) => p.pageId === pointer.pageId);
-      row = page?.rows[pointer.slot] ?? null;
+      const outcome = emitIndexLookup(ctx.emit, tree, lookupKeysOf(plan), ctx.pool, plan.column, ctx.locks);
+      pointers = outcome.pointers;
+      clusterKeys = outcome.clusterKeys;
+      if (tree.clusteredVia !== undefined) {
+        clusteringColumn = tree.clusteredVia;
+        clusteredTree = ctx.trees[tree.clusteredVia];
+      }
     },
     next() {
-      if (done || !row) return null;
-      done = true;
+      for (;;) {
+        const at = cursor;
+        cursor += 1;
+        const pointer = pointers[at];
+        if (!pointer) return null;
 
-      if (!passes(plan.residual, row)) {
-        ctx.emit(
-          'The row the index found fails the rest of the predicate, so it is discarded. The index narrowed the search; it did not verify the whole condition.',
-          { stage: 'execute', op: 'IndexScan', rowsProduced: 0 },
+        // A clustered table's secondary entry has no address (plan.md §25.4 B3e): every match, the first included,
+        // costs a real second descent through the clustered index. Otherwise the lookup already fetched the first
+        // match's own heap page, and each later one is fetched here, lazily, as it is pulled.
+        let resolved: RowPointer | null = pointer;
+        const clusterKey = clusterKeys?.[at];
+        if (clusterKey && clusteredTree) {
+          resolved = resolveClustered(ctx.emit, clusteredTree, clusteringColumn, clusterKey, ctx.pool, ctx.locks);
+        } else if (at > 0) {
+          fetchHeapPage(ctx, pointer);
+        }
+        if (!resolved) continue;
+
+        const row = rowAt(ctx, resolved);
+        if (!row) continue;
+
+        if (!passes(plan.residual, row)) {
+          ctx.emit(
+            'The row the index found fails the rest of the predicate, so it is discarded. The index narrowed the search; it did not verify the whole condition.',
+            { stage: 'execute', op: 'IndexScan', rowsProduced: 0, table: plan.table },
+          );
+          continue;
+        }
+
+        produced(
+          pointers.length === 1
+            ? 'IndexScan returns the single row the lookup pointed at.'
+            : `IndexScan returns entry ${String(at + 1)} of the ${String(pointers.length)} the lookup found.`,
         );
-        return null;
+        return row;
       }
-
-      produced('IndexScan returns the single row the lookup pointed at.');
-      return row;
     },
     close() {
-      row = null;
+      pointers = [];
+      clusterKeys = undefined;
+      clusteredTree = undefined;
+      cursor = 0;
     },
   };
 }
@@ -181,37 +281,38 @@ function indexScan(plan: Extract<Plan, { op: 'IndexScan' }>, ctx: ExecContext): 
  * doesn't already hold — `column`'s own value, which is the key it was
  * found by. `emitIndexLookup`'s `touchHeap: false` skips the heap fetch and
  * lock entirely, so the row this returns is built from the key alone, never
- * from a page read (plan.md §22.2).
+ * from a page read (plan.md §22.2). One row per entry the index holds for the value.
  */
 function indexOnlyScan(plan: Extract<Plan, { op: 'IndexOnlyScan' }>, ctx: ExecContext): Operator {
-  let found = false;
-  let done = false;
-  const produced = counter(ctx, 'IndexOnlyScan');
+  let entries: SqlValue[][] = [];
+  let cursor = 0;
+  const produced = counter(ctx, 'IndexOnlyScan', plan.table);
+  const columns = columnsOfIndex(plan.column);
 
   return {
     name: 'IndexOnlyScan',
     open() {
       const tree = ctx.trees[plan.column];
       if (!tree) return;
-      const { pointer } = emitIndexLookup(
-        ctx.emit,
-        tree,
-        plan.key,
-        ctx.pool,
-        plan.column,
-        ctx.locks,
-        false,
-      );
-      found = pointer !== null;
+      entries = emitIndexLookup(ctx.emit, tree, lookupKeysOf(plan), ctx.pool, plan.column, ctx.locks, false).entries;
     },
     next() {
-      if (done || !found) return null;
-      done = true;
-      produced('IndexOnlyScan returns the key itself — the heap is never touched.');
-      return { [plan.column]: plan.key };
+      const entry = entries[cursor];
+      if (!entry) return null;
+      cursor += 1;
+      produced(
+        columns.length > 1
+          ? `IndexOnlyScan returns ${columns.map((c) => `\`${c}\``).join(' and ')} straight from the entry — the index covers the query, so the heap is never touched.`
+          : 'IndexOnlyScan returns the key itself — the heap is never touched.',
+      );
+      // The leaf's own values, one per indexed column — a row with exactly the columns the index holds.
+      const row: Row = {};
+      columns.forEach((column, i) => { row[column] = entry[i] ?? null; });
+      return row;
     },
     close() {
-      found = false;
+      entries = [];
+      cursor = 0;
     },
   };
 }
@@ -230,14 +331,14 @@ function indexRangeScan(plan: Extract<Plan, { op: 'IndexRangeScan' }>, ctx: Exec
   let leafId: string | null = null;
   let cursorIndex = 0;
   let started = false;
-  const produced = counter(ctx, 'IndexRangeScan');
+  const produced = counter(ctx, 'IndexRangeScan', plan.table);
 
   return {
     name: 'IndexRangeScan',
     open() {
       const tree = ctx.trees[plan.column];
       if (!tree) return;
-      const start = emitRangeStart(ctx.emit, tree, plan.column, plan.low, ctx.pool, ctx.locks);
+      const start = emitRangeStart(ctx.emit, tree, plan.column, plan.low, ctx.pool, ctx.locks, plan.prefix);
       leafId = start.leafId;
       cursorIndex = start.startIndex;
       started = true;
@@ -249,7 +350,7 @@ function indexRangeScan(plan: Extract<Plan, { op: 'IndexRangeScan' }>, ctx: Exec
 
       for (;;) {
         if (leafId === null) return null;
-        const found = nextInRange(ctx.emit, tree, leafId, cursorIndex, plan.high);
+        const found = nextInRange(ctx.emit, tree, leafId, cursorIndex, plan.high, { pool: ctx.pool, locks: ctx.locks }, plan.prefix);
         if (!found) {
           leafId = null;
           return null;
@@ -257,20 +358,11 @@ function indexRangeScan(plan: Extract<Plan, { op: 'IndexRangeScan' }>, ctx: Exec
         leafId = found.leafId;
         cursorIndex = found.nextIndex;
 
-        ctx.locks.acquire(
-          found.pointer.pageId,
-          'shared',
-          `Lock heap page ${String(found.pointer.pageId)}, where the matching row lives.`,
-        );
-        const fetched = ctx.pool.fetch(found.pointer.pageId);
-        if (fetched) ctx.pool.unpin(fetched.frameId);
-        ctx.locks.release(found.pointer.pageId, 'shared');
-
-        const page = ctx.heap.pages.find((p) => p.pageId === found.pointer.pageId);
-        const row = page?.rows[found.pointer.slot];
+        fetchHeapPage(ctx, found.pointer);
+        const row = rowAt(ctx, found.pointer);
         if (!row) continue;
 
-        if (!passes(plan.residual, row)) continue;
+        if (!rangeHolds(row, plan) || !passes(plan.residual, row)) continue;
 
         produced(`IndexRangeScan returns a row via leaf ${found.leafId}.`);
         return row;
@@ -283,12 +375,18 @@ function indexRangeScan(plan: Extract<Plan, { op: 'IndexRangeScan' }>, ctx: Exec
   };
 }
 
-function filter(predicate: Expr, child: Operator, ctx: ExecContext): Operator {
-  const produced = counter(ctx, 'Filter');
+/**
+ * `Filter` and — with `name: 'Having'` — HAVING (plan.md §25.4 B2): the same
+ * per-row predicate, but what flows through a `Having` is a *group* the
+ * aggregate below produced, and its aggregate operands read the values that
+ * aggregate already computed.
+ */
+function filter(predicate: Expr, child: Operator, ctx: ExecContext, name: 'Filter' | 'Having' = 'Filter'): Operator {
+  const produced = counter(ctx, name);
   let rejected = 0;
 
   return {
-    name: 'Filter',
+    name,
     open: child.open,
     next() {
       for (;;) {
@@ -299,7 +397,9 @@ function filter(predicate: Expr, child: Operator, ctx: ExecContext): Operator {
           continue;
         }
         produced(
-          `Filter passes a row through${rejected > 0 ? `, having rejected ${rejected}` : ''}.`,
+          name === 'Having'
+            ? `Having passes a group through${rejected > 0 ? `, having rejected ${rejected}` : ''} — its aggregates satisfy the predicate.`
+            : `Filter passes a row through${rejected > 0 ? `, having rejected ${rejected}` : ''}.`,
         );
         return row;
       }
@@ -321,6 +421,14 @@ function project(columns: ProjectList, child: Operator, ctx: ExecContext): Opera
       if (columns.kind === 'star') {
         produced('Project passes the row through unchanged — `*` keeps every column.');
         return row;
+      }
+
+      if (columns.kind === 'expressions') {
+        // Computed columns (plan.md §25.4 B1b): each item is evaluated against the row.
+        const computed: Row = {};
+        for (const { key, expr } of columns.items) computed[key] = evaluateValue(expr, row);
+        produced(`Project computes ${columns.items.map((i) => i.key).join(', ')} for this row.`);
+        return computed;
       }
 
       const narrowed: Row = {};
@@ -520,7 +628,7 @@ function sortAggregate(
           {
             pool: ctx.pool,
             emit: ctx.emit,
-            base: pageCountFor(ctx.heap, ctx.trees),
+            base: ctx.aggregateSortBase ?? pageCountFor(ctx.heap, ctx.trees),
             memPages: ctx.options.bufferFrames,
             rowsPerPage: ctx.options.rowsPerPage,
           },
@@ -582,7 +690,7 @@ function sort(plan: Extract<Plan, { op: 'Sort' }>, child: Operator, ctx: ExecCon
         rows = externalMergeSort(materialised, (r) => [r[plan.column] ?? null], plan.direction, {
           pool: ctx.pool,
           emit: ctx.emit,
-          base: pageCountFor(ctx.heap, ctx.trees),
+          base: ctx.sortBase ?? pageCountFor(ctx.heap, ctx.trees),
           memPages: ctx.options.bufferFrames,
           rowsPerPage: ctx.options.rowsPerPage,
         });
@@ -608,10 +716,16 @@ function sort(plan: Extract<Plan, { op: 'Sort' }>, child: Operator, ctx: ExecCon
  * that has not been pulled yet is simply never asked: a `SeqScan` beneath one
  * can leave most of the table unread, which `close()` on the child makes
  * final rather than merely paused.
+ *
+ * `offset` (plan.md §25.4 B1c) is the part that is *not* free: the first
+ * `offset` rows have to be produced by everything beneath before they can be
+ * thrown away, so `LIMIT 10 OFFSET 1000` reads a thousand rows to return
+ * ten — the reason deep OFFSET pagination gets slower the further you page.
  */
-function limit(count: number, child: Operator, ctx: ExecContext): Operator {
+function limit(count: number, offset: number, child: Operator, ctx: ExecContext): Operator {
   const produced = counter(ctx, 'Limit');
   let taken = 0;
+  let skipped = 0;
   let stopped = false;
 
   return {
@@ -619,6 +733,25 @@ function limit(count: number, child: Operator, ctx: ExecContext): Operator {
     open: child.open,
     next() {
       if (stopped || taken >= count) return null;
+
+      if (skipped < offset) {
+        while (skipped < offset) {
+          const discarded = child.next();
+          if (!discarded) {
+            ctx.emit(
+              `Limit discards ${String(skipped)} row${skipped === 1 ? '' : 's'} and then the input runs out — fewer than the OFFSET of ${String(offset)}, so nothing is left to return.`,
+              { stage: 'execute', op: 'Limit', rowsProduced: 0 },
+            );
+            return null;
+          }
+          skipped += 1;
+        }
+        ctx.emit(
+          `Limit discards the first ${String(offset)} row${offset === 1 ? '' : 's'}: everything beneath still produced each one, and Limit threw it away. That is the cost of OFFSET.`,
+          { stage: 'execute', op: 'Limit', rowsProduced: 0 },
+        );
+      }
+
       const row = child.next();
       if (!row) return null;
       taken += 1;
@@ -638,12 +771,178 @@ function limit(count: number, child: Operator, ctx: ExecContext): Operator {
   };
 }
 
-/** Merges a left and right row into one, qualifying every key `table.column` so the two can never collide. */
+/**
+ * A stable text key for a whole row: two rows collide exactly when every column is
+ * *equal* — NULL equal to NULL (as DISTINCT and GROUP BY define it), and any other
+ * pair equal under `=`'s own coercion (`equalityKeyOf`, the same one the hash and
+ * sort-merge joins use). The coercion matters for consistency: the sort orders `1`,
+ * `'1'` and `true` as equal, so a hash key that told them apart would let the two
+ * DISTINCT strategies disagree on a column that mixes types.
+ */
+function rowKey(row: Row): string {
+  return JSON.stringify(
+    Object.keys(row).sort().map((k) => {
+      const v = row[k] ?? null;
+      return [k, v === null ? null : equalityKeyOf(v)];
+    }),
+  );
+}
+
+/**
+ * `SELECT DISTINCT` by hashing (plan.md §25.4 B2). A row is passed on the first
+ * time it is seen and dropped every time after — one hash-set lookup per row,
+ * no I/O of its own, and *streaming*: the first new row leaves immediately, so
+ * a `Limit` above it can stop the whole scan early. The price is memory
+ * proportional to the number of distinct rows.
+ */
+function hashDistinct(child: Operator, ctx: ExecContext): Operator {
+  const produced = counter(ctx, 'HashDistinct');
+  let seen = new Set<string>();
+  let dropped = 0;
+
+  return {
+    name: 'HashDistinct',
+    open() {
+      child.open();
+      seen = new Set();
+      dropped = 0;
+    },
+    next() {
+      for (;;) {
+        const row = child.next();
+        if (!row) return null;
+        const key = rowKey(row);
+        if (seen.has(key)) {
+          dropped += 1;
+          continue;
+        }
+        seen.add(key);
+        produced(
+          `HashDistinct passes a row it has not seen before (${String(seen.size)} distinct so far${
+            dropped > 0 ? `, ${String(dropped)} repeat${dropped === 1 ? '' : 's'} dropped` : ''
+          }).`,
+        );
+        return row;
+      }
+    },
+    close: child.close,
+  };
+}
+
+/**
+ * `SELECT DISTINCT` by sorting (plan.md §25.4 B2) — the other half of the hash-vs-
+ * sort contrast `GROUP BY` already has. It cannot stream: it pulls *every* row,
+ * runs them through `externalMergeSort` (real spill I/O through the buffer pool,
+ * in its own reserved block of pages), and only then keeps one row of each run
+ * of equals. The sort key is the `ORDER BY` column first (so the caller's order
+ * survives) and then every column, which is what makes equal rows adjacent.
+ */
+function sortDistinct(plan: Extract<Plan, { op: 'SortDistinct' }>, child: Operator, ctx: ExecContext): Operator {
+  const produced = counter(ctx, 'SortDistinct');
+  let rows: Row[] | null = null;
+  let index = 0;
+
+  return {
+    name: 'SortDistinct',
+    open() {
+      child.open();
+      rows = null;
+      index = 0;
+    },
+    next() {
+      if (rows === null) {
+        const materialised: Row[] = [];
+        for (;;) {
+          const row = child.next();
+          if (!row) break;
+          materialised.push(row);
+        }
+        child.close();
+
+        const keyOf = (r: Row): SqlValue[] => {
+          const columns = Object.keys(r).sort();
+          const first = plan.sortKey ? [plan.sortKey.column] : [];
+          return [...first, ...columns].map((c) => r[c] ?? null);
+        };
+        const sorted = externalMergeSort(
+          materialised,
+          keyOf,
+          plan.sortKey?.direction ?? 'asc',
+          {
+            pool: ctx.pool,
+            emit: ctx.emit,
+            base: ctx.distinctBase ?? pageCountFor(ctx.heap, ctx.trees),
+            memPages: ctx.options.bufferFrames,
+            rowsPerPage: ctx.options.rowsPerPage,
+          },
+          'SortDistinct',
+          'SortDistinct',
+        );
+
+        const kept: Row[] = [];
+        let last: string | null = null;
+        for (const row of sorted) {
+          const key = rowKey(row);
+          if (key !== last) kept.push(row);
+          last = key;
+        }
+        rows = kept;
+      }
+
+      const row = rows[index];
+      if (!row) return null;
+      index += 1;
+      produced(`SortDistinct returns distinct row ${String(index)} of ${String(rows.length)}.`);
+      return row;
+    },
+    close() {
+      if (rows === null) child.close();
+    },
+  };
+}
+
+/**
+ * Merges a left and right row into one, qualifying every key `table.column` so the two can never collide. `leftRow`
+ * came straight off a base-table scan the *first* time a query joins anything, so its own keys are still bare — but
+ * a later `Join` in a chain (plan.md §25.4 C3 slice b) receives, as its `left`, the *previous* Join's already-merged
+ * row, whose keys are already `table.column`-qualified for every table in the chain so far. Re-qualifying an
+ * already-qualified key would nest a table name inside another (`b.a.id`), so a key that already has a `.` in it is
+ * kept exactly as it is — column names themselves never contain one (the tokenizer's `.` is only ever the qualifier
+ * separator), so this can never mistake a real column for an already-merged one.
+ */
 function mergeJoinedRow(leftTable: string, leftRow: Row, rightTable: string, rightRow: Row): Row {
   const merged: Row = {};
-  for (const [key, value] of Object.entries(leftRow)) merged[`${leftTable}.${key}`] = value;
+  for (const [key, value] of Object.entries(leftRow)) merged[key.includes('.') ? key : `${leftTable}.${key}`] = value;
   for (const [key, value] of Object.entries(rightRow)) merged[`${rightTable}.${key}`] = value;
   return merged;
+}
+
+/** A `LEFT JOIN`'s own row for a `left` row that matched nothing on `right` (plan.md §25.4 C3): every one of
+ *  `right`'s declared columns comes back NULL, qualified the same way `mergeJoinedRow` qualifies a real match —
+ *  the row is still there, it just has nothing real to report on that side. */
+function nullPaddedRow(leftTable: string, leftRow: Row, rightTable: string, rightColumns: readonly string[]): Row {
+  const merged: Row = {};
+  for (const [key, value] of Object.entries(leftRow)) merged[key.includes('.') ? key : `${leftTable}.${key}`] = value;
+  for (const column of rightColumns) merged[`${rightTable}.${column}`] = null;
+  return merged;
+}
+
+/**
+ * Reads a `Join`'s own left-hand join-key value off `row` — `column` bare if `row` came straight off a base-table
+ * scan (a query's first `JOIN`), or `table.column` if an earlier `Join` in the chain already merged and qualified it
+ * (plan.md §25.4 C3 slice b). Only ever needed for the *left* side: a left-deep chain's `right` side is always a
+ * fresh, unqualified base-table scan or probe, so every plain `row[plan.rightColumn]` elsewhere is still correct
+ * exactly as written.
+ */
+function leftJoinValue(row: Row, table: string, column: string): SqlValue {
+  return (column in row ? row[column] : row[`${table}.${column}`]) ?? null;
+}
+
+/** `leftJoinValue`, coerced for equality the same way `joinKeyOf` coerces a right-side value — so sort-merge's two
+ *  sides, sorted independently, still agree on which keys are equal. */
+function leftJoinKeyOf(row: Row, table: string, column: string): string | null {
+  const value = leftJoinValue(row, table, column);
+  return value === null ? null : equalityKeyOf(value);
 }
 
 /**
@@ -652,15 +951,18 @@ function mergeJoinedRow(leftTable: string, leftRow: Row, rightTable: string, rig
  * (outer) side produces, the right (inner) side is rescanned from scratch
  * looking for a match: `right`'s operator is only ever built once and
  * re-opened per outer row, exactly the reset `open()` already means for
- * every other operator here. `ctx.joinRight` carries the right table's own
- * heap (built by `runQuery.ts`, its pages numbered right after the left's),
- * so `right`'s `SeqScan` reads through a genuinely different table than
+ * every other operator here. `ctx.joinPartners[plan.rightTable]` carries the right table's own heap (built by
+ * `runQuery.ts`, its pages numbered right after whatever came before it), so `right`'s `SeqScan` reads through a
+ * genuinely different table than
  * `left`'s — the one thing an `ExecContext` never had to represent before a
- * query could name two tables at once.
+ * query could name two tables at once. `left` may itself be another `Join`
+ * (plan.md §25.4 C3 slice b's chain) — `buildOperator`'s own recursion
+ * handles that with no special case here at all.
  */
 function join(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): Operator {
-  const joinRight = ctx.joinRight;
-  if (!joinRight) throw new Error('unreachable: a Join plan implies ExecContext.joinRight is set');
+  const joinRight = ctx.joinPartners?.[plan.rightTable];
+  if (!joinRight) throw new Error("unreachable: a Join plan implies ExecContext.joinPartners has this Join's rightTable");
+  const isLeft = plan.joinType === 'left';
 
   const left = buildOperator(plan.left, ctx);
   const right = buildOperator(plan.right, {
@@ -670,10 +972,12 @@ function join(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): Operator {
     trees: joinRight.trees,
   });
 
-  const produced = counter(ctx, 'Join');
+  const produced = counter(ctx, 'Join', plan.rightTable);
   let leftRow: Row | null = null;
   let rightOpen = false;
   let checked = 0;
+  // LEFT JOIN only (plan.md §25.4 C3): whether the current left row has matched anything yet.
+  let matched = false;
 
   return {
     name: 'Join',
@@ -682,12 +986,14 @@ function join(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): Operator {
       leftRow = null;
       rightOpen = false;
       checked = 0;
+      matched = false;
     },
     next() {
       for (;;) {
         if (!rightOpen) {
           leftRow = left.next();
           if (!leftRow) return null;
+          matched = false;
           right.open();
           rightOpen = true;
         }
@@ -695,16 +1001,22 @@ function join(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): Operator {
         const rightRow = right.next();
         if (!rightRow) {
           rightOpen = false;
+          // The whole inner table was rescanned and nothing matched this left row — a LEFT JOIN keeps it anyway.
+          if (isLeft && !matched) {
+            produced(`Join finds no match in ${plan.rightTable} for a row from ${plan.leftTable} — LEFT JOIN keeps it, with ${plan.rightTable}'s columns NULL.`);
+            return nullPaddedRow(plan.leftTable, leftRow!, plan.rightTable, joinRight.table.columns);
+          }
           continue;
         }
         checked += 1;
 
         // NULL never matches NULL — the same three-valued rule an ordinary
         // `=` predicate follows, so a NULL join key simply finds no partner.
-        if (compare('=', leftRow![plan.leftColumn] ?? null, rightRow[plan.rightColumn] ?? null) !== true) {
+        if (compare('=', leftJoinValue(leftRow!, plan.leftTable, plan.leftColumn), rightRow[plan.rightColumn] ?? null) !== true) {
           continue;
         }
 
+        matched = true;
         produced(
           `Join matches a row from ${plan.leftTable} with one from ${plan.rightTable} (${checked} candidate${
             checked === 1 ? '' : 's'
@@ -737,8 +1049,9 @@ function join(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): Operator {
  * `/tools/hash-join`'s own deferred future work.
  */
 function hashJoin(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): Operator {
-  const joinRight = ctx.joinRight;
-  if (!joinRight) throw new Error('unreachable: a Join plan implies ExecContext.joinRight is set');
+  const joinRight = ctx.joinPartners?.[plan.rightTable];
+  if (!joinRight) throw new Error("unreachable: a Join plan implies ExecContext.joinPartners has this Join's rightTable");
+  const isLeft = plan.joinType === 'left';
 
   const left = buildOperator(plan.left, ctx);
   const right = buildOperator(plan.right, {
@@ -748,7 +1061,7 @@ function hashJoin(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): Operat
     trees: joinRight.trees,
   });
 
-  const produced = counter(ctx, 'Join');
+  const produced = counter(ctx, 'Join', plan.rightTable);
   let built: Map<string, Row[]> | null = null;
   let leftRow: Row | null = null;
   let bucket: Row[] = [];
@@ -783,7 +1096,7 @@ function hashJoin(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): Operat
         built = table;
         ctx.emit(
           `Join builds an in-memory hash table over ${plan.rightTable}, keyed on ${plan.rightColumn} (${String(table.size)} distinct key${table.size === 1 ? '' : 's'}).`,
-          { stage: 'execute', op: 'Join', rowsProduced: 0 },
+          { stage: 'execute', op: 'Join', rowsProduced: 0, table: plan.rightTable },
         );
       }
 
@@ -791,9 +1104,14 @@ function hashJoin(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): Operat
         if (bucketIndex >= bucket.length) {
           leftRow = left.next();
           if (!leftRow) return null;
-          const value = leftRow[plan.leftColumn] ?? null;
+          const value = leftJoinValue(leftRow, plan.leftTable, plan.leftColumn);
           bucket = value === null ? [] : (built.get(equalityKeyOf(value)) ?? []);
           bucketIndex = 0;
+          // Empty bucket, or a NULL key that was never even looked up — nothing matched this left row at all.
+          if (isLeft && bucket.length === 0) {
+            produced(`Join probes the hash table with a row from ${plan.leftTable} and finds nothing in ${plan.rightTable} — LEFT JOIN keeps it, with ${plan.rightTable}'s columns NULL.`);
+            return nullPaddedRow(plan.leftTable, leftRow, plan.rightTable, joinRight.table.columns);
+          }
           continue;
         }
 
@@ -809,6 +1127,107 @@ function hashJoin(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): Operat
     close() {
       left.close();
       if (!built) right.close();
+    },
+  };
+}
+
+/**
+ * Index nested-loop join — the fourth algorithm (plan.md §25.4 B4). The
+ * nested-loop join's shape (an outer loop over `left`, an inner lookup per
+ * row), but the inner lookup is a descent of `right`'s own B+Tree on the join
+ * column instead of a rescan of its whole heap: each outer row costs the
+ * tree's few levels plus a heap page per matching row, whatever the inner
+ * table's size. That is why "a small outer over a big indexed inner" is where
+ * this algorithm wins — and why it is the *worst* of the four when the outer is
+ * large and the inner is small enough that one scan of it would have done.
+ *
+ * The inner index may repeat a value (a foreign key: several posts per
+ * author), so a probe returns *every* entry for the key — the first entry's
+ * heap page is fetched by the lookup itself and each later one as its row is
+ * pulled, so a `LIMIT` above the join stops the probing early. A NULL join key
+ * is never probed: `= NULL` is never true and an index holds no NULLs.
+ * Every candidate is rechecked against the ON equality, so this can never
+ * return a row the other three would not.
+ */
+function indexNestedLoopJoin(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): Operator {
+  const joinRight = ctx.joinPartners?.[plan.rightTable];
+  if (!joinRight) throw new Error("unreachable: a Join plan implies ExecContext.joinPartners has this Join's rightTable");
+  const inner = plan.right;
+  if (inner.op !== 'IndexProbe') throw new Error('unreachable: an index nested-loop Join has an IndexProbe as its inner side');
+  const tree = joinRight.trees[inner.column];
+  if (!tree) throw new Error('unreachable: an index nested-loop Join implies its inner index was built');
+  const isLeft = plan.joinType === 'left';
+
+  const left = buildOperator(plan.left, ctx);
+  const produced = counter(ctx, 'Join', plan.rightTable);
+  let leftRow: Row | null = null;
+  let pointers: RowPointer[] = [];
+  let cursor = 0;
+  let probes = 0;
+  let matched = 0;
+  // LEFT JOIN only (plan.md §25.4 C3): whether the current left row has matched anything yet.
+  let matchedThisRow = false;
+
+  return {
+    name: 'Join',
+    open() {
+      left.open();
+      leftRow = null;
+      pointers = [];
+      cursor = 0;
+      probes = 0;
+      matched = 0;
+      matchedThisRow = false;
+    },
+    next() {
+      for (;;) {
+        const pointer = pointers[cursor];
+        if (pointer === undefined) {
+          // Every candidate the probe found (a NULL key never even probed counts too) has been checked and rejected
+          // — LEFT JOIN keeps this left row anyway, before moving on to the next one.
+          if (leftRow && isLeft && !matchedThisRow) {
+            const unmatched = leftRow;
+            leftRow = null;
+            produced(`Join's probe of ${plan.rightTable} finds nothing for a row from ${plan.leftTable} — LEFT JOIN keeps it, with ${plan.rightTable}'s columns NULL.`);
+            return nullPaddedRow(plan.leftTable, unmatched, plan.rightTable, joinRight.table.columns);
+          }
+
+          leftRow = left.next();
+          if (!leftRow) return null;
+          pointers = [];
+          cursor = 0;
+          matchedThisRow = false;
+
+          const key = leftJoinValue(leftRow, plan.leftTable, plan.leftColumn);
+          if (key === null) continue; // NULL joins nothing, so there is nothing to look up
+          probes += 1;
+          ctx.emit(
+            `Join takes a row from ${plan.leftTable} whose ${plan.leftColumn} is ${typeof key === 'string' ? `'${key}'` : String(key)} and probes ${plan.rightTable}'s B+Tree on ${plan.rightColumn} for it (probe ${String(probes)}).`,
+            { stage: 'execute', op: 'Join', rowsProduced: matched, table: plan.rightTable },
+          );
+          pointers = emitIndexLookup(ctx.emit, tree, [key], ctx.pool, inner.column, ctx.locks).pointers;
+          continue;
+        }
+
+        const at = cursor;
+        cursor += 1;
+        // The lookup itself fetched the first match's heap page; each later one is fetched as its row is pulled.
+        if (at > 0) fetchHeapPage(ctx, pointer);
+        const rightRow = rowAt(ctx, pointer, joinRight.heap);
+        if (!rightRow) continue;
+        if (compare('=', leftJoinValue(leftRow!, plan.leftTable, plan.leftColumn), rightRow[plan.rightColumn] ?? null) !== true) continue;
+
+        matchedThisRow = true;
+        matched += 1;
+        produced(
+          `Join pairs a row from ${plan.leftTable} with entry ${String(at + 1)} of ${String(pointers.length)} its probe found in ${plan.rightTable} (${String(matched)} match${matched === 1 ? '' : 'es'} so far).`,
+        );
+        return mergeJoinedRow(plan.leftTable, leftRow!, plan.rightTable, rightRow);
+      }
+    },
+    close() {
+      left.close();
+      pointers = [];
     },
   };
 }
@@ -836,25 +1255,52 @@ function joinKeyOf(row: Row, column: string): string | null {
  * *entire* run on both sides — every left row in the run paired with every
  * right row in it — before either pointer moves past the run, the textbook
  * refinement a plain two-pointer merge misses.
+ *
+ * `isLeft` (plan.md §25.4 C3): a plain merge only ever needs to look as far as
+ * whichever side runs out first — once one is exhausted, nothing further can
+ * match. A `LEFT JOIN` cannot stop there: every remaining `left` row, and any
+ * `left` row the walk passes with no run of equal keys on `right` at all, must
+ * still be yielded — paired with `null` rather than dropped — so the loop
+ * keeps going until `left` itself is exhausted, not `right`.
+ *
+ * `leftTable` (plan.md §25.4 C3 slice b): `left`'s own rows may already carry qualified keys from an earlier `Join`
+ * in a chain, so every left-side key read goes through `leftJoinKeyOf` rather than `joinKeyOf` directly — `right` is
+ * always a fresh base-table scan, so its own reads are unaffected.
  */
 function* sortMergeMatches(
   left: readonly Row[],
   right: readonly Row[],
+  leftTable: string,
   leftColumn: string,
   rightColumn: string,
-): Generator<readonly [Row, Row]> {
+  isLeft: boolean,
+): Generator<readonly [Row, Row | null]> {
   let i = 0;
   let j = 0;
-  while (i < left.length && j < right.length) {
-    const leftKey = joinKeyOf(left[i]!, leftColumn);
-    const rightKey = joinKeyOf(right[j]!, rightColumn);
-    if (leftKey === null) { i += 1; continue; }
-    if (rightKey === null) { j += 1; continue; }
-    if (leftKey < rightKey) { i += 1; continue; }
-    if (leftKey > rightKey) { j += 1; continue; }
+  while (i < left.length) {
+    const leftKey = leftJoinKeyOf(left[i]!, leftTable, leftColumn);
+    if (leftKey === null) {
+      if (isLeft) yield [left[i]!, null];
+      i += 1;
+      continue;
+    }
+
+    // Advance past whatever this key can never match: a NULL key, or one sorted strictly behind it.
+    while (j < right.length) {
+      const aheadKey = joinKeyOf(right[j]!, rightColumn);
+      if (aheadKey !== null && aheadKey >= leftKey) break;
+      j += 1;
+    }
+    const rightKey = j < right.length ? joinKeyOf(right[j]!, rightColumn) : null;
+    if (rightKey !== leftKey) {
+      // Either the right side is exhausted, or its next key is already past this one — nothing here matches.
+      if (isLeft) yield [left[i]!, null];
+      i += 1;
+      continue;
+    }
 
     const runStart = j;
-    while (i < left.length && joinKeyOf(left[i]!, leftColumn) === leftKey) {
+    while (i < left.length && leftJoinKeyOf(left[i]!, leftTable, leftColumn) === leftKey) {
       for (let k = runStart; k < right.length && joinKeyOf(right[k]!, rightColumn) === leftKey; k++) {
         yield [left[i]!, right[k]!];
       }
@@ -877,14 +1323,19 @@ function* sortMergeMatches(
  * merge's output — the sorting has already happened by the time any row
  * comes out, the same honest gap `Sort`'s own doc comment names.
  *
- * `left`'s sort scratch starts right after every page id already spoken for
- * (both heaps); `right`'s starts right after `left`'s own reservation —
- * `runQuery.ts` sizes and orders the two identically, so neither ever
- * collides with a page id the other is using.
+ * `left`'s sort scratch starts right after every page id already spoken for; `right`'s starts right after `left`'s
+ * own reservation. For a chain of several `JOIN`s (plan.md §25.4 C3 slice b), each sort-merge step's own pair of
+ * bases depends on how much scratch space every *earlier* step already claimed — genuinely sequential bookkeeping,
+ * not something this operator alone can work out from its own two children — so `runQuery.ts` computes every
+ * sort-merge `Join`'s bases up front, in chain order, and hands them back keyed by that `Join`'s own plan-node
+ * identity (`ctx.sortMergeBases`); this operator just looks its own up rather than deriving it.
  */
 function sortMergeJoin(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): Operator {
-  const joinRight = ctx.joinRight;
-  if (!joinRight) throw new Error('unreachable: a Join plan implies ExecContext.joinRight is set');
+  const joinRight = ctx.joinPartners?.[plan.rightTable];
+  if (!joinRight) throw new Error("unreachable: a Join plan implies ExecContext.joinPartners has this Join's rightTable");
+  const bases = ctx.sortMergeBases?.get(plan);
+  if (!bases) throw new Error('unreachable: a sort-merge Join plan implies runQuery.ts reserved its scratch bases');
+  const isLeft = plan.joinType === 'left';
 
   const left = buildOperator(plan.left, ctx);
   const right = buildOperator(plan.right, {
@@ -894,8 +1345,8 @@ function sortMergeJoin(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): O
     trees: joinRight.trees,
   });
 
-  const produced = counter(ctx, 'Join');
-  let matches: Generator<readonly [Row, Row]> | null = null;
+  const produced = counter(ctx, 'Join', plan.rightTable);
+  let matches: Generator<readonly [Row, Row | null]> | null = null;
   let matched = 0;
 
   return {
@@ -924,22 +1375,20 @@ function sortMergeJoin(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): O
         }
         right.close();
 
-        const leftBase = pageCountFor(ctx.heap, ctx.trees) + pageCountFor(joinRight.heap, joinRight.trees);
-        const leftSortSize = sortTempPageCount(ctx.table.rows.length, ctx.options.rowsPerPage, ctx.options.bufferFrames);
-
         const leftSorted = externalMergeSort(
           leftRows,
-          (r) => [joinKeyOf(r, plan.leftColumn)],
+          (r) => [leftJoinKeyOf(r, plan.leftTable, plan.leftColumn)],
           'asc',
           {
             pool: ctx.pool,
             emit: ctx.emit,
-            base: leftBase,
+            base: bases.leftBase,
             memPages: ctx.options.bufferFrames,
             rowsPerPage: ctx.options.rowsPerPage,
           },
           plan.leftTable,
           'Join',
+          plan.rightTable,
         );
         const rightSorted = externalMergeSort(
           rightRows,
@@ -948,25 +1397,30 @@ function sortMergeJoin(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): O
           {
             pool: ctx.pool,
             emit: ctx.emit,
-            base: leftBase + leftSortSize,
+            base: bases.rightBase,
             memPages: ctx.options.bufferFrames,
             rowsPerPage: ctx.options.rowsPerPage,
           },
           plan.rightTable,
           'Join',
+          plan.rightTable,
         );
 
         ctx.emit(
           `Join sorts ${plan.leftTable} and ${plan.rightTable} on the join key, then merges the two sorted lists in one pass.`,
-          { stage: 'execute', op: 'Join', rowsProduced: 0 },
+          { stage: 'execute', op: 'Join', rowsProduced: 0, table: plan.rightTable },
         );
 
-        matches = sortMergeMatches(leftSorted, rightSorted, plan.leftColumn, plan.rightColumn);
+        matches = sortMergeMatches(leftSorted, rightSorted, plan.leftTable, plan.leftColumn, plan.rightColumn, isLeft);
       }
 
       const step = matches.next();
       if (step.done) return null;
       const [leftRow, rightRow] = step.value;
+      if (rightRow === null) {
+        produced(`Join's merge passes a row from ${plan.leftTable} with no run of matching keys on ${plan.rightTable} — LEFT JOIN keeps it, with ${plan.rightTable}'s columns NULL.`);
+        return nullPaddedRow(plan.leftTable, leftRow, plan.rightTable, joinRight.table.columns);
+      }
       matched += 1;
       produced(
         `Join merges a row from ${plan.leftTable} with one from ${plan.rightTable} — both sides already sorted on the join key (${matched} match${matched === 1 ? '' : 'es'} so far).`,
@@ -991,6 +1445,8 @@ function buildJoinOperator(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext
       return sortMergeJoin(plan, ctx);
     case 'nested-loop':
       return join(plan, ctx);
+    case 'index-nested-loop':
+      return indexNestedLoopJoin(plan, ctx);
   }
 }
 
@@ -1005,10 +1461,15 @@ export function buildOperator(plan: Plan, ctx: ExecContext): Operator {
       return indexOnlyScan(plan, ctx);
     case 'IndexRangeScan':
       return indexRangeScan(plan, ctx);
+    case 'IndexProbe':
+      // Only ever the inner side of an index nested-loop `Join`, which probes it itself, once per outer row.
+      throw new Error('unreachable: an IndexProbe is driven by its Join, never built on its own');
     case 'Join':
       return buildJoinOperator(plan, ctx);
     case 'Filter':
       return filter(plan.predicate, buildOperator(plan.child, ctx), ctx);
+    case 'Having':
+      return filter(plan.predicate, buildOperator(plan.child, ctx), ctx, 'Having');
     case 'HashAggregate':
       return hashAggregate(plan, buildOperator(plan.child, ctx), ctx);
     case 'SortAggregate':
@@ -1017,7 +1478,11 @@ export function buildOperator(plan: Plan, ctx: ExecContext): Operator {
       return sort(plan, buildOperator(plan.child, ctx), ctx);
     case 'Project':
       return project(plan.columns, buildOperator(plan.child, ctx), ctx);
+    case 'HashDistinct':
+      return hashDistinct(buildOperator(plan.child, ctx), ctx);
+    case 'SortDistinct':
+      return sortDistinct(plan, buildOperator(plan.child, ctx), ctx);
     case 'Limit':
-      return limit(plan.count, buildOperator(plan.child, ctx), ctx);
+      return limit(plan.count, plan.offset ?? 0, buildOperator(plan.child, ctx), ctx);
   }
 }

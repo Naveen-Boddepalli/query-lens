@@ -1,0 +1,45 @@
+{
+  "name": "@querylens/engine",
+  "version": "0.1.0",
+  "description": "QueryLens's toy database engine: a SQL parser, planner, optimizer, buffer pool, B+Tree and lock manager that emits a trace of every step. Pure and deterministic; no DOM, no React.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "keywords": [
+    "database-internals",
+    "sql",
+    "b-tree",
+    "buffer-pool",
+    "query-planner",
+    "education"
+  ],
+  "homepage": "https://query-lens.1234naveenboddepalli.workers.dev",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Naveen-Boddepalli/query-lens.git",
+    "directory": "packages/engine"
+  },
+  "bugs": {
+    "url": "https://github.com/Naveen-Boddepalli/query-lens/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}

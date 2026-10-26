@@ -23,6 +23,8 @@ export const DATASET_CATALOGUE: Record<DatasetId, DatasetCatalogueEntry> = {
       { label: 'Point lookup', sql: 'SELECT *\nFROM users\nWHERE id = 5;' },
       { label: 'Sequential scan', sql: 'SELECT *\nFROM users\nWHERE age > 30;' },
       { label: 'Lookup, no index', sql: "SELECT *\nFROM users\nWHERE name = 'grace';" },
+      // plan.md §25.4 B6: the plan, and what actually ran, as a result you can read — estimate beside actual.
+      { label: 'EXPLAIN ANALYZE', sql: 'EXPLAIN ANALYZE\nSELECT *\nFROM users\nWHERE age > 30;' },
     ],
   },
   orders: {
@@ -43,6 +45,45 @@ export const DATASET_CATALOGUE: Record<DatasetId, DatasetCatalogueEntry> = {
       { label: 'Selective scan', sql: "SELECT *\nFROM logins\nWHERE status = 'blocked';" },
       { label: 'Unselective scan', sql: "SELECT *\nFROM logins\nWHERE status = 'ok';" },
       { label: 'Point lookup', sql: 'SELECT *\nFROM logins\nWHERE id = 20;' },
+    ],
+  },
+  employees: {
+    label: 'employees',
+    blurb: '250 rows — department and office are perfectly correlated, so an AND of both badly underestimates.',
+    starterSql: "EXPLAIN ANALYZE\nSELECT *\nFROM employees\nWHERE department = 'engineering' AND office = 'building-1';",
+    presets: [
+      {
+        label: 'Correlated AND',
+        sql: "EXPLAIN ANALYZE\nSELECT *\nFROM employees\nWHERE department = 'engineering' AND office = 'building-1';",
+      },
+      { label: 'Department alone', sql: "SELECT *\nFROM employees\nWHERE department = 'engineering';" },
+      { label: 'Point lookup', sql: 'SELECT *\nFROM employees\nWHERE id = 42;' },
+    ],
+  },
+  transactions: {
+    label: 'transactions',
+    blurb: '3,000 rows, indexed on id — a genuinely deep B+Tree and a scan that evicts hard, not just a little.',
+    starterSql: 'SELECT *\nFROM transactions\nWHERE id = 1500;',
+    presets: [
+      { label: 'Deep lookup', sql: 'SELECT *\nFROM transactions\nWHERE id = 1500;' },
+      { label: 'Range lookup', sql: 'SELECT *\nFROM transactions\nWHERE id BETWEEN 1500 AND 1520;' },
+      { label: 'Eviction storm', sql: 'SELECT *\nFROM transactions\nWHERE amount > 4500;' },
+      {
+        label: 'EXPLAIN ANALYZE',
+        sql: 'EXPLAIN ANALYZE\nSELECT *\nFROM transactions\nWHERE amount > 4500;',
+      },
+    ],
+  },
+  // plan.md §26 Feature 3: the one preset with NULLs, so three-valued logic shows without editing any rows.
+  customers: {
+    label: 'customers',
+    blurb: '20 rows, some with no city, no referrer or no discount on record — NULLs, so SQL’s third truth value shows.',
+    starterSql: 'SELECT *\nFROM customers\nWHERE city IS NULL;',
+    presets: [
+      { label: 'IS NULL', sql: 'SELECT *\nFROM customers\nWHERE city IS NULL;' },
+      { label: '= NULL finds nothing', sql: 'SELECT *\nFROM customers\nWHERE city = NULL;' },
+      { label: 'Aggregates skip NULLs', sql: 'SELECT COUNT(*), COUNT(discount), AVG(discount)\nFROM customers;' },
+      { label: 'NOT IN meets a NULL', sql: 'SELECT name\nFROM customers\nWHERE id NOT IN (SELECT referrer FROM customers);' },
     ],
   },
 };

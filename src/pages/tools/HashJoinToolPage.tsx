@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { demoKeys, HASH_JOIN_LIMITS, planHashJoin } from '../../ui/hashJoin.ts';
 import type { HashJoinLeaf, HashJoinPartition } from '../../ui/hashJoin.ts';
 import { PageHeader } from '../../ui/PageHeader.tsx';
 import { btnSecondary, inputField, panelSurface } from '../../ui/primitives.ts';
+import { useAddressBarQuery } from '../../ui/addressBar.ts';
 
 /**
  * The Grace hash join standalone (plan.md §22.3 `/tools/hash-join`). The
@@ -56,19 +57,16 @@ export function HashJoinToolPage() {
     return planHashJoin(buildKeys, probeKeys, { pageSize, memPages });
   }, [build, probe, pageSize, memPages, seed]);
 
-  useEffect(() => {
-    const t = window.setTimeout(() => {
-      const p = new URLSearchParams();
-      p.set('build', String(build));
-      p.set('probe', String(probe));
-      p.set('page', String(pageSize));
-      p.set('mem', String(memPages));
-      p.set('seed', String(seed));
-      const next = `${location.pathname}?${p.toString()}`;
-      if (next !== `${location.pathname}${location.search}`) history.replaceState(null, '', next);
-    }, 250);
-    return () => { window.clearTimeout(t); };
+  const shareQuery = useMemo(() => {
+    const p = new URLSearchParams();
+    p.set('build', String(build));
+    p.set('probe', String(probe));
+    p.set('page', String(pageSize));
+    p.set('mem', String(memPages));
+    p.set('seed', String(seed));
+    return p.toString();
   }, [build, probe, pageSize, memPages, seed]);
+  useAddressBarQuery(shareQuery);
 
   // Falls back to the first leaf whenever nothing is explicitly selected, or
   // the selected id doesn't belong to the current plan — so there's always

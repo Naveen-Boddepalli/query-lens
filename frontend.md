@@ -120,7 +120,7 @@ QueryLens/
 │   │   ├── trace.ts            # Trace builder (step event collector)
 │   │   ├── viewState.ts        # Event → ViewState reducer (what the UI renders)
 │   │   ├── seed.ts             # Default seed database (48-row users table)
-│   │   ├── datasets.ts         # Preset datasets: users, orders, logins
+│   │   ├── datasets.ts         # Preset datasets: users, orders, logins, employees, transactions, customers
 │   │   ├── predict.ts          # Prediction prompt generation
 │   │   ├── bufferTrace.ts      # Standalone buffer-pool trace runner
 │   │   ├── parser/             # SQL tokenizer + recursive-descent parser → AST
@@ -336,10 +336,10 @@ The address bar is the **only persistence layer**. A shareable URL encodes:
 | Parameter | Key | Description |
 |---|---|---|
 | SQL query | `q` | The SQL text |
-| Eviction policy | `p` | `lru` or `clock` |
+| Eviction policy | `p` | `lru`, `clock`, `fifo`, `second-chance`, `optimal`, `midpoint`, `lru-k` or `two-q` |
 | Predict mode | `x` | `0` or `1` |
 | Step position | `s` | Integer step number |
-| Dataset | `t` | `users`, `orders`, or `logins` |
+| Dataset | `t` | `users`, `orders`, `logins`, `employees`, `transactions` or `customers` |
 | Edited rows | `d` | JSON-encoded row arrays (only if modified) |
 | Assignment lock | `l` | `1` = assignment mode |
 
@@ -607,10 +607,10 @@ The root layout rendered by `<Route element={<Layout />}>`.
 The **core experience**. Two-column layout on desktop:
 
 **Left column (authoring):**
-- Dataset selector chips (`users`, `orders`, `logins`, `Custom`).
+- Dataset selector chips (`users`, `orders`, `logins`, `employees`, `transactions`, `customers`, `Custom`).
 - Preset query chips ("Point lookup", "Sequential scan", etc.).
 - `SqlEditor` — CodeMirror with SQL highlighting, autocomplete, error squiggles.
-- **Run** button + **Edit data** button + **Eviction policy** select (LRU / Clock sweep).
+- **Run** button + **Edit data** button + **Eviction policy** select (all eight: LRU, Clock sweep, FIFO, Second-chance, Optimal, Midpoint LRU, LRU-2, 2Q).
 - Trace info line ("33 steps in this trace · showing step 12").
 - Action links: Copy link, Download trace, Load trace, Present, Tour, Print.
 - Predict-on checkbox (or assignment mode notice).
@@ -824,6 +824,9 @@ createTraceProjector(events, options): TraceProjector
 | `users` | `users` | 48 | `id` | Baseline: 12-page scan vs 8 buffer frames |
 | `orders` | `orders` | 120 | `id` | Deeper B+Tree, harder eviction |
 | `logins` | `logins` | 80 | `id` | 8:1 skew on `status` — selectivity contrast |
+| `employees` | `employees` | 250 | `id` | `department` and `office` perfectly correlated — a badly underestimated `AND` |
+| `transactions` | `transactions` | 3,000 | `id` | Tallest B+Tree (height 7), a scan that evicts hard |
+| `customers` | `customers` | 20 | `id` | NULLs in `city`, `referrer` and `discount` — three-valued logic |
 
 ---
 
@@ -1109,30 +1112,26 @@ Every page is `React.lazy()` — no page loads until navigated to. Chunks are co
 
 ### Bundle Budget
 
-`scripts/bundle-budget.ts` enforces gzip size limits per chunk. Runs in CI after every build.
+`scripts/bundle-budget.ts` prices what a visitor downloads, and fails CI when something passes its ceiling. Runs
+after every build (plan.md §25.4 H8 replaced the older per-chunk-group ceilings and their one total).
 
-| Chunk | Gzip Ceiling |
-|---|---|
-| `codemirror` | 128 kB |
-| `flow` | 70 kB |
-| `react` | 63 kB |
-| `entry` | 24 kB |
-| `trace-ui` | 56 kB |
-| `routes` | 12 kB |
-| `standalone-tools` | 43 kB |
-| `learn` | 10 kB |
-| `challenges` | 8 kB |
-| `html-to-image` | 8 kB |
-| `docs` | 27 kB |
-| `css` | 20 kB |
-| `runtime` | 2 kB |
-| **Total** | **424 kB** |
+- **Every route has its own ceiling**: the entry chunk, the route's lazy chunk and every static dependency of
+  either, read from Vite's manifest (`dist/.vite/manifest.json`) — the graph the browser walks. A new tool is its
+  own lazy chunk with its own row, so it cannot grow a shared ceiling to fit.
+- **The entry chunk** — the shell every route loads first — has its own ceiling (24 kB).
+- **Opt-in chunks**, fetched only on a click (PNG export, the Durability dialog, a challenge's checks), are priced
+  on their own, measured past what their page already loaded.
+- **Nothing hides outside the budget**: a chunk over 0.5 kB that no route and no opt-in reaches fails the check.
+- Sizes are gzip at level 9, in KiB; Vite's build output prints slightly larger figures for the same files (the
+  `react` chunk is 62.5 kB here and 64.8 kB there). Ceilings sit about 3 kB over the measured size, and raising
+  one is a diff with a dated comment saying why.
 
 ### Caching
 
-- `public/_headers` sets:
-  - `/assets/*`: `Cache-Control: public, max-age=31536000, immutable` (hashed filenames).
-  - Everything else: `Cache-Control: public, max-age=0, must-revalidate`.
+- `/assets/*`: `Cache-Control: public, max-age=31536000, immutable` (hashed filenames), set in `public/_headers`.
+- Everything else: `Cache-Control: public, max-age=0, must-revalidate` — Cloudflare's own default for static
+  assets, which `_headers` deliberately leaves alone. Only one rule may set `Cache-Control` for a path: a header
+  two matching rules set is joined with a comma, which is how hashed assets once went out with both values.
 
 ---
 
@@ -1206,6 +1205,9 @@ pnpm test:e2e    # playwright test (requires built dist/)
 - Runs against **`dist/`** (production build).
 - Requires: `pnpm exec playwright install chromium`
 - Config: `playwright.config.ts`
+- In CI a failed test is retried once, recording a trace; one that passes only on its retry is **flaky** and fails
+  the build (`failOnFlakyTests`) instead of going green unnoticed. The HTML report, traces included, is uploaded
+  when the job fails.
 - Includes:
   - Smoke: load → run → step → result, shared links, data editor, theming, axe in both palettes.
   - Regressions: panel tracking, zoom, overflow, gating, history, console silence.
@@ -1216,7 +1218,8 @@ pnpm test:e2e    # playwright test (requires built dist/)
 pnpm budget      # run after pnpm build
 ```
 
-Gzip ceiling per chunk and overall. Fails CI if bundle grows past limits.
+A gzip ceiling per route, for the entry chunk and for each opt-in chunk; fails CI if one is passed, or if a chunk
+is reached by no route at all (see §14, *Bundle Budget*).
 
 ---
 
@@ -1271,7 +1274,7 @@ pnpm trace "SELECT * FROM orders" --dataset orders
 | `build-fonts.py` | `python scripts/build-fonts.py` | Downloads, subsets, and renames IBM Plex Sans → "QueryLens Sans" (OFL compliance). Emits `.woff2` to `public/fonts/` |
 | `build-icons.py` | `python scripts/build-icons.py` | Renders `public/apple-touch-icon.png` (180×180) from favicon SVG |
 | `build-og.ts` | `pnpm og` | Captures OG image via Playwright from a real running trace (step 91, buffer eviction moment) |
-| `bundle-budget.ts` | `pnpm budget` | Enforces per-chunk gzip ceilings (fails CI if exceeded) |
+| `bundle-budget.ts` | `pnpm budget` | Enforces per-route gzip ceilings (fails CI if exceeded) |
 | `record.ts` | `pnpm record` | Records step-by-step videos (`.webm` + `.gif`) via Playwright + ffmpeg |
 
 ---
@@ -1291,7 +1294,7 @@ Runs on every PR and push to `main`. All GitHub Actions are **pinned to immutabl
 | `unit-test` | `pnpm test` (`vitest run`) |
 | `build-and-budget` | `pnpm build` + `pnpm budget` |
 | `cli-test` | CLI `--help`, query execution, `--policy clock`, `--json` |
-| `e2e-test` | Playwright + axe a11y audit. Uploads report on failure |
+| `e2e-test` | Playwright + axe a11y audit in three shards (`--shard=1/3` … `3/3`), each on its own runner, the tests dealt out in turn by `e2e/support/shards.ts` so every shard gets a third of every file; a flaky test fails it. A failing shard uploads its HTML report (with traces) as `playwright-report-<shard>` |
 | `ci-gate` | Required status check gating PR merges |
 
 ### Dependabot (`.github/dependabot.yml`)
@@ -1397,7 +1400,8 @@ Runs on every PR and push to `main`. All GitHub Actions are **pinned to immutabl
 | `theme.ts` | `useTheme()` — theme state, localStorage, system preference listener |
 | `usePlayback.ts` | `usePlayback()` — step/play/pause/speed/gates + keyboard shortcuts |
 | `useReducedMotion.ts` | `useReducedMotion()` — prefers-reduced-motion |
-| `urlState.ts` | URL ↔ `ShareState` encode/decode + `writeShareState` |
+| `urlState.ts` | URL ↔ `ShareState` encode/decode |
+| `addressBar.ts` | `useAddressBarQuery()`, `writeAddressBar()` — every address-bar write, dropped once the page has been left |
 | `preferences.ts` | Read/write default policy + predict from localStorage |
 | `stageMeta.ts` | `STAGE_META` — title, blurb, help, doc link, tone for each stage |
 | `primitives.ts` | Shared className strings (buttons, cards, inputs, pills) |
@@ -1448,7 +1452,7 @@ Runs on every PR and push to `main`. All GitHub Actions are **pinned to immutabl
 | `trace.ts` | Trace builder — collects StepEvents during pipeline execution |
 | `viewState.ts` | Pure event→state reducer + `TraceProjector` (incremental folder) |
 | `seed.ts` | Default 48-row users table |
-| `datasets.ts` | Preset dataset definitions (users, orders, logins) |
+| `datasets.ts` | Preset dataset definitions (users, orders, logins, employees, transactions, customers) |
 | `predict.ts` | Prediction prompt generation for each stage |
 | `bufferTrace.ts` | Standalone buffer trace runner (for Compare + Tools) |
 | `parser/tokenizer.ts` | SQL tokenizer |

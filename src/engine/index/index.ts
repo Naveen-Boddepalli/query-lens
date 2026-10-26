@@ -6,13 +6,18 @@ export {
   DEFAULT_MAX_KEYS,
   deleteKey,
   descend,
+  entryKey,
+  entryWidth,
   height,
+  highKey,
   insert,
   leafChain,
   leftmostPath,
   lowerBound,
   node,
+  probe,
   search,
+  valuesOf,
 } from './btree.ts';
 export type {
   BPlusTree,
@@ -20,15 +25,22 @@ export type {
   DeleteResult,
   DeleteStep,
   DeleteStepKind,
+  EntryKey,
+  IndexKey,
   InternalNode,
   LeafNode,
+  ProbeKey,
   RowPointer,
   SearchResult,
 } from './btree.ts';
-export { buildIndex, buildIndexes, pageCountFor } from './build.ts';
-export { keyList, toIndexDisplay } from './display.ts';
-export { emitIndexLookup } from './lookup.ts';
+export { bulkLoad, DEFAULT_FILL_FACTOR, MIN_FILL_FACTOR } from './bulk.ts';
+export type { BulkEntry } from './bulk.ts';
+export { buildIndex, buildIndexes, entryFor, keyValuesOf, pageCountFor } from './build.ts';
+export { columnsOfIndex, findIndexSpec, indexNameOf, indexSpecsOf, isClusteringIndex, joinIndexFor } from './spec.ts';
+export { keyList, keyText, toIndexDisplay } from './display.ts';
+export { describeKeys, emitIndexLookup, resolveClustered } from './lookup.ts';
 export type { LookupOutcome } from './lookup.ts';
 export { emitRangeStart, nextInRange } from './rangeLookup.ts';
-export type { RangeBoundValue, RangeMatch, RangeStart } from './rangeLookup.ts';
+export type { ChainIO, RangeBoundValue, RangeMatch, RangeStart } from './rangeLookup.ts';
 export { validate } from './validate.ts';
+export { describeUniqueKey, uniqueViolation } from './unique.ts';

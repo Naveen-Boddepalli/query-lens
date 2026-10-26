@@ -1,4 +1,6 @@
 import { execSync } from 'node:child_process';
+import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
@@ -45,8 +47,90 @@ const SITE_URL = (
 ).replace(/\/$/, '');
 
 // https://vite.dev/config/
+// plan.md §H1. public/sw.js is written by hand; the build fills in the two things only the build knows: this
+// build's stamp, which names the cache, and every file it emitted, which is what the worker precaches.
+const SW_NOT_PRECACHED = new Set(['sw.js', '_headers', '_redirects']);
+
+function listFiles(dir: string, prefix = ''): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) =>
+    entry.isDirectory() ? listFiles(join(dir, entry.name), `${prefix}${entry.name}/`) : [`${prefix}${entry.name}`],
+  );
+}
+
+let swOutDir = '';
+
+const serviceWorkerPlugin = {
+  name: 'querylens-service-worker',
+  apply: 'build',
+  configResolved(config: { root: string; build: { outDir: string } }) {
+    swOutDir = resolve(config.root, config.build.outDir);
+  },
+  closeBundle() {
+    const file = join(swOutDir, 'sw.js');
+    const source = readFileSync(file, 'utf8');
+    if (!source.includes('__BUILD_STAMP__') || !source.includes('__PRECACHE__')) {
+      throw new Error('public/sw.js lost its __BUILD_STAMP__ or __PRECACHE__ placeholder');
+    }
+    // The shell is cached as `/`, never as `/index.html`: Cloudflare redirects every `/name.html` to `/name`, and a
+    // cached redirect cannot answer a navigation (see `cloudflareHtmlHandlingPlugin`). Any other page (`404.html`, the
+    // platform's own last resort) is the platform's business, not the worker's.
+    const precache = listFiles(swOutDir)
+      .filter((f) => !SW_NOT_PRECACHED.has(f) && !f.split('/').some((seg) => seg.startsWith('.')))
+      .filter((f) => f === 'index.html' || !f.endsWith('.html'))
+      .map((f) => (f === 'index.html' ? '/' : `/${f}`));
+    writeFileSync(
+      file,
+      source
+        .replace('__BUILD_STAMP__', () => `${BUILD_SHA}-${BUILD_TIME}`)
+        .replace('__PRECACHE__', () => JSON.stringify(precache)),
+    );
+  },
+};
+
+/**
+ * `vite preview` is what the e2e suite runs against, so where the platform answers differently from Vite and the app
+ * depends on it, the preview answers the platform's way. Cloudflare's asset handling (`html_handling`, default
+ * `auto-trailing-slash`) redirects `/name.html` to `/name` — `/index.html` to `/` — with a 307. The service worker once
+ * precached `/index.html` and served that redirected response to every navigation, which a browser refuses: the
+ * second visit to production failed to load at all, while every test here passed against a preview that never
+ * redirected (CHANGELOG, 2.0.0-rc.2). A request for an `.html` file now gets the same redirect here.
+ */
+const cloudflareHtmlHandlingPlugin = {
+  name: 'querylens-cloudflare-html-handling',
+  configurePreviewServer(server: { middlewares: { use: (fn: (req: { url?: string }, res: { statusCode: number; setHeader: (k: string, v: string) => void; end: () => void }, next: () => void) => void) => void } }) {
+    server.middlewares.use((req, res, next) => {
+      const [path = '', query] = (req.url ?? '').split('?');
+      if (!path.endsWith('.html')) return next();
+      const target = path === '/index.html' ? '/' : path.slice(0, -'.html'.length);
+      res.statusCode = 307;
+      res.setHeader('Location', query ? `${target}?${query}` : target);
+      res.end();
+    });
+  },
+};
+
+/**
+ * A fenced code block can be wider than its column, and then it scrolls, and a box that scrolls has to be reachable
+ * from the keyboard (WCAG 2.1.1; axe's `scrollable-region-focusable`) — a block of text has nothing focusable inside
+ * it. This gives every `<pre>` of the docs a tab stop, at build time, so no page has to remember to.
+ */
+interface HastNode {
+  type: string;
+  tagName?: string;
+  properties?: Record<string, unknown>;
+  children?: HastNode[];
+}
+function rehypeFocusablePre() {
+  const walk = (node: HastNode): void => {
+    if (node.type === 'element' && node.tagName === 'pre') node.properties = { ...node.properties, tabIndex: 0 };
+    for (const child of node.children ?? []) walk(child);
+  };
+  return (tree: HastNode) => { walk(tree); };
+}
+
 export default defineConfig({
   plugins: [
+    cloudflareHtmlHandlingPlugin,
     // `rehype-slug` gives every rendered heading a stable `id` (kebab-cased
     // from its text), which is what lets a docs page's own `<Contents>` block
     // (src/ui/DocsComponents.tsx) link to `#section-name` and have the browser
@@ -73,7 +157,7 @@ export default defineConfig({
     // text rather than a table.
     { enforce: 'pre', ...mdx({
       remarkPlugins: [remarkFrontmatter, remarkMdxFrontmatter, remarkGfm],
-      rehypePlugins: [rehypeSlug],
+      rehypePlugins: [rehypeSlug, rehypeFocusablePre],
     }) },
     react(),
     tailwindcss(),
@@ -93,8 +177,12 @@ export default defineConfig({
             ),
       },
     },
+    serviceWorkerPlugin,
   ],
   build: {
+    // `dist/.vite/manifest.json`: which chunks each lazy route pulls in. `scripts/bundle-budget.ts` walks it to
+    // price a route by what a visitor to that route actually downloads (plan.md §25.4 H8).
+    manifest: true,
     /**
      * plan.md §14.2 asked for the panels to be lazy-loaded behind Run, on the
      * grounds that React Flow and d3-hierarchy "render nothing until Run".
@@ -116,7 +204,12 @@ export default defineConfig({
           groups: [
             { name: 'codemirror', test: /node_modules\/(@codemirror|@lezer|style-mod|w3c-keyname)\// },
             { name: 'flow', test: /node_modules\/(flowinger|d3-)/ },
-            { name: 'react', test: /node_modules\/(react|react-dom|scheduler)\// },
+            // A group also takes its modules' dependencies (rolldown's `includeDependenciesRecursively`, default
+            // on), and groups claim modules in order of priority, then of position. At priority 0 after `flow`,
+            // this group found `react`, `react-dom` and `react/jsx-runtime` already taken by `flow` as flowinger's
+            // dependencies, so every component in the app imported React from `flow` and every route loaded
+            // flowinger and d3 with it, tree or no tree. The priority lets React claim its own modules first.
+            { name: 'react', test: /node_modules\/(react|react-dom|scheduler)\//, priority: 1 },
             // Panel PNG export (§20.3). `import()`ed on first use only, so this
             // gives it a stable chunk name rather than rolldown's generic `es-`.
             { name: 'html-to-image', test: /node_modules\/html-to-image\// },
@@ -150,7 +243,16 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
     // `src/`, the `bin/` CLI and `scripts/` (the study kit's researcher CLI,
-    // plan.md §25.4 A2); `e2e/` is Playwright's and Vitest cannot run it.
-    include: ['src/**/*.{test,spec}.{ts,tsx}', 'bin/**/*.{test,spec}.ts', 'scripts/**/*.{test,spec}.ts'],
+    // plan.md §25.4 A2), `oracle/` (the SQLite differential + metamorphic
+    // suites, §25.4 A1 — Node-only, since it drives `node:sqlite`), and
+    // `mcp/` (the MCP server, §25.4 H4 — also Node-only: stdio, no DOM);
+    // `e2e/` is Playwright's and Vitest cannot run it.
+    include: [
+      'src/**/*.{test,spec}.{ts,tsx}',
+      'bin/**/*.{test,spec}.ts',
+      'scripts/**/*.{test,spec}.ts',
+      'oracle/**/*.{test,spec}.ts',
+      'mcp/**/*.{test,spec}.ts',
+    ],
   },
 });

@@ -32,9 +32,9 @@ export function markHintSeen(): void {
  * window event covers the common case — the Playground chunk is already
  * mounted and listening; the one-shot `sessionStorage` flag covers the cold
  * one, where the hint rendered before the Playground and the event had no
- * listener yet. `PlaygroundPage` reads the flag in its initial state.
+ * listener yet. `listenForTour` is the one place either is answered.
  */
-export const START_TOUR_EVENT = 'querylens:start-tour';
+const START_TOUR_EVENT = 'querylens:start-tour';
 const PENDING_TOUR_KEY = 'querylens:pending-tour';
 
 export function requestTour(): void {
@@ -46,7 +46,16 @@ export function requestTour(): void {
   window.dispatchEvent(new Event(START_TOUR_EVENT));
 }
 
-export function takePendingTour(): boolean {
+/** Whether a request is waiting, without answering it — safe to call during a render, which may be thrown away. */
+export function hasPendingTour(): boolean {
+  try {
+    return sessionStorage.getItem(PENDING_TOUR_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function takePendingTour(): boolean {
   try {
     const pending = sessionStorage.getItem(PENDING_TOUR_KEY) === '1';
     if (pending) sessionStorage.removeItem(PENDING_TOUR_KEY);
@@ -54,4 +63,26 @@ export function takePendingTour(): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Calls `open` for every "take the tour" request from now on, and once now if one was made before anything was
+ * listening. Returns the function that stops listening.
+ *
+ * The order is the point. The Playground used to take the flag while it *rendered* and attach the listener in an
+ * effect, after the commit; a click in between found no listener, and the flag it set had already been read — the
+ * tour never opened, and the flag was left to open it by surprise on a later visit. Listening first and taking the
+ * flag second leaves no moment a click can reach neither. A request answered live takes its own flag too, so it is
+ * answered exactly once.
+ */
+export function listenForTour(open: () => void): () => void {
+  const onRequest = () => {
+    takePendingTour();
+    open();
+  };
+  window.addEventListener(START_TOUR_EVENT, onRequest);
+  if (takePendingTour()) open();
+  return () => {
+    window.removeEventListener(START_TOUR_EVENT, onRequest);
+  };
 }

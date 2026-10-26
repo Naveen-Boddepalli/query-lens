@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { Row } from '../../engine/index.ts';
+import { ScrollRegion } from '../ScrollRegion.tsx';
 
 export function ResultPanel({ rows }: { rows: Row[] }) {
   const [page, setPage] = useState(0);
@@ -19,25 +20,44 @@ export function ResultPanel({ rows }: { rows: Row[] }) {
         <div className="flex justify-between border-b border-edge px-3 py-1 font-mono text-label text-ink-dim">
           <span>{rows.length} rows</span>
           <div className="flex gap-2">
-            <button type="button" onClick={() => { setPage(p - 1); }} disabled={p === 0} className="hover:text-ink disabled:opacity-30">Prev</button>
+            <button
+              type="button"
+              onClick={() => { setPage(p - 1); }}
+              disabled={p === 0}
+              className="hover:text-ink disabled:opacity-30 cursor-pointer disabled:cursor-not-allowed"
+            >
+              Prev
+            </button>
             <span>{p + 1}/{max + 1}</span>
-            <button type="button" onClick={() => { setPage(p + 1); }} disabled={p >= max} className="hover:text-ink disabled:opacity-30">Next</button>
+            <button
+              type="button"
+              onClick={() => { setPage(p + 1); }}
+              disabled={p >= max}
+              className="hover:text-ink disabled:opacity-30 cursor-pointer disabled:cursor-not-allowed"
+            >
+              Next
+            </button>
           </div>
         </div>
       )}
 
-      <div className="min-h-0 flex-1 overflow-auto">
+      <ScrollRegion label="Query result" className="min-h-0 flex-1 overflow-auto">
         <table className="w-full border-collapse text-left font-mono text-label">
           <thead className="sticky top-0 z-10 border-b border-edge bg-surface-2/95 text-ink-dim backdrop-blur-sm">
             <tr>
               {columns.map((c) => (
-                <th key={c} className="px-3 py-1.5 font-medium uppercase">{c}</th>
+                <th key={c} className="px-3 py-2 font-medium tracking-[0.06em] uppercase">
+                  {c}
+                </th>
               ))}
             </tr>
           </thead>
           <tbody>
             {slice.map((row, i) => (
-              <tr key={i} className="cell border-b border-edge/40 odd:bg-surface-2/40 hover:bg-surface-4">
+              <tr
+                key={i}
+                className="cell border-b border-edge/40 odd:bg-surface-2/40 hover:bg-surface-4"
+              >
                 {columns.map((c) => (
                   <td key={c} className="px-3 py-1.5">{String(row[c] ?? 'NULL')}</td>
                 ))}
@@ -45,7 +65,7 @@ export function ResultPanel({ rows }: { rows: Row[] }) {
             ))}
           </tbody>
         </table>
-      </div>
+      </ScrollRegion>
     </div>
   );
 }

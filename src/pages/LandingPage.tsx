@@ -3,6 +3,7 @@ import { Hero, Icon, StageIcon } from '../ui/Hero.tsx';
 import { cardInteractive } from '../ui/primitives.ts';
 import { STAGE_META } from '../ui/stageMeta.ts';
 import type { Stage } from '../engine/index.ts';
+import { useDefaultDocumentTitle } from '../ui/documentTitle.ts';
 
 const SUBSYSTEM_KEYS: [stage: Stage, num: string, to: string][] = [
   ['parse', 'Stage 01', '/tools/parser'],
@@ -67,6 +68,7 @@ function Card({ to, tag, stage, title, desc }: { to: string; tag: string; stage?
 }
 
 export function LandingPage() {
+  useDefaultDocumentTitle();
   return (
     <div className="flex min-w-0 flex-1 flex-col">
       <Hero />

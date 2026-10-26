@@ -78,20 +78,24 @@ function PartView({ part }: { part: GrammarPart }) {
           ))}
         </span>
       );
-    case 'repeat':
+    case 'repeat': {
+      // An empty `optional` as the separator means direct concatenation — no token between repetitions (e.g. a
+      // JOIN chain) — so the badge just names the loop, with nothing to show beside it.
+      const noSeparator = part.separator.kind === 'optional' && part.separator.parts.length === 0;
       return (
         <span className="flex items-center gap-1.5 rounded-lg border border-edge bg-surface-3/50 px-2 py-1">
           <PartsRow parts={part.parts} />
           <span
             aria-hidden="true"
             className="flex items-center gap-1 rounded-full border border-edge bg-surface-2/80 px-2 py-0.5 text-label text-ink-dim"
-            title="repeats, separated by the token shown"
+            title={noSeparator ? 'repeats, one after another' : 'repeats, separated by the token shown'}
           >
             <RepeatIcon />
-            <PartView part={part.separator} />
+            {!noSeparator && <PartView part={part.separator} />}
           </span>
         </span>
       );
+    }
   }
 }
 

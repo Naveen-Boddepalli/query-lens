@@ -62,7 +62,8 @@ events in a trace shows.
 
 Current operators: `SeqScan`, `IndexScan` (equality), `IndexOnlyScan` (equality, never touches the
 heap), `IndexRangeScan` (a range predicate, walking the leaf sibling chain), `Join` (dispatching to
-`nested-loop`, `hash`, or `sort-merge`), `Filter`, `HashAggregate`, `SortAggregate`, `Sort`,
+`nested-loop`, `hash`, `sort-merge`, or `index-nested-loop` — whose inner side is an `IndexProbe`, a
+lookup keyed by the current outer row), `Filter`, `HashAggregate`, `SortAggregate`, `Sort`,
 `Project`, `Limit`. `DELETE`/`INSERT`/`UPDATE` have their own executors (`exec/delete.ts`,
 `exec/insert.ts`, `exec/update.ts`) that reuse the same scan/index-lookup machinery to find their
 target rows.
@@ -88,7 +89,8 @@ Six rules, applied in this order, each producing one `optimize` event with befor
 the changed nodes highlighted:
 
 1. **`constant-folding`** — drops a conjunct that is always true regardless of the row (two
-   literals, or a column compared with itself).
+   literals). A column compared with *itself* is not folded: `age = age` is UNKNOWN where `age` is
+   NULL, and only TRUE passes a filter.
 2. **`predicate-pushdown`** — folds a `Filter` into the scan beneath it, so rows are discarded as
    they're read rather than materialised and thrown away.
 3. **`join-predicate-pushdown`** — the `Join` counterpart: pushes each `WHERE` conjunct naming only
@@ -103,17 +105,27 @@ the changed nodes highlighted:
 
 When nothing fires, the optimizer says so out loud rather than silently emitting nothing.
 Deliberately absent: **join order** (needs multi-join grammar this parser doesn't have — a query
-has at most one `JOIN`) and **true composite (multi-column) indexes** — each an independent
-single-column B+Tree today.
+has at most one `JOIN`) and **clustered (index-organized) tables** — every table is a heap, and each
+index (plain or composite) is a separate B+Tree pointing at it.
+
+### The plan as relational algebra
+
+Every plan node carries an `ra` field (`{ symbol, sub, rel }`) derived from the real `Plan`, not parsed back out
+of its label: `Filter` and a filtered `SeqScan` and an `IndexScan` are all `σ`; `Project` is `π`; `Join` is `⋈`;
+the aggregate nodes are `γ`; `Sort` is `τ`; `Limit` is `λ`; the distinct nodes are `δ`. The algebra is *logical*
+— it says what is computed — while the node's label stays *physical* — how. `src/export/toRelationalAlgebra.ts`
+turns a tree of them into `π_{name}(σ_{age > 30}(users))` (or LaTeX) and the plan panels can draw the tree in
+either notation; the colours follow the physical operator in both, so switching never changes which node is which.
 
 ## Storage: the buffer pool and the B+Tree
 
 Both are covered in depth, with a live embedded widget each, in [Concepts](/docs/concepts/btree)
 — this section is the short version for someone comparing the code against the idea.
 
-The buffer pool is a fixed set of frames (8 in the Playground) behind one interface with six
-implementations (LRU and clock sweep in the pipeline; FIFO, second-chance, optimal and midpoint
-LRU in the [standalone sandbox](/tools/buffer-pool)). The B+Tree is real: internal nodes hold only
+The buffer pool is a fixed set of frames (8 in the Playground) behind one interface with eight
+implementations — LRU, clock sweep, FIFO, second-chance, optimal, midpoint LRU, LRU-2 and 2Q — every one
+of them available to a query and to the [standalone sandbox](/tools/buffer-pool). Optimal needs the future,
+so a query under it is run once first to record the pages it reads, in order; that record is the future. The B+Tree is real: internal nodes hold only
 separator keys, leaves hold the actual keys and are chained left-to-right, and a leaf split copies
 its separator up while staying in the leaf, while an internal split pushes its middle key up and
 removes it — the one rule [`validate()`](https://github.com/Naveen-Boddepalli/query-lens/blob/main/src/engine/index/validate.ts)

@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { buildHeap, createSeedDatabase, DEFAULT_ENGINE_OPTIONS } from '../../engine/index.ts';
 import { layOutPage } from '../../ui/slottedPage.ts';
 import { PageHeader } from '../../ui/PageHeader.tsx';
 import { inputField, panelSurface } from '../../ui/primitives.ts';
+import { ScrollRegion } from '../../ui/ScrollRegion.tsx';
+import { useAddressBarQuery } from '../../ui/addressBar.ts';
 
 /**
  * The storage-course standalone (plan.md §22.3): one heap page, laid out to the
@@ -54,16 +56,13 @@ export function PageToolPage() {
     [page, pageBytes],
   );
 
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      const params = new URLSearchParams();
-      params.set('page', String(pageId));
-      params.set('bytes', String(pageBytes));
-      const next = `${location.pathname}?${params.toString()}`;
-      if (next !== `${location.pathname}${location.search}`) history.replaceState(null, '', next);
-    }, 250);
-    return () => { window.clearTimeout(timer); };
+  const shareQuery = useMemo(() => {
+    const params = new URLSearchParams();
+    params.set('page', String(pageId));
+    params.set('bytes', String(pageBytes));
+    return params.toString();
   }, [pageId, pageBytes]);
+  useAddressBarQuery(shareQuery);
 
   const usedPct = Math.min(100, Math.round((layout.usedBytes / pageBytes) * 100));
 
@@ -239,7 +238,7 @@ export function PageToolPage() {
         </p>
       </div>
 
-      <div className={`${panelSurface} overflow-auto p-0`}>
+      <ScrollRegion label="The slots and tuples of the page" className={`${panelSurface} overflow-auto p-0`}>
         <table className="w-full border-collapse text-left font-mono text-label">
           <thead>
             <tr className="border-b border-edge bg-surface-2 text-ink-dim">
@@ -287,7 +286,7 @@ export function PageToolPage() {
             })}
           </tbody>
         </table>
-      </div>
+      </ScrollRegion>
 
       <p className="text-label leading-relaxed text-ink-dim">
         Every stage that reads a row goes through a page like this — see it in motion in the{' '}

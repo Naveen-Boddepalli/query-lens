@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { CHALLENGES, type ChallengeCategory } from './challenges/challenges.tsx';
+import { CHALLENGE_GROUPS, type ChallengeGroup } from './challenges/groups.ts';
 import { clearSolved, readSolved } from '../ui/challengeProgress.ts';
 import { PageHeader } from '../ui/PageHeader.tsx';
 import { btnGhost, cardInteractive, eyebrow } from '../ui/primitives.ts';
@@ -17,52 +17,47 @@ const ArrowRightIcon = ({ className = 'h-3.5 w-3.5' }: { className?: string }) =
   </svg>
 );
 
-const CATEGORIES: ('All' | ChallengeCategory)[] = [
-  'All',
-  'Indexing',
-  'Buffer Pool',
-  'Query Planning',
-  'Storage & Execution',
+const GROUP_FILTERS: { id: 'All' | ChallengeGroup['id']; label: string }[] = [
+  { id: 'All', label: 'All Challenges' },
+  { id: 'queries', label: 'SQL Queries' },
+  { id: 'transactions', label: 'Transactions & Durability' },
+  { id: 'storage', label: 'Storage & Execution' },
 ];
 
 export function ChallengesPage() {
   const [solved, setSolved] = useState<ReadonlySet<string>>(() => readSolved());
-  const [selectedCategory, setSelectedCategory] = useState<'All' | ChallengeCategory>('All');
+  const [selectedGroup, setSelectedGroup] = useState<'All' | ChallengeGroup['id']>('All');
 
-  const doneCount = useMemo(
-    () => CHALLENGES.filter((c) => solved.has(c.id)).length,
-    [solved],
-  );
+  const allChallenges = useMemo(() => CHALLENGE_GROUPS.flatMap((g) => g.entries), []);
+  const doneCount = useMemo(() => allChallenges.filter((c) => solved.has(c.id)).length, [allChallenges, solved]);
+  const percentDone = Math.round((doneCount / allChallenges.length) * 100);
 
-  const percentDone = Math.round((doneCount / CHALLENGES.length) * 100);
-
-  const filteredChallenges = useMemo(
+  const visibleGroups = useMemo(
     () =>
-      selectedCategory === 'All'
-        ? CHALLENGES
-        : CHALLENGES.filter((c) => c.category === selectedCategory),
-    [selectedCategory],
+      selectedGroup === 'All'
+        ? CHALLENGE_GROUPS
+        : CHALLENGE_GROUPS.filter((g) => g.id === selectedGroup),
+    [selectedGroup],
   );
 
   return (
     <div className="mx-auto w-full max-w-3xl px-4 py-8 sm:px-6 sm:py-10">
-      <p className={eyebrow}>Challenge Directory</p>
-      <PageHeader title="Database Engine Challenges" className="mt-1">
-        Goal-shaped SQL puzzles evaluated on real engine internals. Write queries to satisfy
-        specific optimizer rewrites, buffer pool eviction limits, external sort spills, and join
-        mechanics. Progress is saved in this browser.
+      <p className={eyebrow}>Puzzles &amp; Quests</p>
+      <PageHeader title="Database Internals Challenges" className="mt-1">
+        Short, goal-shaped puzzles. Write a query — or a schedule, script, or engine configuration —
+        run it, and the check validates whether you satisfied the goal. The trace reveals exactly why.
       </PageHeader>
 
-      {/* Overview Telemetry Card */}
+      {/* Telemetry & Roadmap Overview Card */}
       <section
-        aria-label="Challenge Progress"
+        aria-label="Challenges Progress"
         className="ql-sheen mt-8 rounded-2xl border border-edge bg-surface-2/80 p-5 shadow-neu-rest backdrop-blur-md"
       >
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="space-y-1">
             <div className="flex items-center gap-2">
               <span className="font-mono text-heading font-semibold text-ink tabular-nums">
-                {doneCount} / {CHALLENGES.length}
+                {doneCount} / {allChallenges.length}
               </span>
               <span className="text-label text-ink-dim font-medium">challenges solved</span>
               <span className="rounded-full border border-edge bg-surface-3 px-2 py-0.5 font-mono text-micro text-ink tabular-nums">
@@ -101,13 +96,13 @@ export function ChallengesPage() {
           <span className="mr-2 font-mono text-micro uppercase tracking-wider text-ink-dim">
             Category:
           </span>
-          {CATEGORIES.map((cat) => {
-            const active = selectedCategory === cat;
+          {GROUP_FILTERS.map((f) => {
+            const active = selectedGroup === f.id;
             return (
               <button
-                key={cat}
+                key={f.id}
                 type="button"
-                onClick={() => setSelectedCategory(cat)}
+                onClick={() => setSelectedGroup(f.id)}
                 aria-pressed={active}
                 className={`rounded-lg border px-2.5 py-1 text-label font-medium transition duration-150 select-none ${
                   active
@@ -115,79 +110,81 @@ export function ChallengesPage() {
                     : 'border-edge bg-surface-2/60 text-ink-dim hover:border-ink-dim/40 hover:text-ink hover:bg-surface-3 shadow-neu-rest'
                 }`}
               >
-                {cat}
+                {f.label}
               </button>
             );
           })}
         </div>
       </section>
 
-      {/* Challenges List */}
-      <ol className="mt-8 space-y-3.5">
-        {filteredChallenges.map((c) => {
-          const originalIndex = CHALLENGES.findIndex((item) => item.id === c.id);
-          const isSolved = solved.has(c.id);
-          const datasetName = c.database ? 'authors / posts' : (c.dataset ?? 'users');
+      {/* Challenge Groups */}
+      <div className="mt-10 space-y-12">
+        {visibleGroups.map((group) => {
+          const first = allChallenges.findIndex((c) => c.id === group.entries[0]?.id);
 
           return (
-            <li key={c.id}>
-              <Link
-                to={`/challenges/${c.id}`}
-                className={`${cardInteractive} flex flex-col gap-2.5 group`}
-              >
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <span className="flex h-5 w-5 items-center justify-center rounded-full border border-edge bg-surface-3 font-mono text-micro text-ink-dim">
-                      {originalIndex + 1}
-                    </span>
-                    <span
-                      className={`rounded border px-2 py-0.5 font-mono text-micro uppercase tracking-wider ${
-                        c.difficulty === 'Warm-up'
-                          ? 'border-edge bg-surface-3/80 text-ink-dim'
-                          : c.difficulty === 'Intermediate'
-                            ? 'border-accent/40 bg-accent/10 text-accent'
-                            : 'border-hue-violet-ink/30 bg-hue-violet-soft text-ink'
-                      }`}
-                    >
-                      {c.difficulty}
-                    </span>
-                    <span className="rounded border border-edge bg-surface-3/80 px-2 py-0.5 font-mono text-micro text-ink-dim">
-                      {c.category}
-                    </span>
-                  </div>
+            <section key={group.id} aria-labelledby={`challenges-${group.id}`}>
+              <div className="mb-4">
+                <h2 id={`challenges-${group.id}`} className="text-heading font-semibold text-ink">
+                  {group.title}
+                </h2>
+                <p className="mt-1 text-label text-ink-dim leading-relaxed">{group.about}</p>
+              </div>
 
-                  <div className="flex items-center gap-2 font-mono text-micro text-ink-dim">
-                    <span>table: {datasetName}</span>
-                    {isSolved && (
-                      <span className="inline-flex items-center gap-1 rounded-full border border-hit/40 bg-hit/10 px-2 py-0.5 font-medium text-hit">
-                        <CheckIcon className="h-3 w-3" />
-                        Solved
-                      </span>
-                    )}
-                  </div>
-                </div>
+              <ol className="mt-4 space-y-3.5">
+                {group.entries.map((c, i) => {
+                  const challengeNum = first >= 0 ? first + i + 1 : i + 1;
+                  const isSolved = solved.has(c.id);
 
-                <div>
-                  <h3 className="text-body font-semibold text-ink group-hover:text-accent transition-colors">
-                    {c.title}
-                  </h3>
-                  <div className="mt-1 text-label leading-relaxed text-ink-dim">{c.brief}</div>
-                </div>
+                  return (
+                    <li key={c.id}>
+                      <Link
+                        to={`/challenges/${c.id}`}
+                        className={`${cardInteractive} flex flex-col gap-2.5 group`}
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <span className="flex h-5 w-5 items-center justify-center rounded-full border border-edge bg-surface-3 font-mono text-micro text-ink-dim">
+                              {challengeNum}
+                            </span>
+                            <span className="rounded border border-edge bg-surface-3/80 px-2 py-0.5 font-mono text-micro text-ink-dim">
+                              {group.title}
+                            </span>
+                          </div>
 
-                <div className="flex items-center justify-between border-t border-edge/40 pt-2 text-micro text-ink-dim">
-                  <span className="font-mono">
-                    {c.requirements ? `${c.requirements.length} requirements` : 'Objective predicate'}
-                  </span>
-                  <span className="inline-flex items-center gap-1 font-medium text-ink group-hover:text-accent transition-colors">
-                    {isSolved ? 'Review challenge' : 'Solve challenge'}
-                    <ArrowRightIcon className="h-3 w-3 transition-transform group-hover:translate-x-0.5" />
-                  </span>
-                </div>
-              </Link>
-            </li>
+                          <div className="flex items-center gap-2 font-mono text-micro text-ink-dim">
+                            {isSolved && (
+                              <span className="inline-flex items-center gap-1 rounded-full border border-hit/40 bg-hit/10 px-2 py-0.5 font-medium text-hit">
+                                <CheckIcon className="h-3 w-3" />
+                                Solved
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        <div>
+                          <h3 className="text-body font-semibold text-ink group-hover:text-accent transition-colors">
+                            {c.title}
+                          </h3>
+                          <div className="mt-1 text-label leading-relaxed text-ink-dim">{c.brief}</div>
+                        </div>
+
+                        <div className="flex items-center justify-between border-t border-edge/40 pt-2 text-micro text-ink-dim">
+                          <span className="font-mono">Interactive objective</span>
+                          <span className="inline-flex items-center gap-1 font-medium text-ink group-hover:text-accent transition-colors">
+                            {isSolved ? 'Review challenge' : 'Solve challenge'}
+                            <ArrowRightIcon className="h-3 w-3 transition-transform group-hover:translate-x-0.5" />
+                          </span>
+                        </div>
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ol>
+            </section>
           );
         })}
-      </ol>
+      </div>
     </div>
   );
 }

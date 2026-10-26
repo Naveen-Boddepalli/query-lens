@@ -4,13 +4,13 @@ import type { BufferFrame, ReplacementPolicyName, StepEvent } from '../../engine
 
 export interface BufferPoolPanelProps {
   frames: BufferFrame[];
-  stats: { hits: number; misses: number; evictions: number; writes: number };
+  stats: { hits: number; misses: number; evictions: number; writes: number; prefetches: number };
   clockHand: number;
   policy: ReplacementPolicyName;
   lastEvent: StepEvent | null;
 }
 
-type FrameMood = 'hit' | 'load' | 'write' | 'evict' | 'sweep' | null;
+type FrameMood = 'hit' | 'load' | 'prefetch' | 'write' | 'evict' | 'sweep' | null;
 
 function moodOf(frame: BufferFrame, lastEvent: StepEvent | null): FrameMood {
   if (lastEvent?.stage !== 'buffer') return null;
@@ -28,6 +28,7 @@ function moodOf(frame: BufferFrame, lastEvent: StepEvent | null): FrameMood {
 const MOOD_CLASS: Record<Exclude<FrameMood, null>, string> = {
   hit: 'border-hit bg-hit/15 shadow-[0_0_26px_-4px_var(--color-hit)] hover:bg-hit/25',
   load: 'border-miss bg-miss/15 shadow-[0_0_26px_-4px_var(--color-miss)] hover:bg-miss/25',
+  prefetch: 'border-miss/70 bg-miss/10 shadow-[0_0_20px_-6px_var(--color-miss)] hover:bg-miss/20',
   // Violet, not one of the read-path colours — a write is neither a hit nor a
   // disk read, and it shares its tone with the Sort plan node that causes it.
   write:
@@ -40,6 +41,7 @@ const MOOD_CLASS: Record<Exclude<FrameMood, null>, string> = {
 const MOOD_TAG: Record<Exclude<FrameMood, null>, string> = {
   hit: 'HIT',
   load: 'DISK READ',
+  prefetch: 'PREFETCHED',
   write: 'DIRTY WRITE',
   evict: 'EVICTED',
   sweep: 'SWEPT',
@@ -52,6 +54,19 @@ const MOOD_TAG: Record<Exclude<FrameMood, null>, string> = {
  * (plan.md §20.4).
  */
 const POLICY_NOTE: Record<ReplacementPolicyName, ReactNode> = {
+  'two-q': (
+    <>
+      <span className="text-ink">2Q</span> keeps a page read only once in a small FIFO, and promotes a page to the hot queue
+      only if it is read again after leaving that FIFO. A one-pass scan fills the FIFO and evicts only its own pages.
+    </>
+  ),
+  'lru-k': (
+    <>
+      <span className="text-ink">LRU-2</span> judges a page by its second-most-recent reference, not its last one. A page
+      read once has no second reference, so a one-pass scan evicts its own pages and leaves the twice-touched hot set alone.
+      It is plain LRU with one more memory of history, not a different mechanism.
+    </>
+  ),
   lru: (
     <>
       <span className="text-ink">LRU</span> evicts whichever page was used longest ago. It is
@@ -89,7 +104,8 @@ const POLICY_NOTE: Record<ReplacementPolicyName, ReactNode> = {
       <span className="text-ink">Optimal</span> evicts the page whose next use is farthest in the
       future — a page never used again first. No real system can run it, because it needs the
       whole future access pattern, but it is the fewest-misses bound every policy above is
-      measured against.
+      measured against. Here it knows the future honestly: a query is run once first to record the
+      pages it reads, in order, and evicts by that record.
     </>
   ),
   midpoint: (
@@ -200,7 +216,7 @@ export function BufferPoolPanel({
         </div>
         <div>
           <dt className="text-ink-dim">disk reads</dt>
-          <dd className="font-mono text-miss">{stats.misses}</dd>
+          <dd className="font-mono text-miss">{stats.misses + stats.prefetches}</dd>
         </div>
         <div>
           <dt className="text-ink-dim">evictions</dt>
@@ -210,6 +226,12 @@ export function BufferPoolPanel({
           <div>
             <dt className="text-ink-dim">writes</dt>
             <dd className="font-mono text-hue-violet-ink">{stats.writes}</dd>
+          </div>
+        )}
+        {stats.prefetches > 0 && (
+          <div>
+            <dt className="text-ink-dim"><span aria-hidden>↓ </span>prefetched</dt>
+            <dd className="font-mono text-miss">{stats.prefetches}</dd>
           </div>
         )}
         <div>

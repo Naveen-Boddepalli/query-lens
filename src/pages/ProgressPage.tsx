@@ -1,10 +1,12 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { STAGES } from '../engine/index.ts';
-import { LESSONS } from './learn/lessons.tsx';
+import { STAGES } from '../engine/types.ts';
+import { LESSON_INDEX } from './learn/lessonIndex.ts';
 import { clearCompleted, readCompleted } from '../ui/learnProgress.ts';
 import { clearSolved, readSolved } from '../ui/challengeProgress.ts';
-import { clearProgress, readProgress } from '../ui/progress.ts';
+import { CONFIDENCE_LABELS, CONFIDENCE_LEVELS, clearProgress, readProgress } from '../ui/progress.ts';
+
+const TOTAL_CHALLENGES = 41;
 import { PageHeader } from '../ui/PageHeader.tsx';
 import { STAGE_META } from '../ui/stageMeta.ts';
 import { btnGhost, btnPrimary, btnSecondary, card, eyebrow } from '../ui/primitives.ts';
@@ -21,13 +23,6 @@ const ArrowRightIcon = ({ className = 'h-3.5 w-3.5' }: { className?: string }) =
   </svg>
 );
 
-const TOTAL_CHALLENGES = 12;
-
-/**
- * plan.md §22.4 / §21.2: Returning visitor's progress telemetry dashboard.
- * Tracks completed lessons, solved challenges, pipeline stages seen in traces,
- * and prediction calibration accuracy — stored purely in this browser.
- */
 export function ProgressPage() {
   const [lessons, setLessons] = useState(() => readCompleted());
   const [solved, setSolved] = useState(() => readSolved());
@@ -38,10 +33,12 @@ export function ProgressPage() {
   const isEmpty = lessons.size === 0 && solved.size === 0 && seen.size === 0 && progress.asked === 0;
 
   const hitRate = progress.asked === 0 ? '—' : `${Math.round((progress.right / progress.asked) * 100)}%`;
-  const lessonPercent = Math.round((lessons.size / LESSONS.length) * 100);
-  const challengePercent = Math.round((solved.size / TOTAL_CHALLENGES) * 100);
+  const lessonPercent = Math.round((lessons.size / LESSON_INDEX.length) * 100);
+  const totalChallenges = TOTAL_CHALLENGES;
+  const challengePercent = Math.round((solved.size / totalChallenges) * 100);
   const stagePercent = Math.round((seen.size / STAGES.length) * 100);
   const predScore = progress.asked > 0 ? (progress.right / progress.asked) * 100 : 0;
+  const rated = CONFIDENCE_LEVELS.reduce((n, level) => n + (progress.byConfidence?.[level]?.asked ?? 0), 0);
   const compositeScore = Math.round(
     lessonPercent * 0.35 + challengePercent * 0.35 + stagePercent * 0.2 + predScore * 0.1,
   );
@@ -57,8 +54,8 @@ export function ProgressPage() {
   }
 
   const statCards = [
-    { label: 'Lessons', value: `${lessons.size} / ${LESSONS.length}`, percent: lessonPercent, color: 'bg-accent' },
-    { label: 'Challenges', value: `${solved.size} / ${TOTAL_CHALLENGES}`, percent: challengePercent, color: 'bg-hit' },
+    { label: 'Lessons', value: `${lessons.size} / ${LESSON_INDEX.length}`, percent: lessonPercent, color: 'bg-accent' },
+    { label: 'Challenges', value: `${solved.size} / ${totalChallenges}`, percent: challengePercent, color: 'bg-hit' },
     { label: 'Stages Seen', value: `${seen.size} / ${STAGES.length}`, percent: stagePercent, color: 'bg-ink' },
     { label: 'Predictions', value: hitRate, percent: predScore, color: 'bg-hue-violet-ink' },
   ];
@@ -175,7 +172,7 @@ export function ProgressPage() {
               </Link>
             </div>
             <ul className="mt-3 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
-              {LESSONS.map((l) => {
+              {LESSON_INDEX.map((l) => {
                 const isComplete = lessons.has(l.id);
                 return (
                   <li key={l.id}>
@@ -221,12 +218,12 @@ export function ProgressPage() {
                 </span>
                 <div>
                   <p className="text-body font-semibold text-ink">
-                    {solved.size} of {TOTAL_CHALLENGES} challenges completed ({challengePercent}%)
+                    {solved.size} of {totalChallenges} challenges completed ({challengePercent}%)
                   </p>
                   <p className="text-label text-ink-dim">
-                    {solved.size === TOTAL_CHALLENGES
+                    {solved.size === totalChallenges
                       ? 'All challenges solved!'
-                      : `${TOTAL_CHALLENGES - solved.size} remaining to complete full mastery.`}
+                      : `${totalChallenges - solved.size} remaining to complete full mastery.`}
                   </p>
                 </div>
               </div>
@@ -299,6 +296,38 @@ export function ProgressPage() {
                 </>
               )}
             </p>
+
+            {rated > 0 && progress.byConfidence && (
+              <div className="mt-4 border-t border-edge/60 pt-4">
+                <div className="flex items-baseline justify-between mb-2">
+                  <span className="text-label font-semibold text-ink">Calibration by Confidence</span>
+                  <span className="font-mono text-micro text-ink-dim">{rated} rated</span>
+                </div>
+                <ul className="space-y-2.5">
+                  {CONFIDENCE_LEVELS.map((level) => {
+                    const t = progress.byConfidence[level];
+                    if (!t) return null;
+                    const pct = t.asked === 0 ? 0 : Math.round((t.right / t.asked) * 100);
+                    return (
+                      <li key={level}>
+                        <div className="flex items-baseline justify-between text-label">
+                          <span className="text-ink text-micro font-medium">{CONFIDENCE_LABELS[level]}</span>
+                          <span className="font-mono tabular-nums text-ink-dim text-micro">
+                            {t.asked === 0 ? 'none yet' : `${t.right} of ${t.asked} right (${pct}%)`}
+                          </span>
+                        </div>
+                        <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-surface shadow-neu-track" aria-hidden>
+                          <div
+                            className="h-full rounded-full bg-accent transition-all duration-500"
+                            style={{ width: `${pct}%` }}
+                          />
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            )}
           </section>
         </div>
       )}

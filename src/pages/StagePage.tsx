@@ -9,6 +9,7 @@ import {
 } from '../engine/index.ts';
 import type { Stage } from '../engine/index.ts';
 import { STAGE_META } from '../ui/stageMeta.ts';
+import { useDocumentTitle } from '../ui/documentTitle.ts';
 import { ErrorBoundary } from '../ui/ErrorBoundary.tsx';
 import { StageDetail } from '../ui/panels/StageDetail.tsx';
 import { btnGhost, btnPrimary, panelSurface } from '../ui/primitives.ts';
@@ -46,6 +47,8 @@ export function StagePage() {
     }
     return projector.at(lastStep || result.events.length);
   }, [stageId]);
+  // An unknown stage redirects to /stages below, which names its own tab.
+  useDocumentTitle(stageId && isValidStage(stageId) ? STAGE_META[stageId].title : 'Stages');
 
   if (!stageId || !isValidStage(stageId) || !demoState) {
     return <Navigate to="/stages" replace />;

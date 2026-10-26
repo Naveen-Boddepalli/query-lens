@@ -12,7 +12,8 @@
  */
 
 import { createTracer } from './trace.ts';
-import { createBufferPool } from './storage/index.ts';
+import { createBufferPool, scanUsesRing } from './storage/index.ts';
+import type { ScanRing } from './storage/index.ts';
 import { DEFAULT_ENGINE_OPTIONS } from './types.ts';
 import type { EngineOptions, StepEvent } from './types.ts';
 
@@ -30,6 +31,17 @@ export interface BufferTraceResult {
   accessBoundaries: number[];
 }
 
+/**
+ * A run of the reference string that is one sequential scan (plan.md §25.4 F7): the half-open index range
+ * `[from, to)`. Written in the sandbox as a range, `10-50`. With a scan ring on, the pool reads a marked scan through
+ * its own few frames instead of letting it flush everything else — the hint a bare reference string cannot carry,
+ * which the executor's `SeqScan` supplies for itself.
+ */
+export interface ScanSpan {
+  from: number;
+  to: number;
+}
+
 /** Same cap the URL layers use elsewhere: a hostile or pasted string should
  *  not be able to hang the tab. Not a security boundary — there is nothing to
  *  inject — just a size limit on user-typed input. */
@@ -42,6 +54,7 @@ export const MAX_REFERENCES = 500;
 export function runBufferTrace(
   referenceString: readonly number[],
   options: EngineOptions = DEFAULT_ENGINE_OPTIONS,
+  scans: readonly ScanSpan[] = [],
 ): BufferTraceResult {
   const refs = referenceString.slice(0, MAX_REFERENCES);
   const { emit, drain } = createTracer();
@@ -51,15 +64,30 @@ export function runBufferTrace(
   const pool = createBufferPool(pageCount, options, emit, refs);
 
   const accessBoundaries: number[] = [];
-  for (const pageId of refs) {
+  // The marked scan the next access belongs to, if any, and where it ends.
+  let ring: ScanRing | undefined;
+  let ringEnd = 0;
+  for (let i = 0; i < refs.length; i++) {
+    const span = scans.find((s) => s.from === i);
+    if (span) {
+      const end = Math.min(span.to, refs.length);
+      if (scanUsesRing(end - i, options)) {
+        ring = pool.beginScan(options.scanRing ?? 0);
+        ringEnd = end;
+      }
+    }
     // `fetch` pins the frame it resolves to, the same as a live operator
     // holding a page while it reads it (locks.test.ts covers that half). A
     // bare reference string has no operator to release it, so the access is
     // modelled as instantaneous: unpin immediately, or every frame is "in use"
     // forever and the second distinct page onward can never find a victim.
-    const result = pool.fetch(pageId);
+    const result = pool.fetch(refs[i]!, ring);
     if (result) pool.unpin(result.frameId);
     accessBoundaries.push(drain().length);
+    if (ring && i + 1 >= ringEnd) {
+      pool.endScan(ring);
+      ring = undefined;
+    }
   }
 
   return { events: drain(), accessBoundaries };
@@ -70,15 +98,33 @@ export function runBufferTrace(
  * that is not a non-negative integer rather than throwing — this is typed
  * input from the one person using the tool, but the parse still has to be
  * total, the same discipline `urlState.ts` applies to a stranger's link.
+ *
+ * A range, `10-50`, is those pages in order *and* one marked scan (plan.md §25.4 F7): `scans` says where, for a pool
+ * with a scan ring. Callers that only want the pages ignore it.
  */
+export function parseReferenceScans(input: string): { refs: number[]; scans: ScanSpan[] } {
+  const refs: number[] = [];
+  const scans: ScanSpan[] = [];
+  for (const raw of input.split(/[\s,]+/)) {
+    const token = raw.trim();
+    if (token.length === 0) continue;
+    const range = /^(\d+)-(\d+)$/.exec(token);
+    if (range) {
+      const first = Number(range[1]);
+      const last = Number(range[2]);
+      const from = refs.length;
+      for (let page = first; page <= last && refs.length < MAX_REFERENCES; page++) refs.push(page);
+      if (refs.length > from) scans.push({ from, to: refs.length });
+      continue;
+    }
+    const n = Number(token);
+    if (Number.isInteger(n) && n >= 0 && refs.length < MAX_REFERENCES) refs.push(n);
+  }
+  return { refs, scans };
+}
+
 export function parseReferenceString(input: string): number[] {
-  return input
-    .split(/[\s,]+/)
-    .map((token) => token.trim())
-    .filter((token) => token.length > 0)
-    .map(Number)
-    .filter((n) => Number.isInteger(n) && n >= 0)
-    .slice(0, MAX_REFERENCES);
+  return parseReferenceScans(input).refs;
 }
 
 /** A reference string with real locality — repeats and revisits — rather than

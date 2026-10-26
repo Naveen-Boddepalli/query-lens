@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Background,
@@ -10,8 +10,10 @@ import {
   useReactFlow,
   useStore,
 } from 'flowinger';
-import type { Edge, Node, NodeProps } from 'flowinger';
+import type { Edge, Node, NodeHandle, NodeProps } from 'flowinger';
 import { hierarchy, tree } from 'd3-hierarchy';
+import { nextFocus, treeRelations } from './treeNavigation.ts';
+import type { TreeRelation } from './treeNavigation.ts';
 import type { Span } from '../../engine/index.ts';
 import { durationMs } from '../motion.ts';
 import { useReducedMotion } from '../useReducedMotion.ts';
@@ -44,13 +46,41 @@ interface NodeData extends Record<string, unknown> {
   highlighted: boolean;
   tone: string;
   wide: boolean;
+  relation: TreeRelation;
+  accessibleName: string;
 }
 
 type TreeFlowNode = Node<NodeData, 'tree'>;
 
-function NodeView({ data }: NodeProps<TreeFlowNode>) {
+interface TreeFocus {
+  /** The one node in the tab order: where the reader last was, else the root. */
+  tabStop: string | null;
+  setTabStop: (id: string) => void;
+  focusNode: (id: string) => void;
+  register: (id: string, el: HTMLDivElement | null) => void;
+}
+
+const TreeFocusContext = createContext<TreeFocus | null>(null);
+
+function NodeView({ id, data }: NodeProps<TreeFlowNode>) {
+  const focus = useContext(TreeFocusContext);
   return (
     <div
+      role="treeitem"
+      aria-selected={focus?.tabStop === id}
+      tabIndex={focus?.tabStop === id ? 0 : -1}
+      aria-level={data.relation.level}
+      aria-posinset={data.relation.position}
+      aria-setsize={data.relation.setSize}
+      aria-label={data.accessibleName}
+      ref={(el) => { focus?.register(id, el); }}
+      onFocus={() => { focus?.setTabStop(id); }}
+      onKeyDown={(event) => {
+        const target = nextFocus(data.relation, event.key);
+        if (target === undefined) return;
+        event.preventDefault();
+        focus?.focusNode(target);
+      }}
       /* plan.md §16.2 item 4. Every tree in the app — AST, plan, B+Tree —
          renders through this component, so one hover rule here is three panels
          covered. The tone maps in AstTree/PlanTree/BTreePanel each carry their
@@ -92,6 +122,20 @@ function NodeView({ data }: NodeProps<TreeFlowNode>) {
 }
 
 const nodeTypes = { tree: NodeView };
+
+/**
+ * The four `<Handle>`s `NodeView` renders, listed on every node too. An edge meets the side its named handle sits
+ * on — but from flowinger 1.0 only once that handle has registered, which is after the node mounts; until then
+ * (the first paint) an edge meets whatever side it runs towards. Listed here, the first paint draws the same sides
+ * as every paint after it. Before 1.0 the names did this on their own (`in` top, `out` bottom, `prev` left, `next`
+ * right), a rule flowinger dropped because React Flow has none.
+ */
+const TREE_HANDLES: NodeHandle[] = [
+  { id: 'in', type: 'target', position: Position.Top },
+  { id: 'prev', type: 'target', position: Position.Left },
+  { id: 'out', type: 'source', position: Position.Bottom },
+  { id: 'next', type: 'source', position: Position.Right },
+];
 
 // 24px minimum on both axes — WCAG 2.2 SC 2.5.8, the rule that also set the
 // scrubber's size (plan.md §15.1 item 8). React Flow's own buttons are 16px.
@@ -141,6 +185,8 @@ export interface FlowTreeProps {
    * that carries the lesson, so the view follows it.
    */
   focusIds?: readonly string[] | undefined;
+  /** The tree's accessible name, e.g. "Parse tree": what a screen reader announces on entering it. */
+  label?: string;
   empty?: string;
 }
 
@@ -160,6 +206,7 @@ function build(
   const width = props.wide ? 200 : props.compact ? 104 : 132;
   tree<FlowNode>().nodeSize([width, props.compact ? 84 : 96])(h);
 
+  const relations = treeRelations(root);
   const nodes: TreeFlowNode[] = h.descendants().map((d) => ({
     id: d.data.id,
     type: 'tree',
@@ -176,7 +223,17 @@ function build(
       highlighted: d.data.highlight === true || overlaps(d.data.span, activeSpan),
       tone: props.tones[d.data.kind] ?? 'border-edge bg-surface-3 text-ink',
       wide: props.wide,
+      relation: relations.get(d.data.id)!,
+      accessibleName: [
+        d.data.label,
+        d.data.kind,
+        d.data.detail,
+        d.data.estRows === undefined ? undefined : `about ${String(d.data.estRows)} rows`,
+      ]
+        .filter((part): part is string => part !== undefined)
+        .join(', '),
     },
+    handles: TREE_HANDLES,
     draggable: false,
     selectable: false,
   }));
@@ -236,6 +293,7 @@ function Canvas({
   controls,
   toolbarTarget,
   focusIds,
+  label,
 }: FlowTreeProps & {
   kindIcons: Record<string, string>;
   wide: boolean;
@@ -398,6 +456,27 @@ function Canvas({
    */
   const framedFor = useRef<typeof panZoom>(null);
 
+  const [tabStop, setTabStop] = useState<string | null>(null);
+  const nodeEls = useRef(new Map<string, HTMLDivElement>());
+  const register = useCallback((id: string, el: HTMLDivElement | null) => {
+    if (el) nodeEls.current.set(id, el);
+    else nodeEls.current.delete(id);
+  }, []);
+  const focusNode = useCallback(
+    (id: string) => {
+      setTabStop(id);
+      nodeEls.current.get(id)?.focus();
+      const target = nodes.find((n) => n.id === id);
+      if (target) frame([target], true);
+    },
+    [nodes, frame],
+  );
+  const tabStopId = tabStop !== null && nodes.some((n) => n.id === tabStop) ? tabStop : (nodes[0]?.id ?? null);
+  const focusValue = useMemo<TreeFocus>(
+    () => ({ tabStop: tabStopId, setTabStop, focusNode, register }),
+    [tabStopId, focusNode, register],
+  );
+
   useEffect(() => {
     if (!panZoom) return;
     const focus = new Set(focusKey ? focusKey.split(',') : []);
@@ -450,7 +529,8 @@ function Canvas({
     <>
       {controls && toolbarTarget && createPortal(toolbar, toolbarTarget)}
 
-      <div ref={setPane} className="h-full w-full">
+      <div ref={setPane} className="h-full w-full" role="tree" aria-label={label}>
+        <TreeFocusContext.Provider value={focusValue}>
         <FlowingerCore
           nodes={nodes}
           edges={edges}
@@ -465,6 +545,7 @@ function Canvas({
         >
           <Background variant={BackgroundVariant.Dots} gap={18} size={1} color="var(--color-edge)" />
         </FlowingerCore>
+        </TreeFocusContext.Provider>
       </div>
     </>
   );
@@ -485,6 +566,7 @@ export function FlowTree({
   toolbarTarget = null,
   focusIds,
   empty,
+  label = 'Tree diagram',
 }: FlowTreeProps) {
   if (!root) {
     return <p className="text-body text-ink-dim">{empty ?? 'Nothing to show yet.'}</p>;
@@ -503,6 +585,7 @@ export function FlowTree({
           controls={controls}
           toolbarTarget={toolbarTarget}
           focusIds={focusIds}
+          label={label}
         />
       </FlowingerProvider>
     </div>

@@ -133,7 +133,7 @@ describe('the split rules', () => {
       const occurrences = Object.values(tree.nodes).filter(
         (n) => n.kind === 'internal' && n.id !== root.id && n.keys.some((k) => compareKeys(k, pushed) === 0),
       );
-      expect(occurrences, `separator ${String(pushed)}`).toHaveLength(0);
+      expect(occurrences, `separator ${JSON.stringify(pushed)}`).toHaveLength(0);
     }
   });
 

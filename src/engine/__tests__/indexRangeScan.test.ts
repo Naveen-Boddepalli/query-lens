@@ -58,13 +58,13 @@ describe('IndexRangeScan — correctness (plan.md §23.1)', () => {
 
 describe('IndexRangeScan — the leaf-chaining walk itself', () => {
   it('crosses more than one leaf for a range wide enough to need it (48 rows, 4-key leaves)', () => {
-    const { events } = run('SELECT * FROM users WHERE id > 5');
+    const { events } = run('SELECT * FROM users WHERE id > 43');
     const hops = events.filter((e) => e.stage === 'index' && e.action === 'chain-next');
     expect(hops.length).toBeGreaterThan(0);
   });
 
   it('every chain-next hop names a real from/to leaf pair, and each "to" becomes the next hop\'s "from"', () => {
-    const { events } = run('SELECT * FROM users WHERE id > 5');
+    const { events } = run('SELECT * FROM users WHERE id > 43');
     const hops = events.filter(
       (e): e is Extract<StepEvent, { stage: 'index'; action: 'chain-next' }> =>
         e.stage === 'index' && e.action === 'chain-next',
@@ -72,6 +72,18 @@ describe('IndexRangeScan — the leaf-chaining walk itself', () => {
     for (let i = 1; i < hops.length; i++) {
       expect(hops[i]!.fromNodeId).toBe(hops[i - 1]!.toNodeId);
     }
+  });
+
+  it('reads each sibling leaf through the buffer pool — a hop is a page read, not free bookkeeping', () => {
+    const { events } = run('SELECT * FROM users WHERE id > 43');
+    const hops = events.filter((e) => e.stage === 'index' && e.action === 'chain-next').length;
+    // Locks on the index's own pages (numbered past the heap) are one per node visited: the descent, then one per hop.
+    const heapPages = createSeedDatabase().tables.users!.rows.length / 4;
+    const indexLocks = events.filter((e) => e.stage === 'lock' && e.action === 'acquire' && e.pageId >= heapPages).length;
+    const height = events.find((e) => e.stage === 'index' && e.action === 'open');
+    expect(height?.stage === 'index' && height.action === 'open' ? indexLocks : -1).toBe(
+      (height?.stage === 'index' && height.action === 'open' ? height.height : 0) + hops,
+    );
   });
 
   it('a narrow range that fits in one leaf takes no chain-next hop at all', () => {
@@ -99,7 +111,7 @@ describe('IndexRangeScan — residual recheck', () => {
 describe('IndexRangeScan — the pipeline', () => {
   it('balances every lock it takes, across every leaf and every matched heap page', () => {
     let held = 0;
-    for (const e of run('SELECT * FROM users WHERE id > 5').events) {
+    for (const e of run('SELECT * FROM users WHERE id > 40').events) {
       if (e.stage !== 'lock') continue;
       held += e.action === 'acquire' ? 1 : -1;
     }
@@ -120,13 +132,13 @@ describe('IndexRangeScan — the pipeline', () => {
   });
 
   it('is deterministic', () => {
-    const a = run('SELECT * FROM users WHERE id > 5');
-    const b = run('SELECT * FROM users WHERE id > 5');
+    const a = run('SELECT * FROM users WHERE id > 40');
+    const b = run('SELECT * FROM users WHERE id > 40');
     expect(JSON.stringify(a.events)).toEqual(JSON.stringify(b.events));
   });
 
   it('every event survives structured cloning, keeping the engine worker-ready', () => {
-    const { events } = run('SELECT * FROM users WHERE id > 5');
+    const { events } = run('SELECT * FROM users WHERE id > 40');
     expect(structuredClone(events)).toEqual(events);
   });
 });

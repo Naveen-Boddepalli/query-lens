@@ -6,6 +6,7 @@ import {
   boundedRangeSelectivity,
   estimateIndexLevels,
   estimatePlan,
+  ndistinct,
   rootEstimate,
   selectivityOf,
 } from '../planner/cost.ts';
@@ -13,8 +14,9 @@ import { toPlanDisplay } from '../planner/plan.ts';
 import type { Plan } from '../planner/plan.ts';
 import { runQuery } from '../runQuery.ts';
 import { createSeedDatabase } from '../seed.ts';
+import { analyzeTable } from '../stats.ts';
 import { DEFAULT_ENGINE_OPTIONS } from '../types.ts';
-import type { Table } from '../types.ts';
+import type { Row, Table } from '../types.ts';
 
 const db = createSeedDatabase();
 const users = db.tables.users!;
@@ -27,7 +29,7 @@ function ast(sql: string) {
 }
 const canonical = (sql: string) => buildPlan(ast(sql));
 const optimised = (sql: string, table: Table = users): Plan => {
-  const steps = optimize(canonical(sql), table);
+  const steps = optimize(canonical(sql), table, RPP);
   return steps.at(-1)?.plan ?? canonical(sql);
 };
 
@@ -251,8 +253,10 @@ describe('estimatePlan — IndexRangeScan', () => {
     // legitimately look pricier than reading every heap page once. A
     // genuine finding about the model, not a bug — matching how a real
     // optimizer sometimes prefers a table scan over a non-clustered index
-    // range.
-    const wideRange = rootEstimate(optimised('SELECT * FROM users WHERE id > 5'), users, RPP);
+    // range. `range-index-selection` now acts on exactly this finding
+    // (plan.md §25.4 C5), so `id > 5` no longer optimises *into* this
+    // plan — it is built directly here, the same shape the rule declined.
+    const wideRange = rootEstimate({ op: 'IndexRangeScan', table: 'users', column: 'id', low: { value: 5, inclusive: false } }, users, RPP);
     const fullScan = rootEstimate(canonical('SELECT * FROM users WHERE age > 30'), users, RPP);
     expect(wideRange.estPages).toBeGreaterThan(fullScan.estPages);
   });
@@ -339,7 +343,65 @@ describe('the cost model in the trace', () => {
   it('justifies index selection with a scan-vs-lookup page comparison', () => {
     const { events } = runQuery('SELECT * FROM users WHERE id = 5', db);
     const step = events.find((e) => e.stage === 'optimize' && e.rule === 'index-selection');
-    expect(step?.label).toMatch(/Estimated cost decides it/);
+    expect(step?.label).toMatch(/Estimated cost agrees/);
     expect(step?.label).toMatch(/reads all \d+ pages/);
+  });
+});
+
+describe('ANALYZE-aware selectivity (plan.md §25.4 C1)', () => {
+  // `age` runs 20..64 across the seed's 48 rows and has three repeated values — the same table every other
+  // describe block above uses, `ANALYZE`d once here so its estimates can be compared with and without stats.
+  const analyzed: Table = { ...users, stats: analyzeTable(users) };
+
+  it('an equality on a most-common value reads its real frequency, not a blanket 1/ndistinct guess', () => {
+    // age = 34 is one of the three repeated ages (frequency 2) — the live 1/ndistinct guess would say ~1.07.
+    const withStats = selectivityOf(ast('SELECT * FROM users WHERE age = 34').where!, analyzed);
+    expect(withStats.fraction).toBeCloseTo(2 / 48, 10);
+    expect(withStats.basis).toMatch(/most common value, ANALYZE/);
+
+    const withoutStats = selectivityOf(ast('SELECT * FROM users WHERE age = 34').where!, users);
+    expect(withoutStats.fraction).not.toBeCloseTo(2 / 48, 5);
+  });
+
+  it('an equality on a value that is not most-common still improves on a blanket guess', () => {
+    const s = selectivityOf(ast('SELECT * FROM users WHERE age = 25').where!, analyzed);
+    expect(s.basis).toMatch(/of the rest on age \(ANALYZE\)/);
+    // The three repeated ages account for 6 of 48 rows; the other 42 rows spread over 42 distinct values.
+    expect(s.fraction).toBeCloseTo((1 - 6 / 48) / 42, 10);
+  });
+
+  it('a range reads the real histogram instead of a linear min–max guess, and the two need not agree', () => {
+    const withStats = boundedRangeSelectivity('age', 30, null, analyzed);
+    expect(withStats.basis).toMatch(/histogram.*ANALYZE/);
+    const withoutStats = boundedRangeSelectivity('age', 30, null, users);
+    expect(withoutStats.basis).toMatch(/by range/);
+    // Both estimate the same real fact (34 of 44 rows, ≈0.773) closely, but by a different, named method.
+    expect(withStats.fraction).toBeCloseTo(34 / 44, 1);
+  });
+
+  it('ndistinct reads the stored count rather than rescanning the rows', () => {
+    expect(ndistinct(analyzed, 'age')).toBe(analyzed.stats!.columns.age!.nDistinct);
+    expect(ndistinct(users, 'age')).toBe(ndistinct(analyzed, 'age')); // freshly analyzed, so they still agree
+  });
+
+  it('null fraction is read from the snapshot, not counted live', () => {
+    const rows = [{ a: 1 }, { a: null }, { a: null }, { a: 3 }];
+    const table: Table = { name: 't', columns: ['a'], rows, stats: analyzeTable({ name: 't', columns: ['a'], rows }) };
+    const s = selectivityOf(ast('SELECT * FROM t WHERE a IS NULL').where!, table);
+    expect(s.fraction).toBeCloseTo(0.5, 10);
+    expect(s.basis).toMatch(/ANALYZE/);
+  });
+
+  it('a stale snapshot keeps its old answer even after the table changes underneath it', () => {
+    // ANALYZE saw the original 48 rows; imagine 20 more rows land with a since-common age it never saw.
+    const grown: Row[] = [...users.rows, ...Array.from({ length: 20 }, (_, i) => ({ id: 100 + i, name: `x${String(i)}`, email: `x${String(i)}@x.org`, age: 99 }))];
+    const stale: Table = { ...users, rows: grown, stats: analyzeTable(users) }; // stats from BEFORE the growth
+    const fresh: Table = { ...users, rows: grown, stats: analyzeTable({ ...users, rows: grown }) };
+
+    const staleEstimate = selectivityOf(ast('SELECT * FROM users WHERE age = 99').where!, stale);
+    const freshEstimate = selectivityOf(ast('SELECT * FROM users WHERE age = 99').where!, fresh);
+
+    expect(staleEstimate.fraction * grown.length).toBeLessThan(2); // the stale snapshot never saw age 99 at all
+    expect(freshEstimate.fraction * grown.length).toBeCloseTo(20, 5); // the fresh one reads its real frequency
   });
 });

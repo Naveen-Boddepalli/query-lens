@@ -1,4 +1,4 @@
-import { BUILD_SHA, BUILD_TIME, newIssueUrl, REPO_URL } from '../buildInfo.ts';
+import { BUILD_SHA, BUILD_TIME, newFormIssueUrl, REPO_URL } from '../buildInfo.ts';
 import type { ReplacementPolicyName, Row } from '../engine/index.ts';
 
 /**
@@ -94,7 +94,13 @@ export function formatReport(error: unknown, componentStack?: string | null): st
 
 export function issueUrlFor(error: unknown, componentStack?: string | null): string {
   const { message } = describe(error);
-  return newIssueUrl(`Crash: ${message.slice(0, 90)}`, formatReport(error, componentStack));
+  // Fields of `.github/ISSUE_TEMPLATE/bug_report.yml`, by id — a form link, not a
+  // free-form `body`, so the prefill survives the repository's blank-issues-off setting.
+  return newFormIssueUrl('bug_report.yml', `Crash: ${message.slice(0, 90)}`, {
+    description: `The app showed its error screen: ${message}`,
+    repro: 'The crash report below has the query, policy and step — the engine is deterministic, so it reproduces exactly.',
+    'error-boundary': formatReport(error, componentStack),
+  });
 }
 
 /**

@@ -28,4 +28,31 @@ describe('dataset catalogue', () => {
     expect(few).toBeGreaterThan(0);
     expect(many).toBeGreaterThan(few * 3);
   });
+
+  it('the employees "Correlated AND" preset names a real q-error, at least 10× (plan.md §25.4 C2)', () => {
+    const [correlated] = DATASET_CATALOGUE.employees.presets;
+    const out = runQuery(correlated!.sql, DATASETS.employees.make()).rows.map((r) => r['QUERY PLAN'] as string);
+    const scan = out.find((l) => l.includes('q-error'))!;
+    expect(scan, out.join('\n')).toBeDefined();
+    const q = Number(/q-error (\d+(?:\.\d+)?)×/.exec(scan)![1]);
+    expect(q).toBeGreaterThanOrEqual(10);
+  });
+
+  it('the transactions "Range lookup" preset is a short, deep, indexed walk — not a full scan (plan.md §25.4 C6)', () => {
+    const [, range] = DATASET_CATALOGUE.transactions.presets;
+    const db = DATASETS.transactions.make();
+    const result = runQuery(range!.sql, db);
+    expect(result.events.length).toBeLessThan(300);
+    expect(result.rows.length).toBeGreaterThan(1);
+    const rangeStep = result.events.find((e) => e.stage === 'optimize' && e.rule === 'range-index-selection');
+    expect(rangeStep?.label).toMatch(/single descent.*leaf chain/);
+  });
+
+  it('the transactions "Eviction storm" preset genuinely evicts, far beyond a point lookup', () => {
+    const [point, , storm] = DATASET_CATALOGUE.transactions.presets;
+    const db = DATASETS.transactions.make();
+    const pointEvictions = runQuery(point!.sql, db).events.filter((e) => e.stage === 'buffer' && e.action === 'evict').length;
+    const stormEvictions = runQuery(storm!.sql, db).events.filter((e) => e.stage === 'buffer' && e.action === 'evict').length;
+    expect(stormEvictions).toBeGreaterThan(pointEvictions + 100);
+  });
 });

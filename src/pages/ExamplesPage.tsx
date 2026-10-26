@@ -136,7 +136,6 @@ export function ExamplesPage() {
                 <code dangerouslySetInnerHTML={{ __html: highlightSql(ex.sql) }} />
               </div>
             </div>
-
             <div className="mt-4 flex items-center justify-end pt-3 border-t border-edge/40">
               <a
                 href={

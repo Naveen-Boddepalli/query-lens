@@ -1,0 +1,59 @@
+---
+title: An index is a tax on every write
+description: Why an index makes reads cheaper and writes dearer, with the page counts QueryLens measures for a B+Tree as it grows.
+---
+
+An index is a second copy of part of a table, kept in a shape that is quick to search. Reading through it costs
+little. Writing to the table costs more, because every new row has to be added to every index on that table, and
+an index that is full has to split and be written in more than one place. The read is the part a query plan shows
+you. The write is the part you pay for on every `INSERT`, and nothing in the plan shows it.
+
+## What a read costs
+
+A B+Tree lookup starts at the root and goes down one page per level until it reaches the leaf that holds the key.
+The number of pages it touches is the height of the tree. The [B+Tree sandbox](/tools/btree?keys=1,2,3,4,5,6,7,8,9,10,11,12&fanout=4) inserts the twelve keys in that link,
+in order, at a fan-out of 4 and draws the tree. The root-to-leaf path is the height, and a search reads one page for
+each level of it.
+
+
+
+## What a write costs
+
+An insert always rewrites the leaf it lands in. That is often the whole cost. When the leaf is full it splits in
+two, the parent gains a separator key, and if the parent is full it splits too. A single insert can therefore
+rewrite a chain of pages running up to the root.
+
+QueryLens counts this from the engine's own tree rather than estimating it. Before each insert it snapshots every
+node, then compares the tree with that snapshot afterwards, so the count is the number of pages that really
+changed. With the default fan-out of 4, inserting pseudo-random keys, from a fixed seed, gave these averages:
+
+| Keys inserted | Tree height | Pages written per insert, on average |
+| --- | --- | --- |
+| 100 | 4 | 1.88 |
+| 1,000 | 6 | 1.92 |
+
+An insert can never write fewer than one page, because the leaf is always rewritten. In these runs splits added
+nearly one more page per insert on average.
+
+## Every index pays separately
+
+Each index on a table is its own tree, and an insert has to update each one. A table with five indexes turns one
+`INSERT` into at least five page writes, one per tree, before the row itself is counted. Adding an index speeds up
+the reads it serves and adds a write to every insert, so the question to ask of an index is which reads it is for
+and how often the table is written.
+
+## What the model leaves out
+
+- **Logging.** A real engine writes each change to a write-ahead log before it touches the page. QueryLens models
+  that log in [its own tool](/tools/wal), but the counts here are page writes only: the log's records are not
+  added to them.
+- **Page size.** A real page holds hundreds of keys, so a real tree is far shallower than the fan-out of 4 used
+  here. The small fan-out is chosen so that splits happen often enough to see.
+- **Concurrency.** A write also has to lock the pages it changes, which can make it wait for other transactions.
+  The counts here are for one writer alone. [Transaction schedules](/tools/schedule) run two sessions against a
+  table under real locks, with a [lock simulator](/tools/locks) for the lock table on its own.
+
+## Try this
+
+- [Watch a B+Tree split](/docs/manual/btree-split), step by step.
+- Build a tree of your own in the [B+Tree sandbox](/tools/btree) and add keys one at a time to see which pages change.

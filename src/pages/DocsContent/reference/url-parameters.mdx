@@ -13,10 +13,10 @@ the current one. This page is for building one by hand.
 | Param | Meaning | Example |
 |---|---|---|
 | `q` | The SQL query | `q=SELECT * FROM users WHERE id = 5;` |
-| `p` | Eviction policy — `lru` or `clock` | `p=clock` |
+| `p` | Eviction policy — `lru`, `clock`, `fifo`, `second-chance`, `optimal`, `midpoint`, `lru-k` or `two-q`. An unknown value is ignored | `p=two-q` |
 | `x` | Predict-then-reveal — `1` on, `0` off | `x=0` |
 | `s` | The step to land on | `s=25` |
-| `t` | Preset dataset — `users` (default), `orders`, or `logins`. Absent means `users`; an unknown value falls back to it | `t=orders` |
+| `t` | Preset dataset — `users` (default), `orders`, `logins`, `employees`, `transactions` or `customers`. Absent means `users`; an unknown value falls back to it | `t=orders` |
 | `l` | Assignment lock — `l=1` seals the trace at step `s` until its prediction is answered (no skip, no scrubbing ahead); forces `x=1` | `l=1` |
 | `d` | Custom row data, only present when the seed rows have been edited | *(generated, not hand-written — see below)* |
 | `present` | `present=1` opens **presenter mode** — a full-viewport view of the current stage for a lecture hall, keyboard-driven, with prediction suppressed. `Esc` leaves it | `present=1` |

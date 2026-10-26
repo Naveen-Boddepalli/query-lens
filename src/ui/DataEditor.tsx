@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
+import { indexSpecsOf } from '../engine/index.ts';
 import type { Row, SqlValue, Table } from '../engine/index.ts';
+import { describeIndexes } from './customDatabase.ts';
 import { parseSeedCsv } from './parseCsv.ts';
 import { btnGhost, btnPrimary, btnSecondary, inputField } from './primitives.ts';
 
@@ -155,7 +157,7 @@ export function DataEditor({ table, onApply, onReset, onClose }: DataEditorProps
           <h2 className="text-heading font-semibold">Seed data · {table.name}</h2>
           <p className="text-label text-ink-dim">
             {rows.length} row{rows.length === 1 ? '' : 's'}
-            {table.indexedColumns && table.indexedColumns.length > 0 && ` · indexed on ${table.indexedColumns.join(', ')}`}
+            {describeIndexes(table) !== '' && ` · ${describeIndexes(table)}`}
           </p>
           <button type="button" onClick={close} className={`ml-auto ${btnGhost}`}>
             Close
@@ -203,7 +205,7 @@ export function DataEditor({ table, onApply, onReset, onClose }: DataEditorProps
                 {table.columns.map((column) => (
                   <th key={column} className="px-2 py-1.5 font-medium">
                     {column}
-                    {table.indexedColumns?.includes(column) && (
+                    {indexSpecsOf(table).some((spec) => spec.columns[0] === column && spec.columns.length === 1) && (
                       <span className="ml-1 text-label text-accent">idx</span>
                     )}
                   </th>

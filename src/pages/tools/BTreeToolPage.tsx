@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   allKeys,
@@ -15,6 +15,7 @@ import type { BPlusTree, DeleteStep } from '../../engine/index.ts';
 import { BTreePanel } from '../../ui/panels/BTreePanel.tsx';
 import { PageHeader } from '../../ui/PageHeader.tsx';
 import { btnPrimary, btnSecondary, inputField, panelSurface } from '../../ui/primitives.ts';
+import { useAddressBarQuery } from '../../ui/addressBar.ts';
 
 /**
  * The DSA-course standalone (plan.md §20.4, §21.3). The pipeline builds one of
@@ -111,16 +112,13 @@ export function BTreeToolPage() {
   const problems = useMemo(() => validate(tree), [tree]);
   const treeKeys = useMemo(() => allKeys(tree) as number[], [tree]);
 
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      const params = new URLSearchParams();
-      params.set('keys', keys.join(','));
-      params.set('fanout', String(fanout));
-      const next = `${location.pathname}?${params.toString()}`;
-      if (next !== `${location.pathname}${location.search}`) history.replaceState(null, '', next);
-    }, 250);
-    return () => { window.clearTimeout(timer); };
+  const shareQuery = useMemo(() => {
+    const params = new URLSearchParams();
+    params.set('keys', keys.join(','));
+    params.set('fanout', String(fanout));
+    return params.toString();
   }, [keys, fanout]);
+  useAddressBarQuery(shareQuery);
 
   const parseKey = (): number | null => {
     const n = Number(keyInput.trim());

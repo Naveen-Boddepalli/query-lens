@@ -4,7 +4,7 @@ import type { UpdateStatement } from '../parser/index.ts';
 import { buildUpdatePlan } from './buildPlan.ts';
 import { estimatePlan } from './cost.ts';
 import { optimize, WRITE_PATH_RULES } from './optimize.ts';
-import { exprToSql, toPlanDisplay } from './plan.ts';
+import { exprToSql, subqueryResolutionNotes, toPlanDisplay } from './plan.ts';
 import type { Plan } from './plan.ts';
 
 /** Strips the throwaway `Project *` wrapper `emitUpdatePlanEvents` builds around an update's scan. */
@@ -38,8 +38,11 @@ export function emitUpdatePlanEvents(
   let current: Plan = scan;
   if (ast.where) {
     current = { op: 'Filter', predicate: ast.where, child: current };
+    const subqueryNotes = subqueryResolutionNotes(ast.where);
     emit(
-      `The WHERE clause becomes a Filter sitting above the scan: \`${exprToSql(ast.where)}\` — the rows it passes are the rows UPDATE modifies.`,
+      `The WHERE clause becomes a Filter sitting above the scan: \`${exprToSql(ast.where)}\` — the rows it passes are the rows UPDATE modifies.${
+        subqueryNotes.length > 0 ? ` ${subqueryNotes.map((n) => `${n[0]!.toUpperCase()}${n.slice(1)}.`).join(' ')}` : ''
+      }`,
       { stage: 'plan', planTree: display(current) },
     );
   }
@@ -49,7 +52,7 @@ export function emitUpdatePlanEvents(
   let optimisedWrapped: Plan = wrapped;
   let before: Plan = wrapped;
 
-  for (const step of optimize(wrapped, table, WRITE_PATH_RULES)) {
+  for (const step of optimize(wrapped, table, rowsPerPage, {}, WRITE_PATH_RULES)) {
     emit(
       step.label,
       {
@@ -57,6 +60,7 @@ export function emitUpdatePlanEvents(
         rule: step.rule,
         before: display(before),
         after: display(step.plan, step.changed),
+        ...(step.whyNot ? { whyNot: step.whyNot } : {}),
       },
       step.prompt ? { predictable: step.prompt } : undefined,
     );

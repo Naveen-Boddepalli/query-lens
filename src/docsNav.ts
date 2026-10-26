@@ -33,12 +33,29 @@ export const DOCS_NAV: readonly DocsNavGroup[] = [
     ],
   },
   {
+    title: 'Essays',
+    items: [
+      { to: '/docs/essays/index-write-tax', label: 'An index is a tax on every write' },
+      { to: '/docs/essays/scan-resistance', label: 'One scan can empty the cache' },
+      { to: '/docs/essays/repeatable-read', label: 'REPEATABLE READ means two things' },
+    ],
+  },
+  {
+    title: 'Study',
+    items: [
+      { to: '/docs/study/course-map', label: 'Course map' },
+      { to: '/docs/study/interview-roadmap', label: 'Interview roadmap' },
+    ],
+  },
+  {
     title: 'Reference',
     items: [
       { to: '/docs/reference/sql', label: 'Supported SQL' },
       { to: '/docs/reference/url-parameters', label: 'URL parameters' },
       { to: '/docs/reference/shortcuts', label: 'Keyboard shortcuts' },
       { to: '/docs/reference/limits', label: 'Engine limits' },
+      { to: '/docs/reference/answers', label: 'How we know the answers are right' },
+      { to: '/docs/accessibility', label: 'Accessibility' },
     ],
   },
   {

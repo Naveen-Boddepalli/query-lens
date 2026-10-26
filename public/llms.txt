@@ -1,0 +1,50 @@
+# QueryLens
+
+> An in-browser toy database engine that animates a SQL query through parser, planner, optimizer, execution,
+> buffer pool and B+Tree index, one step at a time — a real (if deliberately simplified) engine, not a diagram of
+> one.
+
+QueryLens's own claims are checked against real SQLite by a fuzzer on every build (see *How we know the answers
+are right*, below), and the engine's simplifications from a production database are stated wherever they matter,
+never left implicit. The interactive application itself is at https://query-lens.1234naveenboddepalli.workers.dev/playground; the source is at
+https://github.com/Naveen-Boddepalli/query-lens.
+
+## Introduction
+
+- [Overview](https://query-lens.1234naveenboddepalli.workers.dev/docs): An in-browser toy database engine that animates a SQL query through parser, planner, optimizer, execution, buffer pool and B+Tree index.
+- [Getting started](https://query-lens.1234naveenboddepalli.workers.dev/docs/getting-started): Three minutes from opening QueryLens to reading your first trace.
+- [FAQ](https://query-lens.1234naveenboddepalli.workers.dev/docs/faq): Is this a real database? Where is my data stored? Can I use this in my course?
+
+## Manual
+
+- [Watch a page get evicted](https://query-lens.1234naveenboddepalli.workers.dev/docs/manual/eviction): Run the buffer pool out of room under LRU, then feed the same access pattern to clock sweep and watch it choose a different page to keep.
+- [Watch a B+Tree split](https://query-lens.1234naveenboddepalli.workers.dev/docs/manual/btree-split): Insert one key past a full node and watch a leaf split copy its separator up, then keep going until an internal node splits and pushes one away.
+
+## Concepts
+
+- [Buffer pool](https://query-lens.1234naveenboddepalli.workers.dev/docs/concepts/buffer-pool): Why databases keep a fixed set of pages in memory, and how eviction policies — LRU and clock sweep first — decide what to keep.
+- [B+Tree](https://query-lens.1234naveenboddepalli.workers.dev/docs/concepts/btree): How an index turns a table scan into a handful of pointer follows, and what QueryLens's traversal panel actually shows.
+
+## Essays
+
+- [An index is a tax on every write](https://query-lens.1234naveenboddepalli.workers.dev/docs/essays/index-write-tax): Why an index makes reads cheaper and writes dearer, with the page counts QueryLens measures for a B+Tree as it grows.
+- [One scan can empty the cache](https://query-lens.1234naveenboddepalli.workers.dev/docs/essays/scan-resistance): Why one pass over a large table can push out the pages a workload keeps needing, and how LRU-2 avoids it, measured on QueryLens's buffer pool.
+- [REPEATABLE READ means two things](https://query-lens.1234naveenboddepalli.workers.dev/docs/essays/repeatable-read): Two engines in QueryLens both offer REPEATABLE READ, and the anomalies each lets through are opposites — computed from the isolation matrix, and held by a test.
+
+## Study
+
+- [Course map](https://query-lens.1234naveenboddepalli.workers.dev/docs/study/course-map): A database course, topic by topic — where QueryLens lets you watch the idea happen, where it only touches it, and where it has nothing to offer.
+- [Interview roadmap](https://query-lens.1234naveenboddepalli.workers.dev/docs/study/interview-roadmap): Six weeks of database-internals interview preparation, week by week, mapped to the pages that let you watch each idea run.
+
+## Reference
+
+- [Supported SQL](https://query-lens.1234naveenboddepalli.workers.dev/docs/reference/sql): The exact SQL subset QueryLens's parser accepts, and what it says when you write something outside it.
+- [URL parameters](https://query-lens.1234naveenboddepalli.workers.dev/docs/reference/url-parameters): What a QueryLens link encodes, and how to build one by hand.
+- [Keyboard shortcuts](https://query-lens.1234naveenboddepalli.workers.dev/docs/reference/shortcuts): Every keyboard shortcut QueryLens responds to.
+- [Engine limits](https://query-lens.1234naveenboddepalli.workers.dev/docs/reference/limits): The fixed numbers behind the engine — buffer pool size, B+Tree fan-out, and what's out of scope entirely.
+- [How we know the answers are right](https://query-lens.1234naveenboddepalli.workers.dev/docs/reference/answers): QueryLens's rows are checked against SQLite by a fuzzer on every build — what that proves, what it cannot, and the short list of places the two disagree on purpose.
+- [Accessibility](https://query-lens.1234naveenboddepalli.workers.dev/docs/accessibility): What QueryLens has been checked against for accessibility, how each check is run, and what has not been checked yet.
+
+## Architecture
+
+- [Architecture](https://query-lens.1234naveenboddepalli.workers.dev/docs/architecture): How QueryLens is built — the engine/UI split, the event model, the Volcano executor, and how to extend it.

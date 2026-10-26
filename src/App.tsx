@@ -97,11 +97,44 @@ const PlannerToolPage = lazy(() =>
 const LocksToolPage = lazy(() =>
   import('./pages/tools/LocksToolPage.tsx').then((m) => ({ default: m.LocksToolPage })),
 );
+const ScheduleToolPage = lazy(() =>
+  import('./pages/tools/ScheduleToolPage.tsx').then((m) => ({ default: m.ScheduleToolPage })),
+);
+const IsolationToolPage = lazy(() =>
+  import('./pages/tools/IsolationToolPage.tsx').then((m) => ({ default: m.IsolationToolPage })),
+);
+const ConcurrencyToolPage = lazy(() =>
+  import('./pages/tools/ConcurrencyToolPage.tsx').then((m) => ({ default: m.ConcurrencyToolPage })),
+);
+const WalToolPage = lazy(() =>
+  import('./pages/tools/WalToolPage.tsx').then((m) => ({ default: m.WalToolPage })),
+);
+const RecoveryToolPage = lazy(() =>
+  import('./pages/tools/RecoveryToolPage.tsx').then((m) => ({ default: m.RecoveryToolPage })),
+);
 const GrammarToolPage = lazy(() =>
   import('./pages/tools/GrammarToolPage.tsx').then((m) => ({ default: m.GrammarToolPage })),
 );
 const HashJoinToolPage = lazy(() =>
   import('./pages/tools/HashJoinToolPage.tsx').then((m) => ({ default: m.HashJoinToolPage })),
+);
+const JoinOrderToolPage = lazy(() =>
+  import('./pages/tools/JoinOrderToolPage.tsx').then((m) => ({ default: m.JoinOrderToolPage })),
+);
+const LsmToolPage = lazy(() =>
+  import('./pages/tools/LsmToolPage.tsx').then((m) => ({ default: m.LsmToolPage })),
+);
+const HashIndexToolPage = lazy(() =>
+  import('./pages/tools/HashIndexToolPage.tsx').then((m) => ({ default: m.HashIndexToolPage })),
+);
+const ColumnarToolPage = lazy(() =>
+  import('./pages/tools/ColumnarToolPage.tsx').then((m) => ({ default: m.ColumnarToolPage })),
+);
+const LatchCrabbingToolPage = lazy(() =>
+  import('./pages/tools/LatchCrabbingToolPage.tsx').then((m) => ({ default: m.LatchCrabbingToolPage })),
+);
+const VectorIndexToolPage = lazy(() =>
+  import('./pages/tools/VectorIndexToolPage.tsx').then((m) => ({ default: m.VectorIndexToolPage })),
 );
 const ComparePage = lazy(() =>
   import('./pages/ComparePage.tsx').then((m) => ({ default: m.ComparePage })),
@@ -114,6 +147,9 @@ const LearnPage = lazy(() =>
 );
 const ProgressPage = lazy(() =>
   import('./pages/ProgressPage.tsx').then((m) => ({ default: m.ProgressPage })),
+);
+const PracticePage = lazy(() =>
+  import('./pages/PracticePage.tsx').then((m) => ({ default: m.PracticePage })),
 );
 const ChallengesPage = lazy(() =>
   import('./pages/ChallengesPage.tsx').then((m) => ({ default: m.ChallengesPage })),
@@ -151,12 +187,19 @@ const DocsFaq = lazy(() => import('./pages/DocsContent/faq.mdx'));
 const DocsArchitecture = lazy(() => import('./pages/DocsContent/architecture.mdx'));
 const DocsBufferPool = lazy(() => import('./pages/DocsContent/concepts/buffer-pool.mdx'));
 const DocsBTree = lazy(() => import('./pages/DocsContent/concepts/btree.mdx'));
+const DocsEssayIndexWriteTax = lazy(() => import('./pages/DocsContent/essays/index-write-tax.mdx'));
+const DocsEssayScanResistance = lazy(() => import('./pages/DocsContent/essays/scan-resistance.mdx'));
+const DocsEssayRepeatableRead = lazy(() => import('./pages/DocsContent/essays/repeatable-read.mdx'));
+const DocsAccessibility = lazy(() => import('./pages/DocsContent/accessibility.mdx'));
 const DocsManualEviction = lazy(() => import('./pages/DocsContent/manual/eviction.mdx'));
 const DocsManualBTreeSplit = lazy(() => import('./pages/DocsContent/manual/btree-split.mdx'));
+const DocsCourseMap = lazy(() => import('./pages/DocsContent/study/course-map.mdx'));
+const DocsInterviewRoadmap = lazy(() => import('./pages/DocsContent/study/interview-roadmap.mdx'));
 const DocsSql = lazy(() => import('./pages/DocsContent/reference/sql.mdx'));
 const DocsUrlParameters = lazy(() => import('./pages/DocsContent/reference/url-parameters.mdx'));
 const DocsShortcuts = lazy(() => import('./pages/DocsContent/reference/shortcuts.mdx'));
 const DocsLimits = lazy(() => import('./pages/DocsContent/reference/limits.mdx'));
+const DocsAnswers = lazy(() => import('./pages/DocsContent/reference/answers.mdx'));
 
 export default function App() {
   return (
@@ -182,6 +225,7 @@ export default function App() {
             <Route path="compare" element={suspended(ComparePage)} />
             <Route path="trace" element={suspended(TracePage)} />
             <Route path="progress" element={suspended(ProgressPage)} />
+              <Route path="practice" element={suspended(PracticePage)} />
             <Route path="challenges">
               <Route index element={suspended(ChallengesPage)} />
               <Route path=":challengeId" element={suspended(ChallengePage)} />
@@ -199,8 +243,19 @@ export default function App() {
               <Route path="sort" element={suspended(SortToolPage)} />
               <Route path="planner" element={suspended(PlannerToolPage)} />
               <Route path="locks" element={suspended(LocksToolPage)} />
+              <Route path="schedule" element={suspended(ScheduleToolPage)} />
+              <Route path="isolation" element={suspended(IsolationToolPage)} />
+              <Route path="concurrency" element={suspended(ConcurrencyToolPage)} />
+              <Route path="wal" element={suspended(WalToolPage)} />
+              <Route path="recovery" element={suspended(RecoveryToolPage)} />
               <Route path="grammar" element={suspended(GrammarToolPage)} />
               <Route path="hash-join" element={suspended(HashJoinToolPage)} />
+              <Route path="join-order" element={suspended(JoinOrderToolPage)} />
+              <Route path="lsm" element={suspended(LsmToolPage)} />
+              <Route path="hash-index" element={suspended(HashIndexToolPage)} />
+              <Route path="columnar" element={suspended(ColumnarToolPage)} />
+              <Route path="latch-crabbing" element={suspended(LatchCrabbingToolPage)} />
+              <Route path="vector-index" element={suspended(VectorIndexToolPage)} />
             </Route>
 
             <Route path="docs" element={suspended(DocsLayout)}>
@@ -209,12 +264,19 @@ export default function App() {
               <Route path="faq" element={<DocsFaq />} />
               <Route path="concepts/buffer-pool" element={<DocsBufferPool />} />
               <Route path="concepts/btree" element={<DocsBTree />} />
+              <Route path="essays/index-write-tax" element={<DocsEssayIndexWriteTax />} />
+              <Route path="essays/scan-resistance" element={<DocsEssayScanResistance />} />
+              <Route path="essays/repeatable-read" element={<DocsEssayRepeatableRead />} />
+              <Route path="accessibility" element={<DocsAccessibility />} />
               <Route path="manual/eviction" element={<DocsManualEviction />} />
               <Route path="manual/btree-split" element={<DocsManualBTreeSplit />} />
+              <Route path="study/course-map" element={<DocsCourseMap />} />
+              <Route path="study/interview-roadmap" element={<DocsInterviewRoadmap />} />
               <Route path="reference/sql" element={<DocsSql />} />
               <Route path="reference/url-parameters" element={<DocsUrlParameters />} />
               <Route path="reference/shortcuts" element={<DocsShortcuts />} />
               <Route path="reference/limits" element={<DocsLimits />} />
+              <Route path="reference/answers" element={<DocsAnswers />} />
               <Route path="architecture" element={<DocsArchitecture />} />
             </Route>
 

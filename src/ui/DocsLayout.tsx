@@ -1,6 +1,7 @@
 import { Suspense, useState } from 'react';
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom';
 import { DOCS_NAV } from '../docsNav.ts';
+import { useDocumentTitle } from './documentTitle.ts';
 
 const itemClass = ({ isActive }: { isActive: boolean }) =>
   [
@@ -9,6 +10,13 @@ const itemClass = ({ isActive }: { isActive: boolean }) =>
       ? 'border-accent bg-accent-soft font-medium text-ink shadow-neu-rest backdrop-blur-sm'
       : 'border-transparent text-ink-dim hover:border-edge hover:bg-surface-3/80 hover:text-ink',
   ].join(' ');
+
+/** The sidebar's label for a docs page names its tab; `/docs` itself is just "Docs". */
+function docsPageTitle(pathname: string): string {
+  const path = pathname.replace(/\/+$/, '');
+  if (path === '/docs') return 'Docs';
+  return DOCS_NAV.flatMap((group) => group.items).find((item) => item.to === path)?.label ?? 'Docs';
+}
 
 function getBreadcrumbs(pathname: string) {
   const current = pathname.replace(/\/$/, '') || '/docs';
@@ -27,6 +35,7 @@ export function DocsLayout() {
   const location = useLocation();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
+  useDocumentTitle(docsPageTitle(location.pathname));
   const activeBreadcrumbs = getBreadcrumbs(location.pathname);
 
   return (

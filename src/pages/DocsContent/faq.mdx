@@ -17,7 +17,7 @@ import { Contents, DocMeta } from '../../ui/DocsComponents.tsx';
   { href: '#can-i-use-this-in-my-course', label: 'Can I use this in my course?' },
   { href: '#how-accurate-is-the-buffer-pool--btree--locking-model', label: 'How accurate is the model?' },
   { href: '#can-i-embed-querylens-in-my-own-page', label: 'Can I embed it?' },
-  { href: '#why-no-joins-subqueries-or-group-by', label: 'Why no joins?' },
+  { href: '#what-sql-is-missing', label: 'What SQL is missing?' },
 ]} />
 
 ## Is this a real database?
@@ -27,8 +27,8 @@ No. QueryLens is a **simplified educational model** — a self-built toy engine 
 would run in production, and it does not aim to be. Every number the app shows is true to its own
 engine, not to any specific real one.
 
-Concretely, that means things like: a single global B+Tree index with a fixed fan-out, exactly two
-eviction policies (LRU and clock sweep) rather than a real system's tuning knobs, and a lock manager
+Concretely, that means things like: a single global B+Tree index with a fixed fan-out, a choice of
+eight textbook eviction policies rather than a real system's tuning knobs, and a lock manager
 that draws page-level locks on screen but never actually blocks a second query — because QueryLens
 only ever runs one. See [Engine limits](/docs/reference/limits) for the specific numbers, and each
 [Concepts](/docs/concepts/buffer-pool) page for where that particular piece diverges from a real engine
@@ -41,6 +41,23 @@ engine runs as JavaScript in the tab you have open. The seed data and any edits 
 in memory for that page load; a shareable link encodes your query, settings and any customised rows
 directly in the URL, not on a server. There is no telemetry, no analytics, and no cookies — nothing
 you do here is sent anywhere.
+
+A custom database you build in the Playground autosaves in this browser. **Workspaces** (the button beside *Manage tables*) keep named copies in the browser's IndexedDB, which has far more room than the autosave, and each one downloads as a `.querylens.json` file you can open in another browser. None of it is sent anywhere.
+
+The one thing that can leave your browser is something *you* send. **Report a confusing step**, under the
+Playground's narration, is a link that opens a prefilled GitHub issue in a new tab — the build, the step, what
+the narration said, your query and a link that reopens the moment. It is a plain link: nothing is sent until
+you press Submit on GitHub, where you can edit or delete any of it first. That is how a tool with no
+telemetry hears which step confused someone.
+
+## Does it work offline?
+
+Yes, once it has loaded once. The first visit stores the app's own files in your browser through a service worker — about 670 KiB to
+download, the app's code, fonts and icons. After that every page, including the docs and the tools,
+opens with no network, and queries run as they always did, since they never left the tab. Only the app's
+files are stored, never your queries or your data. A new version of QueryLens reaches a browser when no
+open tab is still running the old one, so a tab left open keeps the version it loaded until it is closed.
+Browsers that support it offer to install QueryLens as an app from their menu; the offer itself depends on the browser.
 
 ## Can I use this in my course?
 
@@ -66,23 +83,33 @@ is how this documentation itself links out to worked examples.
 
 ## Can I get the diagrams out?
 
-Three ways, from the panel header on any stage. **Copy as Mermaid** puts the AST or the plan on your
+Several ways, from the panel header on any stage. **Copy as Mermaid** puts the AST or the plan on your
 clipboard as a `flowchart` in a fenced code block, ready to paste into a pull request or a doc —
 not the B+Tree, which Mermaid lays out badly. **Copy as text** is the plain-monospace twin: a
 `tree`-style indented list in a bare code fence, for a review comment or an email — and it *does*
 take the B+Tree, which a fixed-width tree renders fine. **Download PNG** saves any panel as an image
 with the app's real typeface and colours baked in; it renders correctly in Chrome and Firefox, and
-may fall back to plain sRGB in Safari, whose SVG-to-canvas path has known colour bugs. All three run
-entirely in your browser.
+may fall back to plain sRGB in Safari, whose SVG-to-canvas path has known colour bugs.
+
+On the plan and optimizer panels there is a fourth: **Show as → Relational algebra** rewrites every node in
+the notation a database course opens with — `σ` selection, `π` projection, `⋈` join, `γ` grouping, `τ` order,
+`δ` distinct, `λ` limit — with the physical operator that runs it kept underneath, so an `IndexScan` and a
+filtered `SeqScan` both read as `σ_{id = 5}(users)`: *what* is computed beside *how*. **Copy as relational
+algebra** and **Copy as LaTeX** put the whole plan on your clipboard as an expression for a homework answer or
+a slide, e.g. `π_{name}(σ_{age > 30}(users))`. Everything here runs entirely in your browser.
 
 A moving version — a GIF or a WebM of a trace playing over a range of steps — is produced by the
 project's own `pnpm record` script rather than an in-app button, because a GIF encoder is a poor
 fit for the browser (bundle weight, and 256 colours wreck the palette). Contributors can read
 `scripts/record.ts` for how it drives the built app.
 
-## Why no joins, subqueries, or `GROUP BY`?
+## What SQL is missing?
 
-They are out of scope for this release, not forgotten — see [Supported SQL](/docs/reference/sql) for
-what runs today. QueryLens's parser recognises the keywords for all of them and tells you so directly
-rather than failing with a generic syntax error, which is usually the fastest way to find out whether
-a query you typed is simply not supported yet.
+Less than it used to be. `JOIN` (three algorithms), `GROUP BY` with aggregates and `HAVING`, `DISTINCT`, `ORDER BY`
+with `LIMIT`/`OFFSET`, `OR`/`NOT`/`IN`/`LIKE`/`IS NULL` with real three-valued logic, arithmetic and computed
+columns, and `INSERT`/`UPDATE`/`DELETE` all run. What does not, yet: **subqueries**, **outer joins** and more than
+one `JOIN` per query, **window functions**, `UNION`, `COUNT(DISTINCT …)`, and `SELECT *, expr`. They are out of
+scope for this release, not forgotten — see [Supported SQL](/docs/reference/sql) for what runs today.
+QueryLens's parser recognises the keywords for most of them and tells you so directly rather than failing with a
+generic syntax error, which is usually the fastest way to find out whether a query you typed is simply not
+supported yet.

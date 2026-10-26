@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
+import { useDocumentTitle } from './documentTitle.ts';
 import { eyebrow as eyebrowClass } from './primitives.ts';
 
 export interface BreadcrumbItem {
@@ -11,6 +12,7 @@ export interface PageHeaderProps {
   eyebrow?: string;
   breadcrumbs?: BreadcrumbItem[];
   title: ReactNode;
+  documentTitle?: string;
   as?: 'h1' | 'h2';
   blurb?: ReactNode;
   children?: ReactNode;
@@ -32,12 +34,16 @@ export function PageHeader({
   eyebrow,
   breadcrumbs,
   title,
+  documentTitle,
   as: Tag = 'h2',
   blurb,
   children,
   actions,
   className = '',
 }: PageHeaderProps) {
+  const effectiveDocTitle = documentTitle ?? (typeof title === 'string' ? title : '');
+  useDocumentTitle(effectiveDocTitle);
+
   const content = blurb ?? children;
 
   return (

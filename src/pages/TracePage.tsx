@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   DATASETS,
@@ -20,6 +20,8 @@ import {
   segOff,
   segOn,
 } from '../ui/primitives.ts';
+import { ScrollRegion } from '../ui/ScrollRegion.tsx';
+import { useAddressBarQuery } from '../ui/addressBar.ts';
 
 const search = typeof location === 'undefined' ? '' : location.search;
 
@@ -143,18 +145,15 @@ export function TracePage() {
     );
   }, [result, stageOff, query]);
 
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      const params = new URLSearchParams();
-      params.set('q', sql);
-      params.set('p', policy);
-      if (RAW_ROWS_PARAM !== null) params.set('d', RAW_ROWS_PARAM);
-      if (view === 'transcript') params.set('v', 'transcript');
-      const next = `${location.pathname}?${params.toString()}`;
-      if (next !== `${location.pathname}${location.search}`) history.replaceState(null, '', next);
-    }, 250);
-    return () => { window.clearTimeout(timer); };
+  const shareQuery = useMemo(() => {
+    const params = new URLSearchParams();
+    params.set('q', sql);
+    params.set('p', policy);
+    if (RAW_ROWS_PARAM !== null) params.set('d', RAW_ROWS_PARAM);
+    if (view === 'transcript') params.set('v', 'transcript');
+    return params.toString();
   }, [sql, policy, view]);
+  useAddressBarQuery(shareQuery);
 
   function toggleStage(stage: Stage) {
     setStageOff((prev) => {
@@ -299,7 +298,7 @@ export function TracePage() {
                 {result.rows.length > 0 && ` · query returned ${result.rows.length} row${result.rows.length === 1 ? '' : 's'}`}
               </p>
 
-              <div className={`${panelSurface} min-h-0 flex-1 overflow-auto p-0`}>
+              <ScrollRegion label="Trace events" className={`${panelSurface} min-h-0 flex-1 overflow-auto p-0`}>
                 <table className="w-full border-collapse text-label">
                   <thead className="sticky top-0 z-10 bg-surface-2 text-ink-dim">
                     <tr className="border-b border-edge text-left">
@@ -328,7 +327,7 @@ export function TracePage() {
                     ))}
                   </tbody>
                 </table>
-              </div>
+              </ScrollRegion>
             </>
           ) : (
             <>
@@ -479,7 +478,7 @@ function FragmentRow({
                     setCopied(true);
                     setTimeout(() => { setCopied(false); }, 1500);
                   }}
-                  className="rounded border border-edge bg-surface-2 px-2.5 py-0.5 font-mono text-[11px] text-ink-dim transition hover:border-accent hover:text-ink"
+                  className="rounded border border-edge bg-surface-2 px-2.5 py-0.5 font-mono text-[11px] text-ink-dim transition hover:border-accent hover:text-ink cursor-pointer"
                 >
                   {copied ? 'Copied' : 'Copy JSON'}
                 </button>

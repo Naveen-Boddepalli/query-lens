@@ -1,15 +1,17 @@
-import { useState } from 'react';
+import { lazy, Suspense, useState } from 'react';
 import { Link, Navigate, useParams } from 'react-router-dom';
 import { DEFAULT_ENGINE_OPTIONS, runQuery } from '../engine/index.ts';
 import type { RunResult } from '../engine/index.ts';
 import {
-  CHALLENGES,
   challengeById,
   challengeDatabase,
   challengeDataset,
   challengeOptions,
   challengeStats,
 } from './challenges/challenges.tsx';
+import { CHALLENGE_ORDER as ORDER } from './challenges/groups.ts';
+import { scriptChallengeById } from './challenges/scriptChallenges.tsx';
+import { settingsChallengeById } from './challenges/settingsChallenges.tsx';
 import { markSolved, readSolved } from '../ui/challengeProgress.ts';
 import { PageHeader } from '../ui/PageHeader.tsx';
 import { SqlEditor } from '../ui/SqlEditor.tsx';
@@ -41,9 +43,55 @@ const ArrowRightIcon = ({ className = 'h-3.5 w-3.5' }: { className?: string }) =
   </svg>
 );
 
-/** One `/challenges/:id`. Runs the query on a fixed engine config and checks it. */
+// The transaction and durability challenges run a schedule or a log script, not a query; their view carries the
+// schedule runner and the log machine, which a query challenge has no use for, so it is loaded only when one is opened.
+const ScriptChallengeView = lazy(() =>
+  import('./challenges/ScriptChallengeView.tsx').then((m) => ({ default: m.ScriptChallengeView })),
+);
+// The settings challenges run the storage and execution drivers (the sort, the LSM tree, the vector index …), which
+// nothing else on this page needs, so their view is loaded when one is opened as well.
+const SettingsChallengeView = lazy(() =>
+  import('./challenges/SettingsChallengeView.tsx').then((m) => ({ default: m.SettingsChallengeView })),
+);
+
+/** One `/challenges/:id`: a query on a fixed engine config, a script on the schedule and log machines, or settings for a tool. */
 export function ChallengePage() {
   const { challengeId } = useParams();
+  const settings = settingsChallengeById(challengeId);
+  if (settings) {
+    const index = ORDER.findIndex((c) => c.id === settings.id);
+    return (
+      <Suspense fallback={<div className="flex-1" aria-hidden />}>
+        <SettingsChallengeView
+          key={settings.id}
+          challenge={settings}
+          index={index}
+          total={ORDER.length}
+          next={ORDER[index + 1] ?? null}
+        />
+      </Suspense>
+    );
+  }
+  const script = scriptChallengeById(challengeId);
+  if (script) {
+    const index = ORDER.findIndex((c) => c.id === script.id);
+    return (
+      <Suspense fallback={<div className="flex-1" aria-hidden />}>
+        <ScriptChallengeView
+          key={script.id}
+          challenge={script}
+          index={index}
+          total={ORDER.length}
+          next={ORDER[index + 1] ?? null}
+        />
+      </Suspense>
+    );
+  }
+  return <QueryChallengeView challengeId={challengeId} />;
+}
+
+/** One query challenge. Runs the query on a fixed engine config and checks it. */
+function QueryChallengeView({ challengeId }: { challengeId: string | undefined }) {
   const challenge = challengeById(challengeId);
   const { theme } = useThemeContext();
   const dataset = challenge ? challengeDataset(challenge) : 'users';
@@ -71,9 +119,9 @@ export function ChallengePage() {
 
   if (!challenge) return <Navigate to="/challenges" replace />;
 
-  const index = CHALLENGES.findIndex((c) => c.id === challenge.id);
-  const next = CHALLENGES[index + 1];
-  const prev = CHALLENGES[index - 1];
+  const index = ORDER.findIndex((c) => c.id === challenge.id);
+  const next = ORDER[index + 1];
+  const prev = ORDER[index - 1];
   const result = run?.result ?? null;
   const passed = run !== null && !run.result.error && challenge.check(run.result, run.sql);
   const stats = result && !result.error ? challengeStats(result) : null;
@@ -93,6 +141,10 @@ export function ChallengePage() {
         )}`
       : null;
 
+  // A tool that shows what the challenge is about, opened on the query that was just run — also after an error, which
+  // the Parser can show better than the message can.
+  const toolLink = run !== null ? (challenge.tool?.href(run.sql) ?? null) : null;
+
   return (
     <div className="mx-auto w-full max-w-3xl px-4 py-8 sm:px-6 sm:py-10">
       {/* Header */}
@@ -105,7 +157,7 @@ export function ChallengePage() {
           <span>Challenges Directory</span>
         </Link>
         <span className="font-mono text-micro text-ink-dim">
-          Puzzle {index + 1} of {CHALLENGES.length}
+          Puzzle {index + 1} of {ORDER.length}
         </span>
       </div>
 
@@ -243,7 +295,7 @@ export function ChallengePage() {
             ) : passed ? (
               /* Calm Success Banner */
               <div className="ql-sheen rounded-2xl border border-hit/50 bg-hit/10 p-5 text-hit shadow-neu-rest backdrop-blur-md">
-                <div className="space-y-1">
+                <div className="space-y-2">
                   <h3 className="text-body font-semibold text-hit flex items-center gap-2">
                     <CheckIcon className="h-4 w-4" />
                     Challenge Solved
@@ -252,6 +304,11 @@ export function ChallengePage() {
                     Your query satisfied all verification requirements and verified cleanly against
                     the engine trace.
                   </p>
+                  {challenge.misconception && (
+                    <p className="text-label leading-relaxed text-ink-dim">
+                      <span className="text-ink font-medium">The belief this checks:</span> {challenge.misconception}
+                    </p>
+                  )}
                   <div className="pt-2 flex flex-wrap items-center gap-3">
                     {next ? (
                       <Link to={`/challenges/${next.id}`} className={`${btnPrimary} gap-1.5`}>
@@ -311,14 +368,19 @@ export function ChallengePage() {
               </dl>
             )}
 
-            {playgroundLink && (
-              <div className="flex justify-end">
+            <div className="flex flex-wrap items-center justify-end gap-3">
+              {toolLink && (
+                <Link to={toolLink} className={btnSecondary}>
+                  {challenge.tool?.label ?? 'Open related tool'}
+                </Link>
+              )}
+              {playgroundLink && (
                 <Link to={playgroundLink} className={`${btnSecondary} gap-1.5`}>
                   <span>Step through in Playground</span>
                   <ArrowRightIcon className="h-3.5 w-3.5" />
                 </Link>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         )}
       </div>

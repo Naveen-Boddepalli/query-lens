@@ -9,6 +9,7 @@
 import type { ASTNode, Span } from '../types.ts';
 import type { Emit } from '../trace.ts';
 import type {
+  AnalyzeStatement,
   DeleteStatement,
   Expr,
   GroupByClause,
@@ -24,21 +25,33 @@ import type {
   UpdateAssignment,
   UpdateStatement,
 } from './ast.ts';
-import { selectItemKey } from './ast.ts';
+import { columnKey, selectItemKey } from './ast.ts';
+import { aggregateKeyOf, exprToSql } from './print.ts';
 
 function selectItemNode(item: SelectItem, id: string): ASTNode {
-  return item.kind === 'column'
-    ? { id, kind: 'Column', label: item.name, span: item.span }
-    : { id, kind: 'Aggregate', label: selectItemKey(item), span: item.span };
+  if (item.kind === 'column') return { id, kind: 'Column', label: item.name, span: item.span };
+  if (item.kind === 'expression') {
+    return {
+      id,
+      kind: 'Expression',
+      label: selectItemKey(item),
+      ...(item.alias === undefined ? {} : { detail: exprToSql(item.expr) }),
+      span: item.span,
+      children: [exprNode(item.expr, `${id}.e`)],
+    };
+  }
+  return { id, kind: 'Aggregate', label: selectItemKey(item), span: item.span };
 }
 
-function selectListNode(select: SelectList): ASTNode {
+function selectListNode(select: SelectList, distinct = false): ASTNode {
+  // `SELECT DISTINCT` (plan.md §25.4 B2) is a property of the whole list, so it is shown on the list's own node.
+  const prefix = distinct ? 'DISTINCT · ' : '';
   if (select.kind === 'star') {
     return {
       id: 'select',
       kind: 'SelectList',
-      label: 'columns',
-      detail: 'every column',
+      label: distinct ? 'DISTINCT columns' : 'columns',
+      detail: `${prefix}every column`,
       span: select.span,
       children: [{ id: 'select.star', kind: 'Star', label: '*', span: select.span }],
     };
@@ -46,8 +59,8 @@ function selectListNode(select: SelectList): ASTNode {
   return {
     id: 'select',
     kind: 'SelectList',
-    label: 'columns',
-    detail: `${select.items.length} named`,
+    label: distinct ? 'DISTINCT columns' : 'columns',
+    detail: `${prefix}${select.items.length} named`,
     span: select.span,
     children: select.items.map((item, i) => selectItemNode(item, `select.col${i}`)),
   };
@@ -58,12 +71,12 @@ function groupByNode(groupBy: GroupByClause): ASTNode {
     id: 'groupBy',
     kind: 'GroupBy',
     label: 'GROUP BY',
-    detail: groupBy.columns.map((c) => c.name).join(', '),
+    detail: groupBy.columns.map(columnKey).join(', '),
     span: groupBy.span,
     children: groupBy.columns.map((c, i) => ({
       id: `groupBy.col${i}`,
       kind: 'Column',
-      label: c.name,
+      label: columnKey(c),
       span: c.span,
     })),
   };
@@ -102,6 +115,65 @@ function exprNode(expr: Expr, id: string): ASTNode {
         span: expr.span,
         children: [exprNode(expr.left, `${id}.l`), exprNode(expr.right, `${id}.r`)],
       };
+    case 'or':
+      return {
+        id,
+        kind: 'Or',
+        label: 'OR',
+        span: expr.span,
+        children: [exprNode(expr.left, `${id}.l`), exprNode(expr.right, `${id}.r`)],
+      };
+    case 'not':
+      return { id, kind: 'Not', label: 'NOT', span: expr.span, children: [exprNode(expr.operand, `${id}.o`)] };
+    case 'isNull':
+      return {
+        id,
+        kind: 'IsNull',
+        label: expr.negated ? 'IS NOT NULL' : 'IS NULL',
+        span: expr.span,
+        children: [exprNode(expr.operand, `${id}.o`)],
+      };
+    case 'in':
+      return expr.subquery
+        ? {
+            id,
+            kind: 'In',
+            label: expr.negated ? 'NOT IN' : 'IN',
+            detail: `subquery — SELECT ${expr.subquery.column.name} FROM ${expr.subquery.from.name}`,
+            span: expr.span,
+            children: [exprNode(expr.operand, `${id}.o`)],
+          }
+        : {
+            id,
+            kind: 'In',
+            label: expr.negated ? 'NOT IN' : 'IN',
+            detail: `${expr.items.length} value${expr.items.length === 1 ? '' : 's'}`,
+            span: expr.span,
+            children: [
+              exprNode(expr.operand, `${id}.o`),
+              ...expr.items.map((item, i) => exprNode(item, `${id}.i${i}`)),
+            ],
+          };
+    case 'aggregate':
+      return { id, kind: 'Aggregate', label: aggregateKeyOf(expr.fn, expr.arg), span: expr.span };
+    case 'arith':
+      return {
+        id,
+        kind: 'Arith',
+        label: expr.op,
+        span: expr.span,
+        children: [exprNode(expr.left, `${id}.l`), exprNode(expr.right, `${id}.r`)],
+      };
+    case 'neg':
+      return { id, kind: 'Arith', label: '−', detail: 'negate', span: expr.span, children: [exprNode(expr.operand, `${id}.o`)] };
+    case 'like':
+      return {
+        id,
+        kind: 'Like',
+        label: expr.negated ? 'NOT LIKE' : 'LIKE',
+        span: expr.span,
+        children: [exprNode(expr.operand, `${id}.o`), exprNode(expr.pattern, `${id}.p`)],
+      };
   }
 }
 
@@ -115,6 +187,16 @@ function whereNode(where: Expr): ASTNode {
   };
 }
 
+function havingNode(having: Expr): ASTNode {
+  return {
+    id: 'having',
+    kind: 'Having',
+    label: 'HAVING',
+    span: having.span,
+    children: [exprNode(having, 'having.expr')],
+  };
+}
+
 function orderByNode(orderBy: OrderByClause): ASTNode {
   return {
     id: 'orderBy',
@@ -122,7 +204,11 @@ function orderByNode(orderBy: OrderByClause): ASTNode {
     label: 'ORDER BY',
     detail: `${orderBy.column} ${orderBy.direction === 'asc' ? 'ASC' : 'DESC'}`,
     span: orderBy.span,
-    children: [{ id: 'orderBy.col', kind: 'Column', label: orderBy.column, span: orderBy.span }],
+    children: [
+      orderBy.aggregate
+        ? exprNode(orderBy.aggregate, 'orderBy.expr')
+        : { id: 'orderBy.col', kind: 'Column', label: orderBy.column, span: orderBy.span },
+    ],
   };
 }
 
@@ -131,7 +217,7 @@ function limitNode(limit: LimitClause): ASTNode {
     id: 'limit',
     kind: 'Limit',
     label: 'LIMIT',
-    detail: String(limit.value),
+    detail: limit.offset === undefined ? String(limit.value) : `${String(limit.value)} OFFSET ${String(limit.offset)}`,
     span: limit.span,
   };
 }
@@ -183,8 +269,10 @@ function assignmentNode(a: UpdateAssignment, id: string): ASTNode {
     id,
     kind: 'Assignment',
     label: a.column,
-    detail: `= ${a.value.raw}`,
+    detail: `= ${exprToSql(a.value)}`,
     span: { from: a.columnSpan.from, to: a.value.span.to },
+    // A literal is fully described by the detail; a computed value gets its own subtree.
+    ...(a.value.kind === 'literal' ? {} : { children: [exprNode(a.value, `${id}.v`)] }),
   };
 }
 
@@ -204,6 +292,7 @@ const ROOT_KIND = {
   DELETE: 'DeleteStatement',
   INSERT: 'InsertStatement',
   UPDATE: 'UpdateStatement',
+  ANALYZE: 'AnalyzeStatement',
 } as const;
 
 function root(
@@ -216,9 +305,10 @@ function root(
 
 /** The complete display tree for a parsed statement. */
 export function toDisplayTree(ast: SelectStatement): ASTNode {
-  const children = [selectListNode(ast.select), fromNode(ast.from)];
+  const children = [selectListNode(ast.select, ast.distinct), fromNode(ast.from)];
   if (ast.where) children.push(whereNode(ast.where));
   if (ast.groupBy) children.push(groupByNode(ast.groupBy));
+  if (ast.having) children.push(havingNode(ast.having));
   if (ast.orderBy) children.push(orderByNode(ast.orderBy));
   if (ast.limit) children.push(limitNode(ast.limit));
   return root(children, ast.span);
@@ -232,12 +322,12 @@ function countNodes(node: ASTNode): number {
 export function emitParseEvents(emit: Emit, ast: SelectStatement): void {
   const children: ASTNode[] = [];
 
-  const selectList = selectListNode(ast.select);
+  const selectList = selectListNode(ast.select, ast.distinct);
   children.push(selectList);
   emit(
     ast.select.kind === 'star'
-      ? 'Read the SELECT list: `*`, meaning every column of the table.'
-      : `Read the SELECT list: ${ast.select.items.map((item) => `\`${selectItemKey(item)}\``).join(', ')}.`,
+      ? `Read the SELECT list: ${ast.distinct ? 'DISTINCT ' : ''}\`*\`, meaning every column of the table${ast.distinct ? ' — and each whole row is returned only once' : ''}.`
+      : `Read the SELECT list: ${ast.distinct ? 'DISTINCT ' : ''}${ast.select.items.map((item) => `\`${selectItemKey(item)}\``).join(', ')}${ast.distinct ? ' — each distinct combination is returned only once' : ''}.`,
     { stage: 'parse', ast: root([...children], ast.span), span: ast.select.span },
   );
 
@@ -260,9 +350,17 @@ export function emitParseEvents(emit: Emit, ast: SelectStatement): void {
     children.push(groupByNode(ast.groupBy));
     emit(
       `Read the GROUP BY clause: rows are grouped by ${ast.groupBy.columns
-        .map((c) => `\`${c.name}\``)
+        .map((c) => `\`${columnKey(c)}\``)
         .join(', ')}. Nothing has been computed yet — this is still only structure.`,
       { stage: 'parse', ast: root([...children], ast.span), span: ast.groupBy.span },
+    );
+  }
+
+  if (ast.having) {
+    children.push(havingNode(ast.having));
+    emit(
+      'Read the HAVING clause: a predicate over the *groups* — unlike WHERE it may test aggregates, because it runs after they are computed. Nothing has been computed yet — this is still only structure.',
+      { stage: 'parse', ast: root([...children], ast.span), span: ast.having.span },
     );
   }
 
@@ -278,11 +376,12 @@ export function emitParseEvents(emit: Emit, ast: SelectStatement): void {
 
   if (ast.limit) {
     children.push(limitNode(ast.limit));
-    emit(`Read the LIMIT clause: cap the result at ${ast.limit.value}.`, {
-      stage: 'parse',
-      ast: root([...children], ast.span),
-      span: ast.limit.span,
-    });
+    emit(
+      ast.limit.offset === undefined
+        ? `Read the LIMIT clause: cap the result at ${ast.limit.value}.`
+        : `Read the LIMIT clause: skip the first ${ast.limit.offset} rows, then cap the result at ${ast.limit.value}.`,
+      { stage: 'parse', ast: root([...children], ast.span), span: ast.limit.span },
+    );
   }
 
   const tree = root([...children], ast.span);
@@ -381,7 +480,7 @@ export function emitUpdateParseEvents(emit: Emit, ast: UpdateStatement): void {
 
   children.push(setNode(ast.set));
   emit(
-    `Read the SET clause: ${ast.set.assignments.map((a) => `\`${a.column}\` = ${a.value.raw}`).join(', ')}. Nothing has been written yet — this is still only structure.`,
+    `Read the SET clause: ${ast.set.assignments.map((a) => `\`${a.column}\` = ${exprToSql(a.value)}`).join(', ')}. Nothing has been written yet — this is still only structure.`,
     { stage: 'parse', ast: root([...children], ast.span, 'UPDATE'), span: ast.set.span },
   );
 
@@ -396,6 +495,25 @@ export function emitUpdateParseEvents(emit: Emit, ast: UpdateStatement): void {
   const tree = root([...children], ast.span, 'UPDATE');
   emit(
     `Parsing is done: ${countNodes(tree)} AST nodes and no data touched. The planner turns the WHERE clause into a plan next — the SET clause has nothing to plan, it only takes effect once a row is found.`,
+    { stage: 'parse', ast: tree, span: ast.span },
+  );
+}
+
+/** The complete display tree for a parsed `ANALYZE`. */
+export function analyzeDisplayTree(ast: AnalyzeStatement): ASTNode {
+  return root([updateTableNode(ast.table)], ast.span, 'ANALYZE');
+}
+
+/** Emit the parse stage for an `ANALYZE` — one clause, so one step: mirrors `emitParseEvents`'s shape all the same. */
+export function emitAnalyzeParseEvents(emit: Emit, ast: AnalyzeStatement): void {
+  const tree = root([updateTableNode(ast.table)], ast.span, 'ANALYZE');
+  emit(`Read the table name: ANALYZE scans \`${ast.table.name}\` to build its statistics.`, {
+    stage: 'parse',
+    ast: tree,
+    span: ast.table.span,
+  });
+  emit(
+    `Parsing is done: ${countNodes(tree)} AST node${countNodes(tree) === 1 ? '' : 's'} and no data touched. There is nothing to plan or optimize — ANALYZE goes straight to a real scan.`,
     { stage: 'parse', ast: tree, span: ast.span },
   );
 }

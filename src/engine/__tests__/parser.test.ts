@@ -317,9 +317,22 @@ describe('parse — GROUP BY and aggregates', () => {
     expect(e.message).toMatch(/SELECT \*.*GROUP BY/);
   });
 
-  it('rejects ORDER BY combined with GROUP BY', () => {
-    const e = err('SELECT age, COUNT(*) FROM users GROUP BY age ORDER BY age');
-    expect(e.message).toMatch(/ORDER BY with GROUP BY/);
+  it('takes ORDER BY with GROUP BY: a grouped column, or an aggregate keyed by its canonical text', () => {
+    expect(ok('SELECT age, COUNT(*) FROM users GROUP BY age ORDER BY age').orderBy).toMatchObject({ column: 'age', direction: 'asc' });
+    const byCount = ok('SELECT age FROM users GROUP BY age ORDER BY count( * ) DESC').orderBy;
+    expect(byCount).toMatchObject({ column: 'COUNT(*)', direction: 'desc', aggregate: { kind: 'aggregate', fn: 'COUNT' } });
+    expect(ok('SELECT age, SUM(id) FROM users GROUP BY age ORDER BY sum(id)').orderBy?.column).toBe('SUM(id)');
+  });
+
+  it('refuses an ORDER BY key the groups do not have one value of', () => {
+    expect(err('SELECT age, COUNT(*) FROM users GROUP BY age ORDER BY name').message).toMatch(/`name` is not aggregated/);
+    expect(err('SELECT COUNT(*) FROM users ORDER BY age').message).toMatch(/whole table is one group|not in the GROUP BY/);
+    expect(err('SELECT name FROM users ORDER BY MAX(age)').message).toMatch(/needs a GROUP BY or an aggregate/);
+  });
+
+  it('SELECT DISTINCT with GROUP BY still sorts only by a selected key', () => {
+    expect(err('SELECT DISTINCT age FROM users GROUP BY age ORDER BY COUNT(*)').message).toMatch(/must appear in the select list/);
+    expect(ok('SELECT DISTINCT age, COUNT(*) FROM users GROUP BY age ORDER BY COUNT(*)').orderBy?.column).toBe('COUNT(*)');
   });
 
   it('still allows LIMIT with GROUP BY', () => {
@@ -450,7 +463,7 @@ describe('parseStatement — UPDATE', () => {
   it('parses multiple assignments, comma-separated', () => {
     const ast = okUpdate("UPDATE users SET name = 'ada', age = 30");
     expect(ast.set.assignments.map((a) => a.column)).toEqual(['name', 'age']);
-    expect(ast.set.assignments.map((a) => a.value.value)).toEqual(['ada', 30]);
+    expect(ast.set.assignments.map((a) => (a.value.kind === 'literal' ? a.value.value : undefined))).toEqual(['ada', 30]);
   });
 
   it('parses a WHERE after SET, same grammar as SELECT and DELETE', () => {
@@ -460,7 +473,7 @@ describe('parseStatement — UPDATE', () => {
 
   it('parses every literal kind an assignment can hold', () => {
     const ast = okUpdate('UPDATE t SET a = 1, b = NULL, c = TRUE, d = FALSE');
-    expect(ast.set.assignments.map((a) => a.value.value)).toEqual([1, null, true, false]);
+    expect(ast.set.assignments.map((a) => (a.value.kind === 'literal' ? a.value.value : undefined))).toEqual([1, null, true, false]);
   });
 
   it('is case-insensitive and tolerates a trailing semicolon', () => {
@@ -484,10 +497,12 @@ describe('parseStatement — UPDATE', () => {
     expect(errStatement('UPDATE users SET age 30').message).toMatch(/expected `=`/i);
   });
 
-  it('rejects a column name written where a value belongs, with a hint', () => {
-    const e = errStatement('UPDATE users SET age = name');
-    expect(e.message).toMatch(/expected a value/i);
-    expect(e.hint).toMatch(/literal values/);
+  it('accepts a column on the right of SET — it reads the row as it was (plan.md §25.4 B1b)', () => {
+    const ast = okUpdate('UPDATE users SET age = age + 1');
+    expect(ast.set.assignments[0]).toMatchObject({
+      column: 'age',
+      value: { kind: 'arith', op: '+', left: { kind: 'column', name: 'age' }, right: { kind: 'literal', value: 1 } },
+    });
   });
 
   it('rejects trailing junk, same as SELECT, DELETE and INSERT', () => {
@@ -520,26 +535,16 @@ describe('parse — errors point at the right text', () => {
     expect(e.from).toBe(20);
   });
 
-  it('names the v0 scope for unsupported operators', () => {
-    // `<=`/`>=`/BETWEEN are real, supported operators now (plan.md §23.1) —
-    // `<>` (not-equal) is the operator that is still genuinely out of scope.
-    const e = err('SELECT * FROM users WHERE id <> 5');
-    expect(e.message).toMatch(/`<>` is not supported yet/);
-    expect(e.hint).toMatch(/`=`, `<`, `>`, `<=`, `>=` and BETWEEN/);
-    expect(e.from).toBe(29);
-    expect(e.to).toBe(31);
-  });
-
-  it('explains OR rather than blaming the token', () => {
-    const e = err('SELECT * FROM users WHERE a = 1 OR b = 2');
-    expect(e.message).toMatch(/`OR` is not supported yet/);
-    expect(e.hint).toMatch(/AND/);
+  it('names the scope for an operator that is still unsupported', () => {
+    // `<>` and `!=` are real now (plan.md §25.4 B1); `==` is not SQL.
+    const e = err('SELECT * FROM users WHERE id == 5');
+    expect(e.message).toBeTruthy();
+    const ne = err('SELECT * FROM users WHERE id ~ 5');
+    expect(ne.from).toBeGreaterThan(0);
   });
 
   it.each([
-    ['SELECT * FROM a LEFT JOIN b ON a.id = b.id', /LEFT.*not supported/, /inner JOIN/],
-    ['SELECT dept, COUNT(*) FROM users GROUP BY dept HAVING COUNT(*) > 1', /HAVING/, /WHERE instead/],
-    ['SELECT * FROM users LIMIT 5 OFFSET 10', /OFFSET/, /LIMIT on its own is/],
+    ['SELECT * FROM a RIGHT JOIN b ON a.id = b.id', /RIGHT.*not supported/, /LEFT JOIN/],
   ])('explains out-of-scope SQL: %s', (sql, message, hint) => {
     const e = err(sql);
     expect(e.message).toMatch(message);
@@ -552,10 +557,16 @@ describe('parse — errors point at the right text', () => {
     expect(err('UPDATE users SET age = 1').message).toMatch(/expected `select`/i);
   });
 
-  it('rejects parentheses with a scope explanation', () => {
-    const e = err('SELECT * FROM users WHERE (id = 5)');
-    expect(e.message).toMatch(/parenthesised/i);
-    expect(e.hint).toMatch(/flat chain/i);
+  it('rejects a chained comparison and says what to write instead', () => {
+    const e = err('SELECT * FROM users WHERE 1 < id < 5');
+    expect(e.message).toMatch(/cannot be chained/);
+    expect(e.hint).toMatch(/AND|BETWEEN/);
+  });
+
+  it('accepts an IN subquery (plan.md §25.4 C3 slice c) but rejects a subquery anywhere else, with a scope explanation', () => {
+    expect(parse('SELECT * FROM users WHERE id IN (SELECT id FROM users)').ok).toBe(true);
+    const e = err('SELECT * FROM users WHERE id = (SELECT id FROM users)');
+    expect(e.message).toMatch(/subquery/i);
   });
 
   it('every error span is inside the query and non-empty', () => {

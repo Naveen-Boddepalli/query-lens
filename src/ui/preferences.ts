@@ -1,3 +1,4 @@
+import { isReplacementPolicyName } from '../engine/types.ts';
 import type { ReplacementPolicyName } from '../engine/index.ts';
 
 /**
@@ -17,7 +18,7 @@ const PREDICT_KEY = 'querylens:default-predict';
 export function readDefaultPolicy(): ReplacementPolicyName | undefined {
   try {
     const stored = localStorage.getItem(POLICY_KEY);
-    return stored === 'lru' || stored === 'clock' ? stored : undefined;
+    return isReplacementPolicyName(stored) ? stored : undefined;
   } catch {
     return undefined;
   }

@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { parse, toDisplayTree, tokenize } from '../../engine/index.ts';
 import type { ASTNode, Token, TokenType } from '../../engine/index.ts';
 import { AstTree } from '../../ui/panels/AstTree.tsx';
 import { PageHeader } from '../../ui/PageHeader.tsx';
 import { inputField, panelSurface } from '../../ui/primitives.ts';
+import { useAddressBarQuery } from '../../ui/addressBar.ts';
 
 /**
  * The compilers-course standalone (plan.md §20.4, §21.3): arbitrary text →
@@ -91,7 +92,7 @@ function MarkedSource({ src, from, to }: { src: string; from: number; to: number
   const a = Math.max(0, Math.min(from, src.length));
   const b = Math.max(a, Math.min(to, src.length));
   return (
-    <pre className="overflow-x-auto rounded-lg border border-edge bg-surface-3 p-2.5 font-mono text-label text-ink-dim">
+    <pre className="rounded-lg border border-edge bg-surface-3 p-2.5 font-mono text-label break-words whitespace-pre-wrap text-ink-dim">
       {src.slice(0, a)}
       <span style={WAVY} className="text-ink">
         {src.slice(a, b) || '␣'}
@@ -111,15 +112,12 @@ export function ParserToolPage() {
     [parsed],
   );
 
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      const params = new URLSearchParams();
-      params.set('src', src);
-      const next = `${location.pathname}?${params.toString()}`;
-      if (next !== `${location.pathname}${location.search}`) history.replaceState(null, '', next);
-    }, 250);
-    return () => { window.clearTimeout(timer); };
+  const shareQuery = useMemo(() => {
+    const params = new URLSearchParams();
+    params.set('src', src);
+    return params.toString();
   }, [src]);
+  useAddressBarQuery(shareQuery);
 
   const visibleTokens = lexed.ok ? lexed.tokens.filter((t) => t.type !== 'eof') : [];
 

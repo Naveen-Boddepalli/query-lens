@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import {
   createTraceProjector,
   DATASET_IDS,
   DATASETS,
   DEFAULT_ENGINE_OPTIONS,
+  REPLACEMENT_POLICY_LABELS,
+  REPLACEMENT_POLICY_NAMES,
   runQuery,
 } from '../engine/index.ts';
 import type {
@@ -17,14 +19,15 @@ import type {
   Stage,
 } from '../engine/index.ts';
 import { DATASET_CATALOGUE } from '../ui/datasetCatalogue.ts';
-import {
-  CUSTOM_STARTER_SQL,
-  loadCustomDatabase,
-  saveCustomDatabase,
-} from '../ui/customDatabase.ts';
+import { CUSTOM_STARTER_SQL } from '../ui/customDatabase.ts';
+import { loadWorkingCopy, saveWorkingCopy } from '../ui/workingCopy.ts';
 import { ErrorBoundary } from '../ui/ErrorBoundary.tsx';
 import { publishRepro } from '../ui/errorReport.ts';
+import { ReportStepLink } from '../ui/ReportStepLink.tsx';
+import type { Moment } from '../ui/stepReport.ts';
 import { PipelineTracker } from '../ui/PipelineTracker.tsx';
+import { appendStep, carryOn, openLog, recordWrite } from '../ui/durableLog.ts';
+import type { DurableLog } from '../ui/durableLog.ts';
 import { PlaybackControls } from '../ui/PlaybackControls.tsx';
 import { SqlEditor } from '../ui/SqlEditor.tsx';
 import { DataEditor } from '../ui/DataEditor.tsx';
@@ -33,8 +36,10 @@ import { PredictionCard } from '../ui/PredictionCard.tsx';
 import { PresenterView } from '../ui/PresenterView.tsx';
 import { PlaygroundTour } from '../ui/PlaygroundTour.tsx';
 import { TraceWorksheet } from '../ui/TraceWorksheet.tsx';
-import { START_TOUR_EVENT, takePendingTour } from '../ui/firstVisit.ts';
+import { useDocumentTitle } from '../ui/documentTitle.ts';
+import { hasPendingTour, listenForTour } from '../ui/firstVisit.ts';
 import { ShortcutHints } from '../ui/ShortcutHints.tsx';
+import { WhyNotNote } from '../ui/WhyNotNote.tsx';
 import { recordPrediction, recordStages } from '../ui/progress.ts';
 import { stepAnnouncement } from '../ui/stepAnnouncement.ts';
 import { btnPrimary, btnSecondary, panelSurface } from '../ui/primitives.ts';
@@ -42,6 +47,9 @@ import { useThemeContext } from '../ui/ThemeContext.tsx';
 import { RUN_HINT, useIsTouch } from '../ui/platform.ts';
 import { readDefaultPolicy, readDefaultPredictOn } from '../ui/preferences.ts';
 import { StageDetail } from '../ui/panels/StageDetail.tsx';
+import { TraceDiffNote } from '../ui/panels/TraceDiffNote.tsx';
+import { diffRuns, readLastRuns, summarize, writeLastRun } from '../ui/traceDiff.ts';
+import type { TraceDiff } from '../ui/traceDiff.ts';
 import { STAGE_META } from '../ui/stageMeta.ts';
 import { usePlayback, usePlaybackShortcuts } from '../ui/usePlayback.ts';
 import {
@@ -49,8 +57,8 @@ import {
   readDatasetParam,
   readShareState,
   skippedAnswersBefore,
-  writeShareState,
 } from '../ui/urlState.ts';
+import { useAddressBarQuery } from '../ui/addressBar.ts';
 import { parseTraceFile, serializeTraceFile } from '../ui/traceFile.ts';
 import type { TraceState } from '../ui/traceFile.ts';
 
@@ -119,7 +127,17 @@ const GLASS_CARD = 'rounded-xl border border-edge bg-surface-2/80 shadow-neu-res
 const NARRATION_BOX = `ql-sheen p-3 ${GLASS_CARD}`;
 const CUSTOM_BLURB = 'Your own tables, kept in this browser';
 
+const WorkspaceDialog = lazy(() =>
+  import('../ui/WorkspaceDialog.tsx').then((m) => ({ default: m.WorkspaceDialog })),
+);
+
+// plan.md §25.4 E4: the write-ahead log, crash and recovery, loaded when a visitor opens it.
+const DurabilityDialog = lazy(() =>
+  import('../ui/DurabilityDialog.tsx').then((m) => ({ default: m.DurabilityDialog })),
+);
+
 export function PlaygroundPage() {
+  useDocumentTitle('Playground');
   const [sql, setSql] = useState(START.sql);
   const [policy, setPolicy] = useState<ReplacementPolicyName>(START.policy);
   const [pinnedStage, setPinnedStage] = useState<Stage | null>(null);
@@ -130,14 +148,21 @@ export function PlaygroundPage() {
   // presets), so JOIN can finally run from the Playground itself instead of
   // staying `/tools/planner` + `/compare`-only.
   const [isCustom, setIsCustom] = useState(false);
+  // Counts every dataset change, so a custom database that finishes loading after the user has moved on is dropped.
+  const datasetChange = useRef(0);
   const [schemaEditorOpen, setSchemaEditorOpen] = useState(false);
+  const [workspacesOpen, setWorkspacesOpen] = useState(false);
+  const [durabilityOpen, setDurabilityOpen] = useState(false);
   const [editingData, setEditingData] = useState(false);
   const [rowsEdited, setRowsEdited] = useState(SHARED.rows !== undefined);
   const [result, setResult] = useState<RunResult>(INITIAL_RESULT);
+  const [traceDiff, setTraceDiff] = useState<{ sql: string; diff: TraceDiff | null } | null>(null);
 
   const [predictOn, setPredictOn] = useState(START.predictOn);
   const [presenting, setPresenting] = useState(PRESENT_INITIAL);
-  const [tourOpen, setTourOpen] = useState(() => TOUR_INITIAL || takePendingTour());
+  // A request already waiting opens the tour on the first render (only *looked at* here — a render may be thrown
+  // away); `listenForTour` below is what answers it.
+  const [tourOpen, setTourOpen] = useState(() => TOUR_INITIAL || hasPendingTour());
   const [answers, setAnswers] = useState<Record<number, string>>(() =>
     skippedAnswersBefore(INITIAL_RESULT.events, SHARED.step ?? 0),
   );
@@ -147,6 +172,9 @@ export function PlaygroundPage() {
   const askToPredict = predictOn && !presenting;
 
   const options = useMemo(() => ({ ...DEFAULT_ENGINE_OPTIONS, policy }), [policy]);
+  // The write statements run here, as log steps (plan.md §25.4 E4). Kept as plain data; the machine runs only when
+  // the Durability dialog is opened.
+  const [durable, setDurable] = useState<DurableLog>(() => openLog(START.db, DEFAULT_ENGINE_OPTIONS.rowsPerPage));
   const tableName = DATASETS[datasetId].table;
   const table = db.tables[tableName];
   const presets = DATASET_CATALOGUE[datasetId].presets;
@@ -188,12 +216,8 @@ export function PlaygroundPage() {
   usePlaybackShortcuts(playback, !editingData && !tourOpen);
 
   // "Take the tour" in the first-visit hint (mounted by `Layout`, a different
-  // subtree) reaches the Playground as a window event once its chunk is live.
-  useEffect(() => {
-    const open = () => { setTourOpen(true); };
-    window.addEventListener(START_TOUR_EVENT, open);
-    return () => { window.removeEventListener(START_TOUR_EVENT, open); };
-  }, []);
+  // subtree): a request made before this ran, or any time after (`firstVisit.ts`).
+  useEffect(() => listenForTour(() => { setTourOpen(true); }), []);
 
   // The print worksheet (plan.md §22.6) is mounted *only* while printing —
   // keeping its copy of the whole trace out of the DOM the rest of the time.
@@ -225,7 +249,8 @@ export function PlaygroundPage() {
   // is never re-created with the very text it needed to announce.
   const announcement = stepAnnouncement({
     narration: state.narration,
-    error: result.error !== undefined,
+    // A statement rejected part-way (a UNIQUE key already taken) has a trace to read; only one that never ran has none.
+    error: result.error !== undefined && result.events.length === 0,
     prediction: prompt && upcoming ? { prompt, answer: answers[upcoming.id] } : undefined,
   });
 
@@ -244,6 +269,15 @@ export function PlaygroundPage() {
   const activeSpan: Span | undefined =
     state?.lastEvent?.stage === 'parse' ? state.lastEvent.span : undefined;
 
+  // The "Why not?" panel (plan.md §25.4 C5, fourth slice): set on whichever step actually chose by cost —
+  // index-vs-scan and join-algorithm land on an `optimize` event, join order on a `plan` event.
+  const whyNot =
+    state?.lastEvent?.stage === 'optimize'
+      ? state.lastEvent.whyNot
+      : state?.lastEvent?.stage === 'plan'
+        ? state.lastEvent.whyNot
+        : undefined;
+
   publishRepro({
     sql,
     policy,
@@ -253,9 +287,12 @@ export function PlaygroundPage() {
     rowsEdited,
   });
 
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      const query = encodeShareState(
+  // The moment as a query string. One derivation feeds both the address bar
+  // (below) and "Report a confusing step", so the link a report carries is
+  // always exactly the one Copy link would give.
+  const shareQuery = useMemo(
+    () =>
+      encodeShareState(
         {
           sql,
           policy,
@@ -268,13 +305,29 @@ export function PlaygroundPage() {
           ...(rowsEdited && table ? { rows: table.rows } : {}),
         },
         table,
-      );
-      // `present` is a view flag, not part of the shared moment — appended after
-      // `encodeShareState` so a copied link still opens the presenter.
-      writeShareState(presenting ? `${query}&present=1` : query);
-    }, 250);
-    return () => { window.clearTimeout(timer); };
-  }, [sql, policy, predictOn, playback.step, datasetId, isCustom, rowsEdited, table, presenting]);
+      ),
+    [sql, policy, predictOn, playback.step, datasetId, isCustom, rowsEdited, table],
+  );
+
+  // `present` is a view flag, not part of the shared moment — appended after
+  // `encodeShareState` so a copied link still opens the presenter.
+  useAddressBarQuery(presenting ? `${shareQuery}&present=1` : shareQuery);
+
+  // plan.md §25.4 A3 — everything a "confusing step" report needs, from state
+  // the page already holds. Read at render, not from `location`, which trails
+  // the playhead by the address bar's 250 ms debounce.
+  const moment: Moment = {
+    sql,
+    policy,
+    predictOn,
+    step: playback.step,
+    stepCount: result.events.length,
+    stage: state.stage ?? null,
+    narration: state.narration ?? '',
+    dataset: isCustom ? 'a custom database' : datasetId,
+    rowsEdited,
+    shareUrl: `${location.origin}${location.pathname}${shareQuery ? `?${shareQuery}` : ''}`,
+  };
 
   const [copied, setCopied] = useState(false);
   async function copyLink() {
@@ -291,6 +344,14 @@ export function PlaygroundPage() {
     (database: Database = db) => {
       const next = runQuery(sql, database, options);
       setResult(next);
+      if (next.error) {
+        setTraceDiff({ sql, diff: null });
+      } else {
+        const after = summarize(next);
+        const before = readLastRuns()[sql];
+        writeLastRun(sql, after);
+        setTraceDiff({ sql, diff: before ? diffRuns(before, after) : null });
+      }
       setPinnedStage(null);
       setAnswers({});
       playback.land(landingStep(next, predictOn));
@@ -306,6 +367,22 @@ export function PlaygroundPage() {
             tables: { ...database.tables, [next.write.table]: { ...target, rows: next.write.rows } },
           });
           setRowsEdited(true);
+          const write = next.write;
+          setDurable((log) =>
+            recordWrite(log, database, sql, { table: write.table, kind: write.kind, rows: write.rows }),
+          );
+        }
+      }
+
+      // ANALYZE (plan.md §25.4 C1) is the same story for statistics: the engine never holds state between calls,
+      // so persisting them here is what lets the *next* query actually read them instead of scanning the live
+      // rows. Unlike a write, the rows themselves have not changed — no `rowsEdited`.
+      if (next.analyze) {
+        const target = database.tables[next.analyze.table];
+        if (target) {
+          setDb({
+            tables: { ...database.tables, [next.analyze.table]: { ...target, stats: next.analyze.stats } },
+          });
         }
       }
     },
@@ -347,6 +424,7 @@ export function PlaygroundPage() {
    */
   function switchDataset(id: DatasetId) {
     if (!isCustom && id === datasetId) return;
+    datasetChange.current += 1;
     const nextDb = DATASETS[id].make();
     const nextSql = DATASET_CATALOGUE[id].starterSql;
     setDatasetId(id);
@@ -362,20 +440,30 @@ export function PlaygroundPage() {
     playback.land(landingStep(next, askToPredict));
   }
 
-  /** Switches to the user's own multi-table database — same shape as `switchDataset`, loading from `localStorage` instead of a fixed preset (plan.md §22.7). */
+  /** Switches to the user's own multi-table database — same shape as `switchDataset`, loading the working copy from IndexedDB instead of a fixed preset (plan.md §22.7). */
   function switchToCustom() {
     if (isCustom) return;
-    const nextDb = loadCustomDatabase();
-    setIsCustom(true);
-    setDb(nextDb);
-    setRowsEdited(false);
-    setEditingData(false);
-    setSql(CUSTOM_STARTER_SQL);
-    const next = runQuery(CUSTOM_STARTER_SQL, nextDb, options);
-    setResult(next);
-    setPinnedStage(null);
-    setAnswers({});
-    playback.land(landingStep(next, askToPredict));
+    const change = ++datasetChange.current;
+    void loadWorkingCopy().then((nextDb) => {
+      if (change !== datasetChange.current) return;
+      setIsCustom(true);
+      setDb(nextDb);
+      setRowsEdited(false);
+      setEditingData(false);
+      setSql(CUSTOM_STARTER_SQL);
+      const next = runQuery(CUSTOM_STARTER_SQL, nextDb, options);
+      setResult(next);
+      setPinnedStage(null);
+      setAnswers({});
+      playback.land(landingStep(next, askToPredict));
+    });
+  }
+
+  function openDatabase(next: Database) {
+    setWorkspacesOpen(false);
+    setDb(next);
+    setRowsEdited(true);
+    run(next);
   }
 
   function applySchema(next: Database) {
@@ -391,7 +479,11 @@ export function PlaygroundPage() {
   // result), never per keystroke, so there is no thrash to guard against, and
   // a debounce would risk losing an edit made just before switching away.
   useEffect(() => {
-    if (isCustom) saveCustomDatabase(db);
+    if (isCustom) {
+      void saveWorkingCopy(db).catch(() => {
+        // Not persisted this session; the database itself is still in memory, and nothing depends on the autosave.
+      });
+    }
   }, [isCustom, db]);
 
   // plan.md §22.5: the shareable moment as a file, for a dataset too big for a
@@ -432,6 +524,7 @@ export function PlaygroundPage() {
     setPolicy(t.policy);
     setPredictOn(t.predictOn);
     setDatasetId(t.dataset);
+    datasetChange.current += 1;
     setIsCustom(false); // a trace file always names one of the fixed presets
     setDb(nextDb);
     setRowsEdited(t.rows !== null);
@@ -529,12 +622,30 @@ export function PlaygroundPage() {
             <button type="button" onClick={() => { run(); }} className={btnPrimary}>
               Run{touch ? '' : ` ${RUN_HINT}`}
             </button>
-            <button
-              type="button"
-              onClick={() => { if (isCustom) setSchemaEditorOpen(true); else setEditingData(true); }}
-              className={btnSecondary}
-            >
-              {isCustom ? `Manage tables (${Object.keys(db.tables).length})` : `Edit data (${table?.rows.length ?? 0})`}
+            {isCustom ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => { setSchemaEditorOpen(true); }}
+                  className={btnSecondary}
+                >
+                  Manage tables ({Object.keys(db.tables).length})
+                </button>
+                <button type="button" onClick={() => { setWorkspacesOpen(true); }} className={btnSecondary}>
+                  Workspaces
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                onClick={() => { setEditingData(true); }}
+                className={btnSecondary}
+              >
+                Edit data ({table?.rows.length ?? 0})
+              </button>
+            )}
+            <button type="button" onClick={() => { setDurabilityOpen(true); }} className={btnSecondary}>
+              Durability{durable.statements.length > 0 ? ` (${String(durable.statements.length)})` : ''}
             </button>
             <label className="ml-auto flex items-center gap-2 text-label text-ink-dim">
               Eviction
@@ -543,16 +654,24 @@ export function PlaygroundPage() {
                 value={policy}
                 onChange={(e) => { setPolicy(e.target.value as ReplacementPolicyName); }}
               >
-                <option value="lru">LRU</option>
-                <option value="clock">Clock sweep</option>
+                {REPLACEMENT_POLICY_NAMES.map((name) => (
+                  <option key={name} value={name}>
+                    {REPLACEMENT_POLICY_LABELS[name]}
+                  </option>
+                ))}
               </select>
             </label>
           </div>
 
           <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-label text-ink-dim">
             <p>
-              {result.error ? (
+              {result.error && result.events.length === 0 ? (
                 <span className="text-evict">The query did not run — see the error by the editor.</span>
+              ) : result.error ? (
+                // A statement the engine started and then rejected (a UNIQUE key already taken): the trace shows how far it got.
+                <span className="text-evict">
+                  Rejected after {result.events.length} steps — the trace shows how far it got; the error is by the editor.
+                </span>
               ) : (
                 <>
                   {result.events.length} steps in this trace · showing step{' '}
@@ -662,12 +781,13 @@ export function PlaygroundPage() {
 
           {prompt && upcoming && (
             <PredictionCard
+              key={upcoming.id}
               prompt={prompt}
               answer={answers[upcoming.id]}
               canSkip={!ASSIGNMENT}
-              onAnswer={(optionId) => {
+              onAnswer={(optionId, confidence) => {
                 setAnswers((current) => ({ ...current, [upcoming.id]: optionId }));
-                recordPrediction(optionId === prompt.correctOptionId);
+                recordPrediction(optionId === prompt.correctOptionId, confidence);
               }}
               onSkip={() => {
                 setAnswers((current) => ({ ...current, [upcoming.id]: '' }));
@@ -686,9 +806,12 @@ export function PlaygroundPage() {
             className={prompt ? 'sr-only' : NARRATION_BOX}
           >
             {!prompt && (
-              <h2 className="mb-1 text-micro font-semibold tracking-[0.14em] text-ink-dim uppercase">
-                Narration
-              </h2>
+              <div className="mb-1 flex items-center justify-between gap-2">
+                <h2 className="text-micro font-semibold tracking-[0.14em] text-ink-dim uppercase">
+                  Narration
+                </h2>
+                <ReportStepLink moment={moment} />
+              </div>
             )}
             <p className="min-h-10 text-body leading-relaxed text-ink" aria-live="polite" aria-atomic="true">
               <span className="sr-only">
@@ -697,6 +820,9 @@ export function PlaygroundPage() {
               {announcement}
             </p>
           </div>
+
+          {!prompt && whyNot && <WhyNotNote whyNot={whyNot} />}
+          {!prompt && traceDiff?.sql === sql && traceDiff.diff && <TraceDiffNote diff={traceDiff.diff} />}
 
           <div
             data-tour="playback"
@@ -732,6 +858,44 @@ export function PlaygroundPage() {
           onReset={resetData}
           onClose={() => { setEditingData(false); }}
         />
+      )}
+
+      {workspacesOpen && (
+        <Suspense fallback={null}>
+          <WorkspaceDialog
+            db={db}
+            sql={sql}
+            onOpen={openDatabase}
+            onLoadQuery={(text) => { setSql(text); }}
+            onClose={() => { setWorkspacesOpen(false); }}
+          />
+        </Suspense>
+      )}
+
+      {durabilityOpen && (
+        <Suspense fallback={null}>
+          <DurabilityDialog
+            db={db}
+            log={durable}
+            onAppend={(step) => { setDurable((log) => appendStep(log, step)); }}
+            onRestart={() => { setDurable(openLog(db, options.rowsPerPage)); }}
+            onUse={(recovered, heap) => {
+              setDb(recovered);
+              setRowsEdited(true);
+              setDurable((log) => carryOn(log, recovered, heap));
+              setDurabilityOpen(false);
+              // A read can show the recovered rows at once; a write must not be run a second time.
+              const again = runQuery(sql, recovered, options);
+              if (!again.write) {
+                setResult(again);
+                setPinnedStage(null);
+                setAnswers({});
+                playback.land(landingStep(again, predictOn));
+              }
+            }}
+            onClose={() => { setDurabilityOpen(false); }}
+          />
+        </Suspense>
       )}
 
       {schemaEditorOpen && (

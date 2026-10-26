@@ -1,0 +1,30 @@
+name: "\U0001F914 Confusing step"
+description: A moment in a trace that was hard to follow, misleading, or looked wrong.
+title: "[Confusing step]: "
+labels: ["clarity", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you — this is the only feedback channel QueryLens has (there is no telemetry, on purpose), and "I didn't understand this step" is the most useful thing a learner can tell us.
+
+        The **Where** box was filled in by the app's *Report a confusing step* button: it holds the build, the step, what the narration said, and a link that reopens this exact moment. **Nothing has been sent — it only goes anywhere when you press Submit below.** Delete anything you would rather not post; it is a public issue.
+  - type: textarea
+    id: confusion
+    attributes:
+      label: What was confusing?
+      description: What did you expect at this step, what did you see, or which word or number did not make sense?
+    validations:
+      required: true
+  - type: textarea
+    id: helped
+    attributes:
+      label: What would have made it clear?
+      description: A different word, a diagram, an earlier step, a prediction question — anything.
+  - type: textarea
+    id: moment
+    attributes:
+      label: Where (filled in by the app)
+      description: If this is empty, use the "Report a confusing step" link under the Playground's narration instead of opening this form directly.
+    validations:
+      required: true

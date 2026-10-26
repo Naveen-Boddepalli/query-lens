@@ -11,6 +11,7 @@ import {
   runQuery,
 } from '../../engine/index.ts';
 import type { ASTNode, Database, DatasetId, EngineOptions, RunResult, StepEvent } from '../../engine/index.ts';
+import { sandboxHref } from '../learn/sandboxScenarios.ts';
 
 /**
  * plan.md §22.4/§23.1: goal-shaped puzzles with a client-side check. Each
@@ -51,6 +52,17 @@ export interface Challenge {
    * rather than trusting an estimate.
    */
   check: (result: RunResult, sql: string) => boolean;
+  /**
+   * The wrong belief this challenge exists to correct (plan.md §G3). Shown once the challenge is solved, not before,
+   * so the player meets the belief by running into it rather than by reading it first.
+   */
+  misconception?: ReactNode;
+  /**
+   * A sandbox that shows what the challenge is about, opened on the player's own query — the Parser for a challenge
+   * about how a query is read, the Grammar diagram for one about what is allowed. `href` returns null when the tool
+   * cannot take the text (it takes a bounded source), and the link is then left out.
+   */
+  tool?: { label: string; href: (sql: string) => string | null };
 }
 
 /** A challenge's dataset, defaulted. Meaningless once `database` is set — `challengeDatabase` below is what actually runs. */
@@ -108,6 +120,93 @@ const lastAst = (events: readonly StepEvent[]): ASTNode | undefined => {
   }
   return undefined;
 };
+
+/** The first node of `kind` in a tree, depth-first. */
+function findNode(node: ASTNode, match: (n: ASTNode) => boolean): ASTNode | undefined {
+  if (match(node)) return node;
+  for (const child of node.children ?? []) {
+    const hit = findNode(child, match);
+    if (hit) return hit;
+  }
+  return undefined;
+}
+
+/** The predicate under a query's WHERE clause, read from the last parse event the way the other checks read the AST. */
+const whereExpr = (events: readonly StepEvent[]): ASTNode | undefined => {
+  const ast = lastAst(events);
+  return ast ? findNode(ast, (n) => n.kind === 'Where')?.children?.[0] : undefined;
+};
+
+const isColumn = (n: ASTNode | undefined, name: string): boolean => n?.kind === 'Column' && n.label === name;
+
+/**
+ * How many of a SELECT's optional parts the parse tree shows: DISTINCT, WHERE, GROUP BY, HAVING, ORDER BY, LIMIT and
+ * OFFSET. JOIN is the eighth, and needs a second table — which the challenge's one-table database does not have —
+ * so it is not counted here.
+ */
+export function optionalClauses(events: readonly StepEvent[]): number {
+  const ast = lastAst(events);
+  if (!ast) return 0;
+  const has = (match: (n: ASTNode) => boolean) => findNode(ast, match) !== undefined;
+  const limit = findNode(ast, (n) => n.kind === 'Limit');
+  return [
+    has((n) => n.kind === 'SelectList' && n.label === 'DISTINCT columns'),
+    has((n) => n.kind === 'Where'),
+    has((n) => n.kind === 'GroupBy'),
+    has((n) => n.kind === 'Having'),
+    has((n) => n.kind === 'OrderBy'),
+    limit !== undefined,
+    limit?.detail?.includes('OFFSET') === true,
+  ].filter(Boolean).length;
+}
+
+/** Who a result row is, whether the query kept the `id` column, the `name`, or both. */
+const personOf = (row: Record<string, unknown>): string | null => {
+  if (row['id'] === 3 || row['name'] === 'barbara') return 'barbara';
+  if (row['id'] === 4 || row['name'] === 'brendan') return 'brendan';
+  return null;
+};
+
+/** The longest source the Parser sandbox takes from its link. */
+const PARSER_SOURCE_LIMIT = 2000;
+
+/** A small table with a NULL in it, for the NULL-semantics challenges. */
+const contactsDatabase = (): Database => ({
+  tables: {
+    contacts: {
+      name: 'contacts',
+      columns: ['id', 'name', 'email'],
+      rows: [
+        { id: 1, name: 'ana', email: 'ana@example.com' },
+        { id: 2, name: 'ben', email: null },
+        { id: 3, name: 'cy', email: 'cy@example.com' },
+      ],
+      indexedColumns: [],
+    },
+  },
+});
+
+/** Three people, and a banned list that contains a NULL. */
+const bannedDatabase = (): Database => ({
+  tables: {
+    people: {
+      name: 'people',
+      columns: ['id', 'name'],
+      rows: [
+        { id: 1, name: 'ana' },
+        { id: 2, name: 'ben' },
+        { id: 3, name: 'cy' },
+      ],
+      indexedColumns: [],
+    },
+    banned: {
+      name: 'banned',
+      columns: ['person_id'],
+      rows: [{ person_id: 2 }, { person_id: null }],
+      indexedColumns: [],
+    },
+  },
+});
 
 export const CHALLENGES: Challenge[] = [
   {
@@ -320,8 +419,12 @@ export const CHALLENGES: Challenge[] = [
     // Forced small on purpose, same reason `/compare`'s own JOIN mode does:
     // the demo's 5 heap pages fit entirely inside the default 8 frames, which
     // would let nested-loop's rescans hit cache and hide the very difference
-    // this challenge exists to show.
-    engineOptions: { bufferFrames: 2 },
+    // this challenge exists to show. `joinStrategy` is pinned to nested-loop too
+    // (plan.md §25.4 C5 slice 2 would otherwise cost-choose hash for the player's
+    // own run too, same as it would for anyone else's) — the whole point here is
+    // naming two specific algorithms and comparing them head to head, not
+    // whichever one the optimizer would have picked on its own.
+    engineOptions: { bufferFrames: 2, joinStrategy: 'nested-loop' },
     brief: (
       <>
         This engine has three join algorithms. Nested-loop rescans all of the right-hand table once
@@ -378,21 +481,384 @@ export const CHALLENGES: Challenge[] = [
     category: 'Indexing',
     brief: (
       <>
-        A range predicate on an <em>indexed</em> column descends the B+Tree once and
-        walks the leaf chain sideways, instead of reading the whole table. Write a range query — not
-        an equality — that touches fewer pages than a full sequential scan does.
+        A range predicate on an <em>indexed</em> column can descend the B+Tree once and walk the
+        leaf chain sideways, instead of reading the whole table — but only when the slice it asks
+        for is narrow enough to actually cost less than the scan it replaces. Write a range query
+        — not an equality — that touches fewer pages than a full sequential scan does.
       </>
     ),
     hint: (
       <>
         <code className="font-mono">age</code> is not indexed, so any range on it is a full 12-page
-        scan. <code className="font-mono">id</code> is — try <code className="font-mono">id &gt;</code>,{' '}
-        <code className="font-mono">id &lt;</code>, or a <code className="font-mono">BETWEEN</code>.
+        scan. <code className="font-mono">id</code> is — but a wide range on it still loses to the
+        scan, one heap page per matching row with no credit for sharing a page. Narrow it down: try{' '}
+        <code className="font-mono">id &gt; 44</code>, <code className="font-mono">id &lt; 5</code>,
+        or a narrow <code className="font-mono">BETWEEN</code>.
       </>
     ),
     starter: 'SELECT * FROM users WHERE age > 30;',
     requirements: ['Optimizer selects IndexRangeScan', 'Reads fewer than 12 pages (< full table)'],
     check: (r) => !r.error && usesRangeScan(r.events) && diskReads(r.events) < 12,
+  },
+  {
+    id: 'the-index-it-cannot-serve',
+    title: 'Filter the indexed column the index cannot serve',
+    difficulty: 'Intermediate',
+    category: 'Indexing',
+    requirements: [
+      'Filter id with a non-equality operator such as <>',
+      'Engine bypasses the index and performs a full scan',
+    ],
+    brief: (
+      <>
+        The seed table has a B+Tree index on <code className="font-mono">id</code>. Write a query that filters on{' '}
+        <code className="font-mono">id</code> and still returns rows, but that the planner cannot answer from the index.
+      </>
+    ),
+    hint: (
+      <>
+        The index answers equality and ranges. A <em>not-equal</em> test has no contiguous run of keys to walk, so the
+        planner reads the table.
+      </>
+    ),
+    starter: 'SELECT * FROM users WHERE id = 5;',
+    check: (r) => {
+      const w = whereExpr(r.events);
+      return (
+        !r.error &&
+        r.rows.length > 0 &&
+        !usesIndex(r.events) &&
+        !usesRangeScan(r.events) &&
+        w?.kind === 'Compare' &&
+        w.label === '<>' &&
+        isColumn(w.children?.[0], 'id')
+      );
+    },
+    misconception: (
+      <>
+        An index on a column makes every filter on that column fast. The index serves some predicates and not others —
+        here the planner reads all 47 rows and the index sits unused.
+      </>
+    ),
+  },
+  {
+    id: 'wrap-the-column',
+    title: 'Wrap the indexed column in arithmetic',
+    difficulty: 'Intermediate',
+    category: 'Indexing',
+    requirements: [
+      'Wrap id in an arithmetic expression like id + 0',
+      'Planner fails to match index and reads base rows',
+    ],
+    brief: (
+      <>
+        Write a query that filters <code className="font-mono">id</code> through an arithmetic expression, returns at least
+        one row, and gets no help from the index.
+      </>
+    ),
+    hint: (
+      <>
+        The index matches a bare column on one side of the comparison. Put anything around it — even{' '}
+        <code className="font-mono">+ 0</code> — and the optimiser can no longer see the column.
+      </>
+    ),
+    starter: 'SELECT * FROM users WHERE id = 5;',
+    check: (r) => {
+      const w = whereExpr(r.events);
+      return (
+        !r.error &&
+        r.rows.length > 0 &&
+        !usesIndex(r.events) &&
+        !usesRangeScan(r.events) &&
+        w?.kind === 'Compare' &&
+        w.children?.[0]?.kind === 'Arith' &&
+        (w.children[0].children ?? []).some((c) => isColumn(c, 'id'))
+      );
+    },
+    misconception: (
+      <>
+        Wrapping an indexed column in a function or expression keeps the index in play. The planner matches the column
+        itself; <code className="font-mono">id + 0</code> is a different expression with no index behind it.
+      </>
+    ),
+  },
+  {
+    id: 'equals-null',
+    title: 'Find the rows where the email is missing',
+    difficulty: 'Warm-up',
+    category: 'Query Planning',
+    requirements: [
+      'Query contacts with IS NULL predicate',
+      'Return only records with missing email',
+    ],
+    brief: (
+      <>
+        The <code className="font-mono">contacts</code> table has one row whose <code className="font-mono">email</code>{' '}
+        is missing. Return that row, and only that kind of row.
+      </>
+    ),
+    hint: (
+      <>
+        NULL is not a value, so no comparison with it is ever true — not even <code className="font-mono">= NULL</code>.
+        SQL has a dedicated test for missing values.
+      </>
+    ),
+    starter: 'SELECT * FROM contacts WHERE email = NULL;',
+    database: contactsDatabase,
+    check: (r) => {
+      const w = whereExpr(r.events);
+      return (
+        !r.error &&
+        r.rows.length > 0 &&
+        r.rows.every((row) => row.email === null) &&
+        w?.kind === 'IsNull' &&
+        isColumn(w.children?.[0], 'email')
+      );
+    },
+    misconception: (
+      <>
+        <code className="font-mono">x = NULL</code> finds the missing values. It finds nothing, because a comparison
+        with NULL is unknown, not true. Missing values are tested with <code className="font-mono">IS NULL</code>.
+      </>
+    ),
+  },
+  {
+    id: 'count-the-nulls',
+    title: 'Count the rows, then count the emails',
+    difficulty: 'Intermediate',
+    category: 'Query Planning',
+    requirements: [
+      'Select COUNT(*) and COUNT(email) together',
+      'Observe differing counts due to NULL non-inclusion',
+    ],
+    brief: (
+      <>
+        In one query on <code className="font-mono">contacts</code>, return the number of rows and the number of emails
+        side by side, so the two can be compared.
+      </>
+    ),
+    hint: (
+      <>
+        <code className="font-mono">COUNT(*)</code> counts rows. <code className="font-mono">COUNT(col)</code> counts the
+        rows where that column is not NULL. Put both in the SELECT list.
+      </>
+    ),
+    starter: 'SELECT COUNT(*) FROM contacts;',
+    database: contactsDatabase,
+    check: (r) => {
+      if (r.error || r.rows.length !== 1) return false;
+      const values = Object.values(r.rows[0]!);
+      return values.includes(3) && values.includes(2);
+    },
+    misconception: (
+      <>
+        <code className="font-mono">COUNT(*)</code> and <code className="font-mono">COUNT(col)</code> always agree. They
+        differ exactly where the column holds a NULL — here three rows, two emails.
+      </>
+    ),
+  },
+  {
+    id: 'not-in-the-null',
+    title: 'Return the people who are not banned',
+    difficulty: 'Advanced',
+    category: 'Query Planning',
+    requirements: [
+      'Execute NOT IN with a subquery containing NULL',
+      'Observe three-valued logic yielding empty result',
+    ],
+    brief: (
+      <>
+        Return the people who are <em>not</em> on the <code className="font-mono">banned</code> list. Ana and Cy are not
+        banned, so a correct answer returns them — but check what the list actually contains.
+      </>
+    ),
+    hint: (
+      <>
+        The banned list has a NULL in it. Compare that NULL with <code className="font-mono">NOT IN</code> and think about
+        what <code className="font-mono">id &lt;&gt; NULL</code> is.
+      </>
+    ),
+    starter: 'SELECT * FROM people WHERE id NOT IN (SELECT person_id FROM banned WHERE person_id IS NOT NULL);',
+    database: bannedDatabase,
+    check: (r) => {
+      const w = whereExpr(r.events);
+      return !r.error && r.rows.length === 0 && w?.kind === 'In' && w.label === 'NOT IN';
+    },
+    misconception: (
+      <>
+        <code className="font-mono">NOT IN</code> returns the rows that are not in the list. One NULL in the list makes
+        every <code className="font-mono">NOT IN</code> comparison unknown, so the query returns nothing at all, even
+        though Ana and Cy are not banned.
+      </>
+    ),
+  },
+  {
+    // plan.md §26 Feature 3 — on `customers`, the preset with NULLs.
+    id: 'not-paris-either',
+    title: 'Everyone not in Paris',
+    difficulty: 'Intermediate',
+    category: 'Query Planning',
+    requirements: [
+      'Return all customers not in Paris including NULL city',
+      'Account for NULL values dropping from <> comparisons',
+    ],
+    brief: (
+      <>
+        Return every customer who does not live in Paris — including the ones whose city is not on record. A customer
+        with no known city is not known to live in Paris either.
+      </>
+    ),
+    hint: (
+      <>
+        <code className="font-mono">city &lt;&gt; 'Paris'</code> is unknown when the city is NULL, so those rows fall
+        out. Count the result against the table: Paris has four customers, and there are twenty.
+      </>
+    ),
+    starter: "SELECT * FROM customers WHERE city <> 'Paris';",
+    dataset: 'customers',
+    // The exact set of customers — by whatever query (`<> … OR IS NULL`, or `id NOT IN (SELECT id … WHERE city =
+    // 'Paris')`), told apart by `id` or by `name`, which is unique here, whichever the query selected.
+    check: (r) => {
+      const key = r.rows.every((row) => 'id' in row) ? 'id' : r.rows.every((row) => 'name' in row) ? 'name' : null;
+      if (r.error || key === null) return false;
+      const want = DATASETS.customers.make().tables.customers!.rows.filter((row) => row['city'] !== 'Paris').map((row) => row[key]);
+      const got = r.rows.map((row) => row[key]);
+      return got.length === want.length && want.every((v) => got.includes(v));
+    },
+    misconception: (
+      <>
+        <code className="font-mono">city &lt;&gt; 'Paris'</code> means &ldquo;everyone else&rdquo;. It means everyone
+        whose city is <em>known</em> to be something else: for a NULL city the comparison is unknown, and a WHERE clause
+        keeps only what is true. <code className="font-mono">city = 'Paris'</code> and{' '}
+        <code className="font-mono">city &lt;&gt; 'Paris'</code> together still leave out every NULL.
+      </>
+    ),
+  },
+  {
+    id: 'keep-the-unmatched',
+    title: 'Keep the authors who have no posts',
+    difficulty: 'Intermediate',
+    category: 'Storage & Execution',
+    requirements: [
+      'Perform LEFT JOIN between authors and posts',
+      'Filter for posts.id IS NULL to keep only unmatched authors',
+    ],
+    brief: (
+      <>
+        Return the authors who have written no posts, using a <code className="font-mono">LEFT JOIN</code> on{' '}
+        <code className="font-mono">posts</code>. Show the author&rsquo;s name.
+      </>
+    ),
+    hint: (
+      <>
+        A <code className="font-mono">LEFT JOIN</code> keeps an author with no match, padding the posts columns with NULL.
+        The filter that keeps only those padded rows is a test on a posts column for NULL.
+      </>
+    ),
+    starter:
+      'SELECT authors.name, posts.title FROM authors LEFT JOIN posts ON authors.id = posts.authorId WHERE posts.id = 999;',
+    database: createJoinDemoDatabase,
+    check: (r) =>
+      !r.error &&
+      r.rows.length > 0 &&
+      r.rows.every((row) => row['posts.title'] === null) &&
+      r.rows.some((row) => row['authors.name'] === 'barbara'),
+    misconception: (
+      <>
+        A <code className="font-mono">LEFT JOIN</code> keeps the unmatched rows no matter what the{' '}
+        <code className="font-mono">WHERE</code> says. A condition on the joined table drops them — and the way to keep
+        exactly the unmatched rows is to test that table for NULL.
+      </>
+    ),
+  },
+  {
+    id: 'and-before-or',
+    title: 'Where the AND lands',
+    difficulty: 'Intermediate',
+    category: 'Query Planning',
+    requirements: [
+      'Combine OR and AND conditions in WHERE clause',
+      'Use parentheses to ensure OR evaluates before AND',
+    ],
+    brief: (
+      <>
+        Return <strong>barbara and brendan</strong> — the users whose <code className="font-mono">id</code> is 1, 3 or 4{' '}
+        <em>and</em> who are over 30 — with a <code className="font-mono">WHERE</code> that uses both{' '}
+        <code className="font-mono">OR</code> and <code className="font-mono">AND</code>. The starter returns ada as
+        well; fix where the <code className="font-mono">AND</code> applies.
+      </>
+    ),
+    hint: (
+      <>
+        <code className="font-mono">AND</code> binds tighter than <code className="font-mono">OR</code>, so the starter
+        asks <code className="font-mono">age &gt; 30</code> of id 4 alone. Parentheses around the three ids make the{' '}
+        <code className="font-mono">OR</code> happen first and the <code className="font-mono">AND</code> cover them all.
+      </>
+    ),
+    starter: 'SELECT * FROM users WHERE id = 1 OR id = 3 OR id = 4 AND age > 30;',
+    check: (r) => {
+      const where = whereExpr(r.events);
+      const people = new Set(r.rows.map(personOf));
+      return (
+        !r.error &&
+        people.size === 2 &&
+        !people.has(null) &&
+        astHasKind(where, 'And') &&
+        astHasKind(where, 'Or')
+      );
+    },
+    tool: {
+      label: 'Read this query’s tree in the Parser →',
+      href: (sql) =>
+        sql.trim().length > 0 && sql.length <= PARSER_SOURCE_LIMIT ? sandboxHref({ tool: 'parser', src: sql }) : null,
+    },
+    misconception: (
+      <>
+        <code className="font-mono">AND</code> and <code className="font-mono">OR</code> are not read left to right.{' '}
+        <code className="font-mono">a OR b AND c</code> is <code className="font-mono">a OR (b AND c)</code>, so in the
+        starter ada got in through <code className="font-mono">id = 1</code> without ever being asked her age. The
+        parentheses are how you move the <code className="font-mono">AND</code>, and the tree shows where it landed.
+      </>
+    ),
+  },
+  {
+    id: 'every-clause',
+    title: 'Seven clauses in one SELECT',
+    difficulty: 'Advanced',
+    category: 'Query Planning',
+    requirements: [
+      'Compose query with DISTINCT, WHERE, GROUP BY, HAVING, ORDER BY, LIMIT, OFFSET',
+      'Query executes cleanly conforming to grammar constraints',
+    ],
+    brief: (
+      <>
+        A <code className="font-mono">SELECT</code> on one table has seven optional parts:{' '}
+        <code className="font-mono">DISTINCT</code>, <code className="font-mono">WHERE</code>,{' '}
+        <code className="font-mono">GROUP BY</code>, <code className="font-mono">HAVING</code>,{' '}
+        <code className="font-mono">ORDER BY</code>, <code className="font-mono">LIMIT</code> and{' '}
+        <code className="font-mono">OFFSET</code> (a <code className="font-mono">JOIN</code> is the eighth, and needs a
+        second table). The grammar reads them in that order, and the engine runs them all together — if what each one
+        names makes sense beside the others. Write one query that <strong>runs</strong> with all seven.
+      </>
+    ),
+    hint: (
+      <>
+        Once there is a <code className="font-mono">GROUP BY</code>, every selected column must be grouped or
+        aggregated, and <code className="font-mono">ORDER BY</code> sorts the groups — so name a grouped column, or an
+        aggregate. With <code className="font-mono">DISTINCT</code>, the sort key must be one you selected. And{' '}
+        <code className="font-mono">OFFSET</code> only comes after a <code className="font-mono">LIMIT</code>.
+      </>
+    ),
+    starter: 'SELECT DISTINCT age FROM users WHERE age > 20 ORDER BY age LIMIT 5;',
+    check: (r) => !r.error && optionalClauses(r.events) >= 7,
+    tool: { label: 'See the select rule in the Grammar →', href: () => sandboxHref({ tool: 'grammar', rule: 'select' }) },
+    misconception: (
+      <>
+        The grammar diagram is what the parser can <em>read</em>, not what the query <em>means</em>. A query can be
+        perfectly well-formed and still be refused — a column that is not grouped has no one value per group — and the
+        message says which rule said no.
+      </>
+    ),
   },
 ];
 

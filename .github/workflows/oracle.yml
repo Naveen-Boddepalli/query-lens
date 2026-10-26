@@ -1,0 +1,66 @@
+# plan.md §25.4 A1 / §25.5 rule 7. The SQLite oracle (`oracle/`) runs a seeded,
+# bounded count on every build (`pnpm test`) so a red CI is always reproducible
+# and never slow. This is the long run: many more cases, a fresh seed each time,
+# on a schedule — so a rare divergence surfaces here instead of being disabled
+# in CI for flakiness.
+#
+# Same supply-chain rules as ci.yml: every action pinned to a full commit SHA
+# (the tag in the comment is documentation, not the pin), and a read-only token
+# — there is nothing here that needs to write, and no secret at all.
+name: Oracle (long run)
+
+on:
+  schedule:
+    - cron: '17 4 * * 1' # Mondays, 04:17 UTC
+  workflow_dispatch:
+    inputs:
+      runs:
+        description: Cases per property
+        required: false
+        default: '20000'
+      seed:
+        description: fast-check seed (blank = derive one from the clock)
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: oracle-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  oracle:
+    name: SQLite differential + metamorphic, long run
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+
+      - name: Install Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The seed is printed first, so a failure is reproducible with
+      #   ORACLE_SEED=<seed> ORACLE_RUNS=<runs> pnpm exec vitest run oracle
+      - name: Run the oracle
+        env:
+          INPUT_RUNS: ${{ github.event.inputs.runs }}
+          INPUT_SEED: ${{ github.event.inputs.seed }}
+        run: |
+          export ORACLE_RUNS="${INPUT_RUNS:-20000}"
+          export ORACLE_SEED="${INPUT_SEED:-$(date +%s)}"
+          echo "ORACLE_SEED=${ORACLE_SEED} ORACLE_RUNS=${ORACLE_RUNS}"
+          pnpm exec vitest run oracle

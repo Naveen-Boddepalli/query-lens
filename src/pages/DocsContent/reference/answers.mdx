@@ -1,0 +1,130 @@
+---
+title: How we know the answers are right
+description: QueryLens's rows are checked against SQLite by a fuzzer on every build — what that proves, what it cannot, and the short list of places the two disagree on purpose.
+---
+
+import { Callout, Contents, DocMeta } from '../../../ui/DocsComponents.tsx';
+
+# How we know the answers are right
+
+<DocMeta items={[
+  { label: 'Audience', value: 'Sceptics, instructors, and anyone deciding whether to trust the rows' },
+  { label: 'Checked by', value: 'the `oracle/` test suites, run by `pnpm test` and by CI' },
+]} />
+
+<Contents items={[
+  { href: '#the-problem-with-true-to-this-engine', label: 'The problem' },
+  { href: '#three-checks', label: 'Three checks' },
+  { href: '#what-it-found', label: 'What it found' },
+  { href: '#what-this-does-not-prove', label: 'What it does not prove' },
+  { href: '#where-querylens-and-sqlite-disagree', label: 'Where the two disagree' },
+  { href: '#run-it-yourself', label: 'Run it yourself' },
+]} />
+
+## The problem with "true to this engine"
+
+Every number QueryLens shows comes from its own engine. That makes the trace *self-consistent* — nothing on
+screen can disagree with the engine — but it says nothing about whether the engine is *right*. A visualiser
+that teaches a wrong `NULL` rule, however faithfully, is worse than no visualiser.
+
+So the **rows** — what a query returns, and what a write leaves behind — are checked against an outside
+authority: [SQLite](https://sqlite.org), through Node's built-in `node:sqlite`. No new dependency, and none of
+it ships to your browser.
+
+## Three checks
+
+**1. Differential: the same statement, two engines.** A generator builds small, deliberately collision-heavy
+tables (few distinct values, many `NULL`s, keys that overlap between two tables) and statements over them —
+`SELECT` with `WHERE`, `ORDER BY` and `LIMIT`; aggregates and `GROUP BY`; `JOIN` and `LEFT JOIN`, chained
+across three tables; `IN (subquery)`, some of them empty on purpose; `INSERT`, `UPDATE`, `DELETE` followed by a
+read of what they left behind. Each statement runs in QueryLens and in SQLite, and the
+answers must match — as a *multiset* unless an `ORDER BY` says otherwise, with a tolerance on floating point.
+Buffer size, page size, replacement policy, join algorithm and aggregate strategy are drawn at random too, so
+every physical strategy is checked, not only the default.
+
+**2. Metamorphic: the engine against itself.** Some things must hold whatever the answer is. Changing the
+buffer size, the policy, the join algorithm or the aggregate strategy — or dropping an index — changes the
+trace and never the rows. The optimised plan must return what evaluating the predicate directly over the raw
+rows returns (the idea behind NoREC). After any writes, an index lookup must find exactly what a scan does.
+The same input must give the same trace, event for event.
+
+**3. Coverage of the checker.** A differential test that never reaches the code under test passes forever and
+proves nothing. So a test samples the generators and *fails the build* if they stop producing every kind of
+statement, firing every optimizer rule, running every join algorithm and both aggregate strategies to a
+non-empty answer, and writes that really change rows.
+
+## What it found
+
+Before it found anything the engine had over a thousand unit tests and a clean build. The first run of the fuzzer found
+two real bugs, both now fixed and pinned by a regression test:
+
+- **`WHERE id > NULL` on an indexed column returned rows.** A comparison with `NULL` is UNKNOWN and matches
+  nothing, but the range rule treated a `NULL` bound as "no bound" and scanned the whole index. `id = NULL` and
+  `BETWEEN NULL AND 3` had the same fault.
+- **`DELETE FROM t WHERE k = k` deleted the rows where `k` is `NULL`.** The optimizer's constant-folding rule
+  treated a column compared with itself as always true. Under three-valued logic `k = k` is UNKNOWN on a `NULL`
+  row, and only TRUE passes a filter — so the folded plan destroyed data the query never selected.
+
+Teaching it outer joins, join chains and subqueries later found two more:
+
+- **`x NOT IN (subquery)` left out the `NULL` rows when the subquery found nothing.** With an empty list there is
+  nothing for a `NULL` to be unknown against, so `NULL NOT IN (∅)` is TRUE; the engine called it UNKNOWN.
+- **A subquery outside a plain `WHERE … AND …` was never run.** Under `IS NULL`, in `HAVING` or in a computed
+  column it was read as an empty list, so `(n IN (SELECT …)) IS NULL` and `HAVING n IN (SELECT …)` answered
+  wrongly.
+
+## What this does not prove
+
+- **Only the shared constructs.** The fuzzer generates statements both engines define the same way. Where they
+  differ on purpose the case is in the ledger below, not silently skipped.
+- **SQLite is not "the SQL standard".** It is a widely used, heavily tested implementation, and it is itself
+  permissive in places (its type affinity is the source of two ledger entries). It is an oracle, not a proof.
+- **Rows, not the model.** Page reads, evictions, frame numbers and cost estimates are QueryLens's own model —
+  labelled as such throughout. Nothing here says a real engine would read the same pages.
+- **Bounded, not exhaustive.** CI runs a seeded, bounded number of cases so a red build is always reproducible.
+  A scheduled job runs many more with a fresh seed and prints it. Absence of a counterexample is evidence, not
+  a guarantee.
+
+## Where QueryLens and SQLite disagree
+
+Each row is an executable entry in `oracle/ledger.ts`. A test runs it on both engines and asserts that each
+still gives the recorded answer *and that the two still differ* — so when a gap is closed the test fails and
+the entry has to be deleted, and this page can never claim a difference that has been fixed. **Design** means
+deliberate; **gap** means a known limit the roadmap intends to close.
+
+| Id | Kind | QueryLens | SQLite |
+|---|---|---|---|
+| `order-by-null-placement` | design | `NULL`s sort last ascending, first descending — PostgreSQL's default | The opposite |
+| `mixed-type-comparison` | gap | A number compared with a string is compared as text, so `n < '50'` puts `100` before `50` | A numeric column converts the string, so the comparison is numeric |
+| `column-types-not-enforced` | gap | A value is stored as written: `'5'` into a number column stays a string | The column's INTEGER affinity converts it to `5` |
+| `sum-avg-over-text` | design | `SUM` and `AVG` of a text column are `NULL` | Text is coerced to `0`, silently |
+| `boolean-values` | design | `TRUE` comes back as `true` | There is no boolean type; `TRUE` is `1` |
+| `text-order-above-the-bmp` | design | Strings compare by UTF-16 code unit, so an emoji sorts before U+FFFD | Bytes of UTF-8 — the emoji sorts after |
+| `like-case-sensitivity` | design | `LIKE` is case-sensitive, as in PostgreSQL | Case-insensitive for ASCII by default (the oracle switches that off to compare `LIKE` itself) |
+| `arithmetic-on-text` | design | `'abc' + 1` is `NULL` — text that is not a number has no arithmetic value | Read as `0`, silently: the result is `1` |
+| `division-of-whole-reals` | gap | A `REAL` holding `3.0` is just `3`, so `r / 2` is whole-number division: `1` | The column really is `REAL`: `1.5` |
+| `identifier-case` | design | Column names are case-sensitive, and the error lists the real ones | Identifiers ignore case |
+
+## Run it yourself
+
+The default run is what CI runs — a fixed seed and 1,000 cases per property:
+
+```bash
+pnpm exec vitest run oracle
+```
+
+Turn it up, or replay a failure, with the environment:
+
+```bash
+ORACLE_RUNS=20000 ORACLE_SEED=42 pnpm exec vitest run oracle
+```
+
+A failure prints the shrunk counterexample, the exact SQL, and both engines' answers. To reproduce it, re-run
+with the same `ORACLE_SEED`.
+
+<Callout>
+  The suites are documentation as much as tests: `oracle/model.ts` is the statement grammar,
+  `oracle/generate.ts` the data shapes, `oracle/ledger.ts` the honest list of differences.
+</Callout>
+
+See also [Supported SQL](/docs/reference/sql) and [Engine limits](/docs/reference/limits).

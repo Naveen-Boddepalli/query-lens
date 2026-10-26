@@ -1,7 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { BUILD_SHA } from '../buildInfo.ts';
+import { clearPerf, setOptIn, summarisePerf } from '../perf/inp.ts';
+import type { PerfSummary } from '../perf/inp.ts';
 import { CopyButton } from '../ui/CopyButton.tsx';
+import { useDocumentTitle } from '../ui/documentTitle.ts';
 import { PageHeader } from '../ui/PageHeader.tsx';
 import { btnPrimary, btnSecondary, card, inputField } from '../ui/primitives.ts';
 import { parseBlocks, parseInline } from '../study/blocks.ts';
@@ -34,6 +37,8 @@ export function StudyPage() {
   const { hash } = useLocation();
   const navigate = useNavigate();
   const [load, setLoad] = useState<Load>({ kind: 'loading' });
+  // Every phase's tab says the same thing; a heading can be an error message, which a tab should not repeat.
+  useDocumentTitle('Study session');
 
   // A research page must not be indexed, whatever robots.txt says.
   useEffect(() => {
@@ -99,7 +104,7 @@ export function StudyPage() {
 
   return (
     <div className={shell}>
-      <PageHeader eyebrow="Study session" title={load.kind === 'error' ? 'This link did not work' : 'Nothing to do here'}>
+      <PageHeader eyebrow="Study session" title={load.kind === 'error' ? 'This link did not work' : 'Nothing to do here'} documentTitle="Study session">
         {load.kind === 'error'
           ? load.message
           : 'This page runs a short research session for people who were sent a personal study link. If you have one, open it again — the link contains everything this page needs.'}
@@ -153,6 +158,8 @@ function Runner({ pack, initial, onCleared }: { pack: StudyPack; initial: Sessio
   const [session, setSession] = useState<Session>(initial);
   const [now, setNow] = useState(() => Date.now());
   const [agreed, setAgreed] = useState(false);
+  // plan.md §25.4 A6 — a separate, optional box; off unless the participant ticks it.
+  const [perfChecked, setPerfChecked] = useState(false);
 
   // One wall-clock tick: the time left is always `start + allowance − now`, so
   // a throttled tab cannot stretch a session, and an expired test finishes here.
@@ -168,9 +175,20 @@ function Runner({ pack, initial, onCleared }: { pack: StudyPack; initial: Sessio
   useEffect(() => { writeSession(session); }, [session]);
 
   // Compression is async, so the result code arrives a beat after `done`.
+  //
+  // plan.md §25.4 A6: the responsiveness timing is read here, once, when the
+  // session has ended — then the measurement is switched off and its samples
+  // deleted. It is held in a ref so a second run of this effect (StrictMode, or
+  // the session changing before the code is ready) reuses the reading instead
+  // of finding the samples already gone.
+  const perfRef = useRef<PerfSummary | null>(null);
   useEffect(() => {
     if (session.phase !== 'done' || session.resultCode !== null) return;
-    const result = toResult(session, BUILD_SHA);
+    if (session.perfOptIn && perfRef.current === null) {
+      perfRef.current = summarisePerf();
+      clearPerf();
+    }
+    const result = toResult(session, BUILD_SHA, perfRef.current);
     if (!result) return;
     let cancelled = false;
     void encodeResult(result).then((code) => {
@@ -180,7 +198,7 @@ function Runner({ pack, initial, onCleared }: { pack: StudyPack; initial: Sessio
   }, [session]);
 
   const header = (title: string, lede?: string) => (
-    <PageHeader eyebrow="Study session" title={title}>{lede}</PageHeader>
+    <PageHeader eyebrow="Study session" title={title} documentTitle="Study session">{lede}</PageHeader>
   );
 
   if (session.phase === 'consent') {
@@ -199,12 +217,34 @@ function Runner({ pack, initial, onCleared }: { pack: StudyPack; initial: Sessio
           />
           I have read this and I agree to take part.
         </label>
+        <div className={`${card} mt-4 text-body text-ink-dim`}>
+          <label className="flex items-start gap-2.5 text-ink">
+            <input
+              type="checkbox"
+              checked={perfChecked}
+              onChange={(e) => { setPerfChecked(e.target.checked); }}
+              className="mt-1 size-4"
+            />
+            Optional: also record how responsive QueryLens feels on this device.
+          </label>
+          <p className="mt-2 text-label">
+            While this session runs, your browser measures how long the app takes to respond to your clicks and taps
+            (a standard measure called INP) — timings only, never your queries, answers or anything on the page. It
+            is kept on this device and added to the result code you send back, with a rough description of the
+            device: its number of processor cores, its screen width, and whether it has a touch screen. This page
+            sends nothing. Leaving it unticked changes nothing else about your session.
+          </p>
+        </div>
         <div className="mt-5">
           <button
             type="button"
             className={btnPrimary}
             disabled={!agreed}
-            onClick={() => { setSession((s) => agree(s, Date.now())); }}
+            onClick={() => {
+              // The flag is what the app's other tabs (the lessons) read to start measuring.
+              if (perfChecked) setOptIn(true);
+              setSession((s) => agree(s, Date.now(), perfChecked));
+            }}
           >
             Begin
           </button>
@@ -309,7 +349,9 @@ function Runner({ pack, initial, onCleared }: { pack: StudyPack; initial: Sessio
       <div className={`${card} mt-6 space-y-3`}>
         <p className="text-body text-ink-dim">
           Copy the code below and send it to the researcher who gave you the link — by message or email. It holds
-          your answers and how long each part took, and nothing else. This page has not sent it anywhere.
+          your answers and how long each part took
+          {session.perfOptIn ? ', plus the responsiveness timing and device description you opted in to' : ''}, and
+          nothing else. This page has not sent it anywhere.
         </p>
         {code === null ? (
           <p className="text-label text-ink-dim">Preparing your code…</p>
@@ -343,6 +385,7 @@ function Runner({ pack, initial, onCleared }: { pack: StudyPack; initial: Sessio
           className={btnSecondary}
           onClick={() => {
             clearSession();
+            clearPerf(); // belt and braces: the flag and samples are already gone once a session ends
             onCleared();
           }}
         >

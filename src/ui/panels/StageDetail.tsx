@@ -7,7 +7,9 @@ import {
   astToText,
   explainToText,
   indexTreeToText,
+  planToLatex,
   planToMermaid,
+  planToRelationalAlgebra,
   planToText,
 } from '../../export/index.ts';
 import { STAGE_META } from '../stageMeta.ts';
@@ -29,6 +31,7 @@ import { BufferPoolPanel } from './BufferPoolPanel.tsx';
 import { ResultPanel } from './ResultPanel.tsx';
 import { PlanTree } from './PlanTree.tsx';
 import { toFlow as planToFlow, TONES as PLAN_TONES } from './planTreeTones.ts';
+import type { PlanNotation } from './planTreeTones.ts';
 
 export interface StageDetailProps {
   stage: Stage;
@@ -90,6 +93,11 @@ export function StageDetail({
   const helpOpen = withHelp && helpFor === stage;
   const helpId = useId();
 
+  // plan.md §25.4 B5: the plan written by its physical operators, or by what it computes in relational algebra.
+  // Remembered across steps within the panel; the colours follow the operator either way.
+  const [notation, setNotation] = useState<PlanNotation>('operators');
+  const isPlanStage = stage === 'plan' || stage === 'optimize';
+
   // Copy-as-Mermaid is offered on the two trees people actually paste (§20.3):
   // the AST and the plan. Not the B+Tree — Mermaid draws its sibling chain badly.
   const mermaid =
@@ -119,7 +127,7 @@ export function StageDetail({
     stage === 'parse' && state.ast
       ? { root: state.ast, tones: AST_TONES }
       : (stage === 'plan' || stage === 'optimize') && state.plan
-        ? { root: planToFlow(state.plan), tones: PLAN_TONES, wide: true }
+        ? { root: planToFlow(state.plan, notation), tones: PLAN_TONES, wide: true }
         : stage === 'index' && state.indexTree
           ? (() => {
               const pathSet = new Set(state.indexPath);
@@ -134,6 +142,10 @@ export function StageDetail({
               };
             })()
           : null;
+
+  // The plan as relational algebra (plan.md §25.4 B5), for a homework answer or a lecture slide.
+  const algebraText = isPlanStage && state.plan ? planToRelationalAlgebra(state.plan) : null;
+  const latexText = isPlanStage && state.plan ? planToLatex(state.plan) : null;
 
   // In-app EXPLAIN (§22.2): estimate next to actual, offered once the query
   // has actually run — `state.operators` is only complete by the result
@@ -185,6 +197,20 @@ export function StageDetail({
               title="Copy tree as text"
             />
           )}
+          {algebraText && (
+            <CopyButton
+              text={algebraText}
+              label="Copy as relational algebra"
+              title="Copy this plan as a relational-algebra expression — π, σ, ⋈, γ — for a proof or a lecture slide"
+            />
+          )}
+          {latexText && (
+            <CopyButton
+              text={latexText}
+              label="Copy as LaTeX"
+              title="Copy the relational-algebra expression as LaTeX math"
+            />
+          )}
           {explainText && (
             <CopyButton
               text={explainText}
@@ -225,6 +251,33 @@ export function StageDetail({
         </div>
       )}
 
+      {isPlanStage && implemented && (
+        <div role="group" aria-label="Plan notation" className="flex flex-wrap items-center gap-2 text-label text-ink-dim">
+          <span>Show as</span>
+          {(
+            [
+              ['operators', 'Operators', 'Filter, SeqScan, IndexScan — how the engine runs it'],
+              ['algebra', 'Relational algebra', 'σ π ⋈ γ — what the plan computes'],
+            ] as const
+          ).map(([value, text, hint]) => (
+            <button
+              key={value}
+              type="button"
+              aria-pressed={notation === value}
+              title={hint}
+              onClick={() => { setNotation(value); }}
+              className={
+                notation === value
+                  ? 'rounded-full border border-accent bg-accent-soft px-2.5 py-0.5 text-ink shadow-e1'
+                  : 'rounded-full border border-edge px-2.5 py-0.5 transition hover:border-ink-dim/50 hover:text-ink'
+              }
+            >
+              {text}
+            </button>
+          ))}
+        </div>
+      )}
+
       <div ref={panelRef} className="min-h-0 min-w-0 flex-1">
         {!implemented && <NotBuiltYet stage={stage} />}
 
@@ -233,7 +286,7 @@ export function StageDetail({
         )}
 
         {implemented && stage === 'plan' && (
-          <PlanTree root={state.plan} empty="No plan yet — the planner has not run." />
+          <PlanTree root={state.plan} empty="No plan yet — the planner has not run." notation={notation} />
         )}
 
         {implemented && stage === 'optimize' &&
@@ -241,7 +294,7 @@ export function StageDetail({
             <div className="grid h-full grid-rows-[auto_1fr] gap-2 sm:grid-cols-2 sm:grid-rows-1">
               <div className="grid h-full min-h-0 grid-rows-[auto_1fr]">
                 <h3 className="mb-1 text-label text-ink-dim">before</h3>
-                <PlanTree root={state.planBefore} empty="—" />
+                <PlanTree root={state.planBefore} empty="—" notation={notation} />
               </div>
               <div className="grid h-full min-h-0 grid-rows-[auto_1fr] border-edge sm:border-l sm:pl-3">
                 <h3 className="mb-1 text-label text-ink-dim">
@@ -250,7 +303,7 @@ export function StageDetail({
                     {state.appliedRules[state.appliedRules.length - 1]}
                   </span>
                 </h3>
-                <PlanTree root={state.plan} empty="—" />
+                <PlanTree root={state.plan} empty="—" notation={notation} />
               </div>
             </div>
           ) : (

@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { planExternalSort, shuffledRange, SORT_LIMITS } from '../../ui/externalSort.ts';
 import type { SortMerge, SortPass, SortPlan } from '../../ui/externalSort.ts';
 import { PageHeader } from '../../ui/PageHeader.tsx';
 import { btnSecondary, inputField, panelSurface } from '../../ui/primitives.ts';
+import { useAddressBarQuery } from '../../ui/addressBar.ts';
 
 /**
  * The sorting standalone (plan.md §22.3 `/tools/sort`). §4's engine has no
@@ -62,18 +63,15 @@ export function SortToolPage() {
     [n, seed, pageSize, memPages],
   );
 
-  useEffect(() => {
-    const t = window.setTimeout(() => {
-      const p = new URLSearchParams();
-      p.set('n', String(n));
-      p.set('page', String(pageSize));
-      p.set('mem', String(memPages));
-      p.set('seed', String(seed));
-      const next = `${location.pathname}?${p.toString()}`;
-      if (next !== `${location.pathname}${location.search}`) history.replaceState(null, '', next);
-    }, 250);
-    return () => { window.clearTimeout(t); };
+  const shareQuery = useMemo(() => {
+    const p = new URLSearchParams();
+    p.set('n', String(n));
+    p.set('page', String(pageSize));
+    p.set('mem', String(memPages));
+    p.set('seed', String(seed));
+    return p.toString();
   }, [n, pageSize, memPages, seed]);
+  useAddressBarQuery(shareQuery);
 
   // The merge that produced the selected run, if it is a merge output.
   const selectedMerge = useMemo<SortMerge | null>(() => {

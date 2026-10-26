@@ -1,5 +1,6 @@
 import { BUILD_SHA, BUILD_TIME } from '../buildInfo.ts';
 import { DATASETS, DEFAULT_DATASET, isDatasetId } from '../engine/index.ts';
+import { isReplacementPolicyName, REPLACEMENT_POLICY_NAMES } from '../engine/types.ts';
 import type { DatasetId, ReplacementPolicyName, Row, SqlValue } from '../engine/index.ts';
 
 /**
@@ -102,8 +103,8 @@ export function parseTraceFile(text: string): TraceParseResult {
   if (typeof o.sql !== 'string' || o.sql.length === 0 || o.sql.length > MAX_SQL) {
     return { ok: false, error: 'The "sql" field is missing or too long.' };
   }
-  if (o.policy !== 'lru' && o.policy !== 'clock') {
-    return { ok: false, error: 'The "policy" field must be "lru" or "clock".' };
+  if (!isReplacementPolicyName(o.policy)) {
+    return { ok: false, error: `The "policy" field must be one of ${REPLACEMENT_POLICY_NAMES.map((n) => `"${n}"`).join(', ')}.` };
   }
   if (typeof o.predictOn !== 'boolean') {
     return { ok: false, error: 'The "predictOn" field must be true or false.' };

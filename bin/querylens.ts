@@ -17,6 +17,7 @@
  * one — this file is the whole implementation.
  */
 
+import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import {
   runQuery,
@@ -228,7 +229,18 @@ export function main(
   return result.error ? 1 : 0;
 }
 
+/** True when this module is the program's entry point. npm runs a bin through a symlink, so the path is resolved first. */
+function invokedDirectly(moduleUrl: string): boolean {
+  const entry = process.argv[1];
+  if (entry === undefined) return false;
+  try {
+    return realpathSync(entry) === fileURLToPath(moduleUrl);
+  } catch {
+    return false;
+  }
+}
+
 // Only run when invoked directly, not when imported by a test.
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+if (invokedDirectly(import.meta.url)) {
   process.exit(main(process.argv.slice(2)));
 }

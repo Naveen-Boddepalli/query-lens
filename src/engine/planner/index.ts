@@ -2,6 +2,8 @@ export {
   buildAggregatePlan,
   buildDeletePlan,
   buildJoinPlan,
+  distinctNodeFor,
+  effectiveJoinAlgorithm,
   buildPlan,
   buildUpdatePlan,
   isAggregateQuery,
@@ -20,6 +22,16 @@ export type { CostEstimate, PlanCost } from './cost.ts';
 export { emitPlanEvents } from './emit.ts';
 export { emitDeletePlanEvents } from './emitDelete.ts';
 export { emitUpdatePlanEvents } from './emitUpdate.ts';
+export {
+  costOfOrder,
+  isReorderableChain,
+  joinGraphFromAst,
+  rebuildJoinsForOrder,
+  reorderJoinsIfCheaper,
+  runJoinOrderDP,
+  writtenOrderFromAst,
+} from './joinOrder.ts';
+export type { JoinOrderCandidate, JoinOrderEdge, JoinOrderNode, JoinOrderResult, SubsetPlan } from './joinOrder.ts';
 export { optimize, OPTIMIZER_RULES, scanPredicate, WRITE_PATH_RULES } from './optimize.ts';
 export type { Rewrite } from './optimize.ts';
 export {
@@ -28,10 +40,16 @@ export {
   conjuncts,
   equalityOn,
   exprToSql,
+  findIndexNestedLoopJoins,
   findSort,
-  findSortMergeJoin,
+  findSortAggregate,
+  findSortDistinct,
+  findSortMergeJoins,
   formatRangeBounds,
-  needsSortSpill,
+  indexLabel,
+  joinsIn,
+  lookupKeysOf,
+  lookupText,
   rangeOn,
   toPlanDisplay,
 } from './plan.ts';

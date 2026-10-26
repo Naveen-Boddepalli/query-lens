@@ -3,10 +3,10 @@ title: Supported SQL
 description: The exact SQL subset QueryLens's parser accepts, and what it says when you write something outside it.
 ---
 
-QueryLens implements four statements — `SELECT`, `DELETE`, `INSERT` and `UPDATE` — over one table
-at a time (two, for a `JOIN`). This page is the complete subset: if it isn't listed here, the
-parser does not accept it yet, and it will tell you so by name rather than failing with a generic
-syntax error.
+QueryLens implements four statements — `SELECT`, `DELETE`, `INSERT` and `UPDATE` — plus `EXPLAIN` for a `SELECT`
+and `ANALYZE` for a table, over one table at a time (more, for a chain of `JOIN`s). This page is the complete
+subset: if it isn't listed here, the parser does not accept it yet, and it will tell you so by name rather than
+failing with a generic syntax error.
 
 ## SELECT
 
@@ -14,31 +14,238 @@ syntax error.
 SELECT * FROM users;
 SELECT id, name FROM users WHERE age > 30 AND name = 'Ada';
 SELECT * FROM users WHERE id BETWEEN 10 AND 20;
+SELECT * FROM users WHERE (age < 30 OR age > 60) AND name LIKE 'a%' AND email IS NOT NULL;
+SELECT * FROM users WHERE id IN (1, 5, 9) OR NOT age >= 18;
+SELECT id, age * 12 AS months, age + 1 FROM users WHERE age % 2 = 0;
 SELECT authors.name, posts.title FROM authors JOIN posts ON authors.id = posts.authorId;
+SELECT authors.name, posts.title FROM authors LEFT JOIN posts ON authors.id = posts.authorId;
+SELECT authors.name, posts.title, comments.body FROM authors
+  JOIN posts ON authors.id = posts.authorId
+  JOIN comments ON posts.id = comments.postId;
 SELECT status, COUNT(*), AVG(attempts) FROM logins GROUP BY status;
+SELECT DISTINCT status FROM logins ORDER BY status;
 SELECT * FROM users ORDER BY age DESC LIMIT 5;
+SELECT * FROM users ORDER BY id LIMIT 10 OFFSET 20;
 ```
 
-- **Column list**: `*`, a comma-separated list of columns, or aggregate calls (below). Not both at
-  once — a plain column and an aggregate can only sit together when every plain column is also
-  named in `GROUP BY`.
-- **`FROM`**: exactly one table, plus an optional single `JOIN`.
-- **`JOIN`**: a bare, implicit inner join — `JOIN table ON a.col = b.col`, always an equality
-  between one qualified column on each side. No `LEFT`/`RIGHT`/`FULL`/`CROSS`/`USING`, and no more
-  than one `JOIN` per query. Every column reference is qualified (`authors.id`, not `id`) once a
-  query has a `JOIN` — there is no ambiguity resolution. A `JOIN` cannot combine with `GROUP BY`,
-  `ORDER BY`, or an aggregate in the SELECT list.
-- **`WHERE`**: any number of comparisons joined with `AND` (no `OR`, no `NOT`).
-  - Operators: `=`, `<`, `>`, `<=`, `>=`.
-  - `BETWEEN lo AND hi` — sugar for `col >= lo AND col <= hi`.
-  - Literals: numbers, single-quoted strings, `TRUE`/`FALSE`, `NULL`.
-- **`GROUP BY`**: one or more columns. Aggregates: `COUNT(*)`, `COUNT`/`SUM`/`AVG`/`MIN`/`MAX` over
-  a column. Every plain column in the SELECT list must be grouped or wrapped in an aggregate.
-  Mutually exclusive with `ORDER BY`.
-- **`ORDER BY`**: exactly one column, `ASC` (default) or `DESC`.
-- **`LIMIT`**: a non-negative integer, always the outermost clause.
+- **Column list**: `*` on its own; or a comma-separated list of columns, [computed columns](#expressions),
+  and aggregate calls (below). `*` cannot be listed alongside anything else (`SELECT *, age * 2` is not
+  accepted). A plain column and an aggregate can only sit together when every plain column is also named
+  in `GROUP BY`, and a computed column cannot be combined with `GROUP BY` or an aggregate yet.
+- **`FROM`**: exactly one table, plus zero or more `JOIN`s, chained left-deep (plan.md §25.4 C3 slice b):
+  `FROM a JOIN b ON … JOIN c ON …` joins `c` to whatever `a ⋈ b` already produced, not to `a` and `b`
+  independently.
+- **`JOIN`**: `[INNER | LEFT [OUTER]] JOIN table ON a.col = b.col`, always an equality between one
+  qualified column on each side. A bare `JOIN` and `INNER JOIN` are the same thing: a row from either
+  side with no match on the other simply does not appear. `LEFT [OUTER] JOIN` (plan.md §25.4 C3) keeps
+  every row on the other side of *this* join, even one with no match — its columns from the table this
+  `JOIN` introduces come back `NULL` instead; a chain may mix `LEFT` and inner freely, step by step. No
+  `RIGHT`/`FULL`/`CROSS`/`USING` (write a `RIGHT JOIN` the other way round, as a `LEFT JOIN` with the two
+  tables swapped), and no aliasing — so the same table can never be named twice in one query's chain, and
+  each `JOIN`'s `ON` must name the table it introduces on one side and some table already in the query
+  (`FROM`'s, or an earlier `JOIN`'s — not necessarily the one written just before it) on the other. Every
+  column reference is qualified (`authors.id`, not `id`) once a query has any `JOIN` — there is no
+  ambiguity resolution. `ORDER BY` sorts the joined rows, by a qualified column (`ORDER BY posts.id DESC`), and
+  `GROUP BY`, `HAVING` and aggregates group them: `SELECT authors.name, COUNT(posts.id) FROM authors LEFT JOIN
+  posts ON authors.id = posts.authorId GROUP BY authors.name` counts each author's posts, zero for one with
+  none — `COUNT(*)` would say one, counting the padded row. A `WHERE` on the table a `LEFT JOIN` introduces is never pushed below it — the classic pitfall
+  that would quietly turn it back into an inner join — so `… LEFT JOIN posts ON … WHERE posts.title IS
+  NULL` correctly finds only the rows a `LEFT JOIN` NULL-padded, not zero rows; this pushdown itself is
+  only reached for a query's *first* `JOIN` so far — a chain's `WHERE` clause stays a residual filter
+  above the whole thing, correct either way, just not narrowed into a scan yet.
+- **`WHERE`**: a predicate built from comparisons and tests, combined with `AND`, `OR` and `NOT`
+  and grouped with parentheses — see [Predicates](#predicates) below.
+- **`DISTINCT`**: `SELECT DISTINCT a, b …` returns each distinct combination once — see
+  [DISTINCT](#distinct) below.
+- **`GROUP BY`**: one or more columns — qualified in a query with a `JOIN`. Aggregates: `COUNT(*)`,
+  `COUNT`/`SUM`/`AVG`/`MIN`/`MAX` over a column. Every plain column in the SELECT list must be grouped or
+  wrapped in an aggregate — and with `HAVING` but no `GROUP BY` the whole table is one group, so the list can
+  only hold aggregates.
+- **`HAVING`**: a predicate over the *groups*, after `GROUP BY` — see [HAVING](#having) below.
+- **`ORDER BY`**: exactly one key, `ASC` (default) or `DESC` — qualified (`posts.title`) in a query with a `JOIN`,
+  like every other column there; descending puts a `LEFT JOIN`'s NULL padding first. In a query that groups it sorts the *groups*, so
+  the key is a grouped column or an aggregate — selected or not: `SELECT account FROM transactions GROUP BY
+  account ORDER BY SUM(amount) DESC LIMIT 5` is the five biggest accounts. The Sort runs after `HAVING`.
+- **`LIMIT`**: a non-negative integer, always the outermost clause, optionally followed by
+  **`OFFSET m`** to skip the first `m` rows of the (ordered) result: `LIMIT 10 OFFSET 20` is page three.
+  An `OFFSET` needs its `LIMIT`. It is *not* free — the skipped rows are still produced by everything
+  beneath and then thrown away, so paging deeper reads more (the trace says so).
 - Keywords are case-insensitive, `--` starts a line comment, `/* */` a block comment, and a
   trailing `;` is optional.
+
+## Predicates
+
+A `WHERE` clause is a tree. From loosest to tightest binding: `OR`, then `AND`, then `NOT`, then one
+*test* on an operand — so `a OR b AND c` means `a OR (b AND c)`, and parentheses override it.
+
+| Test | Meaning |
+|---|---|
+| `x = y`, `x <> y` (or `x != y`), `x < y`, `x > y`, `x <= y`, `x >= y` | Comparison. A comparison cannot be chained (`a < b < c` is an error) — write `a < b AND b < c`. |
+| `x BETWEEN lo AND hi`, `x NOT BETWEEN lo AND hi` | Sugar for `x >= lo AND x <= hi`, and `NOT (…)` of that. |
+| `x IS NULL`, `x IS NOT NULL` | Whether the value is NULL. The only test that is never UNKNOWN. |
+| `x IN (a, b, …)`, `x NOT IN (a, b, …)` | Equal to any listed value. |
+| `x IN (SELECT col FROM t [WHERE …])`, `x NOT IN (…)` | Equal to any value that query returns (plan.md §25.4 C3, closing C3). |
+| `x LIKE pattern`, `x NOT LIKE pattern` | `%` matches any run of characters, `_` exactly one. **Case-sensitive**, no escape character. |
+
+An operand is a column, a literal (number, single-quoted string, `TRUE`/`FALSE`, `NULL`), or a
+parenthesised predicate.
+
+**`IN`'s subquery form** is the one place a `SELECT` may appear inside another query — nowhere else does
+(`x = (SELECT …)` and `EXISTS (…)` both stay unsupported). It is deliberately small: exactly one plain
+column, and no `JOIN`/`GROUP BY`/`HAVING`/`ORDER BY`/`LIMIT`/`DISTINCT`/aggregate — none of those could
+change *which* values end up in the set `IN` tests membership against. It always runs exactly once,
+before the outer query is planned, and is always **uncorrelated**: its own `WHERE`, if it has one, can
+only name a column on its own `FROM` table — there is no shared scope with the outer query for it to
+read from, the same "no table name needed" rule a bare single-table query already enforces.
+
+```sql
+SELECT * FROM posts WHERE authorId IN (SELECT id FROM authors WHERE name = 'ada');
+SELECT * FROM posts WHERE authorId NOT IN (SELECT id FROM authors);
+DELETE FROM posts WHERE authorId IN (SELECT id FROM authors WHERE name = 'ada');
+```
+
+**Three-valued logic.** Comparing anything with `NULL` is neither true nor false but **UNKNOWN**, and
+only TRUE passes a `WHERE`. So `x = NULL` matches nothing (write `x IS NULL`), and `NOT (age > 40)`
+does *not* return the rows `age > 40` left out: a row whose `age` is NULL is in neither. The rules:
+
+| | AND | OR | NOT |
+|---|---|---|---|
+| TRUE, TRUE | TRUE | TRUE | — |
+| TRUE, UNKNOWN | UNKNOWN | **TRUE** | — |
+| FALSE, UNKNOWN | **FALSE** | UNKNOWN | — |
+| UNKNOWN, UNKNOWN | UNKNOWN | UNKNOWN | — |
+| (single operand) | — | — | UNKNOWN stays UNKNOWN |
+
+The one that catches everybody: **`x NOT IN (1, 2, NULL)` is never TRUE.** `x <> NULL` is UNKNOWN for
+every `x`, so a NULL anywhere in the list turns every miss into UNKNOWN — the query returns nothing.
+The same trap applies exactly as sharply when the list comes from a subquery: `x NOT IN (SELECT …)` is
+never TRUE for any row once that subquery's result includes even one NULL, whether or not `x` itself
+ever is one. Run it in the [Playground](/playground) on a table with a NULL in it (**Edit data** to add
+one) and open the parse stage: the WHERE tree shows every node of the predicate.
+
+`OR`, `NOT`, `IN`, `LIKE` and `<>` never become an index lookup — only a top-level `AND`ed equality or
+range on an indexed column can. Even then it is taken only when the optimizer's estimate says it reads
+fewer pages than the scan it would replace: on a column where most rows match, the plan keeps the scan and
+says why. `WHERE id = 5 AND (age < 30 OR age IS NULL)` still uses the index for `id = 5` and rechecks the
+parenthesised part on the one row it finds.
+
+## HAVING
+
+`WHERE` filters **rows before** they are grouped; `HAVING` filters **groups after** their aggregates are
+computed — which is why only `HAVING` may mention an aggregate.
+
+```sql
+SELECT status, COUNT(*) FROM logins GROUP BY status HAVING COUNT(*) > 10;
+SELECT dept FROM emp GROUP BY dept HAVING SUM(pay) / COUNT(*) >= 90 AND dept <> 'hr';
+SELECT COUNT(*) FROM emp HAVING COUNT(*) > 3;
+```
+
+- A `HAVING` predicate is built exactly like a [`WHERE`](#predicates) one (`AND`, `OR`, `NOT`, `IN`, `IS NULL`, arithmetic…),
+  and its operands are **aggregates** (`COUNT(*)`, `SUM(col)`, …) and **grouped columns** — a plain column
+  that is neither is as undefined here as in the `SELECT` list, and the parser says so.
+- The aggregates need not be in the `SELECT` list: `SELECT dept … HAVING COUNT(*) > 2` computes a count nobody
+  selected.
+- It needs groups: a `GROUP BY`, or an aggregate that collapses the whole table into one group (as in the
+  last example, which returns one row or none).
+- An aggregate that is NULL for a group makes the comparison UNKNOWN, and the group is dropped — under the
+  predicate and under its `NOT`.
+- An aggregate in a `WHERE` is an error that points here. `COUNT(DISTINCT x)` is not supported yet.
+- In the plan it is its own `Having` node above the aggregate. The optimizer still moves your `WHERE`
+  *below* the aggregate (an index lookup, a pushdown) and never touches the `HAVING`.
+
+## DISTINCT
+
+`SELECT DISTINCT` drops repeated rows from the result. Two rows are the same when every column is
+equal, and **NULLs count as equal** (as in `GROUP BY`): `SELECT DISTINCT a` returns one NULL however
+many there are.
+
+```sql
+SELECT DISTINCT status FROM logins;
+SELECT DISTINCT customer, status FROM orders ORDER BY customer LIMIT 5;
+```
+
+- It applies after `WHERE`, `GROUP BY`/`HAVING` and the select list, and before `LIMIT`/`OFFSET` — so
+  `LIMIT 5` returns five *distinct* rows.
+- With `ORDER BY`, the sort column must be **in the select list** (PostgreSQL's rule): each distinct row
+  stands for many source rows, so a column that isn't selected has no one value to sort it by.
+- **Two strategies, one setting.** By default a `HashDistinct` remembers the rows it has passed in a hash set
+  and drops repeats — it *streams* (the first new row leaves immediately, so a `LIMIT` above it can stop the
+  scan early) and does no I/O of its own. A `SortDistinct` sorts everything first, spilling through the buffer
+  pool exactly as `ORDER BY` does, then keeps one row of each run — it cannot produce a row until it has seen
+  them all. [Compare](/compare)'s aggregate mode forces each side on the same query.
+- Values that are equal under `=` are one value: `1`, `'1'` and `TRUE` collapse together. (SQLite keeps `1`
+  and `'1'` apart — a column that mixes types is the corner where they differ.)
+- Not yet: `COUNT(DISTINCT x)` — `DISTINCT` inside an aggregate.
+
+## Expressions
+
+An **operand** — in a comparison, a `SELECT` item, an `UPDATE … SET` value — can be arithmetic:
+`+`, `-`, `*`, `/`, `%`, unary minus, and parentheses. `*`, `/` and `%` bind tighter than `+` and `-`,
+and both groups associate left to right, so `10 - 4 - 3` is 3.
+
+```sql
+SELECT id, price * qty AS total, price / qty FROM items WHERE price * qty > 100;
+UPDATE items SET qty = qty + 1, price = -price WHERE id = 5;
+```
+
+- **`AS name`** names a computed column. Without it the column is called by the expression's own text,
+  normalised (`SELECT price*qty` is a column named `price * qty`). A plain column can be renamed the
+  same way: `SELECT note AS label`. `AS` is not accepted on an aggregate yet.
+- **NULL in, NULL out.** Any arithmetic with a NULL is NULL — so `price * qty > 10` is UNKNOWN, and the
+  row is left out, wherever `qty` is NULL.
+- **Division.** `/` between two whole numbers is **integer division**, truncating toward zero:
+  `7 / 2` is 3 and `-7 / 2` is −3 (as in SQLite and PostgreSQL). If either side has a fraction it
+  divides exactly. **`x / 0` and `x % 0` are NULL** — SQLite's rule; PostgreSQL raises an error.
+  `%` takes the sign of the left side.
+- **Text.** Text that is a number (`'5'`) is used as that number; text that is not (`'abc'`) makes the
+  result NULL. `TRUE` is 1 and `FALSE` is 0.
+- **Numbers carry no integer/real distinction here.** A column of decimals that happens to hold `3.0`
+  holds the number 3, so `3.0 / 2` is integer division — see
+  [`division-of-whole-reals`](/docs/reference/answers) in the answers ledger.
+- **`UPDATE … SET`** may read columns. Every value is worked out from the row *as it was*, so
+  `SET a = b, b = a` swaps the two.
+- **A function of a column cannot use its index.** `WHERE id = 5` is an index lookup; `WHERE id + 1 = 6`
+  reads the whole table, because the index is ordered by `id`, not by `id + 1`. Arithmetic on
+  *constants* is different: the optimizer works `id = 2 + 3` out once (`constant-folding`), and the
+  index can then answer `id = 5`.
+- **Not yet:** arithmetic on an aggregate (`COUNT(*) + 1`), a computed column beside `GROUP BY`, and
+  arithmetic in `ORDER BY` or `GROUP BY`.
+
+## EXPLAIN
+
+```sql
+EXPLAIN SELECT * FROM users WHERE id = 5;
+EXPLAIN ANALYZE SELECT age, COUNT(*) FROM users GROUP BY age HAVING COUNT(*) > 1;
+```
+
+`EXPLAIN` shows how a `SELECT` will run, as a result — one `QUERY PLAN` row per operator, each with the
+cost model's **estimate** (`est ~37 rows`):
+
+- **`EXPLAIN`** plans and optimizes but **executes nothing** — the trace stops before the executor, and no page
+  is read. The plan shown is exactly the one that would run: after the optimizer's rewrites.
+- **`EXPLAIN ANALYZE`** runs the query for real (the trace you step through *is* that run) and puts the
+  executor's **actual** row count beside every estimate (`est ~37 rows; actual 40 rows`), then the result size and
+  what the buffer pool did (hits, misses, evictions). It reports **no timings** — QueryLens makes no claim
+  about latency — where a real engine would print milliseconds. When the two disagree by 2× or more it also
+  names the **q-error** (`est ~0 rows; actual 10 rows; q-error 11.0×`) — see
+  [Statistics](/docs/reference/limits#statistics) for a dataset built to produce one.
+- **`SELECT` only.** `EXPLAIN ANALYZE DELETE …` would perform the delete, so writes are refused with that
+  reason.
+
+The Planner panel's **Copy as EXPLAIN** button gives the same text for a query you have already run.
+
+## ANALYZE
+
+```sql
+ANALYZE users;
+```
+
+A real scan of the named table, producing its statistics — distinct count, null fraction,
+most-common values, a histogram, correlation — one column per result row, in the same Result
+panel any other query's answer would be. Every later query against that table then reads them,
+in place of scanning the live rows itself, until `ANALYZE` runs again — see
+[Statistics](/docs/reference/limits#statistics) for what they hold and how the cost model uses
+them. No `WHERE`, no `JOIN`: `ANALYZE` names exactly one table.
 
 ## DELETE, INSERT, UPDATE
 
@@ -46,16 +253,19 @@ SELECT * FROM users ORDER BY age DESC LIMIT 5;
 DELETE FROM users WHERE id = 5;
 INSERT INTO users (id, name, email, age) VALUES (49, 'Ada', 'ada@example.com', 30);
 INSERT INTO users VALUES (50, 'Alan', 'alan@example.com', 41);
-UPDATE users SET name = 'Renamed', age = 31 WHERE id = 5;
+UPDATE users SET name = 'Renamed', age = age + 1 WHERE id = 5;
 ```
 
 - **`DELETE`**/**`UPDATE`** take the same `WHERE` grammar as `SELECT`, found the same way — an
-  equality on an indexed column becomes an `IndexScan`, everything else a full scan.
+  equality on an indexed column becomes an `IndexScan`, a range an `IndexRangeScan`, each only when its
+  estimated cost beats the scan; everything else a full scan. A `UNIQUE` index also refuses an `INSERT` or
+  `UPDATE` that would repeat a key (see [Engine limits](/docs/reference/limits)).
 - **`INSERT`** takes an explicit column list (any order) or none at all, meaning every column in
-  table order; either way there is exactly one row per statement and every value is a literal — no
-  expressions, no `SELECT` as a source.
-- **`UPDATE`**'s `SET` values are literals only, same as `INSERT`'s `VALUES` — no reading one
-  column to set another.
+  table order; either way there is exactly one row per statement. Each value is a literal, or
+  arithmetic on literals (`-5`, `2 * 3`), which is worked out before the row is written — no column
+  references and no `SELECT` as a source.
+- **`UPDATE`**'s `SET` values are [expressions](#expressions): they may read the row's own columns
+  (`SET age = age + 1`).
 - All three persist for real: a write's changed rows become the table's new contents for every
   query that follows, in the Playground and in a challenge.
 
@@ -66,28 +276,29 @@ with a generic syntax error:
 
 | You write | The parser says |
 |---|---|
-| `INNER JOIN` | *v0 supports a bare JOIN only — write JOIN without INNER.* |
-| `LEFT`/`RIGHT`/`FULL` JOIN | *Outer joins are not in the v0 subset — only an inner JOIN.* |
+| `RIGHT`/`FULL` JOIN | *Not in the v0 subset — write a RIGHT JOIN the other way round, as a LEFT JOIN with the two tables swapped; FULL isn't an inner or a LEFT JOIN either.* |
 | `CROSS JOIN` | *CROSS JOIN is not in the v0 subset — JOIN ... ON needs an equality.* |
 | `JOIN ... USING (...)` | *USING is not in the v0 subset — write the equality out.* |
-| A second `JOIN` | *Only one JOIN per query.* |
-| `HAVING` | *HAVING is not in the v0 subset — filter before GROUP BY with WHERE instead.* |
-| `OFFSET` | *OFFSET is not in the v0 subset — LIMIT on its own is.* |
-| `DISTINCT` | *DISTINCT is not in the v0 subset.* |
+| Joining the same table twice | *Already in this query — joining it again needs an alias, which v0 does not have.* |
+| A `JOIN`'s `ON` naming a table not yet in the query | *There is no table called that yet in this query — it has to be named in FROM or an earlier JOIN first.* |
+| `SELECT a, DISTINCT b`, `COUNT(DISTINCT x)` | *DISTINCT applies to the whole SELECT list — write `SELECT DISTINCT a, b …`. Inside an aggregate it is not supported yet.* |
 | `UNION` | *UNION is not in the v0 subset.* |
-| `OR` | *v0 supports AND only. Combine predicates with AND.* |
-| `NOT` | *v0 supports =, &lt;, &gt;, &lt;=, &gt;= and BETWEEN, combined with AND.* |
-| `<>`, `!=` | *Not supported yet — v0 supports =, &lt;, &gt;, &lt;=, &gt;= and BETWEEN.* |
+| A subquery anywhere but `IN`, e.g. `x = (SELECT …)` | *A subquery is not supported here — write the value out, join the two tables, or use IN (SELECT …).* |
+| `BEGIN` / `COMMIT` / `ROLLBACK` | *`BEGIN`, `COMMIT` and `ROLLBACK` need two sessions to mean anything, and the Playground runs one statement at a time.* They run in [Transaction schedules](/tools/schedule). |
 | `CREATE` / `DROP` | *QueryLens only runs SELECT, DELETE, INSERT and UPDATE. Edit the seed data to change the table.* |
 
 ## The seed tables
 
-Every query runs against one table at a time (two for a `JOIN`). The default is `users`, with
-columns `id`, `name`, `email`, `age`; the **Data** chips above the editor also load `orders` (120
-rows — a deeper index and a heavier scan) and `logins` (a lopsided `status` column, for
-selectivity). Rows are editable from the app (**Edit data**), and both the choice of dataset and
+Every query runs against one table at a time (more, for a chain of `JOIN`s). The default is `users`, with
+columns `id`, `name`, `email`, `age` (48 rows); the **Data** chips above the editor also load `orders`
+(120 rows — a deeper index and a heavier scan), `logins` (a lopsided `status` column, for selectivity),
+`employees` (250 rows whose `department` and `office` are perfectly correlated, so the optimizer's estimate
+for both together is badly off), `transactions` (3,000 rows — the tallest B+Tree of the presets, and a
+scan that evicts hard) and `customers` (20 rows with NULLs in `city`, `referrer` and `discount` — the one
+preset where three-valued logic shows; the [NULL lesson](/learn/nulls) walks it). Rows are editable from the app (**Edit data**), and both the choice of dataset and
 any edits travel with a shareable link — see [URL parameters](/docs/reference/url-parameters).
 
 The **Custom** data chip lets you build your own multi-table database in the browser — add a
-table, declare one or more indexed columns, edit its rows, and `JOIN` across tables you built
-yourself. It's kept in this browser only (`localStorage`), outside the shareable-link scheme.
+table, declare indexes (single-column or composite, optionally `UNIQUE`), edit its rows, and `JOIN`
+across tables you built yourself. It's kept in this browser only (IndexedDB), outside the
+shareable-link scheme.

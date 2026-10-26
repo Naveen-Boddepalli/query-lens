@@ -87,6 +87,16 @@ describe('round-trip', () => {
   });
 });
 
+describe('every policy', () => {
+  it.each(['lru', 'clock', 'fifo', 'second-chance', 'optimal', 'midpoint', 'lru-k', 'two-q'] as const)(
+    'a trace run under %s loads back with it',
+    (policy) => {
+      const parsed = parseTraceFile(serializeTraceFile({ ...BASE, policy }));
+      expect(parsed.ok && parsed.value.policy).toBe(policy);
+    },
+  );
+});
+
 describe('a hand-edited or hostile file', () => {
   const cases: { name: string; mutate: (o: Record<string, unknown>) => void }[] = [
     { name: 'not our kind', mutate: (o) => (o.kind = 'something/else') },

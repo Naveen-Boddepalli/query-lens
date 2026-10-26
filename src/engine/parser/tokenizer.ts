@@ -32,10 +32,10 @@ export interface Token {
  * parser say "GROUP BY is not supported yet" instead of "unexpected identifier".
  */
 export const KEYWORDS = new Set([
-  'SELECT', 'FROM', 'WHERE', 'AND', 'OR', 'NOT', 'AS', 'NULL', 'TRUE', 'FALSE', 'BETWEEN',
+  'SELECT', 'FROM', 'WHERE', 'AND', 'OR', 'NOT', 'AS', 'NULL', 'TRUE', 'FALSE', 'BETWEEN', 'IN', 'IS', 'LIKE',
   'JOIN', 'INNER', 'LEFT', 'RIGHT', 'OUTER', 'FULL', 'CROSS', 'ON', 'USING',
   'GROUP', 'ORDER', 'BY', 'ASC', 'DESC', 'HAVING', 'LIMIT', 'OFFSET', 'DISTINCT', 'UNION',
-  'INSERT', 'UPDATE', 'DELETE', 'INTO', 'VALUES', 'SET', 'CREATE', 'DROP',
+  'INSERT', 'UPDATE', 'DELETE', 'INTO', 'VALUES', 'SET', 'CREATE', 'DROP', 'EXPLAIN', 'ANALYZE',
 ]);
 
 export class TokenizeError extends Error {
@@ -70,6 +70,12 @@ const SINGLE: Record<string, TokenType> = {
   '=': 'operator',
   '<': 'operator',
   '>': 'operator',
+  // Arithmetic (plan.md §25.4 B1b). `*` is `star` above: the parser reads it as
+  // multiplication wherever an operand has just been parsed, and as "every column" elsewhere.
+  '+': 'operator',
+  '-': 'operator',
+  '/': 'operator',
+  '%': 'operator',
 };
 
 export function tokenize(sql: string): Token[] {

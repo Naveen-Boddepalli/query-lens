@@ -5,6 +5,15 @@
  */
 
 import type { Row, Table } from '../types.ts';
+import { compareValues } from '../value.ts';
+
+function compareRows(a: Row, b: Row, columns: readonly string[]): number {
+  for (const column of columns) {
+    const cmp = compareValues(a[column] ?? null, b[column] ?? null);
+    if (cmp !== 0) return cmp;
+  }
+  return 0;
+}
 
 export interface Page {
   pageId: number;
@@ -23,12 +32,17 @@ export function buildHeap(table: Table, rowsPerPage: number, firstPageId = 0): H
   const pages: Page[] = [];
   const firstRowIndex: number[] = [];
 
-  for (let i = 0; i < table.rows.length; i += rowsPerPage) {
+  // A CLUSTERED (index-organized) table (plan.md §25.4 B3e) is stored in clustering-key order, not insertion order
+  // — its whole reason to exist: rows near each other in key order sit near each other on disk, so a range on that
+  // key reads pages in sequence instead of wherever insertion happened to leave them.
+  const rows = table.clusteredKey ? [...table.rows].sort((a, b) => compareRows(a, b, table.clusteredKey!)) : table.rows;
+
+  for (let i = 0; i < rows.length; i += rowsPerPage) {
     firstRowIndex.push(i);
     pages.push({
       pageId: firstPageId + pages.length,
       table: table.name,
-      rows: table.rows.slice(i, i + rowsPerPage),
+      rows: rows.slice(i, i + rowsPerPage),
     });
   }
 

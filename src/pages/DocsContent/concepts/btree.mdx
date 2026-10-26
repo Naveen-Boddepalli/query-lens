@@ -57,13 +57,113 @@ collapses into its only child. The [B+Tree sandbox](/tools/btree) lets you inser
 against a live tree and watch exactly that, with a fan-out slider and the structural invariants
 re-checked after every edit.
 
+## When a value repeats
+
+An index on `authorId` has a problem the one on `id` never did: **the same value belongs to several
+rows**. A tree that stores each key once has nowhere to put the second `authorId = 1`. The fix databases
+use (InnoDB and PostgreSQL both) is to make the *row's own address* the tie-breaker: an index entry is
+`(value, page, slot)`, so two rows with `authorId = 1` are two different entries — `1 @ page 0, slot 2`
+and `1 @ page 1, slot 0` — sitting next to each other in the leaves. The tree itself never holds a
+duplicate, so splits, borrows and merges work exactly as before.
+
+What changes is the *lookup*. There is no single "the" entry for `authorId = 1`, so the search descends
+toward the **first** one — and when a value equals a separator on the way down, it goes *left* of it,
+because a run of equal values can straddle a separator and the first of them may be on the far side. Then it
+reads along the leaf for as long as the value holds, and hops to the sibling leaf only if the leaf's
+**high key** (its parent's separator — real engines store it on the page) says the value continues. A
+unique value is the same walk that happens to stop after one entry.
+
+Every entry the lookup finds is a heap page to fetch, so a value that repeats a hundred times costs
+about a hundred page reads however shallow the tree is. That is exactly why an index on a column with
+few distinct values is often *worse* than a scan. Try
+[`SELECT * FROM posts WHERE authorId = 1`](/tools/planner?q=SELECT%20*%20FROM%20posts%20WHERE%20authorId%20%3D%201)
+in the Planner sandbox — `posts` is indexed on `authorId`, which repeats (four authors, ten posts) — and read
+the row estimate the cost model gives the `IndexScan`.
+
+## Building an index: one row at a time, or all at once
+
+An index over a table that already exists can be built two ways. Inserting the rows **one at a time**
+splits a leaf whenever it overflows — and for keys that arrive in order, a full leaf splits and nothing is ever
+inserted into its left half again, so every leaf is left a quarter empty. A **bulk load** sorts the entries
+first, packs the leaves to a *fill factor* (100% leaves no room; 70% leaves 30% free so the next inserts do not
+split at once), and builds each level above from the one below — no splits at all. It is how `CREATE INDEX`
+works on a table full of rows, and why it is faster and yields a smaller, shallower tree.
+
+Shallower is the point: a lookup reads one page per level. Over 400 rows at this fan-out the one-at-a-time tree
+is 5 levels and the packed one 4, so a point lookup costs 5 disk reads instead of 7 — the
+[Index build](/compare) comparison runs it on the real engine. The price of packing is that the tree has no
+room to grow: the next row inserted into a full leaf splits it.
+
+## UNIQUE is a lookup
+
+A `UNIQUE` constraint is not a rule checked somewhere else — it is an index lookup made *before* a key goes
+in. `INSERT INTO accounts … VALUES (4, 'ada@x.org')` first asks the index on `email` whether an entry for
+`'ada@x.org'` already exists: a descent from the root, exactly like a `SELECT`. If it finds one, the
+statement is rejected and nothing is written; if not, the key is free and the insert goes on. That is why
+every unique constraint is backed by an index, and why a table with one reads index pages on every write.
+A key with a NULL in it never conflicts (NULL is not equal to NULL), so it is not even looked up.
+
+## Composite indexes and the leftmost-prefix rule
+
+An index can be over more than one column. An index on `(city, age)` holds entries ordered by `city`
+first and, *within* each city, by `age` — like a phone book ordered by surname, then first name. That
+order is what decides which questions it can answer:
+
+- `city = 'oslo'` — yes. All the Oslo entries sit together, so the search descends to the first one and
+  reads along the run. This is a **leftmost prefix** of the key.
+- `city = 'oslo' AND age = 30` — yes, and narrower: the run for that pair.
+- `city = 'oslo' AND age > 30` — yes: one descent to where Oslo's entries reach age 30, then along that
+  run only, stopping when the city changes.
+- `age = 30` alone — **no.** The people aged 30 are scattered through every city's run; there is no
+  contiguous stretch of the index to read. The index is not entered, and the plan says so.
+
+Because every column is in the entry, an index also *covers* a query that needs nothing else:
+`SELECT city, age FROM people WHERE city = 'oslo'` never touches the heap — the entries answer it, which
+is the same saving as an index-only scan, for more than one column.
+
+Try it in the Playground's **Custom** data: add a table, and declare `city+age` under *Composite
+indexes*.
+
+## Clustered (index-organized) tables
+
+Everything above assumes a table's rows live in a **heap** — pages in whatever order they were inserted
+— and every index, including a `UNIQUE` one, points *into* that heap: an entry's `(page, slot)` names
+where the row actually is. A **clustered** table drops that assumption for one index, its own: the table
+is stored **in that key's order**, not insertion order, so a range on it reads pages in sequence instead
+of wherever insertion happened to leave them.
+
+Declare the pages of eight rows inserted in a scrambled order (`3, 1, 4, 2, 5, 7, 6, 8`) and ask for
+`id > 2 AND id < 7`. Left as a heap, `3`, `4`, `5` and `6` each land on a different original page, paired
+with an unrelated neighbour — the range touches every page in the table. Clustered on `id`, the same four
+rows sit on two adjacent pages. Measured on the real engine: **8 disk reads unclustered, 6 clustered** —
+a quarter fewer, on a table this small; the gap only widens as a table grows and its insertion order
+drifts further from any one column's order.
+
+The catch is that only **one** index can be the table's layout. Every *other* index still needs to find
+the row, and it cannot carry a physical address the way a heap table's index does — a clustered leaf
+splits and moves rows between pages exactly like any other leaf, and a stored `(page, slot)` would go
+stale the moment that happened. So a secondary index on a clustered table stores the **clustering key**
+instead — `email` → `id`, not `email` → page 5, slot 2 — and finding the row costs a second, real descent:
+one through `email`'s tree to read off the `id`, then one through `id`'s own tree to reach the row. That
+second descent is the whole trade-off condensed to one sentence: cluster the column your heaviest range
+queries use, and every other index quietly gets slower by one tree's height.
+
+QueryLens builds that second descent for an equality lookup — `WHERE email = 'ada@x.org'` on a table
+clustered on `id` opens two B+Trees, narrated as two separate descents — and for a covering query that
+needs nothing but the secondary column itself, which still costs only one, since the row is never fetched
+either way. A range scan or an index-nested-loop join never chooses a clustered table's secondary index,
+falling back to a plan that does not need the extra hop — the leaf-chain walk both of those algorithms
+run wants a row address the entries do not carry, and building that too is a larger step than this one.
+
 ## Where this simplifies
 
 QueryLens's tree has a small, fixed fan-out (enough to demonstrate a split without needing thousands
-of rows). It supports point lookups, inserts and deletes — the last only in the standalone
-[sandbox](/tools/btree), since the pipeline itself runs `SELECT` and never removes a row. A
-production index also handles key updates and — critically — concurrent modification, which is where the
+of rows). It supports point lookups, range scans, inserts, deletes and key updates through the
+pipeline, and repeated values as above. A
+production index also handles — critically — concurrent modification, which is where the
 [locking the app's Locks panel visualises](/) actually earns its keep in a real engine: two
 descents that briefly hold two levels of the tree at once ("latch crabbing") are how a B+Tree stays
 correct while more than one query touches it at the same time. QueryLens runs exactly one query, so
-that layer is drawn but never actually contested.
+that layer is drawn but never actually contested. Declaring a clustering key is not yet exposed in the
+Custom database editor — it is built and tested on the engine, reachable through the query API a seeded
+database can set `clusteredKey` on, but there is no form field for it yet.

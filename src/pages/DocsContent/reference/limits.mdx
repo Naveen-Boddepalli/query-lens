@@ -13,17 +13,75 @@ concept explanation.
   [challenges](/challenges) and [Compare](/compare) modes, to make an algorithm's actual behaviour
   visible rather than hidden by a pool big enough to cache everything.
 - **4 rows per page.**
-- **Two replacement policies in the main pipeline** — LRU and clock sweep, switchable per query.
-  The standalone sandbox adds four more for comparison: FIFO, second-chance, optimal (unbuildable
-  for real; the fewest-misses bound the others are measured against), and midpoint LRU (what
-  InnoDB does). See [The buffer pool](/docs/concepts/buffer-pool).
+- **Eight replacement policies**, all implemented in the engine itself: LRU, clock sweep, FIFO,
+  second-chance, optimal (unbuildable for real; the fewest-misses bound the others are measured
+  against), midpoint LRU (what InnoDB does), and the two scan-resistant ones, LRU-2 and 2Q. The
+  Playground's *Eviction* picker, [Trace](/trace), [Compare](/compare) and the
+  [standalone sandbox](/tools/buffer-pool) all offer all eight, and a trace run under any of them is
+  the same engine's own run. A query under optimal is **run twice**: once to record the pages it reads,
+  in order — a query's reads come from its plan, so they are the same under any policy — and once for
+  real, evicting by that record. (Before, a query under optimal quietly behaved as FIFO.) See
+  [The buffer pool](/docs/concepts/buffer-pool).
 - Clock sweep's per-frame usage counter caps at **5**.
+- **Sequential read-ahead is off by default** (`readAhead`, a depth). With a depth of *n*, a request
+  for page *p* that follows a request for *p − 1* has the pool read up to *n* of the pages after *p*
+  that are not already resident, before anything asks for them. Each is a real disk read — it claims
+  a frame, and may evict one, exactly as a miss does — shown as a `prefetch` step and counted as a
+  disk read; the request that later arrives for that page is a hit. An access pattern that is not
+  sequential prefetches nothing. The [standalone sandbox](/tools/buffer-pool) offers 1, 2 or 4 pages
+  (`ra` in its URL), and so does the policy comparison in [Compare](/compare), which gives both policies the
+  same depth.
+- **A scan ring is off by default** (`scanRing`, a size), modelled on PostgreSQL's bulk-read strategy.
+  With a size of *n*, a `SeqScan` of a table bigger than a quarter of the pool reads through its own
+  ring of *n* frames: its first *n* misses take frames the ordinary way, and every page after that
+  reuses the scan's own oldest frame instead of asking the policy for a victim, so a scan far longer
+  than the pool passes through without evicting everything else. The ring is kept across a
+  nested-loop join's rescans, a smaller table is cached whole as before, and `DELETE`/`UPDATE`'s own
+  full scans do not use one. It is a trade, not a free win: a full pool still loses up to *n* pages
+  to the first claims, and a table larger than the ring that is read again and again is re-read from
+  disk each pass. In one query it changes little — every run starts with an empty pool, and a join's
+  hot inner table is already protected by recency — except under FIFO and 2Q, where it takes a join
+  over `comments` and `posts` from 45 disk reads to 33. What it is for is a long scan arriving between
+  two uses of a hot set, which the [sandbox](/tools/buffer-pool) shows directly: a range in the
+  reference string, `10-50`, is one marked scan, and the *Scan ring* control (`sr` in its URL) reads
+  it through 2, 3 or 4 frames.
 
 ## B+Tree index
 
-- **Up to two indexed columns per table**, each its own independent single-column B+Tree — not a
-  composite (multi-column) key over several columns at once. When two candidates each match an
-  equality conjunct, the planner picks the more selective one by distinct-value count.
+- **Any number of indexes per table** — plain single-column ones (`indexedColumns`) and **composite**
+  ones (`indexes: [{ columns: ['city', 'age'] }]`, declared in the Custom database's *Manage tables*
+  as `city+age`). Each is its own B+Tree. When several candidates each match an equality conjunct,
+  the planner picks the one that pins the most rows down — the product of its matched columns'
+  distinct-value counts.
+- **A composite index is entered through a leftmost prefix.** An index on `(a, b)` answers `a = 1`
+  and `a = 1 AND b = 2`, but not `b = 2` alone: its entries are ordered by `a` first, so the `b`
+  matches are scattered through the whole index. The optimizer says so when it declines one. A range
+  enters it through the leading column (`a > 5`), or — after an equality on the columns before it —
+  through the next one (`a = 1 AND b > 5` walks just the run of entries for `a = 1`). A query that
+  reads only the index's own columns is **covered** — an index-only scan returns them straight from
+  the entries.
+- **NULL leading columns are never indexed** (an equality on NULL is never true, so there is
+  nothing to find); a NULL in a *later* column is an ordinary entry, so `(1, NULL)` is still found
+  by `a = 1`. A `JOIN` can probe a composite index through its leading column.
+- **Indexes are built when the query runs** — one entry at a time, in row order, by default. The
+  setting `indexBuild` can *bulk-load* them instead (sort the entries, pack the leaves to a fill
+  factor between 50% and 100%, build the levels above with no splits): a smaller, often shallower tree
+  with identical answers. [Compare](/compare)'s *Index build* mode scores the three on 400 rows.
+- **`UNIQUE`** is an index that refuses repeats: declare it in the Custom database's *Manage tables*
+  (`Unique indexes: email, team+role`). `INSERT` and `UPDATE` look the new key up in the index first
+  and, if it is taken, are rejected — the trace shows the lookup that found it, and **nothing changes**.
+  NULLs never conflict. The check runs row by row in the order rows are visited, so a multi-row
+  `UPDATE` that repeats a key part-way through (`SET id = id + 1`) is rejected, as PostgreSQL's
+  immediate constraints reject it. There is no `CREATE UNIQUE INDEX`; a table whose rows already
+  repeat a key cannot be given one (the editor refuses to apply it).
+- **A table may be *clustered*** on one of its own `UNIQUE` indexes (`clusteredKey: ['id']`): its rows
+  are stored in that key's order rather than insertion order, so a range on it reads pages in sequence.
+  Every other index then carries the clustering key instead of the row's address — a clustered leaf can
+  split and move rows between pages, the clustering key never does — so an equality lookup through one
+  costs a second, real descent, through the clustered index itself; a covering query still costs only
+  one. A range scan and an index-nested-loop join never choose a clustered table's secondary index, and
+  fall back to a plan that does not need one. Not yet exposed in the Custom database editor — a seeded
+  database can set it, the engine and its tests do not otherwise distinguish it from any other table.
 - **Fan-out**: each node holds at most **4 keys** (5 children) before splitting; adjustable 3–6 in
   the [standalone sandbox](/tools/btree).
 - Supported operations: **insert**, **delete** (borrow/merge/root-collapse), **point lookup**, and
@@ -31,56 +89,366 @@ concept explanation.
   See [The B+Tree index](/docs/concepts/btree).
 - The planner uses the index for an equality (`WHERE id = 5`, an `IndexScan`), a range (`WHERE id >
   30`, `<`, `<=`, `>=` or `BETWEEN`, an `IndexRangeScan`), or — when the SELECT list needs nothing
-  but the indexed column itself — an index-only lookup that never touches the heap at all. An
-  equality always wins over a range when both are available, by rule order, not a cost comparison.
-  A predicate on an unindexed column always runs as a sequential scan.
-- Each B+Tree assumes a **unique key** — inserting a duplicate overwrites the previous row's
-  pointer rather than storing both. `DELETE`/`UPDATE` re-run the real `deleteKey`/`insert`
-  algorithms against it; `UPDATE` re-indexes a row only when its own indexed column actually
-  changed.
+  but the indexed column itself — an index-only lookup that never touches the heap at all.
+  **Whether it does is decided by cost, not by shape alone** (plan.md §25.4 C5): an index that
+  matches the predicate is still declined when its estimated page cost is no lower than the scan it
+  would replace — a column where most rows match is cheaper to scan — and the plan says so, with
+  both page counts. An equality is tried before a range by rule order, the two never costed against
+  each other, but a declined equality leaves the range rule free to try its own candidate. A
+  predicate on an unindexed column always runs as a sequential scan.
+- **An indexed column may repeat, unless it is `UNIQUE`.** An entry is the value plus the row's own
+  address, so two rows with the same value are two entries, side by side in the leaves; an equality
+  returns every match (walking the leaf chain for as long as the value holds) and costs one heap page
+  per row. Nothing stops a duplicate in a plain index; declare it `UNIQUE` (above) to refuse them. In
+  a single-column index **NULLs are never indexed**, so `x IS NULL` scans.
+  `DELETE`/`UPDATE` re-run the real `deleteKey`/`insert` algorithms against the one entry that
+  belongs to each row; `UPDATE` re-indexes a row only when its own indexed column actually changed.
 
 ## JOIN
 
-- **One `JOIN` per query**, an implicit inner join: `JOIN table ON a.col = b.col`, always an
-  equality between one qualified column from each side.
-- **Three algorithms** — nested-loop, hash, and sort-merge — chosen by whichever
-  [Compare](/compare) or the engine's own default forces; none of the three consults either side's
-  own index yet, so a joined table's index (if it has one) is never used inside the `JOIN`.
-- Cannot combine with `GROUP BY`, `ORDER BY`, or an aggregate in the SELECT list.
+- **Zero or more `JOIN`s, chained left-deep** (plan.md §25.4 C3 slice b): `[INNER | LEFT [OUTER]] JOIN
+  table ON a.col = b.col`, always an equality between one qualified column from each side, one of which
+  must name the table this `JOIN` introduces and the other some table already in the query — `FROM`'s,
+  or an earlier `JOIN`'s, not necessarily the one written just before it. `FROM a JOIN b ON … JOIN c ON
+  …` joins `c` against whatever `a ⋈ b` already produced, never against `a` and `b` independently. No
+  aliasing, so the same table can never appear twice in one chain. A bare `JOIN`/`INNER JOIN` drops an
+  unmatched row on either side; `LEFT [OUTER] JOIN` (plan.md §25.4 C3) keeps every row on the *other*
+  side of that one join, NULL-padding the introduced table's columns when nothing on it matches —
+  including when the join column itself is NULL, since NULL never matches NULL there either. A chain may
+  mix `LEFT` and inner freely, step by step — a row a `LEFT` step padded is itself a real row, so a later
+  inner step in the same chain can still drop it if nothing matches its own NULLs. No `RIGHT`/`FULL`/`CROSS`.
+- **Four algorithms** — nested-loop, hash, sort-merge, and **index nested-loop** — **chosen by cost**
+  (plan.md §25.4 C5 slice 2) whenever the caller does not force one: every algorithm that could run each
+  step is priced with the same formula [EXPLAIN](/docs/reference/sql) shows, and the cheapest wins, with
+  no "matches but costs more, stays anyway" outcome the way an index's own choice has — every algorithm is
+  a real, working plan, so one is always chosen, possibly the one already there. [Compare](/compare) and
+  the Planner sandbox still force one explicitly to see its own effect, which this never overrides. Index
+  nested-loop applies **per step**, independently, whichever way it was chosen — each step probes that
+  step's own inner table's B+Tree once per outer row, so it needs an index on that table's join column; a
+  step without one quietly runs as a plain nested-loop instead (never chosen by cost either, since it is
+  not actually available), and the plan says so for exactly that step. The other three never consult an
+  index, and no `JOIN` side ever becomes an `IndexScan` — a `WHERE` conjunct on the outer table of a
+  query's first `JOIN` is pushed into its scan, but that scan stays sequential. All four agree on every
+  step's `LEFT JOIN` NULL-padded rows the same way they already had to agree on everything else.
+- **A `WHERE` on the table a `LEFT JOIN` introduces is never pushed below it.** Doing so would filter
+  rows out of the join's own input before it can find out they would not have matched — turning a
+  `LEFT JOIN` back into an ordinary one with no trace of it. It stays a residual `Filter` above the
+  `Join` instead, which is also where SQL itself puts it: `… LEFT JOIN posts ON … WHERE posts.title IS
+  NULL` is the standard way to ask "which rows had nothing on the other side," and it only works if the
+  filter runs *after* the padding. A `WHERE` on the *outer* side of that one join is still pushed —
+  filtering it first is always safe, `LEFT JOIN` or not — but only for a query's first `JOIN`: this rule
+  only recognises `Project → … → Filter → Join → two bare scans`, so a chain of two or more `JOIN`s
+  leaves the whole `WHERE` clause as a residual filter above the chain for now, correct either way, just
+  not yet narrowed into any one step's own scan.
+- `ORDER BY` sorts the joined rows, in a `Sort` above the whole chain that spills to scratch pages past every joined
+  table's heap; `GROUP BY` and aggregates group them, in an aggregate above the chain (a sort aggregate spills
+  there too). The estimate of how many groups there are looks each grouped column up in its own table.
+- **A chain of two or more plain inner `JOIN`s actually runs in whichever left-deep order costs least**
+  (plan.md §25.4 C5 slice 3), not necessarily the order it was written in — a Selinger-style dynamic-
+  programming search over the *subset lattice* (plan.md §25.4 C4) finds it, the plan-stage narration says
+  what changed and why, and [`/tools/join-order`](/tools/join-order) is the same search with every subset
+  it considered visible, not just the winner. **A chain with a `LEFT JOIN` anywhere in it is never
+  reordered**, on purpose: `LEFT JOIN` is not commutative or associative in general (flipping one, or
+  moving another join between its two sides, can change which rows end up NULL-padded, not just the cost),
+  and this DP does not attempt the harder problem of reordering *around* that constraint. For a chain like
+  that, the plan-stage narration and `/tools/join-order` still show what the search would have picked —
+  purely informational there, never a rewrite, exactly as every chain's order used to be before this.
+
+## IN subquery
+
+- **`x [NOT] IN (SELECT column FROM table [WHERE …])`** (plan.md §25.4 C3, closing C3) — the one place a
+  `SELECT` may appear inside another query. Always exactly one plain column, and never combined with
+  `JOIN`/`GROUP BY`/`HAVING`/`ORDER BY`/`LIMIT`/`DISTINCT`/an aggregate — none of those could change
+  *which* values end up in the set `IN` tests membership against, since the result always collapses to
+  one column's distinct values.
+- **Always uncorrelated.** The subquery's own `WHERE`, if it has one, can only name a column on its own
+  `FROM` table — the same "no table name needed" rule a bare single-table query already enforces — so
+  there is no path for it to read a value from the outer query's own row. `EXISTS` and a scalar subquery
+  (`x = (SELECT …)`) both stay unsupported; `IN`'s subquery form is the only one.
+- **Runs exactly once, as its own complete sub-run of the engine** — its own buffer pool, its own real
+  disk reads — before the outer query is planned at all, the same way `EXPLAIN`'s own inner query does.
+  Its result becomes an ordinary literal list from that point on: the cost model, the executor, and every
+  rewrite rule in the optimizer see exactly the same shape a hand-written `IN (1, 2, 3)` always produced,
+  never a subquery. The WHERE clause's own narration says how many distinct values it found.
+- **Works in `SELECT`, `DELETE` and `UPDATE`'s `WHERE`** — resolved the same way regardless of which
+  statement names it.
+- **The NULL trap applies exactly as sharply.** `x NOT IN (SELECT …)` is never TRUE for any row once
+  that subquery's result contains even one NULL — the identical three-valued-logic trap a literal
+  `NOT IN (1, 2, NULL)` already has, since resolution produces the exact same shape.
 
 ## GROUP BY and aggregates
 
 - `COUNT(*)`, and `COUNT`/`SUM`/`AVG`/`MIN`/`MAX` over a column.
 - **Two strategies** — a hash aggregate (default) and a sort aggregate, which sorts the input on
   the `GROUP BY` columns first, spilling through the buffer pool exactly as `ORDER BY` does. Same
-  groups out either way; [Compare](/compare)'s third mode scores the difference in I/O.
+  groups out either way; [Compare](/compare)'s aggregate mode scores the difference in I/O.
+- **`ORDER BY` sorts the groups**, by a grouped column or an aggregate, in a `Sort` above the aggregate. It is
+  never dropped, even when a sort aggregate has already left the groups in that order: the plan stays a literal
+  reading of the query. A sort aggregate and the `Sort` above it each spill to scratch pages of their own.
 
 ## Writes
 
 `DELETE`, `INSERT` and `UPDATE` all run for real and persist their effect — a write's changed rows
 become the table's new contents for every query that follows. Each finds its target rows the same
-way a `SELECT`'s `WHERE` would (an index lookup when it can, a scan otherwise).
+way a `SELECT`'s `WHERE` would (an index lookup or a range walk of the index when it can and its
+estimated cost beats the scan, a scan otherwise), takes an exclusive lock on every page it will change, and drops and re-adds exactly the
+index entries of the rows it touches.
+
+## Statistics
+
+- **`ANALYZE table`** is a real statement: a real scan of the real table, producing — per column —
+  a distinct count, a null fraction, the most-common values with their real frequencies, an
+  equi-depth histogram over what is left, and how much the column's own order tracks the table's
+  physical row order (correlation, `-1` to `1`; a [clustered table](/docs/concepts/btree) achieves
+  exactly `1` on its clustering key). Shaped after PostgreSQL's own `pg_stats`.
+- **The result *is* the statistics** — one row per column — shown in the same Result panel any
+  other query's answer would be. There is no separate stats panel to open; opening the result is
+  opening the statistics.
+- **A snapshot, not a live fact.** Once run, a table's statistics sit on it exactly as they were the
+  moment `ANALYZE` ran — even after later writes change the table underneath them — until `ANALYZE`
+  runs again. A table that has never been `ANALYZE`d keeps the older, always-accurate-because-always-
+  live behaviour every other v2.0 estimate already had: the planner scans the real rows itself.
+  Nothing is `ANALYZE`d by default.
+- **The cost model reads them when they exist.** An equality on a most-common value gets its real
+  frequency instead of assuming every distinct value is equally likely; any other value gets the
+  average of what the most-common list does not already cover, which is closer to `1/ndistinct` the
+  less skewed the column is and further from it the more skewed; a range reads the histogram's real
+  bucket boundaries instead of interpolating linearly between the column's min and max.
+- **A statement, not a button.** Its answer travels through the trace, the URL, a saved moment and
+  an assignment link the same way any other statement's does — there is nothing about `ANALYZE`
+  itself that the rest of the app treats specially.
+- **Single-column only — nothing records how two columns co-occur**, which is the independence
+  assumption every `AND` in `WHERE` makes (`fraction × fraction`) and exactly where it can badly
+  fail. The `employees` preset dataset is built to show it: `department` and `office` are perfectly
+  correlated, so `WHERE department = 'x' AND office = 'y'` is no narrower than `department = 'x'`
+  alone, but the optimizer estimates it as if the two were independent. `EXPLAIN ANALYZE` reports
+  the gap as **q-error** (`max(est/actual, actual/est)`, the metric Leis et al.'s *How Good Are
+  Query Optimizers, Really?* uses) beside any operator whose estimate is off by 2× or more — the
+  `employees` headline query measures **11×**. Nothing here *corrects* for the correlation; naming
+  it honestly is the whole feature.
 
 ## Locks
 
 - **Page-level**, coarse-grained: one shared read lock per page, taken and released as a scan or
   descent visits it, upgraded to exclusive for the page a write actually changes.
-- **Visual only** — QueryLens runs exactly one query at a time, so no lock ever actually waits on
-  another. The panel draws what a real engine's lock manager would be doing, not an enforced
-  constraint. The [locks sandbox](/tools/locks) simulates two transactions separately, with real
-  blocking, deadlock detection and victim selection, outside the main pipeline.
+- **Visual only in the Playground** — it runs exactly one query at a time, so no lock ever actually waits
+  on another there. The panel draws what a real engine's lock manager would be doing. The enforced
+  version is the [locks sandbox](/tools/locks) (two transactions placing lock requests directly) and
+  [Transaction schedules](/tools/schedule) (the same lock table applied to real statements).
+
+## Transactions
+
+- **`BEGIN`, `COMMIT` and `ROLLBACK` exist only in [Transaction schedules](/tools/schedule)**, not the
+  Playground — they mean nothing to one statement on its own, and the Playground runs one at a time.
+  A schedule is a list of statements, each tagged with the session that runs it, in an order you choose;
+  two sessions, `A` and `B`, share one `accounts` table (up to 40 steps).
+- **With no locking** a statement sees and changes whatever the table holds, another session's
+  uncommitted changes included. `ROLLBACK` is real: each transaction keeps an undo log of the rows it
+  changed and puts them back, newest first. The page names what that lets through — a *dirty read* (a
+  session read a change that was never committed) and a *dirty write* (a session changed a row another
+  had changed and not committed, which a later rollback can no longer undo).
+- **With page or row locking** the same schedule runs under **strict two-phase locking**, enforced by the
+  engine's lock table (`engine/locks/lockTable.ts`, the one [`/tools/locks`](/tools/locks) also drives). A
+  statement takes a lock for what it touches — shared to read, exclusive to change — before it runs, and
+  holds every lock until `COMMIT` or `ROLLBACK` (the default, `REPEATABLE READ`; see below for the other
+  levels). One that cannot get its lock **waits**: nothing runs,
+  the session's later steps queue behind it, and it resumes the moment the holder lets go, against
+  whatever the holder committed. Two sessions each waiting on the other is a **deadlock**, and the
+  youngest transaction (the one whose first request came last) is rolled back; a session left waiting at
+  the end is reported as stuck. A *page* lock covers every row on a heap page; a *row* lock covers the rows
+  a statement **examines** — every row on the pages a scan visits, only the matching rows for an index
+  lookup — which is why, on three accounts that the planner scans, a row lock gains nothing, and on twenty
+  it does. A row another open transaction has deleted stays locked until that transaction ends. Index
+  pages are latched, not locked, so only data pages and rows are a transaction's to hold.
+- **Isolation levels are lock durations.** Write locks are held to the end at every level; the levels differ in
+  how long a *read* lock lasts. **`READ UNCOMMITTED`** takes none, so it reads changes that are not committed.
+  **`READ COMMITTED`** takes them and gives each back when the statement ends, so a repeated read can change
+  (a *non-repeatable read*) and a value worked out from an old read can overwrite a newer one (a *lost update*).
+  **`REPEATABLE READ`** — the default — holds them to the end, but a lock covers only rows that exist, so a new
+  row that matches an earlier read can still appear (a *phantom*). **`SERIALIZABLE`** also holds each read's
+  `WHERE` as a **predicate lock** until the transaction ends: a write that would add a matching row waits for
+  it, whatever level the writer runs at. The schedule has a default level, and a transaction may ask for its
+  own with `BEGIN ISOLATION LEVEL …`. The page names each anomaly when it happens.
+- **With versions (MVCC)** a row is a chain of versions, each stamped with the transaction that made it (`xmin`)
+  and the one that deleted or replaced it (`xmax`), and a reader takes **no lock at all**: it sees, for every
+  row, the version its *snapshot* can see — one created by a transaction that had committed when the snapshot was
+  taken (or by itself), and not removed by one that had. Writers still take an exclusive lock on each row they
+  change, so two writers to one row wait for each other, and a deadlock is still a deadlock. **`READ COMMITTED`**
+  takes a fresh snapshot per statement, so a repeated read can change. **`REPEATABLE READ`** takes one for the
+  transaction, which is *snapshot isolation*: no dirty, non-repeatable or phantom reads, and a write to a row
+  someone committed since the snapshot **fails** instead of overwriting it (*first committer wins*) — but **write
+  skew** gets through, two transactions reading the same rows and each changing a different one.
+  **`SERIALIZABLE`** adds a check at `COMMIT` that nothing the transaction read has been changed by a
+  transaction committed since its snapshot, which stops write skew; it aborts more transactions than
+  PostgreSQL's own scheme does, which tracks only the read/write dependencies that can form a cycle. `READ
+  UNCOMMITTED` behaves as `READ COMMITTED`, as it does in PostgreSQL.
+- **Rollback undoes nothing under MVCC.** The transaction's versions simply stop being visible to anyone, and
+  stay in the heap as *dead tuples* — as do the old versions an update or delete leaves behind — so a scan
+  reads more pages than the live rows need. **`VACUUM`** removes the versions no open snapshot can see again;
+  one an old snapshot still needs is kept. The page shows each version's `xmin` and `xmax`, the dead count,
+  and what they cost: three scans of the heap run through the real buffer pool, as it is and after a
+  `VACUUM`, so a heap that has grown past the pool shows as a disk read for every page of every pass. A
+  *Can they see it?* question asks, for a version and a session, whether a statement run now would see it,
+  and reveals the answer against that session's snapshot.
+- **The [isolation matrix](/tools/isolation)** runs ten anomalies from the Hermitage suite — dirty writes,
+  aborted and intermediate reads, circular information flow, observed-transaction-vanishes,
+  predicate-many-preceders, lost update, read skew, and write skew on an item and on a predicate — at the four
+  levels on three engines: locks, snapshots, and InnoDB, which is built from the other two level by level — and,
+  at `REPEATABLE READ`, lets a write work from the latest committed row where PostgreSQL's refuses it. Each cell is
+  a three-transaction schedule that was *run*, and the anomaly is judged by what its transactions saw and wrote.
+  The results are held, in a test, against what PostgreSQL (for versions), SQL Server's locking levels (for locks)
+  and MySQL (for InnoDB) publish: 79 of 80 cells agree for the first two, and the one that does not — `OTV` at
+  `READ UNCOMMITTED` — is marked and explained on the page, as is the same cell for InnoDB. MySQL's page ran only
+  19 of the 40 cells, and `PMP` and `G-single` in read and write variants of which the matrix runs the read ones;
+  the other 21 are computed and carry no claim.
+- **Two protocols never wait** (plan.md §25.4 D6), for comparing against locks and snapshots. **Basic timestamp
+  ordering** gives each transaction a timestamp when it begins, and each row remembers the newest timestamp that
+  read it and the newest that wrote it; an operation that arrives after a *younger* transaction has already read
+  or written what it needs is aborted on the spot, and nothing ever waits. A row that is no longer there to carry
+  a stamp is covered by predicate — one a younger transaction removed or re-keyed, and a new row a younger
+  transaction's `WHERE` would have picked up — so an older transaction cannot quietly miss either. It is **not
+  strict**: a younger transaction may read or write what an older one has not committed, so if that one rolls
+  back, work built on it stands, and the page flags it as a dirty read or write. **Optimistic validation** reads
+  what is committed, writes into a private workspace nobody else sees, and at `COMMIT` is checked against
+  everything that committed since it began: if a row it read or wrote was changed, a unique key it adds was taken,
+  or what one of its reads' `WHERE` matches has changed, it is aborted having done all its work. Neither can
+  deadlock, and both abort a transaction that locking would only have made wait.
+- **The [concurrency-control compare](/tools/concurrency)** runs one schedule under five protocols — two-phase
+  locking, timestamp ordering, optimistic validation, snapshots, serializable snapshots — and reads each run back
+  as a bill: committed, aborted, waits, statements run inside a transaction that was then aborted, and the
+  anomalies that reached a transaction which was *not* aborted (a phantom that validation caught at `COMMIT` was
+  seen, not let through). *One at a time?* is not a lookup: the committed transactions are replayed serially on a
+  fresh database, in an order that has to give every statement the answer it gave in the run — the rows a
+  `SELECT` returned, the rows a write affected — and leave the table that survived. The commit order is tried
+  first, then the begin order, then a search of every order (pruned by those answers, with a budget; the page
+  says *None found* instead of *No* if the budget runs out). Write skew is *No* by this test even though the
+  table it leaves is one a serial run could leave, because each transaction read something no serial order would
+  have shown it. It is a check on one run, not a proof about the protocol; the protocols that claim
+  serializability are held to it, in tests, over thousands of fuzzed schedules.
+- **A row another open transaction has deleted or re-keyed** keeps its old image, still locked, until that
+  transaction ends — otherwise a lookup for the old key finds nothing, touches no page, takes no lock, and
+  reads a change nobody committed.
+- **Not yet:** the scan that measures the dead versions' cost is a reference string of their pages, not the
+  executor reading them (it does not skip invisible tuples, and the index has no entries for dead versions),
+  and a wait for another session's uncommitted row on a `UNIQUE` key — a duplicate is rejected at once, where a
+  real engine would wait to find out whether the other insert commits. The predicate lock is a *toy*: it
+  matches a `WHERE` against the rows a write would add, which is enough for these tables and nothing like an
+  index-range or next-key lock.
+- A statement outside `BEGIN … COMMIT` is its own transaction. A statement that fails changes nothing and
+  leaves the transaction open, as MySQL does; PostgreSQL would instead refuse everything until
+  `ROLLBACK`. There are no savepoints.
+- Each statement is its own run, with its own buffer pool: a schedule shows what the data does, not what
+  the pool does between statements.
+
+## Durability
+
+- **[The write-ahead log](/tools/wal) is its own model, not the engine's.** It has a disk of four pages, a buffer
+  pool of two to four frames, and a log, and a page is a few named integer cells (`a = 10`), not a slotted heap page
+  or a row. The SQL pipeline itself does not log, and its buffer pool — a read cache whose only "dirty" is a marked
+  page — is not the one the log-before-data rule is enforced on. The Playground's *Durability* dialog (below) feeds
+  this model the statements you run, so that a crash and a recovery can be tried on a real table; the engine's
+  statistics are still its own.
+- **What it models.** Every change appends a log record with a **LSN** (strictly increasing) and a **prevLSN**, the
+  transaction's previous record, so each transaction's records chain backwards. A record is in the *log buffer*
+  until it is flushed and *durable* after, and `flushedLSN` is the last durable one. A page remembers the LSN of the
+  last record applied to it (**pageLSN**) and of the one that first dirtied it since it was last written
+  (**recLSN**). A commit forces the log through its commit record and writes **no** data page. Rolling back undoes
+  newest first and writes a **compensation record** for each undo, so the undo is itself logged and is never done
+  twice. This is ARIES's logging; its recovery is not built yet.
+- **The rule is enforced, and can be switched off.** Before a dirty page is written — on request, or because the pool
+  needs its frame — the log is flushed through that page's pageLSN, and only that far. With the rule off the page is
+  written anyway, and the page names what a crash would then find: a change on disk that nothing records. A property
+  test holds the enforced rule over thousands of random scripts (no page on disk is ever ahead of the durable log; a
+  commit is durable when it returns; the durable log is a gapless prefix; what the database holds is what the newest
+  record for each cell says, rollbacks included).
+- **A cell changed by a transaction that has not ended is its alone** until it does — strict two-phase locking in one
+  rule, so that a rollback never has to undo over someone else's change. A second transaction asking for it is
+  refused, not made to wait; there is no concurrency in this script.
+- **Steal and force are choices, and each has a price you can see** (plan.md §25.4 E2). **Steal** lets the pool write a
+  page that holds an uncommitted change, which frees the frame and leaves a change on disk that nobody committed:
+  after a crash it has to be **undone**, so the log must carry the old value. **No-steal** pins such a page until its
+  transaction ends, so there is never anything to undo — and with two frames, a transaction that has changed two
+  pages cannot read a third (the step is refused). **Force** writes every page a transaction changed inside its
+  commit, so no committed change is ever missing from disk and nothing is **redone**, at the price of those writes
+  in every commit. **No-force** commits with one log write and *owes* the pages. The page computes the consequence
+  for any step as a *crash image*: each cell on disk that no committed transaction wrote (undo), and each committed
+  value that never reached disk (redo). Under no-steal the first is empty at every step, and under steal with force
+  the second is, which the tests hold over random scripts. Two details a textbook skips: the log is not forced less
+  because of force (it is forced first, then the pages); and under *force with no-steal* a page that another running
+  transaction has also changed cannot be written at the first commit, so its write waits until that transaction
+  ends — page-grained logging makes force and no-steal at odds, which record-level logging avoids.
+- **A crash, checkpoints and ARIES recovery** (plan.md §25.4 E3, [`/tools/recovery`](/tools/recovery)). A **fuzzy
+  checkpoint** writes a begin record, copies the transaction table and the dirty page table as they are then, and
+  writes an end record holding them: no page is written and nobody waits, so work between its two records is not in
+  its tables — which is fine, because the restart scans forward from the begin record. A forced end record moves the
+  *master record* that says where a restart begins. **A crash** drops the pool, the log buffer and every transaction;
+  it keeps the disk, the durable log and the master record, and the next LSN is numbered from the end of the *durable*
+  log, so a lost record's number is reused. **Recovery** is three passes, each shown: *analysis* scans from the
+  checkpoint, rebuilding both tables and naming the **losers** (no commit record); *redo* repeats history from the
+  oldest recLSN in the dirty page table, skipping a record whose page is not in the table, whose LSN is before the
+  page's recLSN, or whose page on disk already has it (pageLSN ≥ LSN); *undo* takes the losers' last records and always
+  the newest next, writing a **compensation record** for each undone change (and an end record when a transaction is
+  fully undone), forcing each as it goes. A compensation record is redo-only and carries `undoNextLSN`, so a restart
+  that meets one follows it and does not undo what it compensates: a crash *during* recovery (the *Recover, then
+  crash* button) picks up where it stopped. A committed transaction whose end record was lost gets one written. The
+  tests hold, over random scripts with checkpoints and any pool size or policy, that recovery leaves exactly the
+  committed state — also after any number of interrupted recoveries — that analysis names as losers exactly the
+  transactions that wrote and neither committed nor ended, that no transaction has more compensation records than
+  changes, and that the crash image predicted exactly the cells recovery had to fix.
+- **With the rule off, recovery can be wrong, and says so.** A page that reached disk ahead of its log record has
+  nothing durable that says how to undo it, so the restart leaves the uncommitted value in place. The page's *Is the
+  database right?* panel names the cell. This is the only way the model's recovery produces a wrong database.
+- **The Playground can crash and recover** (plan.md §25.4 E4, the *Durability* button by *Edit data*). Each
+  `INSERT`, `UPDATE` and `DELETE` run there is kept as the log steps a write-ahead log would have made of it — one
+  transaction per statement, left open, since the Playground shows its own changes at once — and the dialog is where
+  you decide: commit it, roll it back, write a page, take a checkpoint, **crash**, **recover**. A table's rows are laid
+  out as the engine lays out its heap (four to a page, in table order), one row per cell, as its JSON; a deleted row
+  leaves a tombstone, so the rows after it keep their slots, and an update changes one cell. After a recovery the
+  dialog lists each row whose value differs between the database the Playground held before the crash, the
+  database recovery rebuilt, and what committed — and can replace the Playground's table with the rebuilt one. The
+  tests run a table through commits, a lost uncommitted delete and a lost insert, and recovery gives back exactly
+  what committed.
+- **What the Playground's log cannot do:** a heap cannot grow a page it did not start with, so each table has **eight
+  spare slots** for inserted rows, and a ninth is refused with the reason; a statement that changes more than sixty
+  rows is refused (a log of every row of a large table is not something to step through); the log keeps up to four
+  hundred steps; a table whose data is edited, reloaded or switched starts a new log, and the dialog says when the one
+  it holds is of a database the Playground no longer has; and only `INSERT`/`UPDATE`/`DELETE` are logged — an index is
+  rebuilt from the rows after a recovery, not recovered itself.
+- **Not yet, and not modelled:** log truncation, so the log only grows; concurrent transactions *during* recovery
+  (the machine is down until it finishes); the engine's own buffer pool as the pool the rule is enforced on; and
+  any storage but whole-page writes. There are no savepoints.
 
 ## SQL
 
 See [Supported SQL](/docs/reference/sql) for the complete accepted grammar.
 
+## What cost decides
+
+Three decisions are made by comparing estimated page costs (plan.md §25.4 C5), using the same numbers
+[EXPLAIN](/docs/reference/sql) prints:
+
+- **Whether an index is used.** `index-selection` and `range-index-selection` pick a candidate by shape,
+  then decline it when its estimated page cost is not lower than the scan it would replace; the plan names
+  both costs and keeps the scan.
+- **A join's algorithm.** Nested-loop, hash, sort-merge and — where the inner table has a usable index —
+  index nested-loop are each priced, and the cheapest wins outright.
+- **A join chain's order.** A chain of two or more plain inner `JOIN`s runs in whatever left-deep order
+  [`/tools/join-order`](/tools/join-order)'s Selinger-style search finds cheapest, not necessarily the order
+  it was written in. A chain with a `LEFT JOIN` anywhere in it keeps its order as written, since `LEFT JOIN`
+  is not commutative or associative in general; the search's suggestion is shown there as information only.
+
+Each is the default whenever the caller does not force something explicit — [Compare](/compare) and the
+Planner sandbox still force a specific `joinStrategy` to compare algorithms directly, and that is never
+overridden. The planner's *Why not?* note shows the runner-up each of these beat. Every other rewrite rule —
+constant folding, predicate pushdown, join predicate pushdown, and the index-only scan — still fires on a
+structural match alone; the cost estimates shown beside those plans only justify the narration, they do not
+decide whether the rewrite happens.
+
 ## What's out of scope entirely
 
-No `OR`/`NOT` in `WHERE`, no subqueries, no more than one `JOIN` per query (so no join-order
-choice), no outer joins, no true composite (multi-column) indexes, no transactions, no real
-concurrency (the Locks panel is visual only), and no cost-based query optimization — every
-rewrite rule fires on a structural match, never a cost comparison, and the cost *estimates* shown
-alongside a plan exist to justify a rewrite's narration, not to decide whether it happens. `DISTINCT`,
-`UNION`, `HAVING` and `OFFSET` are also not accepted. These are deliberate exclusions for this
-release, not bugs — see the parser's own error messages in [Supported SQL](/docs/reference/sql)
-for exactly which keywords are recognised and rejected.
+No subqueries anywhere but an uncorrelated `IN (SELECT …)` (plan.md §25.4 C3, closing C3 — no `EXISTS`, no
+scalar subquery like `x = (SELECT …)`, no correlated subquery). No `RIGHT`/`FULL`/`CROSS` join, no transactions in
+the Playground (they exist only in [Transaction schedules](/tools/schedule)), no real
+concurrency there (the Locks panel is visual only). `UNION` and `COUNT(DISTINCT …)` are also not accepted.
+These are deliberate exclusions for this release, not bugs — see the parser's own error messages in
+[Supported SQL](/docs/reference/sql) for exactly which keywords are recognised and rejected.

@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom';
+import { useDocumentTitle } from '../ui/documentTitle.ts';
 import { btnPrimary, btnSecondary, panelSurface } from '../ui/primitives.ts';
 
 const LINKS = [
@@ -9,6 +10,8 @@ const LINKS = [
 ] as const;
 
 export function NotFoundPage() {
+  useDocumentTitle('Page not found');
+
   return (
     <main className="flex flex-1 items-center justify-center p-6 text-center">
       <div className={`w-full max-w-md p-8 ${panelSurface}`}>
@@ -48,4 +51,3 @@ export function NotFoundPage() {
     </main>
   );
 }
-
