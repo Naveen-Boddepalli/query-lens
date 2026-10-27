@@ -139,7 +139,7 @@ export function SchemaEditor({ db, onApply, onClose }: SchemaEditorProps) {
       aria-label="Manage tables"
       onClose={onClose}
       onClick={(e) => { if (e.target === dialog.current) close(); }}
-      className="max-h-[85dvh] w-[min(40rem,calc(100vw-2rem))] overflow-hidden rounded-2xl border border-edge bg-surface p-0 text-ink shadow-e3 backdrop:bg-black/70 backdrop:backdrop-blur-sm"
+      className="ql-sheen max-h-[85dvh] w-[min(40rem,calc(100vw-2rem))] overflow-hidden rounded-2xl border border-edge bg-surface p-0 text-ink shadow-e3 backdrop:bg-black/70 backdrop:backdrop-blur-sm"
     >
       <div className="flex max-h-[85dvh] flex-col">
         <header className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-edge bg-surface-2/40 px-4 py-3">
@@ -283,7 +283,7 @@ export function SchemaEditor({ db, onApply, onClose }: SchemaEditorProps) {
                 title="Undo"
                 className={`${btnGhost} disabled:cursor-not-allowed disabled:opacity-40`}
               >
-                ↶ Undo
+                Undo
               </button>
               <button
                 type="button"
@@ -293,7 +293,7 @@ export function SchemaEditor({ db, onApply, onClose }: SchemaEditorProps) {
                 title="Redo"
                 className={`${btnGhost} disabled:cursor-not-allowed disabled:opacity-40`}
               >
-                ↷ Redo
+                Redo
               </button>
               <button type="button" onClick={() => { setAdding(true); }} className={btnSecondary}>
                 + Add table

@@ -81,7 +81,7 @@
    * than merely a shade lighter. Four steps still, each one further from the
    * page than the last, so a hover is always an *increase* in contrast.
    */
-  --color-surface: oklch(0.155 0.014 264);
+  --color-surface: oklch(0.14 0.015 260);
   --color-surface-2: oklch(0.195 0.016 264);
   --color-surface-3: oklch(0.238 0.018 264);
   /* plan.md §16.2 item 4. The palette had no step to hover *to*: a cell already
@@ -93,27 +93,23 @@
   --color-ink: oklch(0.96 0.004 264);
   --color-ink-dim: oklch(0.72 0.016 264);
 
-  /* One accent, used sparingly. The base value is unchanged from the audited
-     design — it cascades into eight stage tokens, the two B+Tree node hues,
-     CodeMirror and the focus ring, and every one of those was contrast-checked
-     against it. `-strong` is the luminous version for a glow or the hero;
-     `-soft` is the translucent fill under `text-ink`. */
-  --color-accent: oklch(0.78 0.14 196);
-  --color-accent-strong: oklch(0.86 0.15 200);
-  --color-accent-soft: oklch(0.78 0.14 196 / 0.14);
+  /* Primary Accent: Precision Cyan / Sapphire (oklch(0.76 0.16 215)) */
+  --color-accent: oklch(0.76 0.16 215);
+  --color-accent-strong: oklch(0.84 0.16 215);
+  --color-accent-soft: oklch(0.76 0.16 215 / 0.14);
 
   /* A 1px inner highlight along the top edge of an elevated surface — the
      detail that separates a flat box from a lit one. Barely-there on purpose. */
-  --color-hairline: oklch(1 0 0 / 0.055);
+  --color-hairline: oklch(1 0 0 / 0.08);
 
   /* A dedicated colour for the hierarchy edges flowinger draws, one step
      brighter than `--color-edge` so a connector reads against a tinted node. */
   --color-flow-edge: oklch(0.44 0.02 264);
 
   /* Storage-layer semantics — reused everywhere a page is drawn. */
-  --color-hit: oklch(0.78 0.15 155);
-  --color-miss: oklch(0.8 0.15 75);
-  --color-evict: oklch(0.68 0.19 22);
+  --color-hit: oklch(0.78 0.16 155);
+  --color-miss: oklch(0.80 0.16 75);
+  --color-evict: oklch(0.70 0.20 25);
 
   /* BusTub's convention, which CMU students already have in their heads. */
   --color-node-internal: oklch(0.75 0.15 340);
@@ -168,8 +164,8 @@
      a white page. Tokens rather than literals so the light block can flip them
      alongside everything else. */
   --color-line-active: oklch(1 0 0 / 4%);
-  --color-select: oklch(0.78 0.14 196 / 25%);
-  --color-span-active: oklch(0.78 0.14 196 / 16%);
+  --color-select: oklch(0.76 0.16 215 / 25%);
+  --color-span-active: oklch(0.76 0.16 215 / 16%);
 
   /**
    * Elevation — the depth the "instrument" design deliberately did without,
@@ -182,7 +178,13 @@
   --shadow-e1: 0 1px 2px oklch(0 0 0 / 0.28), 0 1px 1px oklch(0 0 0 / 0.22);
   --shadow-e2: 0 6px 16px -4px oklch(0 0 0 / 0.4), 0 2px 6px -2px oklch(0 0 0 / 0.3);
   --shadow-e3: 0 24px 48px -12px oklch(0 0 0 / 0.55), 0 6px 16px -6px oklch(0 0 0 / 0.35);
-  --shadow-glow: 0 0 0 1px oklch(0.78 0.14 196 / 0.45), 0 0 28px -6px oklch(0.86 0.15 200 / 0.5);
+  --shadow-glow: 0 0 0 1px oklch(0.76 0.16 215 / 0.45), 0 0 28px -6px oklch(0.84 0.16 215 / 0.5);
+
+  /* Tactile Neumorphic Dual-Layer Shadows (Dark Theme) */
+  --shadow-neu-rest: -1px -1px 2px 0px oklch(1 0 0 / 0.04), 0 1px 2px 0px oklch(0 0 0 / 0.40), 0 4px 12px -2px oklch(0 0 0 / 0.55);
+  --shadow-neu-hover: -1px -1px 3px 0px oklch(1 0 0 / 0.07), 0 2px 4px 0px oklch(0 0 0 / 0.45), 0 8px 20px -3px oklch(0 0 0 / 0.65), 0 0 0 1px oklch(0.76 0.16 215 / 0.30);
+  --shadow-neu-pressed: inset 0 2px 4px 0px oklch(0 0 0 / 0.60), inset 0 1px 1px 0px oklch(0 0 0 / 0.40), inset -1px -1px 2px 0px oklch(1 0 0 / 0.03);
+  --shadow-neu-track: inset 0 2px 5px 0px oklch(0 0 0 / 0.50), inset 0 0 2px 0px oklch(0 0 0 / 0.40), 0 1px 0px 0px oklch(1 0 0 / 0.05);
 
   /* The adjusted fallback sits second in each stack: it is a real face with
      corrected metrics, so it is what the swap paints in before the webfont
@@ -337,12 +339,35 @@
   /* A single soft wash behind the hero — light falling from where the text
      starts, not a two-colour "aurora". Static. */
   --gradient-hero:
-    radial-gradient(90% 55% at 20% -10%, oklch(0.7 0.09 220 / 0.16), transparent 68%);
+    radial-gradient(90% 55% at 20% -10%, oklch(0.76 0.16 215 / 0.16), transparent 68%);
 
   /* A 1px top highlight for the lit edge of a card. `--color-hairline` is the
      colour; this is the ready-made gradient a `::before`/`background-image`
      can drop in. */
   --sheen: linear-gradient(180deg, var(--color-hairline), transparent 40%);
+
+  /* Design Tokens Architecture: OKLCH Ramp Aliases */
+  --ql-canvas: var(--color-surface);
+  --ql-surface-glass-1: oklch(0.18 0.016 264 / 0.72);
+  --ql-surface-glass-2: oklch(0.20 0.018 264 / 0.82);
+  --ql-surface-glass-3: oklch(0.24 0.020 264 / 0.90);
+  --ql-surface-solid: var(--color-surface-2);
+  --ql-glass-border: var(--color-edge);
+  --ql-glass-border-focus: var(--color-accent);
+  --ql-glass-sheen: var(--color-hairline);
+  --ql-glass-sheen-active: oklch(1 0 0 / 0.16);
+  --ql-shadow-neu-rest: var(--shadow-neu-rest);
+  --ql-shadow-neu-hover: var(--shadow-neu-hover);
+  --ql-shadow-neu-pressed: var(--shadow-neu-pressed);
+  --ql-shadow-neu-track: var(--shadow-neu-track);
+  --ql-ink: var(--color-ink);
+  --ql-ink-dim: var(--color-ink-dim);
+  --ql-ink-muted: oklch(0.55 0.018 264);
+  --ql-accent-cyan: var(--color-accent);
+  --ql-accent-sapphire: oklch(0.70 0.18 245);
+  --ql-accent-emerald: var(--color-hit);
+  --ql-accent-amber: var(--color-miss);
+  --ql-accent-rose: var(--color-evict);
 
 }
 
@@ -376,25 +401,23 @@ html {
 :root[data-theme='light'] {
   color-scheme: light;
 
-  --color-surface: oklch(0.99 0.002 260);
-  --color-surface-2: oklch(0.972 0.004 260);
-  --color-surface-3: oklch(0.94 0.006 260);
-  --color-surface-4: oklch(0.9 0.008 260);
-  --color-edge: oklch(0.86 0.012 260);
-  --color-ink: oklch(0.28 0.02 262);
-  /* 0.42, not 0.46: the pipeline tracker's arrows are drawn at `/80`, and at
-     0.46 that lands on 4.30:1 — under AA. Measured across the sweep, 0.44 is
-     the first passing value and 0.42 is where the floor stops improving. */
-  --color-ink-dim: oklch(0.42 0.02 262);
-  --color-accent: oklch(0.52 0.12 218);
-  --color-accent-strong: oklch(0.46 0.13 222);
-  --color-accent-soft: oklch(0.52 0.12 218 / 0.12);
-  --color-hairline: oklch(1 0 0 / 0.75);
+  --color-surface: oklch(0.98 0.005 260);
+  --color-surface-2: oklch(0.965 0.006 260);
+  --color-surface-3: oklch(0.935 0.008 260);
+  --color-surface-4: oklch(0.89 0.012 260);
+  --color-edge: oklch(0.82 0.015 260);
+  --color-ink: oklch(0.22 0.02 262);
+  /* 0.38 gives 5.8:1 on alabaster, comfortably exceeding WCAG AA even when rendered at /80. */
+  --color-ink-dim: oklch(0.38 0.02 262);
+  --color-accent: oklch(0.52 0.14 218);
+  --color-accent-strong: oklch(0.46 0.16 222);
+  --color-accent-soft: oklch(0.52 0.14 218 / 0.12);
+  --color-hairline: oklch(1 0 0 / 0.85);
   --color-flow-edge: oklch(0.78 0.014 260);
 
-  --color-hit: oklch(0.52 0.14 158);
-  --color-miss: oklch(0.56 0.13 62);
-  --color-evict: oklch(0.52 0.19 26);
+  --color-hit: oklch(0.48 0.15 155);
+  --color-miss: oklch(0.54 0.15 65);
+  --color-evict: oklch(0.50 0.19 25);
 
   --color-node-internal: oklch(0.52 0.2 340);
   --color-node-leaf: oklch(0.48 0.14 155);
@@ -420,16 +443,29 @@ html {
   --color-stage-result: oklch(52% 0.105 223.128);
 
   --color-line-active: oklch(0 0 0 / 4%);
-  --color-select: oklch(0.52 0.12 218 / 22%);
-  --color-span-active: oklch(0.52 0.12 218 / 16%);
+  --color-select: oklch(0.52 0.14 218 / 22%);
+  --color-span-active: oklch(0.52 0.14 218 / 16%);
 
-  --shadow-e1: 0 1px 2px oklch(0.45 0.03 262 / 0.1), 0 1px 3px oklch(0.45 0.03 262 / 0.06);
-  --shadow-e2: 0 6px 16px -4px oklch(0.45 0.03 262 / 0.14), 0 2px 6px -2px oklch(0.45 0.03 262 / 0.08);
-  --shadow-e3: 0 24px 48px -12px oklch(0.45 0.03 262 / 0.2), 0 6px 16px -6px oklch(0.45 0.03 262 / 0.1);
-  --shadow-glow: 0 0 0 1px oklch(0.52 0.12 218 / 0.4), 0 0 24px -6px oklch(0.52 0.12 218 / 0.35);
+  --shadow-e1: 0 1px 2px oklch(0.40 0.03 262 / 0.08), 0 1px 3px oklch(0.40 0.03 262 / 0.05);
+  --shadow-e2: 0 4px 12px -2px oklch(0.40 0.03 262 / 0.12), 0 2px 6px -1px oklch(0.40 0.03 262 / 0.08);
+  --shadow-e3: 0 20px 40px -8px oklch(0.40 0.03 262 / 0.16), 0 6px 16px -4px oklch(0.40 0.03 262 / 0.10);
+  --shadow-glow: 0 0 0 1px oklch(0.52 0.14 218 / 0.4), 0 0 24px -6px oklch(0.52 0.14 218 / 0.35);
+
+  --shadow-neu-rest: -1px -1px 2px 0px oklch(1 0 0 / 0.95), 0 1px 2px 0px oklch(0.40 0.03 262 / 0.08), 0 3px 8px -1px oklch(0.40 0.03 262 / 0.12);
+  --shadow-neu-hover: -1px -1px 3px 0px oklch(1 0 0 / 1.0), 0 2px 4px 0px oklch(0.40 0.03 262 / 0.10), 0 6px 14px -2px oklch(0.40 0.03 262 / 0.16), 0 0 0 1px oklch(0.52 0.14 218 / 0.25);
+  --shadow-neu-pressed: inset 0 2px 4px 0px oklch(0.35 0.03 262 / 0.16), inset 0 1px 1px 0px oklch(0.35 0.03 262 / 0.12), inset -1px -1px 2px 0px oklch(1 0 0 / 0.80);
+  --shadow-neu-track: inset 0 2px 4px 0px oklch(0.35 0.03 262 / 0.14), inset 0 0 2px 0px oklch(0.35 0.03 262 / 0.10), 0 1px 0px 0px oklch(1 0 0 / 0.90);
 
   --gradient-hero:
-    radial-gradient(90% 55% at 20% -10%, oklch(0.55 0.09 220 / 0.1), transparent 68%);
+    radial-gradient(90% 55% at 20% -10%, oklch(0.52 0.14 218 / 0.1), transparent 68%);
+
+  --ql-surface-glass-1: oklch(0.99 0.002 260 / 0.76);
+  --ql-surface-glass-2: oklch(0.975 0.004 260 / 0.86);
+  --ql-surface-glass-3: oklch(0.95 0.006 260 / 0.94);
+  --ql-glass-sheen: oklch(1 0 0 / 0.90);
+  --ql-glass-sheen-active: oklch(1 0 0 / 1.0);
+  --ql-ink-muted: oklch(0.50 0.02 262);
+  --ql-accent-sapphire: oklch(0.46 0.16 250);
 }
 
 body {
@@ -805,3 +841,80 @@ select:disabled {
   background: var(--color-accent);
   box-shadow: 0 0 12px -2px var(--color-accent-soft);
 }
+
+/**
+ * Glassmorphic surface containers & panels (Tactile Glass architecture)
+ */
+.ql-glass-panel {
+  position: relative;
+  background-color: var(--color-surface-2);
+  backdrop-filter: blur(12px) saturate(180%);
+  -webkit-backdrop-filter: blur(12px) saturate(180%);
+  border: 1px solid var(--color-edge);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-neu-rest);
+  isolation: isolate;
+  contain: paint layout;
+}
+
+.ql-glass-header {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  background-color: var(--color-surface);
+  backdrop-filter: blur(8px) saturate(160%);
+  -webkit-backdrop-filter: blur(8px) saturate(160%);
+  border-bottom: 1px solid var(--color-edge);
+  box-shadow: 0 4px 16px -4px oklch(0 0 0 / 0.25);
+}
+
+.ql-glass-floating {
+  position: absolute;
+  z-index: 50;
+  background-color: var(--color-surface-3);
+  backdrop-filter: blur(16px) saturate(190%);
+  -webkit-backdrop-filter: blur(16px) saturate(190%);
+  border: 1px solid var(--color-edge);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-e3);
+}
+
+.ql-code-plate {
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-edge);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-neu-track);
+}
+
+@supports not (backdrop-filter: blur(1px)) {
+  .ql-glass-panel,
+  .ql-glass-header,
+  .ql-glass-floating {
+    background-color: var(--color-surface-2);
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .ql-glass-panel,
+  .ql-glass-header,
+  .ql-glass-floating {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    background-color: var(--color-surface-2) !important;
+  }
+}
+
+@media (prefers-contrast: more) {
+  :root, :root[data-theme='light'] {
+    --color-edge: currentColor !important;
+  }
+
+  .ql-glass-panel,
+  .ql-glass-header,
+  .ql-glass-floating {
+    backdrop-filter: none !important;
+    border: 2px solid currentColor !important;
+    box-shadow: none !important;
+  }
+}
+

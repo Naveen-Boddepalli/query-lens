@@ -184,9 +184,12 @@ export function BTreeToolPage() {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-4 p-6 sm:p-8">
-      <PageHeader title="B+Tree sandbox">
-        Insert, delete and find keys against a live B+Tree — the same structure the{' '}
+    <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-5 p-6 sm:p-8">
+      <PageHeader
+        breadcrumbs={[{ label: 'Tools', to: '/tools' }, { label: 'B+Tree' }]}
+        title="B+Tree Visualizer"
+      >
+        Insert, delete, and search keys against a live B+Tree — the same structure the{' '}
         <Link to="/playground" className="underline underline-offset-2 hover:text-ink">
           Playground
         </Link>{' '}
@@ -194,9 +197,10 @@ export function BTreeToolPage() {
         and borrow from a sibling or merge on delete.
       </PageHeader>
 
-      <div className="mt-4 flex flex-wrap items-end gap-3 rounded-xl border border-edge bg-surface-2 p-3 shadow-e1">
-        <label htmlFor="fanout" className="flex flex-col gap-1 text-label text-ink-dim">
-          Fan-out (max keys per node)
+      {/* Control Toolbar */}
+      <div className="ql-sheen flex flex-wrap items-end gap-3 rounded-xl border border-edge bg-surface-2/80 p-4 shadow-neu-rest backdrop-blur-md">
+        <label htmlFor="fanout" className="flex flex-col gap-1.5 text-label text-ink-dim">
+          <span>Fan-out <span className="text-ink-dim/60 font-mono text-[0.75rem]">(max keys/node)</span></span>
           <select
             id="fanout"
             value={fanout}
@@ -204,22 +208,23 @@ export function BTreeToolPage() {
               setFanout(Number(e.target.value));
               setHighlight([]);
               setOutcome(null);
-              setMessage(`Rebuilt at fan-out ${e.target.value}.`);
+              setMessage(`Rebuilt tree at fan-out ${e.target.value}.`);
             }}
-            className={`${inputField} w-20 tabular-nums`}
+            className={`${inputField} w-24 tabular-nums`}
           >
             {Array.from({ length: MAX_FANOUT - MIN_FANOUT + 1 }, (_, i) => MIN_FANOUT + i).map((n) => (
-              <option key={n} value={n}>{n}</option>
+              <option key={n} value={n}>{n} keys</option>
             ))}
           </select>
         </label>
 
-        <label htmlFor="key" className="flex flex-col gap-1 text-label text-ink-dim">
-          Key
+        <label htmlFor="key" className="flex flex-col gap-1.5 text-label text-ink-dim">
+          <span>Target Key</span>
           <input
             id="key"
             type="text"
             inputMode="numeric"
+            placeholder="e.g. 25"
             value={keyInput}
             onChange={(e) => { setKeyInput(e.target.value); }}
             onKeyDown={(e) => { if (e.key === 'Enter') runFind(); }}
@@ -228,53 +233,91 @@ export function BTreeToolPage() {
           />
         </label>
 
-        <button type="button" onClick={runInsert} className={btnPrimary}>Insert</button>
-        <button type="button" onClick={runDelete} className={btnSecondary}>Delete</button>
-        <button type="button" onClick={runFind} className={btnSecondary}>Find</button>
+        <div className="flex items-center gap-1.5">
+          <button type="button" onClick={runInsert} className={btnPrimary}>
+            Insert
+          </button>
+          <button type="button" onClick={runDelete} className={btnSecondary}>
+            Delete
+          </button>
+          <button type="button" onClick={runFind} className={btnSecondary}>
+            Find
+          </button>
+        </div>
 
-        <span className="mx-1 h-6 w-px bg-edge" aria-hidden />
-        <button type="button" onClick={() => { reseed(SAMPLE); }} className={btnSecondary}>Sample</button>
-        <button
-          type="button"
-          onClick={() => { reseed(Array.from({ length: 20 }, (_, i) => i + 1)); }}
-          className={btnSecondary}
-        >
-          1–20
-        </button>
-        <button type="button" onClick={() => { reseed([]); }} className={btnSecondary}>Clear</button>
+        <span className="mx-1 hidden h-6 w-px bg-edge sm:inline-block" aria-hidden="true" />
+
+        <div className="flex items-center gap-1.5">
+          <button type="button" onClick={() => { reseed(SAMPLE); }} className={btnSecondary}>
+            Sample
+          </button>
+          <button
+            type="button"
+            onClick={() => { reseed(Array.from({ length: 20 }, (_, i) => i + 1)); }}
+            className={btnSecondary}
+          >
+            1&ndash;20
+          </button>
+          <button type="button" onClick={() => { reseed([]); }} className={btnSecondary}>
+            Clear
+          </button>
+        </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-label text-ink-dim tabular-nums">
-        <span>height <span className="text-ink">{height(tree)}</span></span>
-        <span>{treeKeys.length} key{treeKeys.length === 1 ? '' : 's'}</span>
-        <span>{Object.keys(tree.nodes).length} node{Object.keys(tree.nodes).length === 1 ? '' : 's'}</span>
-        <span
-          className={`rounded-full border px-2 py-0.5 ${
-            problems.length === 0
-              ? 'border-hit/50 text-hit'
-              : 'border-evict/50 text-evict'
-          }`}
-        >
-          {problems.length === 0 ? 'invariants hold' : `${problems.length} invariant violation${problems.length === 1 ? '' : 's'}`}
-        </span>
+      {/* Metrics Strip */}
+      <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+        {[
+          { label: 'Tree Height', value: String(height(tree)), sub: 'root to leaf levels' },
+          { label: 'Resident Keys', value: String(treeKeys.length), sub: 'indexed values', color: 'text-accent' },
+          { label: 'Total Nodes', value: String(Object.keys(tree.nodes).length), sub: `fan-out ${fanout}` },
+          {
+            label: 'Invariants',
+            value: problems.length === 0 ? 'Hold' : `${problems.length} Fail`,
+            sub: 'structural check',
+            color: problems.length === 0 ? 'text-hit' : 'text-evict',
+          },
+        ].map((m) => (
+          <div key={m.label} className="ql-sheen rounded-xl border border-edge bg-surface-2/60 p-3 shadow-neu-rest backdrop-blur-sm">
+            <span className="block font-mono text-[0.7rem] uppercase tracking-wider text-ink-dim">{m.label}</span>
+            <span className={`mt-1 block truncate text-heading font-semibold tabular-nums ${m.color ?? 'text-ink'}`}>
+              {m.value}
+            </span>
+            <span className="text-[0.75rem] text-ink-dim">{m.sub}</span>
+          </div>
+        ))}
       </div>
 
-      <p className="min-h-10 text-body leading-relaxed" aria-live="polite">{message}</p>
+      {/* Operation Log & Narration */}
+      <div className="ql-sheen rounded-xl border border-edge bg-surface-2/80 p-4 shadow-neu-rest backdrop-blur-sm">
+        <h3 className="mb-1 text-label font-medium tracking-[0.12em] text-ink-dim uppercase font-mono">
+          Operation Narration
+        </h3>
+        <p className="min-h-8 text-body leading-relaxed text-ink" aria-live="polite">
+          {message}
+        </p>
+      </div>
 
       {problems.length > 0 && (
-        <ul className="rounded-lg border border-evict/40 bg-evict/10 p-3 text-label text-ink">
-          {problems.map((p) => <li key={p}>{p}</li>)}
+        <ul className="rounded-xl border border-evict/40 bg-evict/10 p-3 text-label text-ink space-y-1">
+          {problems.map((p) => (
+            <li key={p} className="flex items-center gap-2">
+              <span className="font-mono text-evict font-bold">[FAIL]</span>
+              <span>{p}</span>
+            </li>
+          ))}
         </ul>
       )}
 
-      <div className={`${panelSurface} min-h-96 flex-1 p-4`}>
+      {/* Visualization Panel */}
+      <div className={`${panelSurface} min-h-96 flex-1 p-5`}>
         <BTreePanel tree={display} path={highlight} outcome={outcome} />
       </div>
 
-      <p className="text-label break-words text-ink-dim">
-        <span className="text-ink-dim">keys:</span>{' '}
-        <span className="font-mono text-ink">{treeKeys.length === 0 ? '(none)' : treeKeys.join(' ')}</span>
-      </p>
+      {/* Keys Registry Strip */}
+      <div className="ql-sheen flex flex-wrap items-center gap-2 rounded-xl border border-edge bg-surface-2/60 p-3 shadow-neu-rest backdrop-blur-sm text-label font-mono text-[0.78rem]">
+        <span className="uppercase tracking-wider text-ink-dim">Keys:</span>
+        <span className="text-ink break-words">{treeKeys.length === 0 ? '(none)' : treeKeys.join(' ')}</span>
+      </div>
     </div>
   );
 }

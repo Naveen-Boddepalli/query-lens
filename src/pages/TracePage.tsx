@@ -23,26 +23,6 @@ import {
 import { ScrollRegion } from '../ui/ScrollRegion.tsx';
 import { useAddressBarQuery } from '../ui/addressBar.ts';
 
-/**
- * plan.md §21.3, "Explore": the raw `StepEvent[]` for a query as a filterable
- * table and copyable JSON — the developer-facing complement to §20.3's Mermaid
- * and PNG exports. It runs the *same* `runQuery` the Playground does, so what
- * you inspect here is exactly what the panels fold; a row's `#` opens the
- * Playground at that step (plan.md §21.4 #4).
- *
- * It reads the Playground's own share keys (`q`, `p`, `d`) so a link pasted
- * from one opens usefully in the other, and parses them with the same
- * defensive `readShareState` — the URL is still the one value from a stranger.
- * It does not carry a step (`s`) or predict flag (`x`): the whole trace is on
- * screen at once, and prediction is a playback gate, not an event.
- *
- * Two views (plan.md §22.6): the JSON-shaped **table**, and a **transcript** —
- * the narration lines as a numbered, printable list, each a link into the
- * Playground. The transcript is the §9 study's control-group artefact (read the
- * steps rather than step them) and, via `@media print` (`src/index.css`), a
- * paper worksheet. `v=transcript` opens straight to it.
- */
-
 const search = typeof location === 'undefined' ? '' : location.search;
 
 // The inspector honours the Playground's `t` (preset dataset, plan.md §22.7)
@@ -207,14 +187,15 @@ export function TracePage() {
     <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-4 p-6 sm:p-8">
       <PageHeader title="Trace inspector">
         The raw event stream <code className="font-mono text-ink">runQuery</code> produces for a
-        query — the array every panel folds. Filter it, copy it as JSON, or jump to any step in the{' '}
+        query — the array every panel folds. Filter it, inspect collapsible JSON nodes, copy as JSON,
+        or jump directly to any step in the{' '}
         <Link to={playgroundLink()} className="underline underline-offset-2 hover:text-ink">
           Playground
         </Link>
         .
       </PageHeader>
 
-      <div className="mt-4 flex flex-col gap-3 rounded-xl border border-edge bg-surface-2 p-3 shadow-e1">
+      <div className="mt-4 flex flex-col gap-3 rounded-xl border border-edge bg-surface-2 p-4 shadow-neu-rest backdrop-blur-sm">
         <label htmlFor="sql" className="flex flex-col gap-1 text-label text-ink-dim">
           Query
           <textarea
@@ -251,10 +232,10 @@ export function TracePage() {
       </div>
 
       {result.error ? (
-        <div className="rounded-lg border border-evict/40 bg-evict/10 p-3">
-          <p className="text-body text-ink">{result.error.message}</p>
+        <div className="rounded-lg border border-evict/40 bg-evict/10 p-4">
+          <p className="text-body font-medium text-ink">{result.error.message}</p>
           {result.error.hint && <p className="mt-1 text-label text-ink-dim">{result.error.hint}</p>}
-          <p className="mt-1 text-label text-ink-dim">
+          <p className="mt-2 text-label text-ink-dim">
             {result.events.length} event{result.events.length === 1 ? '' : 's'} emitted before it stopped.
           </p>
         </div>
@@ -303,12 +284,12 @@ export function TracePage() {
                   type="text"
                   value={query}
                   onChange={(e) => { setQuery(e.target.value); }}
-                  placeholder="filter narration…"
+                  placeholder="filter events…"
                   className={`${inputField} ml-auto w-48`}
                   aria-label="Filter events by text"
                 />
                 <button type="button" onClick={() => { void copyJson(); }} className={btnSecondary}>
-                  {copied ? 'Copied ✓' : 'Copy JSON'}
+                  {copied ? 'Copied' : 'Copy JSON'}
                 </button>
               </div>
 
@@ -398,6 +379,46 @@ export function TracePage() {
   );
 }
 
+function JsonTreeNode({ name, value }: { name?: string; value: unknown }) {
+  const [open, setOpen] = useState(true);
+  const prefix = name ? <span className="text-accent font-medium">{name}: </span> : null;
+
+  if (value === null || typeof value !== 'object') {
+    return (
+      <div className="font-mono text-label py-0.5">
+        {prefix}<span className="text-ink">{typeof value === 'string' ? `"${value}"` : String(value)}</span>
+      </div>
+    );
+  }
+
+  const isArr = Array.isArray(value);
+  const entries = isArr
+    ? (value as unknown[]).map((v, i) => [String(i), v] as const)
+    : Object.entries(value as Record<string, unknown>);
+
+  return (
+    <div className="font-mono text-label">
+      <button
+        type="button"
+        onClick={(ev) => { ev.stopPropagation(); setOpen((o) => !o); }}
+        className="inline-flex items-center gap-1 py-0.5 text-ink-dim hover:text-ink"
+        aria-expanded={open}
+      >
+        <span className="w-3 text-center text-[10px] text-ink-dim/60">{open ? '−' : '+'}</span>
+        {prefix}
+        <span className="text-ink-dim/60">{isArr ? `[${entries.length}]` : `{${entries.length}}`}</span>
+      </button>
+      {open && (
+        <div className="border-l border-edge ml-1.5 pl-2">
+          {entries.map(([k, v]) => (
+            <JsonTreeNode key={k} name={k} value={v} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function FragmentRow({
   event,
   open,
@@ -409,10 +430,12 @@ function FragmentRow({
   onToggle: () => void;
   href: string;
 }) {
+  const [copied, setCopied] = useState(false);
+
   return (
     <>
       <tr
-        className="cursor-pointer border-b border-edge/60 align-top hover:bg-surface-3/60"
+        className="cursor-pointer border-b border-edge/60 align-top transition-colors hover:bg-surface-3/60"
         onClick={onToggle}
       >
         <td className="px-3 py-2 font-mono tabular-nums text-ink-dim">
@@ -434,17 +457,36 @@ function FragmentRow({
             <span className="ml-1.5 text-ink-dim/70">· dwell {event.dwell}</span>
           )}
           {event.predictable && (
-            <span className="ml-1.5 rounded border border-accent/40 px-1 text-accent">predict</span>
+            <span className="ml-1.5 rounded border border-accent/40 bg-accent-soft/30 px-1 text-accent">predict</span>
           )}
         </td>
         <td className="px-3 py-2 text-ink">{event.label}</td>
       </tr>
       {open && (
         <tr className="border-b border-edge bg-surface-3/40">
-          <td colSpan={4} className="px-3 py-2">
-            <pre className="font-mono text-label break-words whitespace-pre-wrap text-ink-dim">
-              {JSON.stringify(event, null, 2)}
-            </pre>
+          <td colSpan={4} className="p-3">
+            <div className="rounded-lg border border-edge bg-surface/80 p-3 shadow-neu-rest backdrop-blur-sm">
+              <div className="mb-2 flex items-center justify-between border-b border-edge/60 pb-2">
+                <span className="font-mono text-label font-semibold uppercase text-ink">
+                  Event #{event.id} Inspector
+                </span>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void navigator.clipboard.writeText(JSON.stringify(event, null, 2));
+                    setCopied(true);
+                    setTimeout(() => { setCopied(false); }, 1500);
+                  }}
+                  className="rounded border border-edge bg-surface-2 px-2.5 py-0.5 font-mono text-[11px] text-ink-dim transition hover:border-accent hover:text-ink cursor-pointer"
+                >
+                  {copied ? 'Copied' : 'Copy JSON'}
+                </button>
+              </div>
+              <div className="overflow-x-auto py-1">
+                <JsonTreeNode value={event} />
+              </div>
+            </div>
           </td>
         </tr>
       )}

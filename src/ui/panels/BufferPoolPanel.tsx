@@ -37,17 +37,14 @@ const MOOD_CLASS: Record<Exclude<FrameMood, null>, string> = {
   sweep: 'border-accent bg-accent/10 shadow-glow hover:bg-accent/20',
 };
 
-// A leading glyph so the mood reads without relying on the border hue — the
-// always-on second channel plan.md §22.6 asks for (colour-vision deficiency,
-// projector wash-out). `✓` resident, `↓` came from disk, `✎` freshly written,
-// `✕` dropped, `↻` swept.
+// Clean status chips for high contrast and accessibility without unicode emojis.
 const MOOD_TAG: Record<Exclude<FrameMood, null>, string> = {
-  hit: '✓ hit',
-  load: '↓ disk read',
-  prefetch: '↓ prefetched',
-  write: '✎ written',
-  evict: '✕ evicted',
-  sweep: '↻ swept',
+  hit: 'HIT',
+  load: 'DISK READ',
+  prefetch: 'PREFETCHED',
+  write: 'DIRTY WRITE',
+  evict: 'EVICTED',
+  sweep: 'SWEPT',
 };
 
 /**
@@ -162,15 +159,19 @@ export function BufferPoolPanel({
               <div className="flex items-baseline justify-between text-label text-ink-dim">
                 <span>frame {frame.frameId}</span>
                 {policy === 'clock' && clockHand === frame.frameId && (
-                  <span title="clock hand is here" aria-label="clock hand">
-                    👉
+                  <span
+                    title="clock hand is here"
+                    aria-label="clock hand"
+                    className="rounded bg-accent/20 px-1 py-0.5 font-mono text-micro font-medium text-accent border border-accent/40"
+                  >
+                    HAND
                   </span>
                 )}
               </div>
 
-              <div className="mt-0.5 font-mono text-body">
+              <div className="mt-0.5 font-mono text-body font-semibold">
                 {empty ? (
-                  <span className="text-ink-dim">empty</span>
+                  <span className="text-ink-dim font-normal">empty</span>
                 ) : (
                   <span>page {frame.pageId}</span>
                 )}
@@ -185,7 +186,7 @@ export function BufferPoolPanel({
                     <span
                       key={i}
                       className={`h-1 flex-1 rounded-full ${
-                        i < frame.usageCount ? 'bg-accent' : 'bg-edge'
+                        i < frame.usageCount ? 'bg-accent shadow-sm' : 'bg-edge/70'
                       }`}
                     />
                   ))}
@@ -193,8 +194,10 @@ export function BufferPoolPanel({
               )}
 
               {mood && (
-                <div className="mt-1 text-label tracking-wide uppercase opacity-80">
-                  {MOOD_TAG[mood]}
+                <div className="mt-1 text-label tracking-wide uppercase opacity-90 font-mono text-micro">
+                  {mood === 'evict' && lastEvent?.stage === 'buffer' && lastEvent.action === 'evict' && lastEvent.writtenBack
+                    ? 'FLUSH DIRTY'
+                    : MOOD_TAG[mood]}
                 </div>
               )}
             </div>
@@ -202,28 +205,26 @@ export function BufferPoolPanel({
         })}
       </div>
 
-      {/* The counts echo the frame glyphs (§22.6), so the green/amber/red on the
-          numbers is a third channel, not the only one. */}
       <dl className="flex flex-wrap gap-x-5 gap-y-1 text-label">
         <div>
-          <dt className="text-ink-dim"><span aria-hidden>✓ </span>hits</dt>
+          <dt className="text-ink-dim">hits</dt>
           <dd className="font-mono text-hit">{stats.hits}</dd>
         </div>
         <div>
-          <dt className="text-ink-dim"><span aria-hidden>↓ </span>misses</dt>
+          <dt className="text-ink-dim">misses</dt>
           <dd className="font-mono text-miss">{stats.misses}</dd>
         </div>
         <div>
-          <dt className="text-ink-dim"><span aria-hidden>↓ </span>disk reads</dt>
+          <dt className="text-ink-dim">disk reads</dt>
           <dd className="font-mono text-miss">{stats.misses + stats.prefetches}</dd>
         </div>
         <div>
-          <dt className="text-ink-dim"><span aria-hidden>✕ </span>evictions</dt>
+          <dt className="text-ink-dim">evictions</dt>
           <dd className="font-mono text-evict">{stats.evictions}</dd>
         </div>
         {stats.writes > 0 && (
           <div>
-            <dt className="text-ink-dim"><span aria-hidden>✎ </span>writes</dt>
+            <dt className="text-ink-dim">writes</dt>
             <dd className="font-mono text-hue-violet-ink">{stats.writes}</dd>
           </div>
         )}

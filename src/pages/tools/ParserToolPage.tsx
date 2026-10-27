@@ -122,49 +122,85 @@ export function ParserToolPage() {
   const visibleTokens = lexed.ok ? lexed.tokens.filter((t) => t.type !== 'eof') : [];
 
   return (
-    <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-4 p-6 sm:p-8">
-      <PageHeader title="Parser sandbox">
-        Type SQL — including SQL QueryLens does not support — and watch the tokenizer split it
-        into a stream and the recursive-descent parser build the AST, or explain why it cannot.
-        This is the parse stage from the{' '}
-        <Link to="/playground" className="underline underline-offset-2 hover:text-ink">
-          Playground
-        </Link>
-        , with the token stream it normally hides.
+    <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-5 p-6 sm:p-8">
+      <PageHeader
+        breadcrumbs={[{ label: 'Tools', to: '/tools' }, { label: 'SQL Parser' }]}
+        title="Recursive-Descent Parser Sandbox"
+      >
+        Type SQL &mdash; including SQL QueryLens does not yet support &mdash; and watch the tokenizer
+        split the input into a live token ribbon and the recursive-descent parser construct the AST.
+        This provides direct visibility into lexical and syntactic analysis stages.
       </PageHeader>
 
-      <label htmlFor="src" className="mt-4 flex flex-col gap-1 text-label text-ink-dim">
-        SQL source
+      {/* SQL Source Input */}
+      <div className="ql-sheen flex flex-col gap-2 rounded-xl border border-edge bg-surface-2/80 p-4 shadow-neu-rest backdrop-blur-md">
+        <label htmlFor="src" className="font-mono uppercase tracking-wider text-[0.75rem] text-ink-dim">
+          SQL Query Source
+        </label>
         <textarea
           id="src"
           value={src}
           onChange={(e) => { setSrc(e.target.value.slice(0, MAX_SRC)); }}
           rows={3}
           spellCheck={false}
-          className={`${inputField} resize-y font-mono`}
+          className={`${inputField} resize-y font-mono text-[0.85rem]`}
         />
-      </label>
+      </div>
+
+      {/* Metrics Strip */}
+      <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+        {[
+          { label: 'Lexed Tokens', value: String(visibleTokens.length), sub: lexed.ok ? 'token stream' : 'lexer error' },
+          {
+            label: 'Parser Status',
+            value: parsed.ok ? 'Valid AST' : 'Parse Error',
+            sub: parsed.ok ? 'statement accepted' : 'syntax rejected',
+            color: parsed.ok ? 'text-hit' : 'text-evict',
+          },
+          { label: 'AST Nodes', value: String(tree ? countNodes(tree) : 0), sub: 'syntax nodes', color: 'text-accent' },
+          { label: 'Recursion Depth', value: String(tree ? treeDepth(tree) : 0), sub: 'call stack height' },
+        ].map((m) => (
+          <div key={m.label} className="ql-sheen rounded-xl border border-edge bg-surface-2/60 p-3 shadow-neu-rest backdrop-blur-sm">
+            <span className="block font-mono text-[0.7rem] uppercase tracking-wider text-ink-dim">{m.label}</span>
+            <span className={`mt-1 block truncate text-heading font-semibold tabular-nums ${m.color ?? 'text-ink'}`}>
+              {m.value}
+            </span>
+            <span className="text-[0.75rem] text-ink-dim">{m.sub}</span>
+          </div>
+        ))}
+      </div>
 
       {/* --- token ribbon ------------------------------------------------- */}
-      <section aria-labelledby="ribbon-h" className="flex flex-col gap-2">
-        <h3 id="ribbon-h" className="text-label font-medium tracking-[0.12em] text-ink-dim uppercase">
-          Tokens
-        </h3>
+      <section
+        aria-labelledby="ribbon-h"
+        className="ql-sheen flex flex-col gap-2.5 rounded-xl border border-edge bg-surface-2/80 p-4 shadow-neu-rest backdrop-blur-sm"
+      >
+        <div className="flex items-center justify-between border-b border-edge/60 pb-1.5">
+          <h3 id="ribbon-h" className="font-mono text-[0.75rem] font-medium uppercase tracking-[0.12em] text-ink-dim">
+            Tokenizer Stream
+          </h3>
+          {lexed.ok && visibleTokens.length > 0 && (
+            <span className="font-mono text-[0.72rem] text-ink-dim/70">
+              {visibleTokens.length} tokens &middot; EOF
+            </span>
+          )}
+        </div>
+
         {lexed.ok ? (
           visibleTokens.length === 0 ? (
-            <p className="text-label text-ink-dim">Nothing to tokenize yet.</p>
+            <p className="text-label text-ink-dim">Nothing to tokenize yet. Enter SQL in the prompt above.</p>
           ) : (
             <ol className="flex flex-wrap gap-1.5">
               {visibleTokens.map((t, i) => (
                 <li
                   key={`${String(t.from)}-${String(i)}`}
-                  className={`flex flex-col items-center gap-0.5 rounded-md border px-2 py-1 ${TOKEN_TONE[t.type]}`}
-                  title={`${t.type} · chars ${String(t.from)}–${String(t.to)}`}
+                  className={`flex flex-col items-center gap-0.5 rounded-lg border px-2 py-1 shadow-neu-rest backdrop-blur-sm ${TOKEN_TONE[t.type]}`}
+                  title={`${t.type} &middot; chars ${String(t.from)}&ndash;${String(t.to)}`}
                 >
-                  <span className="font-mono text-label leading-tight break-all">
+                  <span className="font-mono text-label leading-tight break-all font-medium">
                     {t.type === 'string' ? `'${t.value}'` : t.value}
                   </span>
-                  <span className="text-[0.7rem] leading-none tracking-[0.08em] uppercase">
+                  <span className="text-[0.68rem] font-mono leading-none tracking-[0.08em] uppercase opacity-75">
                     {t.type}
                   </span>
                 </li>
@@ -172,36 +208,26 @@ export function ParserToolPage() {
             </ol>
           )
         ) : (
-          <div className="flex flex-col gap-2 rounded-lg border border-evict/40 bg-evict/10 p-3">
-            <p className="text-label text-ink">{lexed.message}</p>
+          <div className="flex flex-col gap-2 rounded-xl border border-evict/40 bg-evict/10 p-3.5">
+            <p className="text-label font-medium text-ink">{lexed.message}</p>
             <MarkedSource src={src} from={lexed.from} to={lexed.to} />
           </div>
-        )}
-        {lexed.ok && visibleTokens.length > 0 && (
-          <p className="text-label text-ink-dim tabular-nums">
-            {visibleTokens.length} tokens, then EOF.
-          </p>
         )}
       </section>
 
       {/* --- AST / parse result --------------------------------------------- */}
-      <section aria-labelledby="ast-h" className="flex flex-1 flex-col gap-2">
-        <h3 id="ast-h" className="text-label font-medium tracking-[0.12em] text-ink-dim uppercase">
-          Abstract syntax tree
+      <section aria-labelledby="ast-h" className="flex flex-1 flex-col gap-2.5">
+        <h3 id="ast-h" className="font-mono text-[0.75rem] font-medium uppercase tracking-[0.12em] text-ink-dim">
+          Abstract Syntax Tree
         </h3>
 
         {parsed.ok && tree ? (
-          <>
-            <p className="text-label text-ink-dim tabular-nums">
-              Parsed · {countNodes(tree)} nodes · recursion depth {treeDepth(tree)}
-            </p>
-            <div className={`${panelSurface} min-h-64 flex-1 p-4`}>
-              <AstTree root={tree} />
-            </div>
-          </>
+          <div className={`${panelSurface} min-h-64 flex-1 p-5`}>
+            <AstTree root={tree} />
+          </div>
         ) : (
-          <div className="flex flex-col gap-2 rounded-lg border border-evict/40 bg-evict/10 p-3">
-            <p className="text-label text-ink">{parsed.ok ? 'No statement.' : parsed.error.message}</p>
+          <div className="flex flex-col gap-2.5 rounded-xl border border-evict/40 bg-evict/10 p-4">
+            <p className="text-label font-medium text-ink">{parsed.ok ? 'No statement.' : parsed.error.message}</p>
             {!parsed.ok && parsed.error.hint && (
               <p className="text-label text-ink-dim">{parsed.error.hint}</p>
             )}
@@ -215,6 +241,18 @@ export function ParserToolPage() {
           </div>
         )}
       </section>
+
+      <p className="text-label leading-relaxed text-ink-dim">
+        Compare this token stream and syntax tree with the{' '}
+        <Link to="/tools/grammar" className="underline underline-offset-2 hover:text-ink">
+          SQL grammar explorer
+        </Link>{' '}
+        or see the full query lifecycle in the{' '}
+        <Link to="/playground" className="underline underline-offset-2 hover:text-ink">
+          Playground
+        </Link>
+        .
+      </p>
     </div>
   );
 }

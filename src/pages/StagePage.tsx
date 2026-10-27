@@ -12,7 +12,7 @@ import { STAGE_META } from '../ui/stageMeta.ts';
 import { useDocumentTitle } from '../ui/documentTitle.ts';
 import { ErrorBoundary } from '../ui/ErrorBoundary.tsx';
 import { StageDetail } from '../ui/panels/StageDetail.tsx';
-import { btnGhost, btnPrimary, eyebrow, panelSurface } from '../ui/primitives.ts';
+import { btnGhost, btnPrimary, panelSurface } from '../ui/primitives.ts';
 
 const INITIAL_SQL = 'SELECT *\nFROM users\nWHERE id = 5;';
 
@@ -60,35 +60,63 @@ export function StagePage() {
   const nextStage = stageIndex < STAGES.length - 1 ? STAGES[stageIndex + 1] : null;
 
   return (
-    <div className="flex flex-1 flex-col gap-6 overflow-y-auto p-6 sm:p-8">
+    <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-6 p-6 sm:p-8">
+      {/* Stage Header */}
       <div>
-        <p className={eyebrow}>
-          Stage {stageIndex + 1} of {STAGES.length}
-        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="inline-flex items-center gap-1.5 rounded-md border border-edge bg-surface-2/80 px-2 py-0.5 font-mono text-[11px] text-ink-dim shadow-neu-rest">
+            <span
+              aria-hidden="true"
+              className="h-2 w-2 rounded-sm"
+              style={{ background: `var(--color-stage-${stageId})` }}
+            />
+            Stage {stageIndex + 1} of {STAGES.length}
+          </span>
+          {meta.doc && (
+            <Link
+              to={meta.doc}
+              className="text-label text-accent underline underline-offset-2 hover:text-ink"
+            >
+              Read concept doc
+            </Link>
+          )}
+        </div>
         <h2 className={`mt-2 text-display font-semibold tracking-tight ${meta.tone}`}>
           {meta.title}
         </h2>
-        <p className="mt-2 text-body text-ink-dim">{meta.blurb}</p>
+        <p className="mt-1 text-body text-ink-dim">{meta.blurb}</p>
       </div>
 
-      <div className="max-w-3xl text-body leading-relaxed text-ink-dim">
-        <p>{STAGE_EDUCATION[stageId]}</p>
+      {/* Educational Box */}
+      <div className="ql-sheen rounded-xl border border-edge bg-surface-2/85 p-5 shadow-neu-rest backdrop-blur-sm">
+        <h3 className="mb-2 font-mono text-label font-semibold uppercase tracking-wider text-ink">
+          How It Works
+        </h3>
+        <p className="max-w-3xl text-body leading-relaxed text-ink-dim">
+          {STAGE_EDUCATION[stageId]}
+        </p>
       </div>
 
-      {/* Interactive demo panel */}
-      <div className={`${panelSurface} min-h-80 overflow-hidden p-4`}>
-        <ErrorBoundary variant="panel" label={meta.title} resetKey={stageId}>
-          <StageDetail
-            stage={stageId}
-            state={demoState}
-            policy={DEFAULT_ENGINE_OPTIONS.policy}
-            pinned={false}
-          />
-        </ErrorBoundary>
+      {/* Interactive Demo Panel */}
+      <div className="space-y-2">
+        <div className="flex items-center justify-between text-label text-ink-dim">
+          <span className="font-mono text-[11px] uppercase tracking-wider">Live Stage Inspection</span>
+          <span className="font-mono text-[11px]">Query: SELECT * FROM users WHERE id = 5;</span>
+        </div>
+        <div className={`${panelSurface} min-h-80 overflow-hidden p-4`}>
+          <ErrorBoundary variant="panel" label={meta.title} resetKey={stageId}>
+            <StageDetail
+              stage={stageId}
+              state={demoState}
+              policy={DEFAULT_ENGINE_OPTIONS.policy}
+              pinned={false}
+            />
+          </ErrorBoundary>
+        </div>
       </div>
 
       {/* Previous / Next navigation */}
-      <nav className="flex items-center justify-between gap-3 border-t border-edge pt-4">
+      <nav aria-label="Adjacent stages navigation" className="flex items-center justify-between gap-3 border-t border-edge pt-4">
         {prevStage ? (
           <Link to={`/stages/${prevStage}`} className={btnGhost}>
             ← {STAGE_META[prevStage].title}

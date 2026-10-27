@@ -67,17 +67,20 @@ export function PageToolPage() {
   const usedPct = Math.min(100, Math.round((layout.usedBytes / pageBytes) * 100));
 
   return (
-    <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-4 p-6 sm:p-8">
-      <PageHeader title="Slotted page inspector">
-        One heap page of <code className="font-mono text-ink">users</code>, laid out to the byte —
-        the header, the slot array, the tuples and the free space between them. The engine models a
-        page as just a list of rows; this is what that would look like on disk. Not byte-exact to any
-        real engine, but self-consistent.
+    <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-5 p-6 sm:p-8">
+      <PageHeader
+        breadcrumbs={[{ label: 'Tools', to: '/tools' }, { label: 'Slotted Page' }]}
+        title="Slotted Page Inspector"
+      >
+        One heap page of <code className="font-mono text-ink">users</code>, laid out to the byte &mdash;
+        the header, the slot array, the tuples, and the free space between them. The engine models a
+        page as a list of rows; this illustrates the physical binary layout on disk.
       </PageHeader>
 
-      <div className="mt-4 flex flex-wrap items-end gap-4 rounded-xl border border-edge bg-surface-2 p-3 shadow-e1">
-        <label className="flex flex-col gap-1 text-label text-ink-dim">
-          Page
+      {/* Control Toolbar */}
+      <div className="ql-sheen flex flex-wrap items-end gap-4 rounded-xl border border-edge bg-surface-2/80 p-4 shadow-neu-rest backdrop-blur-md">
+        <label className="flex flex-col gap-1.5 text-label text-ink-dim">
+          <span>Target Page</span>
           <select
             value={pageId}
             onChange={(e) => { setPageId(Number(e.target.value)); setSelected(null); }}
@@ -85,15 +88,15 @@ export function PageToolPage() {
           >
             {HEAP.pages.map((p) => (
               <option key={p.pageId} value={p.pageId}>
-                page {p.pageId} · rows {HEAP.firstRowIndex[p.pageId]}–
+                Page {p.pageId} &middot; rows {HEAP.firstRowIndex[p.pageId]}&ndash;
                 {HEAP.firstRowIndex[p.pageId]! + p.rows.length - 1}
               </option>
             ))}
           </select>
         </label>
 
-        <label className="flex flex-col gap-1 text-label text-ink-dim">
-          Page size (bytes)
+        <label className="flex flex-col gap-1.5 text-label text-ink-dim">
+          <span>Page Size (bytes)</span>
           <input
             type="number"
             min={MIN_BYTES}
@@ -108,22 +111,48 @@ export function PageToolPage() {
           />
         </label>
 
-        <div className="flex gap-1.5">
-          {([['512 B', 512], ['4 KB', 4096], ['8 KB', 8192]] as const).map(([label, n]) => (
-            <button
-              key={n}
-              type="button"
-              onClick={() => { setPageBytes(n); }}
-              className={`rounded-md border px-2 py-1 text-label transition ${
-                pageBytes === n
-                  ? 'border-accent bg-accent-soft text-ink'
-                  : 'border-edge text-ink-dim hover:border-ink-dim/50'
-              }`}
-            >
-              {label}
-            </button>
-          ))}
+        <div className="flex flex-col gap-1.5 text-label text-ink-dim">
+          <span>Preset Sizes</span>
+          <div className="flex gap-1.5">
+            {([['512 B', 512], ['4 KB', 4096], ['8 KB', 8192]] as const).map(([label, n]) => (
+              <button
+                key={n}
+                type="button"
+                onClick={() => { setPageBytes(n); }}
+                className={`rounded-lg border px-3 py-1.5 text-label font-medium transition duration-150 ease-out select-none ${
+                  pageBytes === n
+                    ? 'border-accent bg-accent-soft text-ink shadow-neu-rest backdrop-blur-sm'
+                    : 'border-edge bg-surface-2/80 text-ink-dim hover:border-ink-dim/50 hover:bg-surface-3 hover:text-ink'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
+      </div>
+
+      {/* Metrics Strip */}
+      <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+        {[
+          { label: 'Page Size', value: B(pageBytes), sub: `${pageBytes} B disk frame` },
+          { label: 'Space Used', value: `${usedPct}%`, sub: `${B(layout.usedBytes)} allocated`, color: 'text-accent' },
+          {
+            label: 'Free Space',
+            value: layout.overflow ? 'Overflow' : B(layout.freeBytes),
+            sub: layout.overflow ? 'exceeds capacity' : `${100 - usedPct}% remaining`,
+            color: layout.overflow ? 'text-evict' : 'text-hit',
+          },
+          { label: 'Tuples', value: String(layout.tuples.length), sub: `~${layout.moreRowsFit} more fit` },
+        ].map((m) => (
+          <div key={m.label} className="ql-sheen rounded-xl border border-edge bg-surface-2/60 p-3 shadow-neu-rest backdrop-blur-sm">
+            <span className="block font-mono text-[0.7rem] uppercase tracking-wider text-ink-dim">{m.label}</span>
+            <span className={`mt-1 block truncate text-heading font-semibold tabular-nums ${m.color ?? 'text-ink'}`}>
+              {m.value}
+            </span>
+            <span className="text-[0.75rem] text-ink-dim">{m.sub}</span>
+          </div>
+        ))}
       </div>
 
       {/* The map. A proportional strip: header, slot array, free space, then the

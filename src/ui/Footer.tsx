@@ -1,28 +1,7 @@
 import { Link } from 'react-router-dom';
 import { REPO_URL } from '../buildInfo.ts';
-import { DOCS_NAV } from '../docsNav.ts';
 import { NAV_ITEMS } from '../routes.ts';
-import { Logo } from './Logo.tsx';
-
-/**
- * plan.md §16.2 item 9, and §19.1's fifth job.
- *
- * `DisclaimerBanner` is a top bar and stays one — §12 wants the "simplified
- * model" framing unmissable, and a disclaimer in a footer is a disclaimer
- * nobody read. This is a *separate*, real footer: the quiet way deeper, below
- * the fold, for the visitor who has watched a trace and now wants the source,
- * the docs, or a way to file a bug. (The build SHA that identifies a bug
- * report lives in the served HTML and the console banner — see index.html and
- * src/ui/errorReport.ts — not in visible footer text.)
- *
- * Four blocks — a brand block plus three labelled columns — rather than the
- * single row of links this used to be: the app now has enough real
- * destinations (§21.3) that one row would wrap illegibly. "Explore" reads
- * straight off `src/routes.ts`'s primary nav, so it cannot drift from what the
- * header itself offers; "Documentation" is a curated five of the docs site's
- * nine pages (`src/docsNav.ts` has the rest) — a footer column is a map, not
- * a table of contents.
- */
+import { Logo, VersionBadge } from './Logo.tsx';
 
 interface FooterLink {
   label: string;
@@ -31,48 +10,55 @@ interface FooterLink {
   external?: boolean;
 }
 
-const EXPLORE_LINKS: FooterLink[] = NAV_ITEMS.filter((item) => item.nav && item.path !== '/docs').map(
+const PRIMARY_NAV_LINKS: FooterLink[] = NAV_ITEMS.filter((item) => item.nav).map(
   (item) => ({ label: item.label, href: item.path }),
 );
 
-// The "Introduction" group's three items, verbatim from `docsNav.ts`, plus a
-// hand-picked entry point into each of the other two groups — a footer column
-// is a map into the docs site, not a copy of its sidebar.
-const DOCS_LINKS: FooterLink[] = [
-  ...(DOCS_NAV.find((g) => g.title === 'Introduction')?.items ?? []),
-  { to: DOCS_NAV.find((g) => g.title === 'Concepts')?.items[0]?.to ?? '/docs', label: 'Concepts' },
-  { to: DOCS_NAV.find((g) => g.title === 'Study')?.items[0]?.to ?? '/docs', label: 'Course map & interview path' },
-  { to: DOCS_NAV.find((g) => g.title === 'Reference')?.items[0]?.to ?? '/docs', label: 'Reference' },
-].map((item) => ({ label: item.label, href: item.to }));
+const SANDBOX_LINKS: FooterLink[] = [
+  { label: 'B+Tree sandbox', href: '/tools/btree' },
+  { label: 'Buffer pool sandbox', href: '/tools/buffer-pool' },
+  { label: 'Parser sandbox', href: '/tools/parser' },
+  { label: 'Planner sandbox', href: '/tools/planner' },
+  { label: 'Slotted page inspector', href: '/tools/page' },
+  { label: 'External merge sort', href: '/tools/sort' },
+  { label: 'Locks sandbox', href: '/tools/locks' },
+  { label: 'Hash join sandbox', href: '/tools/hash-join' },
+  { label: 'Grammar sandbox', href: '/tools/grammar' },
+];
 
-const PROJECT_LINKS: FooterLink[] = [
-  { label: 'GitHub', href: REPO_URL, title: 'Source, issues and discussions', external: true },
-  {
-    label: 'Licence',
-    href: `${REPO_URL}/blob/main/LICENSE`,
-    title: 'MIT for the code; the bundled fonts are OFL 1.1 (see NOTICE); this documentation is CC BY 4.0 (see LICENSE-DOCS)',
-    external: true,
-  },
-  {
-    label: 'Docs licence',
-    href: `${REPO_URL}/blob/main/LICENSE-DOCS`,
-    title: 'CC BY 4.0 — the terms for reusing this documentation\'s prose',
-    external: true,
-  },
-  { label: 'Changelog', href: `${REPO_URL}/blob/main/CHANGELOG.md`, title: 'What changed, and when', external: true },
+const LEARNING_LINKS: FooterLink[] = [
+  { label: 'Interactive lessons', href: '/learn' },
+  { label: 'Challenges', href: '/challenges' },
+  { label: 'Your progress', href: '/progress' },
+  { label: 'Architecture guide', href: '/docs/architecture' },
+  { label: 'How QueryLens works', href: '/docs' },
+  { label: 'Buffer pool concept', href: '/docs/concepts/buffer-pool' },
+  { label: 'B+Tree index concept', href: '/docs/concepts/btree' },
+  { label: 'Supported SQL', href: '/docs/reference/sql' },
+  { label: 'Engine limits', href: '/docs/reference/limits' },
+  { label: 'FAQ', href: '/docs/faq' },
+];
+
+const META_LINKS: FooterLink[] = [
+  { label: 'GitHub repository', href: REPO_URL, title: 'Source, issues and discussions', external: true },
+  { label: 'MIT Licence', href: `${REPO_URL}/blob/main/LICENSE`, external: true },
+  { label: 'Docs licence (CC BY 4.0)', href: `${REPO_URL}/blob/main/LICENSE-DOCS`, external: true },
+  { label: 'Changelog', href: `${REPO_URL}/blob/main/CHANGELOG.md`, external: true },
   {
     label: 'Report an issue',
     href: `${REPO_URL}/issues/new/choose`,
     title: 'Pick a bug report, a confusing step, or a feature request on GitHub',
     external: true,
   },
-  ...NAV_ITEMS.filter((item) => item.footer).map((item) => ({ label: item.label, href: item.path })),
+  ...NAV_ITEMS.filter((item) => item.footer && item.path !== '/challenges' && item.path !== '/progress').map(
+    (item) => ({ label: item.label, href: item.path }),
+  ),
 ];
 
 function FooterColumn({ title, links }: { title: string; links: FooterLink[] }) {
   return (
     <nav aria-label={title}>
-      <h2 className="mb-3 text-label font-medium tracking-[0.14em] text-ink-dim uppercase">{title}</h2>
+      <h2 className="mb-3 text-label font-mono font-medium tracking-[0.14em] text-ink-dim uppercase">{title}</h2>
       <ul className="space-y-2 text-label">
         {links.map((link) =>
           link.external ? (
@@ -82,10 +68,10 @@ function FooterColumn({ title, links }: { title: string; links: FooterLink[] }) 
                 title={link.title}
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex items-center gap-1 text-ink-dim underline-offset-2 hover:text-ink hover:underline"
+                className="inline-flex items-center gap-1 text-ink-dim underline-offset-2 transition-colors duration-150 hover:text-ink hover:underline"
               >
                 {link.label}
-                <span aria-hidden className="text-ink-dim/60">
+                <span aria-hidden="true" className="text-ink-dim/50">
                   ↗
                 </span>
               </a>
@@ -95,7 +81,7 @@ function FooterColumn({ title, links }: { title: string; links: FooterLink[] }) 
               <Link
                 to={link.href}
                 title={link.title}
-                className="text-ink-dim underline-offset-2 hover:text-ink hover:underline"
+                className="text-ink-dim underline-offset-2 transition-colors duration-150 hover:text-ink hover:underline"
               >
                 {link.label}
               </Link>
@@ -109,42 +95,79 @@ function FooterColumn({ title, links }: { title: string; links: FooterLink[] }) 
 
 export function Footer() {
   return (
-    <footer className="border-t border-edge bg-surface-2/30 px-4 py-10 text-ink-dim sm:px-8">
-      <div className="mx-auto grid max-w-6xl gap-8 sm:grid-cols-[minmax(0,1.3fr)_repeat(3,minmax(0,1fr))]">
-        <div>
-          <Link to="/" className="flex items-center gap-2.5 text-ink transition hover:opacity-90">
-            <Logo className="h-7 w-7" />
-            <span className="text-heading font-semibold text-ink">QueryLens</span>
-          </Link>
-          <p className="mt-3 max-w-xs text-label leading-relaxed">
-            An in-browser toy database engine that shows its working — every SQL query, traced
-            through the parser, planner, buffer pool and B+Tree index, one step at a time.
-          </p>
-          <p className="mt-4 inline-flex flex-wrap items-center gap-x-1.5 rounded-full border border-edge bg-surface-2 px-3 py-1 text-label text-ink-dim shadow-e1">
-            <span>MIT</span>
-            <span aria-hidden className="text-ink-dim/50">
-              ·
-            </span>
-            <span>CC BY 4.0 docs</span>
-            <span aria-hidden className="text-ink-dim/50">
-              ·
-            </span>
-            <span>no telemetry</span>
-          </p>
+    <footer className="border-t border-edge bg-surface-2/60 px-4 py-12 text-ink-dim backdrop-blur-sm sm:px-8">
+      <div className="mx-auto max-w-6xl">
+        {/* Brand Header Block */}
+        <div className="mb-10 flex flex-col gap-4 border-b border-edge/80 pb-8 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <Link to="/" className="flex items-center gap-2.5 text-ink transition hover:opacity-90">
+              <Logo className="h-7 w-7" />
+              <div className="flex items-center gap-2">
+                <span className="text-heading font-semibold text-ink">QueryLens</span>
+                <VersionBadge />
+              </div>
+            </Link>
+            <p className="mt-2.5 max-w-md text-label leading-relaxed text-ink-dim">
+              An in-browser educational database engine that shows its working — every SQL query traced
+              through the parser, planner, buffer pool, and B+Tree index, one step at a time.
+            </p>
+          </div>
+
+          <div className="flex flex-col items-start gap-2 sm:items-end">
+            <div
+              className="inline-flex items-center gap-2 rounded-full border border-edge bg-surface/80 px-3 py-1 font-mono text-xs text-ink-dim shadow-neu-rest backdrop-blur-sm select-none"
+              title="Execution environment: in-memory WebAssembly / TypeScript runtime"
+            >
+              <span className="relative flex h-2 w-2">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-hit opacity-75" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-hit" />
+              </span>
+              <span>Engine: 100% Client-Side In-Memory WASM</span>
+            </div>
+            <p className="font-mono text-[11px] text-ink-dim/60">Zero server calls · Zero analytics</p>
+          </div>
         </div>
 
-        <FooterColumn title="Explore" links={EXPLORE_LINKS} />
-        <FooterColumn title="Documentation" links={DOCS_LINKS} />
-        <FooterColumn title="Project" links={PROJECT_LINKS} />
-      </div>
+        {/* Four Navigation Columns */}
+        <div className="grid grid-cols-2 gap-8 sm:grid-cols-4">
+          <FooterColumn title="Primary Navigation" links={PRIMARY_NAV_LINKS} />
+          <FooterColumn title="Database Sandboxes" links={SANDBOX_LINKS} />
+          <FooterColumn title="Learning & Verification" links={LEARNING_LINKS} />
+          <FooterColumn title="Engine & Meta" links={META_LINKS} />
+        </div>
 
-      <p className="mx-auto mt-8 max-w-6xl border-t border-edge pt-4 text-label text-ink-dim/80">
-        QueryLens is a simplified educational model, not a production database. See the{' '}
-        <Link to="/docs/faq" className="underline underline-offset-2 hover:text-ink">
-          FAQ
-        </Link>{' '}
-        for exactly where it diverges from a real engine.
-      </p>
+        {/* Technical Footer Bar */}
+        <div className="mt-10 border-t border-edge/80 pt-6">
+          <div className="flex flex-col gap-3 text-label sm:flex-row sm:items-center sm:justify-between text-ink-dim/75 font-mono text-xs">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span>MIT Licence</span>
+              <span aria-hidden="true" className="text-edge">·</span>
+              <span>CC BY 4.0 docs</span>
+              <span aria-hidden="true" className="text-edge">·</span>
+              <span>100% Client-Side In-Memory Engine</span>
+              <span aria-hidden="true" className="text-edge">·</span>
+              <span>No telemetry</span>
+            </div>
+            <a
+              href={REPO_URL}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 hover:text-ink underline-offset-2 hover:underline"
+            >
+              GitHub repository
+              <span aria-hidden="true">↗</span>
+            </a>
+          </div>
+
+          <p className="mt-4 text-label text-ink-dim/70 leading-relaxed">
+            QueryLens is a simplified educational model, not a production database. See the{' '}
+            <Link to="/docs/faq" className="underline underline-offset-2 hover:text-ink">
+              FAQ
+            </Link>{' '}
+            for exactly where it diverges from a real engine.
+          </p>
+        </div>
+      </div>
     </footer>
   );
 }

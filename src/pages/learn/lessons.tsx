@@ -4,7 +4,7 @@
    `.tsx`, but nothing here is a React component to hot-reload. */
 import type { ReactNode } from 'react';
 import { createSeedDatabase, DATASETS, DEFAULT_ENGINE_OPTIONS, runQuery } from '../../engine/index.ts';
-import type { DatasetId, ReplacementPolicyName, StepEvent } from '../../engine/index.ts';
+import type { DatasetId, PredictionPrompt, ReplacementPolicyName, StepEvent } from '../../engine/index.ts';
 import { encodeShareState } from '../../ui/urlState.ts';
 import { LESSON_INDEX } from './lessonIndex.ts';
 import type { LessonMeta } from './lessonIndex.ts';
@@ -51,9 +51,15 @@ export interface LessonStep {
    *  a `/tools/*` sandbox, the docs — so it cannot carry a stale step number. */
   link?: { href: string; label: string };
   tryThis?: ReactNode;
+  checkpointPrediction?: PredictionPrompt;
 }
 
+export type LessonDifficulty = 'Beginner' | 'Intermediate' | 'Advanced';
+export type LessonCategory = 'Foundations' | 'Storage' | 'Optimizer' | 'Workflows';
+
 export interface Lesson extends LessonMeta {
+  difficulty: LessonDifficulty;
+  category: LessonCategory;
   steps: LessonStep[];
 }
 
@@ -107,6 +113,15 @@ export const PIPELINE_STEPS: Record<string, LessonStep[]> = {
       heading: 'Read the result',
       body: 'The last step hands back the rows. One row, because `id` is unique — but the buffer pool and the B+Tree still did real work to find it.',
       open: { sql: POINT_LOOKUP, find: END, label: 'Jump to the result' },
+      checkpointPrediction: {
+        question: 'If WHERE id = 999 is queried, does the engine still search the index?',
+        options: [
+          { id: 'yes', label: 'Yes: descends B+Tree to confirm key absence' },
+          { id: 'no', label: 'No: skips traversal' },
+        ],
+        correctOptionId: 'yes',
+        explanation: 'The B+Tree index must be traversed from root to leaf to verify whether the key exists.',
+      },
       tryThis: (
         <>
           Change <code className="font-mono">id = 5</code> to <code className="font-mono">id = 999</code>{' '}
@@ -139,6 +154,15 @@ export const PIPELINE_STEPS: Record<string, LessonStep[]> = {
         sql: POINT_LOOKUP,
         find: (e) => at(e, (x) => x.stage === 'optimize'),
         label: 'Jump to the optimiser rewrite',
+      },
+      checkpointPrediction: {
+        question: 'Why does the optimizer turn SELECT * FROM users WHERE id = 5 into an IndexScan?',
+        options: [
+          { id: 'rule', label: 'id has a B+Tree index and the predicate is an equality on it' },
+          { id: 'rows', label: 'The table has fewer than 100 rows' },
+        ],
+        correctOptionId: 'rule',
+        explanation: 'The index-selection rule looks for equality predicates matching an indexed column, replacing a sequential table scan with a logarithmic tree descent.',
       },
     },
     {
@@ -178,6 +202,15 @@ export const PIPELINE_STEPS: Record<string, LessonStep[]> = {
         predictOn: true,
         find: (e) => at(e, (x) => x.stage === 'buffer' && x.action === 'evict'),
         label: 'Jump to the first eviction (LRU)',
+      },
+      checkpointPrediction: {
+        question: 'Which page does LRU evict when a 9th unique page is read into an 8-frame pool?',
+        options: [
+          { id: 'least', label: 'The page whose last access was longest ago' },
+          { id: 'first', label: 'Page 0 always' },
+        ],
+        correctOptionId: 'least',
+        explanation: 'Least Recently Used tracks access recency and always evicts the frame that has sat untouched longest.',
       },
     },
     {
@@ -228,6 +261,15 @@ export const PIPELINE_STEPS: Record<string, LessonStep[]> = {
           pointer can hang.
         </>
       ),
+      checkpointPrediction: {
+        question: 'During a B+Tree leaf split, how is the separator key handled in the parent?',
+        options: [
+          { id: 'copy', label: 'Copied up to parent; key remains in the right leaf' },
+          { id: 'move', label: 'Moved up to parent and deleted from leaf' },
+        ],
+        correctOptionId: 'copy',
+        explanation: 'In B+Trees (unlike B-Trees), leaf keys are preserved in leaves for sequential range scans while a copy is pushed up to guide parent routing.',
+      },
     },
     {
       heading: 'Go deeper: an internal split',
@@ -281,6 +323,15 @@ export const PIPELINE_STEPS: Record<string, LessonStep[]> = {
         sql: SEQ_SCAN,
         find: (e) => at(e, (x) => x.stage === 'optimize'),
         label: 'Jump to the pushdown rewrite',
+      },
+      checkpointPrediction: {
+        question: 'What is the primary benefit of predicate pushdown?',
+        options: [
+          { id: 'filter', label: 'Filters rows as early as possible, reducing intermediate cardinality' },
+          { id: 'order', label: 'Changes the final ordering of returned rows' },
+        ],
+        correctOptionId: 'filter',
+        explanation: 'Pushing predicates below joins or scans prevents non-matching rows from being copied or joined, reducing CPU and memory overhead.',
       },
       tryThis: (
         <>
@@ -539,11 +590,46 @@ const STEPS: Readonly<Record<string, LessonStep[]>> = {
 /** The ids that have steps, whether or not the index lists them: what `lessonIndex.test.ts` holds against it. */
 export const LESSON_STEP_IDS: readonly string[] = Object.keys(STEPS);
 
+const LESSON_METADATA: Record<string, { difficulty: LessonDifficulty; category: LessonCategory }> = {
+  'first-query': { difficulty: 'Beginner', category: 'Foundations' },
+  'one-row': { difficulty: 'Beginner', category: 'Foundations' },
+  'eviction': { difficulty: 'Intermediate', category: 'Storage' },
+  'btree-split': { difficulty: 'Advanced', category: 'Storage' },
+  'planner': { difficulty: 'Intermediate', category: 'Optimizer' },
+  'edit-data': { difficulty: 'Beginner', category: 'Workflows' },
+  'predict': { difficulty: 'Beginner', category: 'Workflows' },
+  'share': { difficulty: 'Beginner', category: 'Workflows' },
+  'errors': { difficulty: 'Beginner', category: 'Workflows' },
+  'nulls': { difficulty: 'Intermediate', category: 'Foundations' },
+  'tokens-and-trees': { difficulty: 'Intermediate', category: 'Optimizer' },
+  'grammar-diagram': { difficulty: 'Intermediate', category: 'Optimizer' },
+  'planner-rules': { difficulty: 'Advanced', category: 'Optimizer' },
+  'buffer-pool': { difficulty: 'Intermediate', category: 'Storage' },
+  'external-sort': { difficulty: 'Advanced', category: 'Storage' },
+  'hash-join': { difficulty: 'Advanced', category: 'Storage' },
+  'join-order': { difficulty: 'Advanced', category: 'Optimizer' },
+  'slotted-page': { difficulty: 'Intermediate', category: 'Storage' },
+  'hash-index': { difficulty: 'Intermediate', category: 'Storage' },
+  'lsm-tree': { difficulty: 'Advanced', category: 'Storage' },
+  'row-vs-column': { difficulty: 'Intermediate', category: 'Storage' },
+  'latch-crabbing': { difficulty: 'Advanced', category: 'Storage' },
+  'vector-index': { difficulty: 'Advanced', category: 'Storage' },
+  'lock-table': { difficulty: 'Intermediate', category: 'Storage' },
+  'dirty-read': { difficulty: 'Intermediate', category: 'Storage' },
+  'isolation-levels': { difficulty: 'Advanced', category: 'Storage' },
+  'snapshots': { difficulty: 'Advanced', category: 'Storage' },
+  'protocols': { difficulty: 'Advanced', category: 'Storage' },
+  'log-first': { difficulty: 'Intermediate', category: 'Storage' },
+  'steal-and-force': { difficulty: 'Advanced', category: 'Storage' },
+  'recovery': { difficulty: 'Advanced', category: 'Storage' },
+};
+
 /** The whole track, in the order `lessonIndex.ts` gives: each lesson's manifest entry joined to its steps. */
 export const LESSONS: Lesson[] = LESSON_INDEX.map((meta) => {
   const steps = STEPS[meta.id];
   if (!steps) throw new Error(`learn: lesson "${meta.id}" is in lessonIndex.ts and has no steps`);
-  return { ...meta, steps };
+  const metaOverride = LESSON_METADATA[meta.id] ?? { difficulty: 'Intermediate', category: 'Foundations' };
+  return { ...meta, ...metaOverride, steps };
 });
 
 export function lessonById(id: string | undefined): Lesson | undefined {

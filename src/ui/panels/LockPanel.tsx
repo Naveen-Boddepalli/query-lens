@@ -15,44 +15,34 @@ export function LockPanel({ locks, taken }: LockPanelProps) {
           {taken > 0 && ' Every lock taken so far has been released.'}
         </p>
       ) : (
-        <ul className="space-y-1.5">
+        <div className="grid gap-1.5" role="table" aria-label="Lock matrix">
           {locks.map((lock) => (
-            <li
+            <div
               key={`${String(lock.pageId)}-${lock.mode}`}
-              /* plan.md §16.2 item 4, tinted rule. Two rows appear at once
-                 during a latch-crab, and telling them apart is the point of the
-                 note underneath — so pointing at one and having it answer is
-                 not decoration here. */
+              role="row"
               className="cell ql-sheen flex items-baseline justify-between rounded-lg border border-hue-orange/60 bg-hue-orange/10 px-2.5 py-1.5 font-mono text-label text-hue-orange-ink shadow-e1 hover:border-hue-orange/90 hover:bg-hue-orange/20"
             >
-              <span>🔒 page {lock.pageId}</span>
-              <span className="text-label tracking-wide uppercase opacity-80">{lock.mode}</span>
-            </li>
+              <span>page {lock.pageId}</span>
+              <span className="tracking-wide uppercase opacity-80">{lock.mode}</span>
+            </div>
           ))}
-        </ul>
+        </div>
       )}
 
       {locks.length === 2 && (
         <p className="ql-sheen rounded-xl border border-hue-orange/40 border-l-2 border-l-hue-orange bg-hue-orange/5 px-3 py-2 text-label leading-relaxed shadow-e1">
           Two at once — this is <span className="text-ink">latch crabbing</span>. The descent takes
           the child&rsquo;s lock <em>before</em> letting go of the parent&rsquo;s, so the branch
-          cannot be restructured out from under it. The overlap is the technique.
+          cannot be restructured out from under it.
         </p>
       )}
 
       <div className="mt-auto space-y-2 text-label leading-relaxed text-ink-dim">
         <p>
-          <span className="text-ink">{taken}</span> lock
-          {taken === 1 ? '' : 's'} taken so far. A sequential scan holds one page at a time; an index
-          descent briefly holds two.
+          <span className="text-ink">{taken}</span> lock{taken === 1 ? '' : 's'} taken so far.
         </p>
         <p className="rounded-xl border border-edge/60 px-3 py-2">
-          <span className="text-ink">This layer is visual only.</span> QueryLens runs exactly one
-          query, so no lock ever waits on another — nothing here is being protected from a rival.
-          Real engines also separate a short <em>latch</em> on the buffer frame from a
-          transaction-length <em>lock</em> on the data; both are collapsed here into one page-level
-          read lock. A second, concurrent query is the v1 feature that would make this layer mean
-          something.
+          <span className="text-ink">This layer is visual only.</span> QueryLens runs one query at a time.
         </p>
       </div>
     </div>

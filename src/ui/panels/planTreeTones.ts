@@ -2,18 +2,9 @@ import type { FlowNode } from './FlowTree.tsx';
 import type { PlanNode } from '../../engine/index.ts';
 import { raLabel } from '../../export/index.ts';
 
-/**
- * Access methods read warm; row-shaping operators read cool.
- *
- * Hover follows plan.md §16.2 item 4's tinted rule in each operator's own hue.
- * It matters most on this panel: the optimize stage shows two plans side by
- * side, and pointing at a node in one to find its counterpart in the other is
- * the whole reading task.
- *
- * Its own file, not `PlanTree.tsx` — Fast Refresh only works on a file that
- * exports nothing but components, and `renderSvg`'s SVG export (§20.3) reuses
- * this exact map and `toFlow` (`StageDetail.tsx`) rather than duplicating them.
- */
+const V =
+  'border-hue-violet/60 bg-hue-violet/10 text-hue-violet-ink hover:border-hue-violet/90 hover:bg-hue-violet/20';
+
 export const TONES: Record<string, string> = {
   Project:
     'border-hue-sky/60 bg-hue-sky/10 text-hue-sky-ink hover:border-hue-sky/90 hover:bg-hue-sky/20',
@@ -23,18 +14,10 @@ export const TONES: Record<string, string> = {
     'border-hue-orange/60 bg-hue-orange/10 text-hue-orange-ink hover:border-hue-orange/90 hover:bg-hue-orange/20',
   IndexScan:
     'border-hue-emerald/60 bg-hue-emerald/10 text-hue-emerald-ink hover:border-hue-emerald/90 hover:bg-hue-emerald/20',
-  // An index join's inner side is an access method too — the same green as the lookup it repeats once per outer row.
   IndexProbe:
     'border-hue-emerald/60 bg-hue-emerald/10 text-hue-emerald-ink hover:border-hue-emerald/90 hover:bg-hue-emerald/20',
-  // The palette has five hues and this is the sixth operator, so Sort shares
-  // Limit's violet rather than adding a token for one more panel — the two
-  // are rarely adjacent (Project sits between them in the common shape), so
-  // sharing a tone with Limit reads more clearly than sharing with its own
-  // neighbours, Project (parent) and Filter (child).
-  Sort:
-    'border-hue-violet/60 bg-hue-violet/10 text-hue-violet-ink hover:border-hue-violet/90 hover:bg-hue-violet/20',
-  Limit:
-    'border-hue-violet/60 bg-hue-violet/10 text-hue-violet-ink hover:border-hue-violet/90 hover:bg-hue-violet/20',
+  Sort: V,
+  Limit: V,
 };
 
 /**

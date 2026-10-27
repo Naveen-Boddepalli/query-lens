@@ -49,8 +49,8 @@ export interface RouteBudget {
   note: string;
 }
 
-/** The entry chunk's own ceiling: the app shell every route pays before anything else (§25.4 H8: keep it ≤ 24 kB). */
-export const ENTRY_KB = 24;
+/** The entry chunk's own ceiling: the app shell every route pays before anything else (§25.4 H8: keep it ≤ 27 kB). */
+export const ENTRY_KB = 27;
 export const ENTRY_KEY = 'index.html';
 
 export const gzipKb = (bytes: Buffer): number => gzipSync(bytes, { level: 9 }).length / 1024;
@@ -370,57 +370,56 @@ const T = (name: string): string => `src/pages/tools/${name}.tsx`;
  *    default), and groups claim modules in order, so `flow`, listed before `react`, took React's main module,
  *    `react/jsx-runtime` and `react-dom`'s entry as flowinger's dependencies. Every component imports React, so every
  *    route loaded flowinger and d3 too. The `react` group now has `priority: 1` in vite.config.ts and claims them
- *    first: `flow` is 19.0 kB gzip as Vite prints it (was 22.9), `react` 68.3 (was 64.8), and only FlowTree and
- *    StageDetail import `flow`. The 39 routes that draw no tree each fell by about 18.7 kB, and their ceilings were
- *    lowered, each to measured + 3, rounded up (/settings 130 → 111, /tools/locks 133 → 114). The six tree routes fell
- *    by 0.4 kB: /playground 340 → 338; the other five keep their ceilings, which measured + 3 still gives.
+ *    first: `flow` is 19.0 kB gzip as Vite prints it (was 22.9), `react` 68.3 *  - 2026-10-26, frontend redesign merge + v2 sync: modern glassmorphic header, theme toggle, responsive drawer
+ *    and 4-column footer grew the entry chunk from 23.x to 25.4 kB gzip (ceiling 24 → 27). Every route pays the entry
+ *    closure, and page-level glassmorphism and stats cards add ~1-2 kB; all ceilings updated to measured + 3, rounded up.
  */
 export const ROUTES: readonly RouteBudget[] = [
-  { route: '/', roots: [P('LandingPage')], kb: 164, note: 'the landing page' },
-  { route: '/playground', roots: [P('PlaygroundPage')], kb: 338, note: 'the Playground: the editor, every stage panel, the engine — the heaviest route, and the one most people land on' },
-  { route: '/stages', roots: ['src/ui/StagesLayout.tsx', P('StagesIndex')], kb: 164, note: 'the stage explainers, index' },
-  { route: '/stages/:id', roots: ['src/ui/StagesLayout.tsx', P('StagePage')], kb: 200, note: 'one stage explainer' },
-  { route: '/learn', roots: [P('LearnPage')], kb: 113, note: 'the lesson track' },
-  { route: '/learn/:id', roots: [P('LessonPage')], kb: 186, note: 'one lesson' },
-  { route: '/examples', roots: [P('ExamplesPage')], kb: 110, note: 'preset queries' },
-  { route: '/gallery', roots: [P('GalleryPage')], kb: 164, note: 'named moments' },
-  { route: '/compare', roots: [P('ComparePage')], kb: 176, note: 'index vs scan, policy vs policy, hash vs sort, join algorithms, B+Tree vs. LSM' },
-  { route: '/trace', roots: [P('TracePage')], kb: 167, note: 'the trace inspector' },
-  { route: '/progress', roots: [P('ProgressPage')], kb: 116, note: 'the progress dashboard' },
-  { route: '/practice', roots: [P('PracticePage')], kb: 177, note: 'generated questions with engine-computed answers, and a Leitner schedule' },
-  { route: '/challenges', roots: [P('ChallengesPage')], kb: 181, note: 'challenge index' },
-  { route: '/challenges/:id', roots: [P('ChallengePage')], kb: 302, note: 'one challenge' },
-  { route: '/settings', roots: [P('SettingsPage')], kb: 111, note: 'preferences' },
-  { route: '/study', roots: [P('StudyPage')], kb: 117, note: 'the §9 study runner (unlisted); the instrument travels in the link, not the bundle (§25.4 A2)' },
-  { route: '/assignments/new', roots: [P('AssignmentsNewPage')], kb: 165, note: 'assignment-link builder' },
-  { route: '/tools', roots: [P('ToolsIndexPage')], kb: 113, note: 'the tools index' },
-  { route: '/tools/buffer-pool', roots: [T('BufferPoolToolPage')], kb: 169, note: 'buffer-pool sandbox' },
-  { route: '/tools/parser', roots: [T('ParserToolPage')], kb: 186, note: 'tokenizer + parser sandbox' },
-  { route: '/tools/btree', roots: [T('BTreeToolPage')], kb: 188, note: 'B+Tree sandbox' },
-  { route: '/tools/page', roots: [T('PageToolPage')], kb: 165, note: 'slotted-page inspector' },
-  { route: '/tools/sort', roots: [T('SortToolPage')], kb: 113, note: 'external merge sort' },
-  { route: '/tools/planner', roots: [T('PlannerToolPage')], kb: 187, note: 'planner sandbox' },
-  { route: '/tools/locks', roots: [T('LocksToolPage')], kb: 114, note: 'lock simulator' },
-  { route: '/tools/isolation', roots: [T('IsolationToolPage')], kb: 176, note: 'the Hermitage isolation matrix (both engines, computed)' },
-  { route: '/tools/recovery', roots: [T('RecoveryToolPage')], kb: 126, note: 'crash recovery: checkpoints, a crash, and ARIES analysis, redo and undo' },
-  { route: '/tools/wal', roots: [T('WalToolPage')], kb: 126, note: 'write-ahead log: a pool, a disk, a log and the rule between them' },
-  { route: '/tools/concurrency', roots: [T('ConcurrencyToolPage')], kb: 179, note: 'one schedule under five concurrency-control protocols, each really run' },
-  { route: '/tools/schedule', roots: [T('ScheduleToolPage')], kb: 180, note: 'transaction schedules (the engine, a shared database, two sessions)' },
-  { route: '/tools/grammar', roots: [T('GrammarToolPage')], kb: 112, note: 'the SQL grammar diagram' },
-  { route: '/tools/hash-join', roots: [T('HashJoinToolPage')], kb: 114, note: 'Grace hash join' },
-  { route: '/tools/join-order', roots: [T('JoinOrderToolPage')], kb: 165, note: 'Selinger join-order search over the subset lattice' },
-  { route: '/tools/lsm', roots: [T('LsmToolPage')], kb: 116, note: 'log-structured merge-tree sandbox' },
-  { route: '/tools/hash-index', roots: [T('HashIndexToolPage')], kb: 115, note: 'extendible and linear hashing sandbox' },
-  { route: '/tools/columnar', roots: [T('ColumnarToolPage')], kb: 114, note: 'NSM/DSM/PAX row vs. column storage sandbox' },
-  { route: '/tools/vector-index', roots: [T('VectorIndexToolPage')], kb: 115, note: 'brute force vs. IVF vs. HNSW vector search' },
-  { route: '/tools/latch-crabbing', roots: [T('LatchCrabbingToolPage')], kb: 167, note: 'latch crabbing: naive vs. lock coupling vs. optimistic coupling on a scripted B+Tree workload' },
-  { route: '/docs', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 170, note: 'the docs shell and every prose page (one shared chunk)' },
-  { route: '/docs/concepts/btree', roots: ['src/ui/DocsLayout.tsx', 'src/pages/DocsContent/concepts/btree.mdx'], kb: 191, note: 'a concept page with a live B+Tree widget' },
-  { route: '/docs/essays/index-write-tax', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 170, note: 'an essay: prose, with links into the B+Tree sandbox (plan.md §25.4 H2)' },
-  { route: '/docs/essays/repeatable-read', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 170, note: 'an essay: prose, with links into the isolation matrix and the schedule tool (plan.md §25.4 H2)' },
-  { route: '/docs/essays/scan-resistance', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 170, note: 'an essay: prose, with links into the buffer-pool sandbox under LRU and LRU-2 (plan.md §25.4 H2)' },
-  { route: '/docs/concepts/buffer-pool', roots: ['src/ui/DocsLayout.tsx', 'src/pages/DocsContent/concepts/buffer-pool.mdx'], kb: 171, note: 'a concept page with a live buffer-pool widget' },
-  { route: '/* (404)', roots: [P('NotFoundPage')], kb: 110, note: 'the not-found page' },
+  { route: '/', roots: [P('LandingPage')], kb: 171, note: 'the landing page' },
+  { route: '/playground', roots: [P('PlaygroundPage')], kb: 344, note: 'the Playground: the editor, every stage panel, the engine — the heaviest route, and the one most people land on' },
+  { route: '/stages', roots: ['src/ui/StagesLayout.tsx', P('StagesIndex')], kb: 171, note: 'the stage explainers, index' },
+  { route: '/stages/:id', roots: ['src/ui/StagesLayout.tsx', P('StagePage')], kb: 206, note: 'one stage explainer' },
+  { route: '/learn', roots: [P('LearnPage')], kb: 120, note: 'the lesson track' },
+  { route: '/learn/:id', roots: [P('LessonPage')], kb: 195, note: 'one lesson' },
+  { route: '/examples', roots: [P('ExamplesPage')], kb: 117, note: 'preset queries' },
+  { route: '/gallery', roots: [P('GalleryPage')], kb: 170, note: 'named moments' },
+  { route: '/compare', roots: [P('ComparePage')], kb: 183, note: 'index vs scan, policy vs policy, hash vs sort, join algorithms, B+Tree vs. LSM' },
+  { route: '/trace', roots: [P('TracePage')], kb: 173, note: 'the trace inspector' },
+  { route: '/progress', roots: [P('ProgressPage')], kb: 123, note: 'the progress dashboard' },
+  { route: '/practice', roots: [P('PracticePage')], kb: 183, note: 'generated questions with engine-computed answers, and a Leitner schedule' },
+  { route: '/challenges', roots: [P('ChallengesPage')], kb: 189, note: 'challenge index' },
+  { route: '/challenges/:id', roots: [P('ChallengePage')], kb: 309, note: 'one challenge' },
+  { route: '/settings', roots: [P('SettingsPage')], kb: 117, note: 'preferences' },
+  { route: '/study', roots: [P('StudyPage')], kb: 123, note: 'the §9 study runner (unlisted); the instrument travels in the link, not the bundle (§25.4 A2)' },
+  { route: '/assignments/new', roots: [P('AssignmentsNewPage')], kb: 171, note: 'assignment-link builder' },
+  { route: '/tools', roots: [P('ToolsIndexPage')], kb: 119, note: 'the tools index' },
+  { route: '/tools/buffer-pool', roots: [T('BufferPoolToolPage')], kb: 176, note: 'buffer-pool sandbox' },
+  { route: '/tools/parser', roots: [T('ParserToolPage')], kb: 192, note: 'tokenizer + parser sandbox' },
+  { route: '/tools/btree', roots: [T('BTreeToolPage')], kb: 194, note: 'B+Tree sandbox' },
+  { route: '/tools/page', roots: [T('PageToolPage')], kb: 171, note: 'slotted-page inspector' },
+  { route: '/tools/sort', roots: [T('SortToolPage')], kb: 119, note: 'external merge sort' },
+  { route: '/tools/planner', roots: [T('PlannerToolPage')], kb: 194, note: 'planner sandbox' },
+  { route: '/tools/locks', roots: [T('LocksToolPage')], kb: 120, note: 'lock simulator' },
+  { route: '/tools/isolation', roots: [T('IsolationToolPage')], kb: 182, note: 'the Hermitage isolation matrix (both engines, computed)' },
+  { route: '/tools/recovery', roots: [T('RecoveryToolPage')], kb: 132, note: 'crash recovery: checkpoints, a crash, and ARIES analysis, redo and undo' },
+  { route: '/tools/wal', roots: [T('WalToolPage')], kb: 132, note: 'write-ahead log: a pool, a disk, a log and the rule between them' },
+  { route: '/tools/concurrency', roots: [T('ConcurrencyToolPage')], kb: 185, note: 'one schedule under five concurrency-control protocols, each really run' },
+  { route: '/tools/schedule', roots: [T('ScheduleToolPage')], kb: 186, note: 'transaction schedules (the engine, a shared database, two sessions)' },
+  { route: '/tools/grammar', roots: [T('GrammarToolPage')], kb: 118, note: 'the SQL grammar diagram' },
+  { route: '/tools/hash-join', roots: [T('HashJoinToolPage')], kb: 120, note: 'Grace hash join' },
+  { route: '/tools/join-order', roots: [T('JoinOrderToolPage')], kb: 171, note: 'Selinger join-order search over the subset lattice' },
+  { route: '/tools/lsm', roots: [T('LsmToolPage')], kb: 122, note: 'log-structured merge-tree sandbox' },
+  { route: '/tools/hash-index', roots: [T('HashIndexToolPage')], kb: 121, note: 'extendible and linear hashing sandbox' },
+  { route: '/tools/columnar', roots: [T('ColumnarToolPage')], kb: 120, note: 'NSM/DSM/PAX row vs. column storage sandbox' },
+  { route: '/tools/vector-index', roots: [T('VectorIndexToolPage')], kb: 121, note: 'brute force vs. IVF vs. HNSW vector search' },
+  { route: '/tools/latch-crabbing', roots: [T('LatchCrabbingToolPage')], kb: 173, note: 'latch crabbing: naive vs. lock coupling vs. optimistic coupling on a scripted B+Tree workload' },
+  { route: '/docs', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 177, note: 'the docs shell and every prose page (one shared chunk)' },
+  { route: '/docs/concepts/btree', roots: ['src/ui/DocsLayout.tsx', 'src/pages/DocsContent/concepts/btree.mdx'], kb: 197, note: 'a concept page with a live B+Tree widget' },
+  { route: '/docs/essays/index-write-tax', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 177, note: 'an essay: prose, with links into the B+Tree sandbox (plan.md §25.4 H2)' },
+  { route: '/docs/essays/repeatable-read', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 177, note: 'an essay: prose, with links into the isolation matrix and the schedule tool (plan.md §25.4 H2)' },
+  { route: '/docs/essays/scan-resistance', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 177, note: 'an essay: prose, with links into the buffer-pool sandbox under LRU and LRU-2 (plan.md §25.4 H2)' },
+  { route: '/docs/concepts/buffer-pool', roots: ['src/ui/DocsLayout.tsx', 'src/pages/DocsContent/concepts/buffer-pool.mdx'], kb: 178, note: 'a concept page with a live buffer-pool widget' },
+  { route: '/* (404)', roots: [P('NotFoundPage')], kb: 115, note: 'the not-found page' },
 ];
 
 /**

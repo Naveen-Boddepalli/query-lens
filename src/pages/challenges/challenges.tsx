@@ -21,9 +21,15 @@ import { sandboxHref } from '../learn/sandboxScenarios.ts';
  * one (§23.1: sort spills, join algorithms, dirty writeback, range scans).
  */
 
+export type ChallengeDifficulty = 'Warm-up' | 'Intermediate' | 'Advanced';
+export type ChallengeCategory = 'Indexing' | 'Buffer Pool' | 'Query Planning' | 'Storage & Execution';
+
 export interface Challenge {
   id: string;
   title: string;
+  difficulty: ChallengeDifficulty;
+  category: ChallengeCategory;
+  requirements: readonly string[];
   brief: ReactNode;
   hint: ReactNode;
   /** The query the editor opens on — usually one that does *not* pass yet. */
@@ -206,6 +212,8 @@ export const CHALLENGES: Challenge[] = [
   {
     id: 'use-the-index',
     title: 'Make the planner use the index',
+    difficulty: 'Warm-up',
+    category: 'Indexing',
     brief: (
       <>
         The seed table has a B+Tree index on <code className="font-mono">id</code>. Write a query the
@@ -220,11 +228,14 @@ export const CHALLENGES: Challenge[] = [
       </>
     ),
     starter: 'SELECT * FROM users WHERE age > 30;',
+    requirements: ['Execute without error', 'Optimizer rewrites plan into IndexScan'],
     check: (r) => !r.error && usesIndex(r.events),
   },
   {
     id: 'eviction-storm',
     title: 'Force an eviction',
+    difficulty: 'Warm-up',
+    category: 'Buffer Pool',
     brief: (
       <>
         The buffer pool has eight frames; the heap has twelve pages. Write one query that reads
@@ -239,11 +250,14 @@ export const CHALLENGES: Challenge[] = [
       </>
     ),
     starter: 'SELECT * FROM users WHERE id = 5;',
+    requirements: ['Execute without error', 'Buffer pool forces at least 1 page eviction'],
     check: (r) => !r.error && evictions(r.events) >= 1,
   },
   {
     id: 'exactly-one',
     title: 'Return exactly one row',
+    difficulty: 'Warm-up',
+    category: 'Storage & Execution',
     brief: <>Get a result set with exactly one row — no more, no fewer — and no error.</>,
     hint: (
       <>
@@ -252,11 +266,14 @@ export const CHALLENGES: Challenge[] = [
       </>
     ),
     starter: 'SELECT * FROM users;',
+    requirements: ['Execute without error', 'Result set contains exactly 1 row'],
     check: (r) => !r.error && r.rows.length === 1,
   },
   {
     id: 'empty-but-not-free',
     title: 'Empty result, real work',
+    difficulty: 'Intermediate',
+    category: 'Indexing',
     brief: (
       <>
         Return <strong>zero</strong> rows — but make the engine read pages from disk to find that
@@ -271,12 +288,15 @@ export const CHALLENGES: Challenge[] = [
       </>
     ),
     starter: 'SELECT * FROM users WHERE id = 999;',
+    requirements: ['Returns 0 rows', 'Does not use index lookup', 'Performs disk reads'],
     check: (r) =>
       !r.error && r.rows.length === 0 && !usesIndex(r.events) && diskReads(r.events) > 0,
   },
   {
     id: 'and-that-matches',
     title: 'Two conditions, still a hit',
+    difficulty: 'Intermediate',
+    category: 'Query Planning',
     brief: (
       <>
         Write a query whose <code className="font-mono">WHERE</code> clause uses{' '}
@@ -290,11 +310,14 @@ export const CHALLENGES: Challenge[] = [
       </>
     ),
     starter: "SELECT * FROM users WHERE id = 5 AND name = 'zzz';",
+    requirements: ['WHERE clause contains boolean AND', 'Returns at least 1 matching row'],
     check: (r) => !r.error && r.rows.length >= 1 && astHasKind(lastAst(r.events), 'And'),
   },
   {
     id: 'push-it-down',
     title: 'Push the filter down',
+    difficulty: 'Intermediate',
+    category: 'Query Planning',
     brief: (
       <>
         The optimiser&rsquo;s first move is <em>predicate pushdown</em>: folding the{' '}
@@ -310,6 +333,7 @@ export const CHALLENGES: Challenge[] = [
       </>
     ),
     starter: 'SELECT * FROM users;',
+    requirements: ['Optimizer applies predicate-pushdown', 'Does not use index lookup'],
     check: (r) =>
       !r.error &&
       r.events.some((e) => e.stage === 'optimize' && e.rule === 'predicate-pushdown') &&
@@ -318,6 +342,8 @@ export const CHALLENGES: Challenge[] = [
   {
     id: 'deep-descent',
     title: 'A lookup on the big table',
+    difficulty: 'Intermediate',
+    category: 'Indexing',
     dataset: 'orders',
     brief: (
       <>
@@ -334,11 +360,14 @@ export const CHALLENGES: Challenge[] = [
       </>
     ),
     starter: "SELECT * FROM orders WHERE customer = 'acme';",
+    requirements: ['Runs on orders table (120 rows)', 'Uses B+Tree index lookup', 'Returns exactly 1 row'],
     check: (r) => !r.error && usesIndex(r.events) && r.rows.length === 1,
   },
   {
     id: 'needle-in-the-skew',
     title: 'The selective end of a skew',
+    difficulty: 'Intermediate',
+    category: 'Storage & Execution',
     dataset: 'logins',
     brief: (
       <>
@@ -354,11 +383,14 @@ export const CHALLENGES: Challenge[] = [
       </>
     ),
     starter: "SELECT * FROM logins WHERE status = 'ok';",
+    requirements: ['Returns between 1 and 19 rows', 'Uses sequential scan without index'],
     check: (r) => !r.error && r.rows.length > 0 && r.rows.length < 20 && !usesIndex(r.events),
   },
   {
     id: 'sort-spill',
     title: 'The sort spill',
+    difficulty: 'Advanced',
+    category: 'Storage & Execution',
     brief: (
       <>
         <code className="font-mono">ORDER BY</code> looks instant, but QueryLens&rsquo;s{' '}
@@ -375,11 +407,14 @@ export const CHALLENGES: Challenge[] = [
       </>
     ),
     starter: 'SELECT * FROM users WHERE id = 5 ORDER BY age;',
+    requirements: ['Execute without error', 'External sort writes >= 5 spill pages'],
     check: (r) => !r.error && writes(r.events) >= 5,
   },
   {
     id: 'hash-beats-loop',
     title: 'Hash beats loop',
+    difficulty: 'Advanced',
+    category: 'Storage & Execution',
     database: createJoinDemoDatabase,
     // Forced small on purpose, same reason `/compare`'s own JOIN mode does:
     // the demo's 5 heap pages fit entirely inside the default 8 frames, which
@@ -407,6 +442,7 @@ export const CHALLENGES: Challenge[] = [
       </>
     ),
     starter: 'SELECT * FROM authors;',
+    requirements: ['Joins authors and posts', 'Hash join reads fewer pages than nested-loop'],
     check: (r, sql) => {
       if (r.error) return false;
       const nestedLoopReads = diskReads(r.events);
@@ -417,6 +453,8 @@ export const CHALLENGES: Challenge[] = [
   {
     id: 'dirty-eviction',
     title: 'The dirty eviction',
+    difficulty: 'Advanced',
+    category: 'Buffer Pool',
     brief: (
       <>
         Evicting a page an <code className="font-mono">UPDATE</code> already changed costs more than
@@ -433,11 +471,14 @@ export const CHALLENGES: Challenge[] = [
       </>
     ),
     starter: "UPDATE users SET name = 'edited' WHERE id = 5;",
+    requirements: ['Executes UPDATE statement', 'Forces >= 1 dirty page writeback eviction'],
     check: (r) => !r.error && dirtyEvictions(r.events) >= 1,
   },
   {
     id: 'range-leap',
     title: 'The range leap',
+    difficulty: 'Advanced',
+    category: 'Indexing',
     brief: (
       <>
         A range predicate on an <em>indexed</em> column can descend the B+Tree once and walk the
@@ -456,11 +497,18 @@ export const CHALLENGES: Challenge[] = [
       </>
     ),
     starter: 'SELECT * FROM users WHERE age > 30;',
+    requirements: ['Optimizer selects IndexRangeScan', 'Reads fewer than 12 pages (< full table)'],
     check: (r) => !r.error && usesRangeScan(r.events) && diskReads(r.events) < 12,
   },
   {
     id: 'the-index-it-cannot-serve',
     title: 'Filter the indexed column the index cannot serve',
+    difficulty: 'Intermediate',
+    category: 'Indexing',
+    requirements: [
+      'Filter id with a non-equality operator such as <>',
+      'Engine bypasses the index and performs a full scan',
+    ],
     brief: (
       <>
         The seed table has a B+Tree index on <code className="font-mono">id</code>. Write a query that filters on{' '}
@@ -496,6 +544,12 @@ export const CHALLENGES: Challenge[] = [
   {
     id: 'wrap-the-column',
     title: 'Wrap the indexed column in arithmetic',
+    difficulty: 'Intermediate',
+    category: 'Indexing',
+    requirements: [
+      'Wrap id in an arithmetic expression like id + 0',
+      'Planner fails to match index and reads base rows',
+    ],
     brief: (
       <>
         Write a query that filters <code className="font-mono">id</code> through an arithmetic expression, returns at least
@@ -531,6 +585,12 @@ export const CHALLENGES: Challenge[] = [
   {
     id: 'equals-null',
     title: 'Find the rows where the email is missing',
+    difficulty: 'Warm-up',
+    category: 'Query Planning',
+    requirements: [
+      'Query contacts with IS NULL predicate',
+      'Return only records with missing email',
+    ],
     brief: (
       <>
         The <code className="font-mono">contacts</code> table has one row whose <code className="font-mono">email</code>{' '}
@@ -565,6 +625,12 @@ export const CHALLENGES: Challenge[] = [
   {
     id: 'count-the-nulls',
     title: 'Count the rows, then count the emails',
+    difficulty: 'Intermediate',
+    category: 'Query Planning',
+    requirements: [
+      'Select COUNT(*) and COUNT(email) together',
+      'Observe differing counts due to NULL non-inclusion',
+    ],
     brief: (
       <>
         In one query on <code className="font-mono">contacts</code>, return the number of rows and the number of emails
@@ -594,6 +660,12 @@ export const CHALLENGES: Challenge[] = [
   {
     id: 'not-in-the-null',
     title: 'Return the people who are not banned',
+    difficulty: 'Advanced',
+    category: 'Query Planning',
+    requirements: [
+      'Execute NOT IN with a subquery containing NULL',
+      'Observe three-valued logic yielding empty result',
+    ],
     brief: (
       <>
         Return the people who are <em>not</em> on the <code className="font-mono">banned</code> list. Ana and Cy are not
@@ -624,6 +696,12 @@ export const CHALLENGES: Challenge[] = [
     // plan.md §26 Feature 3 — on `customers`, the preset with NULLs.
     id: 'not-paris-either',
     title: 'Everyone not in Paris',
+    difficulty: 'Intermediate',
+    category: 'Query Planning',
+    requirements: [
+      'Return all customers not in Paris including NULL city',
+      'Account for NULL values dropping from <> comparisons',
+    ],
     brief: (
       <>
         Return every customer who does not live in Paris — including the ones whose city is not on record. A customer
@@ -659,6 +737,12 @@ export const CHALLENGES: Challenge[] = [
   {
     id: 'keep-the-unmatched',
     title: 'Keep the authors who have no posts',
+    difficulty: 'Intermediate',
+    category: 'Storage & Execution',
+    requirements: [
+      'Perform LEFT JOIN between authors and posts',
+      'Filter for posts.id IS NULL to keep only unmatched authors',
+    ],
     brief: (
       <>
         Return the authors who have written no posts, using a <code className="font-mono">LEFT JOIN</code> on{' '}
@@ -690,6 +774,12 @@ export const CHALLENGES: Challenge[] = [
   {
     id: 'and-before-or',
     title: 'Where the AND lands',
+    difficulty: 'Intermediate',
+    category: 'Query Planning',
+    requirements: [
+      'Combine OR and AND conditions in WHERE clause',
+      'Use parentheses to ensure OR evaluates before AND',
+    ],
     brief: (
       <>
         Return <strong>barbara and brendan</strong> — the users whose <code className="font-mono">id</code> is 1, 3 or 4{' '}
@@ -734,6 +824,12 @@ export const CHALLENGES: Challenge[] = [
   {
     id: 'every-clause',
     title: 'Seven clauses in one SELECT',
+    difficulty: 'Advanced',
+    category: 'Query Planning',
+    requirements: [
+      'Compose query with DISTINCT, WHERE, GROUP BY, HAVING, ORDER BY, LIMIT, OFFSET',
+      'Query executes cleanly conforming to grammar constraints',
+    ],
     brief: (
       <>
         A <code className="font-mono">SELECT</code> on one table has seven optional parts:{' '}

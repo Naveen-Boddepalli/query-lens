@@ -52,6 +52,32 @@ describe('learn lessons', () => {
       }
     }
   });
+
+  it('every lesson has valid difficulty and category metadata', () => {
+    const validDifficulties = new Set(['Beginner', 'Intermediate', 'Advanced']);
+    const validCategories = new Set(['Foundations', 'Storage', 'Optimizer', 'Workflows']);
+    for (const lesson of LESSONS) {
+      expect(validDifficulties.has(lesson.difficulty), `${lesson.id} invalid difficulty`).toBe(true);
+      expect(validCategories.has(lesson.category), `${lesson.id} invalid category`).toBe(true);
+      expect(lesson.minutes).toBeGreaterThan(0);
+    }
+  });
+
+  it('checkpoint predictions have valid questions, options, and correctOptionId', () => {
+    let checkpointCount = 0;
+    for (const lesson of LESSONS) {
+      for (const step of lesson.steps) {
+        if (!step.checkpointPrediction) continue;
+        checkpointCount++;
+        const p = step.checkpointPrediction;
+        expect(p.question.length).toBeGreaterThan(0);
+        expect(p.options.length).toBeGreaterThanOrEqual(2);
+        expect(p.options.some((o) => o.id === p.correctOptionId)).toBe(true);
+        expect(p.explanation.length).toBeGreaterThan(0);
+      }
+    }
+    expect(checkpointCount).toBeGreaterThanOrEqual(5);
+  });
 });
 
 describe('lesson: NULL is not a value (plan.md §26 Feature 3)', () => {
