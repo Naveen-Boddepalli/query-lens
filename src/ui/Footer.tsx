@@ -124,7 +124,7 @@ export function Footer() {
               </span>
               <span>Engine: 100% Client-Side In-Memory WASM</span>
             </div>
-            <p className="font-mono text-[11px] text-ink-dim/60">Zero server calls · Zero analytics</p>
+            <p className="font-mono text-[11px] text-ink-dim">Zero server calls · Zero analytics</p>
           </div>
         </div>
 
@@ -138,7 +138,7 @@ export function Footer() {
 
         {/* Technical Footer Bar */}
         <div className="mt-10 border-t border-edge/80 pt-6">
-          <div className="flex flex-col gap-3 text-label sm:flex-row sm:items-center sm:justify-between text-ink-dim/75 font-mono text-xs">
+          <div className="flex flex-col gap-3 text-label sm:flex-row sm:items-center sm:justify-between text-ink-dim font-mono text-xs">
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
               <span>MIT Licence</span>
               <span aria-hidden="true" className="text-edge">·</span>
@@ -159,7 +159,7 @@ export function Footer() {
             </a>
           </div>
 
-          <p className="mt-4 text-label text-ink-dim/70 leading-relaxed">
+          <p className="mt-4 text-label text-ink-dim leading-relaxed">
             QueryLens is a simplified educational model, not a production database. See the{' '}
             <Link to="/docs/faq" className="underline underline-offset-2 hover:text-ink">
               FAQ

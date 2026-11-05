@@ -57,9 +57,8 @@ export function ChallengesPage() {
           <div className="space-y-1">
             <div className="flex items-center gap-2">
               <span className="font-mono text-heading font-semibold text-ink tabular-nums">
-                {doneCount} / {allChallenges.length}
+                {doneCount} of {allChallenges.length} solved
               </span>
-              <span className="text-label text-ink-dim font-medium">challenges solved</span>
               <span className="rounded-full border border-edge bg-surface-3 px-2 py-0.5 font-mono text-micro text-ink tabular-nums">
                 {percentDone}%
               </span>
