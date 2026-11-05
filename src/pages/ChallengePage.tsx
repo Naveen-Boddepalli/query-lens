@@ -183,6 +183,21 @@ function QueryChallengeView({ challengeId }: { challengeId: string | undefined }
         {challenge.brief}
       </PageHeader>
 
+      <div className="mt-2">
+        {challenge.database ? (
+          <p className="text-label text-ink-dim">
+            This one runs against its own <code className="font-mono text-ink">authors</code> /{' '}
+            <code className="font-mono text-ink">posts</code> pair, not the usual seed table.
+          </p>
+        ) : (
+          dataset !== 'users' && (
+            <p className="text-label text-ink-dim">
+              This one runs against the <code className="font-mono text-ink">{dataset}</code> table.
+            </p>
+          )
+        )}
+      </div>
+
       {/* Hint Accordion */}
       <div className="mt-4">
         <button
@@ -218,7 +233,7 @@ function QueryChallengeView({ challengeId }: { challengeId: string | undefined }
 
         <div className="flex items-center gap-3">
           <button type="button" onClick={check} className={btnPrimary}>
-            <span>Run &amp; verify</span>
+            <span>Run &amp; check</span>
           </button>
           <span className="text-micro text-ink-dim font-mono hidden sm:inline">
             Press Cmd+Enter or Ctrl+Enter to execute
@@ -298,7 +313,7 @@ function QueryChallengeView({ challengeId }: { challengeId: string | undefined }
                 <div className="space-y-2">
                   <h3 className="text-body font-semibold text-hit flex items-center gap-2">
                     <CheckIcon className="h-4 w-4" />
-                    Challenge Solved
+                    <span>✓ Solved.</span>
                   </h3>
                   <p className="text-label leading-relaxed text-ink-dim">
                     Your query satisfied all verification requirements and verified cleanly against
@@ -376,8 +391,7 @@ function QueryChallengeView({ challengeId }: { challengeId: string | undefined }
               )}
               {playgroundLink && (
                 <Link to={playgroundLink} className={`${btnSecondary} gap-1.5`}>
-                  <span>Step through in Playground</span>
-                  <ArrowRightIcon className="h-3.5 w-3.5" />
+                  <span>Step through this run in the Playground →</span>
                 </Link>
               )}
             </div>

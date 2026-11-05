@@ -219,7 +219,7 @@ export function BTreeToolPage() {
         </label>
 
         <label htmlFor="key" className="flex flex-col gap-1.5 text-label text-ink-dim">
-          <span>Target Key</span>
+          <span>Key</span>
           <input
             id="key"
             type="text"
@@ -272,7 +272,7 @@ export function BTreeToolPage() {
           { label: 'Total Nodes', value: String(Object.keys(tree.nodes).length), sub: `fan-out ${fanout}` },
           {
             label: 'Invariants',
-            value: problems.length === 0 ? 'Hold' : `${problems.length} Fail`,
+            value: problems.length === 0 ? 'invariants hold' : `${problems.length} Fail`,
             sub: 'structural check',
             color: problems.length === 0 ? 'text-hit' : 'text-evict',
           },

@@ -49,9 +49,8 @@ export function LearnPage() {
     <div className="mx-auto w-full max-w-3xl px-4 py-8 sm:px-6 sm:py-10">
       <p className={eyebrow}>Curriculum Track</p>
       <PageHeader title="Database Internals Track" className="mt-1">
-        A structured, hands-on path through the query execution engine. Each lesson pairs
-        system conceptual prose with live engine visualizers, prediction checkpoints, and deep
-        Playground links.
+        A short, ordered path through the engine. Each lesson pairs system conceptual prose with live
+        engine visualizers, prediction checkpoints, and deep Playground links.
       </PageHeader>
 
       {/* Telemetry & Roadmap Overview Card */}
@@ -63,9 +62,8 @@ export function LearnPage() {
           <div className="space-y-1">
             <div className="flex items-center gap-2">
               <span className="font-mono text-heading font-semibold text-ink tabular-nums">
-                {completeCount} / {LESSON_INDEX.length}
+                {completeCount} of {LESSON_INDEX.length} complete
               </span>
-              <span className="text-label text-ink-dim font-medium">lessons completed</span>
               <span className="rounded-full border border-edge bg-surface-3 px-2 py-0.5 font-mono text-micro text-ink tabular-nums">
                 {percentComplete}%
               </span>

@@ -275,7 +275,7 @@ export function ToolsIndexPage() {
     <div className="mx-auto w-full max-w-5xl p-6 sm:p-8">
       <PageHeader
         breadcrumbs={[{ label: 'Directory', to: '/tools' }, { label: 'Standalone Tools' }]}
-        title="Database Sandboxes"
+        title="Tools"
       >
         Isolated database engine components split out of the pipeline for targeted study and
         demonstrations. Each sandbox runs independently without requiring full SQL execution.

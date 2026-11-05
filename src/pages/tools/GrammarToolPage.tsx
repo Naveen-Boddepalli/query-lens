@@ -104,7 +104,7 @@ export function GrammarToolPage() {
     <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-5 p-6 sm:p-8">
       <PageHeader
         breadcrumbs={[{ label: 'Tools', to: '/tools' }, { label: 'SQL Grammar' }]}
-        title="SQL Grammar Explorer"
+        title="Grammar sandbox"
       >
         Every production rule accepted by the QueryLens{' '}
         <Link to="/tools/parser" className="underline underline-offset-2 hover:text-ink">

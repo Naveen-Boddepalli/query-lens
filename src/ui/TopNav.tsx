@@ -42,16 +42,16 @@ export function TopNav() {
   }, [isMobileOpen]);
 
   return (
-    <header className="ql-glass-header sticky top-0 z-30 flex flex-col border-b border-edge bg-surface/85 backdrop-blur-md">
-      <div className="flex w-full items-center justify-between gap-x-4 px-4 py-2.5">
+    <header className="ql-glass-header sticky top-0 z-30 flex w-full max-w-full min-w-0 flex-col border-b border-edge bg-surface/85 backdrop-blur-md">
+      <div className="flex w-full max-w-full min-w-0 items-center justify-between gap-x-2 sm:gap-x-4 px-3 sm:px-4 py-2.5">
         {/* Brand Lockup */}
         <NavLink
           to="/"
-          className="flex items-center gap-2.5 text-ink transition hover:opacity-90"
-          aria-label="QueryLens home"
+          className="flex min-w-0 shrink items-center gap-2 sm:gap-2.5 text-ink transition hover:opacity-90"
+          aria-label="Home"
         >
           <Logo className="h-7 w-7 shrink-0" />
-          <div className="flex items-center gap-2">
+          <div className="flex min-w-0 items-center gap-2">
             <h1 className="text-display font-semibold tracking-tight">QueryLens</h1>
             <VersionBadge className="hidden sm:inline-flex" />
           </div>
@@ -67,7 +67,7 @@ export function TopNav() {
         </nav>
 
         {/* Actions & Utilities Toolbar */}
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
           {/* Client-Side Engine Status Badge */}
           <div
             className="hidden xl:inline-flex items-center gap-2 rounded-full border border-edge bg-surface-2/80 px-2.5 py-1 text-xs font-mono text-ink-dim shadow-neu-rest backdrop-blur-sm select-none"
@@ -86,7 +86,7 @@ export function TopNav() {
             target="_blank"
             rel="noreferrer"
             title="GitHub Repository (4.2k stars)"
-            className="inline-flex items-center gap-1.5 rounded-lg border border-edge bg-surface-2/80 px-2.5 py-1.5 text-xs font-mono text-ink-dim shadow-neu-rest backdrop-blur-sm transition duration-150 ease-out hover:border-ink-dim/50 hover:bg-surface-3 hover:text-ink active:translate-y-px"
+            className="hidden sm:inline-flex items-center gap-1.5 rounded-lg border border-edge bg-surface-2/80 px-2.5 py-1.5 text-xs font-mono text-ink-dim shadow-neu-rest backdrop-blur-sm transition duration-150 ease-out hover:border-ink-dim/50 hover:bg-surface-3 hover:text-ink active:translate-y-px"
           >
             <svg viewBox="0 0 16 16" className="h-4 w-4 fill-currentColor shrink-0" aria-hidden="true">
               <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" />

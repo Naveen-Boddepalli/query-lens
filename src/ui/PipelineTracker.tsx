@@ -18,7 +18,7 @@ export function PipelineTracker({ current, visited, selected, onSelect }: Pipeli
   return (
     <nav
       aria-label="Query pipeline"
-      className="flex items-center gap-1 overflow-x-auto rounded-full border border-edge bg-surface-2/80 p-1 shadow-neu-rest backdrop-blur-md"
+      className="flex w-full min-w-0 max-w-full items-center gap-1 overflow-x-auto rounded-full border border-edge bg-surface-2/80 p-1 shadow-neu-rest backdrop-blur-md"
     >
       {STAGES.map((stage, i) => {
         const meta = STAGE_META[stage];

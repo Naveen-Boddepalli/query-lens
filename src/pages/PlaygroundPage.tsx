@@ -558,7 +558,7 @@ export function PlaygroundPage() {
 
   return (
     <>
-      <main className="grid flex-1 gap-4 p-4 lg:min-h-0 lg:grid-cols-[minmax(320px,420px)_1fr]">
+      <main className="grid flex-1 w-full min-w-0 max-w-full gap-4 p-4 lg:min-h-0 lg:grid-cols-[minmax(320px,420px)_1fr]">
         {/* Authoring panel */}
         <div className={`${PANEL_COL} order-2 lg:order-1 lg:min-h-0 lg:overflow-y-auto`}>
           <div data-tour="editor" className="flex flex-col gap-3">
@@ -740,8 +740,8 @@ export function PlaygroundPage() {
         </div>
 
         {/* Trace panel */}
-        <div className={`${PANEL_COL} order-1 lg:order-2 lg:overflow-hidden`}>
-          <div data-tour="pipeline">
+        <div className={`${PANEL_COL} order-1 lg:order-2 w-full min-w-0 max-w-full lg:overflow-hidden`}>
+          <div data-tour="pipeline" className="w-full min-w-0 max-w-full overflow-hidden">
             <PipelineTracker
               current={state?.stage ?? null}
               visited={visited}

@@ -379,46 +379,6 @@ export function TracePage() {
   );
 }
 
-function JsonTreeNode({ name, value }: { name?: string; value: unknown }) {
-  const [open, setOpen] = useState(true);
-  const prefix = name ? <span className="text-accent font-medium">{name}: </span> : null;
-
-  if (value === null || typeof value !== 'object') {
-    return (
-      <div className="font-mono text-label py-0.5">
-        {prefix}<span className="text-ink">{typeof value === 'string' ? `"${value}"` : String(value)}</span>
-      </div>
-    );
-  }
-
-  const isArr = Array.isArray(value);
-  const entries = isArr
-    ? (value as unknown[]).map((v, i) => [String(i), v] as const)
-    : Object.entries(value as Record<string, unknown>);
-
-  return (
-    <div className="font-mono text-label">
-      <button
-        type="button"
-        onClick={(ev) => { ev.stopPropagation(); setOpen((o) => !o); }}
-        className="inline-flex items-center gap-1 py-0.5 text-ink-dim hover:text-ink"
-        aria-expanded={open}
-      >
-        <span className="w-3 text-center text-[10px] text-ink-dim/60">{open ? '−' : '+'}</span>
-        {prefix}
-        <span className="text-ink-dim/60">{isArr ? `[${entries.length}]` : `{${entries.length}}`}</span>
-      </button>
-      {open && (
-        <div className="border-l border-edge ml-1.5 pl-2">
-          {entries.map(([k, v]) => (
-            <JsonTreeNode key={k} name={k} value={v} />
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
 function FragmentRow({
   event,
   open,
@@ -430,12 +390,10 @@ function FragmentRow({
   onToggle: () => void;
   href: string;
 }) {
-  const [copied, setCopied] = useState(false);
-
   return (
     <>
       <tr
-        className="cursor-pointer border-b border-edge/60 align-top transition-colors hover:bg-surface-3/60"
+        className="cursor-pointer border-b border-edge/60 align-top scroll-mt-10 transition-colors hover:bg-surface-3/60"
         onClick={onToggle}
       >
         <td className="px-3 py-2 font-mono tabular-nums text-ink-dim">
@@ -464,29 +422,10 @@ function FragmentRow({
       </tr>
       {open && (
         <tr className="border-b border-edge bg-surface-3/40">
-          <td colSpan={4} className="p-3">
-            <div className="rounded-lg border border-edge bg-surface/80 p-3 shadow-neu-rest backdrop-blur-sm">
-              <div className="mb-2 flex items-center justify-between border-b border-edge/60 pb-2">
-                <span className="font-mono text-label font-semibold uppercase text-ink">
-                  Event #{event.id} Inspector
-                </span>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    void navigator.clipboard.writeText(JSON.stringify(event, null, 2));
-                    setCopied(true);
-                    setTimeout(() => { setCopied(false); }, 1500);
-                  }}
-                  className="rounded border border-edge bg-surface-2 px-2.5 py-0.5 font-mono text-[11px] text-ink-dim transition hover:border-accent hover:text-ink cursor-pointer"
-                >
-                  {copied ? 'Copied' : 'Copy JSON'}
-                </button>
-              </div>
-              <div className="overflow-x-auto py-1">
-                <JsonTreeNode value={event} />
-              </div>
-            </div>
+          <td colSpan={4} className="px-3 py-2">
+            <pre className="font-mono text-label break-words whitespace-pre-wrap text-ink-dim">
+              {JSON.stringify(event, null, 2)}
+            </pre>
           </td>
         </tr>
       )}

@@ -54,8 +54,8 @@ export function BTreePanel({ tree, path, outcome }: BTreePanelProps) {
         {path.length > 0 && (
           <span className="font-mono">
             {path.join(' → ')}
-            {outcome === 'found' && <span className="ml-1.5 text-hit">FOUND</span>}
-            {outcome === 'not-found' && <span className="ml-1.5 text-evict">NOT FOUND</span>}
+            {outcome === 'found' && <span className="ml-1.5 text-hit">✓ found</span>}
+            {outcome === 'not-found' && <span className="ml-1.5 text-evict">✗ not found</span>}
           </span>
         )}
         {/* The zoom buttons render in here, via a portal from FlowTree. They

@@ -135,7 +135,7 @@ export function ParserToolPage() {
       {/* SQL Source Input */}
       <div className="ql-sheen flex flex-col gap-2 rounded-xl border border-edge bg-surface-2/80 p-4 shadow-neu-rest backdrop-blur-md">
         <label htmlFor="src" className="font-mono uppercase tracking-wider text-[0.75rem] text-ink-dim">
-          SQL Query Source
+          SQL source
         </label>
         <textarea
           id="src"
@@ -177,11 +177,11 @@ export function ParserToolPage() {
       >
         <div className="flex items-center justify-between border-b border-edge/60 pb-1.5">
           <h3 id="ribbon-h" className="font-mono text-[0.75rem] font-medium uppercase tracking-[0.12em] text-ink-dim">
-            Tokenizer Stream
+            Tokens
           </h3>
           {lexed.ok && visibleTokens.length > 0 && (
-            <span className="font-mono text-[0.72rem] text-ink-dim/70">
-              {visibleTokens.length} tokens &middot; EOF
+            <span className="font-mono text-[0.72rem] text-ink-dim">
+              {visibleTokens.length} tokens, then EOF.
             </span>
           )}
         </div>
@@ -222,9 +222,14 @@ export function ParserToolPage() {
         </h3>
 
         {parsed.ok && tree ? (
-          <div className={`${panelSurface} min-h-64 flex-1 p-5`}>
-            <AstTree root={tree} />
-          </div>
+          <>
+            <p className="text-label text-ink-dim tabular-nums">
+              Parsed · {countNodes(tree)} nodes · recursion depth {treeDepth(tree)}
+            </p>
+            <div className={`${panelSurface} min-h-64 flex-1 p-5`}>
+              <AstTree root={tree} />
+            </div>
+          </>
         ) : (
           <div className="flex flex-col gap-2.5 rounded-xl border border-evict/40 bg-evict/10 p-4">
             <p className="text-label font-medium text-ink">{parsed.ok ? 'No statement.' : parsed.error.message}</p>

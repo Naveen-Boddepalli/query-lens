@@ -108,7 +108,7 @@ export function SortToolPage() {
     <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-5 p-6 sm:p-8">
       <PageHeader
         breadcrumbs={[{ label: 'Tools', to: '/tools' }, { label: 'External Sort' }]}
-        title="External Merge Sort Visualizer"
+        title="External merge sort"
       >
         Sorting more records than fit in memory: sort what fits into short runs, then merge the runs
         together pass after pass until one sorted run remains. The cost is page reads and writes &mdash;
@@ -169,15 +169,15 @@ export function SortToolPage() {
       {/* Metrics Strip */}
       <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
         {[
-          { label: 'Data Pages', value: String(plan.pageCount), sub: `${plan.recordCount} records` },
-          { label: 'Initial Runs', value: String(plan.initialRunCount), sub: `${plan.memPages} pages/sort` },
+          { label: 'data pages', value: String(plan.pageCount), sub: `${plan.recordCount} records` },
+          { label: 'initial runs', value: String(plan.initialRunCount), sub: `${plan.memPages} pages/sort` },
           {
-            label: 'Merge Passes',
+            label: 'merge passes',
             value: String(plan.mergePassCount),
             sub: plan.mergePassCount === 0 ? 'in-memory' : `${plan.fanIn}-way fan-in`,
           },
           {
-            label: 'Total Page I/Os',
+            label: 'page I/Os',
             value: String(plan.totalIO),
             sub: `${plan.ioPerPass} I/Os × ${plan.passes.length} passes`,
             color: 'text-accent',

@@ -130,6 +130,8 @@ export function Hero() {
               <button
                 key={st}
                 type="button"
+                role="tab"
+                aria-selected={i === idx}
                 onClick={() => {
                   setPlay(false);
                   setIdx(i);

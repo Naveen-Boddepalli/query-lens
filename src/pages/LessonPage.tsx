@@ -11,7 +11,7 @@ import { LESSONS, lessonById, stepLink } from './learn/lessons.tsx';
 import { readCompleted, setCompleted } from '../ui/learnProgress.ts';
 import { recordPrediction } from '../ui/progress.ts';
 import { PageHeader } from '../ui/PageHeader.tsx';
-import { btnPrimary, btnSecondary, card, eyebrow } from '../ui/primitives.ts';
+import { btnPrimary, btnSecondary, card } from '../ui/primitives.ts';
 
 function CheckIcon({ className = 'h-3.5 w-3.5' }: { className?: string }) {
   return (
@@ -37,14 +37,6 @@ function ArrowLeftIcon({ className = 'h-3.5 w-3.5' }: { className?: string }) {
   );
 }
 
-function ArrowRightIcon({ className = 'h-3.5 w-3.5' }: { className?: string }) {
-  return (
-    <svg aria-hidden="true" className={className} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.75}>
-      <path d="M3.5 8h9M9 4.5l3.5 3.5L9 11.5" />
-    </svg>
-  );
-}
-
 const SEED_DB = createSeedDatabase();
 
 /** Embedded live mini visualizer projecting query engine state at target step */
@@ -52,14 +44,10 @@ function EmbeddedLiveVisualizer({
   sql,
   policy = 'lru',
   targetStepFinder,
-  deepLinkHref,
-  deepLinkLabel,
 }: {
   sql: string;
   policy?: ReplacementPolicyName | undefined;
   targetStepFinder?: ((events: readonly StepEvent[]) => number) | undefined;
-  deepLinkHref?: string | undefined;
-  deepLinkLabel?: string | undefined;
 }) {
   const result = useMemo(() => {
     return runQuery(sql, SEED_DB, { ...DEFAULT_ENGINE_OPTIONS, policy });
@@ -108,15 +96,6 @@ function EmbeddedLiveVisualizer({
           {event?.label || 'Ready.'}
         </p>
       </div>
-
-      {deepLinkHref && (
-        <div className="mt-3 flex justify-end">
-          <Link to={deepLinkHref} className={`${btnPrimary} gap-1.5 text-label`}>
-            <span>{deepLinkLabel ?? 'Open in Playground'}</span>
-            <ArrowRightIcon className="h-3.5 w-3.5" />
-          </Link>
-        </div>
-      )}
     </div>
   );
 }
@@ -218,7 +197,6 @@ export function LessonPage() {
   const lesson = lessonById(lessonId);
 
   const [complete, setComplete] = useState(() => readCompleted().has(lessonId ?? ''));
-  const [activeStepIndex, setActiveStepIndex] = useState(0);
 
   const links = useMemo(
     () => (lesson ? lesson.steps.map((s) => (s.open ? stepLink(s.open) : null)) : []),
@@ -230,9 +208,6 @@ export function LessonPage() {
   const index = LESSONS.findIndex((l) => l.id === lesson.id);
   const next = LESSONS[index + 1];
   const prev = LESSONS[index - 1];
-
-  const currentStep = lesson.steps[activeStepIndex] ?? lesson.steps[0]!;
-  const currentLink = links[activeStepIndex];
 
   return (
     <div className="mx-auto w-full max-w-3xl px-4 py-8 sm:px-6 sm:py-10">
@@ -264,104 +239,66 @@ export function LessonPage() {
         {lesson.summary}
       </PageHeader>
 
-      {/* Interactive Step Navigator / Stepper */}
-      <div className="mt-8 border-b border-edge pb-4">
-        <p className={eyebrow}>Lesson Steps</p>
-        <div className="mt-2 flex flex-wrap gap-2">
-          {lesson.steps.map((step, i) => {
-            const isActive = i === activeStepIndex;
-            return (
-              <button
-                key={step.heading}
-                type="button"
-                onClick={() => setActiveStepIndex(i)}
-                aria-pressed={isActive}
-                className={`flex items-center gap-2 rounded-lg border px-3 py-1.5 text-label font-medium transition duration-150 select-none ${
-                  isActive
-                    ? 'border-accent bg-accent/20 text-ink shadow-neu-pressed font-semibold'
-                    : 'border-edge bg-surface-2/70 text-ink-dim hover:border-ink-dim/40 hover:text-ink hover:bg-surface-3 shadow-neu-rest'
-                }`}
-              >
-                <span className="font-mono text-micro text-ink-dim tabular-nums">{i + 1}.</span>
-                <span>{step.heading}</span>
-              </button>
-            );
-          })}
-        </div>
-      </div>
+      {/* Lesson Steps */}
+      <ol className="mt-8 space-y-6">
+        {lesson.steps.map((step, i) => {
+          const link = links[i];
+          return (
+            <li
+              key={step.heading}
+              className="ql-sheen rounded-2xl border border-edge bg-surface-2/80 p-5 shadow-neu-rest backdrop-blur-md space-y-4"
+            >
+              <div>
+                <h2 className="text-heading font-semibold text-ink flex items-center gap-2">
+                  <span className="flex h-6 w-6 items-center justify-center rounded-full border border-edge bg-surface-3 font-mono text-micro text-accent font-semibold">
+                    {i + 1}
+                  </span>
+                  <span>{step.heading}</span>
+                </h2>
+                <div className="mt-2 text-body leading-relaxed text-ink-dim">{step.body}</div>
+              </div>
 
-      {/* Step Content Card */}
-      <div className="mt-6 space-y-6">
-        <div className="space-y-3">
-          <h2 className="text-heading font-semibold text-ink flex items-center gap-2">
-            <span className="font-mono text-label text-accent tabular-nums">
-              Step {activeStepIndex + 1} of {lesson.steps.length}:
-            </span>
-            <span>{currentStep.heading}</span>
-          </h2>
-          <div className="text-body leading-relaxed text-ink-dim">{currentStep.body}</div>
+              {step.tryThis && (
+                <div className="rounded-lg border border-accent/40 bg-accent-soft/80 p-3 text-label text-ink shadow-neu-rest">
+                  <span className="font-semibold text-ink">Try this: </span>
+                  {step.tryThis}
+                </div>
+              )}
 
-          {currentStep.tryThis && (
-            <div className="rounded-lg border border-accent/40 bg-accent-soft/80 p-3 text-label text-ink shadow-neu-rest">
-              <span className="font-semibold text-ink">Try this: </span>
-              {currentStep.tryThis}
-            </div>
-          )}
+              {link && (
+                <div className="pt-1">
+                  <Link to={link.href} className={`${btnSecondary} gap-1.5`}>
+                    <span>{link.label} →</span>
+                  </Link>
+                </div>
+              )}
 
-          {currentStep.link && (
-            <div className="pt-2">
-              <Link to={currentStep.link.href} className={`${btnSecondary} gap-1.5`}>
-                <span>{currentStep.link.label}</span>
-                <ArrowRightIcon className="h-3.5 w-3.5" />
-              </Link>
-            </div>
-          )}
-        </div>
+              {step.link && (
+                <div className="pt-1">
+                  <Link to={step.link.href} className={`${btnSecondary} gap-1.5`}>
+                    <span>{step.link.label} →</span>
+                  </Link>
+                </div>
+              )}
 
-        {/* Embedded Live Engine Visualizer for steps with `open` spec */}
-        {currentStep.open && (
-          <EmbeddedLiveVisualizer
-            key={`${currentStep.open.sql}-${activeStepIndex}`}
-            sql={currentStep.open.sql}
-            policy={currentStep.open.policy}
-            targetStepFinder={currentStep.open.find}
-            deepLinkHref={currentLink?.href}
-            deepLinkLabel={currentLink?.label}
-          />
-        )}
+              {/* Embedded Live Engine Visualizer for steps with `open` spec */}
+              {step.open && (
+                <EmbeddedLiveVisualizer
+                  key={`${step.open.sql}-${i}`}
+                  sql={step.open.sql}
+                  policy={step.open.policy}
+                  targetStepFinder={step.open.find}
+                />
+              )}
 
-        {/* Checkpoint Prediction Widget */}
-        {currentStep.checkpointPrediction && (
-          <CheckpointCard prediction={currentStep.checkpointPrediction} />
-        )}
-      </div>
-
-      {/* Step Navigation Controls (Prev / Next Step) */}
-      <div className="mt-8 flex flex-wrap items-center justify-between gap-3 border-t border-edge/60 pt-6">
-        <button
-          type="button"
-          disabled={activeStepIndex <= 0}
-          onClick={() => setActiveStepIndex((i) => Math.max(0, i - 1))}
-          className={`${btnSecondary} gap-1.5`}
-        >
-          <ArrowLeftIcon className="h-3.5 w-3.5" />
-          <span>Previous step</span>
-        </button>
-
-        <span className="font-mono text-micro text-ink-dim tabular-nums">
-          Step {activeStepIndex + 1} of {lesson.steps.length}
-        </span>
-
-        <button
-          type="button"
-          disabled={activeStepIndex >= lesson.steps.length - 1}
-          onClick={() => setActiveStepIndex((i) => Math.min(lesson.steps.length - 1, i + 1))}
-          className={`${btnSecondary} gap-1.5`}
-        >
-          <span>Next step</span>
-          <ArrowRightIcon className="h-3.5 w-3.5" />
-        </button>
-      </div>
+              {/* Checkpoint Prediction Widget */}
+              {step.checkpointPrediction && (
+                <CheckpointCard prediction={step.checkpointPrediction} />
+              )}
+            </li>
+          );
+        })}
+      </ol>
 
       {/* Lesson Complete & Track Navigation Footer */}
       <div className={`mt-8 ${card} flex flex-wrap items-center justify-between gap-4`}>
@@ -375,7 +312,7 @@ export function LessonPage() {
           }}
         >
           <CheckIcon className={`h-4 w-4 ${complete ? 'text-hit' : 'text-ink'}`} />
-          <span>{complete ? 'Completed — click to undo' : 'Mark lesson as complete'}</span>
+          <span>{complete ? 'Completed ✓ — undo' : 'Mark this lesson complete'}</span>
         </button>
 
         <div className="flex items-center gap-4">
@@ -392,8 +329,7 @@ export function LessonPage() {
               to={`/learn/${next.id}`}
               className="text-label text-ink font-semibold hover:text-accent flex items-center gap-1"
             >
-              <span>Next: {next.title}</span>
-              <ArrowRightIcon className="h-3.5 w-3.5" />
+              <span>Next: {next.title} →</span>
             </Link>
           ) : (
             <Link
@@ -401,7 +337,6 @@ export function LessonPage() {
               className="text-label text-ink font-semibold hover:text-accent flex items-center gap-1"
             >
               <span>Return to Curriculum Track</span>
-              <ArrowRightIcon className="h-3.5 w-3.5" />
             </Link>
           )}
         </div>

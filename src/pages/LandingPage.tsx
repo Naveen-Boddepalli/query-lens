@@ -137,7 +137,7 @@ export function LandingPage() {
             LRU buffer pool, and latch-crabbing B+Tree. Every metric is{' '}
             <em className="font-medium text-ink">this</em> engine&rsquo;s, not Postgres&rsquo;s.
           </p>
-          <div className="mt-4 flex flex-wrap gap-x-4 gap-y-1 text-label text-ink-dim">
+          <div className="mt-4 flex flex-wrap gap-x-4 gap-y-2 text-label text-ink-dim">
             {[
               ['/stages', 'stages'],
               ['/examples', 'examples'],
@@ -146,7 +146,7 @@ export function LandingPage() {
               ['/tools/btree', 'B+Tree'],
               ['/docs', 'docs'],
             ].map(([to, label]) => (
-              <Link key={to} to={to!} className="underline underline-offset-2 hover:text-ink">
+              <Link key={to} to={to!} className="inline-flex items-center py-1 underline underline-offset-2 hover:text-ink">
                 {label}
               </Link>
             ))}

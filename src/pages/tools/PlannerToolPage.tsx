@@ -131,7 +131,7 @@ export function PlannerToolPage() {
     <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-5 p-6 sm:p-8">
       <PageHeader
         breadcrumbs={[{ label: 'Tools', to: '/tools' }, { label: 'Planner & Optimizer' }]}
-        title="Planner & Optimizer Sandbox"
+        title="Planner sandbox"
       >
         A query&rsquo;s plan is a tree of operators; the optimizer rewrites it with heuristic
         rules. Type a query, toggle each rule and the <code className="font-mono text-ink">id</code>{' '}
@@ -165,7 +165,7 @@ export function PlannerToolPage() {
             onChange={(e) => { setIndexed(e.target.checked); }}
             className="accent-[var(--color-accent)]"
           />
-          <span className="font-mono text-ink font-medium">users.id index</span>
+          <span className="font-mono text-ink font-medium">id index</span>
         </label>
         <span className="hidden h-5 w-px bg-edge sm:inline-block" aria-hidden="true" />
         <span className="font-mono text-[0.72rem] uppercase tracking-wider text-ink-dim/80">Rules:</span>
@@ -222,8 +222,7 @@ export function PlannerToolPage() {
           <div className="grid gap-4 sm:grid-cols-2">
             <figure className={`${panelSurface} flex min-h-64 flex-col p-4`}>
               <figcaption className="mb-2.5 flex items-center justify-between text-label font-mono text-ink-dim border-b border-edge/60 pb-2">
-                <span className="font-semibold text-ink uppercase tracking-wider text-[0.75rem]">Canonical Plan</span>
-                <span className="text-[0.7rem] text-ink-dim/70">unoptimized AST fold</span>
+                <span className="font-semibold text-ink">canonical</span>
               </figcaption>
               <div className="min-h-0 flex-1">
                 <PlanTree root={plans.canonical} empty="&mdash;" />
@@ -232,8 +231,11 @@ export function PlannerToolPage() {
 
             <figure className={`${panelSurface} flex min-h-64 flex-col p-4`}>
               <figcaption className="mb-2.5 flex items-center justify-between text-label font-mono text-ink-dim border-b border-edge/60 pb-2">
-                <span className="font-semibold text-ink uppercase tracking-wider text-[0.75rem]">Optimized Plan</span>
-                <span className="text-[0.7rem] text-ink-dim/70">
+                <span className="font-semibold text-ink">
+                  optimized
+                  {plans.firedRules.size === 0 && ' · unchanged'}
+                </span>
+                <span className="text-[0.7rem] text-ink-dim">
                   {plans.firedRules.size === 0 ? 'unchanged' : `${plans.firedRules.size} rules fired`}
                 </span>
               </figcaption>
@@ -271,10 +273,10 @@ export function PlannerToolPage() {
                         <span className="font-mono text-ink font-medium">{name}</span>
                         {' — '}
                         {off
-                          ? 'rule disabled'
+                          ? 'turned off'
                           : fired && step
                             ? step.label
-                            : 'no candidate pattern matched on this plan'}
+                            : 'no match on this plan'}
                       </span>
                     </div>
                     {!off && fired && step?.whyNot && (

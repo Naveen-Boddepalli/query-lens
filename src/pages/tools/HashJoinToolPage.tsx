@@ -92,7 +92,7 @@ export function HashJoinToolPage() {
     <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-5 p-6 sm:p-8">
       <PageHeader
         breadcrumbs={[{ label: 'Tools', to: '/tools' }, { label: 'Hash Join' }]}
-        title="Grace Hash Join Simulator"
+        title="Hash join"
       >
         Join a build relation and a probe relation by hashing instead of rescanning: partition both by a
         hash of the join key, and recursively re-partition spills that exceed the memory budget.
@@ -173,7 +173,7 @@ export function HashJoinToolPage() {
           {
             label: 'Leaf Partitions',
             value: String(plan.leaves.length),
-            sub: plan.fitsInMemory ? 'in-memory' : `depth ${plan.maxDepth} spill`,
+            sub: plan.fitsInMemory ? 'fits in memory, no split needed' : `depth ${plan.maxDepth} spill`,
           },
           {
             label: 'Matches Found',
@@ -324,7 +324,7 @@ function LeafDetail({ partition, leaf }: { partition: HashJoinPartition; leaf: H
                 bucket {bucket.index}
                 {bucket.hasCollision && (
                   <span className="ml-1.5 rounded px-1.5 py-0.2 font-mono text-[0.68rem] uppercase tracking-wider border border-miss/40 bg-miss/15 text-miss">
-                    collision
+                    ⚠ collision
                   </span>
                 )}
               </div>

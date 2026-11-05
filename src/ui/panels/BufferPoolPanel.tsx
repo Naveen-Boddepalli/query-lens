@@ -37,14 +37,13 @@ const MOOD_CLASS: Record<Exclude<FrameMood, null>, string> = {
   sweep: 'border-accent bg-accent/10 shadow-glow hover:bg-accent/20',
 };
 
-// Clean status chips for high contrast and accessibility without unicode emojis.
 const MOOD_TAG: Record<Exclude<FrameMood, null>, string> = {
-  hit: 'HIT',
-  load: 'DISK READ',
-  prefetch: 'PREFETCHED',
-  write: 'DIRTY WRITE',
-  evict: 'EVICTED',
-  sweep: 'SWEPT',
+  hit: '✓ hit',
+  load: '↓ disk read',
+  prefetch: '↓ prefetched',
+  write: '✎ written',
+  evict: '✕ evicted',
+  sweep: '↻ swept',
 };
 
 /**

@@ -119,12 +119,7 @@ function PolicyColumn({
 
   return (
     <div className="flex min-w-0 flex-1 flex-col gap-2">
-      <div className="flex items-center justify-between">
-        <h3 className="text-body font-semibold text-ink">{label}</h3>
-        <span className={`${pill} text-[11px] font-mono text-ink-dim`}>
-          misses: {state.bufferStats.misses} · hits: {state.bufferStats.hits}
-        </span>
-      </div>
+      <h3 className="text-body font-semibold text-ink">{label}</h3>
       <div className={`${panelSurface} min-h-56 p-3`}>
         <BufferPoolPanel
           frames={state.frames}

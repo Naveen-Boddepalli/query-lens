@@ -40,7 +40,7 @@ export function Layout() {
       <div
         data-app-shell
         className={[
-          'snap-sections flex min-h-dvh flex-col',
+          'snap-sections flex min-h-dvh w-full min-w-0 max-w-full flex-col',
           isLanding ? '' : 'lg:h-dvh lg:overflow-hidden',
         ].join(' ')}
       >
@@ -54,7 +54,7 @@ export function Layout() {
             way to reach the rest of the page. Playground and the /stages and
             /docs layouts size themselves to fit exactly (or scroll a nested
             panel), so this never shows a second scrollbar for them. */}
-        <div className="flex min-h-0 flex-1 overflow-y-auto">
+        <div className="flex min-h-0 min-w-0 w-full max-w-full flex-1 overflow-y-auto">
           <Outlet />
         </div>
       </div>
