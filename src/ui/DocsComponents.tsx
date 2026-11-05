@@ -48,7 +48,7 @@ export function DocMeta({ items }: { items: { label: string; value: React.ReactN
           key={item.label}
           className="inline-flex items-center gap-1.5 rounded-lg border border-edge bg-surface-2/80 px-2.5 py-1 text-label shadow-neu-rest backdrop-blur-sm"
         >
-          <span className="font-mono text-[10px] uppercase tracking-wider text-ink-dim/70">{item.label}:</span>
+          <span className="font-mono text-[10px] uppercase tracking-wider text-ink-dim">{item.label}:</span>
           <span className="font-medium text-ink">{item.value}</span>
         </span>
       ))}

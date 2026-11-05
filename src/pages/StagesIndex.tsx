@@ -55,7 +55,7 @@ export function StagesIndex() {
                 {meta.title}
               </h3>
               <p className="mt-1 text-label font-medium text-ink-dim">{meta.blurb}</p>
-              <p className="mt-2 text-label leading-relaxed text-ink-dim/75">{meta.help}</p>
+              <p className="mt-2 text-label leading-relaxed text-ink-dim">{meta.help}</p>
             </Link>
           );
         })}

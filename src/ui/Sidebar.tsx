@@ -50,7 +50,7 @@ export function Sidebar({ onSelect }: { onSelect?: () => void }) {
               <h3 className="font-mono text-label font-medium tracking-[0.12em] text-ink-dim uppercase">
                 {group.title}
               </h3>
-              <span className="rounded bg-surface-3 px-1.5 py-0.5 font-mono text-[10px] text-ink-dim/60">
+              <span className="rounded bg-surface-3 px-1.5 py-0.5 font-mono text-[10px] text-ink-dim">
                 {group.stages.length}
               </span>
             </div>
@@ -73,7 +73,7 @@ export function Sidebar({ onSelect }: { onSelect?: () => void }) {
                               className="h-2 w-2 shrink-0 rounded-sm"
                               style={{ background: `var(--color-stage-${stageId})` }}
                             />
-                            <span className="font-mono text-[11px] text-ink-dim/60">{idxStr}</span>
+                            <span className="font-mono text-[11px] text-ink-dim">{idxStr}</span>
                             <span className={isActive ? 'font-semibold text-ink' : ''}>{meta.title}</span>
                           </div>
                           {isActive && (

@@ -81,7 +81,7 @@ export function DocsLayout() {
                 <h3 className="text-label font-mono font-medium tracking-[0.12em] text-ink-dim uppercase">
                   {group.title}
                 </h3>
-                <span className="rounded bg-surface-3 px-1.5 py-0.5 font-mono text-[10px] text-ink-dim/60">
+                <span className="rounded bg-surface-3 px-1.5 py-0.5 font-mono text-[10px] text-ink-dim">
                   {group.items.length}
                 </span>
               </div>
@@ -121,7 +121,7 @@ export function DocsLayout() {
             Docs
           </Link>
           <span className="text-ink-dim/40" aria-hidden="true">/</span>
-          <span className="text-ink-dim/70">{activeBreadcrumbs.groupTitle}</span>
+          <span className="text-ink-dim">{activeBreadcrumbs.groupTitle}</span>
           <span className="text-ink-dim/40" aria-hidden="true">/</span>
           <span className="font-medium text-ink" aria-current="page">
             {activeBreadcrumbs.pageTitle}

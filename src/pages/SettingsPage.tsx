@@ -172,7 +172,7 @@ export function SettingsPage() {
         >
           Reset to engine defaults
         </button>
-        <span className="font-mono text-[11px] text-ink-dim/50">Stored locally in browser</span>
+        <span className="font-mono text-[11px] text-ink-dim">Stored locally in browser</span>
       </div>
     </div>
   );

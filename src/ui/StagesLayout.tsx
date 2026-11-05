@@ -32,7 +32,7 @@ export function StagesLayout() {
           >
             Stages
           </NavLink>
-          <span className="text-ink-dim/40">/</span>
+          <span className="text-ink-dim/40" aria-hidden="true">/</span>
           <span className="truncate font-medium text-ink">{title}</span>
         </div>
       </div>
