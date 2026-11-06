@@ -597,7 +597,7 @@ export function ScheduleToolPage() {
     if (locking !== 'none' && isolation !== DEFAULT_ISOLATION) params.set('i', isolation);
     return params.toString();
   }, [steps, locking, rows, isolation]);
-  useAddressBarQuery(shareQuery);
+  useAddressBarQuery(shareQuery, 0);
 
   function add(statement: string) {
     const trimmed = statement.trim();

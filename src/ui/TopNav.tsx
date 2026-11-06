@@ -45,17 +45,16 @@ export function TopNav() {
     <header className="ql-glass-header sticky top-0 z-30 flex w-full max-w-full min-w-0 flex-col border-b border-edge bg-surface/85 backdrop-blur-md">
       <div className="flex w-full max-w-full min-w-0 items-center justify-between gap-x-2 sm:gap-x-4 px-3 sm:px-4 py-2.5">
         {/* Brand Lockup */}
-        <NavLink
-          to="/"
-          className="flex min-w-0 shrink items-center gap-2 sm:gap-2.5 text-ink transition hover:opacity-90"
-          aria-label="Home"
-        >
-          <Logo className="h-7 w-7 shrink-0" />
-          <div className="flex min-w-0 items-center gap-2">
+        <div className="flex min-w-0 shrink items-center gap-2">
+          <NavLink
+            to="/"
+            className="flex min-w-0 shrink items-center gap-2 sm:gap-2.5 text-ink transition hover:opacity-90"
+          >
+            <Logo className="h-7 w-7 shrink-0" />
             <h1 className="text-display font-semibold tracking-tight">QueryLens</h1>
-            <VersionBadge className="hidden sm:inline-flex" />
-          </div>
-        </NavLink>
+          </NavLink>
+          <VersionBadge className="hidden sm:inline-flex" />
+        </div>
 
         {/* Primary Desktop Navigation */}
         <nav aria-label="Main navigation" className="hidden lg:flex items-center gap-0.5">

@@ -83,6 +83,7 @@ export function Logo({ className = 'h-7 w-7' }: { className?: string }) {
 export function VersionBadge({ className = '' }: { className?: string }) {
   return (
     <span
+      aria-hidden="true"
       className={`inline-flex items-center rounded border border-edge bg-surface-2 px-1.5 py-0.5 font-mono text-[10px] font-medium tracking-wider text-ink-dim uppercase select-none ${className}`}
     >
       {VERSION_TAG}
