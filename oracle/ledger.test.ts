@@ -32,8 +32,13 @@ function sqlite(entry: (typeof LEDGER)[number]): Outcome {
     for (const [i, sql] of entry.steps.entries()) {
       const statement = db.prepare(sql);
       if (i === entry.steps.length - 1) {
-        statement.setReturnArrays(true);
-        rows = statement.all() as unknown as Raw[][];
+        if (typeof (statement as { setReturnArrays?: (flag: boolean) => void }).setReturnArrays === 'function') {
+          (statement as { setReturnArrays: (flag: boolean) => void }).setReturnArrays(true);
+          rows = statement.all() as unknown as Raw[][];
+        } else {
+          const records = statement.all() as unknown as Record<string, unknown>[];
+          rows = records.map((r) => entry.columns.map((c) => (r[c] as Raw) ?? null));
+        }
       } else {
         statement.run();
       }
