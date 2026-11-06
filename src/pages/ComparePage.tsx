@@ -36,9 +36,11 @@ import {
   btnSecondary,
   inputField,
   panelSurface,
+  pill,
   segBase,
   segOff,
   segOn,
+  segmentedTrack,
 } from '../ui/primitives.ts';
 import { ScrollRegion } from '../ui/ScrollRegion.tsx';
 
@@ -184,6 +186,23 @@ function PolicyCompare() {
   const a = useMemo(() => runBufferTrace(refs, optionsA), [refs, optionsA]);
   const b = useMemo(() => runBufferTrace(refs, optionsB), [refs, optionsB]);
 
+  const projectorA = useMemo(() => createTraceProjector(a.events, optionsA), [a, optionsA]);
+  const projectorB = useMemo(() => createTraceProjector(b.events, optionsB), [b, optionsB]);
+
+  const eventStepA = accessIndex === 0 ? 0 : (a.accessBoundaries[accessIndex - 1] ?? 0);
+  const eventStepB = accessIndex === 0 ? 0 : (b.accessBoundaries[accessIndex - 1] ?? 0);
+
+  const stateA = projectorA.at(eventStepA);
+  const stateB = projectorB.at(eventStepB);
+
+  const missesA = stateA.bufferStats.misses;
+  const missesB = stateB.bufferStats.misses;
+  const missDiff = missesA - missesB;
+  const hitsA = stateA.bufferStats.hits;
+  const hitsB = stateB.bufferStats.hits;
+  const evictA = stateA.bufferStats.evictions;
+  const evictB = stateB.bufferStats.evictions;
+
   /**
    * The first access where the two policies chose a different victim. An
    * eviction is not necessarily the *last* event of an access, so this scans
@@ -222,7 +241,7 @@ function PolicyCompare() {
         product&rsquo;s best teaching moment — same inputs, different victim.
       </p>
 
-      <div className="mt-2 flex flex-wrap items-end gap-3 rounded-xl border border-edge bg-surface-2 p-3 shadow-e1">
+      <div className="mt-2 flex flex-wrap items-end gap-3 rounded-xl border border-edge bg-surface-2/80 p-3 shadow-neu-rest backdrop-blur-sm">
         <label htmlFor="ref" className="flex flex-1 min-w-64 flex-col gap-1 text-label text-ink-dim">
           Reference string
           <input
@@ -255,14 +274,77 @@ function PolicyCompare() {
         </button>
       </div>
 
-      <div className="flex flex-wrap items-center gap-3 text-label text-ink-dim">
+      {/* Diff callout highlights */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div className="rounded-xl border border-edge bg-surface-2/80 p-3 shadow-neu-rest backdrop-blur-sm">
+          <div className="text-[11px] font-medium uppercase tracking-wider text-ink-dim">Buffer Misses Diff</div>
+          <div className="mt-1 flex items-baseline justify-between font-mono">
+            <span className="text-body font-semibold text-ink">{missesA} vs {missesB}</span>
+            <span className={`text-label font-bold ${missDiff === 0 ? 'text-ink-dim' : missDiff > 0 ? 'text-amber-500' : 'text-hit'}`}>
+              {missDiff === 0 ? 'tied' : `Δ ${Math.abs(missDiff)}`}
+            </span>
+          </div>
+        </div>
+        <div className="rounded-xl border border-edge bg-surface-2/80 p-3 shadow-neu-rest backdrop-blur-sm">
+          <div className="text-[11px] font-medium uppercase tracking-wider text-ink-dim">Page Loads Diff</div>
+          <div className="mt-1 flex items-baseline justify-between font-mono">
+            <span className="text-body font-semibold text-ink">{missesA} vs {missesB}</span>
+            <span className={`text-label font-bold ${missDiff === 0 ? 'text-ink-dim' : 'text-accent'}`}>
+              {missDiff === 0 ? '0' : `Δ ${Math.abs(missDiff)} loads`}
+            </span>
+          </div>
+        </div>
+        <div className="rounded-xl border border-edge bg-surface-2/80 p-3 shadow-neu-rest backdrop-blur-sm">
+          <div className="text-[11px] font-medium uppercase tracking-wider text-ink-dim">Buffer Hits Diff</div>
+          <div className="mt-1 flex items-baseline justify-between font-mono">
+            <span className="text-body font-semibold text-ink">{hitsA} vs {hitsB}</span>
+            <span className="text-label font-bold text-ink-dim">
+              Δ {Math.abs(hitsA - hitsB)}
+            </span>
+          </div>
+        </div>
+        <div className="rounded-xl border border-edge bg-surface-2/80 p-3 shadow-neu-rest backdrop-blur-sm">
+          <div className="text-[11px] font-medium uppercase tracking-wider text-ink-dim">Evictions Diff</div>
+          <div className="mt-1 flex items-baseline justify-between font-mono">
+            <span className="text-body font-semibold text-ink">{evictA} vs {evictB}</span>
+            <span className="text-label font-bold text-ink-dim">
+              Δ {Math.abs(evictA - evictB)}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {divergedAt !== null && (
+        <p className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-accent/40 bg-accent-soft px-3.5 py-2 text-label text-ink shadow-e1">
+          <span>
+            The two policies first pick a <em>different</em> victim at access {divergedAt}.{' '}
+          </span>
+          <button
+            type="button"
+            onClick={() => { setAccessIndex(divergedAt); }}
+            className="inline-flex items-center gap-1 rounded-md border border-accent/60 bg-accent/20 px-2.5 py-0.5 text-label font-medium text-ink transition hover:bg-accent/30 active:scale-95"
+          >
+            <span>Jump there</span>
+            <svg viewBox="0 0 16 16" className="h-3 w-3 stroke-current stroke-2" fill="none" aria-hidden="true">
+              <path d="M6 3l5 5-5 5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+        </p>
+      )}
+
+      {/* Synchronized scrubber bar */}
+      <div className="flex flex-wrap items-center gap-3 rounded-xl border border-edge bg-surface-2/80 p-3 shadow-neu-rest backdrop-blur-sm text-label text-ink-dim">
         <button
           type="button"
           onClick={() => { setAccessIndex((i) => Math.max(0, i - 1)); }}
           disabled={accessIndex === 0}
-          className={btnSecondary}
+          className={`${btnSecondary} text-label py-1.5 px-3`}
+          aria-label="Step back"
         >
-          ◀ back
+          <svg viewBox="0 0 16 16" className="h-3.5 w-3.5 stroke-current stroke-2" fill="none" aria-hidden="true">
+            <path d="M10 13l-5-5 5-5" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          <span>Back</span>
         </button>
         <input
           type="range"
@@ -270,34 +352,25 @@ function PolicyCompare() {
           max={refs.length}
           value={accessIndex}
           onChange={(e) => { setAccessIndex(Number(e.target.value)); }}
-          className="scrubber flex-1 accent-[var(--color-accent)]"
+          className="scrubber flex-1 accent-[var(--color-accent)] cursor-pointer"
           aria-label="Access index"
         />
         <button
           type="button"
           onClick={() => { setAccessIndex((i) => Math.min(refs.length, i + 1)); }}
           disabled={accessIndex >= refs.length}
-          className={btnSecondary}
+          className={`${btnSecondary} text-label py-1.5 px-3`}
+          aria-label="Step forward"
         >
-          forward ▶
+          <span>Forward</span>
+          <svg viewBox="0 0 16 16" className="h-3.5 w-3.5 stroke-current stroke-2" fill="none" aria-hidden="true">
+            <path d="M6 3l5 5-5 5" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
         </button>
-        <span className="tabular-nums text-ink">
+        <span className={`${pill} font-mono tabular-nums text-ink text-label`}>
           access {accessIndex} / {refs.length}
         </span>
       </div>
-
-      {divergedAt !== null && (
-        <p className="rounded-xl border border-accent/40 bg-accent-soft px-3 py-2 text-label text-ink shadow-e1">
-          The two policies first pick a <em>different</em> victim at access {divergedAt}.{' '}
-          <button
-            type="button"
-            onClick={() => { setAccessIndex(divergedAt); }}
-            className="underline underline-offset-2 hover:text-accent"
-          >
-            Jump there
-          </button>
-        </p>
-      )}
 
       <div className="flex flex-col gap-4 lg:flex-row">
         <PolicyColumn
@@ -461,6 +534,45 @@ function IndexCompare() {
             {scan.evictions > 0 && <>, evicting {scan.evictions} page{scan.evictions === 1 ? '' : 's'} on the way</>}
             {ratio !== null && ratio >= 2 && <> — {ratio}× the disk work</>}.
           </p>
+
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div className="rounded-xl border border-edge bg-surface-2/80 p-3 shadow-neu-rest backdrop-blur-sm">
+              <div className="text-[11px] font-medium uppercase tracking-wider text-ink-dim">Disk Reads Diff</div>
+              <div className="mt-1 flex items-baseline justify-between font-mono">
+                <span className="text-body font-semibold text-ink">{indexed.diskReads} vs {scan.diskReads}</span>
+                <span className="text-label font-bold text-hit">
+                  -{scan.diskReads - indexed.diskReads}
+                </span>
+              </div>
+            </div>
+            <div className="rounded-xl border border-edge bg-surface-2/80 p-3 shadow-neu-rest backdrop-blur-sm">
+              <div className="text-[11px] font-medium uppercase tracking-wider text-ink-dim">Page Loads Diff</div>
+              <div className="mt-1 flex items-baseline justify-between font-mono">
+                <span className="text-body font-semibold text-ink">{indexed.diskReads} vs {scan.diskReads}</span>
+                <span className="text-label font-bold text-accent">
+                  Δ {scan.diskReads - indexed.diskReads}
+                </span>
+              </div>
+            </div>
+            <div className="rounded-xl border border-edge bg-surface-2/80 p-3 shadow-neu-rest backdrop-blur-sm">
+              <div className="text-[11px] font-medium uppercase tracking-wider text-ink-dim">B+Tree Node Reads</div>
+              <div className="mt-1 flex items-baseline justify-between font-mono">
+                <span className="text-body font-semibold text-ink">{indexed.btreeReads} vs {scan.btreeReads}</span>
+                <span className="text-label font-bold text-accent">
+                  +{indexed.btreeReads}
+                </span>
+              </div>
+            </div>
+            <div className="rounded-xl border border-edge bg-surface-2/80 p-3 shadow-neu-rest backdrop-blur-sm">
+              <div className="text-[11px] font-medium uppercase tracking-wider text-ink-dim">Evictions Diff</div>
+              <div className="mt-1 flex items-baseline justify-between font-mono">
+                <span className="text-body font-semibold text-ink">{indexed.evictions} vs {scan.evictions}</span>
+                <span className="text-label font-bold text-ink-dim">
+                  Δ {scan.evictions - indexed.evictions}
+                </span>
+              </div>
+            </div>
+          </div>
 
           <div className="flex flex-col gap-4 lg:flex-row">
             <ScoreColumn
@@ -825,6 +937,45 @@ function AggregateCompare() {
             .
           </p>
 
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div className="rounded-xl border border-edge bg-surface-2/80 p-3 shadow-neu-rest backdrop-blur-sm">
+              <div className="text-[11px] font-medium uppercase tracking-wider text-ink-dim">Pages Written Diff</div>
+              <div className="mt-1 flex items-baseline justify-between font-mono">
+                <span className="text-body font-semibold text-ink">{hashScore.writes} vs {sortScore.writes}</span>
+                <span className="text-label font-bold text-hit">
+                  +{sortScore.writes - hashScore.writes} spilled
+                </span>
+              </div>
+            </div>
+            <div className="rounded-xl border border-edge bg-surface-2/80 p-3 shadow-neu-rest backdrop-blur-sm">
+              <div className="text-[11px] font-medium uppercase tracking-wider text-ink-dim">Disk Reads Diff</div>
+              <div className="mt-1 flex items-baseline justify-between font-mono">
+                <span className="text-body font-semibold text-ink">{hashScore.diskReads} vs {sortScore.diskReads}</span>
+                <span className="text-label font-bold text-accent">
+                  Δ {Math.abs(sortScore.diskReads - hashScore.diskReads)}
+                </span>
+              </div>
+            </div>
+            <div className="rounded-xl border border-edge bg-surface-2/80 p-3 shadow-neu-rest backdrop-blur-sm">
+              <div className="text-[11px] font-medium uppercase tracking-wider text-ink-dim">Page Loads Diff</div>
+              <div className="mt-1 flex items-baseline justify-between font-mono">
+                <span className="text-body font-semibold text-ink">{hashScore.diskReads} vs {sortScore.diskReads}</span>
+                <span className="text-label font-bold text-ink-dim">
+                  Δ {Math.abs(sortScore.diskReads - hashScore.diskReads)}
+                </span>
+              </div>
+            </div>
+            <div className="rounded-xl border border-edge bg-surface-2/80 p-3 shadow-neu-rest backdrop-blur-sm">
+              <div className="text-[11px] font-medium uppercase tracking-wider text-ink-dim">Evictions Diff</div>
+              <div className="mt-1 flex items-baseline justify-between font-mono">
+                <span className="text-body font-semibold text-ink">{hashScore.evictions} vs {sortScore.evictions}</span>
+                <span className="text-label font-bold text-ink-dim">
+                  Δ {Math.abs(sortScore.evictions - hashScore.evictions)}
+                </span>
+              </div>
+            </div>
+          </div>
+
           <div className="flex flex-col gap-4 lg:flex-row">
             <AggregateScoreColumn
               label={isDistinctQuery ? 'Hash distinct' : 'Hash aggregate'}
@@ -1053,6 +1204,36 @@ function JoinCompare() {
               </>
             )}
           </p>
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div className="rounded-xl border border-edge bg-surface-2/80 p-3 shadow-neu-rest backdrop-blur-sm">
+              <div className="text-[11px] font-medium uppercase tracking-wider text-ink-dim">Best Disk Reads</div>
+              <div className="mt-1 flex items-baseline justify-between font-mono">
+                <span className="text-body font-semibold text-ink">{best.diskReads} reads</span>
+                <span className="text-label font-bold text-hit">
+                  Hash Join ({hashScore.diskReads})
+                </span>
+              </div>
+            </div>
+            <div className="rounded-xl border border-edge bg-surface-2/80 p-3 shadow-neu-rest backdrop-blur-sm">
+              <div className="text-[11px] font-medium uppercase tracking-wider text-ink-dim">Nested-Loop Cost</div>
+              <div className="mt-1 flex items-baseline justify-between font-mono">
+                <span className="text-body font-semibold text-ink">{nestedScore.diskReads} reads</span>
+                <span className="text-label font-bold text-evict">
+                  +{nestedScore.diskReads - best.diskReads} vs best
+                </span>
+              </div>
+            </div>
+            <div className="rounded-xl border border-edge bg-surface-2/80 p-3 shadow-neu-rest backdrop-blur-sm">
+              <div className="text-[11px] font-medium uppercase tracking-wider text-ink-dim">Sort-Merge Cost</div>
+              <div className="mt-1 flex items-baseline justify-between font-mono">
+                <span className="text-body font-semibold text-ink">{sortMergeScore.diskReads} reads</span>
+                <span className="text-label font-bold text-amber-500">
+                  +{sortMergeScore.diskReads - best.diskReads} vs best
+                </span>
+              </div>
+            </div>
+          </div>
 
           <div className="flex flex-col gap-4 lg:flex-row">
             <JoinScoreColumn
@@ -1416,36 +1597,38 @@ function VectorizeCompare() {
   );
 }
 
+const MODES: { id: Mode; label: string; sublabel: string }[] = [
+  { id: 'policies', label: 'Buffer Policies', sublabel: 'Replacement policies' },
+  { id: 'index', label: 'Index Scan vs Seq Scan', sublabel: 'Index vs. sequential scan' },
+  { id: 'build', label: 'Index Build', sublabel: 'Index build' },
+  { id: 'aggregate', label: 'Aggregation', sublabel: 'Hash aggregate vs. sort aggregate' },
+  { id: 'join', label: 'Join Algorithms', sublabel: 'JOIN algorithms' },
+  { id: 'lsm', label: 'B+Tree vs LSM', sublabel: 'B+Tree vs. LSM tree' },
+  { id: 'vectorize', label: 'Vectorization', sublabel: 'Tuple-at-a-time vs. batched' },
+];
+
 export function ComparePage() {
   const [mode, setMode] = useState<Mode>('policies');
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-4 p-6 sm:p-8">
+    <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-5 p-6 sm:p-8">
       <PageHeader title="Compare">
         Two runs, side by side, to make one contrast concrete.
       </PageHeader>
 
-      <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Comparison">
-        {(
-          [
-            ['policies', 'Replacement policies'],
-            ['index', 'Index vs. sequential scan'],
-            ['build', 'Index build'],
-            ['aggregate', 'Hash aggregate vs. sort aggregate'],
-            ['join', 'JOIN algorithms'],
-            ['lsm', 'B+Tree vs. LSM tree'],
-            ['vectorize', 'Tuple-at-a-time vs. batched'],
-          ] as const
-        ).map(([value, label]) => (
+      <div className={`${segmentedTrack} flex flex-wrap gap-1.5`} role="radiogroup" aria-label="Comparison">
+        {MODES.map((m) => (
           <button
-            key={value}
+            key={m.id}
             type="button"
             role="radio"
-            aria-checked={mode === value}
-            onClick={() => { setMode(value); }}
-            className={`${segBase} ${mode === value ? segOn : segOff}`}
+            aria-checked={mode === m.id}
+            aria-label={`${m.sublabel} (${m.label})`}
+            onClick={() => { setMode(m.id); }}
+            className={`${segBase} text-label py-1.5 px-3 flex items-center gap-1.5 ${mode === m.id ? segOn : segOff}`}
           >
-            {label}
+            <span className="font-semibold">{m.label}</span>
+            <span className="text-[11px] text-ink-dim">· {m.sublabel}</span>
           </button>
         ))}
       </div>

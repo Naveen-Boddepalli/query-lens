@@ -89,19 +89,20 @@ export function HashJoinToolPage() {
   }, [plan]);
 
   return (
-    <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-4 p-6 sm:p-8">
-      <PageHeader title="Hash join">
-        Join a build side and a probe side by hashing instead of rescanning: partition both by a hash
-        of the join key, and re-partition anything that still doesn&rsquo;t fit in memory. Once a
-        partition fits, build an in-memory hash table over it and probe with the other side&rsquo;s
-        matching partition. Not wired to the engine&rsquo;s real{' '}
-        <code className="font-mono text-ink">hashJoin</code> operator (which never partitions or
-        spills, plan.md §22.2) — a self-contained model of the fuller Grace hash join.
+    <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-5 p-6 sm:p-8">
+      <PageHeader
+        breadcrumbs={[{ label: 'Tools', to: '/tools' }, { label: 'Hash Join' }]}
+        title="Hash join"
+      >
+        Join a build relation and a probe relation by hashing instead of rescanning: partition both by a
+        hash of the join key, and recursively re-partition spills that exceed the memory budget.
+        Once a partition fits resident in memory, construct hash buckets and probe for key equality.
       </PageHeader>
 
-      <div className="flex flex-wrap items-end gap-4 rounded-xl border border-edge bg-surface-2 p-3 shadow-e1">
-        <label className="flex flex-col gap-1 text-label text-ink-dim">
-          Build keys
+      {/* Control Toolbar */}
+      <div className="ql-sheen flex flex-wrap items-end gap-4 rounded-xl border border-edge bg-surface-2/80 p-4 shadow-neu-rest backdrop-blur-md">
+        <label className="flex flex-col gap-1.5 text-label text-ink-dim">
+          <span>Build Keys</span>
           <input
             type="number"
             min={HASH_JOIN_LIMITS.minBuildKeys}
@@ -113,12 +114,12 @@ export function HashJoinToolPage() {
                 setBuild(v);
               }
             }}
-            className={`${inputField} w-20 tabular-nums`}
+            className={`${inputField} w-24 tabular-nums`}
           />
         </label>
 
-        <label className="flex flex-col gap-1 text-label text-ink-dim">
-          Probe keys
+        <label className="flex flex-col gap-1.5 text-label text-ink-dim">
+          <span>Probe Keys</span>
           <input
             type="number"
             min={HASH_JOIN_LIMITS.minProbeKeys}
@@ -130,29 +131,29 @@ export function HashJoinToolPage() {
                 setProbe(v);
               }
             }}
-            className={`${inputField} w-20 tabular-nums`}
+            className={`${inputField} w-24 tabular-nums`}
           />
         </label>
 
-        <label className="flex flex-col gap-1 text-label text-ink-dim">
-          Records / page
+        <label className="flex flex-col gap-1.5 text-label text-ink-dim">
+          <span>Records / page</span>
           <select
             value={pageSize}
             onChange={(e) => { setPageSize(Number(e.target.value)); }}
             className={inputField}
           >
-            {[2, 3, 4].map((v) => <option key={v} value={v}>{v}</option>)}
+            {[2, 3, 4].map((v) => <option key={v} value={v}>{v} records</option>)}
           </select>
         </label>
 
-        <label className="flex flex-col gap-1 text-label text-ink-dim">
-          Buffer pages
+        <label className="flex flex-col gap-1.5 text-label text-ink-dim">
+          <span>Buffer pages</span>
           <select
             value={memPages}
             onChange={(e) => { setMemPages(Number(e.target.value)); }}
             className={inputField}
           >
-            {[3, 4, 5, 6].map((v) => <option key={v} value={v}>{v}</option>)}
+            {[3, 4, 5, 6].map((v) => <option key={v} value={v}>{v} pages</option>)}
           </select>
         </label>
 
@@ -161,32 +162,40 @@ export function HashJoinToolPage() {
           onClick={() => { setSeed(Math.floor(Math.random() * MAX_SEED)); }}
           className={btnSecondary}
         >
-          Shuffle
+          Shuffle Keys
         </button>
       </div>
 
-      <div className={`${panelSurface} flex flex-wrap items-start gap-x-8 gap-y-3 p-4`}>
-        <Stat
-          label="partitions per split"
-          value={plan.numPartitions}
-          sub={`from ${plan.memPages} buffer pages`}
-        />
-        <Stat
-          label="leaf partitions"
-          value={plan.leaves.length}
-          sub={plan.fitsInMemory ? 'fits in memory, no split needed' : `spilled to depth ${plan.maxDepth}`}
-        />
-        <Stat
-          label="matches"
-          value={plan.matches.length}
-          sub={`of ${plan.probeKeys.length} probe keys`}
-        />
-        <Stat
-          label="page I/Os"
-          value={plan.totalIO}
-          sub={`${plan.partitionIO} partitioning + ${plan.buildProbeIO} build/probe`}
-          accent
-        />
+      {/* Metrics Strip */}
+      <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+        {[
+          { label: 'Partitions / Split', value: String(plan.numPartitions), sub: `${plan.memPages} buffer pages` },
+          {
+            label: 'Leaf Partitions',
+            value: String(plan.leaves.length),
+            sub: plan.fitsInMemory ? 'fits in memory, no split needed' : `depth ${plan.maxDepth} spill`,
+          },
+          {
+            label: 'Matches Found',
+            value: String(plan.matches.length),
+            sub: `of ${plan.probeKeys.length} probe keys`,
+            color: 'text-hit',
+          },
+          {
+            label: 'Total Page I/Os',
+            value: String(plan.totalIO),
+            sub: `${plan.partitionIO} part + ${plan.buildProbeIO} probe`,
+            color: 'text-accent',
+          },
+        ].map((m) => (
+          <div key={m.label} className="ql-sheen rounded-xl border border-edge bg-surface-2/60 p-3 shadow-neu-rest backdrop-blur-sm">
+            <span className="block font-mono text-[0.7rem] uppercase tracking-wider text-ink-dim">{m.label}</span>
+            <span className={`mt-1 block truncate text-heading font-semibold tabular-nums ${m.color ?? 'text-ink'}`}>
+              {m.value}
+            </span>
+            <span className="text-[0.75rem] text-ink-dim">{m.sub}</span>
+          </div>
+        ))}
       </div>
 
       <p className="text-label leading-relaxed text-ink-dim">
@@ -232,28 +241,6 @@ export function HashJoinToolPage() {
         </Link>{' '}
         in the pipeline shares is what a real engine would spend these I/Os against.
       </p>
-    </div>
-  );
-}
-
-function Stat({
-  label,
-  value,
-  sub,
-  accent = false,
-}: {
-  label: string;
-  value: number;
-  sub: string;
-  accent?: boolean;
-}) {
-  return (
-    <div className="flex flex-col">
-      <span className={`text-heading font-semibold tabular-nums ${accent ? 'text-accent' : 'text-ink'}`}>
-        {value}
-      </span>
-      <span className="text-label text-ink-dim">{label}</span>
-      <span className="text-label text-ink-dim/70">{sub}</span>
     </div>
   );
 }
@@ -335,7 +322,11 @@ function LeafDetail({ partition, leaf }: { partition: HashJoinPartition; leaf: H
             >
               <div className="text-ink-dim">
                 bucket {bucket.index}
-                {bucket.hasCollision && <span className="ml-1.5 text-miss">⚠ collision</span>}
+                {bucket.hasCollision && (
+                  <span className="ml-1.5 rounded px-1.5 py-0.2 font-mono text-[0.68rem] uppercase tracking-wider border border-miss/40 bg-miss/15 text-miss">
+                    ⚠ collision
+                  </span>
+                )}
               </div>
               <div className="mt-1 flex flex-wrap gap-1">
                 {bucket.entries.length === 0 ? (
@@ -354,17 +345,20 @@ function LeafDetail({ partition, leaf }: { partition: HashJoinPartition; leaf: H
       </div>
 
       <div>
-        <h4 className="mb-2 text-label font-medium text-ink-dim">
-          Probe phase — {plural(leaf.matches.length, 'match')}, {plural(leaf.misses.length, 'miss')}
+        <h4 className="mb-2 text-label font-medium text-ink-dim font-mono text-[0.78rem] uppercase tracking-wider">
+          Probe phase &mdash; {plural(leaf.matches.length, 'match')}, {plural(leaf.misses.length, 'miss')}
         </h4>
         <ul className="flex flex-wrap gap-1.5 text-label">
           {leaf.matches.map((m, i) => (
             <li
               key={`match${String(i)}`}
-              title={`probe ${String(m.probeValue)} → bucket ${String(m.bucket)} → matched build ${String(m.buildValue)}`}
-              className="rounded bg-hit/20 px-1.5 py-0.5 font-mono tabular-nums text-ink"
+              title={`probe ${String(m.probeValue)} -> bucket ${String(m.bucket)} -> matched build ${String(m.buildValue)}`}
+              className="inline-flex items-center gap-1 rounded border border-hit/40 bg-hit/15 px-2 py-0.5 font-mono tabular-nums text-ink text-[0.75rem]"
             >
-              {m.probeValue} ✓
+              <span>{m.probeValue}</span>
+              <span aria-hidden="true" className="font-mono text-[0.65rem] uppercase text-hit font-semibold">
+                match
+              </span>
             </li>
           ))}
           {leaf.misses.map((m, i) => (
@@ -372,14 +366,17 @@ function LeafDetail({ partition, leaf }: { partition: HashJoinPartition; leaf: H
               key={`miss${String(i)}`}
               title={
                 m.collided
-                  ? `probe ${String(m.probeValue)} → bucket ${String(m.bucket)} → checked a colliding bucket, no match`
-                  : `probe ${String(m.probeValue)} → bucket ${String(m.bucket)} → empty, no match`
+                  ? `probe ${String(m.probeValue)} -> bucket ${String(m.bucket)} -> checked a colliding bucket, no match`
+                  : `probe ${String(m.probeValue)} -> bucket ${String(m.bucket)} -> empty, no match`
               }
-              className={`rounded px-1.5 py-0.5 font-mono tabular-nums text-ink ${
-                m.collided ? 'bg-miss/20' : 'bg-surface-3'
+              className={`inline-flex items-center gap-1 rounded border px-2 py-0.5 font-mono tabular-nums text-ink text-[0.75rem] ${
+                m.collided ? 'border-miss/40 bg-miss/15' : 'border-edge bg-surface-3'
               }`}
             >
-              {m.probeValue} {m.collided ? '↯' : '✕'}
+              <span>{m.probeValue}</span>
+              <span aria-hidden="true" className="font-mono text-[0.65rem] uppercase text-ink-dim font-semibold">
+                {m.collided ? 'collision-miss' : 'miss'}
+              </span>
             </li>
           ))}
         </ul>

@@ -7,19 +7,88 @@ import {
   writeDefaultPolicy,
   writeDefaultPredictOn,
 } from '../ui/preferences.ts';
+import { useThemeContext } from '../ui/ThemeContext.tsx';
 import { PageHeader } from '../ui/PageHeader.tsx';
-import { btnGhost, card, segBase, segOff, segOn } from '../ui/primitives.ts';
+import { btnGhost, card, segBase, segOff, segOn, segmentedTrack } from '../ui/primitives.ts';
 
-/**
- * plan.md §21.3. Small on purpose: the only two things worth defaulting are
- * the eviction policy and whether prediction is on, because everything else
- * that could be a "setting" — theme, reduced motion — already has its own
- * control (the header toggle; the OS-level media query, respected directly).
- * A preference here never overrides a shareable link (§15.2): the link is
- * what reproduces a *moment*, and a stored default would silently break that
- * for anyone who set one and then opened someone else's link.
- */
+const SPEED_KEY = 'querylens:default-speed';
+
+function readDefaultSpeed(): string {
+  try {
+    return localStorage.getItem(SPEED_KEY) ?? 'default';
+  } catch {
+    return 'default';
+  }
+}
+
+function writeDefaultSpeed(speed: string | null): void {
+  try {
+    if (speed === null || speed === 'default') localStorage.removeItem(SPEED_KEY);
+    else localStorage.setItem(SPEED_KEY, speed);
+  } catch {
+    // Session-only fallback
+  }
+}
+
+interface SectionProps<T extends string> {
+  title: string;
+  desc: string;
+  label: string;
+  value: T;
+  onChange: (val: T) => void;
+  options: readonly (readonly [T, string])[];
+}
+
+function SettingSection<T extends string>({ title, desc, label, value, onChange, options }: SectionProps<T>) {
+  return (
+    <section className={card}>
+      <h3 className="mb-1 text-body font-semibold text-ink">{title}</h3>
+      <p className="mb-3 text-label text-ink-dim leading-relaxed">{desc}</p>
+      <div className={`${segmentedTrack} flex flex-wrap gap-1.5`} role="radiogroup" aria-label={label}>
+        {options.map(([val, text]) => (
+          <button
+            key={val}
+            type="button"
+            role="radio"
+            aria-checked={value === val}
+            onClick={() => { onChange(val); }}
+            className={`${segBase} ${value === val ? segOn : segOff}`}
+          >
+            {text}
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+const THEME_OPTIONS = [
+  ['system', 'System default'],
+  ['dark', 'Dark'],
+  ['light', 'Light'],
+] as const;
+
+const POLICY_OPTIONS = [
+  ['default', 'Engine default (LRU)'],
+  ...REPLACEMENT_POLICY_NAMES.map((name) => [name, REPLACEMENT_POLICY_LABELS[name]] as const),
+] as const;
+
+const PREDICT_OPTIONS = [
+  ['default', 'Engine default (on)'],
+  ['on', 'Always on'],
+  ['off', 'Always off'],
+] as const;
+
+const SPEED_OPTIONS = [
+  ['default', 'Engine default (1×)'],
+  ['0.5', '0.5× Slow'],
+  ['1', '1× Normal'],
+  ['2', '2× Fast'],
+] as const;
+
 export function SettingsPage() {
+  const { choice: themeChoice, setChoice: setThemeChoice } = useThemeContext();
+
   const [policy, setPolicy] = useState<ReplacementPolicyName | 'default'>(
     () => readDefaultPolicy() ?? 'default',
   );
@@ -27,6 +96,7 @@ export function SettingsPage() {
     const stored = readDefaultPredictOn();
     return stored === undefined ? 'default' : stored ? 'on' : 'off';
   });
+  const [speed, setSpeed] = useState<string>(readDefaultSpeed);
 
   function choosePolicy(next: ReplacementPolicyName | 'default') {
     setPolicy(next);
@@ -38,75 +108,72 @@ export function SettingsPage() {
     writeDefaultPredictOn(next === 'default' ? null : next === 'on');
   }
 
+  function chooseSpeed(next: string) {
+    setSpeed(next);
+    writeDefaultSpeed(next);
+  }
+
+  function resetAll() {
+    choosePolicy('default');
+    choosePredict('default');
+    chooseSpeed('default');
+    setThemeChoice('system');
+  }
+
   return (
     <div className="mx-auto w-full max-w-2xl p-6 sm:p-8">
-      <PageHeader title="Settings">
-        Defaults for a bare visit to the Playground. A{' '}
-        <a href="/docs/reference/url-parameters" className="underline underline-offset-2 hover:text-ink">
-          shared link
-        </a>{' '}
-        always wins over these — that is what makes it reproduce the exact moment it points to.
+      <PageHeader eyebrow="Preferences" title="Settings">
+        Defaults for cold visits to the Playground. Shared links always override these preferences.
       </PageHeader>
 
-      <section className={`mt-8 mb-4 ${card}`}>
-        <h3 className="mb-1 text-body font-semibold text-ink">Default eviction policy</h3>
-        <p className="mb-3 text-label text-ink-dim">
-          Which replacement policy the buffer pool uses when a query does not specify one.
-        </p>
-        <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Default eviction policy">
-          {[
-            { value: 'default' as const, label: 'Engine default (LRU)' },
-            ...REPLACEMENT_POLICY_NAMES.map((name) => ({ value: name, label: REPLACEMENT_POLICY_LABELS[name] })),
-          ].map((opt) => (
-            <button
-              key={opt.value}
-              type="button"
-              role="radio"
-              aria-checked={policy === opt.value}
-              onClick={() => { choosePolicy(opt.value); }}
-              className={`${segBase} ${policy === opt.value ? segOn : segOff}`}
-            >
-              {opt.label}
-            </button>
-          ))}
-        </div>
-      </section>
+      <div className="space-y-4 mt-6">
+        <SettingSection
+          title="Color theme"
+          desc="Workspace color scheme."
+          label="Color theme"
+          value={themeChoice}
+          onChange={setThemeChoice}
+          options={THEME_OPTIONS}
+        />
 
-      <section className={`mb-6 ${card}`}>
-        <h3 className="mb-1 text-body font-semibold text-ink">Predict-then-reveal</h3>
-        <p className="mb-3 text-label text-ink-dim">
-          Whether the Playground asks you to commit to an answer before revealing each step, by
-          default.
-        </p>
-        <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Default predict-then-reveal">
-          {(
-            [
-              { value: 'default', label: 'Engine default (on)' },
-              { value: 'on', label: 'Always on' },
-              { value: 'off', label: 'Always off' },
-            ] as const
-          ).map((opt) => (
-            <button
-              key={opt.value}
-              type="button"
-              role="radio"
-              aria-checked={predictOn === opt.value}
-              onClick={() => { choosePredict(opt.value); }}
-              className={`${segBase} ${predictOn === opt.value ? segOn : segOff}`}
-            >
-              {opt.label}
-            </button>
-          ))}
-        </div>
-      </section>
+        <SettingSection
+          title="Default eviction policy"
+          desc="Buffer pool replacement algorithm when none is specified."
+          label="Default eviction policy"
+          value={policy}
+          onChange={choosePolicy}
+          options={POLICY_OPTIONS}
+        />
 
-      <button
-        type="button"
-        onClick={() => { choosePolicy('default'); choosePredict('default'); }}
-        className={btnGhost}
-      >
-        Reset to engine defaults
-      </button>
+        <SettingSection
+          title="Predict-then-reveal mode"
+          desc="Require prediction commitments before revealing each step."
+          label="Default predict-then-reveal"
+          value={predictOn}
+          onChange={choosePredict}
+          options={PREDICT_OPTIONS}
+        />
+
+        <SettingSection
+          title="Animation playback speed"
+          desc="Pacing multiplier for automatic step playback."
+          label="Default playback speed"
+          value={speed}
+          onChange={chooseSpeed}
+          options={SPEED_OPTIONS}
+        />
+      </div>
+
+      <div className="mt-6 flex items-center justify-between border-t border-edge pt-4">
+        <button
+          type="button"
+          onClick={resetAll}
+          className={btnGhost}
+        >
+          Reset to engine defaults
+        </button>
+        <span className="font-mono text-[11px] text-ink-dim">Stored locally in browser</span>
+      </div>
     </div>
   );
 }

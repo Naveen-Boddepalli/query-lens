@@ -116,6 +116,17 @@ const INITIAL_RESULT = runQuery(START.sql, START.db, {
   policy: START.policy,
 });
 
+const CHIP_BASE = 'rounded-full border px-2.5 py-0.5 text-label font-medium select-none transition-all';
+const CHIP_ACTIVE = `${CHIP_BASE} border-accent bg-accent-soft text-ink shadow-glow`;
+const CHIP_INACTIVE = `${CHIP_BASE} border-edge text-ink-dim hover:border-ink-dim/50 hover:text-ink active:scale-95`;
+const CHIP_ROW = 'flex flex-wrap items-center gap-1.5';
+const CHIP_LABEL = 'mr-1 text-label font-medium text-ink-dim';
+const PANEL_COL = 'snap-section flex min-w-0 flex-col gap-3';
+const LINK_ACTION = 'text-label text-ink-dim underline-offset-2 transition-colors hover:text-ink hover:underline disabled:cursor-not-allowed disabled:opacity-50';
+const GLASS_CARD = 'rounded-xl border border-edge bg-surface-2/80 shadow-neu-rest backdrop-blur-md';
+const NARRATION_BOX = `ql-sheen p-3 ${GLASS_CARD}`;
+const CUSTOM_BLURB = 'Your own tables, kept in this browser';
+
 const WorkspaceDialog = lazy(() =>
   import('../ui/WorkspaceDialog.tsx').then((m) => ({ default: m.WorkspaceDialog })),
 );
@@ -492,8 +503,8 @@ export function PlaygroundPage() {
       rows: rowsEdited && table ? table.rows : null,
     });
     const a = document.createElement('a');
-    a.href = `data:application/json;charset=utf-8,${encodeURIComponent(json)}`;
-    a.download = `querylens-trace-${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}.json`;
+    a.href = `data:application/json,${encodeURIComponent(json)}`;
+    a.download = `querylens-trace-${Date.now()}.json`;
     a.click();
   }
 
@@ -540,31 +551,27 @@ export function PlaygroundPage() {
     applyTraceState(parsed.value);
     setTraceMsg({
       kind: 'ok',
-      text: `Loaded trace${parsed.value.rows ? ' with edited data' : ''} at step ${String(parsed.value.step)}.`,
+      text: `Loaded trace at step ${parsed.value.step}.`,
     });
     window.setTimeout(() => { setTraceMsg(null); }, 4000);
   }
 
   return (
     <>
-      <main className="grid flex-1 gap-4 p-4 lg:min-h-0 lg:grid-cols-[minmax(300px,400px)_1fr]">
+      <main className="grid flex-1 w-full min-w-0 max-w-full gap-4 p-4 lg:min-h-0 lg:grid-cols-[minmax(320px,420px)_1fr]">
         {/* Authoring panel */}
-        <div className="snap-section order-2 flex min-w-0 flex-col gap-3 lg:order-1 lg:min-h-0 lg:overflow-y-auto">
+        <div className={`${PANEL_COL} order-2 lg:order-1 lg:min-h-0 lg:overflow-y-auto`}>
           <div data-tour="editor" className="flex flex-col gap-3">
-            <div className="flex flex-col gap-1">
-              <div className="flex flex-wrap items-center gap-1.5">
-                <span className="mr-1 text-label text-ink-dim">Data:</span>
+            <div className="flex flex-col gap-1.5">
+              <div className={CHIP_ROW}>
+                <span className={CHIP_LABEL}>Data:</span>
                 {DATASET_IDS.map((id) => (
                   <button
                     key={id}
                     type="button"
                     onClick={() => { switchDataset(id); }}
                     title={DATASET_CATALOGUE[id].blurb}
-                    className={`rounded-full border px-2.5 py-0.5 text-label transition ${
-                      !isCustom && datasetId === id
-                        ? 'border-accent bg-accent-soft text-ink'
-                        : 'border-edge text-ink-dim hover:border-ink-dim/50 hover:text-ink'
-                    }`}
+                    className={!isCustom && datasetId === id ? CHIP_ACTIVE : CHIP_INACTIVE}
                   >
                     {DATASET_CATALOGUE[id].label}
                   </button>
@@ -572,36 +579,28 @@ export function PlaygroundPage() {
                 <button
                   type="button"
                   onClick={switchToCustom}
-                  title="Your own tables — added, edited and joined here, kept in this browser"
-                  className={`rounded-full border px-2.5 py-0.5 text-label transition ${
-                    isCustom
-                      ? 'border-accent bg-accent-soft text-ink'
-                      : 'border-edge text-ink-dim hover:border-ink-dim/50 hover:text-ink'
-                  }`}
+                  title={CUSTOM_BLURB}
+                  className={isCustom ? CHIP_ACTIVE : CHIP_INACTIVE}
                 >
                   Custom
                 </button>
               </div>
               <p className="text-label text-ink-dim/80">
                 {isCustom
-                  ? 'Your own tables, kept in this browser — add a table, declare an index, and JOIN across them.'
+                  ? CUSTOM_BLURB
                   : DATASET_CATALOGUE[datasetId].blurb}
               </p>
             </div>
 
             {!isCustom && (
-              <div className="flex flex-wrap items-center gap-1.5">
-                <span className="mr-1 text-label text-ink-dim">Try:</span>
+              <div className={CHIP_ROW}>
+                <span className={CHIP_LABEL}>Try:</span>
                 {presets.map((p) => (
                   <button
                     key={p.label}
                     type="button"
                     onClick={() => { loadPreset(p.sql); }}
-                    className={`rounded-full border px-2.5 py-0.5 text-label transition ${
-                      sql === p.sql
-                        ? 'border-accent bg-accent-soft text-ink'
-                        : 'border-edge text-ink-dim hover:border-ink-dim/50 hover:text-ink'
-                    }`}
+                    className={sql === p.sql ? CHIP_ACTIVE : CHIP_INACTIVE}
                   >
                     {p.label}
                   </button>
@@ -651,7 +650,7 @@ export function PlaygroundPage() {
             <label className="ml-auto flex items-center gap-2 text-label text-ink-dim">
               Eviction
               <select
-                className="rounded-lg border border-edge bg-surface-3 px-2 py-1 text-ink shadow-e1 transition hover:border-ink-dim/50"
+                className="cursor-pointer rounded-lg border border-edge bg-surface-3 px-2 py-1 text-ink shadow-neu-rest transition hover:border-ink-dim/50"
                 value={policy}
                 onChange={(e) => { setPolicy(e.target.value as ReplacementPolicyName); }}
               >
@@ -676,53 +675,27 @@ export function PlaygroundPage() {
               ) : (
                 <>
                   {result.events.length} steps in this trace · showing step{' '}
-                  <span className="tabular-nums text-ink">{playback.step}</span>
+                  <span className="tabular-nums font-semibold text-ink">{playback.step}</span>
                 </>
               )}
             </p>
             <span className="ml-auto flex flex-wrap items-baseline gap-x-3 gap-y-1">
-              <button
-                type="button"
-                onClick={() => { void copyLink(); }}
-                className="underline-offset-2 transition-colors hover:text-ink hover:underline"
-              >
-                {copied ? 'Link copied ✓' : 'Copy link to this step'}
+              <button type="button" onClick={() => { void copyLink(); }} className={LINK_ACTION}>
+                {copied ? 'Link copied' : 'Copy link to this step'}
               </button>
-              <button
-                type="button"
-                onClick={downloadTrace}
-                disabled={isCustom}
-                title={isCustom ? 'A custom database is not yet part of a trace file — kept in this browser only.' : undefined}
-                className="underline-offset-2 transition-colors hover:text-ink hover:underline disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:no-underline disabled:hover:text-inherit"
-              >
+              <button type="button" onClick={downloadTrace} disabled={isCustom} title={isCustom ? 'Not available for custom tables' : undefined} className={LINK_ACTION}>
                 Download trace
               </button>
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                className="underline-offset-2 transition-colors hover:text-ink hover:underline"
-              >
+              <button type="button" onClick={() => { fileInputRef.current?.click(); }} className={LINK_ACTION}>
                 Load trace
               </button>
-              <button
-                type="button"
-                onClick={() => { setPresenting(true); }}
-                className="underline-offset-2 transition-colors hover:text-ink hover:underline"
-              >
+              <button type="button" onClick={() => { setPresenting(true); }} className={LINK_ACTION}>
                 Present
               </button>
-              <button
-                type="button"
-                onClick={() => { setTourOpen(true); }}
-                className="underline-offset-2 transition-colors hover:text-ink hover:underline"
-              >
+              <button type="button" onClick={() => { setTourOpen(true); }} className={LINK_ACTION}>
                 Tour
               </button>
-              <button
-                type="button"
-                onClick={() => { window.print(); }}
-                className="underline-offset-2 transition-colors hover:text-ink hover:underline"
-              >
+              <button type="button" onClick={() => { print(); }} className={LINK_ACTION}>
                 Print
               </button>
             </span>
@@ -749,17 +722,16 @@ export function PlaygroundPage() {
           />
 
           {ASSIGNMENT ? (
-            <p className="rounded-lg border border-accent/40 bg-accent/[0.07] px-3 py-2 text-label text-ink-dim">
-              <span className="font-medium text-ink">Assignment mode.</span> The trace is sealed at
-              this step until you answer the question — no skipping, no scrubbing ahead.
+            <p className={`p-3 text-label text-ink-dim ${GLASS_CARD}`}>
+              <span className="font-semibold text-ink">Assignment mode.</span> The trace is sealed until answered.
             </p>
           ) : (
-            <label className="flex items-center gap-2 text-label text-ink-dim">
+            <label className="flex items-center gap-2 text-label text-ink-dim select-none">
               <input
                 type="checkbox"
                 checked={predictOn}
                 onChange={(e) => { setPredictOn(e.target.checked); }}
-                className="accent-[var(--color-accent)]"
+                className="accent-[var(--color-accent)] cursor-pointer"
               />
               Ask me to predict before each reveal
             </label>
@@ -768,8 +740,8 @@ export function PlaygroundPage() {
         </div>
 
         {/* Trace panel */}
-        <div className="snap-section order-1 flex min-h-0 min-w-0 flex-col gap-3 lg:order-2 lg:overflow-hidden">
-          <div data-tour="pipeline">
+        <div className={`${PANEL_COL} order-1 lg:order-2 w-full min-w-0 max-w-full lg:overflow-hidden`}>
+          <div data-tour="pipeline" className="w-full min-w-0 max-w-full overflow-hidden">
             <PipelineTracker
               current={state?.stage ?? null}
               visited={visited}
@@ -831,21 +803,17 @@ export function PlaygroundPage() {
               then the verdict into it. */}
           <div
             data-tour="narration"
-            className={
-              prompt
-                ? 'sr-only'
-                : 'ql-sheen rounded-xl border border-edge bg-surface-2 p-3 shadow-e1'
-            }
+            className={prompt ? 'sr-only' : NARRATION_BOX}
           >
             {!prompt && (
               <div className="mb-1 flex items-center justify-between gap-2">
-                <h2 className="text-label font-medium tracking-[0.12em] text-ink-dim uppercase">
+                <h2 className="text-micro font-semibold tracking-[0.14em] text-ink-dim uppercase">
                   Narration
                 </h2>
                 <ReportStepLink moment={moment} />
               </div>
             )}
-            <p className="min-h-10 text-body leading-relaxed" aria-live="polite" aria-atomic="true">
+            <p className="min-h-10 text-body leading-relaxed text-ink" aria-live="polite" aria-atomic="true">
               <span className="sr-only">
                 Step {playback.step} of {result.events.length}.{' '}
               </span>
@@ -858,7 +826,7 @@ export function PlaygroundPage() {
 
           <div
             data-tour="playback"
-            className="sticky bottom-0 z-10 -mx-4 space-y-2 border-t border-edge bg-surface/85 px-4 py-2 backdrop-blur-md lg:static lg:mx-0 lg:space-y-3 lg:border-0 lg:bg-transparent lg:px-0 lg:py-0 lg:backdrop-blur-none"
+            className="sticky bottom-0 z-10 -mx-4 space-y-2 border-t border-edge bg-surface/80 px-4 py-2 backdrop-blur-md lg:static lg:mx-0 lg:space-y-3 lg:border-0 lg:bg-transparent lg:p-0 lg:backdrop-blur-none"
           >
             <PlaybackControls
               playback={playback}

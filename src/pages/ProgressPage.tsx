@@ -4,10 +4,13 @@ import { Link } from 'react-router-dom';
 import { STAGES } from '../engine/types.ts';
 import { LESSON_INDEX } from './learn/lessonIndex.ts';
 import { clearCompleted, readCompleted } from '../ui/learnProgress.ts';
+import { clearSolved, readSolved } from '../ui/challengeProgress.ts';
 import { CONFIDENCE_LABELS, CONFIDENCE_LEVELS, clearProgress, readProgress } from '../ui/progress.ts';
 import { PageHeader } from '../ui/PageHeader.tsx';
 import { STAGE_META } from '../ui/stageMeta.ts';
 import { btnGhost, card } from '../ui/primitives.ts';
+
+const TOTAL_CHALLENGES = 41;
 
 /**
  * plan.md §22.4: the returning visitor's page (§21.2). Three numbers, all read
@@ -17,11 +20,12 @@ import { btnGhost, card } from '../ui/primitives.ts';
  */
 export function ProgressPage() {
   const [lessons, setLessons] = useState(() => readCompleted());
+  const [solved, setSolved] = useState(() => readSolved());
   const [progress, setProgress] = useState(() => readProgress());
 
   const seen = new Set(progress.stages);
   const nothing =
-    lessons.size === 0 && seen.size === 0 && progress.asked === 0;
+    lessons.size === 0 && solved.size === 0 && seen.size === 0 && progress.asked === 0;
 
   const hitRate =
     progress.asked === 0 ? '—' : `${Math.round((progress.right / progress.asked) * 100)}%`;
@@ -29,8 +33,10 @@ export function ProgressPage() {
 
   function reset() {
     clearCompleted();
+    clearSolved();
     clearProgress();
     setLessons(new Set());
+    setSolved(new Set());
     setProgress(readProgress());
   }
 
@@ -85,6 +91,30 @@ export function ProgressPage() {
 
           <div className={card}>
             <div className="flex items-baseline justify-between">
+              <h2 className="text-body font-semibold text-ink">Challenges solved</h2>
+              <span className="font-mono tabular-nums text-ink-dim">
+                {solved.size} / {TOTAL_CHALLENGES}
+              </span>
+            </div>
+            <p className="mt-2 text-label text-ink-dim">
+              {solved.size === 0 ? (
+                <>
+                  No challenges solved yet.{' '}
+                  <Link to="/challenges" className="underline hover:text-ink">
+                    Try one
+                  </Link>
+                  .
+                </>
+              ) : (
+                <>
+                  <span className="tabular-nums text-ink font-semibold">{solved.size}</span> solved across all categories.
+                </>
+              )}
+            </p>
+          </div>
+
+          <div className={card}>
+            <div className="flex items-baseline justify-between">
               <h2 className="text-body font-semibold text-ink">Pipeline stages seen</h2>
               <span className="font-mono tabular-nums text-ink-dim">
                 {seen.size} / {STAGES.length}
@@ -115,8 +145,8 @@ export function ProgressPage() {
                 <>None yet. Leave “Ask me to predict” on in the Playground.</>
               ) : (
                 <>
-                  <span className="tabular-nums text-ink">{progress.right}</span> right of{' '}
-                  <span className="tabular-nums text-ink">{progress.asked}</span> committed. A wrong
+                  <span className="tabular-nums text-ink font-medium">{progress.right}</span> right of{' '}
+                  <span className="tabular-nums text-ink font-medium">{progress.asked}</span> committed. A wrong
                   guess you committed to is the one that teaches (RESEARCH.md §1).
                 </>
               )}

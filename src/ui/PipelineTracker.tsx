@@ -10,19 +10,7 @@ export interface PipelineTrackerProps {
 }
 
 /**
- * The eight stages as a connected progress rail.
- *
- * Redesigned from a row of text chips joined by "→" glyphs into a rail: each
- * stage is a node with a leading status dot, and the connector between two
- * nodes fills with the accent up to the stage the trace has reached, so the
- * shape itself reads as progress.
- *
- * Constraints kept from the old version: `aria-current="step"` on the live
- * stage, `aria-pressed` on the pin toggle, and — load-bearing for
- * `e2e/regressions.spec.ts` — the button's visible text is exactly
- * `STAGE_META[stage].title` and nothing else; the dot and connector are
- * `aria-hidden` decoration. Scrolls horizontally on a phone rather than
- * wrapping, so the rail never breaks across lines and never widens the page.
+ * The eight stages as a connected progress rail with Tactile Glass capsule styling.
  */
 export function PipelineTracker({ current, visited, selected, onSelect }: PipelineTrackerProps) {
   const currentIndex = current ? STAGES.indexOf(current) : -1;
@@ -30,7 +18,7 @@ export function PipelineTracker({ current, visited, selected, onSelect }: Pipeli
   return (
     <nav
       aria-label="Query pipeline"
-      className="-mx-1 flex items-center gap-1 overflow-x-auto px-1"
+      className="flex w-full min-w-0 max-w-full items-center gap-1 overflow-x-auto rounded-full border border-edge bg-surface-2/80 p-1 shadow-neu-rest backdrop-blur-md"
     >
       {STAGES.map((stage, i) => {
         const meta = STAGE_META[stage];
@@ -38,19 +26,16 @@ export function PipelineTracker({ current, visited, selected, onSelect }: Pipeli
         const isVisited = visited.has(stage);
         const isBuilt = IMPLEMENTED_STAGES.includes(stage);
         const isPinned = stage === selected;
-        // The connector leading into this node is "done" once the previous
-        // stage has been reached.
         const connectorDone = i > 0 && (currentIndex >= i || visited.has(STAGES[i - 1]!));
 
         return (
           <div key={stage} className="flex shrink-0 items-center gap-1">
             {i > 0 && (
               <span
-                aria-hidden
-                className={[
-                  'h-px w-3 shrink-0 rounded-full transition sm:w-5',
-                  connectorDone ? 'bg-accent/70' : 'bg-edge',
-                ].join(' ')}
+                aria-hidden="true"
+                className={`h-0.5 w-3 shrink-0 rounded-full transition-colors sm:w-4 ${
+                  connectorDone ? 'bg-accent/80 shadow-glow' : 'bg-edge'
+                }`}
               />
             )}
             <button
@@ -60,35 +45,30 @@ export function PipelineTracker({ current, visited, selected, onSelect }: Pipeli
               aria-pressed={isPinned}
               title={
                 isPinned
-                  ? `${meta.title} is pinned — click to follow the trace again`
+                  ? `${meta.title} (pinned)`
                   : isBuilt
                     ? meta.blurb
                     : `${meta.blurb} — not part of this release`
               }
-              className={[
-                'cell flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-label font-medium',
+              className={`cell flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-label font-medium select-none transition-all ${
                 isCurrent
                   ? 'border-accent bg-accent-soft text-ink shadow-glow'
                   : isVisited
-                    ? `border-edge bg-surface-3 shadow-e1 hover:border-ink-dim/50 hover:bg-surface-4 active:bg-edge/60 ${meta.tone}`
+                    ? `border-edge bg-surface-3 shadow-neu-rest hover:border-ink-dim/50 hover:text-ink active:scale-95 ${meta.tone}`
                     : isBuilt
-                      ? 'border-edge/60 bg-transparent text-ink-dim hover:border-ink-dim/50 hover:bg-surface-3 hover:text-ink active:bg-surface-4'
-                      : 'border-dashed border-edge/50 bg-transparent text-ink-dim/80 hover:border-ink-dim/40 hover:bg-surface-3',
-                isPinned ? 'ring-2 ring-accent ring-offset-1 ring-offset-surface' : '',
-              ].join(' ')}
+                      ? 'border-edge/60 bg-transparent text-ink-dim hover:border-ink-dim/50 hover:text-ink active:scale-95'
+                      : 'border-dashed border-edge/50 bg-transparent text-ink-dim/80 hover:border-ink-dim/40'
+              }${isPinned ? ' ring-2 ring-accent ring-offset-2 ring-offset-surface' : ''}`}
             >
               <span
-                aria-hidden
-                className={[
-                  'h-1.5 w-1.5 shrink-0 rounded-full transition',
+                aria-hidden="true"
+                className={`h-1.5 w-1.5 shrink-0 rounded-full transition-all ${
                   isCurrent
-                    ? 'bg-accent-strong shadow-[0_0_8px_var(--color-accent)]'
+                    ? 'bg-accent-strong shadow-glow animate-pulse'
                     : isVisited
                       ? 'bg-current'
-                      : isBuilt
-                        ? 'border border-current bg-transparent'
-                        : 'border border-dashed border-current bg-transparent',
-                ].join(' ')}
+                      : `border border-current bg-transparent${isBuilt ? '' : ' border-dashed'}`
+                }`}
               />
               {meta.title}
             </button>
