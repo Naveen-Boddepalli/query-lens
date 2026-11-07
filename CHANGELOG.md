@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-11-07
+
+The general availability release of QueryLens 2.0. It ships a complete frontend redesign with a tactile
+glass-neumorphic visual system, deep slate surfaces, accessible WCAG 2.2 AA contrast compliance across light
+and dark themes, an interactive learning curriculum and challenges suite, dedicated standalone sandboxes, and
+hardened multi-shard CI verification. All 2.0 checklist requirements (plan.md §25.8) are complete.
+
+### Added
+
+- **Tactile Glass Design System**: Deep slate/navy surfaces, subtle multi-layered inner glow borders, tactile
+  neumorphic controls, and unified token utilities (`src/index.css`, `src/ui/primitives.ts`), adding visual depth
+  and tactile feedback while keeping DOM overhead and animation paint costs low.
+- **Modern Landing Page & Interactive Hero**: Overhauled landing experience featuring an interactive live query
+  runner, animated pipeline stage teaser, interactive performance metrics, and responsive hero layouts.
+- **Navigation & Global Chrome Overhaul**: Floating glass header with active route indicators, accessible brand
+  identity, theme toggle, and unified footer with full documentation and tools sitemap.
+- **Playground & Visualizer Panels**: Reimagined query execution stage visualizations with responsive layouts,
+  redesigned playback control bar, enhanced AST and plan tree tonality, and high-density result grids.
+- **Curriculum, Challenges & Progress Dashboard**: 30-lesson interactive learning curriculum and 52 interactive
+  database challenges across storage, execution, transactions, and durability with local scorecards and progress
+  tracking.
+- **Standalone Tools Suite**: Dedicated interactive sandboxes for B+Tree indexes, buffer pool eviction, latch
+  crabbing, LSM trees, hash joins, sorting, lock scheduling, slotted pages, and vector indexes.
+
+### Changed
+
+- **Accessibility & Contrast**: Elevated foreground text contrast across all breadcrumbs, sidebars, code snippets,
+  notes, and footers, strictly eliminating sub-threshold opacity layers to achieve 100% WCAG 2.2 AA compliance across
+  all routes in both light and dark modes.
+- **Dependency Updates**: Bumped `flowinger` to 1.2.1 for stabilized tree graph handles and layout computations,
+  updated `@modelcontextprotocol/sdk` to 1.32.1, and updated React runtime dependencies.
+- **Node Environment**: Pinned `.node-version` to `22.16.0` to provide native `node:sqlite` `setReturnArrays` support
+  for oracle differential testing and reliable Cloudflare Pages build provisioning.
+
+### Fixed
+
+- **Cloudflare Build Provisioning**: Resolved Cloudflare Pages toolchain failure during bootstrap by locking an
+  explicit LTS version in `.node-version`.
+- **E2E Flakiness**: Stabilized URL address bar state debouncing across navigation transitions and ensured accessible
+  name resolution in end-to-end Playwright tests.
+
 ## [2.0.0-rc.3] - 2026-10-18
 
 The third release candidate for 2.0: rc.2 and what its first days in production turned up. Two bugs a visitor
@@ -1510,7 +1551,8 @@ the plan for what comes next is §25. (The tag marks the deployed commit; this v
 - Tested CSP security headers
 - 326 unit tests, 14 end-to-end tests
 
-[Unreleased]: https://github.com/Naveen-Boddepalli/query-lens/compare/v2.0.0-rc.3...HEAD
+[Unreleased]: https://github.com/Naveen-Boddepalli/query-lens/compare/v2.0.0...HEAD
+[2.0.0]: https://github.com/Naveen-Boddepalli/query-lens/releases/tag/v2.0.0
 [2.0.0-rc.3]: https://github.com/Naveen-Boddepalli/query-lens/releases/tag/v2.0.0-rc.3
 [2.0.0-rc.2]: https://github.com/Naveen-Boddepalli/query-lens/releases/tag/v2.0.0-rc.2
 [2.0.0-rc.1]: https://github.com/Naveen-Boddepalli/query-lens/commit/c2b79e8
