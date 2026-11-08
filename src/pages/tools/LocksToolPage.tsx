@@ -130,7 +130,7 @@ export function LocksToolPage() {
     <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-5 p-6 sm:p-8">
       <PageHeader
         breadcrumbs={[{ label: 'Tools', to: '/tools' }, { label: 'Lock Manager' }]}
-        title="Lock Manager Simulator"
+        title="Locks sandbox"
       >
         Two transactions placing real lock requests against each other. A conflicting request
         genuinely <em>blocks</em> here &mdash; unlike the{' '}

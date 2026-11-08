@@ -111,7 +111,7 @@ export function BufferPoolToolPage() {
     <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-5 p-6 sm:p-8">
       <PageHeader
         breadcrumbs={[{ label: 'Tools', to: '/tools' }, { label: 'Buffer Pool' }]}
-        title="Buffer Pool Sandbox"
+        title="Buffer pool sandbox"
       >
         Type a page-reference string — the sequence of pages a program touches — and step through
         how {REPLACEMENT_POLICY_LABELS[policy]} decides what stays resident. This is the buffer pool

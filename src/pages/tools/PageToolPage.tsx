@@ -70,7 +70,7 @@ export function PageToolPage() {
     <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-5 p-6 sm:p-8">
       <PageHeader
         breadcrumbs={[{ label: 'Tools', to: '/tools' }, { label: 'Slotted Page' }]}
-        title="Slotted Page Inspector"
+        title="Slotted page inspector"
       >
         One heap page of <code className="font-mono text-ink">users</code>, laid out to the byte &mdash;
         the header, the slot array, the tuples, and the free space between them. The engine models a
