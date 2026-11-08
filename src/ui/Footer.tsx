@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom';
 import { REPO_URL } from '../buildInfo.ts';
 import { NAV_ITEMS } from '../routes.ts';
-import { Logo, VersionBadge } from './Logo.tsx';
+import { Logo } from './Logo.tsx';
 
 interface FooterLink {
   label: string;
@@ -95,17 +95,14 @@ function FooterColumn({ title, links }: { title: string; links: FooterLink[] }) 
 
 export function Footer() {
   return (
-    <footer className="border-t border-edge bg-surface-2/60 px-4 py-12 text-ink-dim backdrop-blur-sm sm:px-8">
+    <footer className="border-t border-edge bg-surface-2/60 px-4 py-12 text-ink-dim sm:px-8">
       <div className="mx-auto max-w-6xl">
         {/* Brand Header Block */}
         <div className="mb-10 flex flex-col gap-4 border-b border-edge/80 pb-8 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <Link to="/" className="flex items-center gap-2.5 text-ink transition hover:opacity-90">
               <Logo className="h-7 w-7" />
-              <div className="flex items-center gap-2">
-                <span className="text-heading font-semibold text-ink">QueryLens</span>
-                <VersionBadge />
-              </div>
+              <span className="text-heading font-semibold text-ink">QueryLens</span>
             </Link>
             <p className="mt-2.5 max-w-md text-label leading-relaxed text-ink-dim">
               An in-browser educational database engine that shows its working — every SQL query traced
@@ -113,18 +110,16 @@ export function Footer() {
             </p>
           </div>
 
-          <div className="flex flex-col items-start gap-2 sm:items-end">
-            <div
-              className="inline-flex items-center gap-2 rounded-full border border-edge bg-surface/80 px-3 py-1 font-mono text-xs text-ink-dim shadow-neu-rest backdrop-blur-sm select-none"
-              title="Execution environment: in-memory WebAssembly / TypeScript runtime"
-            >
-              <span className="relative flex h-2 w-2">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-hit opacity-75" />
-                <span className="relative inline-flex h-2 w-2 rounded-full bg-hit" />
-              </span>
-              <span>Engine: 100% Client-Side In-Memory WASM</span>
-            </div>
-            <p className="font-mono text-[11px] text-ink-dim">Zero server calls · Zero analytics</p>
+          <div className="flex items-center gap-2">
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-edge bg-surface-3 px-3 py-1 font-mono text-xs text-ink-dim shadow-e1">
+              <span>MIT</span>
+              <span aria-hidden="true" className="text-ink-dim/40">·</span>
+              <span>CC BY 4.0</span>
+              <span aria-hidden="true" className="text-ink-dim/40">·</span>
+              <span>100% in-browser</span>
+              <span aria-hidden="true" className="text-ink-dim/40">·</span>
+              <span>no telemetry</span>
+            </span>
           </div>
         </div>
 
@@ -132,7 +127,7 @@ export function Footer() {
         <div className="grid grid-cols-2 gap-8 sm:grid-cols-4">
           <FooterColumn title="Primary Navigation" links={PRIMARY_NAV_LINKS} />
           <FooterColumn title="Database Sandboxes" links={SANDBOX_LINKS} />
-          <FooterColumn title="Learning & Verification" links={LEARNING_LINKS} />
+          <FooterColumn title="Learning & Docs" links={LEARNING_LINKS} />
           <FooterColumn title="Engine & Meta" links={META_LINKS} />
         </div>
 
@@ -144,7 +139,7 @@ export function Footer() {
               <span aria-hidden="true" className="text-edge">·</span>
               <span>CC BY 4.0 docs</span>
               <span aria-hidden="true" className="text-edge">·</span>
-              <span>100% Client-Side In-Memory Engine</span>
+              <span>100% Client-Side Engine</span>
               <span aria-hidden="true" className="text-edge">·</span>
               <span>No telemetry</span>
             </div>

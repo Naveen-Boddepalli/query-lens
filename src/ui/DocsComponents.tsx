@@ -22,7 +22,7 @@ export function CardGrid({ children }: { children: React.ReactNode }) {
 
 export function Card({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="ql-sheen rounded-xl border border-edge bg-surface-2/85 p-4 shadow-neu-rest backdrop-blur-sm transition duration-150 ease-out hover:-translate-y-0.5 hover:border-accent/50 hover:bg-surface-3/90 hover:shadow-neu-hover">
+    <div className="ql-sheen rounded-xl border border-edge bg-surface-2 p-4 shadow-e1 transition duration-150 ease-out hover:-translate-y-0.5 hover:border-accent/50 hover:bg-surface-3 hover:shadow-e2">
       <div className="flex items-center gap-2">
         <span className="h-2 w-2 rounded-full bg-accent" aria-hidden="true" />
         <h3 className="text-body font-semibold text-ink">{title}</h3>
@@ -46,7 +46,7 @@ export function DocMeta({ items }: { items: { label: string; value: React.ReactN
       {items.map((item) => (
         <span
           key={item.label}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-edge bg-surface-2/80 px-2.5 py-1 text-label shadow-neu-rest backdrop-blur-sm"
+          className="inline-flex items-center gap-1.5 rounded-lg border border-edge bg-surface-2 px-2.5 py-1 text-label shadow-e1"
         >
           <span className="font-mono text-[10px] uppercase tracking-wider text-ink-dim">{item.label}:</span>
           <span className="font-medium text-ink">{item.value}</span>
@@ -67,7 +67,7 @@ export function Contents({ items }: { items: { href: string; label: string }[] }
   return (
     <nav
       aria-label="On this page"
-      className="not-prose ql-sheen mb-8 rounded-xl border border-edge bg-surface-2/80 p-3 shadow-neu-rest backdrop-blur-sm"
+      className="not-prose ql-sheen mb-8 rounded-xl border border-edge bg-surface-2 p-3 shadow-e1"
     >
       <div className="mb-2 flex items-center gap-2">
         <svg
@@ -147,7 +147,7 @@ export function Callout({ type = 'note', title, children }: CalloutProps) {
   return (
     <div
       role="note"
-      className={`not-prose ql-sheen my-6 rounded-xl border ${style.border} ${style.bg} p-4 shadow-neu-rest backdrop-blur-sm text-body leading-relaxed text-ink [&_a]:underline [&_a]:underline-offset-2 [&_strong]:font-semibold`}
+      className={`not-prose ql-sheen my-6 rounded-xl border ${style.border} ${style.bg} p-4 shadow-e1 text-body leading-relaxed text-ink [&_a]:underline [&_a]:underline-offset-2 [&_strong]:font-semibold`}
     >
       <div className="mb-2 flex items-center gap-2">
         <svg

@@ -41,11 +41,11 @@ export function DocsLayout() {
   return (
     <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
       {/* Mobile nav header */}
-      <div className="flex items-center justify-between border-b border-edge bg-surface-2/80 px-4 py-2.5 backdrop-blur-md lg:hidden">
+      <div className="flex items-center justify-between border-b border-edge bg-surface-2 px-4 py-2.5 lg:hidden">
         <button
           type="button"
           onClick={() => { setMobileMenuOpen((o) => !o); }}
-          className="inline-flex items-center gap-2 rounded-lg border border-edge bg-surface-3/60 px-3 py-1.5 text-label font-medium text-ink shadow-neu-rest backdrop-blur-sm transition hover:border-accent/40"
+          className="inline-flex items-center gap-2 rounded-lg border border-edge bg-surface-3 px-3 py-1.5 text-label font-medium text-ink shadow-e1 transition hover:border-accent/40"
           aria-expanded={mobileMenuOpen}
           aria-label="Toggle documentation navigation"
         >
@@ -70,9 +70,9 @@ export function DocsLayout() {
 
       {/* Responsive sticky sidebar */}
       <aside
-        className={`sidebar-nav shrink-0 border-r border-edge bg-surface-2/80 backdrop-blur-md lg:sticky lg:top-0 lg:h-full lg:w-64 lg:overflow-y-auto lg:block ${
+        className={`sidebar-nav shrink-0 border-r border-edge bg-surface-2 lg:sticky lg:top-0 lg:h-full lg:w-64 lg:overflow-y-auto lg:block ${
           mobileMenuOpen ? 'block' : 'hidden lg:block'
-        } p-4 shadow-neu-rest`}
+        } p-4`}
       >
         <nav aria-label="Docs navigation">
           {DOCS_NAV.map((group) => (

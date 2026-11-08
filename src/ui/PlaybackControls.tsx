@@ -22,14 +22,14 @@ const BLOCKED = 'Answer the prediction first';
 
 const btn = 'flex h-8 items-center justify-center rounded-full transition active:scale-95 disabled:cursor-not-allowed';
 const iconBtn = `${btn} w-8 text-ink-dim hover:bg-surface-3 hover:text-ink disabled:opacity-40`;
-const playBtn = `${btn} min-w-24 gap-1.5 border border-accent/60 bg-accent/20 px-3 text-body font-medium text-ink shadow-neu-rest hover:bg-accent/30 disabled:opacity-40`;
+const playBtn = `${btn} min-w-24 gap-1.5 border border-accent/60 bg-accent/20 px-3 text-body font-medium text-ink shadow-e1 hover:bg-accent/30 disabled:opacity-40`;
 
 export function PlaybackControls({ playback, length, maxStep }: PlaybackControlsProps) {
   const { step, playing, speed, atStart, atEnd, blocked } = playback;
 
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-      <div className="inline-flex items-center gap-0.5 rounded-full border border-edge bg-surface-2/80 p-1 shadow-neu-rest backdrop-blur-md">
+      <div className="inline-flex items-center gap-0.5 rounded-full border border-edge bg-surface-2 p-1 shadow-e1">
         <button
           type="button"
           className={iconBtn}
@@ -75,7 +75,7 @@ export function PlaybackControls({ playback, length, maxStep }: PlaybackControls
       <label className="flex items-center gap-1.5 text-label text-ink-dim">
         Speed
         <select
-          className="cursor-pointer rounded-lg border border-edge bg-surface-3 px-2 py-1 text-ink shadow-neu-rest transition hover:border-ink-dim/50"
+          className="cursor-pointer rounded-lg border border-edge bg-surface-3 px-2 py-1 text-ink shadow-e1 transition hover:border-ink-dim/50"
           value={speed}
           onChange={(e) => playback.setSpeed(Number(e.target.value))}
         >
@@ -87,7 +87,7 @@ export function PlaybackControls({ playback, length, maxStep }: PlaybackControls
 
       <label className="flex min-w-40 flex-1 items-center gap-2 text-label text-ink-dim">
         <span
-          className="rounded border border-edge bg-surface-3 px-2 py-0.5 font-mono text-label tabular-nums text-ink shadow-neu-rest"
+          className="rounded border border-edge bg-surface-3 px-2 py-0.5 font-mono text-label tabular-nums text-ink shadow-e1"
           aria-label={`Step ${step} of ${length}`}
         >
           {step} / {length}

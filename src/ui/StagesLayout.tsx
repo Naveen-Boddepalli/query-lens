@@ -13,11 +13,11 @@ export function StagesLayout() {
   return (
     <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
       {/* Mobile top bar */}
-      <div className="flex items-center justify-between border-b border-edge bg-surface-2/80 px-4 py-2 backdrop-blur-md lg:hidden">
+      <div className="flex items-center justify-between border-b border-edge bg-surface-2 px-4 py-2 lg:hidden">
         <button
           type="button"
           onClick={() => { setMobileOpen((o) => !o); }}
-          className="rounded-lg border border-edge bg-surface-3/60 px-2.5 py-1 text-label font-medium text-ink shadow-neu-rest backdrop-blur-sm"
+          className="rounded-lg border border-edge bg-surface-3 px-2.5 py-1 text-label font-medium text-ink shadow-e1"
           aria-expanded={mobileOpen}
           aria-label="Toggle pipeline stages navigation"
         >

@@ -180,11 +180,11 @@
   --shadow-e3: 0 24px 48px -12px oklch(0 0 0 / 0.55), 0 6px 16px -6px oklch(0 0 0 / 0.35);
   --shadow-glow: 0 0 0 1px oklch(0.76 0.16 215 / 0.45), 0 0 28px -6px oklch(0.84 0.16 215 / 0.5);
 
-  /* Tactile Neumorphic Dual-Layer Shadows (Dark Theme) */
-  --shadow-neu-rest: -1px -1px 2px 0px oklch(1 0 0 / 0.04), 0 1px 2px 0px oklch(0 0 0 / 0.40), 0 4px 12px -2px oklch(0 0 0 / 0.55);
-  --shadow-neu-hover: -1px -1px 3px 0px oklch(1 0 0 / 0.07), 0 2px 4px 0px oklch(0 0 0 / 0.45), 0 8px 20px -3px oklch(0 0 0 / 0.65), 0 0 0 1px oklch(0.76 0.16 215 / 0.30);
-  --shadow-neu-pressed: inset 0 2px 4px 0px oklch(0 0 0 / 0.60), inset 0 1px 1px 0px oklch(0 0 0 / 0.40), inset -1px -1px 2px 0px oklch(1 0 0 / 0.03);
-  --shadow-neu-track: inset 0 2px 5px 0px oklch(0 0 0 / 0.50), inset 0 0 2px 0px oklch(0 0 0 / 0.40), 0 1px 0px 0px oklch(1 0 0 / 0.05);
+  /* Elevation aliases */
+  --shadow-neu-rest: var(--shadow-e1);
+  --shadow-neu-hover: var(--shadow-e2);
+  --shadow-neu-pressed: inset 0 1px 2px oklch(0 0 0 / 0.4);
+  --shadow-neu-track: inset 0 1px 2px oklch(0 0 0 / 0.3);
 
   /* The adjusted fallback sits second in each stack: it is a real face with
      corrected metrics, so it is what the swap paints in before the webfont
@@ -451,10 +451,10 @@ html {
   --shadow-e3: 0 20px 40px -8px oklch(0.40 0.03 262 / 0.16), 0 6px 16px -4px oklch(0.40 0.03 262 / 0.10);
   --shadow-glow: 0 0 0 1px oklch(0.52 0.14 218 / 0.4), 0 0 24px -6px oklch(0.52 0.14 218 / 0.35);
 
-  --shadow-neu-rest: -1px -1px 2px 0px oklch(1 0 0 / 0.95), 0 1px 2px 0px oklch(0.40 0.03 262 / 0.08), 0 3px 8px -1px oklch(0.40 0.03 262 / 0.12);
-  --shadow-neu-hover: -1px -1px 3px 0px oklch(1 0 0 / 1.0), 0 2px 4px 0px oklch(0.40 0.03 262 / 0.10), 0 6px 14px -2px oklch(0.40 0.03 262 / 0.16), 0 0 0 1px oklch(0.52 0.14 218 / 0.25);
-  --shadow-neu-pressed: inset 0 2px 4px 0px oklch(0.35 0.03 262 / 0.16), inset 0 1px 1px 0px oklch(0.35 0.03 262 / 0.12), inset -1px -1px 2px 0px oklch(1 0 0 / 0.80);
-  --shadow-neu-track: inset 0 2px 4px 0px oklch(0.35 0.03 262 / 0.14), inset 0 0 2px 0px oklch(0.35 0.03 262 / 0.10), 0 1px 0px 0px oklch(1 0 0 / 0.90);
+  --shadow-neu-rest: var(--shadow-e1);
+  --shadow-neu-hover: var(--shadow-e2);
+  --shadow-neu-pressed: inset 0 1px 2px oklch(0 0 0 / 0.1);
+  --shadow-neu-track: inset 0 1px 2px oklch(0 0 0 / 0.08);
 
   --gradient-hero:
     radial-gradient(90% 55% at 20% -10%, oklch(0.52 0.14 218 / 0.1), transparent 68%);
@@ -843,16 +843,14 @@ select:disabled {
 }
 
 /**
- * Glassmorphic surface containers & panels (Tactile Glass architecture)
+ * Elevated surface containers & panels
  */
 .ql-glass-panel {
   position: relative;
   background-color: var(--color-surface-2);
-  backdrop-filter: blur(12px) saturate(180%);
-  -webkit-backdrop-filter: blur(12px) saturate(180%);
   border: 1px solid var(--color-edge);
   border-radius: var(--radius-xl);
-  box-shadow: var(--shadow-neu-rest);
+  box-shadow: var(--shadow-e2);
   isolation: isolate;
   contain: paint layout;
 }
@@ -862,18 +860,14 @@ select:disabled {
   top: 0;
   z-index: 40;
   background-color: var(--color-surface);
-  backdrop-filter: blur(8px) saturate(160%);
-  -webkit-backdrop-filter: blur(8px) saturate(160%);
   border-bottom: 1px solid var(--color-edge);
-  box-shadow: 0 4px 16px -4px oklch(0 0 0 / 0.25);
+  box-shadow: var(--shadow-e1);
 }
 
 .ql-glass-floating {
   position: absolute;
   z-index: 50;
   background-color: var(--color-surface-3);
-  backdrop-filter: blur(16px) saturate(190%);
-  -webkit-backdrop-filter: blur(16px) saturate(190%);
   border: 1px solid var(--color-edge);
   border-radius: var(--radius-xl);
   box-shadow: var(--shadow-e3);
@@ -883,7 +877,7 @@ select:disabled {
   background-color: var(--color-surface);
   border: 1px solid var(--color-edge);
   border-radius: var(--radius-md);
-  box-shadow: var(--shadow-neu-track);
+  box-shadow: var(--shadow-e1);
 }
 
 @supports not (backdrop-filter: blur(1px)) {

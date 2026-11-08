@@ -64,7 +64,7 @@ function findTarget(key: string): Element | null {
   return document.querySelector(`[data-tour="${key}"]`);
 }
 
-const tourCard = 'rounded-xl border border-edge bg-surface-2/80 shadow-neu-rest backdrop-blur-md ql-sheen outline-none';
+const tourCard = 'rounded-xl border border-edge bg-surface-2 shadow-e2 ql-sheen outline-none';
 
 export function PlaygroundTour({ onClose }: { onClose: () => void }) {
   const reduced = useReducedMotion();

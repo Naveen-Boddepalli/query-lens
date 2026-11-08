@@ -23,13 +23,13 @@ const itemClass = ({ isActive }: { isActive: boolean }) =>
   [
     'cell group flex items-center justify-between rounded-lg border px-3 py-1.5 text-body transition duration-150',
     isActive
-      ? 'border-accent bg-accent-soft font-medium text-ink shadow-neu-rest backdrop-blur-sm'
-      : 'border-transparent text-ink-dim hover:border-edge hover:bg-surface-3/80 hover:text-ink',
+      ? 'border-accent bg-accent-soft font-medium text-ink shadow-e1'
+      : 'border-transparent text-ink-dim hover:bg-surface-3 hover:text-ink',
   ].join(' ');
 
 export function Sidebar({ onSelect }: { onSelect?: () => void }) {
   return (
-    <aside className="sidebar-nav w-full shrink-0 border-r border-edge bg-surface-2/80 p-4 shadow-neu-rest backdrop-blur-md lg:sticky lg:top-0 lg:h-full lg:w-64 lg:overflow-y-auto">
+    <aside className="sidebar-nav w-full shrink-0 border-r border-edge bg-surface-2 p-4 lg:sticky lg:top-0 lg:h-full lg:w-64 lg:overflow-y-auto">
       <nav aria-label="Pipeline stages">
         <div className="mb-4 hidden items-center justify-between lg:flex">
           <span className="font-mono text-label font-medium tracking-wide uppercase text-ink-dim">

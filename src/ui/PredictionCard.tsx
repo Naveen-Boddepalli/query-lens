@@ -101,7 +101,7 @@ export function PredictionCard({
                 onMouseLeave={() => { setHovered(null); }}
                 className={`flex w-full items-center justify-between gap-3 rounded-lg border px-2.5 py-1.5 text-left font-mono text-label transition select-none shadow-e1 ${tone} ${
                   !answered && hovered === option.id ? 'bg-surface-4' : ''
-                } ${answered ? 'cursor-default' : 'cursor-pointer active:scale-[0.99] active:shadow-neu-pressed'}`}
+                } ${answered ? 'cursor-default' : 'cursor-pointer active:translate-y-px'}`}
               >
                 <span className="flex items-center gap-2">
                   <span
