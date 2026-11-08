@@ -162,6 +162,17 @@ describe('renderSvg', () => {
     expect(widthOf(wide)).toBeGreaterThan(widthOf(normal));
   });
 
+  it('a wide tree spaces rows vertically to fit taller operator nodes', () => {
+    const normal = renderSvg(tree, { tones: TONES, resolveColor: echo });
+    const wide = renderSvg(tree, { tones: TONES, resolveColor: echo, wide: true });
+    const rectsOf = (svg: string) => [...svg.matchAll(/<rect x="[\d.-]+" y="([\d.-]+)"/g)].map((m) => Number(m[1]));
+    const normalYs = rectsOf(normal).slice(1);
+    const wideYs = rectsOf(wide).slice(1);
+    const normalDelta = Math.max(...normalYs) - Math.min(...normalYs);
+    const wideDelta = Math.max(...wideYs) - Math.min(...wideYs);
+    expect(wideDelta).toBeGreaterThan(normalDelta);
+  });
+
   it('calls resolveColor with every colour it needs, and nothing crashes if it throws-free for any expression', () => {
     const seen: string[] = [];
     const spy: ColorResolver = (expr) => { seen.push(expr); return '#000'; };
