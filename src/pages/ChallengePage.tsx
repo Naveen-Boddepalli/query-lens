@@ -343,13 +343,13 @@ function QueryChallengeView({ challengeId }: { challengeId: string | undefined }
               <div className="rounded-xl border border-edge bg-surface-2/90 p-4 text-ink-dim shadow-neu-rest backdrop-blur-md">
                 <p className="font-medium text-ink">Not there yet.</p>
                 <p className="mt-1 text-label text-ink-dim">
-                  Inspect the verification checklist above and the engine execution telemetry below
+                  Inspect the verification checklist above and the engine execution stats below
                   to adjust your query.
                 </p>
               </div>
             )}
 
-            {/* Compact Telemetry Grid */}
+            {/* Compact Stats Grid */}
             {!result.error && stats && (
               <dl className="flex flex-wrap gap-x-6 gap-y-2 rounded-xl border border-edge bg-surface-2/80 p-3.5 text-label shadow-neu-rest backdrop-blur-md">
                 <div>

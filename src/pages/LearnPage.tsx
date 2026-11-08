@@ -53,7 +53,7 @@ export function LearnPage() {
         engine visualizers, prediction checkpoints, and deep Playground links.
       </PageHeader>
 
-      {/* Telemetry & Roadmap Overview Card */}
+      {/* Track Progress Overview Card */}
       <section
         aria-label="Track Progress"
         className="ql-sheen mt-8 rounded-2xl border border-edge bg-surface-2/80 p-5 shadow-neu-rest backdrop-blur-md"

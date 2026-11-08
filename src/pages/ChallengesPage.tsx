@@ -48,7 +48,7 @@ export function ChallengesPage() {
         run it, and the check validates whether you satisfied the goal. The trace reveals exactly why.
       </PageHeader>
 
-      {/* Telemetry & Roadmap Overview Card */}
+      {/* Roadmap Overview Card */}
       <section
         aria-label="Challenges Progress"
         className="ql-sheen mt-8 rounded-2xl border border-edge bg-surface-2/80 p-5 shadow-neu-rest backdrop-blur-md"
@@ -64,7 +64,7 @@ export function ChallengesPage() {
               </span>
             </div>
             <p className="font-mono text-micro text-ink-dim">
-              Pure client-side verification · Instant AST &amp; buffer telemetry feedback
+              Pure client-side verification · Instant AST &amp; buffer execution feedback
             </p>
           </div>
 
