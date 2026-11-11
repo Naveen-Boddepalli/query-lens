@@ -4,6 +4,8 @@ import { NAV_ITEMS } from '../routes.ts';
 import { Logo } from './Logo.tsx';
 import { ThemeToggle } from './ThemeToggle.tsx';
 import { useThemeContext } from './ThemeContext.tsx';
+import { openSpotlight } from './spotlight.ts';
+import { MOD_KEY } from './platform.ts';
 
 const desktopLinkClass = ({ isActive }: { isActive: boolean }) =>
   [
@@ -65,6 +67,36 @@ export function TopNav() {
 
         {/* Actions & Utilities Toolbar */}
         <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
+          {/* Spotlight Search Trigger Button */}
+          <button
+            type="button"
+            onClick={openSpotlight}
+            className="ql-liquid-pill group flex items-center justify-between h-9 px-2.5 sm:px-3.5 w-9 sm:w-40 lg:w-48 rounded-full backdrop-blur-md text-ink-dim hover:text-ink cursor-pointer"
+            aria-label={`Search QueryLens (${MOD_KEY === '⌘' ? 'Command' : 'Control'}+K)`}
+            aria-keyshortcuts="Meta+K Control+K"
+          >
+            <div className="flex items-center gap-2 min-w-0">
+              <svg
+                className="h-4 w-4 shrink-0 stroke-current stroke-2 text-ink-dim group-hover:text-accent transition-colors"
+                viewBox="0 0 20 20"
+                fill="none"
+                aria-hidden="true"
+              >
+                <circle cx="8.5" cy="8.5" r="5.5" />
+                <path d="M13 13l4.5 4.5" strokeLinecap="round" />
+              </svg>
+              <span className="hidden sm:inline text-label text-ink-dim group-hover:text-ink truncate">
+                Search...
+              </span>
+            </div>
+            <kbd
+              aria-hidden="true"
+              className="ql-liquid-kbd hidden sm:inline-flex items-center rounded-full px-2 py-0.5 font-mono text-[10px] text-ink-dim group-hover:text-ink transition-colors"
+            >
+              {MOD_KEY}K
+            </kbd>
+          </button>
+
           {/* Theme Mode Segmented Controller */}
           <ThemeToggle choice={choice} setChoice={setChoice} />
 
@@ -96,6 +128,25 @@ export function TopNav() {
           id="mobile-nav-drawer"
           className="w-full border-t border-edge bg-surface/95 px-4 py-4 shadow-e3 backdrop-blur-xl lg:hidden"
         >
+          <button
+            type="button"
+            onClick={() => {
+              setIsMobileOpen(false);
+              openSpotlight();
+            }}
+            className="flex w-full items-center justify-between rounded-lg border border-edge bg-surface-2 px-3 py-2 text-body text-ink-dim shadow-e1 hover:bg-surface-3 hover:text-ink transition duration-150 mb-3 cursor-pointer"
+          >
+            <div className="flex items-center gap-2.5">
+              <svg className="h-4 w-4 shrink-0 stroke-current stroke-2 text-accent" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                <circle cx="8.5" cy="8.5" r="5.5" />
+                <path d="M13 13l4.5 4.5" strokeLinecap="round" />
+              </svg>
+              <span className="font-medium text-ink">Search QueryLens...</span>
+            </div>
+            <kbd className="rounded border border-edge bg-surface-3 px-1.5 py-0.5 font-mono text-[10px] text-ink-dim">
+              {MOD_KEY}K
+            </kbd>
+          </button>
           <nav aria-label="Mobile navigation" className="flex flex-col gap-1">
             {PRIMARY_ITEMS.map((item) => (
               <NavLink

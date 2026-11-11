@@ -667,6 +667,14 @@ select:disabled {
   box-shadow: 0 0 0 4px var(--color-accent-soft);
 }
 
+.ql-spotlight-input,
+.ql-spotlight-input:focus,
+.ql-spotlight-input:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+  border: none !important;
+}
+
 /* Themed scrollbars — the UA's default light-grey bar is one of the loudest
    "unchosen" tells on a dark surface. */
 * {
@@ -880,21 +888,250 @@ select:disabled {
   box-shadow: var(--shadow-e1);
 }
 
+/* Color interpolation token for gradients (visual-effects progressive enhancement) */
+:root {
+  --in-oklch: ;
+}
+
+@supports (linear-gradient(in oklch, white, black)) {
+  :root {
+    --in-oklch: in oklch;
+  }
+}
+
+@keyframes ql-liquid-enter {
+  0% {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.97);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes ql-liquid-backdrop-in {
+  0% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+/* Liquid Glass Spotlight — high optical refraction, saturated backdrop bloom,
+   and specular Fresnel rim highlights tuned per theme (`:root` vs `[data-theme='light']`). */
+.ql-liquid-backdrop {
+  background: oklch(0.06 0.015 260 / 0.34);
+  animation: ql-liquid-backdrop-in 180ms var(--ease-enter) both;
+}
+
+:root[data-theme='light'] .ql-liquid-backdrop {
+  background: oklch(0.85 0.015 255 / 0.24);
+}
+
+.ql-liquid-glass {
+  position: relative;
+  isolation: isolate;
+  border-radius: var(--radius-3xl);
+  background:
+    linear-gradient(
+      145deg var(--in-oklch),
+      oklch(1 0 0 / 0.14) 0%,
+      oklch(1 0 0 / 0.03) 38%,
+      oklch(0.76 0.16 215 / 0.06) 72%,
+      oklch(1 0 0 / 0.09) 100%
+    ),
+    oklch(0.16 0.022 258 / 0.44);
+  backdrop-filter: blur(44px) saturate(215%) brightness(1.06);
+  -webkit-backdrop-filter: blur(44px) saturate(215%) brightness(1.06);
+  border: 1px solid oklch(1 0 0 / 0.22);
+  box-shadow:
+    inset 0 1px 0.5px 0 oklch(1 0 0 / 0.42),
+    inset 1px 0 0.5px 0 oklch(1 0 0 / 0.16),
+    inset 0 -1px 1px 0 oklch(0 0 0 / 0.30),
+    inset 0 0 36px 0 oklch(0.82 0.08 220 / 0.07),
+    0 28px 80px -12px oklch(0 0 0 / 0.65),
+    0 10px 28px -6px oklch(0 0 0 / 0.42);
+  animation: ql-liquid-enter 200ms var(--ease-enter) both;
+}
+
+.ql-liquid-glass::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 0;
+  background: radial-gradient(
+    115% 55% at 22% -12%,
+    oklch(1 0 0 / 0.20) 0%,
+    oklch(1 0 0 / 0.05) 42%,
+    transparent 72%
+  );
+  mix-blend-mode: screen;
+}
+
+:root[data-theme='light'] .ql-liquid-glass {
+  background:
+    linear-gradient(
+      145deg var(--in-oklch),
+      oklch(1 0 0 / 0.78) 0%,
+      oklch(1 0 0 / 0.38) 42%,
+      oklch(0.88 0.04 225 / 0.26) 100%
+    ),
+    oklch(0.98 0.006 250 / 0.48);
+  backdrop-filter: blur(44px) saturate(210%) brightness(1.04);
+  -webkit-backdrop-filter: blur(44px) saturate(210%) brightness(1.04);
+  border: 1px solid oklch(1 0 0 / 0.78);
+  box-shadow:
+    inset 0 1.5px 0 0 oklch(1 0 0 / 0.95),
+    inset 1px 0 0.5px 0 oklch(1 0 0 / 0.65),
+    inset 0 -1px 1px 0 oklch(0.45 0.03 255 / 0.12),
+    inset 0 0 28px 0 oklch(1 0 0 / 0.35),
+    0 28px 72px -12px oklch(0.22 0.04 255 / 0.26),
+    0 10px 24px -6px oklch(0.22 0.04 255 / 0.14);
+}
+
+:root[data-theme='light'] .ql-liquid-glass::before {
+  background: radial-gradient(
+    115% 55% at 22% -12%,
+    oklch(1 0 0 / 0.65) 0%,
+    oklch(1 0 0 / 0.15) 45%,
+    transparent 72%
+  );
+  mix-blend-mode: normal;
+}
+
+.ql-liquid-divider {
+  border-color: oklch(1 0 0 / 0.11);
+}
+
+:root[data-theme='light'] .ql-liquid-divider {
+  border-color: oklch(0.25 0.02 260 / 0.10);
+}
+
+.ql-liquid-pill {
+  background: oklch(1 0 0 / 0.06);
+  border: 1px solid oklch(1 0 0 / 0.14);
+  box-shadow: inset 0 1px 0 0 oklch(1 0 0 / 0.18);
+  transition: background-color 150ms ease, border-color 150ms ease, box-shadow 150ms ease, transform 150ms ease;
+}
+
+.ql-liquid-pill:hover {
+  background: oklch(1 0 0 / 0.13);
+  border-color: oklch(1 0 0 / 0.25);
+  box-shadow: inset 0 1px 0 0 oklch(1 0 0 / 0.28), 0 4px 12px -2px oklch(0 0 0 / 0.22);
+}
+
+:root[data-theme='light'] .ql-liquid-pill {
+  background: oklch(1 0 0 / 0.45);
+  border-color: oklch(1 0 0 / 0.65);
+  box-shadow: inset 0 1px 0 0 oklch(1 0 0 / 0.85), 0 2px 6px oklch(0.25 0.03 255 / 0.06);
+}
+
+:root[data-theme='light'] .ql-liquid-pill:hover {
+  background: oklch(1 0 0 / 0.72);
+  border-color: oklch(1 0 0 / 0.90);
+  box-shadow: inset 0 1px 0 0 oklch(1 0 0 / 1), 0 4px 12px oklch(0.25 0.03 255 / 0.10);
+}
+
+.ql-liquid-pill-active {
+  background: linear-gradient(
+    180deg var(--in-oklch),
+    oklch(1 0 0 / 0.22) 0%,
+    oklch(1 0 0 / 0.11) 100%
+  );
+  border: 1px solid oklch(1 0 0 / 0.30);
+  box-shadow:
+    inset 0 1px 0 0 oklch(1 0 0 / 0.45),
+    0 3px 10px -2px oklch(0 0 0 / 0.28);
+}
+
+:root[data-theme='light'] .ql-liquid-pill-active {
+  background: linear-gradient(
+    180deg var(--in-oklch),
+    oklch(1 0 0 / 0.92) 0%,
+    oklch(1 0 0 / 0.68) 100%
+  );
+  border: 1px solid oklch(1 0 0 / 0.95);
+  box-shadow:
+    inset 0 1px 0 0 oklch(1 0 0 / 1),
+    0 3px 10px -2px oklch(0.25 0.03 255 / 0.12);
+}
+
+.ql-liquid-row-active {
+  background: linear-gradient(
+    180deg var(--in-oklch),
+    oklch(1 0 0 / 0.15) 0%,
+    oklch(1 0 0 / 0.07) 100%
+  );
+  border: 1px solid oklch(1 0 0 / 0.24);
+  box-shadow:
+    inset 0 1px 0 0 oklch(1 0 0 / 0.34),
+    inset 0 -1px 0 0 oklch(0 0 0 / 0.12),
+    0 6px 20px -4px oklch(0 0 0 / 0.35);
+}
+
+:root[data-theme='light'] .ql-liquid-row-active {
+  background: linear-gradient(
+    180deg var(--in-oklch),
+    oklch(1 0 0 / 0.85) 0%,
+    oklch(1 0 0 / 0.56) 100%
+  );
+  border: 1px solid oklch(1 0 0 / 0.92);
+  box-shadow:
+    inset 0 1px 0 0 oklch(1 0 0 / 1),
+    0 6px 18px -4px oklch(0.25 0.03 255 / 0.14);
+}
+
+.ql-liquid-row:hover:not(.ql-liquid-row-active) {
+  background: oklch(1 0 0 / 0.06);
+  border-color: oklch(1 0 0 / 0.10);
+}
+
+:root[data-theme='light'] .ql-liquid-row:hover:not(.ql-liquid-row-active) {
+  background: oklch(1 0 0 / 0.42);
+  border-color: oklch(1 0 0 / 0.55);
+}
+
+.ql-liquid-kbd {
+  background: oklch(1 0 0 / 0.09);
+  border: 1px solid oklch(1 0 0 / 0.18);
+  box-shadow: inset 0 1px 0 0 oklch(1 0 0 / 0.25);
+}
+
+:root[data-theme='light'] .ql-liquid-kbd {
+  background: oklch(1 0 0 / 0.58);
+  border: 1px solid oklch(1 0 0 / 0.82);
+  box-shadow: inset 0 1px 0 0 oklch(1 0 0 / 1), 0 1px 2px oklch(0.25 0.03 255 / 0.08);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ql-liquid-glass,
+  .ql-liquid-backdrop {
+    animation: none !important;
+  }
+}
+
 @supports not (backdrop-filter: blur(1px)) {
   .ql-glass-panel,
   .ql-glass-header,
-  .ql-glass-floating {
-    background-color: var(--color-surface-2);
+  .ql-glass-floating,
+  .ql-liquid-glass {
+    background: var(--color-surface-2);
   }
 }
 
 @media (prefers-reduced-transparency: reduce) {
   .ql-glass-panel,
   .ql-glass-header,
-  .ql-glass-floating {
+  .ql-glass-floating,
+  .ql-liquid-glass,
+  .ql-liquid-pill {
     backdrop-filter: none !important;
     -webkit-backdrop-filter: none !important;
-    background-color: var(--color-surface-2) !important;
+    background: var(--color-surface-2) !important;
   }
 }
 
@@ -905,7 +1142,8 @@ select:disabled {
 
   .ql-glass-panel,
   .ql-glass-header,
-  .ql-glass-floating {
+  .ql-glass-floating,
+  .ql-liquid-glass {
     backdrop-filter: none !important;
     border: 2px solid currentColor !important;
     box-shadow: none !important;
