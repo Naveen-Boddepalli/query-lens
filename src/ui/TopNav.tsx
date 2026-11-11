@@ -72,7 +72,7 @@ export function TopNav() {
             type="button"
             onClick={openSpotlight}
             className="ql-liquid-pill group flex items-center justify-between h-9 px-2.5 sm:px-3.5 w-9 sm:w-40 lg:w-48 rounded-full backdrop-blur-md text-ink-dim hover:text-ink cursor-pointer"
-            aria-label={`Search QueryLens (${MOD_KEY === '⌘' ? 'Command' : 'Control'}+K)`}
+            aria-label={`Spotlight search (${MOD_KEY === '⌘' ? 'Command' : 'Control'}+K)`}
             aria-keyshortcuts="Meta+K Control+K"
           >
             <div className="flex items-center gap-2 min-w-0">
@@ -141,7 +141,7 @@ export function TopNav() {
                 <circle cx="8.5" cy="8.5" r="5.5" />
                 <path d="M13 13l4.5 4.5" strokeLinecap="round" />
               </svg>
-              <span className="font-medium text-ink">Search QueryLens...</span>
+              <span className="font-medium text-ink">Spotlight search...</span>
             </div>
             <kbd className="rounded border border-edge bg-surface-3 px-1.5 py-0.5 font-mono text-[10px] text-ink-dim">
               {MOD_KEY}K
