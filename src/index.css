@@ -922,14 +922,11 @@ select:disabled {
 /* Liquid Glass Spotlight — high optical refraction, saturated backdrop bloom,
    and specular Fresnel rim highlights tuned per theme (`:root` vs `[data-theme='light']`). */
 .ql-liquid-backdrop {
-  background: oklch(0.06 0.015 260 / 0.40);
-  -webkit-backdrop-filter: blur(10px) saturate(130%);
-  backdrop-filter: blur(10px) saturate(130%);
-  animation: ql-liquid-backdrop-in 180ms var(--ease-enter) both;
+  background: transparent;
 }
 
 :root[data-theme='light'] .ql-liquid-backdrop {
-  background: oklch(0.86 0.015 255 / 0.28);
+  background: transparent;
 }
 
 .ql-liquid-glass {
@@ -944,7 +941,7 @@ select:disabled {
       oklch(0.76 0.16 215 / 0.07) 72%,
       oklch(1 0 0 / 0.09) 100%
     ),
-    oklch(0.15 0.022 258 / 0.60);
+    oklch(0.15 0.022 258 / 0.62);
   -webkit-backdrop-filter: blur(52px) saturate(200%) brightness(1.06);
   backdrop-filter: blur(52px) saturate(200%) brightness(1.06);
   border: 1px solid oklch(1 0 0 / 0.22);
@@ -1130,17 +1127,9 @@ select:disabled {
   .ql-glass-header,
   .ql-glass-floating,
   .ql-liquid-glass,
-  .ql-liquid-pill,
-  .ql-liquid-backdrop {
+  .ql-liquid-pill {
     -webkit-backdrop-filter: none !important;
     backdrop-filter: none !important;
-  }
-
-  .ql-glass-panel,
-  .ql-glass-header,
-  .ql-glass-floating,
-  .ql-liquid-glass,
-  .ql-liquid-pill {
     background: var(--color-surface-2) !important;
   }
 }

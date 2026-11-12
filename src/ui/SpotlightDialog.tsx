@@ -874,7 +874,7 @@ export function SpotlightDialog({ onClose }: SpotlightDialogProps) {
       className="fixed inset-0 z-50 flex items-start justify-center pt-[8vh] sm:pt-[12vh] px-3 sm:px-4"
       role="presentation"
     >
-      {/* Frosted Liquid Glass Backdrop */}
+      {/* Click-outside Backdrop — keeps the rest of the page unblurred like macOS Spotlight */}
       <div
         onClick={handleClose}
         className="ql-liquid-backdrop fixed inset-0"
