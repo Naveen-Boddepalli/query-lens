@@ -451,6 +451,7 @@ const SETTINGS_AFTER = ['src/pages/ChallengePage.tsx', 'src/pages/challenges/Set
  * but must still stay small: [manifest key, kB ceiling, why].
  */
 export const OPT_IN: readonly { key: string; kb: number; note: string; after?: string | readonly string[] }[] = [
+  { key: 'src/ui/SpotlightDialog.tsx', kb: 12, note: 'the Spotlight search dialog — fetched only when Cmd+K or search is opened' },
   { key: '_html-to-image', kb: 8, note: 'panel PNG export (§20.3) — fetched on the first click of Download PNG' },
   { key: 'src/perf/inp.ts', kb: 2, note: 'the opt-in INP recorder for the §9 study (§25.4 A6) — fetched only after a participant opts in' },
   { key: 'src/ui/WorkspaceDialog.tsx', kb: 6, after: 'src/pages/PlaygroundPage.tsx', note: 'the Workspaces dialog (§H7) — fetched only when Custom mode\'s Workspaces button is pressed' },

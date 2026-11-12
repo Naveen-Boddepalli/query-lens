@@ -123,7 +123,7 @@ const CHIP_ROW = 'flex flex-wrap items-center gap-1.5';
 const CHIP_LABEL = 'mr-1 text-label font-medium text-ink-dim';
 const PANEL_COL = 'snap-section flex min-w-0 flex-col gap-3';
 const LINK_ACTION = 'text-label text-ink-dim underline-offset-2 transition-colors hover:text-ink hover:underline disabled:cursor-not-allowed disabled:opacity-50';
-const GLASS_CARD = 'rounded-xl border border-edge bg-surface-2/80 shadow-neu-rest backdrop-blur-md';
+const GLASS_CARD = 'rounded-xl border border-edge bg-surface-2 shadow-e1';
 const NARRATION_BOX = `ql-sheen p-3 ${GLASS_CARD}`;
 const CUSTOM_BLURB = 'Your own tables, kept in this browser';
 
@@ -650,7 +650,7 @@ export function PlaygroundPage() {
             <label className="ml-auto flex items-center gap-2 text-label text-ink-dim">
               Eviction
               <select
-                className="cursor-pointer rounded-lg border border-edge bg-surface-3 px-2 py-1 text-ink shadow-neu-rest transition hover:border-ink-dim/50"
+                className="cursor-pointer rounded-lg border border-edge bg-surface-3 px-2 py-1 text-ink shadow-e1 transition hover:border-ink-dim/50"
                 value={policy}
                 onChange={(e) => { setPolicy(e.target.value as ReplacementPolicyName); }}
               >

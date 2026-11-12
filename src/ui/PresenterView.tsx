@@ -26,9 +26,9 @@ const presBtn =
   'rounded-full border px-2.5 py-0.5 text-label font-medium select-none transition-all border-edge text-ink-dim hover:border-ink-dim/50 hover:text-ink active:scale-95';
 
 const kbdCls =
-  'rounded border border-edge bg-surface-3 px-1.5 py-0.5 font-mono text-micro text-ink shadow-neu-rest';
+  'rounded border border-edge bg-surface-3 px-1.5 py-0.5 font-mono text-micro text-ink shadow-e1';
 
-const card = 'rounded-xl border border-edge bg-surface-2/80 shadow-neu-rest backdrop-blur-md';
+const card = 'rounded-xl border border-edge bg-surface-2 shadow-e2';
 
 const Kbd = ({ children }: { children: React.ReactNode }) => <kbd className={kbdCls}>{children}</kbd>;
 

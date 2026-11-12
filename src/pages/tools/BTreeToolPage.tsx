@@ -187,7 +187,7 @@ export function BTreeToolPage() {
     <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-5 p-6 sm:p-8">
       <PageHeader
         breadcrumbs={[{ label: 'Tools', to: '/tools' }, { label: 'B+Tree' }]}
-        title="B+Tree Visualizer"
+        title="B+Tree sandbox"
       >
         Insert, delete, and search keys against a live B+Tree — the same structure the{' '}
         <Link to="/playground" className="underline underline-offset-2 hover:text-ink">

@@ -51,7 +51,7 @@ export function ThemeToggle({ choice, setChoice }: Pick<ThemeState, 'choice' | '
     <div
       role="radiogroup"
       aria-label="Colour theme"
-      className="flex items-center gap-0.5 rounded-full border border-edge bg-surface-2/80 p-0.5 shadow-neu-track backdrop-blur-sm"
+      className="flex items-center gap-0.5 rounded-full border border-edge bg-surface-2 p-0.5 shadow-e1"
     >
       {OPTIONS.map((option) => {
         const selected = choice === option.value;
@@ -68,10 +68,10 @@ export function ThemeToggle({ choice, setChoice }: Pick<ThemeState, 'choice' | '
               // 24px minimum on both axes: WCAG 2.2 SC 2.5.8, the same rule
               // that set the scrubber's size (plan.md §15.1 item 8).
               'flex h-6 min-w-7 items-center justify-center rounded-full px-1.5 text-label select-none ' +
-              'transition duration-150 ease-out active:translate-y-px active:scale-[0.97]',
+              'transition duration-150 ease-out active:translate-y-px',
               selected
-                ? 'border border-accent/40 bg-accent-soft text-ink shadow-neu-rest backdrop-blur-sm'
-                : 'border border-transparent text-ink-dim hover:bg-surface-3/80 hover:text-ink hover:shadow-neu-rest',
+                ? 'border border-accent/40 bg-accent-soft text-ink shadow-e1'
+                : 'border border-transparent text-ink-dim hover:bg-surface-3 hover:text-ink',
             ].join(' ')}
           >
             <Icon />

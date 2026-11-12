@@ -125,7 +125,7 @@ export function ParserToolPage() {
     <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-5 p-6 sm:p-8">
       <PageHeader
         breadcrumbs={[{ label: 'Tools', to: '/tools' }, { label: 'SQL Parser' }]}
-        title="Recursive-Descent Parser Sandbox"
+        title="Parser sandbox"
       >
         Type SQL &mdash; including SQL QueryLens does not yet support &mdash; and watch the tokenizer
         split the input into a live token ribbon and the recursive-descent parser construct the AST.

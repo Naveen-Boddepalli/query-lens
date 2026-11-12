@@ -150,7 +150,7 @@ export interface RenderSvgOptions {
 export function renderSvg(root: FlowNode, options: RenderSvgOptions): string {
   const { tones, kindIcons = {}, wide = false, compact = false, sideEdges = [], resolveColor } = options;
   const nodeWidth = wide ? 200 : compact ? 104 : 132;
-  const rowHeight = compact ? 84 : 96;
+  const rowHeight = wide ? 144 : compact ? 84 : 96;
   const boxWidth = nodeWidth - GUTTER;
   const contentWidth = boxWidth - 2 * BOX_PADDING;
 

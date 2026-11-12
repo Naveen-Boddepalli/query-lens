@@ -1,8 +1,14 @@
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import { DisclaimerBanner } from './DisclaimerBanner.tsx';
 import { FirstVisitHint } from './FirstVisitHint.tsx';
 import { TopNav } from './TopNav.tsx';
 import { Footer } from './Footer.tsx';
+import { OPEN_SPOTLIGHT_EVENT } from './spotlight.ts';
+
+const SpotlightDialog = lazy(() =>
+  import('./SpotlightDialog.tsx').then((m) => ({ default: m.SpotlightDialog })),
+);
 
 /**
  * Root layout shell — persistent across all pages: disclaimer bar, top nav, the
@@ -30,6 +36,29 @@ export function Layout() {
   const { pathname, search } = useLocation();
   const isLanding = pathname === '/';
   const isStudy = pathname === '/study';
+  const [isSpotlightOpen, setIsSpotlightOpen] = useState(false);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (isStudy) return;
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setIsSpotlightOpen((open) => !open);
+      }
+    };
+
+    const handleOpen = () => {
+      if (!isStudy) setIsSpotlightOpen(true);
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener(OPEN_SPOTLIGHT_EVENT, handleOpen);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener(OPEN_SPOTLIGHT_EVENT, handleOpen);
+    };
+  }, [isStudy]);
+
   // The first-visit hint (plan.md §19.2) belongs on the app's own front door
   // only: `/playground` with nothing in the URL. A shared-moment link
   // (`?q=…`) is someone else's onboarding, not a cold first visit.
@@ -59,6 +88,11 @@ export function Layout() {
         </div>
       </div>
       {!isStudy && <Footer />}
+      {!isStudy && isSpotlightOpen && (
+        <Suspense fallback={null}>
+          <SpotlightDialog onClose={() => setIsSpotlightOpen(false)} />
+        </Suspense>
+      )}
     </div>
   );
 }

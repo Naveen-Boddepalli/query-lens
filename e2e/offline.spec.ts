@@ -106,3 +106,24 @@ test('a visited app opens with the network off, including a route it has not ope
     await context.setOffline(false);
   }
 });
+
+test('navigations hit the network when online so new deploys are not hidden behind a stale cached shell', async ({
+  page,
+  context,
+}) => {
+  await page.goto('/');
+  await waitForWorker(page);
+
+  let shellRequests = 0;
+  await context.route('**/*', async (route) => {
+    const req = route.request();
+    const { pathname } = new URL(req.url());
+    if (pathname === '/') {
+      shellRequests += 1;
+    }
+    await route.continue();
+  });
+
+  await page.goto('/');
+  expect(shellRequests).toBeGreaterThan(0);
+});

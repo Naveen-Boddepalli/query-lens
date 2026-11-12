@@ -204,7 +204,8 @@ function build(
   // d3-hierarchy does the layout maths; flowinger only draws it.
   const h = hierarchy<FlowNode>(root, (d) => d.children);
   const width = props.wide ? 200 : props.compact ? 104 : 132;
-  tree<FlowNode>().nodeSize([width, props.compact ? 84 : 96])(h);
+  const height = props.wide ? 144 : props.compact ? 84 : 96;
+  tree<FlowNode>().nodeSize([width, height])(h);
 
   const relations = treeRelations(root);
   const nodes: TreeFlowNode[] = h.descendants().map((d) => ({

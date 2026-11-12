@@ -100,7 +100,7 @@ function EmbeddedLiveVisualizer({
   );
 }
 
-/** Checkpoint prediction component that updates local progress telemetry */
+/** Checkpoint prediction component that updates local progress */
 function CheckpointCard({
   prediction,
 }: {

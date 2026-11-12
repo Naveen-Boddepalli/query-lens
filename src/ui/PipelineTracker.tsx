@@ -18,7 +18,7 @@ export function PipelineTracker({ current, visited, selected, onSelect }: Pipeli
   return (
     <nav
       aria-label="Query pipeline"
-      className="flex w-full min-w-0 max-w-full items-center gap-1 overflow-x-auto rounded-full border border-edge bg-surface-2/80 p-1 shadow-neu-rest backdrop-blur-md"
+      className="flex w-full min-w-0 max-w-full items-center gap-1 overflow-x-auto rounded-full border border-edge bg-surface-2 p-1 shadow-e1"
     >
       {STAGES.map((stage, i) => {
         const meta = STAGE_META[stage];
@@ -54,7 +54,7 @@ export function PipelineTracker({ current, visited, selected, onSelect }: Pipeli
                 isCurrent
                   ? 'border-accent bg-accent-soft text-ink shadow-glow'
                   : isVisited
-                    ? `border-edge bg-surface-3 shadow-neu-rest hover:border-ink-dim/50 hover:text-ink active:scale-95 ${meta.tone}`
+                    ? `border-edge bg-surface-3 shadow-e1 hover:border-ink-dim/50 hover:text-ink active:scale-95 ${meta.tone}`
                     : isBuilt
                       ? 'border-edge/60 bg-transparent text-ink-dim hover:border-ink-dim/50 hover:text-ink active:scale-95'
                       : 'border-dashed border-edge/50 bg-transparent text-ink-dim/80 hover:border-ink-dim/40'

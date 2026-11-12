@@ -81,9 +81,7 @@ export function PageHeader({
         ) : null}
 
         <Tag className="text-display font-semibold tracking-tight text-balance text-ink">
-          <span className="bg-gradient-to-r from-ink via-ink to-ink-dim bg-clip-text text-transparent">
-            {title}
-          </span>
+          {title}
         </Tag>
 
         {content && (
