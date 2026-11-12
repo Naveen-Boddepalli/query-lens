@@ -874,7 +874,7 @@ export function SpotlightDialog({ onClose }: SpotlightDialogProps) {
       className="fixed inset-0 z-50 flex items-start justify-center pt-[8vh] sm:pt-[12vh] px-3 sm:px-4"
       role="presentation"
     >
-      {/* Minimal Backdrop — keeps underlying content sharp so the lens refracts vivid color */}
+      {/* Frosted Liquid Glass Backdrop */}
       <div
         onClick={handleClose}
         className="ql-liquid-backdrop fixed inset-0"
