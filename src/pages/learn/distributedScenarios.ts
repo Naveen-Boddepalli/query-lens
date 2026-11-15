@@ -1,0 +1,67 @@
+import { partitionHref } from '../../ui/partitionLinks.ts';
+import type { PartitionSettings } from '../../ui/partitionLinks.ts';
+import { joinPartitionHref } from '../../ui/joinPartitionLinks.ts';
+import type { JoinPartitionSettings } from '../../ui/joinPartitionLinks.ts';
+import { RAFT_SCENARIOS, raftHref } from '../../ui/raftLinks.ts';
+import type { RaftSettings } from '../../ui/raftLinks.ts';
+import { TPC_SCENARIOS, tpcHref } from '../../ui/tpcLinks.ts';
+import type { TpcSettings } from '../../ui/tpcLinks.ts';
+
+/**
+ * The tool settings the distributed-databases lessons link to (plan.md §27.5 X1–X4), named, so a step's link and the
+ * test that checks the numbers it quotes read the same settings. `__tests__/distributedLessons.test.ts` runs each.
+ */
+
+export interface PartitionScenario extends PartitionSettings {
+  tool: 'partitioning';
+}
+
+export interface TpcScenario extends TpcSettings {
+  tool: '2pc';
+}
+
+export interface RaftScenario extends RaftSettings {
+  tool: 'raft';
+}
+
+/** The partitioning page's join section (plan.md §27.5 X4). */
+export interface JoinPartitionScenario extends JoinPartitionSettings {
+  tool: 'partitioning-join';
+}
+
+export type DistributedScenario = PartitionScenario | TpcScenario | RaftScenario | JoinPartitionScenario;
+
+const raft = (id: string): RaftScenario => ({ tool: 'raft', ...RAFT_SCENARIOS.find((s) => s.id === id)!.settings });
+
+const tpc = (id: string): TpcScenario => ({ tool: '2pc', ...TPC_SCENARIOS.find((s) => s.id === id)!.settings });
+
+const P = { tool: 'partitioning', key: 'id', nodes: 4, leaving: 2 } as const;
+
+export const DISTRIBUTED_SCENARIOS = {
+  hashGrows: { ...P, scheme: 'hash', virtualNodes: 1, change: 'add' },
+  rangeGrows: { ...P, scheme: 'range', virtualNodes: 1, change: 'add' },
+  ringOnePoint: { ...P, scheme: 'consistent', virtualNodes: 1, change: 'add' },
+  ringManyPoints: { ...P, scheme: 'consistent', virtualNodes: 64, change: 'add' },
+  tpcCommit: tpc('commit'),
+  tpcOneNo: tpc('one-no'),
+  tpcAfterDecision: tpc('crash-after-decision'),
+  tpcBeforeDecision: tpc('crash-before-decision'),
+  tpcNeverReturns: tpc('never-returns'),
+  raftCalm: raft('calm'),
+  raftLeaderCrash: raft('leader-crash'),
+  raftMinority: raft('minority-leader'),
+  raftLossy: raft('lossy'),
+  joinColocated: { tool: 'partitioning-join', nodes: 4, orders: 'hash-id', payments: 'hash-orderId' },
+  joinWrongColumn: { tool: 'partitioning-join', nodes: 4, orders: 'hash-id', payments: 'hash-id' },
+  joinWrongColumnEight: { tool: 'partitioning-join', nodes: 8, orders: 'hash-id', payments: 'hash-id' },
+  joinRanges: { tool: 'partitioning-join', nodes: 4, orders: 'range-id', payments: 'range-orderId' },
+} as const satisfies Record<string, DistributedScenario>;
+
+export type DistributedScenarioName = keyof typeof DISTRIBUTED_SCENARIOS;
+
+export function distributedHref(scenario: DistributedScenario): string {
+  if (scenario.tool === '2pc') return tpcHref(scenario);
+  if (scenario.tool === 'raft') return raftHref(scenario);
+  if (scenario.tool === 'partitioning-join') return joinPartitionHref(scenario);
+  return partitionHref(scenario);
+}

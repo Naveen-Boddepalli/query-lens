@@ -54,6 +54,15 @@ describe('differential — QueryLens vs SQLite', () => {
     );
   });
 
+  it('UNION [ALL], INTERSECT and EXCEPT (plan.md §27.5 S3)', () => {
+    fc.assert(
+      fc.property(sessionArb('compound'), optionsArb, ({ tables, steps }, options) => {
+        runSession(tables, steps, options);
+      }),
+      oracleParams(),
+    );
+  });
+
   it('INSERT / UPDATE / DELETE, then a read of what they left behind', () => {
     fc.assert(
       fc.property(sessionArb('any'), optionsArb, ({ tables, steps }, options) => {

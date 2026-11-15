@@ -42,10 +42,14 @@ import { ShortcutHints } from '../ui/ShortcutHints.tsx';
 import { WhyNotNote } from '../ui/WhyNotNote.tsx';
 import { recordPrediction, recordStages } from '../ui/progress.ts';
 import { stepAnnouncement } from '../ui/stepAnnouncement.ts';
-import { btnPrimary, btnSecondary, panelSurface } from '../ui/primitives.ts';
+import { btnPrimary, btnSecondary, panelSurface, segOff, segOn } from '../ui/primitives.ts';
 import { useThemeContext } from '../ui/ThemeContext.tsx';
 import { RUN_HINT, useIsTouch } from '../ui/platform.ts';
-import { readDefaultPolicy, readDefaultPredictOn } from '../ui/preferences.ts';
+import { readDefaultDetail, readDefaultPolicy, readDefaultPredictOn } from '../ui/preferences.ts';
+import { DETAIL_LABELS, DETAIL_LEVELS, readDetailParam } from '../ui/detailLevel.ts';
+import type { DetailLevel } from '../ui/detailLevel.ts';
+import type * as NarrationDetail from '../ui/narrationDetail.ts';
+import type { Narrated } from '../ui/narrationDetail.ts';
 import { StageDetail } from '../ui/panels/StageDetail.tsx';
 import { TraceDiffNote } from '../ui/panels/TraceDiffNote.tsx';
 import { diffRuns, readLastRuns, summarize, writeLastRun } from '../ui/traceDiff.ts';
@@ -54,6 +58,8 @@ import { STAGE_META } from '../ui/stageMeta.ts';
 import { usePlayback, usePlaybackShortcuts } from '../ui/usePlayback.ts';
 import {
   encodeShareState,
+  otherColumnsOf,
+  presetWithRows,
   readDatasetParam,
   readShareState,
   skippedAnswersBefore,
@@ -61,6 +67,13 @@ import {
 import { useAddressBarQuery } from '../ui/addressBar.ts';
 import { parseTraceFile, serializeTraceFile } from '../ui/traceFile.ts';
 import type { TraceState } from '../ui/traceFile.ts';
+
+/** The rows of every edited table but `main`, by name — a multi-table preset's `d.<table>` (plan.md §27.5 S2). */
+function otherEditedRows(db: Database, main: string, edited: ReadonlySet<string>): Record<string, Row[]> {
+  return Object.fromEntries(
+    [...edited].filter((name) => name !== main && db.tables[name]).map((name) => [name, db.tables[name]!.rows]),
+  );
+}
 
 function landingStep(result: RunResult, predictOn: boolean): number {
   if (result.events.length === 0) return 0;
@@ -79,7 +92,8 @@ const DATASET = DATASETS[DATASET_ID];
 const CATALOGUE = DATASET_CATALOGUE[DATASET_ID];
 
 const SEED = DATASET.make();
-const SHARED = readShareState(SEARCH, SEED.tables[DATASET.table]?.columns ?? []);
+// A multi-table preset's other tables travel as `d.<table>` (plan.md §27.5 S2), checked against their own columns.
+const SHARED = readShareState(SEARCH, SEED.tables[DATASET.table]?.columns ?? [], otherColumnsOf(SEED, DATASET.table));
 
 /**
  * plan.md §20.5: an assignment link (`&l=1`) seals the trace at its landing
@@ -97,6 +111,9 @@ const PRESENT_INITIAL = new URLSearchParams(SEARCH).get('present') === '1';
  *  rendered before the Playground's. */
 const TOUR_INITIAL = new URLSearchParams(SEARCH).get('tour') === '1';
 
+/** plan.md §27.5 L2: `?detail=novice|expert`, else the `/settings` default, else the engine's own words. */
+const DETAIL_INITIAL: DetailLevel = readDetailParam(SEARCH) ?? readDefaultDetail() ?? 'standard';
+
 const START = {
   sql: SHARED.sql ?? CATALOGUE.starterSql,
   // The URL wins when present; a `/settings` preference (plan.md §21.3) is the
@@ -104,17 +121,25 @@ const START = {
   // for that. Same precedence order the theme already follows.
   policy: SHARED.policy ?? readDefaultPolicy() ?? DEFAULT_ENGINE_OPTIONS.policy,
   predictOn: SHARED.predictOn ?? readDefaultPredictOn() ?? true,
-  db: ((): Database => {
-    const table = SEED.tables[DATASET.table];
-    if (!SHARED.rows || !table) return SEED;
-    return { tables: { ...SEED.tables, [DATASET.table]: { ...table, rows: SHARED.rows } } };
-  })(),
+  db: presetWithRows(SEED, DATASET.table, SHARED.rows, SHARED.otherRows),
+  /** The tables a link's rows changed from the seed: the main table's `d`, and any other's `d.<table>`. */
+  edited: new Set([...(SHARED.rows ? [DATASET.table] : []), ...Object.keys(SHARED.otherRows ?? {})]),
 };
 
-const INITIAL_RESULT = runQuery(START.sql, START.db, {
+/**
+ * The SQL each run was of (plan.md §27.5 L2): the expert narration quotes the text a parse step read, and the editor
+ * may have moved on since the run it is narrating.
+ */
+const RAN_SQL = new WeakMap<RunResult, string>();
+function ran(sqlText: string, result: RunResult): RunResult {
+  RAN_SQL.set(result, sqlText);
+  return result;
+}
+
+const INITIAL_RESULT = ran(START.sql, runQuery(START.sql, START.db, {
   ...DEFAULT_ENGINE_OPTIONS,
   policy: START.policy,
-});
+}));
 
 const CHIP_BASE = 'rounded-full border px-2.5 py-0.5 text-label font-medium select-none transition-all';
 const CHIP_ACTIVE = `${CHIP_BASE} border-accent bg-accent-soft text-ink shadow-glow`;
@@ -154,12 +179,26 @@ export function PlaygroundPage() {
   const [workspacesOpen, setWorkspacesOpen] = useState(false);
   const [durabilityOpen, setDurabilityOpen] = useState(false);
   const [editingData, setEditingData] = useState(false);
-  const [rowsEdited, setRowsEdited] = useState(SHARED.rows !== undefined);
+  // The tables whose rows differ from the preset's seed (plan.md §27.5 S2) — by an edit, a write statement or a link.
+  // A link carries exactly these; a single-table preset only ever has its one table here.
+  const [editedTables, setEditedTables] = useState<ReadonlySet<string>>(START.edited);
+  const rowsEdited = editedTables.size > 0;
+  const markEdited = (name: string) => { setEditedTables((current) => new Set([...current, name])); };
   const [result, setResult] = useState<RunResult>(INITIAL_RESULT);
   const [traceDiff, setTraceDiff] = useState<{ sql: string; diff: TraceDiff | null } | null>(null);
 
   const [predictOn, setPredictOn] = useState(START.predictOn);
   const [presenting, setPresenting] = useState(PRESENT_INITIAL);
+  const [detail, setDetail] = useState<DetailLevel>(DETAIL_INITIAL);
+  // plan.md §27.5 L2: the novice and expert lines are fetched once one of those levels is first chosen — most visits
+  // stay at standard, the engine's own words, and never need them.
+  const [narrator, setNarrator] = useState<typeof NarrationDetail | null>(null);
+  useEffect(() => {
+    if (detail === 'standard' || narrator) return;
+    let live = true;
+    void import('../ui/narrationDetail.ts').then((m) => { if (live) setNarrator(m); });
+    return () => { live = false; };
+  }, [detail, narrator]);
   // A request already waiting opens the tour on the first render (only *looked at* here — a render may be thrown
   // away); `listenForTour` below is what answers it.
   const [tourOpen, setTourOpen] = useState(() => TOUR_INITIAL || hasPendingTour());
@@ -177,6 +216,10 @@ export function PlaygroundPage() {
   const [durable, setDurable] = useState<DurableLog>(() => openLog(START.db, DEFAULT_ENGINE_OPTIONS.rowsPerPage));
   const tableName = DATASETS[datasetId].table;
   const table = db.tables[tableName];
+  // Which table **Edit data** opens (plan.md §27.5 S2): the main one, unless a multi-table preset's picker says another.
+  const [editTableName, setEditTableName] = useState(DATASETS[DATASET_ID].table);
+  const editTable = db.tables[editTableName] ?? table;
+  const presetTables = isCustom ? [] : Object.keys(db.tables);
   const presets = DATASET_CATALOGUE[datasetId].presets;
   const touch = useIsTouch();
   const { theme } = useThemeContext();
@@ -247,12 +290,22 @@ export function PlaygroundPage() {
   // below is the live region and is kept permanently mounted for it — the
   // prediction card renders alongside rather than in its place, so the region
   // is never re-created with the very text it needed to announce.
+  // plan.md §27.5 L2: the step told at the chosen level of detail — a novice's plain-words line on the first step of
+  // each kind, or an expert's terse one.
+  const firsts = useMemo(() => narrator?.firstOfEachKind(result.events), [narrator, result]);
+  const narrated: Narrated =
+    narrator && firsts && detail !== 'standard'
+      ? narrator.narrationAt(state, detail, RAN_SQL.get(result) ?? sql, firsts)
+      : { text: state.narration, terse: false };
   const announcement = stepAnnouncement({
-    narration: state.narration,
+    narration: narrated.text,
     // A statement rejected part-way (a UNIQUE key already taken) has a trace to read; only one that never ran has none.
     error: result.error !== undefined && result.events.length === 0,
     prediction: prompt && upcoming ? { prompt, answer: answers[upcoming.id] } : undefined,
   });
+  // Only while the line on show is the step's own: a prediction or an error takes the narration's place.
+  const terse = narrated.terse && announcement === narrated.text;
+  const gloss = announcement === narrated.text ? narrated.gloss : undefined;
 
   const visited = useMemo(() => {
     const seen = new Set<Stage>();
@@ -302,16 +355,19 @@ export function PlaygroundPage() {
           // omitted rather than the stale preset id underneath it, so a
           // copied link never claims to be a preset it isn't.
           ...(isCustom ? {} : { dataset: datasetId }),
-          ...(rowsEdited && table ? { rows: table.rows } : {}),
+          ...(editedTables.has(tableName) && table ? { rows: table.rows } : {}),
+          ...(isCustom ? {} : { otherRows: otherEditedRows(db, tableName, editedTables) }),
         },
         table,
+        db.tables,
       ),
-    [sql, policy, predictOn, playback.step, datasetId, isCustom, rowsEdited, table],
+    [sql, policy, predictOn, playback.step, datasetId, isCustom, editedTables, tableName, table, db],
   );
 
   // `present` is a view flag, not part of the shared moment — appended after
   // `encodeShareState` so a copied link still opens the presenter.
-  useAddressBarQuery(presenting ? `${shareQuery}&present=1` : shareQuery);
+  // `detail` (plan.md §27.5 L2) is one too: how the moment is told, not which moment it is.
+  useAddressBarQuery([shareQuery, presenting ? 'present=1' : '', detail === 'standard' ? '' : `detail=${detail}`].filter(Boolean).join('&'));
 
   // plan.md §25.4 A3 — everything a "confusing step" report needs, from state
   // the page already holds. Read at render, not from `location`, which trails
@@ -342,7 +398,7 @@ export function PlaygroundPage() {
 
   const run = useCallback(
     (database: Database = db) => {
-      const next = runQuery(sql, database, options);
+      const next = ran(sql, runQuery(sql, database, options));
       setResult(next);
       if (next.error) {
         setTraceDiff({ sql, diff: null });
@@ -366,7 +422,7 @@ export function PlaygroundPage() {
           setDb({
             tables: { ...database.tables, [next.write.table]: { ...target, rows: next.write.rows } },
           });
-          setRowsEdited(true);
+          markEdited(next.write.table);
           const write = next.write;
           setDurable((log) =>
             recordWrite(log, database, sql, { table: write.table, kind: write.kind, rows: write.rows }),
@@ -390,10 +446,10 @@ export function PlaygroundPage() {
   );
 
   function applyRows(rows: Row[]) {
-    if (!table) return;
-    const next: Database = { tables: { ...db.tables, [tableName]: { ...table, rows } } };
+    if (!editTable) return;
+    const next: Database = { tables: { ...db.tables, [editTable.name]: { ...editTable, rows } } };
     setDb(next);
-    setRowsEdited(true);
+    markEdited(editTable.name);
     setEditingData(false);
     run(next);
   }
@@ -401,7 +457,7 @@ export function PlaygroundPage() {
   function resetData() {
     const fresh = DATASETS[datasetId].make();
     setDb(fresh);
-    setRowsEdited(false);
+    setEditedTables(new Set());
     setEditingData(false);
     run(fresh);
   }
@@ -409,7 +465,7 @@ export function PlaygroundPage() {
   /** A preset chip: load the query and run it in one click (plan.md §19.2). */
   function loadPreset(presetSql: string) {
     setSql(presetSql);
-    const next = runQuery(presetSql, db, options);
+    const next = ran(presetSql, runQuery(presetSql, db, options));
     setResult(next);
     setPinnedStage(null);
     setAnswers({});
@@ -430,10 +486,11 @@ export function PlaygroundPage() {
     setDatasetId(id);
     setIsCustom(false);
     setDb(nextDb);
-    setRowsEdited(false);
+    setEditedTables(new Set());
+    setEditTableName(DATASETS[id].table);
     setEditingData(false);
     setSql(nextSql);
-    const next = runQuery(nextSql, nextDb, options);
+    const next = ran(nextSql, runQuery(nextSql, nextDb, options));
     setResult(next);
     setPinnedStage(null);
     setAnswers({});
@@ -448,10 +505,10 @@ export function PlaygroundPage() {
       if (change !== datasetChange.current) return;
       setIsCustom(true);
       setDb(nextDb);
-      setRowsEdited(false);
+      setEditedTables(new Set());
       setEditingData(false);
       setSql(CUSTOM_STARTER_SQL);
-      const next = runQuery(CUSTOM_STARTER_SQL, nextDb, options);
+      const next = ran(CUSTOM_STARTER_SQL, runQuery(CUSTOM_STARTER_SQL, nextDb, options));
       setResult(next);
       setPinnedStage(null);
       setAnswers({});
@@ -462,13 +519,13 @@ export function PlaygroundPage() {
   function openDatabase(next: Database) {
     setWorkspacesOpen(false);
     setDb(next);
-    setRowsEdited(true);
+    setEditedTables(new Set(Object.keys(next.tables)));
     run(next);
   }
 
   function applySchema(next: Database) {
     setDb(next);
-    setRowsEdited(true);
+    setEditedTables(new Set(Object.keys(next.tables)));
     setSchemaEditorOpen(false);
     run(next);
   }
@@ -500,7 +557,8 @@ export function PlaygroundPage() {
       predictOn,
       step: playback.step,
       dataset: datasetId,
-      rows: rowsEdited && table ? table.rows : null,
+      rows: editedTables.has(tableName) && table ? table.rows : null,
+      otherRows: otherEditedRows(db, tableName, editedTables),
     });
     const a = document.createElement('a');
     a.href = `data:application/json,${encodeURIComponent(json)}`;
@@ -511,13 +569,8 @@ export function PlaygroundPage() {
   /** Restore a parsed trace file the same way a shared link's `START` would. */
   function applyTraceState(t: TraceState) {
     const spec = DATASETS[t.dataset];
-    const seed = spec.make();
-    const seedTable = seed.tables[spec.table];
-    const nextDb: Database =
-      t.rows && seedTable
-        ? { tables: { ...seed.tables, [spec.table]: { ...seedTable, rows: t.rows } } }
-        : seed;
-    const nextResult = runQuery(t.sql, nextDb, { ...DEFAULT_ENGINE_OPTIONS, policy: t.policy });
+    const nextDb = presetWithRows(spec.make(), spec.table, t.rows, t.otherRows);
+    const nextResult = ran(t.sql, runQuery(t.sql, nextDb, { ...DEFAULT_ENGINE_OPTIONS, policy: t.policy }));
     const step = Math.min(t.step, nextResult.events.length);
 
     setSql(t.sql);
@@ -527,7 +580,8 @@ export function PlaygroundPage() {
     datasetChange.current += 1;
     setIsCustom(false); // a trace file always names one of the fixed presets
     setDb(nextDb);
-    setRowsEdited(t.rows !== null);
+    setEditedTables(new Set([...(t.rows ? [spec.table] : []), ...Object.keys(t.otherRows ?? {})]));
+    setEditTableName(spec.table);
     setEditingData(false);
     setPinnedStage(null);
     setResult(nextResult);
@@ -636,13 +690,32 @@ export function PlaygroundPage() {
                 </button>
               </>
             ) : (
-              <button
-                type="button"
-                onClick={() => { setEditingData(true); }}
-                className={btnSecondary}
-              >
-                Edit data ({table?.rows.length ?? 0})
-              </button>
+              <>
+                {/* A multi-table preset (plan.md §27.5 S2): choose which of its tables Edit data opens. */}
+                {presetTables.length > 1 && (
+                  <label className="flex items-center gap-1.5 text-label text-ink-dim">
+                    Table
+                    <select
+                      className="rounded-lg border border-edge bg-surface-3 px-2 py-1 text-ink shadow-e1 transition hover:border-ink-dim/50"
+                      value={editTable?.name ?? tableName}
+                      onChange={(e) => { setEditTableName(e.target.value); }}
+                    >
+                      {presetTables.map((name) => (
+                        <option key={name} value={name}>
+                          {name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+                <button
+                  type="button"
+                  onClick={() => { setEditingData(true); }}
+                  className={btnSecondary}
+                >
+                  Edit data ({editTable?.rows.length ?? 0})
+                </button>
+              </>
             )}
             <button type="button" onClick={() => { setDurabilityOpen(true); }} className={btnSecondary}>
               Durability{durable.statements.length > 0 ? ` (${String(durable.statements.length)})` : ''}
@@ -806,18 +879,40 @@ export function PlaygroundPage() {
             className={prompt ? 'sr-only' : NARRATION_BOX}
           >
             {!prompt && (
-              <div className="mb-1 flex items-center justify-between gap-2">
+              <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
                 <h2 className="text-micro font-semibold tracking-[0.14em] text-ink-dim uppercase">
                   Narration
                 </h2>
-                <ReportStepLink moment={moment} />
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                  {/* plan.md §27.5 L2: how much each step tells you. */}
+                  <div role="radiogroup" aria-label="Narration detail" className="flex gap-1">
+                    {DETAIL_LEVELS.map((level) => (
+                      <button
+                        key={level}
+                        type="button"
+                        role="radio"
+                        aria-checked={detail === level}
+                        onClick={() => { setDetail(level); }}
+                        className={`rounded-md border px-2 py-1 text-label transition ${detail === level ? segOn : segOff}`}
+                      >
+                        {DETAIL_LABELS[level]}
+                      </button>
+                    ))}
+                  </div>
+                  <ReportStepLink moment={moment} />
+                </div>
               </div>
             )}
-            <p className="min-h-10 text-body leading-relaxed text-ink" aria-live="polite" aria-atomic="true">
+            <p
+              className={`min-h-10 leading-relaxed text-ink ${terse ? 'font-mono text-label break-words' : 'text-body'}`}
+              aria-live="polite"
+              aria-atomic="true"
+            >
               <span className="sr-only">
                 Step {playback.step} of {result.events.length}.{' '}
               </span>
               {announcement}
+              {gloss !== undefined && <span className="mt-1.5 block text-label text-ink-dim">{gloss}</span>}
             </p>
           </div>
 
@@ -851,9 +946,10 @@ export function PlaygroundPage() {
         />
       )}
 
-      {editingData && table && (
+      {editingData && editTable && (
         <DataEditor
-          table={table}
+          key={editTable.name}
+          table={editTable}
           onApply={applyRows}
           onReset={resetData}
           onClose={() => { setEditingData(false); }}
@@ -881,11 +977,12 @@ export function PlaygroundPage() {
             onRestart={() => { setDurable(openLog(db, options.rowsPerPage)); }}
             onUse={(recovered, heap) => {
               setDb(recovered);
-              setRowsEdited(true);
+              // Recovery rewrites whichever tables the log touched; carrying every one in the link is the safe reading.
+              setEditedTables(new Set(Object.keys(recovered.tables)));
               setDurable((log) => carryOn(log, recovered, heap));
               setDurabilityOpen(false);
               // A read can show the recovered rows at once; a write must not be run a second time.
-              const again = runQuery(sql, recovered, options);
+              const again = ran(sql, runQuery(sql, recovered, options));
               if (!again.write) {
                 setResult(again);
                 setPinnedStage(null);
@@ -917,7 +1014,7 @@ export function PlaygroundPage() {
           activeSpan={activeSpan}
           currentStage={state?.stage ?? null}
           visited={visited}
-          narration={announcement}
+          narration={gloss === undefined ? announcement : `${announcement} ${gloss}`}
           onExit={() => { setPresenting(false); }}
         />
       )}

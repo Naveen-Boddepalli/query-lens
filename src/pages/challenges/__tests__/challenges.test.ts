@@ -46,6 +46,12 @@ describe('challenges', () => {
     'equals-null': 'SELECT * FROM contacts WHERE email IS NULL;',
     'count-the-nulls': 'SELECT COUNT(*), COUNT(email) FROM contacts;',
     'not-in-the-null': 'SELECT * FROM people WHERE id NOT IN (SELECT person_id FROM banned);',
+    'never-ordered': 'SELECT name FROM customers WHERE NOT EXISTS (SELECT * FROM orders WHERE orders.customerId = customers.id);',
+    'nobody-ordered-it': 'SELECT id FROM products EXCEPT SELECT productId FROM orders;',
+    'leave-no-one-out': 'SELECT customers.name, orders.id FROM customers FULL JOIN orders ON customers.id = orders.customerId;',
+    'count-each-once': 'SELECT COUNT(DISTINCT customerId) FROM orders;',
+    'above-average': 'SELECT name FROM products WHERE price > (SELECT AVG(price) FROM products);',
+    'who-referred-whom': 'SELECT c.name, r.name FROM customers c LEFT JOIN customers r ON c.referrer = r.id;',
     'not-paris-either': "SELECT * FROM customers WHERE city <> 'Paris' OR city IS NULL;",
     'keep-the-unmatched':
       'SELECT authors.name, posts.title FROM authors LEFT JOIN posts ON authors.id = posts.authorId WHERE posts.title IS NULL;',
@@ -102,6 +108,45 @@ describe('challenges', () => {
       ['not-in-the-null', 'SELECT * FROM people WHERE id NOT IN (SELECT person_id FROM banned WHERE person_id IS NOT NULL) AND id > 9;'],
       // Each loses the five customers with no city, or keeps Paris, or is the wrong slice.
       ['not-paris-either', "SELECT * FROM customers WHERE city <> 'Paris';"],
+      // The three who never ordered, and nobody else: not everyone, not those who did, not two of the three.
+      ['never-ordered', 'SELECT name FROM customers;'],
+      ['never-ordered', 'SELECT name FROM customers WHERE EXISTS (SELECT * FROM orders WHERE orders.customerId = customers.id);'],
+      ['never-ordered', 'SELECT name FROM customers WHERE NOT EXISTS (SELECT * FROM orders WHERE orders.customerId = customers.id) AND id < 12;'],
+      ['never-ordered', 'SELECT city FROM customers WHERE NOT EXISTS (SELECT * FROM orders WHERE orders.customerId = customers.id);'],
+      // The vase, but by a subquery; a set operator, but the wrong rows; or the right operator the wrong way round.
+      ['nobody-ordered-it', 'SELECT id FROM products WHERE id NOT IN (SELECT productId FROM orders);'],
+      ['nobody-ordered-it', 'SELECT id FROM products INTERSECT SELECT productId FROM orders;'],
+      ['nobody-ordered-it', 'SELECT productId FROM orders EXCEPT SELECT id FROM products;'],
+      ['nobody-ordered-it', 'SELECT id, name FROM products EXCEPT SELECT id, name FROM products WHERE id < 8;'],
+      // One side kept but not the other, neither, every pair, both stacked with their matches twice, or the padding filtered away.
+      ['leave-no-one-out', 'SELECT customers.name, orders.id FROM customers LEFT JOIN orders ON customers.id = orders.customerId;'],
+      ['leave-no-one-out', 'SELECT customers.name, orders.id FROM customers RIGHT JOIN orders ON customers.id = orders.customerId;'],
+      ['leave-no-one-out', 'SELECT customers.name, orders.id FROM customers JOIN orders ON customers.id = orders.customerId;'],
+      ['leave-no-one-out', 'SELECT customers.name, orders.id FROM customers CROSS JOIN orders;'],
+      [
+        'leave-no-one-out',
+        'SELECT customers.name, orders.id FROM customers LEFT JOIN orders ON customers.id = orders.customerId UNION ALL SELECT customers.name, orders.id FROM customers RIGHT JOIN orders ON customers.id = orders.customerId;',
+      ],
+      ['leave-no-one-out', 'SELECT customers.name, orders.id FROM customers FULL JOIN orders ON customers.id = orders.customerId WHERE orders.id IS NOT NULL;'],
+      ['leave-no-one-out', 'SELECT customers.name FROM customers FULL JOIN orders ON customers.id = orders.customerId;'],
+      // Every order, every order with a customer, the right rows uncounted, another column, or nine without DISTINCT.
+      ['count-each-once', 'SELECT COUNT(*) FROM orders;'],
+      ['count-each-once', 'SELECT COUNT(customerId) FROM orders;'],
+      ['count-each-once', 'SELECT DISTINCT customerId FROM orders;'],
+      ['count-each-once', 'SELECT COUNT(DISTINCT productId) FROM orders;'],
+      ['count-each-once', 'SELECT COUNT(DISTINCT customerId), COUNT(*) FROM orders;'],
+      ['count-each-once', 'SELECT COUNT(*) FROM customers WHERE EXISTS (SELECT * FROM orders WHERE orders.customerId = customers.id);'],
+      // The average typed in, a different statistic, every product, or the wrong side of it.
+      ['above-average', 'SELECT name FROM products WHERE price > 84.625;'],
+      ['above-average', 'SELECT name FROM products WHERE price > (SELECT MIN(price) FROM products);'],
+      ['above-average', 'SELECT name FROM products;'],
+      ['above-average', 'SELECT name FROM products WHERE price < (SELECT AVG(price) FROM products);'],
+      // The referred only, the referrer's id, the other direction, every pair, or a third column.
+      ['who-referred-whom', 'SELECT c.name, r.name FROM customers c JOIN customers r ON c.referrer = r.id;'],
+      ['who-referred-whom', 'SELECT name, referrer FROM customers;'],
+      ['who-referred-whom', 'SELECT c.name, r.name FROM customers c LEFT JOIN customers r ON c.id = r.referrer;'],
+      ['who-referred-whom', 'SELECT c.name, r.name FROM customers c CROSS JOIN customers r;'],
+      ['who-referred-whom', 'SELECT c.name, r.name, c.id FROM customers c LEFT JOIN customers r ON c.referrer = r.id;'],
       ['not-paris-either', "SELECT * FROM customers WHERE NOT (city = 'Paris');"],
       ['not-paris-either', "SELECT * FROM customers WHERE city NOT IN ('Paris');"],
       ['not-paris-either', 'SELECT * FROM customers WHERE city IS NULL;'],
@@ -130,6 +175,89 @@ describe('challenges', () => {
         expect(r.error).toBeUndefined();
         expect(c.check(r, sql)).toBe(false);
       });
+    }
+  });
+
+  it('nobody-ordered-it accepts the vase by its id or its name (plan.md §27.5 S3)', () => {
+    const c = challengeById('nobody-ordered-it')!;
+    for (const sql of [
+      'SELECT name FROM products EXCEPT SELECT products.name FROM products JOIN orders ON products.id = orders.productId;',
+      'SELECT id FROM products EXCEPT SELECT productId FROM orders ORDER BY id;',
+    ]) {
+      const r = runOn(c, sql);
+      expect(r.error, sql).toBeUndefined();
+      expect(c.check(r, sql), sql).toBe(true);
+    }
+  });
+
+  it('leave-no-one-out accepts the full join either way round, and a LEFT and a RIGHT joined by UNION (plan.md §27.5 S4)', () => {
+    const c = challengeById('leave-no-one-out')!;
+    for (const sql of [
+      'SELECT orders.id, customers.name FROM orders FULL OUTER JOIN customers ON orders.customerId = customers.id;',
+      'SELECT customers.name, orders.id FROM customers FULL JOIN orders ON %s ORDER BY orders.id DESC;',
+      'SELECT customers.name, orders.id FROM customers LEFT JOIN orders ON %s UNION SELECT customers.name, orders.id FROM customers RIGHT JOIN orders ON %s;',
+      'SELECT * FROM customers FULL JOIN orders ON %s;',
+    ]) {
+      const r = runOn(c, sql.replaceAll('%s', 'customers.id = orders.customerId'));
+      expect(r.error, sql).toBeUndefined();
+      expect(c.check(r, sql), sql).toBe(true);
+    }
+    // The stacked version the misconception describes: every matched pair twice.
+    const stacked = runOn(c, `SELECT customers.name, orders.id FROM customers LEFT JOIN orders ON ${'customers.id = orders.customerId'} UNION ALL SELECT customers.name, orders.id FROM customers RIGHT JOIN orders ON customers.id = orders.customerId;`);
+    expect(stacked.rows).toHaveLength(38 * 2 + 3 + 2);
+  });
+
+  it('count-each-once accepts a NULL filter, a LIMIT, and either aggregate strategy (plan.md §27.5 S5)', () => {
+    const c = challengeById('count-each-once')!;
+    for (const [sql, options] of [
+      ['SELECT COUNT(DISTINCT customerId) FROM orders LIMIT 1;', challengeOptions(c)],
+      ['SELECT COUNT(DISTINCT customerId) FROM orders WHERE customerId IS NOT NULL;', challengeOptions(c)],
+      ['SELECT COUNT(DISTINCT customerId) FROM orders;', { ...challengeOptions(c), aggregateStrategy: 'sort' as const }],
+    ] as const) {
+      const r = runQuery(sql, challengeDatabase(c), options);
+      expect(r.error, sql).toBeUndefined();
+      expect(c.check(r, sql), sql).toBe(true);
+    }
+    // The misconception's numbers: ten distinct rows, NULL among them; nine distinct values.
+    expect(runOn(c, 'SELECT DISTINCT customerId FROM orders;').rows).toHaveLength(10);
+  });
+
+  it('above-average accepts the subquery on either side, more columns, and an order; WHERE … AVG is refused (plan.md §27.5 S6)', () => {
+    const c = challengeById('above-average')!;
+    for (const sql of [
+      'SELECT name, price FROM products WHERE (SELECT AVG(price) FROM products) < price ORDER BY price DESC;',
+      'SELECT name FROM products WHERE price > (SELECT SUM(price) FROM products) / (SELECT COUNT(*) FROM products);',
+    ]) {
+      const r = runOn(c, sql);
+      expect(r.error, sql).toBeUndefined();
+      expect(c.check(r, sql), sql).toBe(true);
+    }
+    // The misconception: an aggregate has nothing to read in WHERE.
+    expect(runOn(c, 'SELECT name FROM products WHERE price > AVG(price);').error?.message).toMatch(/cannot be used here/);
+  });
+
+  it('who-referred-whom accepts either column order, RIGHT JOIN the other way round, and AS (plan.md §27.5 S7)', () => {
+    const c = challengeById('who-referred-whom')!;
+    for (const sql of [
+      'SELECT r.name, c.name FROM %s ORDER BY c.name;',
+      'SELECT c.name, r.name FROM customers AS r RIGHT JOIN customers AS c ON c.referrer = r.id;',
+    ]) {
+      const r = runOn(c, sql.replace('%s', 'customers c LEFT JOIN customers r ON c.referrer = r.id'));
+      expect(r.error, sql).toBeUndefined();
+      expect(c.check(r, sql), sql).toBe(true);
+    }
+  });
+
+  it('never-ordered accepts every honest way of asking (plan.md §27.5 S1)', () => {
+    const c = challengeById('never-ordered')!;
+    for (const sql of [
+      'SELECT id FROM customers WHERE NOT EXISTS (SELECT 1 FROM orders WHERE orders.customerId = customers.id);',
+      'SELECT name FROM customers WHERE id NOT IN (SELECT customerId FROM orders WHERE customerId IS NOT NULL);',
+      'SELECT customers.name FROM customers LEFT JOIN orders ON customers.id = orders.customerId WHERE orders.id IS NULL;',
+    ]) {
+      const r = runOn(c, sql);
+      expect(r.error, sql).toBeUndefined();
+      expect(c.check(r, sql), sql).toBe(true);
     }
   });
 

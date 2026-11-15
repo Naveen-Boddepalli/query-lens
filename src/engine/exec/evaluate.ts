@@ -188,6 +188,17 @@ export function evaluatePredicate(expr: Expr, row: Row): Truth {
       const value = row[columnKey(expr)] ?? null;
       return value === null ? null : Boolean(value);
     }
+
+    // `resolveExists` (`src/engine/exists.ts`) turns every correlated EXISTS into a semi-join or an anti-join before
+    // anything is planned (plan.md §27.5 S1), and runs an uncorrelated one once, recording what it found — never UNKNOWN.
+    case 'exists':
+      if (expr.resolved === undefined) throw new Error('unreachable: an EXISTS is resolved before its query is planned');
+      return expr.resolved;
+
+    // `resolveStatementSubqueries` runs a scalar subquery once and puts the literal it returned in its place
+    // (plan.md §27.5 S6), so none is left by the time a row is evaluated.
+    case 'scalar':
+      throw new Error('unreachable: a scalar subquery is resolved before its query is planned');
   }
 }
 

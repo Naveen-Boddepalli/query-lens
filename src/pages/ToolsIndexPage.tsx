@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { PageHeader } from '../ui/PageHeader.tsx';
 import { cardInteractive, pill } from '../ui/primitives.ts';
 
-type ToolCategory = 'all' | 'storage' | 'indexing' | 'query' | 'transactions';
+type ToolCategory = 'all' | 'storage' | 'indexing' | 'query' | 'transactions' | 'distributed';
 
 interface ToolItem {
   id: string;
@@ -172,6 +172,28 @@ const TOOLS: ToolItem[] = [
       'Selinger dynamic-programming join-order search over the subset lattice: cheapest way to join every subset, built smallest first with all candidate costs.',
   },
   {
+    id: 'histograms',
+    title: 'Histograms',
+    href: '/tools/histograms',
+    category: 'query',
+    topic: 'Statistics',
+    difficulty: 'Intermediate',
+    metric: 'Equi-depth, 1–100 buckets',
+    description:
+      'ANALYZE with the bucket count you choose: the equi-depth histogram it builds, a range estimate read off it, and the q-error at every bucket count.',
+  },
+  {
+    id: 'parallel',
+    title: 'Parallel execution',
+    href: '/tools/parallel',
+    category: 'query',
+    topic: 'Execution',
+    difficulty: 'Advanced',
+    metric: 'Morsels, up to 8 workers',
+    description:
+      'Morsel-driven parallelism: static ranges, a shared queue or work stealing over workers whose speeds you script, plus exchange operators and a parallel hash join.',
+  },
+  {
     id: 'sort',
     title: 'External merge sort',
     href: '/tools/sort',
@@ -236,6 +258,38 @@ const TOOLS: ToolItem[] = [
     metric: '5 protocols evaluated',
     description:
       'One schedule under five protocols — 2PL, Timestamp Ordering, OCC, Snapshot Isolation, and Serializable Snapshots — comparing throughput and aborts.',
+  },  {
+    id: 'partitioning',
+    title: 'Partitioning',
+    href: '/tools/partitioning',
+    category: 'distributed',
+    topic: 'Distributed',
+    difficulty: 'Intermediate',
+    metric: 'Hash, range, consistent hashing',
+    description:
+      'A table spread over nodes by hash, by range or by consistent hashing. Add or remove a node and count the rows that move — then join across partitions.',
+  },
+  {
+    id: '2pc',
+    title: 'Two-phase commit',
+    href: '/tools/2pc',
+    category: 'distributed',
+    topic: 'Distributed',
+    difficulty: 'Advanced',
+    metric: 'Presumed abort, scripted failures',
+    description:
+      'A coordinator and its participants commit one transaction across machines. Crash either side or lose a message, and watch who is left in doubt, and for how long.',
+  },
+  {
+    id: 'raft',
+    title: 'Raft',
+    href: '/tools/raft',
+    category: 'distributed',
+    topic: 'Distributed',
+    difficulty: 'Advanced',
+    metric: '4 safety properties checked',
+    description:
+      'Leader election and log replication over a schedule you script — lost messages, a partition, a crash — with every server’s role and log drawn over time.',
   },
 ];
 
@@ -245,6 +299,7 @@ const CATEGORIES: { id: ToolCategory; label: string }[] = [
   { id: 'indexing', label: 'Indexing' },
   { id: 'query', label: 'Query & Execution' },
   { id: 'transactions', label: 'Transactions' },
+  { id: 'distributed', label: 'Parallel & Distributed' },
 ];
 
 function DifficultyBadge({ level }: { level: ToolItem['difficulty'] }) {

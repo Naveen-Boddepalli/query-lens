@@ -192,7 +192,7 @@ export const SANDBOX_STEPS: Record<string, LessonStep[]> = {
         <>
           Turn off everything but index selection and <em>nothing</em> fires: the plan is the canonical one. The rule
           looks for a predicate already folded into the scan, and on its own the filter is still a separate node above
-          it. Of the seven rules, these two are the only pair that gives the lookup.
+          it. Of the eight rules, these two are the only pair that gives the lookup.
         </>
       ),
       link: to('plannerIndexOnly', 'Open it with only index selection'),

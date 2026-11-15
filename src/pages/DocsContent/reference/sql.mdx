@@ -4,7 +4,8 @@ description: The exact SQL subset QueryLens's parser accepts, and what it says w
 ---
 
 QueryLens implements four statements — `SELECT`, `DELETE`, `INSERT` and `UPDATE` — plus `EXPLAIN` for a `SELECT`
-and `ANALYZE` for a table, over one table at a time (more, for a chain of `JOIN`s). This page is the complete
+and `ANALYZE` for a table, over one table at a time (more, for a chain of `JOIN`s, or SELECTs combined by
+[`UNION`, `INTERSECT` or `EXCEPT`](#union-intersect-except)). This page is the complete
 subset: if it isn't listed here, the parser does not accept it yet, and it will tell you so by name rather than
 failing with a generic syntax error.
 
@@ -35,17 +36,35 @@ SELECT * FROM users ORDER BY id LIMIT 10 OFFSET 20;
 - **`FROM`**: exactly one table, plus zero or more `JOIN`s, chained left-deep (plan.md §25.4 C3 slice b):
   `FROM a JOIN b ON … JOIN c ON …` joins `c` to whatever `a ⋈ b` already produced, not to `a` and `b`
   independently.
-- **`JOIN`**: `[INNER | LEFT [OUTER]] JOIN table ON a.col = b.col`, always an equality between one
-  qualified column on each side. A bare `JOIN` and `INNER JOIN` are the same thing: a row from either
-  side with no match on the other simply does not appear. `LEFT [OUTER] JOIN` (plan.md §25.4 C3) keeps
-  every row on the other side of *this* join, even one with no match — its columns from the table this
-  `JOIN` introduces come back `NULL` instead; a chain may mix `LEFT` and inner freely, step by step. No
-  `RIGHT`/`FULL`/`CROSS`/`USING` (write a `RIGHT JOIN` the other way round, as a `LEFT JOIN` with the two
-  tables swapped), and no aliasing — so the same table can never be named twice in one query's chain, and
-  each `JOIN`'s `ON` must name the table it introduces on one side and some table already in the query
-  (`FROM`'s, or an earlier `JOIN`'s — not necessarily the one written just before it) on the other. Every
-  column reference is qualified (`authors.id`, not `id`) once a query has any `JOIN` — there is no
-  ambiguity resolution. `ORDER BY` sorts the joined rows, by a qualified column (`ORDER BY posts.id DESC`), and
+- **Table aliases** (plan.md §27.5 S7): any table a `SELECT` reads — in `FROM`, a `JOIN`, a subquery's `FROM` — can
+  be given a name for this query, `customers AS c` or just `customers c`, and is then called by that name only
+  (`c.name`; `customers.name` is refused, and the error says it is called `c`). So one table can appear twice: a
+  **self-join**, `FROM customers AS c LEFT JOIN customers AS r ON c.referrer = r.id`, or a subquery on its own
+  table, `FROM customers c WHERE NOT EXISTS (SELECT * FROM customers r WHERE r.referrer = c.id)`. Both names read
+  the one stored table — the same pages and the same indexes — so a self-join's second scan can find the first's
+  pages in the pool. The plan and the trace call it `customers AS r`, and relational algebra a rename,
+  `ρ_r(customers)`. A write (`DELETE`, `UPDATE`, `INSERT`) names its one table plainly.
+- **`JOIN`**: `[INNER | LEFT [OUTER] | RIGHT [OUTER] | FULL [OUTER]] JOIN table ON a.col = b.col`, always an
+  equality between one qualified column on each side. A bare `JOIN` and `INNER JOIN` are the same thing: a row
+  from either side with no match on the other simply does not appear. `LEFT [OUTER] JOIN` (plan.md §25.4 C3)
+  keeps every row on the other side of *this* join, even one with no match — its columns from the table this
+  `JOIN` introduces come back `NULL` instead. `RIGHT [OUTER] JOIN` (plan.md §27.5 S4) is the mirror: it keeps
+  every row of the table it introduces, and pads every column of the rows so far — every table before it —
+  with `NULL`; `FULL [OUTER] JOIN` keeps both, each unmatched row exactly once. A chain may mix them all
+  freely, step by step. In relational algebra they read ⟕, ⟖ and ⟗. Neither `RIGHT` nor `FULL` runs as an
+  index nested-loop (a probe never visits the inner rows nothing matched, and those are the rows it must
+  keep), so the trace says so and a nested-loop takes its place.
+- **`CROSS JOIN table`**, or a comma — `FROM a, b` — pairs every row with every row: the Cartesian product
+  ×, with no `ON` (`CROSS JOIN … ON` is refused; put the condition in `WHERE`). It always runs as a nested
+  loop. A `WHERE` equality between the two sides turns it into a real join before anything runs — the
+  optimizer's **product-to-join** rule, σ over × becomes ⋈ — so the textbook's `FROM customers, orders WHERE
+  customers.id = orders.customerId` plans exactly as the `JOIN … ON` it means. The rule leaves a cross join a
+  later `RIGHT` or `FULL` join pads alone: there, the `WHERE` must stay above to remove the padded rows.
+- No `USING`. One name appears once in a query — a table twice needs an alias for one of them — and each
+  `JOIN`'s `ON` must name the table it introduces on one side and some table already in the query (`FROM`'s, or
+  an earlier `JOIN`'s — not necessarily the one written just before it) on the other. Every column reference is
+  qualified (`authors.id`, not `id`) once a query has any `JOIN` — there is no ambiguity resolution. Without a
+  `JOIN` a qualifier is optional, and may only name the query's own table (or its alias). `ORDER BY` sorts the joined rows, by a qualified column (`ORDER BY posts.id DESC`), and
   `GROUP BY`, `HAVING` and aggregates group them: `SELECT authors.name, COUNT(posts.id) FROM authors LEFT JOIN
   posts ON authors.id = posts.authorId GROUP BY authors.name` counts each author's posts, zero for one with
   none — `COUNT(*)` would say one, counting the padded row. A `WHERE` on the table a `LEFT JOIN` introduces is never pushed below it — the classic pitfall
@@ -58,7 +77,8 @@ SELECT * FROM users ORDER BY id LIMIT 10 OFFSET 20;
 - **`DISTINCT`**: `SELECT DISTINCT a, b …` returns each distinct combination once — see
   [DISTINCT](#distinct) below.
 - **`GROUP BY`**: one or more columns — qualified in a query with a `JOIN`. Aggregates: `COUNT(*)`,
-  `COUNT`/`SUM`/`AVG`/`MIN`/`MAX` over a column. Every plain column in the SELECT list must be grouped or
+  `COUNT`/`SUM`/`AVG`/`MIN`/`MAX` over a column, or over its distinct values — `COUNT(DISTINCT col)`, see
+  [DISTINCT](#distinct). Every plain column in the SELECT list must be grouped or
   wrapped in an aggregate — and with `HAVING` but no `GROUP BY` the whole table is one group, so the list can
   only hold aggregates.
 - **`HAVING`**: a predicate over the *groups*, after `GROUP BY` — see [HAVING](#having) below.
@@ -85,13 +105,14 @@ A `WHERE` clause is a tree. From loosest to tightest binding: `OR`, then `AND`, 
 | `x IS NULL`, `x IS NOT NULL` | Whether the value is NULL. The only test that is never UNKNOWN. |
 | `x IN (a, b, …)`, `x NOT IN (a, b, …)` | Equal to any listed value. |
 | `x IN (SELECT col FROM t [WHERE …])`, `x NOT IN (…)` | Equal to any value that query returns (plan.md §25.4 C3, closing C3). |
+| `EXISTS (SELECT * FROM t [WHERE …])`, `NOT EXISTS (…)` | Whether that query returns any row at all — never UNKNOWN. Its `WHERE` may name the outer query's tables (plan.md §27.5 S1); see below. |
 | `x LIKE pattern`, `x NOT LIKE pattern` | `%` matches any run of characters, `_` exactly one. **Case-sensitive**, no escape character. |
 
-An operand is a column, a literal (number, single-quoted string, `TRUE`/`FALSE`, `NULL`), or a
-parenthesised predicate.
+An operand is a column, a literal (number, single-quoted string, `TRUE`/`FALSE`, `NULL`), a
+parenthesised predicate, or a [subquery standing for one value](#expressions) — `(SELECT AVG(price) FROM products)`.
 
-**`IN`'s subquery form** is the one place a `SELECT` may appear inside another query — nowhere else does
-(`x = (SELECT …)` and `EXISTS (…)` both stay unsupported). It is deliberately small: exactly one plain
+**`IN`'s subquery form** is one of three places a `SELECT` may appear inside another query — the others
+are `EXISTS`, below, and a scalar subquery used as a value. It is deliberately small: exactly one plain
 column, and no `JOIN`/`GROUP BY`/`HAVING`/`ORDER BY`/`LIMIT`/`DISTINCT`/aggregate — none of those could
 change *which* values end up in the set `IN` tests membership against. It always runs exactly once,
 before the outer query is planned, and is always **uncorrelated**: its own `WHERE`, if it has one, can
@@ -103,6 +124,39 @@ SELECT * FROM posts WHERE authorId IN (SELECT id FROM authors WHERE name = 'ada'
 SELECT * FROM posts WHERE authorId NOT IN (SELECT id FROM authors);
 DELETE FROM posts WHERE authorId IN (SELECT id FROM authors WHERE name = 'ada');
 ```
+
+**`EXISTS` and `NOT EXISTS`** (plan.md §27.5 S1) ask whether a subquery returns any row. Unlike `IN`'s, an
+`EXISTS` subquery may be **correlated** — its `WHERE` may name a column of the outer query's row — which is
+what makes it useful: "authors who have a post", "authors who have none".
+
+```sql
+SELECT name FROM authors WHERE EXISTS (SELECT * FROM posts WHERE posts.authorId = authors.id);
+SELECT name FROM authors WHERE NOT EXISTS (SELECT * FROM posts WHERE posts.authorId = authors.id);
+SELECT name FROM authors
+  WHERE EXISTS (SELECT 1 FROM posts WHERE posts.authorId = authors.id AND posts.id > 6);
+```
+
+- **Every column inside it names its table.** The subquery can see two tables — its own and the outer
+  query's — so, the same rule a `JOIN` follows, `posts.authorId` and `authors.id`, never a bare `authorId`.
+  Its table goes by a name the outer query does not already use, and not one another `EXISTS` in the same
+  query uses — so to read the outer query's own table, give it an alias (plan.md §27.5 S7): `FROM customers c
+  WHERE NOT EXISTS (SELECT * FROM customers r WHERE r.referrer = c.id)`.
+- **It runs as a join, not once per row.** A subquery correlated through an equality between one of its
+  own columns and an outer one (`posts.authorId = authors.id`) becomes a **semi-join** (⋉) for `EXISTS` —
+  an outer row is kept *once* if at least one row matches, however many do — or an **anti-join** (▷) for
+  `NOT EXISTS` — kept only if none does. The plan draws it like any join and the optimizer picks its
+  algorithm by cost: nested-loop is exactly "run the subquery again for every outer row, stopping at the
+  first match"; hash, sort-merge and index nested-loop are the unnested forms. The subquery's other
+  conditions on its own table filter its scan; one naming both tables is checked on each pair whose keys
+  match.
+- **Uncorrelated, it runs once.** An `EXISTS` that names nothing from the outer query has the same answer
+  for every row, so it runs exactly once, before planning, stopping at the first row it finds.
+- **Only as a condition joined by `AND`.** `WHERE a = 1 AND NOT EXISTS (…)` is fine; under `OR`, or inside
+  another test, it is refused — a semi-join keeps or drops whole rows. It works in a `SELECT`'s `WHERE`
+  only, not in `HAVING`, the `SELECT` list, `DELETE` or `UPDATE`; and a correlation needs an equality
+  to join on (`posts.authorId > authors.id` alone is refused, with the reason).
+- **`NOT EXISTS` is not `NOT IN`.** `NOT EXISTS` only asks whether a matching row exists, so a NULL on
+  either side never turns its answer UNKNOWN — the trap below does not apply to it.
 
 **Three-valued logic.** Comparing anything with `NULL` is neither true nor false but **UNKNOWN**, and
 only TRUE passes a `WHERE`. So `x = NULL` matches nothing (write `x IS NULL`), and `NOT (age > 40)`
@@ -149,7 +203,8 @@ SELECT COUNT(*) FROM emp HAVING COUNT(*) > 3;
   last example, which returns one row or none).
 - An aggregate that is NULL for a group makes the comparison UNKNOWN, and the group is dropped — under the
   predicate and under its `NOT`.
-- An aggregate in a `WHERE` is an error that points here. `COUNT(DISTINCT x)` is not supported yet.
+- An aggregate in a `WHERE` is an error that points here. A `DISTINCT` one works here too: `HAVING COUNT(DISTINCT
+  productId) >= 4`.
 - In the plan it is its own `Having` node above the aggregate. The optimizer still moves your `WHERE`
   *below* the aggregate (an index lookup, a pushdown) and never touches the `HAVING`.
 
@@ -175,7 +230,14 @@ SELECT DISTINCT customer, status FROM orders ORDER BY customer LIMIT 5;
   them all. [Compare](/compare)'s aggregate mode forces each side on the same query.
 - Values that are equal under `=` are one value: `1`, `'1'` and `TRUE` collapse together. (SQLite keeps `1`
   and `'1'` apart — a column that mixes types is the corner where they differ.)
-- Not yet: `COUNT(DISTINCT x)` — `DISTINCT` inside an aggregate.
+- **Inside an aggregate** (plan.md §27.5 S5): `COUNT(DISTINCT x)` counts each distinct non-NULL value of `x` once,
+  and `SUM`, `AVG`, `MIN` and `MAX` take `DISTINCT` too — `SELECT COUNT(DISTINCT customerId) FROM orders` on the
+  `shop` preset is 9, where `COUNT(customerId)` is 38 and `SELECT DISTINCT customerId` returns ten rows, one of them
+  the guests' NULL. Values are the same value exactly when `SELECT DISTINCT` would say so. The hash aggregate keeps a
+  set of the values each group has seen; the sort aggregate sorts on the group *and* the value, so a repeat sits right
+  after what it repeats — unless two `DISTINCT` aggregates read different columns, which one sort cannot order, and
+  then it keeps sets too. Either way the trace says how many values it read and kept. `COUNT(DISTINCT *)` is not
+  SQL, and is refused.
 
 ## Expressions
 
@@ -208,8 +270,46 @@ UPDATE items SET qty = qty + 1, price = -price WHERE id = 5;
   reads the whole table, because the index is ordered by `id`, not by `id + 1`. Arithmetic on
   *constants* is different: the optimizer works `id = 2 + 3` out once (`constant-folding`), and the
   index can then answer `id = 5`.
+- **A subquery as a value** (plan.md §27.5 S6): `(SELECT …)` with exactly one column stands for that column's one
+  value, anywhere an operand goes — `WHERE price > (SELECT AVG(price) FROM products)`, a computed column
+  (`price - (SELECT AVG(price) FROM products) AS above`), `HAVING COUNT(*) > (SELECT COUNT(*) FROM orders) / 10`,
+  an `UPDATE … SET` value. Inside it, anything a SELECT can do: an aggregate, `ORDER BY … LIMIT 1`, a `JOIN`,
+  another subquery. It runs **once, before the outer query is planned**, as its own sub-run of the engine, and the
+  plan holds its answer as a constant — so an index can serve `customerId = (SELECT id FROM customers WHERE name =
+  'alice')`, and the plan's narration says what the subquery returned. No row is `NULL`; **more than one row is an
+  error** that says how many (PostgreSQL's rule — SQLite quietly uses the first row, see
+  [`scalar-subquery-many-rows`](/docs/reference/answers)). It is **uncorrelated**: it cannot read the outer query's
+  columns, and the error says so and points at `EXISTS`. A computed column is named by its text as written,
+  subquery and all.
 - **Not yet:** arithmetic on an aggregate (`COUNT(*) + 1`), a computed column beside `GROUP BY`, and
   arithmetic in `ORDER BY` or `GROUP BY`.
+
+## UNION, INTERSECT, EXCEPT
+
+Two or more SELECTs, combined left to right (plan.md §27.5 S3) — the relational algebra's ∪, ∩ and −.
+
+```sql
+SELECT id FROM customers EXCEPT SELECT customerId FROM orders;            -- customers who never ordered
+SELECT id FROM customers INTERSECT SELECT customerId FROM orders;         -- customers who did
+SELECT customerId FROM orders UNION SELECT id FROM customers;            -- every id, once
+SELECT name FROM customers UNION ALL SELECT name FROM products ORDER BY name LIMIT 5;
+```
+
+- **Rows are matched by position, not by name.** Every SELECT returns the same number of columns; the result's
+  columns are named by the first one. `id` beside `customerId` is fine.
+- **Each row once, unless `UNION ALL`.** `UNION` removes repeats — across both sides and within either — and so do
+  `INTERSECT` and `EXCEPT`. Like `DISTINCT`, they count two NULLs as the same row, though no comparison says so:
+  `EXCEPT` is not thrown by a NULL the way `NOT IN` is. `INTERSECT ALL` and `EXCEPT ALL` are refused — SQLite, which
+  checks these answers, has neither.
+- **`ORDER BY` and `LIMIT` belong to the whole result**, written once after the last SELECT; no SELECT inside may have
+  its own. `ORDER BY` names a column of the result — one the first SELECT returns.
+- **Left to right.** `a UNION b EXCEPT c` is `(a ∪ b) − c`. `INTERSECT` is never mixed with `UNION` or `EXCEPT`:
+  standard SQL does it first, SQLite reads left to right, and QueryLens refuses rather than pick.
+- **How it runs.** Each SELECT is planned and optimized exactly as it would be on its own; the set operation sits
+  above them. `UNION ALL` passes every row of one side, then the other; `UNION` adds the `DISTINCT` node above that —
+  hash or sort, the same choice `SELECT DISTINCT` makes; `INTERSECT` and `EXCEPT` read the right-hand SELECT into a
+  hash set, then check each row of the left against it. Every table is laid out once, so two SELECTs over the same
+  table read the same pages — the second often finds them already in the buffer pool.
 
 ## EXPLAIN
 
@@ -238,6 +338,7 @@ The Planner panel's **Copy as EXPLAIN** button gives the same text for a query y
 
 ```sql
 ANALYZE users;
+ANALYZE transactions WITH 20 BUCKETS;
 ```
 
 A real scan of the named table, producing its statistics — distinct count, null fraction,
@@ -245,7 +346,9 @@ most-common values, a histogram, correlation — one column per result row, in t
 panel any other query's answer would be. Every later query against that table then reads them,
 in place of scanning the live rows itself, until `ANALYZE` runs again — see
 [Statistics](/docs/reference/limits#statistics) for what they hold and how the cost model uses
-them. No `WHERE`, no `JOIN`: `ANALYZE` names exactly one table.
+them. No `WHERE`, no `JOIN`: `ANALYZE` names exactly one table. `WITH n BUCKETS` (MySQL's phrase, plan.md §27.5
+T5) sets how many buckets each column's histogram gets, 1 to 100; without it, 10. `WITH` and `BUCKETS` are read
+as words only there, so a column may still be called `buckets`.
 
 ## DELETE, INSERT, UPDATE
 
@@ -276,14 +379,21 @@ with a generic syntax error:
 
 | You write | The parser says |
 |---|---|
-| `RIGHT`/`FULL` JOIN | *Not in the v0 subset — write a RIGHT JOIN the other way round, as a LEFT JOIN with the two tables swapped; FULL isn't an inner or a LEFT JOIN either.* |
-| `CROSS JOIN` | *CROSS JOIN is not in the v0 subset — JOIN ... ON needs an equality.* |
+| `CROSS JOIN … ON …` | *CROSS JOIN takes no ON. — a cross join keeps every pair of rows; for a condition, write JOIN … ON, or put it in WHERE.* |
 | `JOIN ... USING (...)` | *USING is not in the v0 subset — write the equality out.* |
-| Joining the same table twice | *Already in this query — joining it again needs an alias, which v0 does not have.* |
+| Joining the same table twice, with no alias | *`customers` is already in this query.* — give one of the two its own name: `JOIN customers AS c2 ON …`. |
+| A table's own name after it has an alias | *There is no table called `customers` in this query.* — in this query it is called `c`. |
 | A `JOIN`'s `ON` naming a table not yet in the query | *There is no table called that yet in this query — it has to be named in FROM or an earlier JOIN first.* |
-| `SELECT a, DISTINCT b`, `COUNT(DISTINCT x)` | *DISTINCT applies to the whole SELECT list — write `SELECT DISTINCT a, b …`. Inside an aggregate it is not supported yet.* |
-| `UNION` | *UNION is not in the v0 subset.* |
-| A subquery anywhere but `IN`, e.g. `x = (SELECT …)` | *A subquery is not supported here — write the value out, join the two tables, or use IN (SELECT …).* |
+| `SELECT a, DISTINCT b` | *DISTINCT applies to the whole SELECT list — write `SELECT DISTINCT a, b …` — or to an aggregate's argument, as in `COUNT(DISTINCT x)`.* |
+| `COUNT(DISTINCT *)` | *`COUNT(DISTINCT *)` is not valid SQL. — DISTINCT needs a column whose distinct values to read; to count distinct rows, write `SELECT DISTINCT …`.* |
+| `INTERSECT` beside `UNION` or `EXCEPT` | *INTERSECT cannot share a query with UNION or EXCEPT* — the standard and SQLite read the same text two ways. |
+| `INTERSECT ALL`, `EXCEPT ALL` | *Not supported yet* — SQLite, which checks the answers, has neither. |
+| `SELECT n, n` | *`n` is selected twice* — a result row is keyed by column name, so alias one: `n AS n2`. |
+| A subquery without its parentheses, e.g. `x = SELECT …` | *A subquery needs parentheses.* — write it as a value, `x = (SELECT MAX(y) FROM t)`, or use `IN (SELECT …)` or `EXISTS (SELECT …)`. |
+| A subquery used as a value with two columns, or `*` | *A subquery used as a value must select exactly one column.* |
+| A subquery used as a value that returns two rows | *The subquery … returned 2 rows, but a subquery used as a value must return at most one.* — add an aggregate, a WHERE on a unique column, or `ORDER BY … LIMIT 1`. |
+| A subquery used as a value that reads the outer query's table | *There is no table called `customers` in this query.* — it runs once, on its own; for a per-row test, use `EXISTS`. |
+| `EXISTS` under `OR`, or in `HAVING`, `DELETE` or `UPDATE` | *EXISTS has to be one of the conditions WHERE joins with AND* — it runs as a semi-join, which keeps or drops whole rows. |
 | `BEGIN` / `COMMIT` / `ROLLBACK` | *`BEGIN`, `COMMIT` and `ROLLBACK` need two sessions to mean anything, and the Playground runs one statement at a time.* They run in [Transaction schedules](/tools/schedule). |
 | `CREATE` / `DROP` | *QueryLens only runs SELECT, DELETE, INSERT and UPDATE. Edit the seed data to change the table.* |
 
@@ -294,9 +404,14 @@ columns `id`, `name`, `email`, `age` (48 rows); the **Data** chips above the edi
 (120 rows — a deeper index and a heavier scan), `logins` (a lopsided `status` column, for selectivity),
 `employees` (250 rows whose `department` and `office` are perfectly correlated, so the optimizer's estimate
 for both together is badly off), `transactions` (3,000 rows — the tallest B+Tree of the presets, and a
-scan that evicts hard) and `customers` (20 rows with NULLs in `city`, `referrer` and `discount` — the one
-preset where three-valued logic shows; the [NULL lesson](/learn/nulls) walks it). Rows are editable from the app (**Edit data**), and both the choice of dataset and
-any edits travel with a shareable link — see [URL parameters](/docs/reference/url-parameters).
+scan that evicts hard), `customers` (20 rows with NULLs in `city`, `referrer` and `discount`, so three-valued
+logic shows; the [NULL lesson](/learn/nulls) walks it) and `shop` — the one preset with **several tables**:
+`customers(id, name, city)`, `products(id, name, price)` and `orders(id, customerId, productId, qty)`, indexed on
+`orders.customerId` as a join would want. Three customers never order, one product is never ordered and two orders
+are a guest's, with no `customerId` — so `JOIN`, `LEFT JOIN`, `EXISTS` and join order all run on a preset, and
+`NOT IN` meets a NULL where `NOT EXISTS` does not (the [NOT EXISTS lesson](/learn/not-exists) walks it). Rows are
+editable from the app (**Edit data**; on `shop`, pick the table beside it), and both the choice of dataset and any
+edits — every table's — travel with a shareable link — see [URL parameters](/docs/reference/url-parameters).
 
 The **Custom** data chip lets you build your own multi-table database in the browser — add a
 table, declare indexes (single-column or composite, optionally `UNIQUE`), edit its rows, and `JOIN`

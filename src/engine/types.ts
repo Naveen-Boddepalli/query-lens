@@ -74,11 +74,20 @@ export interface IndexNode {
  *   δ    duplicate elimination
  */
 export interface RaInfo {
-  symbol: 'rel' | 'σ' | 'π' | '⋈' | 'γ' | 'τ' | 'λ' | 'δ';
+  /**
+   * `⋉` and `▷` are the semi-join and anti-join a correlated `EXISTS` / `NOT EXISTS` runs as (plan.md §27.5 S1); `∪`,
+   * `∩` and `−` the set operators (§27.5 S3).
+   */
+  symbol: 'rel' | 'σ' | 'π' | '⋈' | '⟕' | '⟖' | '⟗' | '×' | '⋉' | '▷' | '∪' | '∩' | '−' | 'γ' | 'τ' | 'λ' | 'δ';
   /** What sits in the subscript: the predicate, the columns, the join condition. */
   sub?: string;
   /** The relation a leaf reads — set on scans, whether or not they carry a σ. */
   rel?: string;
+  /**
+   * The stored relation `rel` renames, when a query reads a table under an alias (plan.md §27.5 S7): the leaf is then
+   * `ρ_rel(source)`, the textbook's rename — how a self-join's two copies of one relation are told apart.
+   */
+  source?: string;
 }
 
 /** One option a cost-based decision weighed, named and priced the same way `EXPLAIN` already prices a plan. */
@@ -246,6 +255,11 @@ export type EventOf<S extends Stage> = Extract<StepEvent, { stage: S }>;
 
 export interface Table {
   name: string;
+  /**
+   * For a table a query names by an alias (plan.md §27.5 S7): the stored table this is a copy of, under the alias as
+   * `name`. Its pages are that table's — a self-join's two scans read the same heap.
+   */
+  source?: string;
   columns: string[];
   rows: Row[];
   /**

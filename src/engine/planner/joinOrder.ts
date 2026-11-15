@@ -6,7 +6,8 @@
  *
  * Restricted to **left-deep** orderings on purpose: the engine's own `Join` operator (plan.md §25.4 C3 slice b)
  * only ever executes a left-deep chain, so a bushy plan this module might otherwise consider is one the engine
- * could never actually run. That restriction is also what keeps this simple — a subset's own best plan is just
+ * could never actually run (`joinShapes.ts` prices them beside these, plan.md §27.5 T4, as plans nothing runs). That
+ * restriction is also what keeps this simple — a subset's own best plan is just
  * "which table was added last," not "which two smaller subsets were merged," so there is no need to search which
  * way to *split* a subset, only which single table to peel off it.
  *
@@ -227,6 +228,8 @@ export function joinGraphFromAst(
   const nodes: JoinOrderNode[] = [nodeFor(ast.from.name)];
   const edges: JoinOrderEdge[] = [];
   for (const join of ast.joins ?? []) {
+    // A cross join has no edge: every caller keeps it out (`isReorderableChain`, emit's join-order note).
+    if (!join.on) continue;
     const { left, right } = join.on;
     if (left.kind !== 'column' || right.kind !== 'column') continue; // unreachable: checkJoinOn guarantees this
     const newTable = join.table.name;
@@ -254,10 +257,13 @@ export function writtenOrderFromAst(ast: SelectStatement): string[] {
   return [ast.from.name, ...(ast.joins ?? []).map((j) => j.table.name)];
 }
 
-/** A chain real execution may reorder (plan.md §25.4 C5 slice 3): 2+ `JOIN`s, none of them `LEFT`. */
+/**
+ * A chain real execution may reorder (plan.md §25.4 C5 slice 3): 2+ `JOIN`s, every one a plain inner join — no LEFT,
+ * RIGHT or FULL (not commutative or associative in general) and no CROSS (no edge to price, plan.md §27.5 S4).
+ */
 export function isReorderableChain(ast: SelectStatement): boolean {
   const joins = ast.joins ?? [];
-  return joins.length >= 2 && joins.every((j) => j.joinType !== 'left');
+  return joins.length >= 2 && joins.every((j) => j.joinType === undefined);
 }
 
 /**

@@ -5,8 +5,11 @@ import { buildOperator } from './operators.ts';
 import type { ExecContext } from './operators.ts';
 import type { Plan } from '../planner/index.ts';
 
-/** Pulls the operator tree to exhaustion and emits the result. */
-export function execute(plan: Plan, ctx: ExecContext): Row[] {
+/**
+ * Pulls the operator tree to exhaustion and emits the result. `promptTableRows` sizes the "how many rows?" prediction
+ * — the table the query reads; `null` asks none (a compound query reads several, plan.md §27.5 S3).
+ */
+export function execute(plan: Plan, ctx: ExecContext, promptTableRows: number | null = ctx.table.rows.length): Row[] {
   const root = buildOperator(plan, ctx);
   const rows: Row[] = [];
 
@@ -43,7 +46,7 @@ export function execute(plan: Plan, ctx: ExecContext): Row[] {
     }.${reconcile}`,
     { stage: 'result', rows },
     (() => {
-      const prompt = resultPrompt(rows.length, ctx.table.rows.length);
+      const prompt = promptTableRows === null ? null : resultPrompt(rows.length, promptTableRows);
       return prompt ? { predictable: prompt } : undefined;
     })(),
   );

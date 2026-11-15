@@ -11,6 +11,12 @@ const IDS = [
   'one-merge-pass',
   'more-memory-more-io',
   'cheapest-order',
+  'enough-buckets',
+  'outrun-the-slow-worker',
+  'meet-the-rows',
+  'efficiency-floor',
+  'grow-without-churn',
+  'join-in-place',
   'tightest-page',
   'split-the-other-bucket',
   'cheap-writes-cheap-reads',
@@ -142,4 +148,16 @@ test('a challenge fetches the checks of its own tool and no other tool’s', asy
   await run(page);
   await expect(page.getByText('✓ Solved.')).toBeVisible();
   expect(scripts.some((s) => s.startsWith('hermitage-'))).toBe(true);
+});
+
+test('enough buckets for the gap: fifty miss, forty-six do (plan.md §27.5 T5)', async ({ page }) => {
+  await page.goto('/challenges/enough-buckets');
+  await page.getByLabel('Buckets', { exact: true }).fill('50');
+  await run(page);
+  await expect(page.getByText(/Not there yet/)).toBeVisible();
+  await expect(page.getByText('2.33×')).toBeVisible();
+  await page.getByLabel('Buckets', { exact: true }).fill('46');
+  await run(page);
+  await expect(page.getByText('✓ Solved.')).toBeVisible();
+  await expect(page.getByRole('link', { name: /Open this run in its tool/ })).toHaveAttribute('href', /\/tools\/histograms\?c=clustered&b=46&lo=500&hi=2000/);
 });

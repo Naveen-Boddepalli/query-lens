@@ -370,55 +370,142 @@ const T = (name: string): string => `src/pages/tools/${name}.tsx`;
  *    default), and groups claim modules in order, so `flow`, listed before `react`, took React's main module,
  *    `react/jsx-runtime` and `react-dom`'s entry as flowinger's dependencies. Every component imports React, so every
  *    route loaded flowinger and d3 too. The `react` group now has `priority: 1` in vite.config.ts and claims them
- *    first: `flow` is 19.0 kB gzip as Vite prints it (was 22.9), `react` 68.3 *  - 2026-10-26, frontend redesign merge + v2 sync: modern glassmorphic header, theme toggle, responsive drawer
- *    and 4-column footer grew the entry chunk from 23.x to 25.4 kB gzip (ceiling 24 → 27). Every route pays the entry
- *    closure, and page-level glassmorphism and stats cards add ~1-2 kB; all ceilings updated to measured + 3, rounded up.
+ *    first: `flow` is 19.0 kB gzip as Vite prints it (was 22.9), `react` 68.3 (was 64.8), and only FlowTree and
+ *    StageDetail import `flow`. The 39 routes that draw no tree each fell by about 18.7 kB, and their ceilings were
+ *    lowered, each to measured + 3, rounded up (/settings 130 → 111, /tools/locks 133 → 114). The six tree routes fell
+ *    by 0.4 kB: /playground 340 → 338; the other five keep their ceilings, which measured + 3 still gives.
+ *  - 2026-10-18, `EXISTS` and `NOT EXISTS` as semi- and anti-joins (plan.md §27.5 S1, the first v3 item): the engine's
+ *    own chunk (`runQuery`) grew from 49.5 to 53.5 kB gzip as this script counts it (169 → 184 kB raw) — the resolver,
+ *    a semi- and an anti-join path in each of the four join operators, the parser's EXISTS grammar with an error and
+ *    a hint for each refusal, and the plan's narration, which is most of it. Every route that runs the engine pays it:
+ *    the 24 that went over were raised, each to its measured size + 3, rounded up (/playground 338 → 343, / 164 →
+ *    168, /tools/planner 187 → 191). The docs chunk grew 1.7 kB with the SQL reference's new section, inside /docs's
+ *    ceiling.
+ *  - 2026-10-18, UNION, INTERSECT and EXCEPT (plan.md §27.5 S3): the engine chunk grew again, 53.5 → 57.9 kB gzip — the
+ *    compound parser, planner, runner and set-operation operator, with their narration — and the docs chunk 1.4 kB with
+ *    the reference's new section (the shop preset, S2, added nothing to either). The 28 routes that went over were
+ *    raised, each to its measured size + 3, rounded up (/playground 343 → 348, /docs 170 → 174).
+ *  - 2026-10-19, `COUNT(DISTINCT x)` (plan.md §27.5 S5): the challenge data, which S4's lesson and challenge had
+ *    already filled to within a kilobyte of three ceilings, gained *Count each customer once*, and the engine its
+ *    DISTINCT aggregation and narration. The three that went over were raised, each to its measured size + 3, rounded
+ *    up: /learn/:id 197 → 201 (197.3), /challenges 190 → 194 (190.6), /challenges/:id 311 → 315 (311.5).
+ *  - 2026-10-19, scalar subqueries (plan.md §27.5 S6): the engine chunk, which S4's outer joins and S5's DISTINCT
+ *    aggregates had grown inside the slack the S3 bump left, reached 61.6 kB gzip (57.9 after S3) with the scalar
+ *    subquery's parser, resolver, errors and narration. The 19 routes that run the engine and went over — none by
+ *    more than 1.8 kB — were raised, each to its measured size + 3, rounded up (/playground 348 → 352, / 173 → 177,
+ *    /tools/planner 196 → 200).
+ *  - 2026-10-19, table aliases and self-joins (plan.md §27.5 S7): the engine chunk 61.6 → 62.8 kB gzip — alias
+ *    parsing and scoping, one heap per stored table, ρ in the algebra, the pinned-pool error. The two routes it took
+ *    over were raised to measured + 3, rounded up: /gallery 173 → 178 (174.1), /docs/concepts/btree 200 → 205 (201.1).
+ *  - 2026-10-19, the precedence graph (plan.md §27.5 T1): /tools/schedule now carries the graph's engine module, its
+ *    panel and the replay check (`serialCheck`, which only /tools/concurrency loaded before) — 196.1 kB, raised to
+ *    measured + 3, rounded up: 193 → 200. No other route imports them.
+ *  - 2026-10-19, multi-granularity locking (plan.md §27.5 T2): the docs chunk 174.5 kB — two Locks bullets in
+ *    reference/limits and a sentence in the course map — so /docs and the three essays that share it were raised to
+ *    measured + 3, rounded up: 174 → 178. The lock table's five modes, the computed matrix and `combine` reach
+ *    `ScriptChallengeView` through the lock scripts: 31.1 kB, raised 31 → 35.
+ *  - 2026-10-19, next-key locks (plan.md §27.5 T3): the schedule engine every transaction route shares grew by the
+ *    next-key footprint, insert intentions and the leaf rows (and now imports `finalPlan`), and /tools/schedule adds
+ *    the leaf view. Each route over was raised to measured + 3, rounded up: /tools/schedule 200 → 205 (201.7),
+ *    /tools/isolation 189 → 194 (190.1), /tools/concurrency 191 → 196 (192.5), and the isolation challenges' checks
+ *    16 → 20 (16.1).
+ *  - 2026-10-19, bushy plans (plan.md §27.5 T4): /tools/join-order carries the shape search (`joinShapes.ts`), the
+ *    explorer's sweep and its section — 179.1 kB, raised to measured + 3, rounded up: 178 → 183. No other route
+ *    imports them.
+ *  - 2026-10-19, equi-depth histograms (plan.md §27.5 T5): /tools/histograms is a new route, 178.9 kB → 182; its
+ *    challenge's checks are a new opt-in chunk, 1.5 kB → 5. The lesson and the challenge put their text in the lesson
+ *    and challenge lists every one of those routes carries: /learn/:id 201 → 205 (201.1), /challenges 194 → 198
+ *    (194.5), /challenges/:id 315 → 319 (315.4), each measured + 3, rounded up.
+ *  - 2026-10-19, morsel-driven execution (plan.md §27.5 P1): /tools/parallel is a new route, 129.7 kB → 133, and its
+ *    challenge's checks 3.3 kB → 7. Its lazy route, the histogram tool's before it, put the entry chunk at 24.1 kB,
+ *    over §25.4 H8's 24: rather than raise that, App.tsx now builds its lazy pages with one helper and its tool routes
+ *    from a table, and the entry is 23.9 kB again — which also brings /playground, /practice, /tools/latch-crabbing
+ *    and /docs, each pushed 0.1 kB over by it, back under their ceilings.
+ *  - 2026-10-19, exchange operators (plan.md §27.5 P2), on the same page: /tools/parallel 132.6 kB → 136, its checks
+ *    5.2 kB → 9 (the join challenge), and the docs chunk 178.5 kB with the parallel-execution section in
+ *    reference/limits → /docs and its three essays 178 → 182, each measured + 3, rounded up.
+ *  - 2026-10-19, serial against parallel (plan.md §27.5 P3): Compare's new mode carries the morsel model, 4.5 kB that
+ *    put /compare at 193.5 of 189. It is loaded only when chosen instead — a new opt-in chunk, 5.6 kB → 9 — and
+ *    /compare is 188.9 again.
+ *  - 2026-10-19, partitioning (plan.md §27.5 X1): /tools/partitioning is a new route, 115.6 kB → 119, its checks 2.4
+ *    → 6. Its route put the entry chunk at 24.0 kB again, so the docs routes are a table too (`DOC_PAGES`): 23.9. The
+ *    new lesson group's titles and summaries live in the lesson manifest, a chunk nearly every page loads for its
+ *    progress marks (`learnProgress`, 3.4 kB), and the lessons themselves in /learn/:id: /playground 352 → 356, /learn/:id
+ *    205 → 209, /compare 189 → 193, /trace 180 → 184, /practice 189 → 193, /tools/latch-crabbing 179 → 183, each
+ *    measured + 3, rounded up. (The lesson links the tool through `partitionLinks.ts`, which carries none of the model.)
+ *  - 2026-10-19, two-phase commit (plan.md §27.5 X2): /tools/2pc is a new route, 113.0 kB → 116, its challenge's checks
+ *    3.4 → 7. Its route put the entry chunk at the 24 kB cap again; the simple pages are a table now too (`PAGES`), and
+ *    the footer — below the fold, with the docs navigation it maps — is fetched after the page instead of with the
+ *    shell: a new opt-in row, 2.0 kB → 5, and the entry chunk is 22.8 kB. That also pulled /challenges, /challenges/:id
+ *    and /tools/planner, each 0.1 kB over, back under.
+ *  - 2026-10-19, Raft (plan.md §27.5 X3): /tools/raft is a new route, 114.2 kB → 118, its challenge's checks 4.4 → 8.
+ *    Nothing else moved over its ceiling; the entry chunk is 22.9 kB.
+ *  - 2026-10-20, a join across the nodes (plan.md §27.5 X4), on /tools/partitioning: 117.1 kB → 121 once the orders and
+ *    payments moved into a module of their own (`bigJoinTables.ts`) — reached through the parallel tool's presets they
+ *    brought the parser and the exchange model, 131.0 kB; its challenge's checks are 3.9 kB, under their 6. The four
+ *    distributed lessons' text and the challenges' put /learn/:id at 209.7, /challenges at 198.0 and /challenges/:id at
+ *    319.0: 209 → 213, 198 → 202, 319 → 323, each measured + 3, rounded up.
+ *  - 2026-10-20, narration detail levels (plan.md §27.5 L2): the novice and expert lines and `eventKey` put
+ *    /playground at 355.9 kB of its 356 while they sat in the route, so they are now an opt-in chunk,
+ *    `narrationDetail.ts` (4.0 kB → 7), fetched when one of those levels is chosen. The route keeps the Narration
+ *    box's level control and is 352.0. Nothing else moved over its ceiling.
+ *  - 2026-10-26, on main: the frontend redesign merge and v2 sync (glass header, theme toggle, responsive drawer,
+ *    footer) grew the entry chunk from 23.x to 25.4 kB gzip (ceiling 24 → 27) and page-level glass and stat cards
+ *    added 1–2 kB to most routes; main's ceilings were set to measured + 3, rounded up.
+ *  - 2026-11-15, v3 merged into main (version/v3-remaining over 2.0.0 and the Spotlight search): every route ceiling
+ *    re-measured on the merged build and set to measured + 3, rounded up. v3's lazy Footer and main's lazy Spotlight
+ *    dialog both stay out of the entry chunk, which measures 24.2 kB (down from main's 25.4).
  */
 export const ROUTES: readonly RouteBudget[] = [
-  { route: '/', roots: [P('LandingPage')], kb: 171, note: 'the landing page' },
-  { route: '/playground', roots: [P('PlaygroundPage')], kb: 344, note: 'the Playground: the editor, every stage panel, the engine — the heaviest route, and the one most people land on' },
-  { route: '/stages', roots: ['src/ui/StagesLayout.tsx', P('StagesIndex')], kb: 171, note: 'the stage explainers, index' },
-  { route: '/stages/:id', roots: ['src/ui/StagesLayout.tsx', P('StagePage')], kb: 206, note: 'one stage explainer' },
+  { route: '/', roots: [P('LandingPage')], kb: 184, note: 'the landing page' },
+  { route: '/playground', roots: [P('PlaygroundPage')], kb: 362, note: 'the Playground: the editor, every stage panel, the engine — the heaviest route, and the one most people land on' },
+  { route: '/stages', roots: ['src/ui/StagesLayout.tsx', P('StagesIndex')], kb: 185, note: 'the stage explainers, index' },
+  { route: '/stages/:id', roots: ['src/ui/StagesLayout.tsx', P('StagePage')], kb: 222, note: 'one stage explainer' },
   { route: '/learn', roots: [P('LearnPage')], kb: 120, note: 'the lesson track' },
-  { route: '/learn/:id', roots: [P('LessonPage')], kb: 195, note: 'one lesson' },
+  { route: '/learn/:id', roots: [P('LessonPage')], kb: 222, note: 'one lesson' },
   { route: '/examples', roots: [P('ExamplesPage')], kb: 117, note: 'preset queries' },
-  { route: '/gallery', roots: [P('GalleryPage')], kb: 170, note: 'named moments' },
-  { route: '/compare', roots: [P('ComparePage')], kb: 183, note: 'index vs scan, policy vs policy, hash vs sort, join algorithms, B+Tree vs. LSM' },
-  { route: '/trace', roots: [P('TracePage')], kb: 173, note: 'the trace inspector' },
-  { route: '/progress', roots: [P('ProgressPage')], kb: 123, note: 'the progress dashboard' },
-  { route: '/practice', roots: [P('PracticePage')], kb: 183, note: 'generated questions with engine-computed answers, and a Leitner schedule' },
-  { route: '/challenges', roots: [P('ChallengesPage')], kb: 189, note: 'challenge index' },
-  { route: '/challenges/:id', roots: [P('ChallengePage')], kb: 309, note: 'one challenge' },
+  { route: '/gallery', roots: [P('GalleryPage')], kb: 185, note: 'named moments' },
+  { route: '/compare', roots: [P('ComparePage')], kb: 199, note: 'index vs scan, policy vs policy, hash vs sort, join algorithms, B+Tree vs. LSM' },
+  { route: '/trace', roots: [P('TracePage')], kb: 188, note: 'the trace inspector' },
+  { route: '/progress', roots: [P('ProgressPage')], kb: 122, note: 'the progress dashboard' },
+  { route: '/practice', roots: [P('PracticePage')], kb: 198, note: 'generated questions with engine-computed answers, and a Leitner schedule' },
+  { route: '/challenges', roots: [P('ChallengesPage')], kb: 209, note: 'challenge index' },
+  { route: '/challenges/:id', roots: [P('ChallengePage')], kb: 330, note: 'one challenge' },
   { route: '/settings', roots: [P('SettingsPage')], kb: 117, note: 'preferences' },
-  { route: '/study', roots: [P('StudyPage')], kb: 123, note: 'the §9 study runner (unlisted); the instrument travels in the link, not the bundle (§25.4 A2)' },
-  { route: '/assignments/new', roots: [P('AssignmentsNewPage')], kb: 171, note: 'assignment-link builder' },
+  { route: '/study', roots: [P('StudyPage')], kb: 122, note: 'the §9 study runner (unlisted); the instrument travels in the link, not the bundle (§25.4 A2)' },
+  { route: '/assignments/new', roots: [P('AssignmentsNewPage')], kb: 186, note: 'assignment-link builder' },
   { route: '/tools', roots: [P('ToolsIndexPage')], kb: 119, note: 'the tools index' },
-  { route: '/tools/buffer-pool', roots: [T('BufferPoolToolPage')], kb: 176, note: 'buffer-pool sandbox' },
-  { route: '/tools/parser', roots: [T('ParserToolPage')], kb: 192, note: 'tokenizer + parser sandbox' },
-  { route: '/tools/btree', roots: [T('BTreeToolPage')], kb: 194, note: 'B+Tree sandbox' },
-  { route: '/tools/page', roots: [T('PageToolPage')], kb: 171, note: 'slotted-page inspector' },
+  { route: '/tools/buffer-pool', roots: [T('BufferPoolToolPage')], kb: 191, note: 'buffer-pool sandbox' },
+  { route: '/tools/parser', roots: [T('ParserToolPage')], kb: 208, note: 'tokenizer + parser sandbox' },
+  { route: '/tools/btree', roots: [T('BTreeToolPage')], kb: 210, note: 'B+Tree sandbox' },
+  { route: '/tools/page', roots: [T('PageToolPage')], kb: 186, note: 'slotted-page inspector' },
   { route: '/tools/sort', roots: [T('SortToolPage')], kb: 119, note: 'external merge sort' },
-  { route: '/tools/planner', roots: [T('PlannerToolPage')], kb: 194, note: 'planner sandbox' },
-  { route: '/tools/locks', roots: [T('LocksToolPage')], kb: 120, note: 'lock simulator' },
-  { route: '/tools/isolation', roots: [T('IsolationToolPage')], kb: 182, note: 'the Hermitage isolation matrix (both engines, computed)' },
+  { route: '/tools/planner', roots: [T('PlannerToolPage')], kb: 210, note: 'planner sandbox' },
+  { route: '/tools/locks', roots: [T('LocksToolPage')], kb: 121, note: 'lock simulator' },
+  { route: '/tools/isolation', roots: [T('IsolationToolPage')], kb: 200, note: 'the Hermitage isolation matrix (both engines, computed)' },
   { route: '/tools/recovery', roots: [T('RecoveryToolPage')], kb: 132, note: 'crash recovery: checkpoints, a crash, and ARIES analysis, redo and undo' },
   { route: '/tools/wal', roots: [T('WalToolPage')], kb: 132, note: 'write-ahead log: a pool, a disk, a log and the rule between them' },
-  { route: '/tools/concurrency', roots: [T('ConcurrencyToolPage')], kb: 185, note: 'one schedule under five concurrency-control protocols, each really run' },
-  { route: '/tools/schedule', roots: [T('ScheduleToolPage')], kb: 186, note: 'transaction schedules (the engine, a shared database, two sessions)' },
-  { route: '/tools/grammar', roots: [T('GrammarToolPage')], kb: 118, note: 'the SQL grammar diagram' },
+  { route: '/tools/concurrency', roots: [T('ConcurrencyToolPage')], kb: 203, note: 'one schedule under five concurrency-control protocols, each really run' },
+  { route: '/tools/schedule', roots: [T('ScheduleToolPage')], kb: 212, note: 'transaction schedules (the engine, a shared database, two sessions)' },
+  { route: '/tools/grammar', roots: [T('GrammarToolPage')], kb: 117, note: 'the SQL grammar diagram' },
   { route: '/tools/hash-join', roots: [T('HashJoinToolPage')], kb: 120, note: 'Grace hash join' },
-  { route: '/tools/join-order', roots: [T('JoinOrderToolPage')], kb: 171, note: 'Selinger join-order search over the subset lattice' },
-  { route: '/tools/lsm', roots: [T('LsmToolPage')], kb: 122, note: 'log-structured merge-tree sandbox' },
+  { route: '/tools/join-order', roots: [T('JoinOrderToolPage')], kb: 189, note: 'Selinger join-order search over the subset lattice' },
+  { route: '/tools/raft', roots: [T('RaftToolPage')], kb: 123, note: 'Raft: election and replication over a scripted schedule, its safety properties checked (plan.md §27.5 X3)' },
+  { route: '/tools/2pc', roots: [T('TwoPhaseCommitToolPage')], kb: 122, note: 'two-phase commit with presumed abort; crashes and lost messages scripted (plan.md §27.5 X2)' },
+  { route: '/tools/partitioning', roots: [T('PartitioningToolPage')], kb: 126, note: 'partitioning by hash, range and consistent hashing; rows moved when a node joins or leaves (plan.md §27.5 X1)' },
+  { route: '/tools/parallel', roots: [T('ParallelToolPage')], kb: 142, note: 'morsel-driven parallel execution and exchange operators, worker speeds scripted (plan.md §27.5 P1)' },
+  { route: '/tools/histograms', roots: [T('HistogramToolPage')], kb: 188, note: 'equi-depth histograms: ANALYZE with a bucket count, and a range estimate’s q-error (plan.md §27.5 T5)' },
+  { route: '/tools/lsm', roots: [T('LsmToolPage')], kb: 121, note: 'log-structured merge-tree sandbox' },
   { route: '/tools/hash-index', roots: [T('HashIndexToolPage')], kb: 121, note: 'extendible and linear hashing sandbox' },
   { route: '/tools/columnar', roots: [T('ColumnarToolPage')], kb: 120, note: 'NSM/DSM/PAX row vs. column storage sandbox' },
-  { route: '/tools/vector-index', roots: [T('VectorIndexToolPage')], kb: 121, note: 'brute force vs. IVF vs. HNSW vector search' },
-  { route: '/tools/latch-crabbing', roots: [T('LatchCrabbingToolPage')], kb: 173, note: 'latch crabbing: naive vs. lock coupling vs. optimistic coupling on a scripted B+Tree workload' },
-  { route: '/docs', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 177, note: 'the docs shell and every prose page (one shared chunk)' },
-  { route: '/docs/concepts/btree', roots: ['src/ui/DocsLayout.tsx', 'src/pages/DocsContent/concepts/btree.mdx'], kb: 197, note: 'a concept page with a live B+Tree widget' },
-  { route: '/docs/essays/index-write-tax', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 177, note: 'an essay: prose, with links into the B+Tree sandbox (plan.md §25.4 H2)' },
-  { route: '/docs/essays/repeatable-read', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 177, note: 'an essay: prose, with links into the isolation matrix and the schedule tool (plan.md §25.4 H2)' },
-  { route: '/docs/essays/scan-resistance', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 177, note: 'an essay: prose, with links into the buffer-pool sandbox under LRU and LRU-2 (plan.md §25.4 H2)' },
-  { route: '/docs/concepts/buffer-pool', roots: ['src/ui/DocsLayout.tsx', 'src/pages/DocsContent/concepts/buffer-pool.mdx'], kb: 178, note: 'a concept page with a live buffer-pool widget' },
+  { route: '/tools/vector-index', roots: [T('VectorIndexToolPage')], kb: 120, note: 'brute force vs. IVF vs. HNSW vector search' },
+  { route: '/tools/latch-crabbing', roots: [T('LatchCrabbingToolPage')], kb: 187, note: 'latch crabbing: naive vs. lock coupling vs. optimistic coupling on a scripted B+Tree workload' },
+  { route: '/docs', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 192, note: 'the docs shell and every prose page (one shared chunk)' },
+  { route: '/docs/concepts/btree', roots: ['src/ui/DocsLayout.tsx', 'src/pages/DocsContent/concepts/btree.mdx'], kb: 213, note: 'a concept page with a live B+Tree widget' },
+  { route: '/docs/essays/index-write-tax', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 192, note: 'an essay: prose, with links into the B+Tree sandbox (plan.md §25.4 H2)' },
+  { route: '/docs/essays/repeatable-read', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 192, note: 'an essay: prose, with links into the isolation matrix and the schedule tool (plan.md §25.4 H2)' },
+  { route: '/docs/essays/scan-resistance', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 192, note: 'an essay: prose, with links into the buffer-pool sandbox under LRU and LRU-2 (plan.md §25.4 H2)' },
+  { route: '/docs/concepts/buffer-pool', roots: ['src/ui/DocsLayout.tsx', 'src/pages/DocsContent/concepts/buffer-pool.mdx'], kb: 193, note: 'a concept page with a live buffer-pool widget' },
   { route: '/* (404)', roots: [P('NotFoundPage')], kb: 115, note: 'the not-found page' },
 ];
 
@@ -431,6 +518,11 @@ const SETTINGS_TOOL_CHECKS: readonly (readonly [string, number, string])[] = [
   ['sort', 6, 'the external merge sort driver'],
   ['hash-join', 6, 'the Grace hash join driver'],
   ['join-order', 4, 'the join-order graph and the Selinger search'],
+  ['raft', 8, 'the Raft model (plan.md §27.5 X3)'],
+  ['two-phase-commit', 7, 'the two-phase commit model (plan.md §27.5 X2)'],
+  ['partitioning', 6, 'the partitioning and distributed-join models, the transactions preset and the join tables (plan.md §27.5 X1, X4)'],
+  ['parallel', 9, 'the morsel and exchange models and the transactions preset (plan.md §27.5 P1)'],
+  ['histograms', 5, 'the histogram columns, ANALYZE and the range estimate (plan.md §27.5 T5)'],
   ['page', 5, 'the slotted-page layout'],
   ['hash-index', 7, 'the extendible and linear hashing driver'],
   ['lsm', 7, 'the LSM tree planner'],
@@ -440,7 +532,7 @@ const SETTINGS_TOOL_CHECKS: readonly (readonly [string, number, string])[] = [
   ['buffer-pool', 5, 'the buffer-pool trace and its policies'],
   ['planner', 4, 'the planner’s rewrite-rule pipeline'],
   ['btree', 5, 'the B+Tree insert and invariants'],
-  ['isolation', 16, 'the Hermitage suite on both isolation engines'],
+  ['isolation', 20, 'the Hermitage suite on both isolation engines'],
 ];
 
 /** What is already loaded when a settings challenge fetches its tool's checks: the page and the view. */
@@ -455,8 +547,11 @@ export const OPT_IN: readonly { key: string; kb: number; note: string; after?: s
   { key: '_html-to-image', kb: 8, note: 'panel PNG export (§20.3) — fetched on the first click of Download PNG' },
   { key: 'src/perf/inp.ts', kb: 2, note: 'the opt-in INP recorder for the §9 study (§25.4 A6) — fetched only after a participant opts in' },
   { key: 'src/ui/WorkspaceDialog.tsx', kb: 6, after: 'src/pages/PlaygroundPage.tsx', note: 'the Workspaces dialog (§H7) — fetched only when Custom mode\'s Workspaces button is pressed' },
+  { key: 'src/ui/Footer.tsx', kb: 5, after: 'index.html', note: 'the footer and the docs navigation it maps — below the fold on every page, so fetched after the page itself, not with the shell (§25.4 H8)' },
+  { key: 'src/ui/ParallelCompare.tsx', kb: 9, after: 'src/pages/ComparePage.tsx', note: 'Compare’s serial-against-parallel mode (plan.md §27.5 P3): the morsel model and its scaling table — fetched only when that mode is chosen' },
+  { key: 'src/ui/narrationDetail.ts', kb: 7, after: 'src/pages/PlaygroundPage.tsx', note: 'the narration\'s novice and expert lines (plan.md §27.5 L2) and the event keys they are looked up by — fetched only when one of those levels is chosen' },
   { key: 'src/ui/DurabilityDialog.tsx', kb: 17, after: 'src/pages/PlaygroundPage.tsx', note: 'the Durability dialog (§25.4 E4): the write-ahead-log machine, crash and recovery — fetched only when the Playground\'s Durability button is pressed' },
-  { key: 'src/pages/challenges/ScriptChallengeView.tsx', kb: 31, after: 'src/pages/ChallengePage.tsx', note: 'a transaction or durability challenge: the schedule runner, the protocol comparison and the log machine — fetched only when one of those challenges is opened' },
+  { key: 'src/pages/challenges/ScriptChallengeView.tsx', kb: 35, after: 'src/pages/ChallengePage.tsx', note: 'a transaction or durability challenge: the schedule runner, the protocol comparison and the log machine — fetched only when one of those challenges is opened' },
   { key: 'src/pages/challenges/SettingsChallengeView.tsx', kb: 8, after: 'src/pages/ChallengePage.tsx', note: 'a storage, execution or isolation challenge: the form and the runner — no driver; each tool\'s own checks are the rows below, fetched when one of its challenges is opened' },
   ...SETTINGS_TOOL_CHECKS.map(([tool, kb, what]) => ({
     key: `src/pages/challenges/settings/${tool}.ts`,

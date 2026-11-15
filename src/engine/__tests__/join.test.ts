@@ -21,7 +21,7 @@ describe('JOIN — parsing', () => {
     if (!parsed.ok) throw new Error(parsed.error.message);
     expect(parsed.ast.joins).toBeDefined();
     expect(parsed.ast.joins?.[0]?.table.name).toBe('posts');
-    expect(parsed.ast.joins?.[0]?.on.op).toBe('=');
+    expect(parsed.ast.joins?.[0]?.on?.op).toBe('=');
   });
 
   it('accepts the ON equality in either order', () => {
@@ -52,10 +52,15 @@ describe('JOIN — parsing', () => {
     if (!parsed.ok) expect(parsed.error.message).toMatch(/needs a table name/);
   });
 
-  it('rejects a table qualifier on a query with no JOIN at all', () => {
-    const parsed = parse('SELECT authors.name FROM authors');
-    expect(parsed.ok).toBe(false);
-    if (!parsed.ok) expect(parsed.error.message).toMatch(/does not need a table name/);
+  it('takes its own table as a qualifier with no JOIN, and drops it — but no other table (plan.md §27.5 S7)', () => {
+    const parsed = parse('SELECT authors.name FROM authors WHERE authors.id > 1');
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      expect(parsed.ast.select.kind === 'columns' && parsed.ast.select.items[0]).toMatchObject({ kind: 'column', name: 'name' });
+      expect(parsed.ast.select.kind === 'columns' && parsed.ast.select.items[0]).not.toHaveProperty('table');
+    }
+    const other = parse('SELECT posts.title FROM authors');
+    expect(!other.ok && other.error.message).toMatch(/no table called `posts`/);
   });
 
   it('rejects a qualifier naming a table the query never mentions', () => {
@@ -102,13 +107,27 @@ describe('JOIN — parsing', () => {
     },
   );
 
-  it.each(['RIGHT', 'FULL', 'CROSS'])(
-    '%s JOIN stays out of scope',
-    (word) => {
-      const parsed = parse(`SELECT * FROM authors ${word} JOIN posts ON authors.id = posts.authorId`);
-      expect(parsed.ok).toBe(false);
+  it.each([['RIGHT', 'right'], ['RIGHT OUTER', 'right'], ['FULL', 'full'], ['FULL OUTER', 'full']] as const)(
+    '%s JOIN parses (plan.md §27.5 S4)',
+    (words, joinType) => {
+      const parsed = parse(`SELECT * FROM authors ${words} JOIN posts ON authors.id = posts.authorId`);
+      if (!parsed.ok) throw new Error(parsed.error.message);
+      expect(parsed.ast.joins?.[0]?.joinType).toBe(joinType);
     },
   );
+
+  it('CROSS JOIN parses with no ON, refuses one, and FROM a, b is the same join (plan.md §27.5 S4)', () => {
+    const cross = parse('SELECT * FROM authors CROSS JOIN posts');
+    if (!cross.ok) throw new Error(cross.error.message);
+    expect(cross.ast.joins?.[0]).toMatchObject({ joinType: 'cross' });
+    expect(cross.ast.joins?.[0]?.on).toBeUndefined();
+    const comma = parse('SELECT * FROM authors, posts');
+    if (!comma.ok) throw new Error(comma.error.message);
+    expect(comma.ast.joins?.[0]).toMatchObject({ joinType: 'cross', comma: true });
+    const on = parse('SELECT * FROM authors CROSS JOIN posts ON authors.id = posts.authorId');
+    expect(on.ok).toBe(false);
+    if (!on.ok) expect(on.error.message).toMatch(/CROSS JOIN takes no ON/);
+  });
 
   it('USING stays out of scope', () => {
     const parsed = parse('SELECT * FROM authors JOIN posts USING (id)');
@@ -728,11 +747,9 @@ describe('LEFT JOIN (plan.md §25.4 C3)', () => {
     expect(joinNode.estRows).toBeGreaterThanOrEqual(5); // 5 authors, every one of them kept
   });
 
-  it('RIGHT and FULL stay out of scope, with a hint pointing at LEFT JOIN or an inner one', () => {
-    const right = parseStatement('SELECT * FROM authors RIGHT JOIN posts ON authors.id = posts.authorId');
-    expect(right.ok).toBe(false);
-    const full = parseStatement('SELECT * FROM authors FULL JOIN posts ON authors.id = posts.authorId');
-    expect(full.ok).toBe(false);
+  it('RIGHT and FULL parse too (plan.md §27.5 S4) — their results are outerJoin.test.ts’s', () => {
+    expect(parseStatement('SELECT * FROM authors RIGHT JOIN posts ON authors.id = posts.authorId').ok).toBe(true);
+    expect(parseStatement('SELECT * FROM authors FULL JOIN posts ON authors.id = posts.authorId').ok).toBe(true);
   });
 });
 
@@ -968,7 +985,8 @@ describe('ORDER BY above a JOIN (plan.md §26 Feature 1, slice b)', () => {
     expect(run(`${base} name`).error?.message).toMatch(/needs a table name/);
     expect(run(`${base} nope.name`).error?.message).toMatch(/no table called `nope`/);
     expect(run(`${base} posts.nope`).error?.message).toMatch(/`posts` has no column called `nope`/);
-    expect(run('SELECT name FROM authors ORDER BY authors.name').error?.message).toMatch(/does not need a table name/);
+    // With no JOIN, the one table's own name is allowed, and dropped (plan.md §27.5 S7).
+    expect(run('SELECT name FROM authors ORDER BY authors.name').error).toBeUndefined();
   });
 
   it('SELECT DISTINCT sorts only by a selected column', () => {

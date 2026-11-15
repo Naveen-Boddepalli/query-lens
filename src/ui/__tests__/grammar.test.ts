@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { GRAMMAR, ruleNamed } from '../grammar.ts';
 import type { GrammarPart } from '../grammar.ts';
 import { KEYWORDS } from '../../engine/parser/tokenizer.ts';
-import { AGGREGATE_FNS, parseStatement } from '../../engine/parser/parser.ts';
+import { AGGREGATE_FNS, CONTEXTUAL_WORDS, parseStatement } from '../../engine/parser/parser.ts';
 
 /** Every literal and rule-reference part, anywhere in the grammar, depth-first. */
 function walk(parts: GrammarPart[], visit: (part: GrammarPart) => void): void {
@@ -30,8 +30,8 @@ describe('grammar data — structural consistency', () => {
       walk(r.parts, (part) => {
         if (part.kind === 'literal' && /^[A-Z]+$/.test(part.text)) {
           expect(
-            KEYWORDS.has(part.text) || AGGREGATE_FNS.has(part.text),
-            `${r.name} claims "${part.text}" is a keyword or aggregate function`,
+            KEYWORDS.has(part.text) || AGGREGATE_FNS.has(part.text) || CONTEXTUAL_WORDS.has(part.text),
+            `${r.name} claims "${part.text}" is a keyword, an aggregate function or a contextual word`,
           ).toBe(true);
         }
       });
@@ -58,6 +58,7 @@ describe('grammar data — every rule is demonstrated by a query the real parser
     ['explain — with ANALYZE', 'EXPLAIN ANALYZE SELECT * FROM users WHERE id = 5'],
     ['statement (analyze)', 'ANALYZE users'],
     ['analyze — with a trailing semicolon', 'ANALYZE users;'],
+    ['analyze — with a bucket count', 'ANALYZE users WITH 20 BUCKETS;'],
     ['statement (delete)', 'DELETE FROM users'],
     ['statement (insert)', "INSERT INTO users VALUES (1, 'a')"],
     ['statement (update)', 'UPDATE users SET age = 1'],
@@ -70,6 +71,11 @@ describe('grammar data — every rule is demonstrated by a query the real parser
     ['join — INNER', 'SELECT * FROM authors INNER JOIN posts ON authors.id = posts.authorId'],
     ['join — LEFT', 'SELECT * FROM authors LEFT JOIN posts ON authors.id = posts.authorId'],
     ['join — LEFT OUTER', 'SELECT * FROM authors LEFT OUTER JOIN posts ON authors.id = posts.authorId'],
+    ['join — RIGHT and RIGHT OUTER', 'SELECT * FROM authors RIGHT JOIN posts ON authors.id = posts.authorId RIGHT OUTER JOIN tags ON posts.id = tags.postId'],
+    ['join — FULL and FULL OUTER', 'SELECT * FROM authors FULL JOIN posts ON authors.id = posts.authorId FULL OUTER JOIN tags ON posts.id = tags.postId'],
+    ['join — CROSS, and a comma', 'SELECT * FROM authors CROSS JOIN posts, tags'],
+    ['tableRef — AS and bare aliases, a self-join', 'SELECT a.name, b.name FROM authors AS a JOIN authors b ON a.id = b.id CROSS JOIN posts p, tags t'],
+    ['tableRef — in EXISTS and IN subqueries', 'SELECT name FROM authors a WHERE NOT EXISTS (SELECT * FROM authors b WHERE b.id = a.id) AND id IN (SELECT authorId FROM posts p)'],
     ['join', 'SELECT * FROM authors JOIN posts ON authors.id = posts.authorId'],
     [
       'join — chained, left-deep (plan.md §25.4 C3 slice b)',
@@ -84,6 +90,7 @@ describe('grammar data — every rule is demonstrated by a query the real parser
     ['selectList — repeated selectItem', 'SELECT id, name, age FROM users'],
     ['selectItem — aggregateCall', 'SELECT COUNT(*) FROM users'],
     ['aggregateCall — every function', 'SELECT COUNT(id), SUM(age), AVG(age), MIN(age), MAX(age) FROM users'],
+    ['aggregateCall — DISTINCT', 'SELECT age, COUNT(DISTINCT name), SUM(DISTINCT id) FROM users GROUP BY age HAVING AVG(DISTINCT id) > 2'],
     ['expr', 'SELECT * FROM users WHERE id = 5'],
     ['orExpr — OR repeated', 'SELECT * FROM users WHERE id = 1 OR id = 2 OR id = 3'],
     ['andExpr — AND repeated', 'SELECT * FROM users WHERE id = 5 AND age > 1 AND age < 99'],
@@ -97,9 +104,17 @@ describe('grammar data — every rule is demonstrated by a query the real parser
       'inSubquery — IN and NOT IN, with a WHERE',
       "SELECT * FROM users WHERE id IN (SELECT id FROM logins WHERE status = 'ok') AND age NOT IN (SELECT attempts FROM logins)",
     ],
+    [
+      'existsSubquery — EXISTS and NOT EXISTS, correlated, with each kind of select',
+      'SELECT name FROM authors WHERE EXISTS (SELECT * FROM posts WHERE posts.authorId = authors.id) AND NOT EXISTS (SELECT 1 FROM comments WHERE comments.authorId = authors.id) AND EXISTS (SELECT tags.id FROM tags)',
+    ],
+    ['compound — UNION, UNION ALL and EXCEPT, with the result’s ORDER BY and LIMIT', 'SELECT id FROM users UNION SELECT id FROM logins UNION ALL SELECT id FROM orders EXCEPT SELECT id FROM employees ORDER BY id DESC LIMIT 3 OFFSET 1;'],
+    ['setOp — INTERSECT', 'SELECT id FROM users INTERSECT SELECT id FROM logins'],
+    ['explain — a compound', 'EXPLAIN SELECT id FROM users UNION SELECT id FROM logins'],
     ['predicate — LIKE and NOT LIKE', "SELECT * FROM users WHERE name LIKE 'a%' AND name NOT LIKE '%z'"],
     ['compareOp — every operator', 'SELECT * FROM users WHERE id = 1 OR id <> 2 OR id != 3 OR id < 4 OR id > 5 OR id <= 6 OR id >= 7'],
     ['primary — a parenthesised expr', 'SELECT * FROM users WHERE (id = 1 OR id = 2) AND age > 3'],
+    ['primary — a scalarSubquery', 'SELECT name, age - (SELECT AVG(age) FROM users) FROM users WHERE id = (SELECT id FROM users ORDER BY age DESC LIMIT 1)'],
     ['operand — + and - repeated', 'SELECT * FROM users WHERE age + 1 - 2 > 3'],
     ['multiplicative — * / % repeated', 'SELECT * FROM users WHERE age * 2 / 3 % 4 = 1'],
     ['unary — minus, nested', 'SELECT * FROM users WHERE age > - -5'],

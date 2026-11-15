@@ -10,7 +10,7 @@
  * Order matters: it is the order of the track, and the order lessons are numbered in.
  */
 
-export type LessonGroupId = 'pipeline' | 'storage' | 'transactions';
+export type LessonGroupId = 'pipeline' | 'storage' | 'transactions' | 'distributed';
 
 export interface LessonMeta {
   id: string;
@@ -93,6 +93,27 @@ export const LESSON_GROUPS: readonly LessonGroup[] = [
         summary: 'A missing value is UNKNOWN, not false — and = NULL, <>, COUNT, AVG and NOT IN each show it a different way.',
       },
       {
+        // plan.md §27.5 S1, on S2's `shop` preset.
+        id: 'not-exists',
+        title: 'NOT EXISTS is not NOT IN',
+        minutes: 5,
+        summary: 'A semi-join keeps each customer once, an anti-join finds the three who never ordered — and NOT IN, meeting a guest’s NULL, finds no one.',
+      },
+      {
+        // plan.md §27.5 S3, on the `shop` preset.
+        id: 'set-operations',
+        title: 'UNION, INTERSECT, EXCEPT',
+        minutes: 4,
+        summary: 'Two SELECTs, one result: every row, each row once, the rows in both, the rows in one and not the other — and why a NULL does not trip EXCEPT.',
+      },
+      {
+        // plan.md §27.5 S4, on the `shop` preset.
+        id: 'outer-joins',
+        title: 'RIGHT, FULL and CROSS JOIN',
+        minutes: 5,
+        summary: 'The rows an inner join drops, kept on the right or on both sides — and the cross product a WHERE equality turns back into a join.',
+      },
+      {
         id: 'tokens-and-trees',
         title: 'From text to tokens to a tree',
         minutes: 3,
@@ -108,7 +129,7 @@ export const LESSON_GROUPS: readonly LessonGroup[] = [
         id: 'planner-rules',
         title: 'Rewrite rules need each other',
         minutes: 3,
-        summary: 'Seven rules, two of which make a lookup — and what each does alone.',
+        summary: 'Eight rules, two of which make a lookup — and what each does alone.',
       },
       {
         id: 'buffer-pool',
@@ -133,6 +154,24 @@ export const LESSON_GROUPS: readonly LessonGroup[] = [
         title: 'Join order: the same tables, five times the work',
         minutes: 4,
         summary: 'Every order gives the same rows. Selinger’s search finds the cheap one without pricing every order.',
+      },
+      {
+        id: 'histograms',
+        title: 'Histograms: how many buckets an estimate needs',
+        minutes: 4,
+        summary: 'ANALYZE cuts a column into buckets of equal depth. Too few, and a range over a gap is guessed many times too high.',
+      },
+      {
+        id: 'parallel',
+        title: 'Parallel execution: morsels and the slow worker',
+        minutes: 5,
+        summary: 'Four workers, one slow: an even split waits for it, a shared queue reads remotely, work stealing gets both right.',
+      },
+      {
+        id: 'exchange',
+        title: 'Exchange: broadcast or repartition',
+        minutes: 5,
+        summary: 'A parallel join brings equal keys together: copy the small side everywhere, or hash both sides to their key’s worker.',
       },
     ],
   },
@@ -232,6 +271,37 @@ export const LESSON_GROUPS: readonly LessonGroup[] = [
         title: 'Survive a crash',
         minutes: 5,
         summary: 'Analysis, redo and undo on a real log — then a crash in the middle of recovery itself.',
+      },
+    ],
+  },
+  {
+    id: 'distributed',
+    title: 'Distributed databases',
+    about: 'One table on many machines (plan.md §27.5 X1–X4): where each row lives, and what it costs when the machines change.',
+    lessons: [
+      {
+        id: 'partitioning',
+        title: 'Partitioning: hash, range and the ring',
+        minutes: 5,
+        summary: 'Spread a table over four nodes, add a fifth, and count the rows that have to move under each scheme.',
+      },
+      {
+        id: 'two-phase-commit',
+        title: 'Two-phase commit: in doubt',
+        minutes: 6,
+        summary: 'Every machine commits or none does: votes, one log record that decides, and the wait when the coordinator fails.',
+      },
+      {
+        id: 'raft',
+        title: 'Raft: one log, many machines',
+        minutes: 6,
+        summary: 'Elect a leader, replicate a log, crash the leader, cut it off — and check the four promises on every run.',
+      },
+      {
+        id: 'distributed-join',
+        title: 'Joining across nodes',
+        minutes: 4,
+        summary: 'Co-located, broadcast or shuffled: the same join, priced in rows sent over the network.',
       },
     ],
   },

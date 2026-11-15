@@ -7,6 +7,7 @@ import {
   updateDisplayTree,
 } from '../parser/display.ts';
 import type { DeleteStatement, InsertStatement, SelectStatement, UpdateStatement } from '../parser/ast.ts';
+import { exprToSql } from '../parser/print.ts';
 
 function ok(sql: string): SelectStatement {
   const out = parse(sql);
@@ -122,6 +123,15 @@ describe('parse — the v0 subset', () => {
     expect(ok('SELECT * FROM t WHERE x = NULL').where).toMatchObject({
       right: { value: null },
     });
+  });
+
+  it("prints a string holding a quote so it parses back to the same string (found by the oracle, plan.md §27.5 S1)", () => {
+    // `'it''s'` is the string it's. Printed as `'it's'`, it no longer parsed — an EXISTS run once from its
+    // printed WHERE failed with "Unterminated string literal".
+    const where = ok("SELECT * FROM t WHERE name = 'it''s'").where!;
+    expect(where).toMatchObject({ right: { value: "it's", raw: "'it''s'" } });
+    const again = ok(`SELECT * FROM t WHERE ${exprToSql(where)}`).where!;
+    expect(again).toMatchObject({ right: { value: "it's" } });
   });
 
   it('tolerates a trailing semicolon, newlines and comments', () => {
@@ -530,9 +540,11 @@ describe('parse — errors point at the right text', () => {
   });
 
   it('rejects trailing junk', () => {
-    const e = err('SELECT * FROM users garbage');
+    // One word after the table name is an alias (plan.md §27.5 S7) — `FROM users garbage` reads `users` as `garbage`.
+    expect(parse('SELECT * FROM users garbage').ok).toBe(true);
+    const e = err('SELECT * FROM users garbage more');
     expect(e.message).toMatch(/unexpected/i);
-    expect(e.from).toBe(20);
+    expect(e.from).toBe(28);
   });
 
   it('names the scope for an operator that is still unsupported', () => {
@@ -544,7 +556,7 @@ describe('parse — errors point at the right text', () => {
   });
 
   it.each([
-    ['SELECT * FROM a RIGHT JOIN b ON a.id = b.id', /RIGHT.*not supported/, /LEFT JOIN/],
+    ['SELECT * FROM a JOIN b USING (id)', /USING.*not supported/, /write the equality out/],
   ])('explains out-of-scope SQL: %s', (sql, message, hint) => {
     const e = err(sql);
     expect(e.message).toMatch(message);
@@ -563,10 +575,10 @@ describe('parse — errors point at the right text', () => {
     expect(e.hint).toMatch(/AND|BETWEEN/);
   });
 
-  it('accepts an IN subquery (plan.md §25.4 C3 slice c) but rejects a subquery anywhere else, with a scope explanation', () => {
+  it('accepts an IN subquery (plan.md §25.4 C3 slice c) and a scalar one (§27.5 S6), which selects one column', () => {
     expect(parse('SELECT * FROM users WHERE id IN (SELECT id FROM users)').ok).toBe(true);
-    const e = err('SELECT * FROM users WHERE id = (SELECT id FROM users)');
-    expect(e.message).toMatch(/subquery/i);
+    expect(parse('SELECT * FROM users WHERE id = (SELECT id FROM users)').ok).toBe(true);
+    expect(err('SELECT * FROM users WHERE id = (SELECT id, age FROM users)').message).toMatch(/subquery used as a value must select exactly one column/);
   });
 
   it('every error span is inside the query and non-empty', () => {

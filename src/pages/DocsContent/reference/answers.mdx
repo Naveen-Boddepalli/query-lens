@@ -35,9 +35,10 @@ it ships to your browser.
 
 **1. Differential: the same statement, two engines.** A generator builds small, deliberately collision-heavy
 tables (few distinct values, many `NULL`s, keys that overlap between two tables) and statements over them —
-`SELECT` with `WHERE`, `ORDER BY` and `LIMIT`; aggregates and `GROUP BY`; `JOIN` and `LEFT JOIN`, chained
-across three tables; `IN (subquery)`, some of them empty on purpose; `INSERT`, `UPDATE`, `DELETE` followed by a
-read of what they left behind. Each statement runs in QueryLens and in SQLite, and the
+`SELECT` with `WHERE`, `ORDER BY` and `LIMIT`; aggregates and `GROUP BY`; inner, `LEFT`, `RIGHT`, `FULL` and
+`CROSS` joins (and `FROM a, b`), chained across three tables; `IN (subquery)`, some of them empty on purpose, and
+`[NOT] EXISTS`; `UNION`, `INTERSECT` and `EXCEPT`; `INSERT`, `UPDATE`, `DELETE` followed by a read of what they
+left behind. Each statement runs in QueryLens and in SQLite, and the
 answers must match — as a *multiset* unless an `ORDER BY` says otherwise, with a tolerance on floating point.
 Buffer size, page size, replacement policy, join algorithm and aggregate strategy are drawn at random too, so
 every physical strategy is checked, not only the default.
@@ -104,6 +105,8 @@ deliberate; **gap** means a known limit the roadmap intends to close.
 | `arithmetic-on-text` | design | `'abc' + 1` is `NULL` — text that is not a number has no arithmetic value | Read as `0`, silently: the result is `1` |
 | `division-of-whole-reals` | gap | A `REAL` holding `3.0` is just `3`, so `r / 2` is whole-number division: `1` | The column really is `REAL`: `1.5` |
 | `identifier-case` | design | Column names are case-sensitive, and the error lists the real ones | Identifiers ignore case |
+| `column-selected-twice` | design | `SELECT n, n` is refused — a result row is keyed by column name, so alias one (`n AS n2`) | Both columns come back, named alike |
+| `scalar-subquery-many-rows` | design | A subquery used as a value that returns two rows is an error, as in PostgreSQL | The first row it happens to return, silently |
 
 ## Run it yourself
 
