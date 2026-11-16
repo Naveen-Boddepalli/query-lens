@@ -99,9 +99,11 @@ test('the theme toggle switches, persists, and survives a reload', async ({ page
   // colour on the value its custom property held when the transition started,
   // so every `transition-colors` element kept the *previous* palette. Reading
   // a real element's colour is the only way to catch it — the token is right
-  // either way. See src/ui/theme.ts.
+  // either way. See src/ui/theme.ts. The probe is a secondary button: the
+  // primary Run button is white-on-iris in both themes (--color-on-accent), so
+  // its colour cannot tell the themes apart.
   const runColour = () =>
-    page.getByRole('button', { name: /^Run/ }).evaluate((el) => getComputedStyle(el).color);
+    page.getByRole('button', { name: /^Edit data/ }).evaluate((el) => getComputedStyle(el).color);
   const lightRun = await runColour();
 
   await page.getByRole('radio', { name: 'Dark' }).click();
