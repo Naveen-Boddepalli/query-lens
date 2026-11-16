@@ -73,7 +73,7 @@ export function TopNav() {
           <button
             type="button"
             onClick={openSpotlight}
-            className="ql-liquid-pill group flex items-center justify-between h-9 px-2.5 sm:px-3.5 w-9 sm:w-40 lg:w-48 rounded-full backdrop-blur-md text-ink-dim hover:text-ink cursor-pointer"
+            className="ql-liquid-pill group flex items-center justify-between h-9 px-2.5 sm:px-3.5 lg:px-2.5 xl:px-3.5 w-9 sm:w-40 lg:w-9 xl:w-48 rounded-full backdrop-blur-md text-ink-dim hover:text-ink cursor-pointer"
             aria-label={`Spotlight search (${MOD_KEY === '⌘' ? 'Command' : 'Control'}+K)`}
             aria-keyshortcuts="Meta+K Control+K"
           >
@@ -87,13 +87,13 @@ export function TopNav() {
                 <circle cx="8.5" cy="8.5" r="5.5" />
                 <path d="M13 13l4.5 4.5" strokeLinecap="round" />
               </svg>
-              <span className="hidden sm:inline text-label text-ink-dim group-hover:text-ink truncate">
+              <span className="hidden sm:inline lg:hidden xl:inline text-label text-ink-dim group-hover:text-ink truncate">
                 Search...
               </span>
             </div>
             <kbd
               aria-hidden="true"
-              className="ql-liquid-kbd hidden sm:inline-flex items-center rounded-full px-2 py-0.5 font-mono text-[10px] text-ink-dim group-hover:text-ink transition-colors"
+              className="ql-liquid-kbd hidden sm:inline-flex lg:hidden xl:inline-flex items-center rounded-full px-2 py-0.5 font-mono text-[10px] text-ink-dim group-hover:text-ink transition-colors"
             >
               {MOD_KEY}K
             </kbd>
