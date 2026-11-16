@@ -78,6 +78,8 @@ export function Layout() {
           isLanding ? '' : 'lg:h-dvh lg:overflow-hidden',
         ].join(' ')}
       >
+        {/* The brand line: the eight stage colours, end to end. */}
+        {!isStudy && <div aria-hidden="true" className="ql-spectrum-line shrink-0" />}
         {!isStudy && <DisclaimerBanner />}
         {!isStudy && <TopNav />}
         {showHint && <FirstVisitHint />}

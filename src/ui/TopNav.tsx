@@ -9,10 +9,10 @@ import { MOD_KEY } from './platform.ts';
 
 const desktopLinkClass = ({ isActive }: { isActive: boolean }) =>
   [
-    'inline-flex items-center rounded-lg px-2.5 py-1.5 text-label font-medium transition duration-150 ease-out select-none',
+    'relative inline-flex items-center rounded-full px-3 py-1.5 text-label font-medium transition duration-150 ease-out select-none',
     isActive
-      ? 'border border-accent/40 bg-accent-soft text-ink shadow-e1'
-      : 'border border-transparent text-ink-dim hover:bg-surface-3 hover:text-ink',
+      ? 'bg-accent-soft text-ink ring-1 ring-inset ring-accent/40'
+      : 'text-ink-dim hover:bg-surface-3 hover:text-ink',
   ].join(' ');
 
 const PRIMARY_ITEMS = NAV_ITEMS.filter((item) => item.nav);
@@ -43,7 +43,7 @@ export function TopNav() {
   }, [isMobileOpen]);
 
   return (
-    <header className="sticky top-0 z-30 flex w-full max-w-full min-w-0 flex-col border-b border-edge bg-surface/85 backdrop-blur-md">
+    <header className="sticky top-0 z-30 flex w-full max-w-full min-w-0 flex-col border-b border-edge/70 bg-surface/80 backdrop-blur-xl backdrop-saturate-150">
       <div className="flex w-full max-w-full min-w-0 items-center justify-between gap-x-2 sm:gap-x-4 px-3 sm:px-4 py-2.5">
         {/* Brand Lockup */}
         <div className="flex min-w-0 shrink items-center gap-2">
@@ -52,7 +52,9 @@ export function TopNav() {
             className="flex min-w-0 shrink items-center gap-2 sm:gap-2.5 text-ink transition hover:opacity-90"
           >
             <Logo className="h-7 w-7 shrink-0" />
-            <h1 className="text-display font-semibold tracking-tight">QueryLens</h1>
+            <h1 className="text-heading font-semibold tracking-tight">
+              Query<span className="ql-spectrum-text">Lens</span>
+            </h1>
           </NavLink>
         </div>
 

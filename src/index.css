@@ -607,6 +607,73 @@ body {
   pointer-events: none;
 }
 
+/**
+ * Prism utilities — the few places the spectrum is allowed to show up as
+ * decoration. Each is tied to something the spectrum *means* (the pipeline),
+ * never sprinkled.
+ */
+
+/* The primary-action fill. A class rather than utilities because the hover
+   swaps a multi-layer shadow and the gradient lives in a custom property. */
+.ql-fill-accent {
+  border-color: oklch(1 0 0 / 0.12);
+  background-image: var(--gradient-accent);
+  color: var(--color-on-accent);
+  box-shadow: var(--shadow-e1), inset 0 1px 0 oklch(1 0 0 / 0.22);
+}
+.ql-fill-accent:hover:not(:disabled) {
+  box-shadow: var(--shadow-glow), inset 0 1px 0 oklch(1 0 0 / 0.3);
+}
+
+/* Text painted in the pipeline's colours. */
+.ql-spectrum-text {
+  background-image: var(--gradient-spectrum);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* A 2px rule in the pipeline's colours — the brand line atop the header. */
+.ql-spectrum-line {
+  height: 2px;
+  background-image: var(--gradient-spectrum);
+}
+
+/* A card's edge lighting up in the spectrum on hover. `::after`, because
+   `.ql-sheen` already owns `::before`; same mask trick so it stays a 1px ring
+   inside the radius. */
+.ql-ring-spectrum {
+  position: relative;
+}
+.ql-ring-spectrum::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 1px;
+  background-image: var(--gradient-spectrum);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  opacity: 0;
+  transition: opacity var(--dur-base) var(--ease-morph);
+  pointer-events: none;
+}
+.ql-ring-spectrum:hover::after,
+.ql-ring-spectrum:focus-visible::after {
+  opacity: 1;
+}
+
+@media (forced-colors: active) {
+  .ql-spectrum-text {
+    background: none;
+    color: CanvasText;
+  }
+  .ql-ring-spectrum::after {
+    display: none;
+  }
+}
+
 /* The animated dash on a highlighted flowinger edge (the active B+Tree hop,
    an optimizer rewrite). The class is added by FlowTree to the edge. The
    `react-flow__*` class names are kept on flowinger's elements on purpose: this
