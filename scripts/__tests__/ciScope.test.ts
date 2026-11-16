@@ -50,7 +50,9 @@ describe('ciScope', () => {
 
 describe('MARKDOWN_UNDER_TEST', () => {
   it('lists every Markdown file the code reads', () => {
-    const readers = execFileSync('git', ['ls-files', '*.ts', '*.tsx'], { encoding: 'utf-8' }).split('\n').filter((f) => f !== '');
+    // Not ci-scope.ts or this file: their comments and patterns mention the call without making it.
+    const self = new Set(['scripts/ci-scope.ts', 'scripts/__tests__/ciScope.test.ts']);
+    const readers = execFileSync('git', ['ls-files', '*.ts', '*.tsx'], { encoding: 'utf-8' }).split('\n').filter((f) => f !== '' && !self.has(f));
     const read = readers.flatMap((f) => [...readFileSync(f, 'utf-8').matchAll(/readFileSync\(\s*['"`]([^'"`]+\.md)['"`]/g)].map((m) => m[1] ?? ''));
     expect(read.length).toBeGreaterThan(0);
     for (const file of read) expect(hasNoCiEffect(file), file).toBe(false);
