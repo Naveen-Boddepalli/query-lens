@@ -437,25 +437,45 @@ All routes are defined in `App.tsx`. Navigation items are in `src/routes.ts`.
 
 All colours are CSS custom properties defined in `src/index.css` using **oklch** colour space. They **flip automatically** under `[data-theme='light']`.
 
+#### The Prism theme
+
+The palette is built around the logo (a prism: one ray in, a spectrum out). The eight stage colours form one
+spectrum in pipeline order, and that spectrum is the only decoration — `--gradient-spectrum` lays them end to end.
+Dark mode is a plum-tinted near-black (hue 285) with an iris accent; light mode is warm paper (hue 85) with white
+panels and plum ink.
+
 #### Surface Ramp (Dark Theme)
 
 | Token | Value | Usage |
 |---|---|---|
-| `--color-surface` | oklch(0.155 0.014 264) | Page background |
-| `--color-surface-2` | oklch(0.195 0.016 264) | Elevated panels, cards |
-| `--color-surface-3` | oklch(0.238 0.018 264) | Hover states, inputs |
-| `--color-surface-4` | oklch(0.29 0.02 264) | Deep hover, scrollbar thumb |
-| `--color-edge` | oklch(0.34 0.02 264) | Borders |
-| `--color-ink` | oklch(0.96 0.004 264) | Primary text |
-| `--color-ink-dim` | oklch(0.72 0.016 264) | Secondary/dimmed text |
+| `--color-surface` | oklch(0.145 0.022 285) | Page background |
+| `--color-surface-2` | oklch(0.19 0.027 286) | Elevated panels, cards |
+| `--color-surface-3` | oklch(0.235 0.031 287) | Hover states, inputs |
+| `--color-surface-4` | oklch(0.285 0.035 288) | Deep hover, scrollbar thumb |
+| `--color-edge` | oklch(0.345 0.036 289) | Borders |
+| `--color-ink` | oklch(0.965 0.008 290) | Primary text |
+| `--color-ink-dim` | oklch(0.755 0.03 290) | Secondary/dimmed text |
 
 #### Accent
 
 | Token | Usage |
 |---|---|
-| `--color-accent` | Primary accent (links, active states) |
-| `--color-accent-strong` | Luminous accent (glow, hero) |
+| `--color-accent` | Iris — links, active states, focus ring |
+| `--color-accent-strong` | Luminous accent (glow) |
 | `--color-accent-soft` | Translucent accent fill |
+| `--color-accent-fill` / `--color-accent-fill-2` | The primary button's iris→orchid fill (`--gradient-accent`) |
+| `--color-on-accent` | Text on that fill (white in both themes, ≥ 5:1) |
+| `--color-ember` | Warm counterweight, used only inside gradients |
+
+#### Prism utilities (`src/index.css`)
+
+| Class | Effect |
+|---|---|
+| `.ql-fill-accent` | Solid primary-action fill (used by `btnPrimary` and Play) |
+| `.ql-spectrum-text` / `.ql-spectrum-line` | Text / a 2px rule in the stage spectrum |
+| `.ql-ring-spectrum` | A card's edge lights up in the spectrum on hover (`cardInteractive`) |
+| `--stage` + `.ql-stage-panel` / `.ql-card-stage` / `.ql-stage-chip-current` | Tint an element by one stage colour; `--stage` is a registered `<color>`, so changes cross-fade |
+| `.ql-route-progress` | The route-loading sweep in `App.tsx`'s Suspense fallback |
 
 #### Semantic Colours
 
@@ -469,7 +489,7 @@ All colours are CSS custom properties defined in `src/index.css` using **oklch**
 
 #### Pipeline Stage Colours
 
-Each stage has a dedicated colour token: `--color-stage-parse`, `--color-stage-plan`, `--color-stage-optimize`, `--color-stage-execute`, `--color-stage-buffer`, `--color-stage-index`, `--color-stage-lock`, `--color-stage-result`.
+Each stage has a dedicated colour token: `--color-stage-parse`, `--color-stage-plan`, `--color-stage-optimize`, `--color-stage-execute`, `--color-stage-buffer`, `--color-stage-index`, `--color-stage-lock`, `--color-stage-result`. They walk the hue wheel in that order (225° → 165°, ~40° apart) at one lightness — 0.8–0.87 on dark, ~0.48 on light, so each clears 5:1. Tools categories and Learn tracks reuse them (storage = buffer, indexing = index, query = execute, transactions = lock, distributed = parse).
 
 #### Diagram Hues
 

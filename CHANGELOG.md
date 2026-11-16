@@ -296,6 +296,24 @@ parallel execution, partitioning, two-phase commit and Raft — are listed in th
 
 ### Changed
 
+- **The Prism theme.** The interface is re-coloured around the logo's idea — one ray in, a spectrum out. The eight
+  pipeline stages now walk the hue wheel in pipeline order (parse sky → plan periwinkle → optimize violet → execute
+  orchid → buffer coral → index amber → locks lime → result mint) at one perceptual lightness, and that spectrum is
+  the theme's only decoration: the 2px brand line over the header, the logo's rays, the hero headline, progress bars,
+  and the hover ring on interactive cards. Dark mode is a plum-tinted near-black with an iris accent; light mode is
+  warm paper with plum ink and white panels. The primary action is a solid iris→orchid button with white text. Every
+  stage label clears 5:1 in both themes.
+- **The landing hero draws the product.** Beside the headline, the logo's prism takes one white `SELECT` ray and
+  splits it into eight labelled stage rays that draw themselves once on load (reduced motion shows the final frame).
+  The stage list under the buttons is eight colour-coded chips, each linking to its stage page.
+- **Each stage wears its own colour in the Playground.** The live tracker chip glows in its stage colour, finished
+  connectors are gradients from one stage into the next, and the main panel takes the active stage's colour as a top
+  rule and corner wash, cross-fading as the trace moves on.
+- **Tools and lessons are colour-coded by stage.** A Tools category or Learn track borrows the colour of the stage it
+  belongs to (storage is the buffer pool's coral everywhere), and difficulty reads as a three-bar meter.
+- **A slow route shows it is loading.** A lazy page that takes longer than 250 ms shows a thin spectrum sweep under the
+  header instead of a blank page.
+
 - **A qualifier naming a table a one-table query does not read** (`SELECT orders.id FROM customers`) is now told
   *There is no table called `orders` in this query*, not that the column needs no table name.
 - **A `LEFT JOIN` reads ⟕ in the relational-algebra view** (and `\mathbin{⟕}` in LaTeX), not ⋈ — the symbol now says
@@ -307,6 +325,11 @@ parallel execution, partitioning, two-phase commit and Raft — are listed in th
   record the difference.
 
 ### Fixed
+
+- **54 labels were rendering at the wrong size.** They used `text-micro`, a size step retired when the 13px type floor
+  was set, so each silently inherited its parent's size (often the 15px body). They are 13px labels again.
+- **The header crowded the nav at 1024px.** The wordmark and the first nav link sat 16px apart; between 1024px and
+  1280px the search trigger now collapses to its icon.
 
 - **A range on one column was priced as two.** `amount BETWEEN 100 AND 400` under a sequential scan was estimated as
   the product of `amount >= 100` and `amount <= 400`, counting the rows outside each bound twice — 230 rows for the
