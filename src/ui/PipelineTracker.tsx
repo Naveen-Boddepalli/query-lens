@@ -1,5 +1,6 @@
 import { IMPLEMENTED_STAGES, STAGES } from '../engine/index.ts';
 import type { Stage } from '../engine/index.ts';
+import type { CSSProperties } from 'react';
 import { STAGE_META } from './stageMeta.ts';
 
 export interface PipelineTrackerProps {
@@ -10,8 +11,15 @@ export interface PipelineTrackerProps {
 }
 
 /**
- * The eight stages as a connected progress rail with Tactile Glass capsule styling.
+ * The eight stages as a connected progress rail.
+ *
+ * Each chip carries its stage colour as `--stage` (the Prism spectrum), so the
+ * live chip lights up in *its own* colour rather than a generic accent, and a
+ * finished connector is a gradient from the previous stage's colour into this
+ * one — the rail fills in as a spectrum as the trace advances.
  */
+const stageVar = (stage: Stage): CSSProperties =>
+  ({ '--stage': `var(--color-stage-${stage})` }) as CSSProperties;
 export function PipelineTracker({ current, visited, selected, onSelect }: PipelineTrackerProps) {
   const currentIndex = current ? STAGES.indexOf(current) : -1;
 
@@ -34,8 +42,16 @@ export function PipelineTracker({ current, visited, selected, onSelect }: Pipeli
               <span
                 aria-hidden="true"
                 className={`h-0.5 w-3 shrink-0 rounded-full transition-colors sm:w-4 ${
-                  connectorDone ? 'bg-accent/80 shadow-glow' : 'bg-edge'
+                  connectorDone ? 'ql-stage-connector' : 'bg-edge'
                 }`}
+                style={
+                  connectorDone
+                    ? ({
+                        '--from': `var(--color-stage-${STAGES[i - 1]!})`,
+                        '--to': `var(--color-stage-${stage})`,
+                      } as CSSProperties)
+                    : undefined
+                }
               />
             )}
             <button
@@ -43,6 +59,7 @@ export function PipelineTracker({ current, visited, selected, onSelect }: Pipeli
               onClick={() => { onSelect(stage); }}
               aria-current={isCurrent ? 'step' : undefined}
               aria-pressed={isPinned}
+              style={stageVar(stage)}
               title={
                 isPinned
                   ? `${meta.title} (pinned)`
@@ -52,7 +69,7 @@ export function PipelineTracker({ current, visited, selected, onSelect }: Pipeli
               }
               className={`cell flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-label font-medium select-none transition-all ${
                 isCurrent
-                  ? 'border-accent bg-accent-soft text-ink shadow-glow'
+                  ? 'ql-stage-chip-current text-ink'
                   : isVisited
                     ? `border-edge bg-surface-3 shadow-e1 hover:border-ink-dim/50 hover:text-ink active:scale-95 ${meta.tone}`
                     : isBuilt
@@ -64,7 +81,7 @@ export function PipelineTracker({ current, visited, selected, onSelect }: Pipeli
                 aria-hidden="true"
                 className={`h-1.5 w-1.5 shrink-0 rounded-full transition-all ${
                   isCurrent
-                    ? 'bg-accent-strong shadow-glow animate-pulse'
+                    ? 'ql-stage-dot-current animate-pulse'
                     : isVisited
                       ? 'bg-current'
                       : `border border-current bg-transparent${isBuilt ? '' : ' border-dashed'}`

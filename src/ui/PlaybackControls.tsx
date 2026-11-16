@@ -22,7 +22,7 @@ const BLOCKED = 'Answer the prediction first';
 
 const btn = 'flex h-8 items-center justify-center rounded-full transition active:scale-95 disabled:cursor-not-allowed';
 const iconBtn = `${btn} w-8 text-ink-dim hover:bg-surface-3 hover:text-ink disabled:opacity-40`;
-const playBtn = `${btn} min-w-24 gap-1.5 border border-accent/60 bg-accent/20 px-3 text-body font-medium text-ink shadow-e1 hover:bg-accent/30 disabled:opacity-40`;
+const playBtn = `${btn} ql-fill-accent min-w-24 gap-1.5 border px-3 text-body font-semibold disabled:opacity-40`;
 
 export function PlaybackControls({ playback, length, maxStep }: PlaybackControlsProps) {
   const { step, playing, speed, atStart, atEnd, blocked } = playback;

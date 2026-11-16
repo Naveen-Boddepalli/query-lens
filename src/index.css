@@ -680,6 +680,52 @@ body {
   opacity: 1;
 }
 
+/* Stage colour as a registered property, so a panel or chip that changes
+   stage *fades* between the two colours instead of snapping. */
+@property --stage {
+  syntax: '<color>';
+  inherits: true;
+  initial-value: transparent;
+}
+
+/* The live tracker chip, lit in its own stage colour. */
+.ql-stage-chip-current {
+  border-color: var(--stage);
+  background-color: color-mix(in oklch, var(--stage) 16%, transparent);
+  box-shadow:
+    0 0 0 1px color-mix(in oklch, var(--stage) 35%, transparent),
+    0 0 22px -6px var(--stage);
+}
+.ql-stage-dot-current {
+  background-color: var(--stage);
+  box-shadow: 0 0 8px var(--stage);
+}
+.ql-stage-connector {
+  background-image: linear-gradient(90deg, var(--from), var(--to));
+}
+
+/* The Playground's main panel wears the stage it is showing: a 2px rule of
+   that colour along the top and a faint wash in the far corner. */
+.ql-stage-panel {
+  transition: --stage var(--dur-slow) var(--ease-morph);
+  background-image: radial-gradient(
+    60% 45% at 100% 0%,
+    color-mix(in oklch, var(--stage) 9%, transparent),
+    transparent 70%
+  );
+}
+.ql-stage-panel::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 12%;
+  right: 12%;
+  height: 2px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent, var(--stage), transparent);
+  pointer-events: none;
+}
+
 /* The hero prism's rays drawing themselves once (paths carry pathLength=1).
    `both` keeps them hidden before their delay and drawn after; reduced motion
    shrinks the duration to ~0 so the final frame shows at once. */

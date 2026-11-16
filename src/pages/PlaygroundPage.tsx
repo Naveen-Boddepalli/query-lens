@@ -1,4 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { CSSProperties } from 'react';
 import { flushSync } from 'react-dom';
 import {
   createTraceProjector,
@@ -825,7 +826,8 @@ export function PlaygroundPage() {
 
           <div
             data-tour="panel"
-            className={`${panelSurface} max-h-[60dvh] min-h-80 min-w-0 flex-1 overflow-hidden p-4 lg:max-h-none`}
+            className={`${panelSurface} ql-stage-panel max-h-[60dvh] min-h-80 min-w-0 flex-1 overflow-hidden p-4 lg:max-h-none`}
+            style={activeStage ? ({ '--stage': `var(--color-stage-${activeStage})` } as CSSProperties) : undefined}
           >
             {activeStage ? (
               <ErrorBoundary
