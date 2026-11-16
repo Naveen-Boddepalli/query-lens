@@ -587,6 +587,22 @@ body {
   background-repeat: no-repeat;
 }
 
+/* A faint engineering grid under the hero, faded out toward the edges so it
+   reads as graph paper behind the prism rather than a pattern. */
+.ql-hero-grid {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(var(--color-edge) 1px, transparent 1px),
+    linear-gradient(90deg, var(--color-edge) 1px, transparent 1px);
+  background-size: 44px 44px;
+  opacity: 0.28;
+  -webkit-mask-image: radial-gradient(ellipse 65% 70% at 65% 40%, #000, transparent 72%);
+  mask-image: radial-gradient(ellipse 65% 70% at 65% 40%, #000, transparent 72%);
+}
+
 /**
  * The lit top edge shared by every elevated card. A `::before` rather than a
  * border so it sits *inside* the radius and does not fight the real border.
@@ -662,6 +678,32 @@ body {
 .ql-ring-spectrum:hover::after,
 .ql-ring-spectrum:focus-visible::after {
   opacity: 1;
+}
+
+/* The hero prism's rays drawing themselves once (paths carry pathLength=1).
+   `both` keeps them hidden before their delay and drawn after; reduced motion
+   shrinks the duration to ~0 so the final frame shows at once. */
+@keyframes ql-draw {
+  from { stroke-dashoffset: 1; }
+  to { stroke-dashoffset: 0; }
+}
+@keyframes ql-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.ql-draw {
+  fill: none;
+  stroke-dasharray: 1;
+  animation: ql-draw 520ms var(--ease-enter) both;
+}
+.ql-fade {
+  animation: ql-fade 360ms var(--ease-enter) both;
+}
+.ql-ray-glow {
+  filter: drop-shadow(0 0 6px oklch(0.74 0.17 292 / 0.35));
+}
+:root[data-theme='light'] .ql-ray-glow {
+  filter: none;
 }
 
 @media (forced-colors: active) {
