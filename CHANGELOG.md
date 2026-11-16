@@ -296,6 +296,12 @@ parallel execution, partitioning, two-phase commit and Raft — are listed in th
 
 ### Changed
 
+- **CI runs only what a change can affect** — a new `Detect changes` job (`scripts/ci-scope.ts`, plain git, no
+  third-party action) skips every check for a docs-only PR and the three Playwright shards for a change confined to
+  the oracle, CLI, MCP server, package wrappers or build scripts. Markdown a test reads (`STUDY.md`, `CHANGELOG.md`)
+  still counts as code, an unknown path or an unworkable diff runs everything, and `All CI Tests Passed` treats a
+  deliberately skipped job as passed.
+
 - **The Prism theme.** The interface is re-coloured around the logo's idea — one ray in, a spectrum out. The eight
   pipeline stages now walk the hue wheel in pipeline order (parse sky → plan periwinkle → optimize violet → execute
   orchid → buffer coral → index amber → locks lime → result mint) at one perceptual lightness, and that spectrum is

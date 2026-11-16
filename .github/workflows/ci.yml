@@ -19,8 +19,51 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Which jobs this change needs (scripts/ci-scope.ts). A docs-only PR runs none of the checks below;
+  # a change only to the oracle, CLI, MCP server, package wrappers or build scripts skips the Playwright
+  # shards. Plain git, not a paths-filter action: the third-party path-filter actions are exactly the
+  # supply-chain risk the header describes. Workflow-level `paths-ignore` was not used either: it would
+  # leave `ci-gate` unreported on a docs PR, and a required check that never reports blocks the merge.
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.scope.outputs.code }}
+      e2e: ${{ steps.scope.outputs.e2e }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+
+      # A PR is diffed against its merge base with main; a push to main against the commit before it. If
+      # that base is missing (a new branch, a force-push) the list is empty and ci-scope runs everything.
+      - name: Work out the scope
+        id: scope
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          if [ "$EVENT" = "pull_request" ]; then base="$PR_BASE"; range="${base}...HEAD"; else base="$PUSH_BEFORE"; range="${base}..HEAD"; fi
+          changed=""
+          if [ -n "$base" ] && git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            changed="$(git diff --name-only "$range")"
+          fi
+          echo "Changed files:"; echo "${changed:-(could not be worked out — running everything)}"
+          echo "$changed" | node --experimental-strip-types scripts/ci-scope.ts --stdin | tee -a "$GITHUB_OUTPUT"
+
   typecheck:
     name: Typecheck
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -46,6 +89,8 @@ jobs:
 
   lint:
     name: Lint & A11y
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -71,6 +116,8 @@ jobs:
 
   unit-test:
     name: Unit & Integration
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -97,6 +144,8 @@ jobs:
 
   build-and-budget:
     name: Build & Bundle Budget
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -127,6 +176,8 @@ jobs:
 
   cli-test:
     name: CLI Smoke Tests
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -169,6 +220,8 @@ jobs:
   # out in turn, so the slow axe audits are spread over all three instead of filling one.
   e2e-test:
     name: E2E & Accessibility (Playwright & Axe) ${{ matrix.shard }}/3
+    needs: changes
+    if: needs.changes.outputs.e2e == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
@@ -253,21 +306,37 @@ jobs:
             echo "Tick the preview-deploy item in the PR checklist once you have looked at it (see RELEASING.md)." >> "$GITHUB_STEP_SUMMARY"
           fi
 
+  # The one required check. A job skipped because `changes` said its files were untouched counts as
+  # passed; anything else that is not a success — including `changes` itself failing, which skips
+  # everything downstream — fails the gate.
   ci-gate:
     name: All CI Tests Passed
     runs-on: ubuntu-latest
-    needs: [typecheck, lint, unit-test, build-and-budget, cli-test, e2e-test]
+    needs: [changes, typecheck, lint, unit-test, build-and-budget, cli-test, e2e-test]
     if: always()
     steps:
       - name: Check status of all required CI checks
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          RESULTS: >-
+            typecheck=${{ needs.typecheck.result }}
+            lint=${{ needs.lint.result }}
+            unit-test=${{ needs.unit-test.result }}
+            build-and-budget=${{ needs.build-and-budget.result }}
+            cli-test=${{ needs.cli-test.result }}
+            e2e-test=${{ needs.e2e-test.result }}
         run: |
-          if [ "${{ needs.typecheck.result }}" != "success" ] || \
-             [ "${{ needs.lint.result }}" != "success" ] || \
-             [ "${{ needs.unit-test.result }}" != "success" ] || \
-             [ "${{ needs.build-and-budget.result }}" != "success" ] || \
-             [ "${{ needs.cli-test.result }}" != "success" ] || \
-             [ "${{ needs.e2e-test.result }}" != "success" ]; then
+          if [ "$CHANGES" != "success" ]; then
+            echo "Change detection did not succeed ($CHANGES), so nothing was checked."
+            exit 1
+          fi
+          failed=0
+          for r in $RESULTS; do
+            echo "$r"
+            case "${r#*=}" in success|skipped) ;; *) failed=1 ;; esac
+          done
+          if [ "$failed" -ne 0 ]; then
             echo "One or more required CI checks failed."
             exit 1
           fi
-          echo "All CI checks completed successfully!"
+          echo "All CI checks completed successfully (skipped = not affected by this change)."
