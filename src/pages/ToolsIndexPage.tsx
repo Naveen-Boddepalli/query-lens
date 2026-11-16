@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import type { CSSProperties } from 'react';
 import { Link } from 'react-router-dom';
 import { PageHeader } from '../ui/PageHeader.tsx';
 import { cardInteractive, pill } from '../ui/primitives.ts';
@@ -302,17 +303,39 @@ const CATEGORIES: { id: ToolCategory; label: string }[] = [
   { id: 'distributed', label: 'Parallel & Distributed' },
 ];
 
-function DifficultyBadge({ level }: { level: ToolItem['difficulty'] }) {
-  const styles = {
-    Foundation: 'border-edge bg-surface-3/80 text-ink-dim',
-    Intermediate: 'border-accent/40 bg-accent/10 text-accent',
-    Advanced: 'border-hue-violet-ink/30 bg-hue-violet-soft text-ink',
-  }[level];
+/**
+ * Each category borrows the colour of the pipeline stage it lives in, so a
+ * storage tool is the buffer pool's coral everywhere — here, in the tracker,
+ * and on the landing prism.
+ */
+const CATEGORY_STAGE: Record<Exclude<ToolCategory, 'all'>, string> = {
+  storage: 'buffer',
+  indexing: 'index',
+  query: 'execute',
+  transactions: 'lock',
+  distributed: 'parse',
+};
 
+const stageStyle = (category: Exclude<ToolCategory, 'all'>): CSSProperties =>
+  ({ '--stage': `var(--color-stage-${CATEGORY_STAGE[category]})` }) as CSSProperties;
+
+const LEVELS: Record<ToolItem['difficulty'], number> = { Foundation: 1, Intermediate: 2, Advanced: 3 };
+
+/** Difficulty as a three-bar meter plus its word — scannable at a glance,
+ *  and the word keeps it readable without colour. */
+function DifficultyBadge({ level }: { level: ToolItem['difficulty'] }) {
+  const n = LEVELS[level];
   return (
-    <span
-      className={`inline-flex items-center rounded border px-2 py-0.5 font-mono text-[0.68rem] uppercase tracking-wider ${styles}`}
-    >
+    <span className="inline-flex items-center gap-1.5 font-mono text-[0.68rem] uppercase tracking-wider text-ink-dim">
+      <span aria-hidden="true" className="flex items-end gap-0.5">
+        {[1, 2, 3].map((bar) => (
+          <span
+            key={bar}
+            className={`w-1 rounded-sm ${bar <= n ? 'bg-[var(--stage)]' : 'bg-edge'}`}
+            style={{ height: `${String(4 + bar * 3)}px` }}
+          />
+        ))}
+      </span>
       {level}
     </span>
   );
@@ -352,6 +375,11 @@ export function ToolsIndexPage() {
                   : 'text-ink-dim hover:bg-surface-3 hover:text-ink'
               }`}
             >
+              <span
+                aria-hidden="true"
+                className={`h-1.5 w-1.5 rounded-full ${cat.id === 'all' ? 'bg-[image:var(--gradient-spectrum)]' : 'bg-[var(--stage)]'}`}
+                style={cat.id === 'all' ? undefined : stageStyle(cat.id)}
+              />
               <span>{cat.label}</span>
               <span
                 className={`rounded-full px-1.5 py-0.2 font-mono text-[0.68rem] tabular-nums ${
@@ -371,11 +399,13 @@ export function ToolsIndexPage() {
           <Link
             key={tool.id}
             to={tool.href}
-            className={`${cardInteractive} flex flex-col justify-between`}
+            style={stageStyle(tool.category)}
+            className={`${cardInteractive} ql-card-stage flex flex-col justify-between`}
           >
             <div>
               <div className="flex items-center justify-between gap-2">
                 <span className={pill}>
+                  <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-[var(--stage)]" />
                   <span className="font-mono text-[0.7rem] uppercase tracking-wider">{tool.topic}</span>
                 </span>
                 <DifficultyBadge level={tool.difficulty} />
@@ -396,7 +426,7 @@ export function ToolsIndexPage() {
               </span>
               <span
                 aria-hidden="true"
-                className="text-ink-dim transition-transform duration-150 group-hover:translate-x-1 group-hover:text-accent font-mono"
+                className="text-ink-dim transition-transform duration-150 group-hover:translate-x-1 group-hover:text-[var(--stage)] font-mono"
               >
                 &rarr;
               </span>

@@ -726,6 +726,37 @@ body {
   pointer-events: none;
 }
 
+/* A card tinted by its stage (Tools index): a faint wash in its corner. */
+.ql-card-stage {
+  background-image: radial-gradient(
+    80% 60% at 0% 0%,
+    color-mix(in oklch, var(--stage) 16%, transparent),
+    transparent 70%
+  );
+}
+
+/* The route-loading bar: hidden for the first 250ms so a fast chunk never
+   flashes it, then a slice of the spectrum sweeping under the header. */
+@keyframes ql-route-slide {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(250%); }
+}
+.ql-route-progress {
+  position: absolute;
+  inset: 0 0 auto;
+  height: 2px;
+  overflow: hidden;
+  animation: ql-fade 200ms 250ms both;
+}
+.ql-route-progress::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  width: 40%;
+  background-image: var(--gradient-spectrum);
+  animation: ql-route-slide 1.1s var(--ease-morph) infinite;
+}
+
 /* The hero prism's rays drawing themselves once (paths carry pathLength=1).
    `both` keeps them hidden before their delay and drawn after; reduced motion
    shrinks the duration to ~0 so the final frame shows at once. */

@@ -19,9 +19,14 @@ import { Layout } from './ui/Layout.tsx';
  * footer stay put while a page chunk loads.
  */
 
-/** Holds the shell's height so the footer does not jump while a chunk loads. */
+/** Holds the shell's height so the footer does not jump while a chunk loads,
+ *  and shows a thin progress sweep if the load takes longer than a blink. */
 function PageFallback() {
-  return <div className="flex-1" aria-hidden />;
+  return (
+    <div className="relative flex-1" aria-hidden>
+      <div className="ql-route-progress" />
+    </div>
+  );
 }
 
 /** Wraps a lazy page in the one Suspense boundary every route shares. */
