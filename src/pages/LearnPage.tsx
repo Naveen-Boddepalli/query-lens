@@ -1,6 +1,18 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { LESSON_GROUPS, LESSON_INDEX, type LessonGroupId } from './learn/lessonIndex.ts';
+import type { CSSProperties } from 'react';
+
+/** Each track borrows a stage colour (the Prism spectrum), the same mapping the
+ *  Tools index uses, so "storage" is the buffer pool's coral everywhere. */
+const GROUP_STAGE: Record<LessonGroupId, string> = {
+  pipeline: 'optimize',
+  storage: 'buffer',
+  transactions: 'lock',
+  distributed: 'parse',
+};
+const groupStyle = (id: LessonGroupId): CSSProperties =>
+  ({ '--stage': `var(--color-stage-${GROUP_STAGE[id]})` }) as CSSProperties;
 import { clearCompleted, readCompleted } from '../ui/learnProgress.ts';
 import { PageHeader } from '../ui/PageHeader.tsx';
 import { btnGhost, cardInteractive, eyebrow } from '../ui/primitives.ts';
@@ -64,11 +76,11 @@ export function LearnPage() {
               <span className="font-mono text-heading font-semibold text-ink tabular-nums">
                 {completeCount} of {LESSON_INDEX.length} complete
               </span>
-              <span className="rounded-full border border-edge bg-surface-3 px-2 py-0.5 font-mono text-micro text-ink tabular-nums">
+              <span className="rounded-full border border-edge bg-surface-3 px-2 py-0.5 font-mono text-label text-ink tabular-nums">
                 {percentComplete}%
               </span>
             </div>
-            <p className="font-mono text-micro text-ink-dim">
+            <p className="font-mono text-label text-ink-dim">
               ~{totalMinutes} min total track · {remainingMinutes} min remaining
             </p>
           </div>
@@ -90,14 +102,14 @@ export function LearnPage() {
         {/* Tactile Sunken Progress Bar */}
         <div className="mt-4 h-2 w-full overflow-hidden rounded-full border border-edge/60 bg-surface/80 p-0.5 shadow-neu-track">
           <div
-            className="h-full rounded-full bg-accent transition-all duration-500 ease-out"
+            className="h-full rounded-full bg-[image:var(--gradient-spectrum)] transition-all duration-500 ease-out"
             style={{ width: `${percentComplete}%` }}
           />
         </div>
 
         {/* Filter Chips */}
         <div className="mt-5 flex flex-wrap items-center gap-1.5 border-t border-edge/60 pt-4">
-          <span className="mr-2 font-mono text-micro uppercase tracking-wider text-ink-dim">
+          <span className="mr-2 font-mono text-label uppercase tracking-wider text-ink-dim">
             Track:
           </span>
           {TRACK_FILTERS.map((filter) => {
@@ -128,9 +140,10 @@ export function LearnPage() {
           const first = LESSON_INDEX.findIndex((l) => l.id === lessons[0]!.id);
 
           return (
-            <section key={group.id} aria-labelledby={`track-${group.id}`} className="relative">
+            <section key={group.id} aria-labelledby={`track-${group.id}`} className="relative" style={groupStyle(group.id)}>
               <div className="mb-4">
-                <h2 id={`track-${group.id}`} className="text-heading font-semibold text-ink">
+                <h2 id={`track-${group.id}`} className="flex items-center gap-2.5 text-heading font-semibold text-ink">
+                  <span aria-hidden="true" className="h-2.5 w-2.5 rounded-full bg-[var(--stage)] shadow-[0_0_10px_var(--stage)]" />
                   {group.title}
                 </h2>
                 <p className="mt-1 text-label text-ink-dim leading-relaxed">{group.about}</p>
@@ -140,7 +153,7 @@ export function LearnPage() {
               <div className="relative mt-6">
                 <div
                   aria-hidden="true"
-                  className="absolute top-6 bottom-6 left-5 hidden w-px bg-edge sm:block"
+                  className="absolute top-6 bottom-6 left-5 hidden w-px bg-gradient-to-b from-[var(--stage)] to-edge sm:block"
                 />
 
                 <ol className="space-y-3.5">
@@ -153,7 +166,7 @@ export function LearnPage() {
                         {/* Roadmap Milestone Marker */}
                         <div
                           aria-hidden="true"
-                          className={`absolute top-4 left-2.5 hidden h-5 w-5 -translate-x-1/2 items-center justify-center rounded-full border text-micro font-mono sm:flex ${
+                          className={`absolute top-4 left-2.5 hidden h-5 w-5 -translate-x-1/2 items-center justify-center rounded-full border text-label font-mono sm:flex ${
                             isComplete
                               ? 'border-hit/60 bg-hit/15 text-hit'
                               : 'border-edge bg-surface-3 text-ink-dim'
@@ -168,15 +181,16 @@ export function LearnPage() {
                         >
                           <div className="flex flex-wrap items-center justify-between gap-2">
                             <div className="flex items-center gap-2">
-                              <span className="flex h-5 w-5 items-center justify-center rounded-full border border-edge bg-surface-3 font-mono text-micro text-ink-dim sm:hidden">
+                              <span className="flex h-5 w-5 items-center justify-center rounded-full border border-edge bg-surface-3 font-mono text-label text-ink-dim sm:hidden">
                                 {lessonIndex + 1}
                               </span>
-                              <span className="rounded border border-edge bg-surface-3/80 px-2 py-0.5 font-mono text-micro text-ink-dim">
+                              <span className="inline-flex items-center gap-1.5 rounded border border-edge bg-surface-3/80 px-2 py-0.5 font-mono text-label text-ink-dim">
+                                <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-[var(--stage)]" />
                                 {group.title}
                               </span>
                             </div>
 
-                            <div className="flex items-center gap-2 font-mono text-micro text-ink-dim">
+                            <div className="flex items-center gap-2 font-mono text-label text-ink-dim">
                               <span>~{lesson.minutes} min</span>
                               {isComplete && (
                                 <span className="inline-flex items-center gap-1 rounded-full border border-hit/40 bg-hit/10 px-2 py-0.5 font-medium text-hit">
@@ -196,7 +210,7 @@ export function LearnPage() {
                             </p>
                           </div>
 
-                          <div className="flex items-center justify-between border-t border-edge/40 pt-2 text-micro text-ink-dim">
+                          <div className="flex items-center justify-between border-t border-edge/40 pt-2 text-label text-ink-dim">
                             <span className="font-mono">Interactive guided track</span>
                             <span className="inline-flex items-center gap-1 font-medium text-ink group-hover:text-accent transition-colors">
                               {isComplete ? 'Review lesson' : 'Start lesson'}

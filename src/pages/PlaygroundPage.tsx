@@ -882,7 +882,7 @@ export function PlaygroundPage() {
           >
             {!prompt && (
               <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
-                <h2 className="text-micro font-semibold tracking-[0.14em] text-ink-dim uppercase">
+                <h2 className="text-label font-semibold tracking-[0.14em] text-ink-dim uppercase">
                   Narration
                 </h2>
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1">

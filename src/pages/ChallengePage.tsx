@@ -158,23 +158,23 @@ function QueryChallengeView({ challengeId }: { challengeId: string | undefined }
           <ArrowLeftIcon className="h-3.5 w-3.5" />
           <span>Challenges Directory</span>
         </Link>
-        <span className="font-mono text-micro text-ink-dim">
+        <span className="font-mono text-label text-ink-dim">
           Puzzle {index + 1} of {ORDER.length}
         </span>
       </div>
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        <span className="rounded border border-edge bg-surface-3/80 px-2 py-0.5 font-mono text-micro uppercase tracking-wider text-ink-dim">
+        <span className="rounded border border-edge bg-surface-3/80 px-2 py-0.5 font-mono text-label uppercase tracking-wider text-ink-dim">
           {challenge.difficulty}
         </span>
-        <span className="rounded border border-edge bg-surface-3/80 px-2 py-0.5 font-mono text-micro text-ink-dim">
+        <span className="rounded border border-edge bg-surface-3/80 px-2 py-0.5 font-mono text-label text-ink-dim">
           {challenge.category}
         </span>
-        <span className="rounded border border-edge bg-surface px-2 py-0.5 font-mono text-micro text-ink-dim">
+        <span className="rounded border border-edge bg-surface px-2 py-0.5 font-mono text-label text-ink-dim">
           dataset: {challenge.database ? 'authors / posts' : dataset}
         </span>
         {solved && (
-          <span className="inline-flex items-center gap-1 rounded-full border border-hit/40 bg-hit/10 px-2 py-0.5 font-mono text-micro font-medium text-hit">
+          <span className="inline-flex items-center gap-1 rounded-full border border-hit/40 bg-hit/10 px-2 py-0.5 font-mono text-label font-medium text-hit">
             <CheckIcon className="h-3 w-3" />
             Solved
           </span>
@@ -235,7 +235,7 @@ function QueryChallengeView({ challengeId }: { challengeId: string | undefined }
 
       {/* Editor & Controls */}
       <div className="mt-6 space-y-3">
-        <div className="flex items-center justify-between text-micro font-mono text-ink-dim">
+        <div className="flex items-center justify-between text-label font-mono text-ink-dim">
           <span>SQL Query Editor</span>
           <button
             type="button"
@@ -252,7 +252,7 @@ function QueryChallengeView({ challengeId }: { challengeId: string | undefined }
           <button type="button" onClick={check} className={btnPrimary}>
             <span>Run &amp; check</span>
           </button>
-          <span className="text-micro text-ink-dim font-mono hidden sm:inline">
+          <span className="text-label text-ink-dim font-mono hidden sm:inline">
             Press Cmd+Enter or Ctrl+Enter to execute
           </span>
         </div>
@@ -265,10 +265,10 @@ function QueryChallengeView({ challengeId }: { challengeId: string | undefined }
           className="ql-sheen rounded-xl border border-edge bg-surface-2/80 p-4 shadow-neu-rest backdrop-blur-md"
         >
           <div className="flex items-center justify-between border-b border-edge/60 pb-2.5">
-            <h3 className="font-mono text-micro uppercase tracking-wider text-ink font-semibold">
+            <h3 className="font-mono text-label uppercase tracking-wider text-ink font-semibold">
               Verification Requirements Checklist
             </h3>
-            <span className="font-mono text-micro text-ink-dim">
+            <span className="font-mono text-label text-ink-dim">
               {run
                 ? `${run.result.error ? 0 : passed ? requirements.length : 1} / ${requirements.length} satisfied`
                 : 'Awaiting run'}
@@ -293,7 +293,7 @@ function QueryChallengeView({ challengeId }: { challengeId: string | undefined }
                 >
                   <div className="flex items-center gap-2.5">
                     <span
-                      className={`flex h-4 w-4 items-center justify-center rounded-full border text-micro ${
+                      className={`flex h-4 w-4 items-center justify-center rounded-full border text-label ${
                         !hasRun
                           ? 'border-edge text-ink-dim'
                           : isSatisfied
@@ -305,7 +305,7 @@ function QueryChallengeView({ challengeId }: { challengeId: string | undefined }
                     </span>
                     <span className={isSatisfied ? 'text-hit' : 'text-ink'}>{req}</span>
                   </div>
-                  <span className="font-mono text-micro">
+                  <span className="font-mono text-label">
                     {!hasRun ? 'pending' : isSatisfied ? 'pass' : 'fail'}
                   </span>
                 </li>
@@ -319,7 +319,7 @@ function QueryChallengeView({ challengeId }: { challengeId: string | undefined }
           <div className="space-y-4">
             {result.error ? (
               <div className="rounded-xl border border-evict/50 bg-evict/10 p-4 text-evict shadow-neu-rest backdrop-blur-md">
-                <p className="font-mono text-micro uppercase tracking-wider font-semibold">
+                <p className="font-mono text-label uppercase tracking-wider font-semibold">
                   Execution Error
                 </p>
                 <p className="mt-1 font-mono text-label">{result.error.message}</p>
@@ -370,31 +370,31 @@ function QueryChallengeView({ challengeId }: { challengeId: string | undefined }
             {!result.error && stats && (
               <dl className="flex flex-wrap gap-x-6 gap-y-2 rounded-xl border border-edge bg-surface-2/80 p-3.5 text-label shadow-neu-rest backdrop-blur-md">
                 <div>
-                  <dt className="text-micro font-mono uppercase text-ink-dim">rows</dt>
+                  <dt className="text-label font-mono uppercase text-ink-dim">rows</dt>
                   <dd className="font-mono tabular-nums text-ink font-semibold">{stats.rows}</dd>
                 </div>
                 <div>
-                  <dt className="text-micro font-mono uppercase text-ink-dim">disk reads</dt>
+                  <dt className="text-label font-mono uppercase text-ink-dim">disk reads</dt>
                   <dd className="font-mono tabular-nums text-miss font-semibold">{stats.diskReads}</dd>
                 </div>
                 <div>
-                  <dt className="text-micro font-mono uppercase text-ink-dim">evictions</dt>
+                  <dt className="text-label font-mono uppercase text-ink-dim">evictions</dt>
                   <dd className="font-mono tabular-nums text-evict font-semibold">{stats.evictions}</dd>
                 </div>
                 <div>
-                  <dt className="text-micro font-mono uppercase text-ink-dim">index used</dt>
+                  <dt className="text-label font-mono uppercase text-ink-dim">index used</dt>
                   <dd className="font-mono text-ink font-semibold">{stats.usesIndex ? 'yes' : 'no'}</dd>
                 </div>
                 <div>
-                  <dt className="text-micro font-mono uppercase text-ink-dim">range scan</dt>
+                  <dt className="text-label font-mono uppercase text-ink-dim">range scan</dt>
                   <dd className="font-mono text-ink font-semibold">{stats.usesRangeScan ? 'yes' : 'no'}</dd>
                 </div>
                 <div>
-                  <dt className="text-micro font-mono uppercase text-ink-dim">sort writes</dt>
+                  <dt className="text-label font-mono uppercase text-ink-dim">sort writes</dt>
                   <dd className="font-mono tabular-nums text-hue-violet-ink font-semibold">{stats.writes}</dd>
                 </div>
                 <div>
-                  <dt className="text-micro font-mono uppercase text-ink-dim">dirty evicts</dt>
+                  <dt className="text-label font-mono uppercase text-ink-dim">dirty evicts</dt>
                   <dd className="font-mono tabular-nums text-evict font-semibold">{stats.dirtyEvictions}</dd>
                 </div>
               </dl>
