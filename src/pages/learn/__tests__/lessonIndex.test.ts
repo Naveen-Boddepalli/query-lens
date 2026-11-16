@@ -8,8 +8,8 @@ import { LESSON_STEP_IDS, LESSONS, lessonById } from '../lessons.tsx';
  * no steps without a lesson, no lesson without steps — and that the manifest itself is well formed.
  */
 describe('the lesson index', () => {
-  it('has the three groups of the track, in order, none of them empty', () => {
-    expect(LESSON_GROUPS.map((g) => g.id)).toEqual(['pipeline', 'storage', 'transactions']);
+  it('has the four groups of the track, in order, none of them empty', () => {
+    expect(LESSON_GROUPS.map((g) => g.id)).toEqual(['pipeline', 'storage', 'transactions', 'distributed']);
     for (const group of LESSON_GROUPS) {
       expect(group.title.length, group.id).toBeGreaterThan(0);
       expect(group.about.length, group.id).toBeGreaterThan(0);

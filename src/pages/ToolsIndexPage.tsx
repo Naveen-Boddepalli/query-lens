@@ -1,9 +1,10 @@
 import { useState } from 'react';
+import type { CSSProperties } from 'react';
 import { Link } from 'react-router-dom';
 import { PageHeader } from '../ui/PageHeader.tsx';
 import { cardInteractive, pill } from '../ui/primitives.ts';
 
-type ToolCategory = 'all' | 'storage' | 'indexing' | 'query' | 'transactions';
+type ToolCategory = 'all' | 'storage' | 'indexing' | 'query' | 'transactions' | 'distributed';
 
 interface ToolItem {
   id: string;
@@ -172,6 +173,28 @@ const TOOLS: ToolItem[] = [
       'Selinger dynamic-programming join-order search over the subset lattice: cheapest way to join every subset, built smallest first with all candidate costs.',
   },
   {
+    id: 'histograms',
+    title: 'Histograms',
+    href: '/tools/histograms',
+    category: 'query',
+    topic: 'Statistics',
+    difficulty: 'Intermediate',
+    metric: 'Equi-depth, 1–100 buckets',
+    description:
+      'ANALYZE with the bucket count you choose: the equi-depth histogram it builds, a range estimate read off it, and the q-error at every bucket count.',
+  },
+  {
+    id: 'parallel',
+    title: 'Parallel execution',
+    href: '/tools/parallel',
+    category: 'query',
+    topic: 'Execution',
+    difficulty: 'Advanced',
+    metric: 'Morsels, up to 8 workers',
+    description:
+      'Morsel-driven parallelism: static ranges, a shared queue or work stealing over workers whose speeds you script, plus exchange operators and a parallel hash join.',
+  },
+  {
     id: 'sort',
     title: 'External merge sort',
     href: '/tools/sort',
@@ -236,6 +259,38 @@ const TOOLS: ToolItem[] = [
     metric: '5 protocols evaluated',
     description:
       'One schedule under five protocols — 2PL, Timestamp Ordering, OCC, Snapshot Isolation, and Serializable Snapshots — comparing throughput and aborts.',
+  },  {
+    id: 'partitioning',
+    title: 'Partitioning',
+    href: '/tools/partitioning',
+    category: 'distributed',
+    topic: 'Distributed',
+    difficulty: 'Intermediate',
+    metric: 'Hash, range, consistent hashing',
+    description:
+      'A table spread over nodes by hash, by range or by consistent hashing. Add or remove a node and count the rows that move — then join across partitions.',
+  },
+  {
+    id: '2pc',
+    title: 'Two-phase commit',
+    href: '/tools/2pc',
+    category: 'distributed',
+    topic: 'Distributed',
+    difficulty: 'Advanced',
+    metric: 'Presumed abort, scripted failures',
+    description:
+      'A coordinator and its participants commit one transaction across machines. Crash either side or lose a message, and watch who is left in doubt, and for how long.',
+  },
+  {
+    id: 'raft',
+    title: 'Raft',
+    href: '/tools/raft',
+    category: 'distributed',
+    topic: 'Distributed',
+    difficulty: 'Advanced',
+    metric: '4 safety properties checked',
+    description:
+      'Leader election and log replication over a schedule you script — lost messages, a partition, a crash — with every server’s role and log drawn over time.',
   },
 ];
 
@@ -245,19 +300,42 @@ const CATEGORIES: { id: ToolCategory; label: string }[] = [
   { id: 'indexing', label: 'Indexing' },
   { id: 'query', label: 'Query & Execution' },
   { id: 'transactions', label: 'Transactions' },
+  { id: 'distributed', label: 'Parallel & Distributed' },
 ];
 
-function DifficultyBadge({ level }: { level: ToolItem['difficulty'] }) {
-  const styles = {
-    Foundation: 'border-edge bg-surface-3/80 text-ink-dim',
-    Intermediate: 'border-accent/40 bg-accent/10 text-accent',
-    Advanced: 'border-hue-violet-ink/30 bg-hue-violet-soft text-ink',
-  }[level];
+/**
+ * Each category borrows the colour of the pipeline stage it lives in, so a
+ * storage tool is the buffer pool's coral everywhere — here, in the tracker,
+ * and on the landing prism.
+ */
+const CATEGORY_STAGE: Record<Exclude<ToolCategory, 'all'>, string> = {
+  storage: 'buffer',
+  indexing: 'index',
+  query: 'execute',
+  transactions: 'lock',
+  distributed: 'parse',
+};
 
+const stageStyle = (category: Exclude<ToolCategory, 'all'>): CSSProperties =>
+  ({ '--stage': `var(--color-stage-${CATEGORY_STAGE[category]})` }) as CSSProperties;
+
+const LEVELS: Record<ToolItem['difficulty'], number> = { Foundation: 1, Intermediate: 2, Advanced: 3 };
+
+/** Difficulty as a three-bar meter plus its word — scannable at a glance,
+ *  and the word keeps it readable without colour. */
+function DifficultyBadge({ level }: { level: ToolItem['difficulty'] }) {
+  const n = LEVELS[level];
   return (
-    <span
-      className={`inline-flex items-center rounded border px-2 py-0.5 font-mono text-[0.68rem] uppercase tracking-wider ${styles}`}
-    >
+    <span className="inline-flex items-center gap-1.5 font-mono text-[0.68rem] uppercase tracking-wider text-ink-dim">
+      <span aria-hidden="true" className="flex items-end gap-0.5">
+        {[1, 2, 3].map((bar) => (
+          <span
+            key={bar}
+            className={`w-1 rounded-sm ${bar <= n ? 'bg-[var(--stage)]' : 'bg-edge'}`}
+            style={{ height: `${String(4 + bar * 3)}px` }}
+          />
+        ))}
+      </span>
       {level}
     </span>
   );
@@ -297,6 +375,11 @@ export function ToolsIndexPage() {
                   : 'text-ink-dim hover:bg-surface-3 hover:text-ink'
               }`}
             >
+              <span
+                aria-hidden="true"
+                className={`h-1.5 w-1.5 rounded-full ${cat.id === 'all' ? 'bg-[image:var(--gradient-spectrum)]' : 'bg-[var(--stage)]'}`}
+                style={cat.id === 'all' ? undefined : stageStyle(cat.id)}
+              />
               <span>{cat.label}</span>
               <span
                 className={`rounded-full px-1.5 py-0.2 font-mono text-[0.68rem] tabular-nums ${
@@ -316,11 +399,13 @@ export function ToolsIndexPage() {
           <Link
             key={tool.id}
             to={tool.href}
-            className={`${cardInteractive} flex flex-col justify-between`}
+            style={stageStyle(tool.category)}
+            className={`${cardInteractive} ql-card-stage flex flex-col justify-between`}
           >
             <div>
               <div className="flex items-center justify-between gap-2">
                 <span className={pill}>
+                  <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-[var(--stage)]" />
                   <span className="font-mono text-[0.7rem] uppercase tracking-wider">{tool.topic}</span>
                 </span>
                 <DifficultyBadge level={tool.difficulty} />
@@ -341,7 +426,7 @@ export function ToolsIndexPage() {
               </span>
               <span
                 aria-hidden="true"
-                className="text-ink-dim transition-transform duration-150 group-hover:translate-x-1 group-hover:text-accent font-mono"
+                className="text-ink-dim transition-transform duration-150 group-hover:translate-x-1 group-hover:text-[var(--stage)] font-mono"
               >
                 &rarr;
               </span>

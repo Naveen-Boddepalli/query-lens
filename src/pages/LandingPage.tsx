@@ -30,6 +30,10 @@ const START: { title: string; blurb: string; to: string }[] = [
   },
 ];
 
+/** The step numerals borrow three stage colours, so the list reads as part of
+ *  the same spectrum as the hero rather than a generic ordered list. */
+const STEP_TONES = ['text-stage-parse', 'text-stage-optimize', 'text-stage-index'];
+
 const STEPS = [
   ['Type a query.', 'Any SELECT over the seed table — or edit the rows and watch every number downstream change.'],
   ['Predict before each step.', 'The run halts and asks what happens next. Committing to a wrong guess is the part that teaches.'],
@@ -53,10 +57,12 @@ export function LandingPage() {
         <h2 className="mt-14 text-heading font-semibold tracking-tight text-ink">
           Reading a trace
         </h2>
-        <ol className="mt-4 space-y-4">
+        <ol className="mt-5 space-y-5">
           {STEPS.map(([lead, rest], i) => (
             <li key={lead} className="flex gap-4">
-              <span className="mt-0.5 shrink-0 font-mono text-label text-ink-dim tabular-nums">
+              <span
+                className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-current/40 bg-surface-2 font-mono text-label font-semibold tabular-nums shadow-e1 ${STEP_TONES[i] ?? 'text-ink-dim'}`}
+              >
                 {i + 1}
               </span>
               <p className="text-body leading-relaxed text-ink-dim">
@@ -72,12 +78,18 @@ export function LandingPage() {
             <li key={item.to}>
               <Link
                 to={item.to}
-                className="group -mx-3 flex flex-col gap-1 rounded-md px-3 py-4 transition hover:bg-surface-2/50 sm:flex-row sm:items-baseline sm:gap-4"
+                className="group -mx-3 flex flex-col gap-1 rounded-lg px-3 py-4 transition hover:bg-surface-2 sm:flex-row sm:items-baseline sm:gap-4"
               >
                 <span className="w-28 shrink-0 font-medium text-ink transition group-hover:text-accent">
                   {item.title}
                 </span>
-                <span className="text-label leading-relaxed text-ink-dim">{item.blurb}</span>
+                <span className="flex-1 text-label leading-relaxed text-ink-dim">{item.blurb}</span>
+                <span
+                  aria-hidden="true"
+                  className="hidden self-center text-ink-dim transition group-hover:translate-x-1 group-hover:text-accent sm:inline"
+                >
+                  →
+                </span>
               </Link>
             </li>
           ))}

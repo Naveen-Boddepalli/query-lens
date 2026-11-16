@@ -84,12 +84,13 @@ const displayWhere = (sql: string): ASTNode => {
 const locks = (s: LocksScenario) => runLockSteps(s.steps.map((l) => parseLockStep(l)!));
 
 describe('the sandbox lessons are wired into the track', () => {
-  it('put four lessons after the ten Playground ones, and the lock table first among the transactions', () => {
+  it('put four lessons after the thirteen Playground ones, and the lock table first among the transactions', () => {
     const pipeline = LESSON_GROUPS.find((g) => g.id === 'pipeline')!.lessons.map((l) => l.id);
-    // The NULL lesson (plan.md §26 Feature 3) runs in the Playground too, so it closes that run, after errors.
-    expect(pipeline.slice(8, 10)).toEqual(['errors', 'nulls']);
-    expect(pipeline.slice(10, 14)).toEqual(['tokens-and-trees', 'grammar-diagram', 'planner-rules', 'buffer-pool']);
-    expect(pipeline.slice(14)).toEqual(['external-sort', 'hash-join', 'join-order']);
+    // The NULL lesson (plan.md §26 Feature 3), NOT EXISTS (§27.5 S1), the set operations (S3) and the outer joins (S4)
+    // run in the Playground too, so they close that run, after errors — each after the one it builds on.
+    expect(pipeline.slice(8, 13)).toEqual(['errors', 'nulls', 'not-exists', 'set-operations', 'outer-joins']);
+    expect(pipeline.slice(13, 17)).toEqual(['tokens-and-trees', 'grammar-diagram', 'planner-rules', 'buffer-pool']);
+    expect(pipeline.slice(17)).toEqual(['external-sort', 'hash-join', 'join-order', 'histograms', 'parallel', 'exchange']);
     const transactions = LESSON_GROUPS.find((g) => g.id === 'transactions')!.lessons.map((l) => l.id);
     expect(transactions[0]).toBe('lock-table');
   });
@@ -252,8 +253,8 @@ describe('lesson: read the grammar diagram', () => {
 describe('lesson: rewrite rules need each other', () => {
   const S = SANDBOX_SCENARIOS;
 
-  it('there are seven rules, and with all on pushdown then index selection make an IndexScan with age left to check', () => {
-    expect(OPTIMIZER_RULES).toHaveLength(7);
+  it('there are eight rules, and with all on pushdown then index selection make an IndexScan with age left to check', () => {
+    expect(OPTIMIZER_RULES).toHaveLength(8);
     const p = planned(S.plannerAll);
     expect(p.canonical).toEqual(['Project', 'Filter', 'SeqScan']);
     expect(p.fired).toEqual(['predicate-pushdown', 'index-selection']);

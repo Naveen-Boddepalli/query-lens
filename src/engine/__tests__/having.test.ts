@@ -80,9 +80,10 @@ describe('parsing', () => {
     expect(parse('SELECT COUNT(*) FROM emp HAVING COUNT(*) > 1').ok).toBe(true);
   });
 
-  it('COUNT(DISTINCT x) is named as unsupported rather than mis-parsed', () => {
-    const out = parse('SELECT COUNT(DISTINCT dept) FROM emp');
-    expect(!out.ok && out.error.message).toMatch(/COUNT\(DISTINCT/);
+  it('COUNT(DISTINCT x) parses in HAVING (plan.md §27.5 S5); COUNT(DISTINCT *) is refused by name', () => {
+    expect(parse('SELECT dept FROM emp GROUP BY dept HAVING COUNT(DISTINCT pay) > 1').ok).toBe(true);
+    const out = parse('SELECT COUNT(DISTINCT *) FROM emp');
+    expect(!out.ok && out.error.message).toMatch(/COUNT\(DISTINCT \*\)` is not valid SQL/);
   });
 });
 

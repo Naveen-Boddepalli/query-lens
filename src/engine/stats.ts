@@ -16,8 +16,11 @@ import { compareValues } from './value.ts';
 
 /** How many of a column's most frequent values get their own entry, PostgreSQL's own default. */
 const MOST_COMMON_LIMIT = 5;
-/** Buckets in the equi-depth histogram over whatever `mostCommonValues` does not already cover. */
-const HISTOGRAM_BUCKETS = 10;
+/**
+ * Buckets in the equi-depth histogram over whatever `mostCommonValues` does not already cover, unless `ANALYZE … WITH
+ * n BUCKETS` asks for another number (plan.md §27.5 T5). PostgreSQL's default statistics target is 100.
+ */
+export const DEFAULT_HISTOGRAM_BUCKETS = 10;
 /** Below this many non-MCV rows, a histogram is noise, not signal — left empty instead. */
 const MIN_ROWS_FOR_HISTOGRAM = 20;
 
@@ -75,7 +78,7 @@ function correlationOf(values: readonly SqlValue[]): number {
   return pearson(physicalIndex, rank);
 }
 
-function analyzeColumn(rows: readonly Row[], column: string): ColumnStats {
+function analyzeColumn(rows: readonly Row[], column: string, buckets: number): ColumnStats {
   const values = rows.map((row) => row[column] ?? null);
   const nonNull = values.filter((v) => v !== null);
   const nullFraction = values.length === 0 ? 0 : (values.length - nonNull.length) / values.length;
@@ -91,7 +94,7 @@ function analyzeColumn(rows: readonly Row[], column: string): ColumnStats {
   const covered = new Set(mostCommonValues.map((m) => m.value));
 
   const remaining = nonNull.filter((v) => !covered.has(v)).sort(compareValues);
-  const histogramBounds = remaining.length < MIN_ROWS_FOR_HISTOGRAM ? [] : equiDepthBounds(remaining, HISTOGRAM_BUCKETS);
+  const histogramBounds = remaining.length < MIN_ROWS_FOR_HISTOGRAM ? [] : equiDepthBounds(remaining, buckets);
 
   return {
     nDistinct: counts.size,
@@ -102,10 +105,10 @@ function analyzeColumn(rows: readonly Row[], column: string): ColumnStats {
   };
 }
 
-/** The table's statistics, as of right now — what `ANALYZE <table>` computes. */
-export function analyzeTable(table: Table): TableStats {
+/** The table's statistics, as of right now — what `ANALYZE <table> [WITH n BUCKETS]` computes. */
+export function analyzeTable(table: Table, buckets: number = DEFAULT_HISTOGRAM_BUCKETS): TableStats {
   const columns: Record<string, ColumnStats> = {};
-  for (const column of table.columns) columns[column] = analyzeColumn(table.rows, column);
+  for (const column of table.columns) columns[column] = analyzeColumn(table.rows, column, buckets);
   return { rowCount: table.rows.length, columns };
 }
 

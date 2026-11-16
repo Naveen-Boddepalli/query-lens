@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { lazy, Suspense, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   createJoinCompareDatabase,
@@ -88,7 +88,18 @@ import { ScrollRegion } from '../ui/ScrollRegion.tsx';
  *    measured cost (with the filter) is usually lower.
  */
 
-type Mode = 'policies' | 'index' | 'build' | 'aggregate' | 'join' | 'lsm' | 'vectorize';
+type Mode = 'policies' | 'index' | 'build' | 'aggregate' | 'join' | 'lsm' | 'vectorize' | 'parallel';
+const MODES: readonly Mode[] = ['policies', 'index', 'build', 'aggregate', 'join', 'lsm', 'vectorize', 'parallel'];
+
+/** The serial-against-parallel mode (plan.md §27.5 P3) carries the morsel model: fetched only when it is chosen. */
+const ParallelCompare = lazy(() => import('../ui/ParallelCompare.tsx').then((m) => ({ default: m.ParallelCompare })));
+
+/** `?mode=…` opens one comparison (plan.md §27.5 P3 links to the parallel one); `?q=…` its query, where it has one. */
+function readInitial(): { mode: Mode; query: string | undefined } {
+  const p = new URLSearchParams(typeof location === 'undefined' ? '' : location.search);
+  const mode = p.get('mode');
+  return { mode: MODES.includes(mode as Mode) ? (mode as Mode) : 'policies', query: p.get('q') ?? undefined };
+}
 
 /* -------------------------------------------------------------------------- */
 /* Replacement-policy comparison                                              */
@@ -783,6 +794,8 @@ const AGGREGATE_PRESETS = [
   // plan.md §25.4 B2: SELECT DISTINCT rides on the same strategy setting as GROUP BY.
   { label: 'SELECT DISTINCT a low-cardinality column', sql: 'SELECT DISTINCT status FROM orders' },
   { label: 'SELECT DISTINCT a high-cardinality column', sql: 'SELECT DISTINCT customer FROM orders' },
+  // plan.md §27.5 S5: a set per group against a sort on (group, value).
+  { label: 'COUNT(DISTINCT …) per group', sql: 'SELECT status, COUNT(DISTINCT customer) FROM orders GROUP BY status' },
 ] as const;
 
 interface AggregateScorecard {
@@ -1597,7 +1610,7 @@ function VectorizeCompare() {
   );
 }
 
-const MODES: { id: Mode; label: string; sublabel: string }[] = [
+const MODE_TABS: readonly { id: Mode; label: string; sublabel: string }[] = [
   { id: 'policies', label: 'Buffer Policies', sublabel: 'Replacement policies' },
   { id: 'index', label: 'Index Scan vs Seq Scan', sublabel: 'Index vs. sequential scan' },
   { id: 'build', label: 'Index Build', sublabel: 'Index build' },
@@ -1605,10 +1618,12 @@ const MODES: { id: Mode; label: string; sublabel: string }[] = [
   { id: 'join', label: 'Join Algorithms', sublabel: 'JOIN algorithms' },
   { id: 'lsm', label: 'B+Tree vs LSM', sublabel: 'B+Tree vs. LSM tree' },
   { id: 'vectorize', label: 'Vectorization', sublabel: 'Tuple-at-a-time vs. batched' },
+  { id: 'parallel', label: 'Parallel Execution', sublabel: 'Serial vs. parallel' },
 ];
 
 export function ComparePage() {
-  const [mode, setMode] = useState<Mode>('policies');
+  const [initial] = useState(readInitial);
+  const [mode, setMode] = useState<Mode>(initial.mode);
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-5 p-6 sm:p-8">
@@ -1617,7 +1632,7 @@ export function ComparePage() {
       </PageHeader>
 
       <div className={`${segmentedTrack} flex flex-wrap gap-1.5`} role="radiogroup" aria-label="Comparison">
-        {MODES.map((m) => (
+        {MODE_TABS.map((m) => (
           <button
             key={m.id}
             type="button"
@@ -1645,6 +1660,10 @@ export function ComparePage() {
         <JoinCompare />
       ) : mode === 'lsm' ? (
         <LsmCompare />
+      ) : mode === 'parallel' ? (
+        <Suspense fallback={<p className="text-label text-ink-dim">Loading the parallel model…</p>}>
+          <ParallelCompare initialQuery={initial.query} />
+        </Suspense>
       ) : (
         <VectorizeCompare />
       )}

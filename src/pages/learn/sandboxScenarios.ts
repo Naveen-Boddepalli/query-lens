@@ -48,6 +48,7 @@ const PLANNER_QUERY = 'SELECT name, email\nFROM users\nWHERE id = 5 AND age > 30
 const ALL_RULES = [
   'constant-folding',
   'predicate-pushdown',
+  'product-to-join',
   'join-predicate-pushdown',
   'join-algorithm-selection',
   'index-selection',

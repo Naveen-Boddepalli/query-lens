@@ -592,10 +592,17 @@ describe('strict two-phase locking (plan.md §25.4 D2)', () => {
 
   it('shows who holds and who waits for what, after every record', () => {
     const result = run(blockedReader, PAGE);
+    // An intention lock on the table above the page lock (plan.md §27.5 T2): B's IS there is granted beside A's IX, and
+    // B waits on the page itself.
     expect(result.steps[1]!.locks).toEqual([
+      { resource: 'the table accounts', holders: [{ session: 'A', mode: 'intention-exclusive' }], waiters: [] },
       { resource: 'page 0', holders: [{ session: 'A', mode: 'exclusive' }], waiters: [] },
     ]);
-    expect(result.steps[2]!.locks[0]!.waiters).toEqual([{ session: 'B', mode: 'shared' }]);
+    expect(result.steps[2]!.locks.find((l) => l.resource === 'the table accounts')!.holders).toEqual([
+      { session: 'A', mode: 'intention-exclusive' },
+      { session: 'B', mode: 'intention-shared' },
+    ]);
+    expect(result.steps[2]!.locks.find((l) => l.resource === 'page 0')!.waiters).toEqual([{ session: 'B', mode: 'shared' }]);
     expect(result.steps.at(-1)!.locks).toEqual([]);
   });
 
@@ -965,7 +972,10 @@ describe('multi-version concurrency control (plan.md §25.4 D4)', () => {
     const result = mvcc(uncommittedWrite, 'read-committed');
     expect(phases(result)).toEqual(['A0:ran', 'A1:ran', 'B2:ran', 'A3:ran']);
     expect(result.steps[2]!.rows).toEqual([{ balance: 100 }]);
+    // The writer's X on the row sits under its IX on the page and the table (plan.md §27.5 T2); the reader took nothing.
     expect(result.steps[2]!.locks).toEqual([
+      { resource: 'the table accounts', holders: [{ session: 'A', mode: 'intention-exclusive' }], waiters: [] },
+      { resource: 'page 0', holders: [{ session: 'A', mode: 'intention-exclusive' }], waiters: [] },
       { resource: 'the row of accounts with id = 1', holders: [{ session: 'A', mode: 'exclusive' }], waiters: [] },
     ]);
     expect(kinds(result)).toEqual([]);
@@ -1710,5 +1720,19 @@ describe('bugs a fuzz found while comparing protocols (plan.md §25.4 D6)', () =
     );
     expect(result.steps.flatMap((s) => s.anomalies.map((a) => a.kind))).toEqual([]);
     expect(result.steps.some((s) => s.session === 'B' && s.phase === 'blocked')).toBe(true);
+  });
+});
+
+describe('a table read under an alias (plan.md §27.5 S7, found in T3)', () => {
+  it('is locked as the stored table it is', () => {
+    const result = runSchedule(
+      steps(['A', 'BEGIN'], ['A', 'SELECT a.balance FROM accounts AS a WHERE a.id = 1'], ['B', 'UPDATE accounts SET balance = 0 WHERE id = 1']),
+      createAccountsDatabase(20),
+      undefined,
+      { granularity: 'row', isolation: 'repeatable-read' },
+    );
+    expect(result.steps[1]!.error).toBeUndefined();
+    expect(result.steps[1]!.locks.map((l) => l.resource)).toContain('the row of accounts with id = 1');
+    expect(result.steps[2]!.phase).toBe('blocked');
   });
 });

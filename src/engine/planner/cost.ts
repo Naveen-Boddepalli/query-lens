@@ -16,7 +16,7 @@
 import type { CompareOp, Expr } from '../parser/index.ts';
 import type { Row, SqlValue, Table } from '../types.ts';
 import { columnsOfIndex } from '../index/spec.ts';
-import { lookupKeysOf } from './plan.ts';
+import { conjuncts, lookupKeysOf, rangeOn } from './plan.ts';
 import type { Plan } from './plan.ts';
 
 /** Default selectivity for an open range with no usable min/max (Selinger et al., 1979). */
@@ -265,9 +265,50 @@ const clampFraction = (f: number): number => Math.min(1, Math.max(0, f));
  * assumes the two parts are independent; `NOT` is the complement. Both are
  * exactly the assumptions plan.md §25.4 C2 later sets out to break on purpose.
  */
+/**
+ * The bounds an `AND` puts on one column, gathered into one range: `amount >= 100 AND amount <= 400` (a `BETWEEN`) is
+ * one fact about `amount`, not two independent ones, so it is priced as `boundedRangeSelectivity` prices it — as an
+ * index range scan already is — rather than as the product of two half-open ranges, which counts the rows outside
+ * each bound twice (plan.md §27.5 T5 found the two disagreeing). Only a column bounded from both sides by numbers is
+ * gathered; anything else is left to the ordinary `AND`.
+ */
+function boundedRanges(parts: readonly Expr[]): { ranges: { column: string; low: number; high: number }[]; rest: Expr[] } {
+  const bounds = new Map<string, { low: number | null; high: number | null; parts: Expr[] }>();
+  for (const part of parts) {
+    if (part.kind !== 'compare') continue;
+    const column = part.left.kind === 'column' ? part.left.name : part.right.kind === 'column' ? part.right.name : null;
+    const range = column === null ? undefined : rangeOn(part, column);
+    if (!column || !range || typeof range.value !== 'number') continue;
+    const b = bounds.get(column) ?? { low: null, high: null, parts: [] };
+    if (range.op === '>' || range.op === '>=') b.low = b.low === null ? range.value : Math.max(b.low, range.value);
+    else b.high = b.high === null ? range.value : Math.min(b.high, range.value);
+    b.parts.push(part);
+    bounds.set(column, b);
+  }
+  const ranges: { column: string; low: number; high: number }[] = [];
+  const gathered = new Set<Expr>();
+  for (const [column, b] of bounds) {
+    if (b.low === null || b.high === null) continue;
+    ranges.push({ column, low: b.low, high: b.high });
+    for (const part of b.parts) gathered.add(part);
+  }
+  return { ranges, rest: parts.filter((part) => !gathered.has(part)) };
+}
+
 export function selectivityOf(expr: Expr, table: Table): Selectivity {
   switch (expr.kind) {
     case 'and': {
+      const { ranges, rest } = boundedRanges(conjuncts(expr));
+      if (ranges.length > 0) {
+        const pieces = [
+          ...ranges.map((r) => boundedRangeSelectivity(r.column, r.low, r.high, table)),
+          ...rest.map((part) => selectivityOf(part, table)),
+        ];
+        return {
+          fraction: pieces.reduce((product, piece) => product * piece.fraction, 1),
+          basis: pieces.map((piece) => piece.basis).join(' × '),
+        };
+      }
       const left = selectivityOf(expr.left, table);
       const right = selectivityOf(expr.right, table);
       return {
@@ -307,6 +348,11 @@ export function selectivityOf(expr: Expr, table: Table): Selectivity {
         fraction: expr.negated ? 1 - LIKE_SELECTIVITY : LIKE_SELECTIVITY,
         basis: expr.negated ? '0.9 default (NOT LIKE)' : '0.1 default (LIKE)',
       };
+    // An uncorrelated EXISTS has already run (plan.md §27.5 S1): its answer is known, the same for every row.
+    case 'exists':
+      return expr.resolved === undefined
+        ? { fraction: 1, basis: 'EXISTS not yet run' }
+        : { fraction: expr.resolved ? 1 : 0, basis: `EXISTS ran once: ${expr.resolved ? 'TRUE' : 'FALSE'}` };
     case 'compare': {
       if (expr.op === '=') return equalitySelectivity(columnName(expr), table, literalValue(expr));
       if (expr.op === '<>') {
@@ -321,6 +367,26 @@ export function selectivityOf(expr: Expr, table: Table): Selectivity {
 }
 
 const clampRows = (value: number): number => Math.max(0, Math.round(value));
+
+/**
+ * The table a plan reads first — its leftmost scan's: a SELECT's `FROM` table, under whatever sits above it. How a
+ * compound query's `SetOp` (plan.md §27.5 S3) finds the table to estimate each of its inputs against.
+ */
+export function baseTableOf(plan: Plan): string {
+  switch (plan.op) {
+    case 'SeqScan':
+    case 'IndexScan':
+    case 'IndexOnlyScan':
+    case 'IndexRangeScan':
+    case 'IndexProbe':
+      return plan.table;
+    case 'Join':
+    case 'SetOp':
+      return baseTableOf(plan.left);
+    default:
+      return baseTableOf(plan.child);
+  }
+}
 
 /** Estimated B+Tree levels for a bulk-loaded index over `rowCount` rows. */
 export function estimateIndexLevels(rowCount: number): number {
@@ -355,6 +421,19 @@ function estimateNode(
 
   let estimate: CostEstimate;
   switch (plan.op) {
+    case 'SetOp': {
+      // Each input is a whole SELECT over its own table (plan.md §27.5 S3), estimated against that table.
+      const left = estimateNode(plan.left, tableNamed(baseTableOf(plan.left)), rowsPerPage, into, otherTables);
+      const right = estimateNode(plan.right, tableNamed(baseTableOf(plan.right)), rowsPerPage, into, otherTables);
+      const estPages = left.estPages + right.estPages;
+      estimate =
+        plan.kind === 'union'
+          ? { estRows: left.estRows + right.estRows, estPages, basis: `${String(left.estRows)} + ${String(right.estRows)}: every row of both` }
+          : plan.kind === 'intersect'
+            ? { estRows: Math.min(left.estRows, right.estRows), estPages, basis: `at most min(${String(left.estRows)}, ${String(right.estRows)}): no row is in both more often than in either` }
+            : { estRows: left.estRows, estPages, basis: `at most ${String(left.estRows)}: EXCEPT can only remove rows from the left` };
+      break;
+    }
     case 'Join': {
       const left = estimateNode(plan.left, tableNamed(plan.leftTable), rowsPerPage, into, otherTables);
       const right = estimateNode(plan.right, tableNamed(plan.rightTable), rowsPerPage, into, otherTables);
@@ -367,11 +446,40 @@ function estimateNode(
       // An `IndexProbe`'s own estimate is *per outer row*, so the full inner size comes from the table itself.
       const rightRows = plan.algorithm === 'index-nested-loop' ? tableNamed(plan.rightTable).rows.length : right.estRows;
       const innerEstimate = clampRows((left.estRows * rightRows) / rightDistinct);
+      // A semi- or anti-join (plan.md §27.5 S1) never produces more rows than its outer side, and never one per match:
+      // under the textbook *containment* assumption, the outer key's distinct values are matched in proportion to how
+      // many distinct keys the inner side has left after its own filter — min(1, that / ndistinct(outer key)). The
+      // anti-join keeps the rest. A residual is not estimated: it is assumed to pass.
+      const semiKind = plan.joinType === 'semi' || plan.joinType === 'anti' ? plan.joinType : null;
+      const outerDistinct = Math.max(1, ndistinct(tableNamed(plan.leftTable), plan.leftColumn));
+      const innerKeys = Math.min(rightDistinct, Math.max(rightRows, 0));
+      const matchedFraction = Math.min(1, innerKeys / outerDistinct);
+      const semiRows = clampRows(left.estRows * matchedFraction);
       // A LEFT JOIN (plan.md §25.4 C3) never drops a left row — the equi-join estimate is a floor, not the answer,
       // whenever it would otherwise guess fewer rows than the outer side alone already has.
-      const estRows = plan.joinType === 'left' ? Math.max(left.estRows, innerEstimate) : innerEstimate;
-      const rowsBasis =
-        plan.joinType === 'left' && estRows === left.estRows && left.estRows > innerEstimate
+      // RIGHT and FULL (plan.md §27.5 S4) floor the estimate at the side they keep whole, as LEFT does at its own; a
+      // cross join is every pair.
+      const estRows =
+        semiKind === 'semi'
+          ? semiRows
+          : semiKind === 'anti'
+            ? Math.max(0, left.estRows - semiRows)
+            : plan.joinType === 'cross'
+              ? clampRows(left.estRows * rightRows)
+              : plan.joinType === 'left'
+                ? Math.max(left.estRows, innerEstimate)
+                : plan.joinType === 'right'
+                  ? Math.max(rightRows, innerEstimate)
+                  : plan.joinType === 'full'
+                    ? Math.max(left.estRows, rightRows, innerEstimate)
+                    : innerEstimate;
+      const rowsBasis = plan.joinType === 'cross'
+        ? `${String(left.estRows)} × ${String(rightRows)}: every pair`
+        : (plan.joinType === 'right' || plan.joinType === 'full') && estRows > innerEstimate
+          ? `${String(estRows)} (every ${plan.joinType === 'full' ? `${plan.leftTable} and ${plan.rightTable}` : plan.rightTable} row survives a ${plan.joinType.toUpperCase()} JOIN; the equi-join estimate alone was only ${String(innerEstimate)})`
+          : semiKind
+        ? `${semiKind === 'anti' ? `${String(left.estRows)} − ` : ''}${String(left.estRows)} × min(1, ${String(innerKeys)} distinct ${plan.rightTable}.${plan.rightColumn} / ${String(outerDistinct)} distinct ${plan.leftTable}.${plan.leftColumn})`
+        : plan.joinType === 'left' && estRows === left.estRows && left.estRows > innerEstimate
           ? `${String(left.estRows)} (every ${plan.leftTable} row survives a LEFT JOIN; the equi-join estimate alone was only ${String(innerEstimate)})`
           : `${String(left.estRows)} × ${String(rightRows)} / ndistinct(${plan.rightTable}.${plan.rightColumn})`;
       switch (plan.algorithm) {
@@ -418,7 +526,9 @@ function estimateNode(
             // `left`/`right` are always a bare SeqScan in v1.
             estRows,
             estPages: left.estPages + left.estRows * right.estPages,
-            basis: `${rowsBasis}; nested-loop rescans ${plan.rightTable} once per ${plan.leftTable} row`,
+            basis: semiKind
+              ? `${rowsBasis}; nested-loop rescans ${plan.rightTable} once per ${plan.leftTable} row — at most, since it stops at the first match`
+              : `${rowsBasis}; nested-loop rescans ${plan.rightTable} once per ${plan.leftTable} row`,
           };
           break;
       }

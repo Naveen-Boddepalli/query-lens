@@ -13,9 +13,9 @@
  * legible when the two are shown side by side.
  */
 
-import type { DeleteStatement, Expr, JoinClause, SelectStatement, UpdateStatement } from '../parser/index.ts';
+import type { AggregateArg, AggregateFn, DeleteStatement, Expr, JoinClause, SelectStatement, SemiJoinClause, UpdateStatement } from '../parser/index.ts';
 import { exprToSql } from '../parser/print.ts';
-import { aggregateKeyOf, columnKey, selectItemArgColumn, selectItemKey, walkExpr } from '../parser/index.ts';
+import { aggregateKeyOf, columnKey, selectItemKey, walkExpr } from '../parser/index.ts';
 import type { AggregateSpec, Plan, ProjectList } from './plan.ts';
 import type { JoinAlgorithm, Table } from '../types.ts';
 import { indexNameOf, joinIndexFor } from '../index/spec.ts';
@@ -57,24 +57,26 @@ export function isAggregateQuery(ast: SelectStatement): boolean {
  */
 export function aggregateSpecsOf(ast: SelectStatement): AggregateSpec[] {
   const specs = new Map<string, AggregateSpec>();
+  const add = (fn: AggregateFn, arg: AggregateArg) => {
+    const key = aggregateKeyOf(fn, arg);
+    if (specs.has(key)) return;
+    specs.set(key, {
+      key,
+      fn,
+      column: arg.kind === 'star' ? null : columnKey(arg),
+      ...(arg.kind === 'column' && arg.distinct ? { distinct: true } : {}),
+    });
+  };
   if (ast.select.kind === 'columns') {
-    for (const item of ast.select.items) {
-      if (item.kind !== 'aggregate') continue;
-      const key = selectItemKey(item);
-      specs.set(key, { key, fn: item.fn, column: selectItemArgColumn(item) });
-    }
+    for (const item of ast.select.items) if (item.kind === 'aggregate') add(item.fn, item.arg);
   }
   if (ast.having) {
     walkExpr(ast.having, (e) => {
-      if (e.kind !== 'aggregate') return;
-      const key = aggregateKeyOf(e.fn, e.arg);
-      if (!specs.has(key)) specs.set(key, { key, fn: e.fn, column: e.arg.kind === 'star' ? null : columnKey(e.arg) });
+      if (e.kind === 'aggregate') add(e.fn, e.arg);
     });
   }
   const sortBy = ast.orderBy?.aggregate;
-  if (sortBy && !specs.has(ast.orderBy!.column)) {
-    specs.set(ast.orderBy!.column, { key: ast.orderBy!.column, fn: sortBy.fn, column: sortBy.arg.kind === 'star' ? null : columnKey(sortBy.arg) });
-  }
+  if (sortBy) add(sortBy.fn, sortBy.arg);
   return [...specs.values()];
 }
 
@@ -107,8 +109,13 @@ export function effectiveJoinAlgorithm(
   requested: JoinAlgorithm,
   joinTable: Table | undefined,
   rightColumn: string,
+  joinType?: JoinClause['joinType'],
 ): JoinAlgorithm {
+  // A cross join has no key: nested-loop is the only way to pair every row with every row (plan.md §27.5 S4).
+  if (joinType === 'cross') return 'nested-loop';
   if (requested !== 'index-nested-loop') return requested;
+  // RIGHT and FULL keep the inner rows nothing matched — which a probe never visits, so it gives way to a nested-loop.
+  if (joinType === 'right' || joinType === 'full') return 'nested-loop';
   // An index whose *leading* column is the join column will do — a composite one that starts with it is entered
   // through that one-column leftmost prefix.
   return joinTable && joinIndexFor(joinTable, rightColumn) ? requested : 'nested-loop';
@@ -134,7 +141,24 @@ export function buildJoinPlan(
   joinTables?: Record<string, Table>,
 ): Plan {
   let plan: Plan = { op: 'SeqScan', table: fromTable };
+  let previous = fromTable;
   for (const join of joins) {
+    // A cross join (plan.md §27.5 S4) has no ON: every row of the chain so far with every row of its table.
+    if (!join.on) {
+      plan = {
+        op: 'Join',
+        algorithm: 'nested-loop',
+        joinType: 'cross',
+        left: plan,
+        right: { op: 'SeqScan', table: join.table.name },
+        leftTable: previous,
+        rightTable: join.table.name,
+        leftColumn: '',
+        rightColumn: '',
+      };
+      previous = join.table.name;
+      continue;
+    }
     const { left, right } = join.on;
     if (left.kind !== 'column' || right.kind !== 'column') {
       throw new Error('unreachable: checkJoinOn guarantees a JOIN ON is column = column');
@@ -146,7 +170,7 @@ export function buildJoinPlan(
     const leftColumn = newTableIsLeftOperand ? right.name : left.name;
     const leftTable = (newTableIsLeftOperand ? right.table : left.table)!;
     const joinTable = joinTables?.[newTable];
-    const effective = effectiveJoinAlgorithm(algorithm, joinTable, rightColumn);
+    const effective = effectiveJoinAlgorithm(algorithm, joinTable, rightColumn, join.joinType);
     plan = {
       op: 'Join',
       algorithm: effective,
@@ -168,8 +192,59 @@ export function buildJoinPlan(
       leftColumn,
       rightColumn,
     };
+    previous = newTable;
   }
   return plan;
+}
+
+/**
+ * One correlated `[NOT] EXISTS` as a semi-join or anti-join on top of `plan` (plan.md §27.5 S1) — the outer query's
+ * rows so far on the left, a scan (or, for `index-nested-loop`, a probe) of the subquery's table on the right, joined
+ * on the correlation equality. The subquery's own conditions on its own table filter that scan as it reads — they
+ * are its `WHERE`, not the outer query's — so a probe, which has nowhere to put them, gives way to a nested-loop the
+ * way `effectiveJoinAlgorithm` already does without an index. Anything naming both tables is the join's `residual`.
+ * Shared with `emit.ts`'s narration, like `buildJoinPlan`.
+ */
+export function buildSemiJoin(
+  plan: Plan,
+  sj: SemiJoinClause,
+  algorithm: JoinAlgorithm = 'nested-loop',
+  joinTables?: Record<string, Table>,
+): Extract<Plan, { op: 'Join' }> {
+  const innerTable = joinTables?.[sj.table.name];
+  const requested = sj.innerFilter && algorithm === 'index-nested-loop' ? 'nested-loop' : algorithm;
+  const effective = effectiveJoinAlgorithm(requested, innerTable, sj.innerColumn);
+  return {
+    op: 'Join',
+    algorithm: effective,
+    joinType: sj.kind,
+    left: plan,
+    right:
+      effective === 'index-nested-loop'
+        ? {
+            op: 'IndexProbe',
+            table: sj.table.name,
+            column: indexNameOf(joinIndexFor(innerTable!, sj.innerColumn)!.columns),
+            outerTable: sj.outerTable,
+            outerColumn: sj.outerColumn,
+          }
+        : { op: 'SeqScan', table: sj.table.name, ...(sj.innerFilter ? { filter: sj.innerFilter } : {}) },
+    leftTable: sj.outerTable,
+    rightTable: sj.table.name,
+    leftColumn: sj.outerColumn,
+    rightColumn: sj.innerColumn,
+    ...(sj.residual ? { residual: sj.residual } : {}),
+  };
+}
+
+/** `plan` with every semi- and anti-join `ast` carries stacked on top, in source order (plan.md §27.5 S1). */
+export function withSemiJoins(
+  plan: Plan,
+  ast: SelectStatement,
+  algorithm: JoinAlgorithm = 'nested-loop',
+  joinTables?: Record<string, Table>,
+): Plan {
+  return (ast.semiJoins ?? []).reduce<Plan>((below, sj) => buildSemiJoin(below, sj, algorithm, joinTables), plan);
 }
 
 /**
@@ -220,10 +295,12 @@ export function buildPlan(
   joinStrategy: JoinAlgorithm = 'nested-loop',
   joinTables?: Record<string, Table>,
 ): Plan {
-  const scan: Plan =
+  const joined: Plan =
     ast.joins && ast.joins.length > 0
       ? buildJoinPlan(ast.joins, ast.from.name, joinStrategy, joinTables)
       : { op: 'SeqScan', table: ast.from.name };
+  // A correlated EXISTS is a semi-join on top of every JOIN (plan.md §27.5 S1): it only keeps or drops rows.
+  const scan = withSemiJoins(joined, ast, joinStrategy, joinTables);
 
   const filtered: Plan = ast.where
     ? { op: 'Filter', predicate: ast.where, child: scan }

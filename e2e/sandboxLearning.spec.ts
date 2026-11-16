@@ -149,9 +149,10 @@ test('a string of page numbers is a setting, and an empty one is refused in word
 test('rules are checkboxes, and two of them are enough for the lookup', async ({ page }) => {
   await page.goto('/challenges/index-with-two-rules');
   const rules = page.getByRole('group', { name: 'Rules that are on' });
-  await expect(rules.getByRole('checkbox')).toHaveCount(7);
+  await expect(rules.getByRole('checkbox')).toHaveCount(8);
   for (const rule of [
     'constant-folding',
+    'product-to-join',
     'join-predicate-pushdown',
     'join-algorithm-selection',
     'range-index-selection',

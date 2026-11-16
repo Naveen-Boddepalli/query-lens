@@ -1,4 +1,7 @@
 export { runQuery } from './runQuery.ts';
+export { resolveExists } from './exists.ts';
+export { resolveStatementSubqueries } from './subquery.ts';
+export { scopedDatabase } from './scope.ts';
 export {
   MAX_REFERENCES,
   parseReferenceScans,
@@ -22,7 +25,7 @@ export {
 } from './datasets.ts';
 export type { DatasetId, DatasetSpec } from './datasets.ts';
 export { createTracer } from './trace.ts';
-export { parse, toDisplayTree, columnsIn, tokenize } from './parser/index.ts';
+export { compoundDisplayTree, parse, parseQueryStatement, toDisplayTree, columnsIn, tokenize } from './parser/index.ts';
 export type { Token, TokenType } from './parser/index.ts';
 export {
   buildPlan,
@@ -30,6 +33,7 @@ export {
   exprToSql,
   optimize,
   OPTIMIZER_RULES,
+  renamesOf,
   rootEstimate,
   selectivityOf,
   toPlanDisplay,
@@ -45,6 +49,8 @@ export {
   writtenOrderFromAst,
 } from './planner/joinOrder.ts';
 export type { JoinOrderCandidate, JoinOrderEdge, JoinOrderNode, JoinOrderResult, SubsetPlan } from './planner/joinOrder.ts';
+export { connectedPlanCounts, isLeftDeep, planCounts, searchJoinShapes, treeText } from './planner/joinShapes.ts';
+export type { JoinTree, ShapePlan, ShapeSearch, ShapeSplit } from './planner/joinShapes.ts';
 export {
   buildHeap,
   createBufferPool,
@@ -96,6 +102,8 @@ export type { BufferFrame, LockHeld, TraceProjector, ViewState } from './viewSta
 export { DEFAULT_ENGINE_OPTIONS, IMPLEMENTED_STAGES, STAGES } from './types.ts';
 export { analyzeTable, statsToRows } from './stats.ts';
 export { finalPlan, nodeKey } from './explain.ts';
+export { eventKey, planLine } from './eventKey.ts';
+export type { EventKey, EventParams } from './eventKey.ts';
 export type {
   ASTNode,
   ColumnStats,

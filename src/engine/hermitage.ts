@@ -47,13 +47,14 @@ export type EngineKind = 'locks' | 'mvcc' | 'innodb';
  * version whatever its state, so it is the locking engine's dirty reads with write locks; `READ COMMITTED` is a
  * snapshot for each statement; `REPEATABLE READ` is a snapshot for the transaction for plain reads and a current read
  * for writes (`currentWrites`), which is how it differs from PostgreSQL's; and at `SERIALIZABLE` a plain read becomes a
- * locking one, so it is the locking engine again.
+ * locking one, so it is the locking engine again — with InnoDB's next-key locks (plan.md §27.5 T3) where the locks
+ * engine has a predicate lock: the phantom is kept out by a lock on the gap it would go into.
  */
-const INNODB_AT: Record<IsolationLevel, { mvcc: boolean; currentWrites?: boolean }> = {
-  'read-uncommitted': { mvcc: false },
+const INNODB_AT: Record<IsolationLevel, { mvcc: boolean; currentWrites?: boolean; nextKey?: boolean }> = {
+  'read-uncommitted': { mvcc: false, nextKey: true },
   'read-committed': { mvcc: true },
   'repeatable-read': { mvcc: true, currentWrites: true },
-  serializable: { mvcc: false },
+  serializable: { mvcc: false, nextKey: true },
 };
 
 export interface HermitageTest {
@@ -306,6 +307,7 @@ export function runHermitage(test: HermitageTest, level: IsolationLevel, engine:
     isolation: level,
     ...(how.mvcc ? { mvcc: true } : {}),
     ...('currentWrites' in how && how.currentWrites ? { currentWrites: true } : {}),
+    ...('nextKey' in how && how.nextKey ? { nextKey: true } : {}),
   });
   return { test: test.id, level, engine, occurred: test.occurred(result), result };
 }

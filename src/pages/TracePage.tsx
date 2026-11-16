@@ -7,8 +7,8 @@ import {
   REPLACEMENT_POLICY_NAMES,
   runQuery,
 } from '../engine/index.ts';
-import type { Database, ReplacementPolicyName, Stage, StepEvent } from '../engine/index.ts';
-import { readDatasetParam, readShareState } from '../ui/urlState.ts';
+import type { ReplacementPolicyName, Stage, StepEvent } from '../engine/index.ts';
+import { otherColumnsOf, presetWithRows, readDatasetParam, readShareState } from '../ui/urlState.ts';
 import { DATASET_CATALOGUE } from '../ui/datasetCatalogue.ts';
 import { PageHeader } from '../ui/PageHeader.tsx';
 import {
@@ -33,8 +33,13 @@ const SEED = DATASET.make();
 const COLUMNS = SEED.tables[TABLE]?.columns ?? [];
 const DEFAULT_SQL = DATASET_CATALOGUE[DATASET.id].starterSql;
 
-const SHARED = readShareState(search, COLUMNS);
-const RAW_ROWS_PARAM = new URLSearchParams(search).get('d');
+const SHARED = readShareState(search, COLUMNS, otherColumnsOf(SEED, TABLE));
+/**
+ * The link's data, passed on untouched to every link this page writes: the preset (`t`), the main table's rows (`d`)
+ * and a multi-table preset's other tables' (`d.<table>`, plan.md §27.5 S2). Dropping `t` here once sent a copied
+ * `/trace` link back to `users` with another preset's query.
+ */
+const CARRIED_PARAMS = [...new URLSearchParams(search)].filter(([key]) => key === 't' || key === 'd' || key.startsWith('d.'));
 
 // `readShareState` allow-lists `p` to `lru`/`clock` (the Playground's contract).
 // The inspector is a dev tool and runs any of the five, so it parses `p`
@@ -52,11 +57,7 @@ const START_VIEW: View = new URLSearchParams(search).get('v') === 'transcript' ?
 const START = {
   sql: SHARED.sql ?? DEFAULT_SQL,
   policy: START_POLICY,
-  db: ((): Database => {
-    const table = SEED.tables[TABLE];
-    if (!SHARED.rows || !table) return SEED;
-    return { tables: { ...SEED.tables, [TABLE]: { ...table, rows: SHARED.rows } } };
-  })(),
+  db: presetWithRows(SEED, TABLE, SHARED.rows, SHARED.otherRows),
 };
 
 /** A stage name with its colour carried by a small square rather than the
@@ -149,7 +150,7 @@ export function TracePage() {
     const params = new URLSearchParams();
     params.set('q', sql);
     params.set('p', policy);
-    if (RAW_ROWS_PARAM !== null) params.set('d', RAW_ROWS_PARAM);
+    for (const [key, value] of CARRIED_PARAMS) params.set(key, value);
     if (view === 'transcript') params.set('v', 'transcript');
     return params.toString();
   }, [sql, policy, view]);
@@ -179,7 +180,7 @@ export function TracePage() {
     params.set('q', ran.sql);
     params.set('p', ran.policy);
     if (step !== undefined) params.set('s', String(step));
-    if (RAW_ROWS_PARAM !== null) params.set('d', RAW_ROWS_PARAM);
+    for (const [key, value] of CARRIED_PARAMS) params.set(key, value);
     return `/playground?${params.toString()}`;
   };
 

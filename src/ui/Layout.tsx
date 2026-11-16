@@ -3,8 +3,13 @@ import { Outlet, useLocation } from 'react-router-dom';
 import { DisclaimerBanner } from './DisclaimerBanner.tsx';
 import { FirstVisitHint } from './FirstVisitHint.tsx';
 import { TopNav } from './TopNav.tsx';
-import { Footer } from './Footer.tsx';
 import { OPEN_SPOTLIGHT_EVENT } from './spotlight.ts';
+
+/**
+ * The footer is below the fold on every page, and carries the docs site's navigation: fetched after the page itself,
+ * not as part of the shell every route waits for (plan.md §25.4 H8 keeps that small).
+ */
+const Footer = lazy(() => import('./Footer.tsx').then((m) => ({ default: m.Footer })));
 
 const SpotlightDialog = lazy(() =>
   import('./SpotlightDialog.tsx').then((m) => ({ default: m.SpotlightDialog })),
@@ -73,6 +78,8 @@ export function Layout() {
           isLanding ? '' : 'lg:h-dvh lg:overflow-hidden',
         ].join(' ')}
       >
+        {/* The brand line: the eight stage colours, end to end. */}
+        {!isStudy && <div aria-hidden="true" className="ql-spectrum-line shrink-0" />}
         {!isStudy && <DisclaimerBanner />}
         {!isStudy && <TopNav />}
         {showHint && <FirstVisitHint />}
@@ -87,7 +94,11 @@ export function Layout() {
           <Outlet />
         </div>
       </div>
-      {!isStudy && <Footer />}
+      {!isStudy && (
+        <Suspense fallback={null}>
+          <Footer />
+        </Suspense>
+      )}
       {!isStudy && isSpotlightOpen && (
         <Suspense fallback={null}>
           <SpotlightDialog onClose={() => setIsSpotlightOpen(false)} />

@@ -1,8 +1,19 @@
-import type { AggregateArg, AggregateFn, Expr } from './ast.ts';
+import type { AggregateArg, AggregateFn, Expr, TableRef } from './ast.ts';
 
 /** The canonical key an aggregate's value is stored under — `COUNT(*)`, `SUM(age)`, `SUM(t.age)`. */
 export function aggregateKeyOf(fn: AggregateFn, arg: AggregateArg): string {
-  return `${fn}(${arg.kind === 'star' ? '*' : arg.table ? `${arg.table}.${arg.name}` : arg.name})`;
+  if (arg.kind === 'star') return `${fn}(*)`;
+  return `${fn}(${arg.distinct ? 'DISTINCT ' : ''}${arg.table ? `${arg.table}.${arg.name}` : arg.name})`;
+}
+
+/** A table reference as SQL — `employees AS e` for an alias (plan.md §27.5 S7), or just `employees`. */
+export function tableRefSql(ref: TableRef): string {
+  return ref.source === undefined ? ref.name : `${ref.source} AS ${ref.name}`;
+}
+
+/** A string as a SQL literal: quoted, with each `'` inside doubled — the form the tokenizer reads back as the same string. */
+export function sqlString(value: string): string {
+  return `'${value.replaceAll("'", "''")}'`;
 }
 
 /**
@@ -26,9 +37,13 @@ function precedence(expr: Expr): number {
       return expr.op === '+' || expr.op === '-' ? 5 : 6;
     case 'neg':
       return 7;
+    // An atom. An `exists` is one too: its parentheses are part of its syntax, so it never needs another pair — and so
+    // is a scalar subquery's (plan.md §27.5 S6).
     case 'column':
     case 'literal':
     case 'aggregate':
+    case 'exists':
+    case 'scalar':
       return 8;
   }
 }
@@ -44,10 +59,14 @@ export function exprToSql(expr: Expr): string {
   switch (expr.kind) {
     case 'column':
       return expr.table ? `${expr.table}.${expr.name}` : expr.name;
+    // A scalar subquery's answer prints as the subquery that produced it (plan.md §27.5 S6): a computed column keeps the
+    // name it was written with, as SQLite names it, and the text still re-parses to the same query.
     case 'literal':
-      return expr.raw;
+      return expr.scalarSubquery === undefined ? expr.raw : `(${expr.scalarSubquery})`;
     case 'aggregate':
       return aggregateKeyOf(expr.fn, expr.arg);
+    case 'scalar':
+      return `(${expr.sql})`;
     case 'compare':
       return `${at(expr.left, 5)} ${expr.op} ${at(expr.right, 5)}`;
     case 'and':
@@ -60,10 +79,15 @@ export function exprToSql(expr: Expr): string {
       return `${at(expr.operand, 5)} IS ${expr.negated ? 'NOT ' : ''}NULL`;
     case 'in':
       return expr.subquery
-        ? `${at(expr.operand, 5)} ${expr.negated ? 'NOT ' : ''}IN (SELECT ${expr.subquery.column.name} FROM ${expr.subquery.from.name}${expr.subquery.where ? ` WHERE ${exprToSql(expr.subquery.where)}` : ''})`
+        ? `${at(expr.operand, 5)} ${expr.negated ? 'NOT ' : ''}IN (SELECT ${expr.subquery.column.name} FROM ${tableRefSql(expr.subquery.from)}${expr.subquery.where ? ` WHERE ${exprToSql(expr.subquery.where)}` : ''})`
         : `${at(expr.operand, 5)} ${expr.negated ? 'NOT ' : ''}IN (${expr.items.map((i) => at(i, 5)).join(', ')})`;
     case 'like':
       return `${at(expr.operand, 5)} ${expr.negated ? 'NOT ' : ''}LIKE ${at(expr.pattern, 5)}`;
+    case 'exists': {
+      const { select, from, where } = expr.subquery;
+      // The stored table and its alias (plan.md §27.5 S7), so the text re-parses to the same scope.
+      return `EXISTS (SELECT ${select} FROM ${tableRefSql(from)}${where ? ` WHERE ${exprToSql(where)}` : ''})`;
+    }
     case 'arith': {
       // Left-associative: the right operand of a same-level operator needs parentheses (`a - (b - c)`).
       const p = precedence(expr);

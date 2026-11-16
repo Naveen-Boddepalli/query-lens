@@ -1,7 +1,7 @@
 import type { SqlValue } from '../types.ts';
 import type { ArithOp } from '../value.ts';
 import { aggregateKeyOf, exprToSql } from './print.ts';
-export { aggregateKeyOf } from './print.ts';
+export { aggregateKeyOf, tableRefSql } from './print.ts';
 
 export interface Span {
   from: number;
@@ -31,7 +31,11 @@ export type CompareOp = '=' | '<>' | '<' | '>' | '<=' | '>=';
  */
 export type Expr =
   | { kind: 'column'; name: string; table?: string; span: Span }
-  | { kind: 'literal'; value: SqlValue; raw: string; span: Span }
+  /**
+   * `scalarSubquery` marks a literal that was a scalar subquery (plan.md §27.5 S6) until `resolveStatementSubqueries`
+   * ran it — its source text, so the plan can say where the value came from while planning it as the constant it is.
+   */
+  | { kind: 'literal'; value: SqlValue; raw: string; scalarSubquery?: string; span: Span }
   | { kind: 'compare'; op: CompareOp; left: Expr; right: Expr; span: Span }
   | { kind: 'and'; left: Expr; right: Expr; span: Span }
   | { kind: 'or'; left: Expr; right: Expr; span: Span }
@@ -63,10 +67,65 @@ export type Expr =
    * value the aggregate operator computes per group*: at run time it reads the group row's `key`
    * (`aggregateKeyOf`). Only the parser's HAVING context produces one; a WHERE with an aggregate is an error.
    */
-  | { kind: 'aggregate'; fn: AggregateFn; arg: AggregateArg; span: Span };
+  | { kind: 'aggregate'; fn: AggregateFn; arg: AggregateArg; span: Span }
+  /**
+   * `EXISTS (SELECT … FROM t [WHERE …])` (plan.md §27.5 S1): TRUE when the subquery finds at least one row — never
+   * UNKNOWN. `NOT EXISTS` is a `not` around one. Its subquery is a scope of its own, so `childrenOf` does not enter
+   * it: its `WHERE` may name the outer query's tables (a *correlated* subquery), and every column there is qualified.
+   * Only a part of a SELECT's `WHERE` joined by `AND` may be one; `resolveExists` (`src/engine/exists.ts`) turns each
+   * into a semi-join or an anti-join before planning, or — when nothing correlates it — runs it once and records
+   * what it found in `resolved`, keeping the node (as `IN (subquery)` keeps its `subquery`) so the plan can still
+   * say what ran.
+   */
+  | { kind: 'exists'; subquery: ExistsSubquery; resolved?: boolean; span: Span }
+  /**
+   * `(SELECT one_column FROM …)` used as a value (plan.md §27.5 S6): `price > (SELECT AVG(price) FROM products)`.
+   * Uncorrelated by construction — `select` is a whole query of its own, parsed in its own scope, so like `exists`
+   * it has no children here. It runs exactly once, before planning (`resolveStatementSubqueries`), and becomes the
+   * literal it returned — NULL for no row, an error for more than one. `sql` is its source text, for printing.
+   */
+  | { kind: 'scalar'; select: SelectStatement; sql: string; span: Span };
 
-/** What an aggregate reads: `*` (only `COUNT`) or one column. */
-export type AggregateArg = { kind: 'star'; span: Span } | { kind: 'column'; name: string; table?: string; span: Span };
+/**
+ * The subquery inside `EXISTS (…)` (plan.md §27.5 S1): `SELECT * | value | column FROM table [WHERE expr]`. What it
+ * selects never matters — EXISTS asks only whether a row comes back — so `select` is kept as written, for display.
+ * `where`'s columns are all qualified (the parser requires it: the subquery can see its own table and the outer
+ * query's), which is how a reference says whether it is the subquery's own column or a correlated one.
+ */
+export interface ExistsSubquery {
+  select: string;
+  from: TableRef;
+  where?: Expr;
+  span: Span;
+}
+
+/**
+ * A correlated `[NOT] EXISTS`, as planning sees it (plan.md §27.5 S1) — derived by `resolveExists`, never written by
+ * the parser. `semi` keeps an outer row that has at least one match; `anti` keeps one that has none. The key is the
+ * subquery's first equality between one of its own columns (`innerColumn`) and an outer one (`outerTable`.
+ * `outerColumn`); `innerFilter` is the rest of its `WHERE` that names only its own table (unqualified, for its scan);
+ * `residual` is whatever else names both sides (qualified, checked on each candidate pair).
+ */
+export interface SemiJoinClause {
+  kind: 'semi' | 'anti';
+  table: TableRef;
+  outerTable: string;
+  outerColumn: string;
+  innerColumn: string;
+  innerFilter?: Expr;
+  residual?: Expr;
+  /** The `EXISTS` (or `NOT EXISTS`) as written, for the plan's narration. */
+  source: Expr;
+}
+
+/**
+ * What an aggregate reads: `*` (only `COUNT`) or one column — each distinct non-NULL value of it once, with `distinct`
+ * (`COUNT(DISTINCT x)`, plan.md §27.5 S5). The quantifier belongs to the argument, as in SQL's own grammar, so every
+ * key printed from an argument (`aggregateKeyOf`) carries it.
+ */
+export type AggregateArg =
+  | { kind: 'star'; span: Span }
+  | { kind: 'column'; name: string; table?: string; distinct?: boolean; span: Span };
 
 
 /** The aggregate functions v0 supports (plan.md §22.2). */
@@ -95,11 +154,6 @@ export function columnKey(ref: { name: string; table?: string }): string {
   return ref.table ? `${ref.table}.${ref.name}` : ref.name;
 }
 
-/** The row key an aggregate reads, or `null` for `COUNT(*)`. */
-export function selectItemArgColumn(item: Extract<SelectItem, { kind: 'aggregate' }>): string | null {
-  return item.arg.kind === 'star' ? null : columnKey(item.arg);
-}
-
 /** Canonical display key for a SELECT item — its own name, or e.g. `COUNT(*)`, `SUM(age)`. */
 export function selectItemKey(item: SelectItem): string {
   if (item.kind === 'column') return columnKey(item);
@@ -111,9 +165,22 @@ export type SelectList =
   | { kind: 'star'; span: Span }
   | { kind: 'columns'; items: SelectItem[]; span: Span };
 
+/**
+ * A table a statement names. `name` is the name it goes by *in this query* — what its columns are qualified with
+ * and what the plan calls it. With an alias (plan.md §27.5 S7: `FROM employees AS e`, or `FROM employees e`) that is
+ * the alias, and `source` is the stored table it reads; so a table can appear twice under two names (a self-join),
+ * and everything that only scopes — qualifiers, the plan, the joined row's keys — never needs to know.
+ */
 export interface TableRef {
   name: string;
+  /** The stored table, when `name` is an alias for it (plan.md §27.5 S7). */
+  source?: string;
   span: Span;
+}
+
+/** The stored table a reference reads — its own name, or what its alias stands for (plan.md §27.5 S7). */
+export function baseTableOf(ref: TableRef): string {
+  return ref.source ?? ref.name;
 }
 
 /**
@@ -133,9 +200,9 @@ export interface InSubquery {
 }
 
 /**
- * `[INNER | LEFT [OUTER]] JOIN table ON t1.col = t2.col` (plan.md §22.2, `LEFT` since §25.4 C3). `on` is always a
- * single equality between one qualified column from each side — checked at parse time (`checkJoinOn`), so the
- * planner never has to. `RIGHT`/`FULL`/`CROSS` stay out of scope. `ORDER BY`, `GROUP BY`, `HAVING` and aggregates
+ * `[INNER | LEFT [OUTER]] JOIN table ON t1.col = t2.col` (plan.md §22.2, `LEFT` since §25.4 C3; `RIGHT`, `FULL` and
+ * `CROSS` since §27.5 S4). `on` is always a single equality between one qualified column from each side — checked at
+ * parse time (`checkJoinOn`), so the planner never has to — and absent only on a cross join. `ORDER BY`, `GROUP BY`, `HAVING` and aggregates
  * all work over the joined rows (plan.md §26 Feature 1, slices b and c), each column qualified.
  *
  * A `SelectStatement` may chain several of these (plan.md §25.4 C3 slice b), left-deep: `FROM a JOIN b ON … JOIN c
@@ -145,10 +212,17 @@ export interface InSubquery {
  */
 export interface JoinClause {
   table: TableRef;
-  on: Extract<Expr, { kind: 'compare' }>;
-  /** `LEFT [OUTER] JOIN`: every row on the other side of this join survives, NULL-padded when nothing on `table`
-   *  matched it. Absent for a bare `JOIN` or an explicit `INNER JOIN` — the original, still-default inner-join shape. */
-  joinType?: 'left';
+  /** The equality the join matches on — absent exactly for a cross join, which keeps every pair (plan.md §27.5 S4). */
+  on?: Extract<Expr, { kind: 'compare' }>;
+  /**
+   * `LEFT [OUTER] JOIN`: every row on the other side of this join survives, NULL-padded when nothing on `table` matched
+   * it. `RIGHT [OUTER]` (plan.md §27.5 S4) keeps every row of `table` the same way, and `FULL [OUTER]` both; `CROSS`
+   * (or a comma in `FROM`) pairs every row with every row, with no `ON`. Absent for a bare `JOIN` or an explicit
+   * `INNER JOIN` — the original, still-default inner-join shape.
+   */
+  joinType?: 'left' | 'right' | 'full' | 'cross';
+  /** `FROM a, b` — a cross join written with a comma, as a textbook writes one (plan.md §27.5 S4). */
+  comma?: boolean;
   span: Span;
 }
 
@@ -187,6 +261,11 @@ export interface SelectStatement {
   orderBy?: OrderByClause;
   /** `LIMIT n [OFFSET m]` — non-negative whole numbers, checked at parse time. */
   limit?: LimitClause;
+  /**
+   * Each correlated `[NOT] EXISTS` the `WHERE` held, in source order (plan.md §27.5 S1) — set by `resolveExists`
+   * after parsing, never by the parser, with those conjuncts removed from `where`. Planned after every `JOIN`.
+   */
+  semiJoins?: SemiJoinClause[];
   span: Span;
 }
 
@@ -291,7 +370,30 @@ export interface UpdateStatement {
 export interface ExplainStatement {
   kind: 'explain';
   analyze: boolean;
-  select: SelectStatement;
+  /** The query explained: one SELECT, or a compound of several (plan.md §27.5 S3). */
+  select: SelectStatement | CompoundStatement;
+  span: Span;
+}
+
+/** The three set operators (plan.md §27.5 S3): ∪, ∩ and −. */
+export type SetOperator = 'union' | 'intersect' | 'except';
+
+/**
+ * `SELECT … UNION [ALL] SELECT … [ORDER BY col] [LIMIT n [OFFSET m]]` (plan.md §27.5 S3) — two or more SELECTs combined
+ * left to right: `ops[i]` joins `members[i + 1]` to everything before it, so `a UNION b EXCEPT c` is `(a ∪ b) − c`.
+ * Every member returns the same number of columns, matched by position; the result's columns are named by the first
+ * member. `ORDER BY` and `LIMIT` belong to the whole result, written after the last member, and none of the members
+ * may have its own. `ALL` keeps duplicates — on `UNION` only; without it every operator returns each row once, NULLs
+ * counted equal. `INTERSECT` never shares a query with `UNION` or `EXCEPT` (the standard binds it tighter, SQLite
+ * reads them left to right), which the parser refuses rather than choose.
+ */
+export interface CompoundStatement {
+  kind: 'compound';
+  members: SelectStatement[];
+  ops: { op: SetOperator; all: boolean; span: Span }[];
+  /** A column of the result — one the first member names — to sort the combined rows by. */
+  orderBy?: { column: string; direction: 'asc' | 'desc'; span: Span };
+  limit?: LimitClause;
   span: Span;
 }
 
@@ -304,24 +406,32 @@ export interface ExplainStatement {
 export interface AnalyzeStatement {
   kind: 'analyze';
   table: TableRef;
+  /** `WITH n BUCKETS` (plan.md §27.5 T5, MySQL's phrase): how many buckets each histogram gets. Absent: the default. */
+  buckets?: number;
   span: Span;
 }
 
 /** Every statement form `parseStatement` can produce. `parse` stays SELECT-only. */
 export type Statement =
   | SelectStatement
+  | CompoundStatement
   | DeleteStatement
   | InsertStatement
   | UpdateStatement
   | ExplainStatement
   | AnalyzeStatement;
 
-/** The direct sub-expressions of a node, in source order. */
+/**
+ * The direct sub-expressions of a node, in source order. An `exists` has none here: its subquery is a different
+ * scope, and a walk of the outer query's columns must not meet the subquery's.
+ */
 export function childrenOf(expr: Expr): Expr[] {
   switch (expr.kind) {
     case 'column':
     case 'literal':
     case 'aggregate':
+    case 'exists':
+    case 'scalar':
       return [];
     case 'compare':
     case 'and':
@@ -345,6 +455,8 @@ export function mapChildren(expr: Expr, f: (child: Expr) => Expr): Expr {
     case 'column':
     case 'literal':
     case 'aggregate':
+    case 'exists':
+    case 'scalar':
       return expr;
     case 'compare':
     case 'and':

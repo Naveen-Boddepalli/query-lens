@@ -7,6 +7,382 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Work toward **v3** (plan.md §27), built on `version/v3` and `version/v3-remaining` and merged into `main` after
+2.0.0, together with the interface work that landed on `main` since 2.0.0. v3's five new tools — histograms,
+parallel execution, partitioning, two-phase commit and Raft — are listed in the redesigned tools index (under a new
+*Parallel & Distributed* category for the last three) and in Spotlight search.
+
+### Added
+
+- **Narration detail levels** (plan.md §27.5 L2, G5 carried over) — the Playground's Narration box gains *Novice*,
+  *Standard* and *Expert*. Novice keeps the engine's sentence and adds one in plain words the first time each kind of
+  step happens in a trace: what a buffer miss is, why an index helps, what a rewrite never changes. Expert replaces
+  the sentence with a terse line of the step's own fields (`read · page 20 → frame 0`, `n8 · key 5 → child 0`, the
+  plan on one line, the counters at the result). Chosen in the box, by `?detail=novice|expert`, or as a default in
+  Settings; a link's own `detail` wins. Both are looked up by a new `eventKey(event)` in the engine. It derives
+  `{key, params}` from each event's structured body, not from each of the engine's emit sites: the half of H5's
+  event-label refactor that L2 shares. A test holds every kind of step in a broad corpus to a novice line of its
+  own. A step in the first lesson opens at the first buffer miss in novice. There is no challenge: a level changes
+  how a step is told, not what there is to solve.
+
+- **A join across the nodes** (plan.md §27.5 X4) — [Partitioning](/tools/partitioning) gains a second section:
+  2,000 orders and 3,000 payments, each partitioned as you choose, joined on `orders.id = payments.orderId` over two
+  to ten nodes, and priced in rows over the network three ways — co-located (nothing moves, when both tables are
+  spread by the same hash or ring of their join columns), a broadcast of the smaller table, or a shuffle of both by
+  the join key. With payments spread by their own id, four nodes cost 6,000 rows by broadcast against 2,224 by
+  shuffle, and eight nodes 14,000 against 2,627; ranges never line up. A lesson, *Joining across nodes*, and a
+  challenge, *Join in place*. Every strategy's matches are held to a join in one place by a property test. Keys
+  are hashed and matched as the engine's `=` compares them (`'1'` and `TRUE` both equal `1`; NULL equals nothing and
+  stays put in a shuffle) — partitioning had hashed `TRUE` apart from `1`. The parallel tool's payments are now numbered apart from the orders (their own `id` from 10,001), which changes none of
+  its figures.
+
+- **Raft** (plan.md §27.5 X3) — a new tool, [Raft](/tools/raft): leader election and log replication on three or
+  five servers, after the paper's Figure 2, over a schedule you script — a seed for the timeouts and message delays,
+  a share of messages lost, a partition and a crash. The page draws each server's role over time with its term, every
+  log at any tick you choose (entries coloured by term, uncommitted ones dashed), and checks Raft's four safety
+  properties on the run. Five scenarios: a calm election, the leader crashing, the leader cut off in a minority (it
+  takes six commands it can never commit, and drops them when it rejoins), a lossy network, three servers. A new
+  leader's no-op can be turned off. Property tests assert election safety, log matching, leader completeness and state
+  machine safety over 400 seeded random schedules; of six classic mutations each fails at least one test — two of them
+  (a recovering server forgetting its vote, and the Figure 8 commit rule) only once a counterexample found by search
+  was pinned and the commit rule tested on its own. Not modelled, and said so: membership changes, snapshots, client
+  sessions. A lesson, *Raft: one log, many machines*, and a challenge, *Lost in the minority*. With partitioning and
+  two-phase commit, plan.md's 3.3 criterion is met.
+
+- **Two-phase commit** (plan.md §27.5 X2) — a new tool, [Two-phase commit](/tools/2pc): a coordinator and two to
+  five participants commit one transaction with presumed abort, and you script what goes wrong — the votes, a crash
+  of the coordinator at one of five points or of a participant before or after voting, each back after some ticks or
+  never, and a lost message. The page draws each machine's lane with every message (lost ones crossed), every log
+  write and crash, and shades each participant's time in doubt; a table view lists it all. A crash after COMMIT is
+  logged keeps three participants in doubt for 12 ticks and then commits them; a crash a moment before, with nothing
+  logged, ends in a presumed abort; a coordinator that never comes back leaves them in doubt for good. Nine named
+  scenarios, a lesson, *Two-phase commit: in doubt*, and a challenge, *Commit after the wait*. Property tests over
+  random scripts hold the protocol atomic, and live whenever every crashed machine comes back. The tool-coverage test
+  now reads tool paths with digits in them.
+
+- **Partitioning** (plan.md §27.5 X1) — a new tool, [Partitioning](/tools/partitioning): the transactions preset's rows
+  spread over two to ten nodes by **hash**, by **range**, or by **consistent hashing** with up to 64 virtual nodes each.
+  Add a node or take one away, and the page counts the rows that move against the least any change must, draws each
+  node's rows before and after with the skew, shows the ring or the ranges, and says where the next 300 rows would
+  land. Adding a fifth node to four moves 2,399 of 3,000 rows under hash, 375 under range (leaving two nodes half
+  full, and every new id on the last node), and 590 under consistent hashing with 64 points each, all of them to the
+  newcomer. A new lesson group, *Distributed databases*, opens with *Partitioning: hash, range and the ring*, and a
+  challenge, *Grow without the churn*. A property test holds that range and consistent hashing move rows only onto a
+  joining node or off a leaving one.
+
+- **Serial against parallel** (plan.md §27.5 P3) — a new [Compare](/compare?mode=parallel) mode, *Serial vs.
+  parallel*: one query on the transactions preset run once by the engine (its own plan shown) and by up to eight
+  workers in the morsel model, the ticks side by side, and a table for one to eight workers of the speedup,
+  efficiency, what Amdahl's law predicts from the one-worker run's serial fraction, and the Karp–Flatt serial
+  fraction measured from each speedup. Grouped by `id`, Amdahl's law predicts the run within 3%; grouped by account,
+  the merge grows with the workers and Karp–Flatt climbs from 0.054 to 0.102 — 4.66× on eight against Amdahl's 7.46.
+  Compare now opens a mode from its link (`?mode=…&q=…`). A fifth step in the parallel lesson, *Amdahl's ceiling*,
+  and a challenge, *Where a worker stops paying*. With P1 and P2, the course map's *Parallel execution* row is
+  *Partly*: plan.md's 3.2 criterion is met.
+
+- **Exchange operators** (plan.md §27.5 P2) — [Parallel execution](/tools/parallel) gains a second section: a
+  parallel hash join on one to eight workers, by **broadcast** (copy the smaller side to every worker) or
+  **repartition** (hash both sides to the join key's worker), with a **gather** at the end. It shows the rows each
+  worker sent each other as a table, what each then holds, the ticks of each phase, and the other strategy's figures
+  beside the chosen one's. Broadcast wins 200 employees with 5,000 timesheets (603 rows moved against 3,903; 3.58×
+  against 2.84× on four workers), repartition wins 2,000 orders with 3,000 payments (2.72× against 1.60×), and a key
+  with five values leaves three of eight workers empty when hashed. A lesson, *Exchange: broadcast or repartition*,
+  and a challenge, *Bring the rows together*. The model (`engine/exchange.ts`) is checked against the engine's own
+  count over every preset join, strategy and worker count, and against a nested loop over random tables.
+
+- **Parallel execution** (plan.md §27.5 P1) — a new tool, [Parallel execution](/tools/parallel): morsel-driven
+  parallelism after Leis et al. A scan, a filter and an aggregate on the transactions preset are cut into morsels of
+  pages and run by one to eight workers whose speeds you script — nothing runs in parallel, time is ticks — each
+  aggregating into a partial result that one of them merges at the end. Three dispatchers: static ranges, a shared
+  queue, and work stealing over per-worker queues of the morsels in each worker's own memory. The timeline is drawn
+  worker by worker (remote reads and stolen morsels marked; a table view beside it), the speedup is measured against
+  one worker alone, and a table runs one to eight workers under each dispatcher. With one worker three times slower,
+  static ranges reach 1.34×, a shared queue 2.67× and stealing 3.09×. A lesson, *Parallel execution: morsels and the
+  slow worker*, and a challenge, *Outrun the slow worker*. The engine model (`engine/parallel.ts`) is checked by a
+  fuzz holding the merged answer to the serial engine's over random queries, worker counts, dispatchers, morsel sizes
+  and speeds, and another holding the timeline well formed.
+
+- **Equi-depth histograms with a bucket count you choose** (plan.md §27.5 T5) — `ANALYZE table WITH n BUCKETS`
+  (MySQL's phrase; 1 to 100, 10 without it). The new [Histograms](/tools/histograms) tool draws the buckets the
+  engine's own `ANALYZE` builds over a column, reads a range estimate off them — the one `EXPLAIN` gives — and shows
+  its q-error at every bucket count from 1 to 100, against the rows really in the range. On the transactions preset's
+  even amounts the count hardly matters; on a skewed column and a clustered one made in the tool it does, and not
+  monotonically: with ten buckets a range in the gap between two bands is guessed 6.67× too high and a narrow one at a
+  band's edge 55× too low. A lesson, *Histograms: how many buckets an estimate needs*, and a challenge, *Enough
+  buckets for the gap*, where 50 buckets miss and 46 do not. `WITH` and `BUCKETS` are not keywords. Checked by unit
+  tests (the tool's estimate against `EXPLAIN`'s, the parser's refusals), the lesson's quoted figures, the
+  challenge's solutions and near-misses, and an e2e test.
+
+- **Bushy plans** (plan.md §27.5 T4) — [Join order](/tools/join-order) now searches the same subset lattice a second
+  way, trying every split of a subset into an outer and an inner part rather than only which table goes last, and
+  prices bushy plans beside left-deep ones: how many more there are (120 trees against 24 orders for four tables, and a
+  table up to ten), the cheapest of each for the demo query — `(departments ⋈ projects) ⋈ (employees ⋈ timesheets)`,
+  0.5% cheaper — and every split of all four tables it priced. A join whose inner side is itself a join computes it
+  once, writes it out and reads it once per outer row. Every plan for the same tables gets one row estimate, System
+  R's, so plans differ only in shape and the search is exact. An explorer of four tables joined by foreign keys, as a
+  chain or a star with sizes from a menu, shows where a bushy plan wins: *Two pairs* is 24% cheaper bushy, and of the
+  2,592 graphs the menus make, bushy wins in 425, never by more than 1.32×. The engine still runs left-deep chains only.
+  Checked by 9 unit tests — two of them price every plan outright, on random graphs, against the search — with nine of
+  ten mutations failing at least one (the tenth only changes which of two equally cheap plans is shown), and an e2e
+  test.
+
+- **Next-key (gap) locks** (plan.md §27.5 T3) — InnoDB's answer to the phantom, on
+  [Transaction schedules](/tools/schedule) under row locks with *Gap locks: Next-key* (`g=1` in the link). At
+  `REPEATABLE READ` and `SERIALIZABLE` a statement locks each index record it reads and the gap below it — a full scan
+  every record and gap of the table's first unique index, a range only its own, a whole unique key that is there just
+  its row — and an `INSERT`, or an `UPDATE` that moves a key, asks for X on the gap its new key goes into and waits for
+  anyone's S there. So the *Phantom* example's insert now waits and the re-read finds the same rows; `SERIALIZABLE`
+  takes no predicate lock, and `READ COMMITTED` locks no gaps. Gap locks never wait for each other, two inserts into
+  one gap don't either, and a transaction that inserts into its own gap keeps both halves. Each step draws the locks
+  on the index's leaf level, keys in order with the gaps between, open where an insert waits; the new *Gap lock*
+  example shows a range read leaving a row outside it free and an insert past it waiting. The
+  [isolation matrix](/tools/isolation)'s InnoDB column now runs `SERIALIZABLE` on next-key locks (its published cells
+  still agree: write skew on a predicate deadlocks on one gap). Checked by 16 unit tests — one a fuzz of 300 random
+  three-transaction schedules, none of which leaves a cycle in the precedence graph, a phantom or a changed re-read —
+  each of twelve mutations failing at least one, and two e2e tests.
+
+- **Multi-granularity locking** (plan.md §27.5 T2) — the lock table has five modes, **IS, IX, S, SIX and X**, over a
+  table → page → row hierarchy. Their compatibility matrix is computed, not typed in: each mode is what it lets its
+  holder do to the whole resource and below it, and two modes conflict when one writes something the other reads or
+  writes — the result is the textbook's matrix, which a test holds it to. A transaction holds one mode per resource,
+  and asking for more asks for the weakest that covers both (S held, IX asked: SIX). On
+  [Transaction schedules](/tools/schedule) every page or row lock now sits under an intention lock on each resource
+  above it, taken top down (an `UPDATE` under row locks holds IX on the table, IX on the page and X on the row; an
+  `INSERT` says IX on the table before it writes), and at `READ COMMITTED` a statement's IS locks go with its shared
+  ones. No schedule's outcome changes — every Hermitage cell and the protocol fuzz are as they were — only the lock
+  lists are longer. **Lock escalation**, off by default: *Escalation* (`e` in the link) makes a transaction past 2 or 5
+  row locks on a table trade them for one table lock, S or X, and the new *Escalation* example shows the price — a
+  reader of a row nobody touched waits on its IS. The [locks sandbox](/tools/locks) offers all five modes (its scripts
+  read `is`, `ix`, `six`) and draws the matrix with what each mode does. Checked by 11 unit tests (each of ten
+  mutations fails at least one), the lock-script tests, and two e2e tests.
+- **The precedence graph** (plan.md §27.5 T1, the first 3.1 item) — on [Transaction schedules](/tools/schedule),
+  every run drawn as its committed transactions with an arrow for each pair of conflicting operations on a row:
+  **ww**, **wr** and **rw**, a cycle drawn in the warning colour and named (*Cycle: B → A → B … not
+  conflict-serializable*), or the serial order the graph allows. Edges come from the version of each row a statement
+  actually saw, so under snapshots the graph is the multiversion one — a read that did not see an earlier write is an
+  rw edge, as write skew needs. A statement reads by its `WHERE` (Adya's predicate reads): a write counts where it
+  changes what the predicate picks out, so a phantom insert is an edge. What a graph of committed transactions cannot
+  show is listed under it: an aborted read (G1a), an intermediate read (G1b), and a table a rollback left holding
+  another transaction's uncommitted write. Beside it, the replay check `/tools/concurrency` already used, now also on
+  this page, and what it means when they disagree — a cycle the replay passes because the values happened to agree.
+  A table lists every edge with its kind, row and steps, for a screen reader and for checking by hand. The two
+  checks are held against each other on all 120 Hermitage cells and on random interleavings of three transactions
+  under every protocol: no cycle and nothing unseen always means a serial order explains the run, and a run none
+  explains always shows a cycle or something unseen. Checked by 13 unit tests (each of nine mutations of the graph
+  fails at least one) and an e2e test. The replay check now compares every table of the database a run started from
+  (it compared `accounts` only), so it can judge a Hermitage schedule.
+- **Table aliases and self-joins** (plan.md §27.5 S7) — `FROM customers AS c`, or `customers c`, anywhere a SELECT
+  names a table: `FROM`, every `JOIN` form, and the `FROM` of an `EXISTS`, `IN` or scalar subquery. The alias becomes
+  the table's only name in that query (`customers.name` is then refused, and the error says it is called `c`), so one
+  table can appear twice: a self-join, `FROM customers AS c LEFT JOIN customers AS r ON c.referrer = r.id`, or a
+  subquery on its own table — the `customers` preset's question, *who referred nobody?*, as `NOT EXISTS (SELECT *
+  FROM customers r WHERE r.referrer = c.id)`, which a NULL cannot trip the way `NOT IN` is. Every scope sees the alias;
+  only laying out pages asks what it stands for, so both names read the one heap and its indexes — a self-join's
+  second scan finds the first's pages in the pool, and an index nested-loop probes the index already built. Every
+  join algorithm, LEFT/RIGHT/FULL, grouping and compounds work over aliases. The plan says `SeqScan customers AS c`,
+  the narration *a second scan of `customers AS r`*, and relational algebra a rename, `ρ_c(customers)` (`\rho` in
+  LaTeX). A one-table query may now qualify columns with its own table's name or alias (`SELECT c.name FROM
+  customers c`); the qualifier is dropped, as its rows are unqualified. Joining a table to itself without an alias,
+  or an `EXISTS` on the outer query's own table, is refused with the alias to write. The challenge **Who referred
+  whom** (`/challenges/who-referred-whom`) runs on `customers`, which gains *Self-join* and *NOT EXISTS, by alias*
+  chips, and the NULL lesson's NOT IN step points at the NOT EXISTS that works. Checked by 30 unit tests (each of
+  twelve mutations of the new code fails at least one), an e2e test, and the SQLite oracle, which now joins a table
+  to itself and reads it again in its own `EXISTS`; three 10,000-case seeds are clean.
+- **Scalar subqueries** (plan.md §27.5 S6) — `(SELECT one_column FROM …)` wherever a value goes: `WHERE price >
+  (SELECT AVG(price) FROM products)`, a computed column, `HAVING`, an `UPDATE … SET` value, in `SELECT`, `DELETE`
+  and `UPDATE`. Inside it, any one-column SELECT the engine runs — an aggregate, `ORDER BY … LIMIT 1`, a join,
+  another subquery. It runs once, before the outer query is planned, as its own sub-run of the engine, and the plan
+  holds its answer as a constant: constant folding can fold it, an index can serve a comparison with it
+  (`customerId = (SELECT id FROM customers WHERE name = 'alice')` becomes a B+Tree lookup), and the plan's narration
+  says what the subquery returned. No row is NULL; more than one is an error that says how many, underlines the
+  subquery and says how to fix it — PostgreSQL's rule, where SQLite takes the first row (a new ledger entry,
+  `scalar-subquery-many-rows`). It is never correlated (plan.md §27.10): a reference to the outer query's table is
+  refused, and the error points at `EXISTS`. A computed column is named by its text as written, subquery and all.
+  The parse tree draws the subquery's own tree under a *Subquery* node, `/tools/grammar` has `scalarSubquery`, and
+  `/tools/planner` now runs a query's subqueries before planning it — `IN (subquery)` too, which it never did. The
+  challenge **Above average** (`/challenges/above-average`) starts from a typed-in threshold and names the
+  `WHERE price > AVG(price)` mistake; `shop` gains an *Above average* chip. Checked by 17 unit tests (each of ten
+  mutations of the new code fails at least one), an e2e test, and the SQLite oracle, which now compares columns with
+  scalar subqueries — aggregates, and a column sorted by itself and cut to one row, a quarter of them empty — in
+  `WHERE` and `HAVING`, with NoREC computing each subquery by hand; three 10,000-case seeds are clean.
+- **`COUNT(DISTINCT x)`, and `SUM`/`AVG`/`MIN`/`MAX` with `DISTINCT`** (plan.md §27.5 S5) — each distinct non-NULL value
+  of the column once, in the SELECT list, in `HAVING` and as the `ORDER BY` key, grouped or not, over joins and inside
+  a compound. Two values are one exactly when `SELECT DISTINCT` would say so. The hash aggregate keeps a set of the
+  values each group has seen; the sort aggregate adds the column to its sort key — (group, value) — so a repeat sits
+  right after what it repeats and is spotted against the value before it, with no set at all, unless two `DISTINCT`
+  aggregates read different columns, which one sort cannot order (then it keeps sets too, and says why). The plan says
+  which, the sort node's detail reads *sorted on customerId, productId*, and the trace counts what each read and kept
+  (*COUNT(DISTINCT customerId) read 38 values and kept 9*). `COUNT(DISTINCT *)` is refused as the invalid SQL it is.
+  The grammar diagram, the parse tree, the algebra view's γ and EXPLAIN all show it. The challenge **Count each
+  customer once** (`/challenges/count-each-once`) starts from `COUNT(customerId)`'s 38 and wants the 9 — not the 10
+  rows `SELECT DISTINCT customerId` returns, one of them the guests' NULL. `shop` gains a *COUNT(DISTINCT)* chip and
+  [Compare](/compare)'s aggregate mode a *COUNT(DISTINCT …) per group* query. Checked by 24 unit tests (each of nine
+  mutations of the new code fails at least one), an e2e test, and the SQLite oracle, which now makes one column
+  aggregate in four `DISTINCT`, in the SELECT list, `HAVING` and `ORDER BY`; three 10,000-case seeds are clean.
+- **`RIGHT [OUTER] JOIN`, `FULL [OUTER] JOIN`, `CROSS JOIN` and `FROM a, b`** (plan.md §27.5 S4) — the joins a
+  textbook writes, ⟖ ⟗ and ×. `RIGHT` keeps every row of the table it introduces and pads every column of the rows so
+  far with NULL; `FULL` keeps both sides, each unmatched row exactly once; a chain mixes them with inner and `LEFT`
+  joins step by step. Nested-loop, hash and sort-merge each remember which inner rows matched and send the rest out at
+  the end — the trace says when (*2 rows of orders matched nothing, and come out next*); an index nested-loop never
+  visits those rows, so a `RIGHT` or `FULL` asked of it runs as a nested-loop and says why. `CROSS JOIN` and the comma
+  pair every row with every row, always as a nested loop, estimated at left × right. A new rewrite rule,
+  **product-to-join**, turns a cross join with a `WHERE` equality between its two sides into a join on it — σ over ×
+  becomes ⋈ — so `FROM customers, orders WHERE customers.id = orders.customerId` plans exactly as `JOIN … ON` does; it
+  leaves a cross join a later `RIGHT` or `FULL` pads alone, where the `WHERE` has to stay above to remove the padded
+  rows. A `WHERE` on a side a join pads is never pushed below that join, and join reordering leaves any chain with an
+  outer or cross join as written (the trace says an outer join is not commutative). Plan labels read `Right join`,
+  `Full join`, `Cross join`; the algebra view and LaTeX use ⟕ ⟖ ⟗ × (`\times`); `/tools/grammar` draws the new forms.
+  `CROSS JOIN … ON` is refused, pointing at `WHERE`. The lesson **RIGHT, FULL and CROSS JOIN** (`/learn/outer-joins`)
+  and the challenge **Leave no one out** (`/challenges/leave-no-one-out`, a FULL JOIN of 43 rows) run on `shop`, which
+  gains *FULL JOIN* and *CROSS JOIN* chips. Checked by 31 new unit tests (each of eight mutations of the new code fails
+  at least one), an e2e test, and the SQLite oracle, which now generates `RIGHT`, `FULL`, `CROSS` and comma joins —
+  in chains, under `GROUP BY`, and as a product with its key in `WHERE`. Its first run found product-to-join moving a
+  `WHERE` equality below a `RIGHT JOIN`, where the padded rows survived it; fixed before commit, with a test. Three
+  10,000-case seeds are clean.
+- **`UNION [ALL]`, `INTERSECT` and `EXCEPT`** (plan.md §27.5 S3) — two or more SELECTs combined left to right, the
+  relational algebra's ∪, ∩ and −. Rows are matched by position and named by the first SELECT; `ORDER BY` and
+  `LIMIT` belong to the whole result, written once after the last SELECT. Each SELECT is planned and optimized exactly
+  as it would be alone (its trace steps prefixed *SELECT 2 of 2.*), and the set operation sits above them: `UNION ALL`
+  passes both sides; `UNION` adds the `HashDistinct` or `SortDistinct` that `SELECT DISTINCT` uses, so the hash-or-sort
+  choice carries over; `INTERSECT` and `EXCEPT` read the right-hand SELECT into a hash set. Set operators count two
+  NULLs as the same row, so `EXCEPT` finds the shop's three never-ordering customers where `NOT IN` finds none. Every
+  table is laid out once in the buffer pool, so two SELECTs over one table share its pages — the second finds them
+  cached. The plan reads `Union all` / `Intersect (hash)` / `Except (hash)`, the algebra view and LaTeX use ∪ ∩ −,
+  EXPLAIN [ANALYZE] shows them, the parser sandbox draws a compound as one root over each SELECT's tree, and
+  `/tools/grammar` has `compound`, `selectCore` and `setOp`. Refused, with the reason: `INTERSECT` beside `UNION` or
+  `EXCEPT` (the standard and SQLite read that text two ways), `INTERSECT ALL` / `EXCEPT ALL` (SQLite has neither),
+  `UNION DISTINCT`, an `ORDER BY` or `LIMIT` on one SELECT of several, an `ORDER BY` that is not a result column,
+  SELECTs of different widths, a SELECT in parentheses. The lesson **UNION, INTERSECT, EXCEPT** (`/learn/set-operations`)
+  and the challenge **Products nobody ordered** (`/challenges/nobody-ordered-it`, with `EXCEPT`) run on `shop`, which
+  gains an *EXCEPT* chip. Checked by 28 unit tests (each of ten mutations of the new code fails at least one), an e2e
+  test, and the SQLite oracle, which now generates compounds of two or three SELECTs over any of its tables — one
+  table against itself included — with every operator, both distinct strategies, ORDER BY and a page; three 10,000-case
+  seeds are clean.
+- **`shop`, the first preset with more than one table** (plan.md §27.5 S2). `customers` (12), `products` (8) and
+  `orders` (40, indexed on its `customerId` foreign key): three customers never order, one product is never
+  ordered, alice orders seven times, and two orders are a guest's, with no `customerId` — so `JOIN`, `LEFT JOIN`,
+  `EXISTS`, join order and the NOT IN trap all run on a preset, without the Custom editor. Its chips: *JOIN*,
+  *EXISTS*, *NOT EXISTS* (the starter), *NOT IN meets a NULL*, *Orders per customer* and *Three tables*. **Edit
+  data** gains a *Table* picker on a multi-table preset, and edits are now tracked per table: a link carries the
+  main table's rows as `d` and any other edited table's as `d.<table>` — after a `DELETE FROM orders` too — and a
+  trace file carries them as `otherRows`. The lesson **NOT EXISTS is not NOT IN** (`/learn/not-exists`, after
+  *NULL is not a value*) walks the semi-join, the cost of running the subquery per row (about 123 pages against
+  13), the anti-join and the guest's NULL; the challenge **Customers who never ordered** (`/challenges/never-
+  ordered`) starts from the `NOT IN` that finds no one and accepts any query that returns exactly the three. The
+  numbers the lesson quotes are held by its tests; the challenge rejects four near misses and accepts `NOT EXISTS`,
+  a `NOT IN` that keeps its NULLs out, and a `LEFT JOIN`. An e2e test runs the preset, deletes the guest orders and
+  reloads the link; both new pages are in the accessibility audit.
+- **`EXISTS` and `NOT EXISTS`, run as semi-joins and anti-joins** (plan.md §27.5 S1, the first v3 item). An
+  `EXISTS` subquery may be *correlated* — `SELECT name FROM authors WHERE NOT EXISTS (SELECT * FROM posts WHERE
+  posts.authorId = authors.id)` — and every column inside it names its table, the rule a `JOIN` already follows.
+  A correlated one becomes a **semi-join** (⋉: an outer row kept once if anything matches, however many do) or an
+  **anti-join** (▷: kept only if nothing does) at the end of the join chain, run by all four join algorithms and
+  chosen by cost like any other join. Nested-loop is literally "run the subquery again for every outer row,
+  stopping at the first match" — the trace says when it stops — while hash, sort-merge and index nested-loop are
+  the unnested forms, so decorrelation is shown rather than described. The subquery's own conditions filter its
+  scan; one naming both tables is checked on each key-matched pair. An uncorrelated `EXISTS` runs once, before
+  planning, as `SELECT * … LIMIT 1`. The plan labels read `Semi-join (hash) authors ⋉ posts`, the relational-
+  algebra view and *Copy as LaTeX* use ⋉ / ▷ (`\ltimes`, `\triangleright`), `EXPLAIN [ANALYZE]` shows them, and
+  the cost model estimates them by containment (`min(1, distinct inner keys ÷ distinct outer keys)`). Refused,
+  with the reason: `EXISTS` under `OR` or inside another test, in `HAVING`, the `SELECT` list, `DELETE` or
+  `UPDATE`; a correlation with no equality to join on; the outer query's own table, or one another `EXISTS`
+  already reads (no aliases yet); an aggregate in the subquery (always TRUE). `/tools/planner` and `/tools/grammar` know it; `sql.mdx`, `limits.mdx`
+  and the course map say what it does and does not do. Checked by 79 unit tests (each of nine mutations of the new
+  code fails at least one — the one that first slipped through, the pushdown rule, got its own test), an e2e
+  test, and the SQLite oracle, which now generates correlated and uncorrelated `[NOT] EXISTS` — with a residual,
+  over join chains and under `GROUP BY` — and a NoREC reference that re-runs the subquery per row; three
+  10,000-case seeds are clean. Reachable today through the Custom editor, `/tools/planner`, the CLI and the MCP
+  server; a multi-table preset (S2) brings it to the Playground's own data.
+
+### Changed
+
+- **The Prism theme.** The interface is re-coloured around the logo's idea — one ray in, a spectrum out. The eight
+  pipeline stages now walk the hue wheel in pipeline order (parse sky → plan periwinkle → optimize violet → execute
+  orchid → buffer coral → index amber → locks lime → result mint) at one perceptual lightness, and that spectrum is
+  the theme's only decoration: the 2px brand line over the header, the logo's rays, the hero headline, progress bars,
+  and the hover ring on interactive cards. Dark mode is a plum-tinted near-black with an iris accent; light mode is
+  warm paper with plum ink and white panels. The primary action is a solid iris→orchid button with white text. Every
+  stage label clears 5:1 in both themes.
+- **The landing hero draws the product.** Beside the headline, the logo's prism takes one white `SELECT` ray and
+  splits it into eight labelled stage rays that draw themselves once on load (reduced motion shows the final frame).
+  The stage list under the buttons is eight colour-coded chips, each linking to its stage page.
+- **Each stage wears its own colour in the Playground.** The live tracker chip glows in its stage colour, finished
+  connectors are gradients from one stage into the next, and the main panel takes the active stage's colour as a top
+  rule and corner wash, cross-fading as the trace moves on.
+- **Tools and lessons are colour-coded by stage.** A Tools category or Learn track borrows the colour of the stage it
+  belongs to (storage is the buffer pool's coral everywhere), and difficulty reads as a three-bar meter.
+- **A slow route shows it is loading.** A lazy page that takes longer than 250 ms shows a thin spectrum sweep under the
+  header instead of a blank page.
+
+- **A qualifier naming a table a one-table query does not read** (`SELECT orders.id FROM customers`) is now told
+  *There is no table called `orders` in this query*, not that the column needs no table name.
+- **A `LEFT JOIN` reads ⟕ in the relational-algebra view** (and `\mathbin{⟕}` in LaTeX), not ⋈ — the symbol now says
+  which rows survive. The optimizer has **eight rewrite rules**, with *product-to-join*; `/tools/planner` and the
+  rule-toggling challenges list it.
+- **A SELECT may not name one column twice.** `SELECT n, n` silently returned one column — a result row is keyed by
+  column name — which under a set operator compared the wrong columns; the oracle's first compounds found it. It is now
+  refused, and the error says to alias one (`n AS n2`). SQLite accepts it; the divergence ledger and the answers page
+  record the difference.
+
+### Fixed
+
+- **54 labels were rendering at the wrong size.** They used `text-micro`, a size step retired when the 13px type floor
+  was set, so each silently inherited its parent's size (often the 15px body). They are 13px labels again.
+- **The header crowded the nav at 1024px.** The wordmark and the first nav link sat 16px apart; between 1024px and
+  1280px the search trigger now collapses to its icon.
+
+- **A range on one column was priced as two.** `amount BETWEEN 100 AND 400` under a sequential scan was estimated as
+  the product of `amount >= 100` and `amount <= 400`, counting the rows outside each bound twice — 230 rows for the
+  183 really there, where the index range scan's own formula said 181. Bounds on one column are now gathered into one
+  range for every access path. No other estimate in the test suite moved (plan.md §27.5 T5).
+
+- **A read under an alias took no locks.** Since aliases (S7), the schedule engine looked an aliased table up by its
+  alias and found nothing, so `SELECT … FROM accounts AS a` under locking locked no row. It locks the stored table now
+  (plan.md §27.5 T3).
+
+- **A nested loop in a pool with too few frames answered wrongly.** A scan holds its current page pinned while the
+  scans inside a nested loop run; when every frame was pinned, the scan that needed one more quietly ended as if its
+  table had — a three-table nested loop with two frames returned no rows, and a `NOT EXISTS` whose subquery could not
+  read kept every row. It is now an error that says so, as PostgreSQL's *no unpinned buffers available* is. Found by
+  the SQLite oracle once self-joins let a query read four tables at once.
+- **The FAQ's "What SQL is missing?" was two releases stale.** It still listed subqueries, outer joins, more than one
+  `JOIN`, `UNION` and `COUNT(DISTINCT …)` as missing; it now lists what is: scalar subqueries, table aliases, window
+  functions, CTEs and `SELECT *, expr`.
+- **On a phone, a docs heading reached by its anchor landed under the sticky header.** v3's header wrapped to
+  about 167px at 360px wide, so v3 padded the scroll area by the header's measured height. The redesigned header on
+  `main` is one compact row with a drawer, so the merge keeps `main`'s fixed `5rem` heading margin instead: the
+  measured padding made the accessibility audit flag targets partly under the header at 360px on `/playground` and
+  `/tools/raft`.
+- **`/trace` dropped the dataset from its own links.** Opened with `?t=logins`, it wrote back an address — and
+  links into the Playground — with `q`, `p` and `d` but no `t`, so a copied link reran the query against `users`.
+  It now carries `t`, `d` and every `d.<table>`; an e2e assertion holds it.
+- **A string holding a quote was printed back as SQL that did not parse.** `name = 'it''s'` printed as
+  `name = 'it's'` — in plan labels, a computed column's name and an `IN` subquery's resolved values — breaking
+  `exprToSql`'s promise that its text parses back to the same tree. The oracle found it on its first run with
+  `EXISTS`, whose one-time run re-parses the subquery's printed `WHERE`. Now quoted with the inner quote doubled.
+
+### Added (on `main` since 2.0.0)
+
+- **Spotlight search** — a ⌘K / Ctrl+K dialog over every tool, pipeline stage and docs page, opened from a header
+  button or the mobile drawer, loaded only when first opened.
+
+### Changed (on `main` since 2.0.0)
+
+- **Liquid-glass refinements** — the Spotlight window alone is blurred, the backdrop behind it stays sharp, and the
+  top-left glare on glass surfaces is gone.
+- **Header and footer cleanup** — the GitHub star element and placeholder badges are removed from the header and
+  hero, and the footer is back to a plain three-column layout without fake status indicators.
+- **Dependency updates** (Dependabot): `@modelcontextprotocol/sdk` 1.32.1 → 1.32.2, `actions/upload-artifact`
+  7.0.1 → 7.0.2, `actions/setup-node` 7.0.0 → 7.1.0, `pnpm/action-setup` 6.0.10 → 6.1.1.
+
+### Fixed (on `main` since 2.0.0)
+
+- **New deploys load at once** — the service worker serves navigations network-first, so a visitor no longer gets
+  the previous deploy's page from cache.
+- **Wide plan-tree nodes overlapped** — plan-tree rows are taller, so wide nodes no longer collide.
+- **The Spotlight trigger's accessible name** no longer contains "Query", which collided with other controls'
+  names; standalone tool titles match their canonical names again.
+
 ## [2.0.0] - 2026-11-07
 
 The general availability release of QueryLens 2.0. It ships a complete frontend redesign with a tactile

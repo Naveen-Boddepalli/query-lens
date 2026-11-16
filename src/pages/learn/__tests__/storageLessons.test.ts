@@ -23,6 +23,11 @@ import { demoKeys, HASH_JOIN_LIMITS, planHashJoin } from '../../../ui/hashJoin.t
 import { demoWrites as hashWrites, HASH_LIMITS, planHashIndex } from '../../../ui/hashIndex.ts';
 import { DEMO_INITIAL_KEYS, demoScripts, LATCH_LIMITS, planLatchCrabbing } from '../../../ui/latchCrabbing.ts';
 import { demoWrites as lsmWrites, LSM_LIMITS, planLsm } from '../../../ui/lsm.ts';
+import { estimateAt, HISTOGRAM_LIMITS, isColumnId } from '../../../ui/histogramColumns.ts';
+import { parallelRun } from '../../../ui/parallelPresets.ts';
+import { joinRun } from '../../../ui/exchangePresets.ts';
+import { PARALLEL_COMPARE_QUERIES, parallelComparison } from '../../../ui/parallelComparison.ts';
+import { PARALLEL_LIMITS } from '../../../engine/parallel.ts';
 import { layOutPage } from '../../../ui/slottedPage.ts';
 import { planVectorIndex, VECTOR_LIMITS } from '../../../ui/vectorIndex.ts';
 import { STORAGE_SCENARIOS, storageHref } from '../storageScenarios.ts';
@@ -50,7 +55,7 @@ function lessonsOf(group: LessonGroupId) {
   return ids.map((id) => LESSONS.find((l) => l.id === id)!);
 }
 
-const EXECUTION_IDS = ['external-sort', 'hash-join', 'join-order'];
+const EXECUTION_IDS = ['external-sort', 'hash-join', 'join-order', 'histograms', 'parallel', 'exchange'];
 const EXECUTION_LESSONS = EXECUTION_IDS.map((id) => LESSONS.find((l) => l.id === id)!);
 const STORAGE_LESSONS = lessonsOf('storage');
 
@@ -72,10 +77,10 @@ const count = <T>(items: readonly T[], test: (item: T) => boolean) => items.filt
 
 describe('the storage and execution lessons are wired into the track', () => {
   it('sit in the pipeline group and a group of their own, before the transactions, with unique ids', () => {
-    expect(LESSON_GROUPS.map((g) => g.id)).toEqual(['pipeline', 'storage', 'transactions']);
-    expect(LESSONS).toEqual([...lessonsOf('pipeline'), ...lessonsOf('storage'), ...lessonsOf('transactions')]);
-    // The sort, the hash join and the join order close the pipeline group.
-    expect(lessonsOf('pipeline').slice(-3).map((l) => l.id)).toEqual(EXECUTION_IDS);
+    expect(LESSON_GROUPS.map((g) => g.id)).toEqual(['pipeline', 'storage', 'transactions', 'distributed']);
+    expect(LESSONS).toEqual([...lessonsOf('pipeline'), ...lessonsOf('storage'), ...lessonsOf('transactions'), ...lessonsOf('distributed')]);
+    // The sort, the hash join, the join order and the histograms (plan.md §27.5 T5) close the pipeline group.
+    expect(lessonsOf('pipeline').slice(-EXECUTION_IDS.length).map((l) => l.id)).toEqual(EXECUTION_IDS);
     const ids = LESSONS.map((l) => l.id);
     expect(new Set(ids).size).toBe(ids.length);
     expect(STORAGE_LESSONS.map((l) => l.id)).toEqual([
@@ -113,7 +118,8 @@ describe('the storage and execution lessons are wired into the track', () => {
     const within = (v: number, lo: number, hi: number) => v >= lo && v <= hi;
     for (const s of Object.values(STORAGE_SCENARIOS) as StorageScenario[]) {
       const url = new URL(storageHref(s), 'https://x');
-      expect(url.pathname).toBe(`/tools/${s.tool}`);
+      // Every scenario opens its tool, but Compare's mode (plan.md §27.5 P3), which is a page of its own.
+      expect(url.pathname).toBe(s.tool === 'compare-parallel' ? '/compare' : `/tools/${s.tool}`);
       switch (s.tool) {
         case 'lsm':
           expect(within(s.n, LSM_LIMITS.minWrites, LSM_LIMITS.maxWrites)).toBe(true);
@@ -163,6 +169,23 @@ describe('the storage and execution lessons are wired into the track', () => {
           break;
         case 'join-order':
           expect(url.search).toBe('');
+          break;
+        case 'compare-parallel':
+          expect(url.pathname).toBe('/compare');
+          expect(url.searchParams.get('mode')).toBe('parallel');
+          expect(PARALLEL_COMPARE_QUERIES.map((q) => q.id)).toContain(s.q);
+          break;
+        case 'parallel':
+          expect(within(s.w, PARALLEL_LIMITS.minWorkers, PARALLEL_LIMITS.maxWorkers)).toBe(true);
+          expect(within(s.m, PARALLEL_LIMITS.minMorselPages, PARALLEL_LIMITS.maxMorselPages)).toBe(true);
+          expect(s.s).toHaveLength(s.w);
+          for (const v of s.s) expect(within(v, PARALLEL_LIMITS.minSpeed, PARALLEL_LIMITS.maxSpeed)).toBe(true);
+          if (s.jw !== undefined) expect(within(s.jw, 1, 8)).toBe(true);
+          break;
+        case 'histograms':
+          expect(isColumnId(s.c)).toBe(true);
+          expect(within(s.b, HISTOGRAM_LIMITS.minBuckets, HISTOGRAM_LIMITS.maxBuckets)).toBe(true);
+          expect(within(s.lo, HISTOGRAM_LIMITS.minValue, s.hi) && within(s.hi, s.lo, HISTOGRAM_LIMITS.maxValue)).toBe(true);
           break;
       }
     }
@@ -251,6 +274,88 @@ describe('lesson: join order', () => {
     expect(written.pages / dp.winner.pages).toBeLessThan(5.3);
     const last = Object.fromEntries(dp.winner.candidates.map((c) => [c.addedTable, c.pages]));
     expect(last).toEqual({ projects: 290252, departments: 590050, timesheets: 1501542, employees: 7537542 });
+  });
+});
+
+describe('lesson: histograms', () => {
+  const at = (s: { c: 'amount' | 'skewed' | 'clustered'; b: number; lo: number; hi: number }, b = s.b) => estimateAt(s.c, s.lo, s.hi, b);
+
+  it('ten buckets put a gap in one bucket: 199 estimated, 29 really, 6.67×', () => {
+    const e = at(STORAGE_SCENARIOS.histogramGap);
+    expect([e.estimate, e.actual, e.qError.toFixed(2)]).toEqual([199, 29, '6.67']);
+  });
+
+  it('a hundred buckets: 35, 1.20× — down from 29.87× with one', () => {
+    const e = at(STORAGE_SCENARIOS.histogramGapFine);
+    expect([e.estimate, e.qError.toFixed(2)]).toEqual([35, '1.20']);
+    expect(at(STORAGE_SCENARIOS.histogramGap, 1).qError.toFixed(2)).toBe('29.87');
+  });
+
+  it('a narrow range at a boundary: 110 rows, estimated 1 with ten buckets (55.50×) and 83 with twenty', () => {
+    const e = at(STORAGE_SCENARIOS.histogramEdge);
+    expect([e.actual, e.estimate, e.qError.toFixed(2)]).toEqual([110, 1, '55.50']);
+    expect(at(STORAGE_SCENARIOS.histogramEdge, 20).estimate).toBe(83);
+  });
+
+  it('the even amounts: one bucket estimates 181 of 183', () => {
+    const e = at(STORAGE_SCENARIOS.histogramEven);
+    expect([e.estimate, e.actual]).toEqual([181, 183]);
+  });
+});
+
+describe('lesson: parallel execution', () => {
+  const at = (s: { q: string; w: number; d: 'static' | 'shared' | 'stealing'; m: number; s: readonly number[] }) => parallelRun(s.q, s.w, s.d, s.m, s.s);
+
+  it('four even workers: 3,750 ticks alone, 948 together, 3.96×, an 8-tick merge', () => {
+    const r = at(STORAGE_SCENARIOS.parallelEven);
+    expect([r.serialTicks, r.ticks, r.speedup.toFixed(2), r.merge.end - r.merge.start]).toEqual([3750, 948, '3.96', 8]);
+  });
+
+  it('a slow fourth: static 2,798 ticks (1.34×), a shared queue 2.67×, stealing 1,213 ticks (3.09×) with 6 steals', () => {
+    const fixed = at(STORAGE_SCENARIOS.parallelSlowStatic);
+    expect([fixed.ticks, fixed.speedup.toFixed(2)]).toEqual([2798, '1.34']);
+    expect(at(STORAGE_SCENARIOS.parallelSlowShared).speedup.toFixed(2)).toBe('2.67');
+    const stealing = at(STORAGE_SCENARIOS.parallelSlowStealing);
+    expect([stealing.ticks, stealing.speedup.toFixed(2), stealing.steals]).toEqual([1213, '3.09', 6]);
+  });
+
+  it('by account on eight in Compare: 4.66× where Amdahl promises 7.46 from a 1.04% merge; Karp–Flatt 0.054 → 0.102', () => {
+    const { scaling } = parallelComparison(STORAGE_SCENARIOS.compareByAccount.q, 'stealing', 16);
+    const eight = scaling.points[7]!;
+    expect([eight.speedup.toFixed(2), eight.amdahl.toFixed(2), (scaling.serialFraction * 100).toFixed(2)]).toEqual(['4.66', '7.46', '1.04']);
+    expect([scaling.points[1]!.karpFlatt!.toFixed(3), eight.karpFlatt!.toFixed(3)]).toEqual(['0.054', '0.102']);
+  });
+
+  it('one corner: static 1.71×, stealing 3.22×; one-page morsels steal 93 times', () => {
+    expect(parallelRun('corner', 4, 'static', 16, [1, 1, 1, 1]).speedup.toFixed(2)).toBe('1.71');
+    expect(parallelRun('corner', 4, 'stealing', 16, [1, 1, 1, 1]).speedup.toFixed(2)).toBe('3.22');
+    expect(parallelRun('corner', 4, 'stealing', 1, [1, 1, 1, 1]).steals).toBe(93);
+  });
+});
+
+describe('lesson: exchange', () => {
+  const at = (s: { jq?: string; jw?: number; jx?: 'broadcast' | 'repartition' }) => joinRun(s.jq!, s.jw!, s.jx!);
+
+  it('small with big on four: broadcast moves 603 rows (3.58×), repartition 3,903 (2.84×)', () => {
+    const b = at(STORAGE_SCENARIOS.joinSmallBroadcast);
+    const r = at(STORAGE_SCENARIOS.joinSmallRepartition);
+    expect([b.moved.total, b.speedup.toFixed(2), r.moved.total, r.speedup.toFixed(2)]).toEqual([603, '3.58', 3903, '2.84']);
+  });
+
+  it('big with big: broadcast 6,003 rows (1.60×), repartition 3,751 (2.72×)', () => {
+    const r = at(STORAGE_SCENARIOS.joinBigRepartition);
+    const b = joinRun('big-big', 4, 'broadcast');
+    expect([b.moved.total, b.speedup.toFixed(2), r.moved.total, r.speedup.toFixed(2)]).toEqual([6003, '1.60', 3751, '2.72']);
+  });
+
+  it('five keys on eight: repartition leaves three workers empty (4.44×), broadcast 5.96×', () => {
+    const r = at(STORAGE_SCENARIOS.joinFewKeys);
+    expect([r.held.probe.filter((h) => h === 0).length, r.speedup.toFixed(2), joinRun('few-keys', 8, 'broadcast').speedup.toFixed(2)]).toEqual([3, '4.44', '5.96']);
+  });
+
+  it('every row back on four: the gather takes 3,750 of 6,600 ticks', () => {
+    const r = joinRun('all-rows', 4, 'broadcast');
+    expect([r.phases.find((p) => p.name === 'gather')!.ticks, r.ticks]).toEqual([3750, 6600]);
   });
 });
 

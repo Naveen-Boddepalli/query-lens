@@ -161,7 +161,7 @@ export function BufferPoolPanel({
                   <span
                     title="clock hand is here"
                     aria-label="clock hand"
-                    className="rounded bg-accent/20 px-1 py-0.5 font-mono text-micro font-medium text-accent border border-accent/40"
+                    className="rounded bg-accent/20 px-1 py-0.5 font-mono text-label font-medium text-accent border border-accent/40"
                   >
                     HAND
                   </span>
@@ -193,7 +193,7 @@ export function BufferPoolPanel({
               )}
 
               {mood && (
-                <div className="mt-1 text-label tracking-wide uppercase opacity-90 font-mono text-micro">
+                <div className="mt-1 text-label tracking-wide uppercase opacity-90 font-mono text-label">
                   {mood === 'evict' && lastEvent?.stage === 'buffer' && lastEvent.action === 'evict' && lastEvent.writtenBack
                     ? 'FLUSH DIRTY'
                     : MOOD_TAG[mood]}

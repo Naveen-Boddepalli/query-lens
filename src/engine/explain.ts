@@ -41,7 +41,7 @@ export function finalPlan(events: readonly StepEvent[]): PlanNode | null {
  * it missed. Both sides get the literature's own `+1` smoothing, so a `0` estimate or a `0` actual row count is
  * still a real, finite number rather than a division by zero.
  */
-function qError(estRows: number, actualRows: number): number {
+export function qError(estRows: number, actualRows: number): number {
   return Math.max((estRows + 1) / (actualRows + 1), (actualRows + 1) / (estRows + 1));
 }
 

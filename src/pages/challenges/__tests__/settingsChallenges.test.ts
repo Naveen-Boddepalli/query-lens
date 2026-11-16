@@ -8,6 +8,10 @@ import { demoKeys, HASH_JOIN_LIMITS, planHashJoin } from '../../../ui/hashJoin.t
 import { demoWrites as hashWrites, HASH_LIMITS, planHashIndex } from '../../../ui/hashIndex.ts';
 import { DEMO_INITIAL_KEYS, demoScripts, LATCH_LIMITS, planLatchCrabbing } from '../../../ui/latchCrabbing.ts';
 import { demoWrites as lsmWrites, LSM_LIMITS, planLsm } from '../../../ui/lsm.ts';
+import { PARALLEL_LIMITS } from '../../../engine/parallel.ts';
+import { PARTITION_LIMITS } from '../../../engine/partitioning.ts';
+import { TPC_LINK_LIMITS } from '../../../ui/tpcLinks.ts';
+import { HISTOGRAM_LIMITS } from '../../../ui/histogramColumns.ts';
 import { layOutPage } from '../../../ui/slottedPage.ts';
 import { planVectorIndex, VECTOR_LIMITS } from '../../../ui/vectorIndex.ts';
 import { CHALLENGES } from '../challenges.tsx';
@@ -69,18 +73,25 @@ describe('settings challenges', () => {
         'columnar',
         'hash-index',
         'hash-join',
+        'histograms',
         'isolation',
         'join-order',
         'latch-crabbing',
         'lsm',
         'page',
+        'parallel',
+        'partitioning',
         'planner',
+        'raft',
         'sort',
+        'two-phase-commit',
         'vector-index',
       ].sort(),
     );
-    expect(SETTINGS_CHALLENGES.length).toBe(17);
+    expect(SETTINGS_CHALLENGES.length).toBe(25);
     expect(SETTINGS_CHALLENGES.filter((c) => c.group === 'transactions').map((c) => c.id)).toEqual([
+      'commit-after-the-wait',
+      'lost-in-the-minority',
       'same-level-different-promise',
     ]);
   });
@@ -144,6 +155,11 @@ describe('settings challenges', () => {
       'clock-is-not-lru': { frames: [2, 8] },
       'scan-keeps-the-hot-set': { frames: [2, 8], ring: [0, 4] },
       'third-level': { fanout: [3, 6], keys: [1, 200] },
+      'enough-buckets': { buckets: [HISTOGRAM_LIMITS.minBuckets, HISTOGRAM_LIMITS.maxBuckets] },
+      'outrun-the-slow-worker': { morsel: [PARALLEL_LIMITS.minMorselPages, PARALLEL_LIMITS.maxMorselPages] },
+      'efficiency-floor': { workers: [PARALLEL_LIMITS.minWorkers, PARALLEL_LIMITS.maxWorkers] },
+      'grow-without-churn': { virtual: [PARTITION_LIMITS.minVirtual, PARTITION_LIMITS.maxVirtual] },
+      'commit-after-the-wait': { recover: [0, TPC_LINK_LIMITS.maxRecover] },
     };
     for (const c of SETTINGS_CHALLENGES) {
       const want = ranges[c.id] ?? {};
@@ -172,6 +188,8 @@ describe('settings challenges', () => {
       }
     }
     expect(options('index-with-two-rules', 'rules').map((o) => o.value)).toEqual([...OPTIMIZER_RULES]);
+    // Its brief says every rule starts on: a rule added to the optimizer belongs in the starter too.
+    expect(SETTINGS_CHALLENGES.find((c) => c.id === 'index-with-two-rules')!.starter['rules']!.split(',')).toEqual([...OPTIMIZER_RULES]);
     expect(options('same-level-different-promise', 'anomaly').map((o) => o.label)).toEqual(
       HERMITAGE_TESTS.map((t) => `${t.id} ${t.name}`),
     );
@@ -195,6 +213,20 @@ describe('settings challenges', () => {
     ['more-memory-more-io', { build: 10, probe: 6, page: 2, mem: 3 }],
     ['cheapest-order', { first: 'departments', second: 'employees', third: 'timesheets', fourth: 'projects' }],
     ['cheapest-order', { first: 'timesheets', second: 'employees', third: 'departments', fourth: 'projects' }],
+    ['enough-buckets', { buckets: 46 }],
+    ['enough-buckets', { buckets: 49 }],
+    ['outrun-the-slow-worker', { dispatch: 'stealing', morsel: 16 }],
+    ['outrun-the-slow-worker', { dispatch: 'stealing', morsel: 4 }],
+    ['meet-the-rows', { smallBig: 'broadcast', bigBig: 'repartition', fiveKeys: 'broadcast' }],
+    ['efficiency-floor', { workers: 4 }],
+    ['grow-without-churn', { scheme: 'consistent', virtual: 64 }],
+    ['grow-without-churn', { scheme: 'consistent', virtual: 40 }],
+    ['commit-after-the-wait', { crash: 'after-decision', recover: 10 }],
+    ['commit-after-the-wait', { crash: 'after-first-commit', recover: 12 }],
+    ['lost-in-the-minority', { side: '12', window: 'middle' }],
+    ['lost-in-the-minority', { side: '345', window: 'middle' }],
+    ['join-in-place', { orders: 'hash-id', payments: 'hash-orderId' }],
+    ['join-in-place', { orders: 'consistent-id', payments: 'consistent-orderId' }],
     ['tightest-page', { page: 0, bytes: 202 }],
     ['tightest-page', { page: 5, bytes: 200 }],
     ['split-the-other-bucket', { n: 40, strategy: 'linear', cap: 4, init: 2 }],
@@ -249,6 +281,33 @@ describe('settings challenges', () => {
       ['more-memory-more-io', 'one more page that changes nothing', { build: 12, probe: 20, page: 2, mem: 4 }],
       ['more-memory-more-io', 'a join that fits either way', { build: 12, probe: 20, page: 4, mem: 3 }],
       ['cheapest-order', 'the order as written', {}],
+      ['enough-buckets', 'the default ten', {}],
+      ['enough-buckets', 'fifty, the most allowed, at 2.33×', { buckets: 50 }],
+      ['enough-buckets', 'forty, just short at 1.70×', { buckets: 40 }],
+      ['enough-buckets', 'a hundred: close enough, but too many', { buckets: 100 }],
+      ['outrun-the-slow-worker', 'static ranges: everyone waits for the slow quarter', {}],
+      ['meet-the-rows', 'repartition everything', {}],
+      ['efficiency-floor', 'eight: 58%', {}],
+      ['grow-without-churn', 'hash: 2,399 rows move', {}],
+      ['commit-after-the-wait', 'a crash before the decision: presumed abort', {}],
+      ['lost-in-the-minority', 'a follower cut off: the leader keeps its majority', {}],
+      ['join-in-place', 'payments by their own id', {}],
+      ['join-in-place', 'ranges on both: they never line up', { orders: 'range-id', payments: 'range-orderId' }],
+      ['join-in-place', 'the right key, different schemes', { orders: 'hash-id', payments: 'consistent-orderId' }],
+      ['lost-in-the-minority', 'server 1 alone: a follower again', { side: '1' }],
+      ['lost-in-the-minority', 'the leader’s side, but after the last command', { side: '12', window: 'late' }],
+      ['commit-after-the-wait', 'a crash after it, but back too soon', { crash: 'after-decision', recover: 5 }],
+      ['commit-after-the-wait', 'never back: in doubt for good', { crash: 'after-decision', recover: 0 }],
+      ['grow-without-churn', 'range: 375 move, but skew 1.25', { scheme: 'range' }],
+      ['grow-without-churn', 'a ring of one point each: 1,459 move', { scheme: 'consistent', virtual: 1 }],
+      ['grow-without-churn', 'sixteen points each: 799 move', { scheme: 'consistent', virtual: 16 }],
+      ['efficiency-floor', 'five: 75%', { workers: 5 }],
+      ['efficiency-floor', 'three: still efficient, but not the most', { workers: 3 }],
+      ['meet-the-rows', 'broadcast everything', { smallBig: 'broadcast', bigBig: 'broadcast', fiveKeys: 'broadcast' }],
+      ['meet-the-rows', 'repartition on five keys', { smallBig: 'broadcast', bigBig: 'repartition', fiveKeys: 'repartition' }],
+      ['outrun-the-slow-worker', 'a shared queue: balanced, but its reads are remote', { dispatch: 'shared' }],
+      ['outrun-the-slow-worker', 'stealing with morsels of one page: all dispatch', { dispatch: 'stealing', morsel: 1 }],
+      ['outrun-the-slow-worker', 'stealing with morsels of 64 pages: the last one holds everyone up', { dispatch: 'stealing', morsel: 64 }],
       ['cheapest-order', 'ending on departments', { first: 'employees', second: 'timesheets', third: 'projects', fourth: 'departments' }],
       ['cheapest-order', 'timesheets before the branch that feeds it', { first: 'departments', second: 'timesheets', third: 'employees', fourth: 'projects' }],
       ['tightest-page', 'one byte too few', { page: 0, bytes: 201 }],
@@ -290,7 +349,7 @@ describe('settings challenges', () => {
       ['scan-keeps-the-hot-set', '2Q, which a one-time scan still floods', { policy: 'two-q' }],
       ['scan-keeps-the-hot-set', 'a ring of three in a pool of six', { policy: 'lru', ring: 3 }],
       ['scan-keeps-the-hot-set', 'midpoint LRU, one hit short', { policy: 'midpoint' }],
-      ['index-with-two-rules', 'all seven', {}],
+      ['index-with-two-rules', 'all eight', {}],
       ['index-with-two-rules', 'the index rule alone', { rules: 'index-selection' }],
       ['index-with-two-rules', 'pushdown alone', { rules: 'predicate-pushdown' }],
       ['index-with-two-rules', 'a lookup, but with three rules on', { rules: 'constant-folding,predicate-pushdown,index-selection' }],

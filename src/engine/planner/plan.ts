@@ -4,11 +4,11 @@
  * what the optimizer actually chooses (plan.md §7.2–7.4).
  */
 
-import type { JoinAlgorithm, PlanNode, RaInfo, SqlValue } from '../types.ts';
+import type { JoinAlgorithm, PlanNode, RaInfo, SqlValue, Table } from '../types.ts';
 import { columnsOfIndex } from '../index/spec.ts';
 import { exprToSql } from '../parser/print.ts';
-import { walkExpr } from '../parser/index.ts';
-import type { AggregateFn, CompareOp, Expr } from '../parser/index.ts';
+import { tableRefSql, walkExpr } from '../parser/index.ts';
+import type { AggregateFn, CompareOp, Expr, SetOperator } from '../parser/index.ts';
 import type { PlanCost } from './cost.ts';
 
 /**
@@ -33,6 +33,20 @@ export interface AggregateSpec {
   fn: AggregateFn;
   /** The column it reads, or `null` only for `COUNT(*)`. */
   column: string | null;
+  /** `COUNT(DISTINCT x)` (plan.md §27.5 S5): each distinct non-NULL value of `column` counts once. */
+  distinct?: boolean;
+}
+
+/**
+ * The column a `SortAggregate` sorts on after its groups (plan.md §27.5 S5). When every DISTINCT aggregate reads one
+ * column, sorting on (group, value) puts equal values side by side, so each counts only where it differs from the one
+ * before — no set of seen values. `null` with no DISTINCT aggregate, or with two reading different columns: one sort
+ * cannot order both, so those keep a set, as the hash strategy always does.
+ */
+export function distinctSortColumn(aggregates: readonly AggregateSpec[]): string | null {
+  const columns = new Set(aggregates.filter((a) => a.distinct).map((a) => a.column));
+  const [only] = columns;
+  return columns.size === 1 && only !== undefined ? only : null;
 }
 
 export type Plan =
@@ -64,8 +78,16 @@ export type Plan =
       algorithm: JoinAlgorithm;
       /** `LEFT JOIN` (plan.md §25.4 C3): every row of `left` appears at least once, NULL-padded on `right`'s side
        *  when nothing matched it. Absent means the join's original, still-default shape: an inner join, where an
-       *  unmatched `left` row simply does not appear. */
-      joinType?: 'left';
+       *  unmatched `left` row simply does not appear. `semi` and `anti` (plan.md §27.5 S1) are how a correlated
+       *  `EXISTS` and `NOT EXISTS` run: a `left` row comes out at most once and unchanged — kept when it has a match on
+       *  `right` (semi) or when it has none (anti) — and `right`'s columns never reach the rows above. Always after
+       *  every inner and LEFT join in a chain. `right` and `full` (plan.md §27.5 S4) keep `right`'s unmatched rows too,
+       *  NULL-padded on every column of `left`'s tables; `cross` pairs every row with every row — no key, so
+       *  `leftColumn`/`rightColumn` are empty and only nested-loop can run it. */
+      joinType?: 'left' | 'right' | 'full' | 'cross' | 'semi' | 'anti';
+      /** A semi- or anti-join's further condition on each key-matched pair (plan.md §27.5 S1) — the rest of the
+       *  subquery's `WHERE` that names both tables, qualified, read off the two rows merged. */
+      residual?: Expr;
       left: Plan;
       right: Plan;
       leftTable: string;
@@ -186,6 +208,26 @@ export type Plan =
    */
   | { op: 'HashDistinct'; child: Plan }
   | { op: 'SortDistinct'; sortKey?: { column: string; direction: 'asc' | 'desc' }; child: Plan }
+  /**
+   * Two inputs combined by a set operator (plan.md §27.5 S3) — each a whole SELECT's plan (a member of a compound
+   * query), or for a chain, `left` is the combination so far. `UNION ALL` (`all`) passes every row of `left` and then
+   * every row of `right`; a plain `UNION` is that with a `HashDistinct` or `SortDistinct` above it, the same node
+   * `SELECT DISTINCT` uses. `INTERSECT` and `EXCEPT` read `right` into a hash set first, then keep each distinct row
+   * of `left` that is (or is not) in it — NULLs counting as equal, as in `DISTINCT`. Rows are matched by position:
+   * `right`'s columns (`rightColumns`) are renamed to `columns`, the result's, which the first member names.
+   */
+  | {
+      op: 'SetOp';
+      kind: SetOperator;
+      /** Only for `UNION`: keep every row, repeats included. INTERSECT and EXCEPT always return each row once. */
+      all: boolean;
+      left: Plan;
+      right: Plan;
+      columns: string[];
+      rightColumns: string[];
+      /** Which SELECT of the compound `right` is — 2 for the second — telling this node apart from another in a chain. */
+      position: number;
+    }
   /** `LIMIT n`, always the outermost node when present: `Limit → Project → …`. */
   | { op: 'Limit'; count: number; /** Rows skipped first (`OFFSET m`); absent means none. */ offset?: number; child: Plan };
 
@@ -302,6 +344,12 @@ export function conjoin(parts: Expr[]): Expr | undefined {
  * `emitDelete.ts`, `emitUpdate.ts` all share it). Empty when `where` has none — the ordinary case, and the only
  * one before this slice existed at all.
  */
+/** `subqueryResolutionNotes` over several expressions, as sentences to append to a step's narration — or `''`. */
+export function subqueryNotesText(exprs: readonly Expr[]): string {
+  const notes = exprs.flatMap(subqueryResolutionNotes);
+  return notes.length > 0 ? ` ${notes.map((n) => `${n[0]!.toUpperCase()}${n.slice(1)}.`).join(' ')}` : '';
+}
+
 export function subqueryResolutionNotes(where: Expr): string[] {
   const notes: string[] = [];
   walkExpr(where, (e) => {
@@ -311,7 +359,19 @@ export function subqueryResolutionNotes(where: Expr): string[] {
           ? `finding no values at all — so \`${e.negated ? 'NOT IN' : 'IN'}\` is ${e.negated ? 'TRUE' : 'FALSE'} for every row, even one whose value is NULL`
           : `finding ${e.items.length} distinct value${e.items.length === 1 ? '' : 's'}`;
       notes.push(
-        `its subquery \`SELECT ${e.subquery.column.name} FROM ${e.subquery.from.name}${e.subquery.where ? ' WHERE …' : ''}\` already ran once, before this plan was built, ${found}`,
+        `its subquery \`SELECT ${e.subquery.column.name} FROM ${tableRefSql(e.subquery.from)}${e.subquery.where ? ' WHERE …' : ''}\` already ran once, before this plan was built, ${found}`,
+      );
+    }
+    // A scalar subquery (plan.md §27.5 S6): one value for every row, so it ran once, and the plan holds its answer.
+    if (e.kind === 'literal' && e.scalarSubquery !== undefined) {
+      notes.push(
+        `the subquery \`(${e.scalarSubquery})\` names nothing from the outer query, so it already ran once, before this plan was built, and returned ${e.raw} — to the plan, a constant`,
+      );
+    }
+    // An uncorrelated EXISTS (plan.md §27.5 S1): the same answer for every row, so it ran once, like an IN subquery.
+    if (e.kind === 'exists' && e.resolved !== undefined) {
+      notes.push(
+        `its \`EXISTS (SELECT ${e.subquery.select} FROM ${tableRefSql(e.subquery.from)}${e.subquery.where ? ' WHERE …' : ''})\` names nothing from the outer query, so its answer is the same for every row: it already ran once, before this plan was built, stopping at the first row, and ${e.resolved ? `found one — EXISTS is TRUE` : `found none — EXISTS is FALSE`} for every row`,
       );
     }
   });
@@ -408,8 +468,34 @@ export function toPlanDisplay(
   plan: Plan,
   changed: ReadonlySet<Plan> = new Set(),
   estimates?: PlanCost,
+  /** Each alias the query uses and the stored table it names (plan.md §27.5 S7) — `renamesOf`. */
+  renames?: ReadonlyMap<string, string>,
 ): PlanNode {
-  return convert(plan, 'p', changed, estimates);
+  const node = convert(plan, 'p', changed, estimates);
+  return renames && renames.size > 0 ? withRenames(node, renames) : node;
+}
+
+/** Every alias among `tables` and the stored table it names (plan.md §27.5 S7). */
+export function renamesOf(tables: Iterable<Table>): Map<string, string> {
+  const renames = new Map<string, string>();
+  for (const t of tables) if (t.source !== undefined) renames.set(t.name, t.source);
+  return renames;
+}
+
+/**
+ * `node` with each leaf that reads an alias saying what it renames (plan.md §27.5 S7): `ρ_c(customers)` in the
+ * algebra, `SeqScan customers AS c` on the tree. Done over the finished display, since the plan itself only ever needs
+ * the query's own names.
+ */
+function withRenames(node: PlanNode, renames: ReadonlyMap<string, string>): PlanNode {
+  const rel = node.ra?.rel;
+  const source = rel === undefined ? undefined : renames.get(rel);
+  return {
+    ...node,
+    ...(source !== undefined && node.op === 'SeqScan' ? { label: `SeqScan ${source} AS ${rel!}` } : {}),
+    ...(source !== undefined && node.ra ? { ra: { ...node.ra, source } } : {}),
+    ...(node.children ? { children: node.children.map((child) => withRenames(child, renames)) } : {}),
+  };
 }
 
 /** A predicate over `column` for a range bound, as SQL — `age >= 30`. */
@@ -452,8 +538,15 @@ function raOf(plan: Plan): RaInfo {
     case 'Filter':
     case 'Having':
       return { symbol: 'σ', sub: exprToSql(plan.predicate) };
+    case 'SetOp':
+      return { symbol: plan.kind === 'union' ? '∪' : plan.kind === 'intersect' ? '∩' : '−' };
     case 'Join':
-      return { symbol: '⋈', sub: `${plan.leftTable}.${plan.leftColumn} = ${plan.rightTable}.${plan.rightColumn}` };
+      return plan.joinType === 'cross'
+        ? { symbol: '×' }
+        : {
+            symbol: joinSymbol(plan),
+            sub: `${plan.leftTable}.${plan.leftColumn} = ${plan.rightTable}.${plan.rightColumn}${plan.residual ? ` AND ${exprToSql(plan.residual)}` : ''}`,
+          };
     case 'HashAggregate':
     case 'SortAggregate': {
       const keys = plan.aggregates.map((a) => a.key).join(', ');
@@ -478,6 +571,40 @@ function raOf(plan: Plan): RaInfo {
       return { symbol: 'λ', sub: plan.offset ? `${String(plan.count)}, offset ${String(plan.offset)}` : String(plan.count) };
   }
 }
+
+/**
+ * A `Join`'s relational-algebra symbol: ⋈ for an inner join, ⟕ ⟖ ⟗ for the outer joins and × for a cross join (plan.md
+ * §27.5 S4 — LEFT's was ⋈ until then, which the algebra does not mean), ⋉ and ▷ for a semi- and an anti-join (S1).
+ */
+function joinSymbol(plan: Extract<Plan, { op: 'Join' }>): RaInfo['symbol'] {
+  switch (plan.joinType) {
+    case 'semi':
+      return '⋉';
+    case 'anti':
+      return '▷';
+    case 'left':
+      return '⟕';
+    case 'right':
+      return '⟖';
+    case 'full':
+      return '⟗';
+    case 'cross':
+      return '×';
+    default:
+      return '⋈';
+  }
+}
+
+/** A `Join`'s label word: `Join` for an inner join, otherwise its kind (plan.md §27.5 S4). */
+const JOIN_WORD: Record<NonNullable<Extract<Plan, { op: 'Join' }>['joinType']> | 'inner', string> = {
+  inner: 'Join',
+  left: 'Left join',
+  right: 'Right join',
+  full: 'Full join',
+  cross: 'Cross join',
+  semi: 'Semi-join',
+  anti: 'Anti-join',
+};
 
 function convert(
   plan: Plan,
@@ -516,13 +643,33 @@ function convertBody(
       return {
         id,
         op: 'Join',
-        label: `Join (${plan.algorithm}) ${plan.leftTable} × ${plan.rightTable}`,
-        detail: `on: ${plan.leftTable}.${plan.leftColumn} = ${plan.rightTable}.${plan.rightColumn}`,
+        label:
+          plan.joinType === 'semi' || plan.joinType === 'anti'
+            ? `${JOIN_WORD[plan.joinType]} (${plan.algorithm}) ${plan.leftTable} ${joinSymbol(plan)} ${plan.rightTable}`
+            : `${JOIN_WORD[plan.joinType ?? 'inner']} (${plan.algorithm}) ${plan.leftTable} × ${plan.rightTable}`,
+        detail:
+          plan.joinType === 'cross'
+            ? 'every pair of rows'
+            : `on: ${plan.leftTable}.${plan.leftColumn} = ${plan.rightTable}.${plan.rightColumn}${plan.residual ? ` · and: ${exprToSql(plan.residual)}` : ''}`,
         // `rightTable` is the table this specific `Join` step introduces — unique across a chain, since the parser
         // never allows a query to name the same table twice (plan.md §25.4 C3 slice b) — so it is what disambiguates
         // this node from another `Join` in the same chain for EXPLAIN ANALYZE's actual-row lookup (see `table`'s
         // own doc comment on `PlanNode`), the same way `plan.table` does for a scan below.
         table: plan.rightTable,
+        ...(highlight ? { highlight } : {}),
+        ...cost,
+        children: [
+          convert(plan.left, `${id}.0`, changed, estimates),
+          convert(plan.right, `${id}.1`, changed, estimates),
+        ],
+      };
+    case 'SetOp':
+      return {
+        id,
+        op: 'SetOp',
+        label: plan.kind === 'union' ? 'Union all' : plan.kind === 'intersect' ? 'Intersect (hash)' : 'Except (hash)',
+        detail: `columns: ${plan.columns.join(', ')}${plan.rightColumns.some((c, i) => c !== plan.columns[i]) ? ` · SELECT ${String(plan.position)} matched by position: ${plan.rightColumns.join(', ')}` : ''}`,
+        table: `SELECT ${String(plan.position)}`,
         ...(highlight ? { highlight } : {}),
         ...cost,
         children: [
@@ -602,12 +749,18 @@ function convertBody(
         id,
         op: plan.op,
         label: plan.op,
-        detail:
+        detail: `${
           plan.groupBy.length > 0
             ? `GROUP BY ${plan.groupBy.join(', ')}${
                 plan.aggregates.length > 0 ? `; ${plan.aggregates.map((a) => a.key).join(', ')}` : ''
               }`
-            : plan.aggregates.map((a) => a.key).join(', '),
+            : plan.aggregates.map((a) => a.key).join(', ')
+        }${
+          // A sort strategy's DISTINCT column joins its sort key (plan.md §27.5 S5) — said on the node, where it shows.
+          plan.op === 'SortAggregate' && distinctSortColumn(plan.aggregates) !== null
+            ? `; sorted on ${[...plan.groupBy, distinctSortColumn(plan.aggregates)!].join(', ')}`
+            : ''
+        }`,
         ...(highlight ? { highlight } : {}),
         ...cost,
         children: kid(plan.child),

@@ -108,12 +108,15 @@ function FooterColumn({ title, links }: { title: string; links: FooterLink[] }) 
 
 export function Footer() {
   return (
-    <footer className="border-t border-edge bg-surface-2/30 px-4 py-10 text-ink-dim sm:px-8">
+    <footer className="relative border-t border-edge bg-surface-2/30 px-4 py-10 text-ink-dim sm:px-8">
+      <div aria-hidden="true" className="ql-spectrum-line absolute inset-x-0 -top-px opacity-60 [mask-image:linear-gradient(90deg,transparent,#000_20%,#000_80%,transparent)]" />
       <div className="mx-auto grid max-w-6xl gap-8 sm:grid-cols-[minmax(0,1.3fr)_repeat(3,minmax(0,1fr))]">
         <div>
           <Link to="/" className="flex items-center gap-2.5 text-ink transition hover:opacity-90">
             <Logo className="h-7 w-7" />
-            <span className="text-heading font-semibold text-ink">QueryLens</span>
+            <span className="text-heading font-semibold text-ink">
+              Query<span className="ql-spectrum-text">Lens</span>
+            </span>
           </Link>
           <p className="mt-3 max-w-xs text-label leading-relaxed">
             An in-browser toy database engine that shows its working — every SQL query, traced

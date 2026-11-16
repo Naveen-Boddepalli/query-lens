@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { createSeedDatabase } from '../../engine/index.ts';
+import { createSeedDatabase, DATASETS } from '../../engine/index.ts';
 import type { Table } from '../../engine/index.ts';
 import {
   encodeShareState,
+  otherColumnsOf,
+  presetWithRows,
   readDatasetParam,
   readShareState,
   skippedAnswersBefore,
@@ -90,6 +92,40 @@ describe('share state', () => {
       TABLE,
     );
     expect(readShareState(query, COLUMNS).rows).toEqual(rows);
+  });
+
+  describe("a multi-table preset's other tables (plan.md §27.5 S2)", () => {
+    const shop = DATASETS.shop.make();
+    const others = otherColumnsOf(shop, 'customers');
+
+    it('names every table but the main one, with its columns', () => {
+      expect(others).toEqual({ products: ['id', 'name', 'price'], orders: ['id', 'customerId', 'productId', 'qty'] });
+    });
+
+    it('carries an edited other table as d.<table>, beside the main table’s d, and reads both back', () => {
+      const orders = shop.tables.orders!.rows.filter((r) => r.customerId !== null);
+      const customers = shop.tables.customers!.rows.slice(0, 2);
+      const query = encodeShareState(
+        { sql: 'SELECT * FROM orders;', policy: 'lru', predictOn: false, step: 0, dataset: 'shop', rows: customers, otherRows: { orders } },
+        shop.tables.customers,
+        shop.tables,
+      );
+      expect(new URLSearchParams(query).has('d.orders')).toBe(true);
+      expect(new URLSearchParams(query).has('d.products')).toBe(false);
+      const read = readShareState(query, shop.tables.customers!.columns, others);
+      expect(read.rows).toEqual(customers);
+      expect(read.otherRows).toEqual({ orders });
+      // …and puts them back into the preset, leaving the table nobody edited as it was.
+      const restored = presetWithRows(shop, 'customers', read.rows, read.otherRows);
+      expect(restored.tables.orders!.rows).toEqual(orders);
+      expect(restored.tables.customers!.rows).toEqual(customers);
+      expect(restored.tables.products!.rows).toEqual(shop.tables.products!.rows);
+    });
+
+    it('ignores a d.<table> for a table the preset does not have, and drops one whose rows do not fit', () => {
+      const read = readShareState('d.payments=%5B%5B1%5D%5D&d.orders=%5B%5B1%2C2%5D%5D', shop.tables.customers!.columns, others);
+      expect(read.otherRows).toBeUndefined();
+    });
   });
 
   // The URL is the one input this app takes from a stranger: somebody opens a

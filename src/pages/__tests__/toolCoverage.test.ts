@@ -14,7 +14,8 @@ import indexSource from '../ToolsIndexPage.tsx?raw';
  * release.
  */
 
-const TOOL_PATHS = [...indexSource.matchAll(/href: '(\/tools\/[a-z-]+)'/g)].map((m) => m[1]!);
+// Digits too: `/tools/2pc` (plan.md §27.5 X2) is a tool like any other, and a pattern without them would skip it.
+const TOOL_PATHS = [...indexSource.matchAll(/href: '(\/tools\/[a-z0-9-]+)'/g)].map((m) => m[1]!);
 
 const pathOf = (href: string) => new URL(href, 'https://x').pathname;
 

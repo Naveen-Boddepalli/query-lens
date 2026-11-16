@@ -66,29 +66,29 @@ function EmbeddedLiveVisualizer({
     <div className="ql-sheen rounded-xl border border-edge bg-surface-2/80 p-4 shadow-neu-rest backdrop-blur-md">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-edge/60 pb-3">
         <div className="flex items-center gap-2">
-          <span className="font-mono text-micro uppercase tracking-wider text-accent font-semibold">
+          <span className="font-mono text-label uppercase tracking-wider text-accent font-semibold">
             Live Engine Visualizer
           </span>
-          <span className="rounded border border-edge bg-surface-3 px-1.5 py-0.5 font-mono text-micro text-ink-dim uppercase">
+          <span className="rounded border border-edge bg-surface-3 px-1.5 py-0.5 font-mono text-label text-ink-dim uppercase">
             {policy}
           </span>
         </div>
-        <span className="font-mono text-micro text-ink-dim">
+        <span className="font-mono text-label text-ink-dim">
           Target Step {targetEventIndex + 1} of {result.events.length}
         </span>
       </div>
 
-      <div className="mt-3 overflow-x-auto rounded-lg border border-edge bg-surface/90 px-3 py-2 font-mono text-micro text-ink shadow-neu-track">
+      <div className="mt-3 overflow-x-auto rounded-lg border border-edge bg-surface/90 px-3 py-2 font-mono text-label text-ink shadow-neu-track">
         <span className="text-ink-dim select-none">$ </span>
         {sql.replace(/\n/g, ' ')}
       </div>
 
       <div className="mt-3 rounded-lg border border-edge/60 bg-surface-3/70 p-3 text-label">
         <div className="flex items-baseline justify-between gap-2">
-          <span className="font-mono text-micro uppercase tracking-wider text-ink-dim">
+          <span className="font-mono text-label uppercase tracking-wider text-ink-dim">
             Engine State
           </span>
-          <span className="rounded border border-accent/40 bg-accent/15 px-2 py-0.5 font-mono text-micro text-accent font-semibold uppercase">
+          <span className="rounded border border-accent/40 bg-accent/15 px-2 py-0.5 font-mono text-label text-accent font-semibold uppercase">
             {activeStage}
           </span>
         </div>
@@ -127,11 +127,11 @@ function CheckpointCard({
   return (
     <div className="ql-sheen mt-4 rounded-xl border border-edge bg-surface-2/90 p-4 shadow-neu-rest backdrop-blur-md">
       <div className="flex items-center justify-between gap-2 border-b border-edge/60 pb-2.5">
-        <span className="flex items-center gap-1.5 font-mono text-micro uppercase tracking-wider text-accent font-semibold">
+        <span className="flex items-center gap-1.5 font-mono text-label uppercase tracking-wider text-accent font-semibold">
           <span className="h-2 w-2 rounded-full bg-accent animate-pulse" />
           Active Checkpoint Prediction
         </span>
-        <span className="font-mono text-micro text-ink-dim">Test your intuition</span>
+        <span className="font-mono text-label text-ink-dim">Test your intuition</span>
       </div>
 
       <p className="mt-3 font-medium text-body text-ink leading-relaxed">
@@ -220,19 +220,19 @@ export function LessonPage() {
           <ArrowLeftIcon className="h-3.5 w-3.5" />
           <span>Curriculum Track</span>
         </Link>
-        <span className="font-mono text-micro text-ink-dim">
+        <span className="font-mono text-label text-ink-dim">
           Lesson {index + 1} of {LESSONS.length}
         </span>
       </div>
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        <span className="rounded border border-edge bg-surface-3/80 px-2 py-0.5 font-mono text-micro uppercase tracking-wider text-ink-dim">
+        <span className="rounded border border-edge bg-surface-3/80 px-2 py-0.5 font-mono text-label uppercase tracking-wider text-ink-dim">
           {lesson.difficulty}
         </span>
-        <span className="rounded border border-edge bg-surface-3/80 px-2 py-0.5 font-mono text-micro text-ink-dim">
+        <span className="rounded border border-edge bg-surface-3/80 px-2 py-0.5 font-mono text-label text-ink-dim">
           {lesson.category}
         </span>
-        <span className="font-mono text-micro text-ink-dim">~{lesson.minutes} min read</span>
+        <span className="font-mono text-label text-ink-dim">~{lesson.minutes} min read</span>
       </div>
 
       <PageHeader title={lesson.title} className="mt-2">
@@ -250,7 +250,7 @@ export function LessonPage() {
             >
               <div>
                 <h2 className="text-heading font-semibold text-ink flex items-center gap-2">
-                  <span className="flex h-6 w-6 items-center justify-center rounded-full border border-edge bg-surface-3 font-mono text-micro text-accent font-semibold">
+                  <span className="flex h-6 w-6 items-center justify-center rounded-full border border-edge bg-surface-3 font-mono text-label text-accent font-semibold">
                     {i + 1}
                   </span>
                   <span>{step.heading}</span>

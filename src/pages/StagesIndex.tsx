@@ -1,3 +1,4 @@
+import type { CSSProperties } from 'react';
 import { Link } from 'react-router-dom';
 import { STAGES } from '../engine/index.ts';
 import { STAGE_META } from '../ui/stageMeta.ts';
@@ -24,11 +25,16 @@ export function StagesIndex() {
 
 
       {/* Stage Grid */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {STAGES.map((stageId, i) => {
           const meta = STAGE_META[stageId];
           return (
-            <Link key={stageId} to={`/stages/${stageId}`} className={cardInteractive}>
+            <Link
+              key={stageId}
+              to={`/stages/${stageId}`}
+              className={`${cardInteractive} ql-card-stage`}
+              style={{ '--stage': `var(--color-stage-${stageId})` } as CSSProperties}
+            >
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <span

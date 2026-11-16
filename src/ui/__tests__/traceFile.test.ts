@@ -78,6 +78,25 @@ describe('round-trip', () => {
     }
   });
 
+  it("restores a multi-table preset's other edited tables, and writes the field only when one was edited (plan.md §27.5 S2)", () => {
+    const orders = DATASETS.shop.make().tables.orders!.rows.slice(0, 5);
+    const shop: TraceState = { ...BASE, sql: 'SELECT * FROM orders;', dataset: 'shop', rows: null, otherRows: { orders } };
+    const parsed = parseTraceFile(serializeTraceFile(shop));
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      expect(parsed.value.rows).toBeNull();
+      expect(parsed.value.otherRows).toEqual({ orders });
+    }
+    expect(asObject({ ...shop, otherRows: {} })).not.toHaveProperty('otherRows');
+  });
+
+  it("refuses other rows for a table the preset does not have, or for its main table, or that do not fit", () => {
+    const base = { ...asObject({ ...BASE, dataset: 'shop' }) };
+    for (const otherRows of [{ payments: [] }, { customers: [] }, { orders: [{ id: 1 }] }, []]) {
+      expect(parseTraceFile(JSON.stringify({ ...base, otherRows })).ok, JSON.stringify(otherRows)).toBe(false);
+    }
+  });
+
   it('a v1 file (no dataset field) restores as users', () => {
     const o = asObject(BASE);
     expect(o).not.toHaveProperty('dataset');
