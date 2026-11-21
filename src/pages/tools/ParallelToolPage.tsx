@@ -292,7 +292,7 @@ export function ParallelToolPage() {
           The same query and morsel size with one to eight workers, the speeds above for the first ones and full speed for
           any added.
         </p>
-        <ScrollRegion label="Speedup by workers and dispatch" className="overflow-x-auto">
+        <ScrollRegion label="Speedup by workers and dispatch" className="overflow-x-auto" stickyFirst>
           <table className="w-full text-label">
             <thead>
               <tr className="text-left text-ink-dim">

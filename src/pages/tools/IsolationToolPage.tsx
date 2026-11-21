@@ -118,7 +118,7 @@ export function IsolationToolPage() {
             <p className="mb-2 text-label text-ink-dim">
               {engine.blurb} Compared with {engine.reference}.
             </p>
-            <ScrollRegion label={`Which anomalies can occur, by isolation level, under ${engine.title}`} className="overflow-x-auto">
+            <ScrollRegion label={`Which anomalies can occur, by isolation level, under ${engine.title}`} className="overflow-x-auto" stickyFirst>
               <table className="w-full min-w-[34rem] text-left text-label">
                 <caption className="sr-only">
                   Which anomalies can occur, by isolation level, under {engine.title}

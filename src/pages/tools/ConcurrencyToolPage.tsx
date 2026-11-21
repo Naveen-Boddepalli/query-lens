@@ -288,7 +288,7 @@ export function ConcurrencyToolPage() {
           Counted off the runs below. A statement outside a transaction is one of its own. Choose a row to see its rule,
           its verdict, and the run itself.
         </p>
-        <ScrollRegion label="The same schedule under each concurrency-control protocol" className="overflow-x-auto">
+        <ScrollRegion label="The same schedule under each concurrency-control protocol" className="overflow-x-auto" stickyFirst>
           <table className="w-full min-w-[44rem] text-left text-label">
             <caption className="sr-only">The same schedule under each concurrency-control protocol</caption>
             <thead>

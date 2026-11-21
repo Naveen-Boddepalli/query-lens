@@ -73,7 +73,7 @@ export const pill =
 
 /** An `<input>`, `<select>` or `<textarea>`. */
 export const inputField =
-  'rounded-lg border border-edge bg-surface-3 px-2.5 py-1.5 text-body text-ink shadow-e1 transition duration-150 ease-out ' +
+  'max-w-full rounded-lg border border-edge bg-surface-3 px-2.5 py-1.5 text-body text-ink shadow-e1 transition duration-150 ease-out ' +
   'hover:border-ink-dim/50 focus:border-accent disabled:cursor-not-allowed disabled:opacity-40';
 
 /** One option in a segmented control or radio group. Compose with the

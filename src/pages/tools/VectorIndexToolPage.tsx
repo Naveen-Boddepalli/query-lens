@@ -109,7 +109,7 @@ export function VectorIndexToolPage() {
 
       <div className={`${panelSurface} flex flex-col gap-3 p-4`}>
         <h3 className="text-body font-semibold text-ink">Cost and recall, averaged over {VECTOR_LIMITS.queries} queries</h3>
-        <ScrollRegion label="Cost and recall by method" className="overflow-x-auto">
+        <ScrollRegion label="Cost and recall by method" className="overflow-x-auto" stickyFirst>
           <table className="w-full text-label">
             <thead>
               <tr className="text-left text-ink-dim">
@@ -121,11 +121,11 @@ export function VectorIndexToolPage() {
             <tbody>
               {plan.curve.map((c) => (
                 <tr key={`${c.method}-${String(c.parameter)}`} className="border-t border-edge/60">
-                  <td className="py-1.5 text-ink">{c.label}</td>
+                  <td className="min-w-32 py-1.5 pr-3 text-ink">{c.label}</td>
                   <td className="py-1.5 text-right font-mono tabular-nums text-ink">{c.avgComputations.toFixed(1)}</td>
                   <td className="py-1.5 pl-4">
                     <div className="flex items-center gap-2">
-                      <div className="h-2 w-40 overflow-hidden rounded-full bg-surface-4">
+                      <div className="h-2 w-24 overflow-hidden rounded-full bg-surface-4 sm:w-40">
                         <div className="h-full rounded-full bg-accent" style={{ width: `${String(Math.round(c.avgRecall * 100))}%` }} />
                       </div>
                       <span className="font-mono tabular-nums text-ink">{(c.avgRecall * 100).toFixed(1)}%</span>

@@ -131,7 +131,7 @@ export function TwoPhaseCommitToolPage() {
       </div>
 
       <div className="flex flex-wrap items-end gap-4 rounded-xl border border-edge bg-surface-2 p-3 shadow-e1">
-        <label className="flex flex-col gap-1 text-label text-ink-dim">
+        <label className="flex max-w-full flex-col gap-1 text-label text-ink-dim">
           Participants
           <select
             value={n}
@@ -170,7 +170,7 @@ export function TwoPhaseCommitToolPage() {
       </div>
 
       <div className="flex flex-wrap items-end gap-4 rounded-xl border border-edge bg-surface-2 p-3 shadow-e1">
-        <label className="flex flex-col gap-1 text-label text-ink-dim">
+        <label className="flex max-w-full flex-col gap-1 text-label text-ink-dim">
           The coordinator…
           <select value={s.coordinatorCrash} onChange={(e) => { set({ coordinatorCrash: e.target.value as CoordinatorCrashPoint }); }} className={inputField}>
             {COORDINATOR_POINTS.map((p) => (
@@ -181,7 +181,7 @@ export function TwoPhaseCommitToolPage() {
           </select>
         </label>
         {s.coordinatorCrash !== 'none' && (
-          <label className="flex flex-col gap-1 text-label text-ink-dim">
+          <label className="flex max-w-full flex-col gap-1 text-label text-ink-dim">
             …and
             <select value={s.coordinatorRecover} onChange={(e) => { set({ coordinatorRecover: Number(e.target.value) }); }} className={inputField}>
               {RECOVERIES.map((x) => (
@@ -192,7 +192,7 @@ export function TwoPhaseCommitToolPage() {
             </select>
           </label>
         )}
-        <label className="flex flex-col gap-1 text-label text-ink-dim">
+        <label className="flex max-w-full flex-col gap-1 text-label text-ink-dim">
           A participant…
           <select value={s.participantCrash} onChange={(e) => { set({ participantCrash: e.target.value as ParticipantCrashPoint }); }} className={inputField}>
             {PARTICIPANT_POINTS.map((p) => (
@@ -204,7 +204,7 @@ export function TwoPhaseCommitToolPage() {
         </label>
         {s.participantCrash !== 'none' && (
           <>
-            <label className="flex flex-col gap-1 text-label text-ink-dim">
+            <label className="flex max-w-full flex-col gap-1 text-label text-ink-dim">
               Which
               <select value={s.crashedParticipant} onChange={(e) => { set({ crashedParticipant: Number(e.target.value) }); }} className={inputField}>
                 {Array.from({ length: n }, (_, i) => i + 1).map((k) => (
@@ -214,7 +214,7 @@ export function TwoPhaseCommitToolPage() {
                 ))}
               </select>
             </label>
-            <label className="flex flex-col gap-1 text-label text-ink-dim">
+            <label className="flex max-w-full flex-col gap-1 text-label text-ink-dim">
               …and
               <select value={s.participantRecover} onChange={(e) => { set({ participantRecover: Number(e.target.value) }); }} className={inputField}>
                 {RECOVERIES.map((x) => (
@@ -226,7 +226,7 @@ export function TwoPhaseCommitToolPage() {
             </label>
           </>
         )}
-        <label className="flex flex-col gap-1 text-label text-ink-dim">
+        <label className="flex max-w-full flex-col gap-1 text-label text-ink-dim">
           Lost message
           <select value={s.lost} onChange={(e) => { set({ lost: e.target.value as LostMessage }); }} className={inputField}>
             {LOST_MESSAGES.map((m) => (
@@ -237,7 +237,7 @@ export function TwoPhaseCommitToolPage() {
           </select>
         </label>
         {s.lost !== 'none' && (
-          <label className="flex flex-col gap-1 text-label text-ink-dim">
+          <label className="flex max-w-full flex-col gap-1 text-label text-ink-dim">
             {s.lost === 'VOTE' ? 'From' : 'To'}
             <select value={s.lostParticipant} onChange={(e) => { set({ lostParticipant: Number(e.target.value) }); }} className={inputField}>
               {Array.from({ length: n }, (_, i) => i + 1).map((k) => (

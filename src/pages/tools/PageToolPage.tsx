@@ -238,55 +238,57 @@ export function PageToolPage() {
         </p>
       </div>
 
-      <ScrollRegion label="The slots and tuples of the page" className={`${panelSurface} overflow-auto p-0`}>
-        <table className="w-full border-collapse text-left font-mono text-label">
-          <thead>
-            <tr className="border-b border-edge bg-surface-2 text-ink-dim">
-              <th className="px-3 py-2 font-medium tabular-nums">slot</th>
-              <th className="px-3 py-2 font-medium tabular-nums">offset</th>
-              <th className="px-3 py-2 font-medium tabular-nums">bytes</th>
-              {USERS.columns.map((c) => (
-                <th key={c} className="px-3 py-2 font-medium tracking-[0.06em] uppercase">{c}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {layout.tuples.length === 0 && (
-              <tr>
-                <td colSpan={3 + USERS.columns.length} className="px-3 py-6 text-center text-ink-dim">
-                  This page holds no rows.
-                </td>
+      <div className={`${panelSurface} overflow-hidden`}>
+        <ScrollRegion label="The slots and tuples of the page" className="overflow-x-auto" stickyFirst>
+          <table className="w-full border-collapse text-left font-mono text-label">
+            <thead>
+              <tr className="border-b border-edge bg-surface-2 text-ink-dim">
+                <th className="px-3 py-2 font-medium tabular-nums">slot</th>
+                <th className="px-3 py-2 font-medium tabular-nums">offset</th>
+                <th className="px-3 py-2 font-medium tabular-nums">bytes</th>
+                {USERS.columns.map((c) => (
+                  <th key={c} className="px-3 py-2 font-medium tracking-[0.06em] uppercase">{c}</th>
+                ))}
               </tr>
-            )}
-            {layout.tuples.map((t) => {
-              const on = selected === t.slot;
-              return (
-                <tr
-                  key={t.slot}
-                  aria-selected={on}
-                  onClick={() => { setSelected((cur) => (cur === t.slot ? null : t.slot)); }}
-                  className={`cursor-pointer border-b border-edge/40 ${
-                    on ? 'bg-hit/15' : 'hover:bg-surface-4'
-                  }`}
-                >
-                  <td className="px-3 py-1.5 tabular-nums text-ink-dim">#{t.slot}</td>
-                  <td className="px-3 py-1.5 tabular-nums text-ink-dim">{t.offset}</td>
-                  <td className="px-3 py-1.5 tabular-nums">
-                    {t.length}
-                    <span className="text-ink-dim/70"> ({t.headerBytes}+{t.length - t.headerBytes})</span>
+            </thead>
+            <tbody>
+              {layout.tuples.length === 0 && (
+                <tr>
+                  <td colSpan={3 + USERS.columns.length} className="px-3 py-6 text-center text-ink-dim">
+                    This page holds no rows.
                   </td>
-                  {t.fields.map((f) => (
-                    <td key={f.column} className="px-3 py-1.5">
-                      {f.value}
-                      <span className="text-ink-dim/60"> {f.bytes}B</span>
-                    </td>
-                  ))}
                 </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </ScrollRegion>
+              )}
+              {layout.tuples.map((t) => {
+                const on = selected === t.slot;
+                return (
+                  <tr
+                    key={t.slot}
+                    aria-selected={on}
+                    onClick={() => { setSelected((cur) => (cur === t.slot ? null : t.slot)); }}
+                    className={`cursor-pointer border-b border-edge/40 ${
+                      on ? 'bg-hit/15' : 'hover:bg-surface-4'
+                    }`}
+                  >
+                    <td className="px-3 py-1.5 tabular-nums text-ink-dim">#{t.slot}</td>
+                    <td className="px-3 py-1.5 tabular-nums text-ink-dim">{t.offset}</td>
+                    <td className="px-3 py-1.5 tabular-nums">
+                      {t.length}
+                      <span className="text-ink-dim/70"> ({t.headerBytes}+{t.length - t.headerBytes})</span>
+                    </td>
+                    {t.fields.map((f) => (
+                      <td key={f.column} className="px-3 py-1.5">
+                        {f.value}
+                        <span className="text-ink-dim/60"> {f.bytes}B</span>
+                      </td>
+                    ))}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </ScrollRegion>
+      </div>
 
       <p className="text-label leading-relaxed text-ink-dim">
         Every stage that reads a row goes through a page like this — see it in motion in the{' '}
