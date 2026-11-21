@@ -40,6 +40,15 @@ export const btnGhost =
   'hover:border-edge hover:bg-surface-3 hover:text-ink active:translate-y-px ' +
   'disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-transparent disabled:hover:bg-transparent disabled:hover:text-ink-dim disabled:hover:shadow-none disabled:active:translate-y-0';
 
+/** An action that destroys state on purpose: Crash, Delete all. Not the primary
+ *  (that is the thing you came to do), but never just another secondary either:
+ *  an outline in the evict red, filled on hover so the press is a decision. */
+export const btnCritical =
+  'inline-flex items-center justify-center gap-1.5 rounded-lg border border-evict/60 ' +
+  'bg-transparent px-3.5 py-2 text-body font-semibold text-evict transition duration-150 ease-out select-none ' +
+  'hover:bg-evict hover:text-surface active:translate-y-px ' +
+  'disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-evict disabled:active:translate-y-0';
+
 /* ----- surfaces -------------------------------------------------------- */
 
 /** A static elevated container — a panel that holds a diagram or an editor. */
@@ -63,6 +72,14 @@ export const cardInteractive =
  *  and lowercase on purpose: the wide-tracked all-caps accent version reads as
  *  a template. */
 export const eyebrow = 'text-label font-medium text-ink-dim';
+
+/** The label beside or above a control. Sentence case, never a mono all-caps kicker. */
+export const controlLabel = 'text-label text-ink-dim';
+
+/** A readout's number and its name, the one KPI style every tool shares
+ *  (`MetricStrip`), replacing the per-page `text-[0.7rem]` uppercase mono labels. */
+export const metricValue = 'text-heading font-semibold tabular-nums text-ink';
+export const metricLabel = 'text-label text-ink-dim';
 
 /** A small rounded tag — a status, a hint, a count. */
 export const pill =

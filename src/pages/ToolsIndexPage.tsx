@@ -1,10 +1,10 @@
 import { useState } from 'react';
-import type { CSSProperties } from 'react';
 import { Link } from 'react-router-dom';
 import { PageHeader } from '../ui/PageHeader.tsx';
 import { cardInteractive, pill } from '../ui/primitives.ts';
+import { stageStyle, type ToolCategory as Category } from '../ui/tool/toolCategory.ts';
 
-type ToolCategory = 'all' | 'storage' | 'indexing' | 'query' | 'transactions' | 'distributed';
+type ToolCategory = 'all' | Category;
 
 interface ToolItem {
   id: string;
@@ -302,22 +302,6 @@ const CATEGORIES: { id: ToolCategory; label: string }[] = [
   { id: 'transactions', label: 'Transactions' },
   { id: 'distributed', label: 'Parallel & Distributed' },
 ];
-
-/**
- * Each category borrows the colour of the pipeline stage it lives in, so a
- * storage tool is the buffer pool's coral everywhere — here, in the tracker,
- * and on the landing prism.
- */
-const CATEGORY_STAGE: Record<Exclude<ToolCategory, 'all'>, string> = {
-  storage: 'buffer',
-  indexing: 'index',
-  query: 'execute',
-  transactions: 'lock',
-  distributed: 'parse',
-};
-
-const stageStyle = (category: Exclude<ToolCategory, 'all'>): CSSProperties =>
-  ({ '--stage': `var(--color-stage-${CATEGORY_STAGE[category]})` }) as CSSProperties;
 
 const LEVELS: Record<ToolItem['difficulty'], number> = { Foundation: 1, Intermediate: 2, Advanced: 3 };
 

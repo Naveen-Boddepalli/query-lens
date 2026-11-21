@@ -345,6 +345,14 @@
   --space-12: calc(var(--spacing) * 12);
   --space-16: calc(var(--spacing) * 16);
 
+  /* The tool workbench's layout (src/ui/tool/, docs/research/tool-layouts.md §4).
+     Lengths only, kept out of @theme so they generate no utilities; components
+     read them through arbitrary values, e.g. `lg:grid-cols-[var(--tool-rail)_1fr]`. */
+  --tool-rail: 18rem; /* the inspector's width from lg up */
+  --tool-gap: 1rem; /* between the workbench's regions */
+  --control-label: 7.5rem; /* a ControlRow's label column */
+  --stage-min-h: 22rem; /* the stage panel's minimum height from lg up */
+
   /**
    * Compound decorative values — kept out of `@theme` because they are not a
    * single colour or length, so no utility should be generated for them. Each
@@ -695,6 +703,14 @@ body {
   box-shadow:
     0 0 0 1px color-mix(in oklch, var(--stage) 35%, transparent),
     0 0 22px -6px var(--stage);
+}
+/* A chosen Segmented option inside a ToolShell (`tone="stage"`): the tool
+   family's hue instead of the accent, so a storage tool's view switch is coral. */
+.ql-seg-on-stage {
+  border-color: color-mix(in oklch, var(--stage) 70%, transparent);
+  background-color: color-mix(in oklch, var(--stage) 16%, transparent);
+  color: var(--color-ink);
+  box-shadow: var(--shadow-e1);
 }
 .ql-stage-dot-current {
   background-color: var(--stage);
