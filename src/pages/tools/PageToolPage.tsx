@@ -182,9 +182,10 @@ export function PageToolPage() {
           <Seg
             grow={Math.max(layout.freeBytes, layout.overflow ? 0 : 1)}
             min={0}
-            className="border-l border-dashed border-edge bg-transparent text-ink-dim"
+            className="min-w-0 overflow-hidden border-l border-dashed border-edge bg-transparent text-ink-dim"
           >
-            {layout.overflow ? '' : 'free space'}
+            {/* The first thing to give way on a phone: the label ellipsises before any slot loses its target. */}
+            {layout.overflow ? '' : <span className="truncate">free space</span>}
           </Seg>
           <div className="flex flex-1 flex-row-reverse" style={{ flexGrow: countBytes(layout) }}>
             {layout.tuples.map((t) => {
@@ -196,7 +197,7 @@ export function PageToolPage() {
                   onClick={() => { setSelected((cur) => (cur === t.slot ? null : t.slot)); }}
                   style={{ flexGrow: t.length }}
                   className={[
-                    'flex min-w-11 items-center justify-center border-l border-edge font-mono text-label transition',
+                    'flex min-w-6 items-center justify-center border-l border-edge font-mono text-label transition',
                     on
                       ? 'bg-hit/25 text-ink'
                       : 'bg-hit/10 text-hit hover:bg-hit/20',
