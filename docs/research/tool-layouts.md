@@ -521,6 +521,12 @@ needs the pan-instead-of-shrink rule in §4.
 | 4 | Script and step tools sharing `CommandBar` + transport | WAL → Recovery → Schedule → Concurrency | Largest pages. WAL first because Recovery is a superset. Needs the step list ↔ transport sync | L each |
 | 5 | Reference-shaped pages | Isolation, Join order (split "Bushy plans" into a `ToolSection` with local controls), Grammar (jump list) | Least interactive. Mostly `ResponsiveTable` + sections | S–M |
 
+**Phase 0 status (2026-11-21): done.** The components are in `src/ui/tool/` (documented in
+`frontend.md` §8.4), with unit tests in `src/ui/tool/__tests__/`. `e2e/toolLayout.spec.ts` checks all
+25 tools at 1440 and 375px for page overflow, elements escaping their card and content clipped inside
+one. On its first run it found one more bug, in the slotted page's map, which is now fixed.
+`TOOL_SHOTS=1` saves the screenshots. No page uses the shell yet; Phase 1 starts with Buffer pool.
+
 Each tool migrates as its own commit with before/after screenshots from the Phase 0 spec, matching
 the repo's one-item-per-commit cadence. The URL state (`addressBar.ts`, `walUrl.ts`, `scheduleUrl.ts`
 …) does not change, because the shell only moves controls, so shared links keep working.
