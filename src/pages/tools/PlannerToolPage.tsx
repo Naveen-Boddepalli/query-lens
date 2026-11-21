@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type CSSProperties } from 'react';
 import { Link } from 'react-router-dom';
 import {
   buildPlan,
@@ -16,7 +16,7 @@ import {
   scopedDatabase,
   toPlanDisplay,
 } from '../../engine/index.ts';
-import type { Database, Plan, Table } from '../../engine/index.ts';
+import type { Database, Plan, PlanNode, Table } from '../../engine/index.ts';
 import { PlanTree } from '../../ui/panels/PlanTree.tsx';
 import { PageHeader } from '../../ui/PageHeader.tsx';
 import { inputField, panelSurface } from '../../ui/primitives.ts';
@@ -73,6 +73,22 @@ function readInitial() {
 }
 
 const INITIAL = readInitial();
+
+function planDepth(node: PlanNode | null): number {
+  if (!node) return 0;
+  const kids = node.children ?? [];
+  return kids.length === 0 ? 1 : 1 + Math.max(...kids.map(planDepth));
+}
+
+/**
+ * Both trees' panels share one height, sized for the deeper tree: at a fixed 16rem the deeper canonical tree was
+ * fitted down to unreadable and the taller optimized nodes clipped. A plan is a narrow chain, so height is what
+ * limits the fit at every width, phones included.
+ */
+function treeHeight(a: PlanNode | null, b: PlanNode | null): CSSProperties {
+  const rows = Math.max(planDepth(a), planDepth(b));
+  return { '--tree-h': `${String(Math.min(560, Math.max(256, rows * 120 + 64)))}px` } as CSSProperties;
+}
 
 export function PlannerToolPage() {
   const [sql, setSql] = useState(INITIAL.sql);
@@ -172,29 +188,32 @@ export function PlannerToolPage() {
       </div>
 
       {/* Controls & Rule Toggles */}
-      <div className="ql-sheen flex flex-wrap items-center gap-x-5 gap-y-2.5 rounded-xl border border-edge bg-surface-2/80 p-4 text-label shadow-neu-rest backdrop-blur-md">
-        <label className="flex items-center gap-2 text-ink-dim cursor-pointer select-none">
-          <input
-            type="checkbox"
-            checked={indexed}
-            onChange={(e) => { setIndexed(e.target.checked); }}
-            className="accent-[var(--color-accent)]"
-          />
-          <span className="font-mono text-ink font-medium">id index</span>
-        </label>
-        <span className="hidden h-5 w-px bg-edge sm:inline-block" aria-hidden="true" />
-        <span className="font-mono text-[0.72rem] uppercase tracking-wider text-ink-dim/80">Rules:</span>
-        {OPTIMIZER_RULES.map((name) => (
-          <label key={name} className="flex items-center gap-2 text-ink-dim cursor-pointer select-none">
+      <div className="ql-sheen flex flex-wrap items-center gap-x-8 gap-y-2.5 rounded-xl border border-edge bg-surface-2/80 p-4 text-label shadow-neu-rest backdrop-blur-md">
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2.5">
+          <label className="flex items-center gap-2 text-ink-dim cursor-pointer select-none">
             <input
               type="checkbox"
-              checked={rules.has(name)}
-              onChange={() => { toggleRule(name); }}
+              checked={indexed}
+              onChange={(e) => { setIndexed(e.target.checked); }}
               className="accent-[var(--color-accent)]"
             />
-            <span className="font-mono text-[0.8rem] text-ink">{name}</span>
+            <span className="font-mono text-ink font-medium">id index</span>
           </label>
-        ))}
+        </div>
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2.5">
+          <span className="font-mono text-[0.72rem] uppercase tracking-wider text-ink-dim/80">Rules:</span>
+          {OPTIMIZER_RULES.map((name) => (
+            <label key={name} className="flex items-center gap-2 text-ink-dim cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={rules.has(name)}
+                onChange={() => { toggleRule(name); }}
+                className="accent-[var(--color-accent)]"
+              />
+              <span className="font-mono text-[0.8rem] text-ink">{name}</span>
+            </label>
+          ))}
+        </div>
       </div>
 
       {/* Metrics Strip */}
@@ -234,8 +253,8 @@ export function PlannerToolPage() {
         </div>
       ) : plans ? (
         <>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <figure className={`${panelSurface} flex min-h-64 flex-col p-4`}>
+          <div className="grid gap-4 sm:grid-cols-2" style={treeHeight(plans.canonical, plans.optimised)}>
+            <figure className={`${panelSurface} flex min-h-(--tree-h) flex-col p-4`}>
               <figcaption className="mb-2.5 flex items-center justify-between text-label font-mono text-ink-dim border-b border-edge/60 pb-2">
                 <span className="font-semibold text-ink">canonical</span>
               </figcaption>
@@ -244,7 +263,7 @@ export function PlannerToolPage() {
               </div>
             </figure>
 
-            <figure className={`${panelSurface} flex min-h-64 flex-col p-4`}>
+            <figure className={`${panelSurface} flex min-h-(--tree-h) flex-col p-4`}>
               <figcaption className="mb-2.5 flex items-center justify-between text-label font-mono text-ink-dim border-b border-edge/60 pb-2">
                 <span className="font-semibold text-ink">
                   optimized

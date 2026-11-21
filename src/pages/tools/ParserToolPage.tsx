@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type CSSProperties } from 'react';
 import { Link } from 'react-router-dom';
 import { compoundDisplayTree, parseQueryStatement, toDisplayTree, tokenize } from '../../engine/index.ts';
 import type { ASTNode, Token, TokenType } from '../../engine/index.ts';
@@ -227,7 +227,11 @@ export function ParserToolPage() {
             <p className="text-label text-ink-dim tabular-nums">
               Parsed · {countNodes(tree)} nodes · recursion depth {treeDepth(tree)}
             </p>
-            <div className={`${panelSurface} min-h-64 flex-1 p-5`}>
+            <div
+              className={`${panelSurface} min-h-64 flex-1 p-5 sm:min-h-(--tree-h)`}
+              // The tree's depth sets the panel's height from `sm` up; a fixed 16rem fitted a 14-node tree to a third of its size.
+              style={{ '--tree-h': `${String(Math.min(560, Math.max(256, treeDepth(tree) * 96 + 80)))}px` } as CSSProperties}
+            >
               <AstTree root={tree} />
             </div>
           </>

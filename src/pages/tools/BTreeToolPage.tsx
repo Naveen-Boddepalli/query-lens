@@ -198,69 +198,70 @@ export function BTreeToolPage() {
       </PageHeader>
 
       {/* Control Toolbar */}
-      <div className="ql-sheen flex flex-wrap items-end gap-3 rounded-xl border border-edge bg-surface-2/80 p-4 shadow-neu-rest backdrop-blur-md">
-        <label htmlFor="fanout" className="flex flex-col gap-1.5 text-label text-ink-dim">
-          <span>Fan-out <span className="text-ink-dim/60 font-mono text-[0.75rem]">(max keys/node)</span></span>
-          <select
-            id="fanout"
-            value={fanout}
-            onChange={(e) => {
-              setFanout(Number(e.target.value));
-              setHighlight([]);
-              setOutcome(null);
-              setMessage(`Rebuilt tree at fan-out ${e.target.value}.`);
-            }}
-            className={`${inputField} w-24 tabular-nums`}
-          >
-            {Array.from({ length: MAX_FANOUT - MIN_FANOUT + 1 }, (_, i) => MIN_FANOUT + i).map((n) => (
-              <option key={n} value={n}>{n} keys</option>
-            ))}
-          </select>
-        </label>
+      <div className="ql-sheen flex flex-wrap items-end gap-x-6 gap-y-3 rounded-xl border border-edge bg-surface-2/80 p-4 shadow-neu-rest backdrop-blur-md">
+        <div className="flex flex-wrap items-end gap-3">
+          <label htmlFor="fanout" className="flex flex-col gap-1.5 text-label text-ink-dim">
+            <span>Fan-out <span className="text-ink-dim/60 font-mono text-[0.75rem]">(max keys/node)</span></span>
+            <select
+              id="fanout"
+              value={fanout}
+              onChange={(e) => {
+                setFanout(Number(e.target.value));
+                setHighlight([]);
+                setOutcome(null);
+                setMessage(`Rebuilt tree at fan-out ${e.target.value}.`);
+              }}
+              className={`${inputField} w-24 tabular-nums`}
+            >
+              {Array.from({ length: MAX_FANOUT - MIN_FANOUT + 1 }, (_, i) => MIN_FANOUT + i).map((n) => (
+                <option key={n} value={n}>{n} keys</option>
+              ))}
+            </select>
+          </label>
 
-        <label htmlFor="key" className="flex flex-col gap-1.5 text-label text-ink-dim">
-          <span>Key</span>
-          <input
-            id="key"
-            type="text"
-            inputMode="numeric"
-            placeholder="e.g. 25"
-            value={keyInput}
-            onChange={(e) => { setKeyInput(e.target.value); }}
-            onKeyDown={(e) => { if (e.key === 'Enter') runFind(); }}
-            className={`${inputField} w-28 font-mono tabular-nums`}
-            spellCheck={false}
-          />
-        </label>
+          <label htmlFor="key" className="flex flex-col gap-1.5 text-label text-ink-dim">
+            <span>Key</span>
+            <input
+              id="key"
+              type="text"
+              inputMode="numeric"
+              placeholder="e.g. 25"
+              value={keyInput}
+              onChange={(e) => { setKeyInput(e.target.value); }}
+              onKeyDown={(e) => { if (e.key === 'Enter') runFind(); }}
+              className={`${inputField} w-28 font-mono tabular-nums`}
+              spellCheck={false}
+            />
+          </label>
 
-        <div className="flex items-center gap-1.5">
-          <button type="button" onClick={runInsert} className={btnPrimary}>
-            Insert
-          </button>
-          <button type="button" onClick={runDelete} className={btnSecondary}>
-            Delete
-          </button>
-          <button type="button" onClick={runFind} className={btnSecondary}>
-            Find
-          </button>
+          <div className="flex items-center gap-1.5">
+            <button type="button" onClick={runInsert} className={btnPrimary}>
+              Insert
+            </button>
+            <button type="button" onClick={runDelete} className={btnSecondary}>
+              Delete
+            </button>
+            <button type="button" onClick={runFind} className={btnSecondary}>
+              Find
+            </button>
+          </div>
         </div>
-
-        <span className="mx-1 hidden h-6 w-px bg-edge sm:inline-block" aria-hidden="true" />
-
-        <div className="flex items-center gap-1.5">
-          <button type="button" onClick={() => { reseed(SAMPLE); }} className={btnSecondary}>
-            Sample
-          </button>
-          <button
-            type="button"
-            onClick={() => { reseed(Array.from({ length: 20 }, (_, i) => i + 1)); }}
-            className={btnSecondary}
-          >
-            1&ndash;20
-          </button>
-          <button type="button" onClick={() => { reseed([]); }} className={btnSecondary}>
-            Clear
-          </button>
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="flex items-center gap-1.5">
+            <button type="button" onClick={() => { reseed(SAMPLE); }} className={btnSecondary}>
+              Sample
+            </button>
+            <button
+              type="button"
+              onClick={() => { reseed(Array.from({ length: 20 }, (_, i) => i + 1)); }}
+              className={btnSecondary}
+            >
+              1&ndash;20
+            </button>
+            <button type="button" onClick={() => { reseed([]); }} className={btnSecondary}>
+              Clear
+            </button>
+          </div>
         </div>
       </div>
 

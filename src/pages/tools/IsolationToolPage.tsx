@@ -95,7 +95,7 @@ export function IsolationToolPage() {
     <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-4 p-6 sm:p-8">
       <PageHeader title="Isolation matrix">
         Ten anomalies from the Hermitage suite, each a fixed schedule of three transactions, run at four isolation
-        levels on three engines (plan.md §25.4 D5). A <strong>—</strong> means the anomaly <em>happened</em> in that
+        levels on three engines. A <strong>—</strong> means the anomaly <em>happened</em> in that
         schedule at that level; a <strong>✓</strong> means it did not. Every cell was computed by running the schedule
         and checking what its transactions saw and wrote, and opens the run. The tables are held against what
         PostgreSQL, SQL Server and MySQL publish — for MySQL only the cells its page ran; the{' '}

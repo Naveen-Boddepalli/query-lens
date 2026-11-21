@@ -102,7 +102,7 @@ export function HashJoinToolPage() {
       {/* Control Toolbar */}
       <div className="ql-sheen flex flex-wrap items-end gap-4 rounded-xl border border-edge bg-surface-2/80 p-4 shadow-neu-rest backdrop-blur-md">
         <label className="flex flex-col gap-1.5 text-label text-ink-dim">
-          <span>Build Keys</span>
+          <span>Build keys</span>
           <input
             type="number"
             min={HASH_JOIN_LIMITS.minBuildKeys}
@@ -119,7 +119,7 @@ export function HashJoinToolPage() {
         </label>
 
         <label className="flex flex-col gap-1.5 text-label text-ink-dim">
-          <span>Probe Keys</span>
+          <span>Probe keys</span>
           <input
             type="number"
             min={HASH_JOIN_LIMITS.minProbeKeys}
@@ -162,7 +162,7 @@ export function HashJoinToolPage() {
           onClick={() => { setSeed(Math.floor(Math.random() * MAX_SEED)); }}
           className={btnSecondary}
         >
-          Shuffle Keys
+          Shuffle keys
         </button>
       </div>
 

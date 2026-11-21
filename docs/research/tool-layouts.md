@@ -55,7 +55,7 @@ by page shape.
 | `panelSurface`, `card` | `primitives.ts` | some | 23/25 pages also hand-write `rounded-xl border border-edge bg-surface-2…` |
 | `DataView` ("Show as table") | `src/ui/DataView.tsx` | 12 | The toggle renders as a right-aligned orphan line *above* its panel |
 | `PlaybackControls` + `usePlayback` | `src/ui/PlaybackControls.tsx` | **1** (buffer pool) | Good component: icon transport, speed, scrubber, keyboard shortcuts |
-| `ScrollRegion` | `src/ui/ScrollRegion.tsx` | 10 | Not used for the wide tables that clip on mobile |
+| `ScrollRegion` | `src/ui/ScrollRegion.tsx` | 16 | Wraps the wide tables, which do scroll, but gave no cue that they did (fixed in §5.0) |
 | Layout shell | `src/ui/Layout.tsx` | all | `lg:h-dvh lg:overflow-hidden` with an inner `overflow-y-auto` pane, so `position: sticky` works inside it |
 
 ### 1.2 Per-tool audit
@@ -499,6 +499,16 @@ the logs. On phones the timeline keeps its scale and pans instead of shrinking t
 | Replace `w-px` separators with `gap-3` between clusters | Recovery, WAL, Page, B+Tree, Schedule, Planner, Concurrency |
 | Remove `plan.md §…` references from user-facing blurbs | WAL, Recovery, Schedule, Isolation, Concurrency, Join order |
 | Fix tree fit/clip: give the canonical and optimized trees the same scale and enough height | Planner, Parser |
+
+**Status (2026-11-21): done.** Two findings were corrected on the way. The wide tables were already
+inside `ScrollRegion` and did scroll; what they lacked was any sign of it. `ScrollRegion` now fades
+the edge with more behind it and can pin the first column (`stickyFirst`). The 2PC overflow was the
+select's intrinsic width, now capped by `inputField`'s `max-w-full`, and a re-measure found one more
+overflow, the recovery step slider. The Planner clip came from `FlowTree` fitting a nominal 62px node
+height while plan operators render up to 128px; it now fits each node's rendered height. Planner and
+Parser panels take their height from the tree's depth. Separators became cluster wrappers, so a
+cluster wraps as one unit. Parser on a phone is still limited by width, so it is still small; that
+needs the pan-instead-of-shrink rule in §4.
 
 ### 5.1 Build order
 

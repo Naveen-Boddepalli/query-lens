@@ -221,7 +221,7 @@ export function LocksToolPage() {
         </div>
 
         <label htmlFor="resource" className="flex flex-col gap-1.5 text-label text-ink-dim">
-          <span>Page Resource</span>
+          <span>Page</span>
           <select
             id="resource"
             value={resource}
@@ -235,7 +235,7 @@ export function LocksToolPage() {
         </label>
 
         <div className="flex flex-col gap-1.5 text-label text-ink-dim">
-          <span>Lock Mode</span>
+          <span>Lock mode</span>
           <div className="flex gap-1" role="radiogroup" aria-label="Lock mode">
             {MODES.map((m) => (
               <button
@@ -253,12 +253,12 @@ export function LocksToolPage() {
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <button type="button" onClick={runRequest} disabled={full} className={btnPrimary}>
-            Request Lock
+            Request lock
           </button>
           <button type="button" onClick={runPreset} className={btnSecondary}>
-            Deadlock Example
+            Deadlock example
           </button>
           <button type="button" onClick={reset} className={btnSecondary}>
             Reset

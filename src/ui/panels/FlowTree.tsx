@@ -387,6 +387,9 @@ function Canvas({
    *
    * Returns whether it had enough information to frame anything.
    */
+  /** Each node's element, by id: for keyboard focus, and for the real height `frame` fits. */
+  const nodeEls = useRef(new Map<string, HTMLDivElement>());
+
   const frame = useCallback(
     (targets: TreeFlowNode[], animate: boolean) => {
       if (targets.length === 0 || size.w === 0 || size.h === 0) return false;
@@ -396,8 +399,12 @@ function Canvas({
 
       const minX = Math.min(...targets.map((n) => n.position.x));
       const maxX = Math.max(...targets.map((n) => n.position.x)) + nodeW;
+      // A plan operator with a detail line and an estimate is twice the nominal height, and fitting the
+      // nominal one clipped the bottom row (the Planner's optimized tree). Fit each node's rendered height
+      // where it has one; offsetHeight is layout size, unaffected by the current zoom.
+      const heightOf = (n: TreeFlowNode) => nodeEls.current.get(n.id)?.offsetHeight || nodeH;
       const minY = Math.min(...targets.map((n) => n.position.y));
-      const maxY = Math.max(...targets.map((n) => n.position.y)) + nodeH;
+      const maxY = Math.max(...targets.map((n) => n.position.y + heightOf(n)));
 
       const margin = 1.35;
       const zoom = Math.max(
@@ -458,7 +465,6 @@ function Canvas({
   const framedFor = useRef<typeof panZoom>(null);
 
   const [tabStop, setTabStop] = useState<string | null>(null);
-  const nodeEls = useRef(new Map<string, HTMLDivElement>());
   const register = useCallback((id: string, el: HTMLDivElement | null) => {
     if (el) nodeEls.current.set(id, el);
     else nodeEls.current.delete(id);

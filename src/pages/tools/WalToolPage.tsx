@@ -204,7 +204,7 @@ export function WalToolPage() {
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-4 p-6 sm:p-8">
       <PageHeader title="Write-ahead log">
-        A page may not reach disk before the log records that describe its changes are durable (plan.md §25.4 E1).
+        A page may not reach disk before the log records that describe its changes are durable.
         Write a script of changes, commits and rollbacks; the page runs it against a buffer pool, a disk and a log, and
         shows for every step what was appended, what was forced and what was written. Switch the rule off to see what
         it was for. <strong>Steal</strong> and <strong>force</strong> decide when a page may be written (E2): choose
@@ -303,66 +303,70 @@ export function WalToolPage() {
         </p>
       </div>
 
-      <div className="flex flex-wrap items-end gap-3 rounded-xl border border-edge bg-surface-2 p-3 shadow-e1">
-        <label className="flex flex-col gap-1 text-label text-ink-dim">
-          Transaction
-          <select className={inputField} value={txn} onChange={(e) => { setTxn(e.target.value); }}>
-            {TXNS.map((t) => (
-              <option key={t}>{t}</option>
-            ))}
-          </select>
-        </label>
-        <label className="flex flex-col gap-1 text-label text-ink-dim">
-          Cell
-          <select className={inputField} value={key} onChange={(e) => { setKey(e.target.value); }}>
-            {KEYS.map((k) => (
-              <option key={k}>{k}</option>
-            ))}
-          </select>
-        </label>
-        <label className="flex flex-col gap-1 text-label text-ink-dim">
-          New value
-          <input
-            type="number"
-            value={value}
-            onChange={(e) => { setValue(e.target.value); }}
-            className={`${inputField} w-24 tabular-nums`}
-          />
-        </label>
-        <button
-          type="button"
-          disabled={full || !valueOk}
-          onClick={() => { add({ op: 'set', txn, key, value: valueNumber }); }}
-          className={btnPrimary}
-        >
-          Add change
-        </button>
-        <span className="mx-1 h-6 w-px bg-edge" aria-hidden />
-        {(['begin', 'commit', 'abort'] as const).map((op) => (
-          <button key={op} type="button" disabled={full} onClick={() => { add({ op, txn }); }} className={btnSecondary}>
-            {op === 'abort' ? 'Roll back' : op === 'begin' ? 'Begin' : 'Commit'} {txn}
+      <div className="flex flex-wrap items-end gap-x-6 gap-y-3 rounded-xl border border-edge bg-surface-2 p-3 shadow-e1">
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="flex flex-col gap-1 text-label text-ink-dim">
+            Transaction
+            <select className={inputField} value={txn} onChange={(e) => { setTxn(e.target.value); }}>
+              {TXNS.map((t) => (
+                <option key={t}>{t}</option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1 text-label text-ink-dim">
+            Cell
+            <select className={inputField} value={key} onChange={(e) => { setKey(e.target.value); }}>
+              {KEYS.map((k) => (
+                <option key={k}>{k}</option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1 text-label text-ink-dim">
+            New value
+            <input
+              type="number"
+              value={value}
+              onChange={(e) => { setValue(e.target.value); }}
+              className={`${inputField} w-24 tabular-nums`}
+            />
+          </label>
+          <button
+            type="button"
+            disabled={full || !valueOk}
+            onClick={() => { add({ op: 'set', txn, key, value: valueNumber }); }}
+            className={btnPrimary}
+          >
+            Add change
           </button>
-        ))}
-        <span className="mx-1 h-6 w-px bg-edge" aria-hidden />
-        <label className="flex flex-col gap-1 text-label text-ink-dim">
-          Page
-          <select className={inputField} value={page} onChange={(e) => { setPage(Number(e.target.value)); }}>
-            {PAGES.map((p) => (
-              <option key={p} value={p}>
-                {p}
-              </option>
-            ))}
-          </select>
-        </label>
-        <button type="button" disabled={full} onClick={() => { add({ op: 'write-page', page }); }} className={btnSecondary}>
-          Write page
-        </button>
-        <button type="button" disabled={full} onClick={() => { add({ op: 'read-page', page }); }} className={btnSecondary}>
-          Read page
-        </button>
-        <button type="button" disabled={full} onClick={() => { add({ op: 'flush-log' }); }} className={btnSecondary}>
-          Flush log
-        </button>
+        </div>
+        <div className="flex flex-wrap items-end gap-3">
+          {(['begin', 'commit', 'abort'] as const).map((op) => (
+            <button key={op} type="button" disabled={full} onClick={() => { add({ op, txn }); }} className={btnSecondary}>
+              {op === 'abort' ? 'Roll back' : op === 'begin' ? 'Begin' : 'Commit'} {txn}
+            </button>
+          ))}
+        </div>
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="flex flex-col gap-1 text-label text-ink-dim">
+            Page
+            <select className={inputField} value={page} onChange={(e) => { setPage(Number(e.target.value)); }}>
+              {PAGES.map((p) => (
+                <option key={p} value={p}>
+                  {p}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button type="button" disabled={full} onClick={() => { add({ op: 'write-page', page }); }} className={btnSecondary}>
+            Write page
+          </button>
+          <button type="button" disabled={full} onClick={() => { add({ op: 'read-page', page }); }} className={btnSecondary}>
+            Read page
+          </button>
+          <button type="button" disabled={full} onClick={() => { add({ op: 'flush-log' }); }} className={btnSecondary}>
+            Flush log
+          </button>
+        </div>
       </div>
 
       <div className="flex flex-wrap items-center gap-2 text-label text-ink-dim">

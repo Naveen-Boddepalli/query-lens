@@ -162,7 +162,7 @@ export function SortToolPage() {
           onClick={() => { setSeed(Math.floor(Math.random() * MAX_SEED)); setSelected(null); }}
           className={btnSecondary}
         >
-          Shuffle Keys
+          Shuffle keys
         </button>
       </div>
 

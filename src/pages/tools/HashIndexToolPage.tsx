@@ -112,11 +112,13 @@ export function HashIndexToolPage() {
           </select>
         </label>
 
-        <label className={`flex flex-col gap-1 text-label text-ink-dim ${strategy === 'extendible' ? 'opacity-40' : ''}`}>
-          Initial buckets
+        <div className="flex max-w-44 flex-col gap-1 text-label text-ink-dim">
+          <label htmlFor="initial-buckets">Initial buckets</label>
           <select
+            id="initial-buckets"
             value={initialBuckets}
             disabled={strategy === 'extendible'}
+            aria-describedby={strategy === 'extendible' ? 'initial-buckets-hint' : undefined}
             onChange={(e) => { setInitialBuckets(Number(e.target.value)); }}
             className={inputField}
           >
@@ -124,7 +126,12 @@ export function HashIndexToolPage() {
               (v) => <option key={v} value={v}>{v}</option>,
             )}
           </select>
-        </label>
+          {strategy === 'extendible' && (
+            <span id="initial-buckets-hint" className="text-ink-dim/80">
+              Extendible hashing starts from one bucket and grows its directory itself.
+            </span>
+          )}
+        </div>
 
         <button
           type="button"

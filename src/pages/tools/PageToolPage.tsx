@@ -80,7 +80,7 @@ export function PageToolPage() {
       {/* Control Toolbar */}
       <div className="ql-sheen flex flex-wrap items-end gap-4 rounded-xl border border-edge bg-surface-2/80 p-4 shadow-neu-rest backdrop-blur-md">
         <label className="flex flex-col gap-1.5 text-label text-ink-dim">
-          <span>Target Page</span>
+          <span>Target page</span>
           <select
             value={pageId}
             onChange={(e) => { setPageId(Number(e.target.value)); setSelected(null); }}
@@ -112,7 +112,7 @@ export function PageToolPage() {
         </label>
 
         <div className="flex flex-col gap-1.5 text-label text-ink-dim">
-          <span>Preset Sizes</span>
+          <span>Preset sizes</span>
           <div className="flex gap-1.5">
             {([['512 B', 512], ['4 KB', 4096], ['8 KB', 8192]] as const).map(([label, n]) => (
               <button
@@ -231,7 +231,7 @@ export function PageToolPage() {
             <>
               About <span className="text-ink tabular-nums">{layout.moreRowsFit}</span> more rows of
               this size would fit here. The pipeline caps a page at{' '}
-              {DEFAULT_ENGINE_OPTIONS.rowsPerPage} rows so the contents stay readable (§7); a real
+              {DEFAULT_ENGINE_OPTIONS.rowsPerPage} rows so the contents stay readable; a real
               4 KB page holds a hundred or more.
             </>
           )}
