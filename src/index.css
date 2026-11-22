@@ -345,6 +345,14 @@
   --space-12: calc(var(--spacing) * 12);
   --space-16: calc(var(--spacing) * 16);
 
+  /* The tool workbench's layout (src/ui/tool/, docs/research/tool-layouts.md §4).
+     Lengths only, kept out of @theme so they generate no utilities; components
+     read them through arbitrary values, e.g. `lg:grid-cols-[var(--tool-rail)_1fr]`. */
+  --tool-rail: 18rem; /* the inspector's width from lg up */
+  --tool-gap: 1rem; /* between the workbench's regions */
+  --control-label: 7.5rem; /* a ControlRow's label column */
+  --stage-min-h: 22rem; /* the stage panel's minimum height from lg up */
+
   /**
    * Compound decorative values — kept out of `@theme` because they are not a
    * single colour or length, so no utility should be generated for them. Each
@@ -696,6 +704,14 @@ body {
     0 0 0 1px color-mix(in oklch, var(--stage) 35%, transparent),
     0 0 22px -6px var(--stage);
 }
+/* A chosen Segmented option inside a ToolShell (`tone="stage"`): the tool
+   family's hue instead of the accent, so a storage tool's view switch is coral. */
+.ql-seg-on-stage {
+  border-color: color-mix(in oklch, var(--stage) 70%, transparent);
+  background-color: color-mix(in oklch, var(--stage) 16%, transparent);
+  color: var(--color-ink);
+  box-shadow: var(--shadow-e1);
+}
 .ql-stage-dot-current {
   background-color: var(--stage);
   box-shadow: 0 0 8px var(--stage);
@@ -755,6 +771,36 @@ body {
   width: 40%;
   background-image: var(--gradient-spectrum);
   animation: ql-route-slide 1.1s var(--ease-morph) infinite;
+}
+
+/* A ScrollRegion that is wider than its box fades the edge that has more behind
+   it, so a table cut off at a phone's width reads as "scroll", not as clipped.
+   ScrollRegion sets data-more-start / data-more-end from its scroll position.
+   The fade is a mask, which would also clip a focus ring and a card's border or
+   shadow: it is dropped while the box has keyboard focus, and a region that is
+   itself a bordered card opts out (`cue={false}`). */
+.ql-scroll-cue[data-more-end] {
+  mask-image: linear-gradient(to right, #000 calc(100% - 2.5rem), transparent);
+}
+.ql-scroll-cue[data-more-start]:not(.ql-sticky-first) {
+  mask-image: linear-gradient(to right, transparent, #000 2.5rem);
+}
+.ql-scroll-cue[data-more-start][data-more-end]:not(.ql-sticky-first) {
+  mask-image: linear-gradient(to right, transparent, #000 2.5rem, #000 calc(100% - 2.5rem), transparent);
+}
+.ql-scroll-cue:focus-visible {
+  mask-image: none;
+}
+/* Pins a table's first column (the row's name) while the rest scrolls under
+   it. The cell needs the card's own fill to hide what passes beneath. */
+.ql-sticky-first :is(th, td):first-child {
+  position: sticky;
+  inset-inline-start: 0;
+  z-index: 1;
+  background-color: var(--color-surface-2);
+}
+.ql-sticky-first[data-more-start] :is(th, td):first-child {
+  box-shadow: inset -1px 0 var(--color-edge);
 }
 
 /* The hero prism's rays drawing themselves once (paths carry pathLength=1).

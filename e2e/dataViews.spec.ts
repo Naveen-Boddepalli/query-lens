@@ -11,7 +11,12 @@ const pages: [string, RegExp][] = [
 for (const [path, caption] of pages) {
   test(`${path} has a table view of its data that is clean under axe (plan.md §H6)`, async ({ page }) => {
     await page.goto(path);
-    const toggle = page.getByRole('button', { name: 'Show as table' }).first();
+    // A page still on DataView has a 'Show as table' button; one on the tool workbench has a Diagram | Table
+    // switch in its stage header.
+    const toggle = page
+      .getByRole('button', { name: 'Show as table' })
+      .or(page.getByRole('radio', { name: 'Table', exact: true }))
+      .first();
     await expect(toggle).toBeVisible();
     await toggle.click();
 
@@ -26,7 +31,11 @@ for (const [path, caption] of pages) {
       .analyze();
     expect(results.violations.map((v) => `${v.id}: ${v.help}`)).toEqual([]);
 
-    await page.getByRole('button', { name: 'Show as diagram' }).first().click();
+    await page
+      .getByRole('button', { name: 'Show as diagram' })
+      .or(page.getByRole('radio', { name: 'Diagram', exact: true }))
+      .first()
+      .click();
     await expect(table).toHaveCount(0);
   });
 }

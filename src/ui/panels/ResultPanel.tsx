@@ -9,7 +9,7 @@ export function ResultPanel({ rows }: { rows: Row[] }) {
   const columns = Object.keys(rows[0]!);
 
   return (
-    <ScrollRegion label="Query result" className="h-full overflow-auto rounded-xl border border-edge shadow-e1">
+    <ScrollRegion label="Query result" cue={false} className="h-full overflow-auto rounded-xl border border-edge shadow-e1">
       <table className="w-full border-collapse text-left font-mono text-label">
         <thead>
           <tr className="sticky top-0 z-10 border-b border-edge bg-surface-2/95 text-ink-dim backdrop-blur-sm">

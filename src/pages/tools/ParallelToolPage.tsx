@@ -3,10 +3,9 @@ import { DISPATCHES, PARALLEL_LIMITS } from '../../engine/parallel.ts';
 import type { Dispatch, ParallelResult } from '../../engine/parallel.ts';
 import { EXCHANGE_LIMITS } from '../../engine/exchange.ts';
 import type { JoinExchange } from '../../engine/exchange.ts';
-import { DataView } from '../../ui/DataView.tsx';
+import { DataTable } from '../../ui/DataView.tsx';
 import { ExchangeSection } from '../../ui/ExchangeSection.tsx';
 import { JOIN_QUERIES } from '../../ui/exchangePresets.ts';
-import { PageHeader } from '../../ui/PageHeader.tsx';
 import {
   DISPATCH_LABELS,
   isDispatch,
@@ -15,14 +14,31 @@ import {
   parallelRun,
   parseSpeeds,
 } from '../../ui/parallelPresets.ts';
-import { inputField, panelSurface, segBase, segOff, segOn } from '../../ui/primitives.ts';
+import { inputField } from '../../ui/primitives.ts';
 import { ScrollRegion } from '../../ui/ScrollRegion.tsx';
 import { useAddressBarQuery } from '../../ui/addressBar.ts';
+import {
+  ControlGroup,
+  ControlRow,
+  hintIdFor,
+  Inspector,
+  MetricStrip,
+  Segmented,
+  StagePanel,
+  Stepper,
+  ToolHeader,
+  ToolSection,
+  ToolShell,
+} from '../../ui/tool/index.ts';
 
 /**
  * The parallel-execution standalone (plan.md §27.5 P1): a scan, a filter and an aggregate on the transactions preset,
  * cut into morsels and run by *N* workers whose speeds are a script you set. `engine/parallel.ts` is the model; this
  * page draws its timeline, worker by worker, and measures the speedup in ticks.
+ *
+ * Laid out on the tool workbench (`src/ui/tool/`): query, dispatch and workers (with each one's speed) in the
+ * inspector, the speedup in the readout, the timeline on the stage with a table view, and the speedup sweep, the
+ * exchange section and the answer below.
  *
  * URL state: `q` (query), `w` (workers), `d` (dispatch), `m` (pages per morsel), `s` (one speed digit per worker); and
  * for the exchange section (plan.md §27.5 P2), `jq` (join), `jw` (workers) and `jx` (broadcast or repartition).
@@ -31,6 +47,12 @@ import { useAddressBarQuery } from '../../ui/addressBar.ts';
 const W = 720;
 const LANE = 26;
 const fmt = (n: number) => n.toLocaleString('en-US');
+const DISPATCH_SHORT: Record<Dispatch, string> = { static: 'Static', shared: 'Shared', stealing: 'Stealing' };
+const DISPATCH_HINTS: Record<Dispatch, string> = {
+  static: 'Static ranges: each worker gets one slice of the pages up front.',
+  shared: 'Shared queue: an idle worker takes the next morsel from one queue.',
+  stealing: 'Work stealing: each worker has its own queue and robs a busy one when it runs dry.',
+};
 
 function clampInt(raw: string | null, lo: number, hi: number, fallback: number): number {
   if (raw === null || raw.trim() === '') return fallback;
@@ -106,6 +128,7 @@ export function ParallelToolPage() {
   const [joinQuery, setJoinQuery] = useState(INITIAL.joinQuery);
   const [joinWorkers, setJoinWorkers] = useState(INITIAL.joinWorkers);
   const [joinStrategy, setJoinStrategy] = useState<JoinExchange>(INITIAL.joinStrategy);
+  const [view, setView] = useState<'diagram' | 'table'>('diagram');
   // The speeds of the workers in use, as a string: one digit each, which is also how the link carries them.
   const profile = Array.from({ length: workers }, (_, k) => speeds[k] ?? 1).join('');
   const active = [...profile].map(Number);
@@ -142,222 +165,231 @@ export function ParallelToolPage() {
   const remote = result.runs.reduce((s, r) => s + r.remotePages, 0);
   const runRows = [...result.runs].sort((a, b) => a.start - b.start);
 
+  const setSpeed = (w: number, v: number) => {
+    setSpeeds((cur) => {
+      const next = [...cur];
+      while (next.length < workers) next.push(1);
+      next[w] = v;
+      return next;
+    });
+  };
+  const partials = result.merge.partials.filter((p) => p > 0).length;
+
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-4 p-6 sm:p-8">
-      <PageHeader title="Parallel execution">
-        A scan, a filter and an aggregate, cut into <em>morsels</em> of a few pages and run by several workers at once —
-        each aggregating what it reads into a partial result, then one of them merging the partials. How the morsels are
-        handed out decides whether the workers finish together. Time here is ticks, counted, and how fast each worker is,
-        is yours to set: nothing runs in parallel in your browser, so the same settings always draw the same timeline.
-      </PageHeader>
-
-      <div className="flex flex-wrap items-end gap-4 rounded-xl border border-edge bg-surface-2 p-3 shadow-e1">
-        <div className="flex flex-col gap-1 text-label text-ink-dim">
-          Query
-          <div className="flex flex-wrap gap-1" role="radiogroup" aria-label="Query">
-            {PARALLEL_QUERIES.map((q) => (
-              <button key={q.id} type="button" role="radio" aria-checked={query === q.id} onClick={() => { setQuery(q.id); }} className={`${segBase} ${query === q.id ? segOn : segOff}`}>
-                {q.label}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="flex flex-col gap-1 text-label text-ink-dim">
-          Dispatch
-          <div className="flex flex-wrap gap-1" role="radiogroup" aria-label="Dispatch">
-            {DISPATCHES.map((d) => (
-              <button key={d} type="button" role="radio" aria-checked={dispatch === d} onClick={() => { setDispatch(d); }} className={`${segBase} ${dispatch === d ? segOn : segOff}`}>
-                {DISPATCH_LABELS[d]}
-              </button>
-            ))}
-          </div>
-        </div>
-        <label className="flex flex-col gap-1 text-label text-ink-dim">
-          Workers
-          <select value={workers} onChange={(e) => { setWorkers(Number(e.target.value)); }} className={inputField}>
-            {Array.from({ length: PARALLEL_LIMITS.maxWorkers }, (_, i) => i + 1).map((n) => (
-              <option key={n} value={n}>
-                {n}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="flex flex-col gap-1 text-label text-ink-dim">
-          Pages per morsel
-          <input
-            type="number"
-            min={PARALLEL_LIMITS.minMorselPages}
-            max={PARALLEL_LIMITS.maxMorselPages}
-            value={morselPages}
-            disabled={dispatch === 'static'}
-            onChange={(e) => {
-              const v = Number(e.target.value);
-              if (Number.isInteger(v) && v >= PARALLEL_LIMITS.minMorselPages && v <= PARALLEL_LIMITS.maxMorselPages) setMorselPages(v);
-            }}
-            className={`${inputField} w-24 tabular-nums`}
+    <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col p-4 sm:p-6 lg:p-8">
+      <ToolShell
+        category="query"
+        header={
+          <ToolHeader
+            id="parallel"
+            title="Parallel execution"
+            summary="Cut a scan into morsels for several workers, set how fast each one is, and see how the dispatch decides when they finish."
+            about={
+              <p>
+                A scan, a filter and an aggregate, cut into <em>morsels</em> of a few pages and run by several workers at
+                once, each aggregating what it reads into a partial result, then one of them merging the partials. How the
+                morsels are handed out decides whether the workers finish together. Time here is ticks, counted, and how
+                fast each worker is, is yours to set: nothing runs in parallel in your browser, so the same settings always
+                draw the same timeline.
+              </p>
+            }
           />
-        </label>
-      </div>
-
-      <fieldset className="flex flex-wrap items-end gap-3 rounded-xl border border-edge bg-surface-2 p-3 shadow-e1">
-        <legend className="px-1 text-label text-ink-dim">Ticks per unit of work — 1 is full speed, 3 three times slower</legend>
-        {active.map((s, w) => (
-          <label key={w} className="flex flex-col gap-1 text-label text-ink-dim">
-            Worker {w + 1}
-            <select
-              value={s}
-              onChange={(e) => {
-                const v = Number(e.target.value);
-                setSpeeds((cur) => {
-                  const next = [...cur];
-                  while (next.length < workers) next.push(1);
-                  next[w] = v;
-                  return next;
-                });
-              }}
-              className={inputField}
-            >
-              {Array.from({ length: PARALLEL_LIMITS.maxSpeed }, (_, i) => i + 1).map((v) => (
-                <option key={v} value={v}>
-                  {v}
-                </option>
-              ))}
-            </select>
-          </label>
-        ))}
-      </fieldset>
-
-      <div className={`${panelSurface} flex flex-col gap-2 p-4`}>
-        <p className="font-mono text-label text-ink">{about.sql}</p>
-        <p className="text-label text-ink-dim">{about.about}</p>
-        <dl className="grid grid-cols-2 gap-x-6 gap-y-1 text-label sm:grid-cols-5">
-          <div>
-            <dt className="text-ink-dim">speedup</dt>
-            <dd className="tabular-nums text-body text-ink">
-              <span role="status">{result.speedup.toFixed(2)}×</span>
-            </dd>
-          </div>
-          <div>
-            <dt className="text-ink-dim">ticks</dt>
-            <dd className="tabular-nums text-body text-ink">{fmt(result.ticks)}</dd>
-          </div>
-          <div>
-            <dt className="text-ink-dim">one worker alone</dt>
-            <dd className="tabular-nums text-body text-ink">{fmt(result.serialTicks)}</dd>
-          </div>
-          <div>
-            <dt className="text-ink-dim">morsels, stolen</dt>
-            <dd className="tabular-nums text-body text-ink">
-              {fmt(result.morsels.length)}, {fmt(result.steals)}
-            </dd>
-          </div>
-          <div>
-            <dt className="text-ink-dim">pages read remotely</dt>
-            <dd className="tabular-nums text-body text-ink">
-              {fmt(remote)} of {fmt(result.pages)}
-            </dd>
-          </div>
-        </dl>
-      </div>
-
-      <DataView
-        caption="Every morsel, in the order it started"
-        rows={runRows}
-        keyOf={(r) => String(r.morsel)}
-        columns={[
-          { header: 'Morsel', cell: (r) => r.morsel + 1 },
-          { header: 'Worker', cell: (r) => r.worker + 1 },
-          { header: 'Pages', cell: (r) => `${String(result.morsels[r.morsel]!.firstPage)}–${String(result.morsels[r.morsel]!.lastPage)}` },
-          { header: 'Start', cell: (r) => r.start },
-          { header: 'End', cell: (r) => r.end },
-          { header: 'Remote pages', cell: (r) => r.remotePages },
-          { header: 'Stolen from', cell: (r) => (r.stolenFrom === undefined ? '—' : `worker ${String(r.stolenFrom + 1)}`) },
-        ]}
+        }
+        inspector={
+          <Inspector summary={`${about.label} · ${plural(workers, 'worker')} · ${DISPATCH_LABELS[dispatch].toLowerCase()}`}>
+            <ControlGroup legend="Run">
+              <ControlRow label="Query" labelId="par-query" stacked hint={about.about}>
+                <Segmented
+                  labelledBy="par-query"
+                  describedBy={hintIdFor('par-query')}
+                  tone="stage"
+                  value={query}
+                  onChange={setQuery}
+                  options={PARALLEL_QUERIES.map((q) => ({ value: q.id, label: q.label }))}
+                />
+              </ControlRow>
+              <ControlRow label="Dispatch" labelId="par-dispatch" stacked hint="How the morsels reach the workers.">
+                <Segmented
+                  labelledBy="par-dispatch"
+                  describedBy={hintIdFor('par-dispatch')}
+                  tone="stage"
+                  value={dispatch}
+                  onChange={setDispatch}
+                  options={DISPATCHES.map((d) => ({ value: d, label: DISPATCH_SHORT[d], ariaLabel: DISPATCH_LABELS[d] }))}
+                />
+              </ControlRow>
+              {dispatch === 'static' ? (
+                <p className="text-label text-ink-dim">Static ranges hand each worker one slice up front, so there are no morsels to size.</p>
+              ) : (
+                <ControlRow label="Pages per morsel" htmlFor="par-m">
+                  <Stepper id="par-m" value={morselPages} min={PARALLEL_LIMITS.minMorselPages} max={PARALLEL_LIMITS.maxMorselPages} unit="pages" onChange={setMorselPages} />
+                </ControlRow>
+              )}
+            </ControlGroup>
+            <ControlGroup legend="Workers">
+              <ControlRow label="Workers" htmlFor="par-w">
+                <Stepper id="par-w" value={workers} min={PARALLEL_LIMITS.minWorkers} max={PARALLEL_LIMITS.maxWorkers} unit="workers" onChange={setWorkers} />
+              </ControlRow>
+              <div className="flex flex-col gap-2">
+                <p id="par-speeds" className="text-label text-ink-dim">
+                  Ticks per unit of work for each: 1 is full speed, 3 three times slower.
+                </p>
+                <div className="grid grid-cols-2 gap-x-3 gap-y-2">
+                  {active.map((v, w) => (
+                    <label key={w} className="flex items-center justify-between gap-2 text-label text-ink-dim">
+                      Worker {w + 1}
+                      <select
+                        value={v}
+                        aria-describedby="par-speeds"
+                        onChange={(e) => { setSpeed(w, Number(e.target.value)); }}
+                        className={`${inputField} w-14`}
+                      >
+                        {Array.from({ length: PARALLEL_LIMITS.maxSpeed }, (_, i) => i + 1).map((n) => (
+                          <option key={n} value={n}>
+                            {n}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            </ControlGroup>
+          </Inspector>
+        }
+        metrics={
+          <MetricStrip
+            items={[
+              { label: 'Speedup', value: `${result.speedup.toFixed(2)}×`, sub: 'against one worker alone' },
+              { label: 'Ticks', value: fmt(result.ticks), sub: `${fmt(result.serialTicks)} for one worker` },
+              { label: 'Morsels', value: fmt(result.morsels.length), sub: `${fmt(result.steals)} stolen` },
+              { label: 'Pages read remotely', value: fmt(remote), sub: `of ${fmt(result.pages)}` },
+            ]}
+          />
+        }
+        stage={
+          <StagePanel
+            title="Timeline"
+            legend={`${plural(workers, 'worker')}, in ticks`}
+            views={[{ value: 'diagram', label: 'Diagram' }, { value: 'table', label: 'Table' }]}
+            view={view}
+            onView={setView}
+          >
+            <p className="mb-3 font-mono text-label break-words text-ink">{about.sql}</p>
+            {view === 'diagram' ? (
+              <>
+                <p className="mb-2 flex flex-wrap gap-x-3 gap-y-1 text-label text-ink-dim">
+                  <Key className="bg-accent/60">own pages</Key>
+                  <Key className="bg-miss/50">some remote</Key>
+                  <Key className="bg-evict/60">stolen</Key>
+                  <Key className="bg-ink">merge</Key>
+                </p>
+                <ScrollRegion label="Timeline, worker by worker" className="overflow-x-auto">
+                  <div className="min-w-[36rem]">
+                    <Timeline result={result} workers={workers} />
+                  </div>
+                </ScrollRegion>
+              </>
+            ) : (
+              <DataTable
+                caption="Every morsel, in the order it started"
+                rows={runRows}
+                keyOf={(r) => String(r.morsel)}
+                columns={[
+                  { header: 'Morsel', cell: (r) => r.morsel + 1 },
+                  { header: 'Worker', cell: (r) => r.worker + 1 },
+                  { header: 'Pages', cell: (r) => `${String(result.morsels[r.morsel]!.firstPage)}–${String(result.morsels[r.morsel]!.lastPage)}` },
+                  { header: 'Start', cell: (r) => r.start },
+                  { header: 'End', cell: (r) => r.end },
+                  { header: 'Remote pages', cell: (r) => r.remotePages },
+                  { header: 'Stolen from', cell: (r) => (r.stolenFrom === undefined ? '—' : `worker ${String(r.stolenFrom + 1)}`) },
+                ]}
+              />
+            )}
+          </StagePanel>
+        }
+        narration={`${DISPATCH_HINTS[dispatch]} The merge of ${plural(partials, 'partial result')} takes ${plural(result.merge.end - result.merge.start, 'tick')} that no number of workers shortens. Idle ticks by worker: ${result.idle.map((idle, w) => `${String(w + 1)}: ${fmt(idle)}`).join(', ')}.`}
       >
-        <div className={`${panelSurface} p-4`}>
-          <Timeline result={result} workers={workers} />
-          <p className="mt-1 text-label text-ink-dim">
-            Each bar is a morsel: teal read only the worker&rsquo;s own pages, amber read some of another&rsquo;s (a second
-            tick each), red was stolen from another worker&rsquo;s queue. The dark bar at the end is the merge of{' '}
-            {result.merge.partials.filter((p) => p > 0).length} partial results — {fmt(result.merge.end - result.merge.start)}{' '}
-            ticks no number of workers shortens. Worker idle time:{' '}
-            {result.idle.map((idle, w) => `${String(w + 1)}: ${fmt(idle)}`).join(', ')}.
-          </p>
-        </div>
-      </DataView>
-
-      <div className={`${panelSurface} flex flex-col gap-2 p-4`}>
-        <h2 className="text-body font-semibold text-ink">Speedup by workers</h2>
-        <p className="text-label text-ink-dim">
-          The same query and morsel size with one to eight workers, the speeds above for the first ones and full speed for
-          any added.
-        </p>
-        <ScrollRegion label="Speedup by workers and dispatch" className="overflow-x-auto">
-          <table className="w-full text-label">
-            <thead>
-              <tr className="text-left text-ink-dim">
-                <th scope="col" className="py-1 pr-3 font-medium">Dispatch</th>
-                {Array.from({ length: PARALLEL_LIMITS.maxWorkers }, (_, i) => (
-                  <th key={i} scope="col" className="py-1 pr-3 text-right font-medium">
-                    {i + 1}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="tabular-nums text-ink">
-              {sweep.map((row) => (
-                <tr key={row.dispatch} className="border-t border-edge">
-                  <th scope="row" className="py-1 pr-3 text-left font-normal">
-                    {DISPATCH_LABELS[row.dispatch]}
-                  </th>
-                  {row.speedups.map((s, i) => (
-                    <td key={i} className={`py-1 pr-3 text-right ${i + 1 === workers && row.dispatch === dispatch ? 'font-semibold text-accent' : ''}`}>
-                      {s.toFixed(2)}
-                    </td>
+        <ToolSection
+          title="Speedup by workers"
+          description="The same query and morsel size with one to eight workers, the speeds above for the first ones and full speed for any added."
+        >
+          <ScrollRegion label="Speedup by workers and dispatch" className="overflow-x-auto" stickyFirst>
+            <table className="w-full text-label">
+              <thead>
+                <tr className="text-left text-ink-dim">
+                  <th scope="col" className="py-1 pr-3 font-medium">Dispatch</th>
+                  {Array.from({ length: PARALLEL_LIMITS.maxWorkers }, (_, i) => (
+                    <th key={i} scope="col" className="py-1 pr-3 text-right font-medium">
+                      {i + 1}
+                    </th>
                   ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </ScrollRegion>
-      </div>
-
-      {/* plan.md §27.5 P2: exchanges, and a parallel hash join's two ways of getting rows together. */}
-      <ExchangeSection
-        query={joinQuery}
-        workers={joinWorkers}
-        strategy={joinStrategy}
-        onQuery={setJoinQuery}
-        onWorkers={setJoinWorkers}
-        onStrategy={setJoinStrategy}
-      />
-
-      <div className={`${panelSurface} p-4`}>
-        <h2 className="mb-2 text-body font-semibold text-ink">The answer</h2>
-        <p className="mb-2 text-label text-ink-dim">The partial results merged — the same rows the engine returns running the query alone.</p>
-        <table className="text-label">
-          <thead>
-            <tr className="text-left text-ink-dim">
-              {result.columns.map((c) => (
-                <th key={c} scope="col" className="py-1 pr-4 font-mono font-medium">
-                  {c}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody className="tabular-nums text-ink">
-            {result.rows.map((row, i) => (
-              <tr key={i} className="border-t border-edge">
-                {result.columns.map((c) => (
-                  <td key={c} className="py-1 pr-4 font-mono">
-                    {String(row[c] ?? 'NULL')}
-                  </td>
+              </thead>
+              <tbody className="text-ink tabular-nums">
+                {sweep.map((row) => (
+                  <tr key={row.dispatch} className="border-t border-edge/60">
+                    <th scope="row" className="py-1 pr-3 text-left font-normal whitespace-nowrap">
+                      {DISPATCH_LABELS[row.dispatch]}
+                    </th>
+                    {row.speedups.map((sp, i) => (
+                      <td key={i} className={`py-1 pr-3 text-right ${i + 1 === workers && row.dispatch === dispatch ? 'font-semibold text-accent' : ''}`}>
+                        {sp.toFixed(2)}
+                      </td>
+                    ))}
+                  </tr>
                 ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+              </tbody>
+            </table>
+          </ScrollRegion>
+        </ToolSection>
+        {/* plan.md §27.5 P2: exchanges, and a parallel hash join's two ways of getting rows together. */}
+        <ExchangeSection
+          query={joinQuery}
+          workers={joinWorkers}
+          strategy={joinStrategy}
+          onQuery={setJoinQuery}
+          onWorkers={setJoinWorkers}
+          onStrategy={setJoinStrategy}
+        />
+        <ToolSection title="The answer" description="The partial results merged: the same rows the engine returns running the query alone.">
+          <ScrollRegion label="The query's answer" className="overflow-x-auto">
+            <table className="text-label">
+              <thead>
+                <tr className="text-left text-ink-dim">
+                  {result.columns.map((c) => (
+                    <th key={c} scope="col" className="py-1 pr-4 font-mono font-medium">
+                      {c}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="text-ink tabular-nums">
+                {result.rows.map((row, i) => (
+                  <tr key={i} className="border-t border-edge/60">
+                    {result.columns.map((c) => (
+                      <td key={c} className="py-1 pr-4 font-mono">
+                        {String(row[c] ?? 'NULL')}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </ScrollRegion>
+        </ToolSection>
+      </ToolShell>
     </div>
   );
 }
+
+function Key({ className, children }: { className: string; children: string }) {
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span className={`inline-block h-2.5 w-2.5 rounded-sm ${className}`} aria-hidden />
+      {children}
+    </span>
+  );
+}
+
+const plural = (k: number, s: string) => `${String(k)} ${k === 1 ? s : `${s}s`}`;

@@ -696,7 +696,7 @@ export function ScheduleToolPage() {
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-4 p-6 sm:p-8">
       <PageHeader title="Transaction schedules">
-        Two sessions, one database, and an interleaving you choose (plan.md §25.4 D1, D2). With{' '}
+        Two sessions, one database, and an interleaving you choose. With{' '}
         <strong>no locking</strong>, a statement sees and changes whatever the table holds, another session&rsquo;s
         uncommitted work included, and <code>ROLLBACK</code> really undoes — the page names what that lets through. Turn
         on <strong>page or row locks</strong> and the same schedule runs under strict two-phase locking, enforced by the
@@ -716,57 +716,59 @@ export function ScheduleToolPage() {
         <RowsTable caption="accounts at the start" columns={columns} rows={database.tables.accounts?.rows ?? []} />
       </div>
 
-      <div className="flex flex-wrap items-end gap-3 rounded-xl border border-edge bg-surface-2 p-3 shadow-e1">
-        <div className="flex flex-col gap-1 text-label text-ink-dim">
-          Session
-          <div className="flex gap-1" role="radiogroup" aria-label="Session">
-            {SESSIONS.map((s) => (
-              <button
-                key={s}
-                type="button"
-                role="radio"
-                aria-checked={session === s}
-                onClick={() => { setSession(s); }}
-                className={`${segBase} ${session === s ? segOn : segOff}`}
-              >
-                {s}
-              </button>
-            ))}
+      <div className="flex flex-wrap items-end gap-x-6 gap-y-3 rounded-xl border border-edge bg-surface-2 p-3 shadow-e1">
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="flex flex-col gap-1 text-label text-ink-dim">
+            Session
+            <div className="flex gap-1" role="radiogroup" aria-label="Session">
+              {SESSIONS.map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  role="radio"
+                  aria-checked={session === s}
+                  onClick={() => { setSession(s); }}
+                  className={`${segBase} ${session === s ? segOn : segOff}`}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
           </div>
+
+          <label htmlFor="statement" className="flex min-w-64 flex-1 flex-col gap-1 text-label text-ink-dim">
+            Statement
+            <input
+              id="statement"
+              type="text"
+              value={sql}
+              maxLength={MAX_STATEMENT_LENGTH}
+              spellCheck={false}
+              placeholder="UPDATE accounts SET balance = 0 WHERE id = 1"
+              onChange={(e) => { setSql(e.target.value); }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') submit();
+              }}
+              className={`${inputField} font-mono`}
+            />
+          </label>
+
+          <button type="button" onClick={submit} disabled={full} className={btnPrimary}>
+            Add step
+          </button>
         </div>
-
-        <label htmlFor="statement" className="flex min-w-64 flex-1 flex-col gap-1 text-label text-ink-dim">
-          Statement
-          <input
-            id="statement"
-            type="text"
-            value={sql}
-            maxLength={MAX_STATEMENT_LENGTH}
-            spellCheck={false}
-            placeholder="UPDATE accounts SET balance = 0 WHERE id = 1"
-            onChange={(e) => { setSql(e.target.value); }}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') submit();
-            }}
-            className={`${inputField} font-mono`}
-          />
-        </label>
-
-        <button type="button" onClick={submit} disabled={full} className={btnPrimary}>
-          Add step
-        </button>
-
-        <span className="mx-1 h-6 w-px bg-edge" aria-hidden />
-        {CONTROL.map((c) => (
-          <button key={c.label} type="button" disabled={full} onClick={() => { add(c.sql); }} className={btnSecondary}>
-            {c.label}
-          </button>
-        ))}
-        {locking === 'mvcc' && (
-          <button type="button" disabled={full} onClick={() => { add('VACUUM'); }} className={btnSecondary}>
-            VACUUM
-          </button>
-        )}
+        <div className="flex flex-wrap items-end gap-3">
+          {CONTROL.map((c) => (
+            <button key={c.label} type="button" disabled={full} onClick={() => { add(c.sql); }} className={btnSecondary}>
+              {c.label}
+            </button>
+          ))}
+          {locking === 'mvcc' && (
+            <button type="button" disabled={full} onClick={() => { add('VACUUM'); }} className={btnSecondary}>
+              VACUUM
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="flex flex-wrap items-end gap-4 rounded-xl border border-edge bg-surface-2 p-3 shadow-e1">

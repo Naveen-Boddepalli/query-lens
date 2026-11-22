@@ -2,9 +2,20 @@ import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { demoKeys, HASH_JOIN_LIMITS, planHashJoin } from '../../ui/hashJoin.ts';
 import type { HashJoinLeaf, HashJoinPartition } from '../../ui/hashJoin.ts';
-import { PageHeader } from '../../ui/PageHeader.tsx';
-import { btnSecondary, inputField, panelSurface } from '../../ui/primitives.ts';
+import { btnGhost } from '../../ui/primitives.ts';
 import { useAddressBarQuery } from '../../ui/addressBar.ts';
+import {
+  ControlGroup,
+  ControlRow,
+  hintIdFor,
+  Inspector,
+  MetricStrip,
+  Segmented,
+  StagePanel,
+  Stepper,
+  ToolHeader,
+  ToolShell,
+} from '../../ui/tool/index.ts';
 
 /**
  * The Grace hash join standalone (plan.md §22.3 `/tools/hash-join`). The
@@ -15,6 +26,10 @@ import { useAddressBarQuery } from '../../ui/addressBar.ts';
  * `/tools/sort` it is parameter-driven — change the buffer budget and watch
  * the partition count, the spill, and the I/O move.
  *
+ * Laid out on the tool workbench (`src/ui/tool/`): the data and the memory budget in the inspector, every
+ * partitioning pass on the stage with the chosen leaf's buckets and probes under it, and the cost sentence as the
+ * narration.
+ *
  * URL state: `build`/`probe` (key counts), `page` (records per page), `mem`
  * (buffer pages) and `seed` (the probe-key draw). Parsed defensively — a
  * pasted link is a stranger's input, the rule `src/ui/urlState.ts` follows.
@@ -22,6 +37,8 @@ import { useAddressBarQuery } from '../../ui/addressBar.ts';
 
 const DEFAULTS = { build: 12, probe: 20, pageSize: 2, memPages: 4, seed: 1 };
 const MAX_SEED = 999_999;
+const PAGE_SIZES = [2, 3, 4] as const;
+const MEM_PAGES = [3, 4, 5, 6] as const;
 
 function clampInt(raw: string | null, lo: number, hi: number, fallback: number): number {
   if (raw === null || raw.trim() === '') return fallback; // Number(null) is 0, not NaN
@@ -89,158 +106,115 @@ export function HashJoinToolPage() {
   }, [plan]);
 
   return (
-    <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-5 p-6 sm:p-8">
-      <PageHeader
-        breadcrumbs={[{ label: 'Tools', to: '/tools' }, { label: 'Hash Join' }]}
-        title="Hash join"
-      >
-        Join a build relation and a probe relation by hashing instead of rescanning: partition both by a
-        hash of the join key, and recursively re-partition spills that exceed the memory budget.
-        Once a partition fits resident in memory, construct hash buckets and probe for key equality.
-      </PageHeader>
-
-      {/* Control Toolbar */}
-      <div className="ql-sheen flex flex-wrap items-end gap-4 rounded-xl border border-edge bg-surface-2/80 p-4 shadow-neu-rest backdrop-blur-md">
-        <label className="flex flex-col gap-1.5 text-label text-ink-dim">
-          <span>Build Keys</span>
-          <input
-            type="number"
-            min={HASH_JOIN_LIMITS.minBuildKeys}
-            max={HASH_JOIN_LIMITS.maxBuildKeys}
-            value={build}
-            onChange={(e) => {
-              const v = Number(e.target.value);
-              if (Number.isInteger(v) && v >= HASH_JOIN_LIMITS.minBuildKeys && v <= HASH_JOIN_LIMITS.maxBuildKeys) {
-                setBuild(v);
-              }
-            }}
-            className={`${inputField} w-24 tabular-nums`}
+    <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col p-4 sm:p-6 lg:p-8">
+      <ToolShell
+        category="query"
+        header={
+          <ToolHeader
+            id="hash-join"
+            title="Hash join"
+            summary="Partition two relations by a hash of the join key, spill what does not fit, then build and probe."
+            about={
+              <p>
+                A hash join matches a build relation and a probe relation by hashing instead of rescanning. Both are
+                partitioned by a hash of the join key, and a partition whose build side still exceeds the memory
+                budget is partitioned again. Once a partition fits, its build side becomes hash buckets and every
+                probe key looks for an equal key. The same buffer pool every{' '}
+                <Link to="/tools/buffer-pool" className="underline underline-offset-2 hover:text-ink">
+                  disk read
+                </Link>{' '}
+                in the pipeline shares is what a real engine would spend these I/Os against.
+              </p>
+            }
           />
-        </label>
-
-        <label className="flex flex-col gap-1.5 text-label text-ink-dim">
-          <span>Probe Keys</span>
-          <input
-            type="number"
-            min={HASH_JOIN_LIMITS.minProbeKeys}
-            max={HASH_JOIN_LIMITS.maxProbeKeys}
-            value={probe}
-            onChange={(e) => {
-              const v = Number(e.target.value);
-              if (Number.isInteger(v) && v >= HASH_JOIN_LIMITS.minProbeKeys && v <= HASH_JOIN_LIMITS.maxProbeKeys) {
-                setProbe(v);
-              }
-            }}
-            className={`${inputField} w-24 tabular-nums`}
+        }
+        inspector={
+          <Inspector summary={`${String(build)} build · ${String(probe)} probe · ${String(memPages)} buffer pages`}>
+            <ControlGroup legend="Data">
+              <ControlRow label="Build keys" htmlFor="hj-build">
+                <Stepper
+                  id="hj-build"
+                  value={build}
+                  min={HASH_JOIN_LIMITS.minBuildKeys}
+                  max={HASH_JOIN_LIMITS.maxBuildKeys}
+                  unit="build keys"
+                  onChange={setBuild}
+                />
+              </ControlRow>
+              <ControlRow label="Probe keys" htmlFor="hj-probe">
+                <Stepper
+                  id="hj-probe"
+                  value={probe}
+                  min={HASH_JOIN_LIMITS.minProbeKeys}
+                  max={HASH_JOIN_LIMITS.maxProbeKeys}
+                  unit="probe keys"
+                  onChange={setProbe}
+                />
+              </ControlRow>
+              <ControlRow label="Records per page" labelId="hj-page">
+                <Segmented
+                  labelledBy="hj-page"
+                  tone="stage"
+                  value={String(pageSize)}
+                  onChange={(v) => { setPageSize(Number(v)); }}
+                  options={PAGE_SIZES.map((v) => ({ value: String(v), label: String(v) }))}
+                />
+              </ControlRow>
+              <button
+                type="button"
+                onClick={() => { setSeed(Math.floor(Math.random() * MAX_SEED)); }}
+                className={`${btnGhost} self-start`}
+              >
+                Shuffle the probe keys
+              </button>
+            </ControlGroup>
+            <ControlGroup legend="Memory">
+              <ControlRow label="Buffer pages" labelId="hj-mem" hint="How much of the build side can be resident at once.">
+                <Segmented
+                  labelledBy="hj-mem"
+                  describedBy={hintIdFor('hj-mem')}
+                  tone="stage"
+                  value={String(memPages)}
+                  onChange={(v) => { setMemPages(Number(v)); }}
+                  options={MEM_PAGES.map((v) => ({ value: String(v), label: String(v) }))}
+                />
+              </ControlRow>
+            </ControlGroup>
+          </Inspector>
+        }
+        metrics={
+          <MetricStrip
+            items={[
+              { label: 'Partitions per split', value: plan.numPartitions, sub: `${String(plan.memPages)} buffer pages` },
+              {
+                label: 'Leaf partitions',
+                value: plan.leaves.length,
+                sub: plan.fitsInMemory ? 'fits in memory, no split needed' : `spills to depth ${String(plan.maxDepth)}`,
+              },
+              { label: 'Matches', value: plan.matches.length, sub: `of ${String(plan.probeKeys.length)} probe keys`, tone: 'hit' },
+              { label: 'Page I/Os', value: plan.totalIO, sub: `${String(plan.partitionIO)} partitioning, ${String(plan.buildProbeIO)} probing` },
+            ]}
           />
-        </label>
-
-        <label className="flex flex-col gap-1.5 text-label text-ink-dim">
-          <span>Records / page</span>
-          <select
-            value={pageSize}
-            onChange={(e) => { setPageSize(Number(e.target.value)); }}
-            className={inputField}
+        }
+        stage={
+          <StagePanel
+            title="Partitions"
+            legend="Click a leaf partition (solid border) for its buckets and probes. Dashed ones split again."
           >
-            {[2, 3, 4].map((v) => <option key={v} value={v}>{v} records</option>)}
-          </select>
-        </label>
-
-        <label className="flex flex-col gap-1.5 text-label text-ink-dim">
-          <span>Buffer pages</span>
-          <select
-            value={memPages}
-            onChange={(e) => { setMemPages(Number(e.target.value)); }}
-            className={inputField}
-          >
-            {[3, 4, 5, 6].map((v) => <option key={v} value={v}>{v} pages</option>)}
-          </select>
-        </label>
-
-        <button
-          type="button"
-          onClick={() => { setSeed(Math.floor(Math.random() * MAX_SEED)); }}
-          className={btnSecondary}
-        >
-          Shuffle Keys
-        </button>
-      </div>
-
-      {/* Metrics Strip */}
-      <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
-        {[
-          { label: 'Partitions / Split', value: String(plan.numPartitions), sub: `${plan.memPages} buffer pages` },
-          {
-            label: 'Leaf Partitions',
-            value: String(plan.leaves.length),
-            sub: plan.fitsInMemory ? 'fits in memory, no split needed' : `depth ${plan.maxDepth} spill`,
-          },
-          {
-            label: 'Matches Found',
-            value: String(plan.matches.length),
-            sub: `of ${plan.probeKeys.length} probe keys`,
-            color: 'text-hit',
-          },
-          {
-            label: 'Total Page I/Os',
-            value: String(plan.totalIO),
-            sub: `${plan.partitionIO} part + ${plan.buildProbeIO} probe`,
-            color: 'text-accent',
-          },
-        ].map((m) => (
-          <div key={m.label} className="ql-sheen rounded-xl border border-edge bg-surface-2/60 p-3 shadow-neu-rest backdrop-blur-sm">
-            <span className="block font-mono text-[0.7rem] uppercase tracking-wider text-ink-dim">{m.label}</span>
-            <span className={`mt-1 block truncate text-heading font-semibold tabular-nums ${m.color ?? 'text-ink'}`}>
-              {m.value}
-            </span>
-            <span className="text-[0.75rem] text-ink-dim">{m.sub}</span>
-          </div>
-        ))}
-      </div>
-
-      <p className="text-label leading-relaxed text-ink-dim">
-        {plan.fitsInMemory ? (
-          <>
-            All {plan.buildKeys.length} build keys fit in {plan.memPages} buffer pages, so the join
-            goes straight to build-and-probe — no partitioning pass at all. Add build keys or drop a
-            buffer page to force a real Grace hash join.
-          </>
-        ) : (
-          <>
-            With <span className="text-ink">{plan.memPages}</span> buffer pages you partition into{' '}
-            <span className="text-ink">{plan.numPartitions}</span> pieces at a time. Partitioning the
-            whole input, and re-partitioning anything still too big, costs{' '}
-            <span className="text-ink tabular-nums">{plan.partitionIO}</span> page I/Os; the final
-            build-and-probe pass over every leaf partition costs{' '}
-            <span className="text-ink tabular-nums">{plan.buildProbeIO}</span> more —{' '}
-            <span className="text-ink tabular-nums">{plan.totalIO}</span> in total.
-          </>
-        )}
-      </p>
-
-      <div className="flex flex-col gap-3">
-        {levels.map(([level, nodes]) => (
-          <LevelBlock
-            key={level}
-            level={level}
-            nodes={nodes}
-            selected={selectedLeaf?.id ?? null}
-            onSelect={setSelected}
-          />
-        ))}
-      </div>
-
-      {selectedLeaf?.leaf && <LeafDetail partition={selectedLeaf} leaf={selectedLeaf.leaf} />}
-
-      <p className="text-label leading-relaxed text-ink-dim">
-        Click a leaf partition (solid border) to see its bucket table and probe results. A dashed box
-        needed to split again because its build side still didn&rsquo;t fit on its own — a partition
-        spill. The same buffer pool every{' '}
-        <Link to="/tools/buffer-pool" className="underline underline-offset-2 hover:text-ink">
-          disk read
-        </Link>{' '}
-        in the pipeline shares is what a real engine would spend these I/Os against.
-      </p>
+            <div className="flex flex-col divide-y divide-edge/60">
+              {levels.map(([level, nodes]) => (
+                <LevelBlock key={level} level={level} nodes={nodes} selected={selectedLeaf?.id ?? null} onSelect={setSelected} />
+              ))}
+            </div>
+            {selectedLeaf?.leaf && <LeafDetail partition={selectedLeaf} leaf={selectedLeaf.leaf} />}
+          </StagePanel>
+        }
+        narration={
+          plan.fitsInMemory
+            ? `All ${String(plan.buildKeys.length)} build keys fit in ${String(plan.memPages)} buffer pages, so the join goes straight to build and probe, with no partitioning pass. Add build keys or drop a buffer page to force a real Grace hash join.`
+            : `With ${String(plan.memPages)} buffer pages you partition into ${String(plan.numPartitions)} pieces at a time. Partitioning the whole input, and re-partitioning anything still too big, costs ${String(plan.partitionIO)} page I/Os; the final build-and-probe pass over every leaf partition costs ${String(plan.buildProbeIO)} more, ${String(plan.totalIO)} in total.`
+        }
+      />
     </div>
   );
 }
@@ -259,9 +233,9 @@ function LevelBlock({
   const title = level === 0 ? 'Partitioning pass 1' : `Partitioning pass ${level + 1} (spill)`;
 
   return (
-    <div className={`${panelSurface} p-3`}>
+    <div className="py-3 first:pt-0">
       <div className="mb-2 flex items-baseline gap-2 text-label">
-        <span className="font-medium text-ink">{title}</span>
+        <h4 className="font-medium text-ink">{title}</h4>
         <span className="text-ink-dim">{plural(nodes.length, 'partition')}</span>
       </div>
 
@@ -303,15 +277,15 @@ function LevelBlock({
 
 function LeafDetail({ partition, leaf }: { partition: HashJoinPartition; leaf: HashJoinLeaf }) {
   return (
-    <div className={`${panelSurface} flex flex-col gap-4 p-4`}>
-      <h3 className="text-body font-semibold text-ink">
+    <div className="mt-1 flex flex-col gap-4 border-t border-edge/60 pt-4">
+      <h4 className="text-body font-semibold text-ink">
         Partition {partition.slot}, pass {partition.level + 1} — build &amp; probe
-      </h3>
+      </h4>
 
       <div>
-        <h4 className="mb-2 text-label font-medium text-ink-dim">
+        <h5 className="mb-2 text-label font-medium text-ink-dim">
           Build phase — {plural(leaf.numBuckets, 'bucket')}
-        </h4>
+        </h5>
         <div className="flex flex-wrap gap-2">
           {leaf.buckets.map((bucket) => (
             <div
@@ -345,9 +319,9 @@ function LeafDetail({ partition, leaf }: { partition: HashJoinPartition; leaf: H
       </div>
 
       <div>
-        <h4 className="mb-2 text-label font-medium text-ink-dim font-mono text-[0.78rem] uppercase tracking-wider">
-          Probe phase &mdash; {plural(leaf.matches.length, 'match')}, {plural(leaf.misses.length, 'miss')}
-        </h4>
+        <h5 className="mb-2 text-label font-medium text-ink-dim">
+          Probe phase — {plural(leaf.matches.length, 'match')}, {plural(leaf.misses.length, 'miss')}
+        </h5>
         <ul className="flex flex-wrap gap-1.5 text-label">
           {leaf.matches.map((m, i) => (
             <li

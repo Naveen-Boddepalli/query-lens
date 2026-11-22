@@ -90,7 +90,7 @@ test('the optimistic step opens the latch tool on its timeline, with the restart
   await expect(page.getByRole('radio', { name: 'Optimistic timeline' })).toHaveAttribute('aria-checked', 'true');
 
   // Eight of the twenty-four inserts restarted, and the table says what it was that sent each back to the root.
-  const restarted = page.getByText('inserts restarted', { exact: true });
+  const restarted = page.getByLabel('Readout').getByText('Inserts restarted', { exact: true });
   await expect(restarted.locator('..').getByText('8', { exact: true })).toBeVisible();
   await expect(page.getByRole('cell', { name: /restart — the page was held/ }).first()).toBeVisible();
 

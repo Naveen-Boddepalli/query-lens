@@ -299,7 +299,7 @@ export function TracePage() {
                 {result.rows.length > 0 && ` · query returned ${result.rows.length} row${result.rows.length === 1 ? '' : 's'}`}
               </p>
 
-              <ScrollRegion label="Trace events" className={`${panelSurface} min-h-0 flex-1 overflow-auto p-0`}>
+              <ScrollRegion label="Trace events" cue={false} className={`${panelSurface} min-h-0 flex-1 overflow-auto p-0`}>
                 <table className="w-full border-collapse text-label">
                   <thead className="sticky top-0 z-10 bg-surface-2 text-ink-dim">
                     <tr className="border-b border-edge text-left">

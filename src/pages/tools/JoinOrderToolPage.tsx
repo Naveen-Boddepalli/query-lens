@@ -128,8 +128,8 @@ export function JoinOrderToolPage() {
 
       <p className="text-label leading-relaxed text-ink-dim">
         Both are estimates from the same cost model the rest of the app uses — this page never runs a query, it
-        only costs hypothetical ones. The demo query above is a plain chain of inner JOINs, though (plan.md §25.4
-        C5 slice 3), so unlike a chain with a LEFT JOIN in it, this <em>is</em> what actually runs — in the{' '}
+        only costs hypothetical ones. The demo query above is a plain chain of inner JOINs, though, so
+        unlike a chain with a LEFT JOIN in it, this <em>is</em> what actually runs — in the{' '}
         <Link to="/playground" className="underline underline-offset-2 hover:text-ink">
           Playground
         </Link>{' '}

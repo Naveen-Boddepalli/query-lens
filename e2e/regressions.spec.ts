@@ -220,7 +220,7 @@ test.describe('a URL write made on one page', () => {
   for (const { from, change } of [
     // The Playground's share-state write, and a tool page's own debounced copy of it.
     { from: `/playground?q=${LOOKUP}&p=lru&x=0&s=1`, change: (page: Page) => page.getByRole('button', { name: 'Step forward' }) },
-    { from: '/tools/btree', change: (page: Page) => page.getByRole('button', { name: 'Clear', exact: true }) },
+    { from: '/tools/btree', change: (page: Page) => page.getByRole('radio', { name: '5 keys per node' }) },
     // A tool that writes in the effect itself, with no timer.
     {
       from: '/tools/wal',

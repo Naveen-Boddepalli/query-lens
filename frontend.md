@@ -232,6 +232,7 @@ QueryLens/
 │   │   ├── preferences.ts       # localStorage preferences (default policy, predict)
 │   │   ├── stageMeta.ts         # Metadata for each pipeline stage (title, blurb, color)
 │   │   ├── primitives.ts        # Shared className strings (btnPrimary, panelSurface, etc.)
+│   │   ├── tool/                # The tool workbench: ToolShell and its regions and controls (§8.4)
 │   │   ├── platform.ts          # Platform detection (Apple vs PC, touch vs desktop)
 │   │   ├── motion.ts            # CSS duration tokens read from JS
 │   │   ├── progress.ts          # User progress tracker (localStorage)
@@ -574,6 +575,7 @@ Pre-composed Tailwind className strings for consistent styling:
 | `btnPrimary` | Primary action button (translucent accent fill, glow on hover) |
 | `btnSecondary` | Secondary action button (neutral surface) |
 | `btnGhost` | Quiet link-weight button |
+| `btnCritical` | An action that destroys state on purpose (Crash): evict-red outline, filled on hover. Never the primary |
 | `panelSurface` | Elevated panel container with sheen |
 | `card` | Static content card |
 | `cardInteractive` | Clickable card that lifts on hover |
@@ -581,6 +583,8 @@ Pre-composed Tailwind className strings for consistent styling:
 | `pill` | Small rounded tag/badge |
 | `inputField` | Form input/select/textarea |
 | `segBase`, `segOn`, `segOff` | Segmented radio group |
+| `controlLabel` | The label beside or above a control, sentence case |
+| `metricValue`, `metricLabel` | A readout's number and name: the one KPI style (`MetricStrip`) |
 
 ### 7.8 Special CSS Classes
 
@@ -688,6 +692,30 @@ Nine self-contained sandbox pages under `/tools/`:
 | Grammar | `/tools/grammar` | SQL grammar railroad diagrams |
 | Hash Join | `/tools/hash-join` | Hash join build/probe visualization |
 
+#### The tool workbench (`src/ui/tool/`)
+
+One layout system for every tool page, proposed in `docs/research/tool-layouts.md` §4 and being rolled out
+page by page (§5.1 of that report gives the order). A page keeps its own state and URL handling and moves its
+controls into `ToolShell`'s slots:
+
+| Region / control | Component | Rule |
+|---|---|---|
+| Header | `ToolHeader` | Breadcrumbs, title, one-sentence summary. The long blurb goes in "About this tool", open on a first visit (`querylens:tool-about-seen`) |
+| Parameters | `Inspector` → `ControlGroup` → `ControlRow` | A sticky rail from `lg` up; a collapsed summary bar below, so a phone sees the output first. No prose in a group: a row's hint holds its help, or why it is disabled |
+| Worked examples | `ScenarioPicker` | One select with a blurb and ‹ › arrows, never a wall of preset buttons. Reads "Custom" once edited |
+| Operations | `CommandBar` | At most one `btnPrimary` per tool. Crash is `btnCritical`. Clusters wrap as units; no `w-px` separators |
+| Visualization | `StagePanel` | Title, legend, view switch and zoom in its header; the canvas at full width, `--stage-min-h` tall from `lg` |
+| Readouts | `MetricStrip` | One KPI style; replaces the hand-built uppercase mono cards |
+| Time | `Transport` | `PlaybackControls` in a sticky bar, with optional phase chips. Every step-based tool uses it. `unit` renames the step ("tick" on Raft's timeline). Its shortcuts leave Space to a focused button and skip a key a control already handled |
+| Deep dive | `ToolSection`, `ResponsiveTable` | Sections below the live model, with their own controls in the header (they wrap below the description on a phone); tables scroll with a sticky first column and an edge fade |
+| Values | `Segmented` (2–5 options), `Stepper` (small integer range; typing applies once in range and clamps on blur; the input widens to its max's digits; `buttonLabels` renames − and + for a picker), `Switch` (a binary rule), a select or `inputField` otherwise | One idiom per kind of value |
+
+`ToolShell` sets `--stage` from the tool's category (`toolCategory.ts`, shared with the Tools index), so the stage
+panel, `tone="stage"` options and the phase chips wear the family's hue. Layout tokens: `--tool-rail`,
+`--tool-gap`, `--control-label`, `--stage-min-h` (index.css `:root`). `e2e/toolLayout.spec.ts` checks every tool
+at 1440px and 375px for page overflow, elements escaping their card and content clipped inside one; run it with
+`TOOL_SHOTS=1` to save full-page screenshots of every tool.
+
 ### 8.5 Compare Page
 
 Four comparison modes:
@@ -774,6 +802,7 @@ QueryLens uses **no Redux, Zustand, or global state library**. All state is:
 | `querylens:challenges` | Challenge completion status |
 | `querylens:learn-progress` | Learning module progress |
 | `querylens:custom-db` | Custom multi-table database definition |
+| `querylens:tool-about-seen` | Tools whose "About this tool" has been shown once, so it opens collapsed after (`ToolHeader`) |
 
 ---
 

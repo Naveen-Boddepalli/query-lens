@@ -1582,7 +1582,7 @@ function VectorizeCompare() {
             <span className="font-mono">{totals.batched}</span> — <span className="font-mono">{ratio.toFixed(1)}×</span> fewer.
           </p>
 
-          <ScrollRegion label="Calls to next(), operator by operator" className={`${panelSurface} overflow-x-auto p-3`}>
+          <ScrollRegion label="Calls to next(), operator by operator" cue={false} className={`${panelSurface} overflow-x-auto p-3`}>
             <table className="w-full text-label">
               <thead>
                 <tr className="text-left text-ink-dim">

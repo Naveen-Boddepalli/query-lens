@@ -19,7 +19,8 @@ test('the buffer-pool sandbox steps a typed reference string', async ({ page }) 
   await page.goto('/tools/buffer-pool');
   const input = page.getByLabel(/Reference string/);
   await input.fill('0 1 2 0 1 2 3 4');
-  await page.getByRole('button', { name: 'Run' }).click();
+  // No Run button: the string runs on Enter (or when the field loses focus).
+  await input.press('Enter');
 
   // Stepped by raw event (miss/load/evict are each their own step, the same
   // unit the Playground uses) rather than by access, so the eviction is some
@@ -42,8 +43,8 @@ test('the buffer-pool sandbox runs any policy over a reference string typed in',
   // Five distinct pages, four frames: page 0 is loaded first and then made the
   // hottest page — FIFO evicts it anyway when page 4 arrives.
   await page.getByLabel(/Reference string/).fill('0 1 2 3 0 0 0 4');
+  await page.getByLabel(/Reference string/).press('Enter');
   await page.getByLabel('Policy').selectOption('fifo');
-  await page.getByRole('button', { name: 'Run' }).click();
 
   const forward = page.getByRole('button', { name: 'Step forward' });
   const evicted = page.getByText(/is evicted from frame/);
@@ -77,6 +78,7 @@ test('midpoint LRU keeps the hot set where plain LRU flushes it', async ({ page 
   await page.goto('/tools/buffer-pool');
   // Pages 0 and 1 go hot, then a scan of fresh pages, then page 0 once more.
   await page.getByLabel(/Reference string/).fill('0 1 0 1 2 3 4 5 0');
+  await page.getByLabel(/Reference string/).press('Enter');
 
   const stepToEnd = async () => {
     const fwd = page.getByRole('button', { name: 'Step forward' });
@@ -84,16 +86,29 @@ test('midpoint LRU keeps the hot set where plain LRU flushes it', async ({ page 
   };
 
   await page.getByLabel('Policy').selectOption('midpoint');
-  await page.getByRole('button', { name: 'Run' }).click();
   await stepToEnd();
   // Page 0 rode out the scan in the young sublist — the last read is a hit.
   await expect(page.getByText(/Page 0 is already in frame .* a buffer hit/)).toBeVisible();
 
+  // A setting applies as it changes: the same string reruns under LRU.
   await page.getByLabel('Policy').selectOption('lru');
-  await page.getByRole('button', { name: 'Run' }).click();
   await stepToEnd();
   // Plain LRU evicted page 0 during the scan — the same last read hits disk.
   await expect(page.getByText(/Read page 0 from disk/)).toBeVisible();
+});
+
+test('the buffer-pool scenarios load a lesson’s setup, and changing it reads Custom', async ({ page }) => {
+  await page.goto('/tools/buffer-pool');
+  const picker = page.getByLabel('Scenario');
+  // The default string, four frames and LRU are the lesson's loop.
+  await expect(picker).toHaveValue('loop');
+  await picker.selectOption({ label: 'Bélády’s anomaly, four frames' });
+  await expect.poll(() => page.url()).toMatch(/frames=4/);
+  await expect(page).toHaveURL(/policy=fifo/);
+  await page.getByRole('button', { name: /^Next:/ }).click();
+  await expect(picker).toHaveValue('scan');
+  await page.getByRole('button', { name: 'More frames' }).click();
+  await expect(picker.locator('option:checked')).toHaveText('Custom');
 });
 
 test('the parser sandbox shows the token stream and the parser\'s own errors', async ({ page }) => {
@@ -117,7 +132,7 @@ test('the parser sandbox shows the token stream and the parser\'s own errors', a
 
 test('the B+Tree sandbox inserts, deletes with rebalancing, and finds', async ({ page }) => {
   await page.goto('/tools/btree');
-  await page.getByRole('button', { name: 'Sample' }).click();
+  await page.getByLabel('Starting keys').selectOption('sample');
   await expect(page.getByText('invariants hold')).toBeVisible();
   expect(await page.locator('.react-flow__node').count()).toBeGreaterThan(3);
 
@@ -177,8 +192,9 @@ test('the locks sandbox blocks a conflicting request, then detects and resolves 
 
   // The built-in example: two transactions each holding what the other wants,
   // in exclusive mode — a real cycle the sandbox must detect and resolve.
-  await page.getByRole('button', { name: 'Deadlock example' }).click();
-  await expect(page.getByText(/Deadlock: T2 → T1 → T2/)).toBeVisible();
+  await page.getByLabel('Scenario').selectOption('deadlock');
+  // The narration repeats the last step's lines, the timeline has them all: either will do.
+  await expect(page.getByText(/Deadlock: T2 → T1 → T2/).first()).toBeVisible();
   await expect(page.getByText('aborted', { exact: true })).toBeVisible();
   // The survivor's long-blocked request is granted the moment the victim's lock frees
   // up: T1 ends up holding both pages (T2, the victim, holds nothing — the only
@@ -241,12 +257,12 @@ test('the external merge sort sandbox trades memory for I/O', async ({ page }) =
   await expect(page.getByRole('heading', { name: 'External merge sort' })).toBeVisible();
 
   // 32 records, 2/page, 3 buffer pages → 16 data pages, 3 merge passes, 128 I/Os.
-  const io = () => page.getByText('page I/Os', { exact: true }).locator('..');
+  const io = () => page.getByLabel('Readout').getByText('Page I/Os', { exact: true }).locator('..');
   await expect(io().getByText('128', { exact: true })).toBeVisible();
   await expect(page.getByText(/3 merge passes then folds/)).toBeVisible();
 
   // Wider merges with more buffer pages: fewer passes, less I/O.
-  await page.getByLabel('Buffer pages').selectOption('6');
+  await page.getByRole('radiogroup', { name: 'Buffer pages' }).getByRole('radio', { name: '6' }).click();
   await expect(io().getByText('64', { exact: true })).toBeVisible();
   await expect(page.getByText(/1 merge pass then folds/)).toBeVisible();
   await expect.poll(() => page.url()).toMatch(/[?&]mem=6/);
@@ -269,7 +285,7 @@ test('the hash join sandbox partitions, spills, and shows a bucket collision', a
   await expect(page.getByText(/\d+ matches?, \d+ misses?/)).toBeVisible();
 
   // A generous buffer budget needs no partitioning pass at all.
-  await page.getByLabel('Buffer pages').selectOption('6');
+  await page.getByRole('radiogroup', { name: 'Buffer pages' }).getByRole('radio', { name: '6' }).click();
   await expect(page.getByText(/no split needed/)).toBeVisible();
   await expect.poll(() => page.url()).toMatch(/[?&]mem=6/);
 });
@@ -279,12 +295,13 @@ test('the LSM tree sandbox flushes, compacts, and shows write/space/read amplifi
   await page.goto('/tools/lsm?n=30&mem=3&trigger=2&base=4&mult=2&seed=1');
   await expect(page.getByRole('heading', { name: 'LSM tree' })).toBeVisible();
 
-  const stat = (label: string) => page.getByText(label, { exact: true }).locator('..');
-  await expect(stat('flushes / compactions').getByText('21', { exact: true })).toBeVisible();
-  await expect(stat('write amplification').getByText('3.83×', { exact: true })).toBeVisible();
-  await expect(stat('read amp., worst case').getByText('1', { exact: true })).toBeVisible();
-  await expect(stat('read amp., measured').getByText('0.50×', { exact: true })).toBeVisible();
-  await expect(stat('false-positive rate').getByText('0.0%', { exact: true })).toBeVisible();
+  const stat = (label: string) => page.getByLabel('Readout').getByText(label, { exact: true }).locator('..');
+  await expect(stat('Flushes').getByText('10', { exact: true })).toBeVisible();
+  await expect(stat('Compactions').getByText('11', { exact: true })).toBeVisible();
+  await expect(stat('Write amplification').getByText('3.83×', { exact: true })).toBeVisible();
+  await expect(stat('Read amplification').getByText('0.50×', { exact: true })).toBeVisible();
+  await expect(stat('Read amplification')).toContainText('worst case 1 table');
+  await expect(stat('False positives').getByText('0.0%', { exact: true })).toBeVisible();
 
   // L0, L1 and L2 all drained down to L3 — the deepest, only non-empty level.
   await expect(page.getByText('L0 (flushed from the memtable)')).toBeVisible();
@@ -306,26 +323,30 @@ test('the LSM tree sandbox flushes, compacts, and shows write/space/read amplifi
 
   // A roomy memtable and level budget: everything fits, no compaction, and the write-amp drops below 1 —
   // the memtable coalescing an overwrite before it is ever flushed, a real reduction, not a bug.
-  await page.getByLabel('Memtable capacity').selectOption('8');
-  await page.getByLabel('L0 compaction trigger').selectOption('6');
-  await page.getByLabel('L1 capacity').selectOption('32');
-  await expect(stat('flushes / compactions').getByText('4', { exact: true })).toBeVisible();
-  await expect(stat('write amplification').getByText('0.90×', { exact: true })).toBeVisible();
-  await expect(stat('false-positive rate').getByText('11.8%', { exact: true })).toBeVisible();
+  await page.getByLabel('Memtable capacity').fill('8');
+  await page.getByLabel('L0 compaction trigger').fill('6');
+  await page.getByRole('radiogroup', { name: 'L1 capacity' }).getByRole('radio', { name: '32' }).click();
+  await expect(stat('Flushes').getByText('4', { exact: true })).toBeVisible();
+  await expect(stat('Compactions').getByText('0', { exact: true })).toBeVisible();
+  await expect(stat('Write amplification').getByText('0.90×', { exact: true })).toBeVisible();
+  await expect(stat('False positives').getByText('11.8%', { exact: true })).toBeVisible();
   await expect.poll(() => page.url()).toMatch(/[?&]mem=8/);
 
   // A narrower Bloom filter (fewer bits per key) raises the measured false-positive rate; a wider one drops
   // it to zero — the filter's own size/accuracy trade-off, not a fixed property of the structure.
-  await page.getByLabel('Bloom bits/key').selectOption('2');
-  await expect(stat('false-positive rate').getByText('67.4%', { exact: true })).toBeVisible();
+  await page.getByLabel('Bits per key').selectOption('2');
+  await expect(stat('False positives').getByText('67.4%', { exact: true })).toBeVisible();
   await expect.poll(() => page.url()).toMatch(/[?&]bits=2/);
 
-  await page.getByLabel('Bloom bits/key').selectOption('20');
-  await expect(stat('false-positive rate').getByText('0.0%', { exact: true })).toBeVisible();
+  await page.getByLabel('Bits per key').selectOption('20');
+  await expect(stat('False positives').getByText('0.0%', { exact: true })).toBeVisible();
   await expect.poll(() => page.url()).toMatch(/[?&]bits=20/);
 
   // An SSTable is selectable and names what built it.
-  const table = page.getByRole('button', { name: /entr(y|ies)/ }).first();
+  const table = page
+    .getByRole('region', { name: 'Levels' })
+    .getByRole('button', { name: /entr(y|ies)/ })
+    .first();
   await table.click();
   await expect(table).toHaveAttribute('aria-pressed', 'true');
   await expect(table.getByText(/flushed from the memtable|compacted from/)).toBeVisible();
@@ -335,29 +356,33 @@ test('switching the LSM sandbox to tiered compaction trades read amplification f
   await page.goto('/tools/lsm?n=30&mem=3&trigger=2&base=4&mult=2&seed=1');
   await expect(page.getByRole('heading', { name: 'LSM tree' })).toBeVisible();
 
-  const stat = (label: string) => page.getByText(label, { exact: true }).locator('..');
+  const stat = (label: string) => page.getByLabel('Readout').getByText(label, { exact: true }).locator('..');
 
   // Leveled (the default): the known baseline from the test above.
-  await expect(stat('write amplification').getByText('3.83×', { exact: true })).toBeVisible();
-  await expect(stat('read amp., worst case').getByText('1', { exact: true })).toBeVisible();
+  await expect(stat('Write amplification').getByText('3.83×', { exact: true })).toBeVisible();
+  await expect(stat('Read amplification')).toContainText('worst case 1 table');
 
   // Tiered never re-splits a merge or touches the next level's existing tables — less data rewritten per
   // compaction, so less write amplification for the identical writes, but more tables can now overlap below
   // L0 too, so more read amplification worst-case. Both directions of the same real trade-off, at once.
-  await page.getByLabel('Compaction strategy').selectOption('tiered');
-  await expect(stat('write amplification').getByText('2.97×', { exact: true })).toBeVisible();
-  await expect(stat('read amp., worst case').getByText('2', { exact: true })).toBeVisible();
+  await page.getByRole('radiogroup', { name: 'Compaction strategy' }).getByRole('radio', { name: 'Tiered' }).click();
+  await expect(stat('Write amplification').getByText('2.97×', { exact: true })).toBeVisible();
+  await expect(stat('Read amplification')).toContainText('worst case 2 tables');
   await expect.poll(() => page.url()).toMatch(/[?&]strategy=tiered/);
 
-  // The leveled-only controls (re-split level capacity/multiplier) are disabled, not just hidden, and the
+  // The leveled-only controls (re-split level capacity/multiplier) give way to a note saying why, and the
   // shared trigger control's label changes to reflect its new, every-level meaning.
-  await expect(page.getByLabel('L1 capacity')).toBeDisabled();
-  await expect(page.getByLabel('Level size ×')).toBeDisabled();
-  await expect(page.getByLabel('Files per tier')).toBeVisible();
+  await expect(page.getByRole('radiogroup', { name: 'L1 capacity' })).toHaveCount(0);
+  await expect(page.getByRole('radiogroup', { name: 'Level size ×' })).toHaveCount(0);
+  await expect(page.getByText(/has no level sizes to set/)).toBeVisible();
+  await expect(page.getByRole('spinbutton', { name: 'Files per tier' })).toBeVisible();
 
   // Any level, not just L0, can now hold overlapping SSTables — clicking one names how many source tables it
   // merged, same as leveled, but every tiered merge creates exactly one new table, never re-split.
-  const table = page.getByRole('button', { name: /entr(y|ies)/ }).first();
+  const table = page
+    .getByRole('region', { name: 'Levels' })
+    .getByRole('button', { name: /entr(y|ies)/ })
+    .first();
   await table.click();
   await expect(table.getByText(/compacted from 2 tables/)).toBeVisible();
 });
@@ -366,12 +391,13 @@ test('the hash-index sandbox grows a directory under extendible hashing and a bu
   await page.goto('/tools/hash-index?n=60&cap=4&init=2&seed=1');
   await expect(page.getByRole('heading', { name: 'Hash index', exact: true })).toBeVisible();
 
-  const stat = (label: string) => page.getByText(label, { exact: true }).locator('..');
+  const stat = (label: string) => page.getByLabel('Readout').getByText(label, { exact: true }).locator('..');
 
   // Extendible (the default): a directory, sized by a global depth.
-  await expect(stat('buckets').getByText('10', { exact: true })).toBeVisible();
-  await expect(stat('global depth').getByText('4', { exact: true })).toBeVisible();
-  await expect(page.getByText(/Directory \(16 slots, global depth 4\)/)).toBeVisible();
+  await expect(stat('Buckets').getByText('10', { exact: true })).toBeVisible();
+  await expect(stat('Global depth').getByText('4', { exact: true })).toBeVisible();
+  await expect(stat('Directory slots').getByText('16', { exact: true })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Directory' })).toContainText('16 slots · depth 4');
 
   // A real hit and a genuine miss, both through the actual lookup path.
   await page.getByLabel('Look up a key').fill('27');
@@ -385,16 +411,18 @@ test('the hash-index sandbox grows a directory under extendible hashing and a bu
   await expect(page.getByText(/consecutive keys, right after the highest one actually written/)).toBeVisible();
 
   // Switching to linear hashing: no directory, a bucket array with a split pointer and overflow chains instead.
-  await page.getByLabel('Scheme').selectOption('linear');
-  await expect(stat('level').getByText('2', { exact: true })).toBeVisible();
-  await expect(stat('split pointer').getByText('1', { exact: true })).toBeVisible();
-  await expect(stat('max chain length').getByText('2', { exact: true })).toBeVisible();
-  await expect(page.getByText(/Buckets \(level 2, split pointer at address 1\)/)).toBeVisible();
+  await page.getByRole('radiogroup', { name: 'Scheme' }).getByRole('radio', { name: 'Linear' }).click();
+  await expect(stat('Level').getByText('2', { exact: true })).toBeVisible();
+  await expect(stat('Split pointer').getByText('1', { exact: true })).toBeVisible();
+  await expect(stat('Max chain length').getByText('2', { exact: true })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Buckets' })).toContainText('level 2 · next split at 1');
   await expect.poll(() => page.url()).toMatch(/[?&]strategy=linear/);
 
-  // Extendible's own "initial buckets" control is irrelevant to it and stays disabled.
-  await page.getByLabel('Scheme').selectOption('extendible');
-  await expect(page.getByLabel('Initial buckets')).toBeDisabled();
+  // Linear hashing's starting bucket count means nothing to extendible hashing, which says so in its place.
+  await expect(page.getByRole('spinbutton', { name: 'Initial buckets' })).toBeVisible();
+  await page.getByRole('radiogroup', { name: 'Scheme' }).getByRole('radio', { name: 'Extendible' }).click();
+  await expect(page.getByRole('spinbutton', { name: 'Initial buckets' })).toHaveCount(0);
+  await expect(page.getByText(/no starting bucket count to set/)).toBeVisible();
 });
 
 test('the columnar sandbox computes real compressed sizes, per-layout page counts, and a materialization gap', async ({ page }) => {
@@ -402,7 +430,11 @@ test('the columnar sandbox computes real compressed sizes, per-layout page count
   await expect(page.getByRole('heading', { name: 'Row vs. column storage' })).toBeVisible();
 
   // Each demo column auto-picks its own genuinely best encoding, with a real compressed byte count.
-  const columnRow = (name: string) => page.locator('div.flex.flex-wrap.items-center.gap-3', { hasText: name }).first();
+  const columnRow = (name: string) =>
+    page
+      .getByRole('region', { name: 'Compression, per column' })
+      .getByRole('listitem')
+      .filter({ has: page.getByText(name, { exact: true }) });
   await expect(columnRow('id').getByText('2000 B → 129 B')).toBeVisible();
   await expect(columnRow('status_grouped').getByText('2000 B → 24 B')).toBeVisible();
   await expect(columnRow('status_shuffled').getByText('2000 B → 125 B')).toBeVisible();
@@ -410,17 +442,17 @@ test('the columnar sandbox computes real compressed sizes, per-layout page count
 
   // DSM (the default): a single-column scan costs far fewer pages than a full scan, and reconstructing a row
   // means visiting one region per column.
-  const dl = page.locator('dl').first();
-  await expect(dl.getByText('32', { exact: true })).toBeVisible();
-  await expect(dl.getByText('8', { exact: true }).first()).toBeVisible();
-  await expect(dl.getByText('4', { exact: true })).toBeVisible();
+  const stat = (label: string) => page.getByLabel('Readout').getByText(label, { exact: true }).locator('..');
+  const columns = ['id', 'status_grouped', 'status_shuffled', 'amount'];
+  await expect(stat('Full scan').getByText('32', { exact: true })).toBeVisible();
+  for (const c of columns) await expect(stat(`Only ${c}`).getByText('8', { exact: true })).toBeVisible();
+  await expect(stat('Rebuild one row').getByText('4', { exact: true })).toBeVisible();
 
   // Switching to NSM: no layout can skip a column within a page, so every single-column cost rises to match
   // the full-scan cost, and a row is reconstructed from just one region (the opposite trade-off from DSM).
   await page.getByRole('radio', { name: 'NSM' }).click();
-  const nsmValues = await dl.locator('dd').allTextContents();
-  expect(new Set(nsmValues.slice(0, 5))).toEqual(new Set(['32'])); // full scan + all 4 single-column costs tie
-  await expect(dl.getByText('1', { exact: true })).toBeVisible();
+  for (const c of columns) await expect(stat(`Only ${c}`).getByText('32', { exact: true })).toBeVisible();
+  await expect(stat('Rebuild one row').getByText('1', { exact: true })).toBeVisible();
   await expect.poll(() => page.url()).toMatch(/[?&]layout=NSM/);
 
   // Late materialization touches far fewer bytes than early materialization for the default filter/project pair.
@@ -433,20 +465,25 @@ test('latch crabbing: lock coupling blocks threads less than naive latching on t
   await page.goto('/tools/latch-crabbing?fanout=4&threads=3&ops=2&seed=1');
   await expect(page.getByRole('heading', { name: 'Latch crabbing', exact: true })).toBeVisible();
 
-  const column = (heading: string) =>
-    page.locator('div.flex.flex-col.gap-2', { has: page.getByRole('heading', { name: heading, exact: true }) });
-  const stat = (heading: string, label: string) =>
-    column(heading).locator('dt', { hasText: label }).locator('xpath=following-sibling::dd[1]');
+  // Columns: protocol, ticks to finish, ticks blocked, restarts, peak latches by one thread, across threads.
+  const cell = (protocol: string, column: number) =>
+    page.getByRole('row', { name: new RegExp(`^${protocol}`) }).getByRole('cell').nth(column);
 
   // The same six inserts, both protocols. Naive funnels every thread through the root for the whole insert.
-  await expect(stat('Naive latching', 'ticks spent blocked')).toHaveText('30');
-  await expect(stat('Naive latching', 'ticks to finish')).toHaveText('28');
-  await expect(stat('Lock crabbing', 'ticks spent blocked')).toHaveText('20');
-  await expect(stat('Lock crabbing', 'ticks to finish')).toHaveText('24');
+  await expect(cell('Naive latching', 1)).toHaveText('30');
+  await expect(cell('Naive latching', 0)).toHaveText('28');
+  await expect(cell('Lock crabbing', 1)).toHaveText('20');
+  await expect(cell('Lock crabbing', 0)).toHaveText('24');
+
+  // The readout follows the protocol whose timeline is shown, crabbing by default.
+  const stat = (label: string) => page.getByLabel('Readout').getByText(label, { exact: true }).locator('..');
+  await expect(stat('Ticks blocked').getByText('20', { exact: true })).toBeVisible();
 
   // The timeline is the engine's own schedule: switching protocol shows its first action list.
   await page.getByRole('radio', { name: 'Naive timeline' }).click();
   await expect(page.getByRole('cell', { name: 'blocked' }).first()).toBeVisible();
+  await expect(stat('Ticks blocked').getByText('30', { exact: true })).toBeVisible();
+  await expect.poll(() => page.url()).toMatch(/[?&]timeline=naive/);
 });
 
 test('vector index: brute force, IVF and HNSW, scored by distances computed and recall, on the same seeded points', async ({ page }) => {
@@ -465,9 +502,16 @@ test('vector index: brute force, IVF and HNSW, scored by distances computed and 
   await expect(row(/HNSW, beam width 10/)).toContainText('55.3');
 
   // The query's own panel: IVF probing two clusters misses one neighbour; HNSW at beam 16 finds all of them.
-  await expect(page.getByText(/IVF, probing 2 clusters/)).toBeVisible();
-  await expect(page.getByText('90.0% · 67 distances')).toBeVisible();
-  await expect(page.getByText('100.0% · 79 distances')).toBeVisible();
+  const stat = (label: string) => page.getByLabel('Readout').getByText(label, { exact: true }).locator('..');
+  await expect(stat('IVF, probing 2 clusters')).toContainText('90.0%');
+  await expect(stat('IVF, probing 2 clusters')).toContainText('67 distances');
+  await expect(stat('HNSW, beam width 16')).toContainText('100.0%');
+  await expect(stat('HNSW, beam width 16')).toContainText('79 distances');
+  await expect(page.getByRole('status')).toContainText('finds 9 of the true 10');
+
+  // Another query, picked from the stage header.
+  await page.getByRole('button', { name: 'Next query' }).click();
+  await expect(page.getByRole('status')).toContainText('For query 2');
 
   // The HNSW layers thin out: every point on layer 0, one on the top layer.
   await expect(page.getByText('layer 0', { exact: true })).toBeVisible();
@@ -492,14 +536,16 @@ test('the planner sandbox runs the rewrite rules one at a time', async ({ page }
   await expect(page.getByText(/^index-selection — /)).toContainText(/indexed/);
 
   // Drop the index → index-selection has nothing to match; the scan stays sequential.
-  await page.getByLabel('id index').uncheck();
+  const index = page.getByRole('switch', { name: 'users has an index on id' });
+  await index.click();
+  await expect(index).toHaveAttribute('aria-checked', 'false');
   await expect(optimized.getByText(/IndexScan/)).toHaveCount(0);
   await expect(optimized.getByText(/SeqScan/).first()).toBeVisible();
   await expect(page.getByText(/^index-selection — no match/)).toBeVisible();
   await expect.poll(() => page.url()).toMatch(/[?&]idx=0/);
 
   // Turn predicate-pushdown off (index back on): nothing fires — the two plans match.
-  await page.getByLabel('id index').check();
+  await index.click();
   await page.getByLabel('predicate-pushdown', { exact: true }).uncheck();
   await expect(page.getByText('optimized · unchanged')).toBeVisible();
   await expect(page.getByText(/predicate-pushdown — turned off/)).toBeVisible();
@@ -2195,17 +2241,20 @@ test('the histogram tool reads a range estimate off the buckets ANALYZE builds, 
   await page.goto('/tools/histograms');
   await expect(page.getByRole('heading', { name: 'Histograms', exact: true })).toBeVisible();
   // The clustered column, ten buckets, the range in the gap: 199 estimated for 29.
-  await expect(page.getByRole('status')).toHaveText('6.67×');
-  await expect(page.getByText('199 rows')).toBeVisible();
-  await page.getByLabel('Buckets', { exact: true }).fill('100');
-  await expect(page.getByRole('status')).toHaveText('1.20×');
+  const stat = (label: string) => page.getByLabel('Readout').getByText(label, { exact: true }).locator('..');
+  await expect(stat('q-error').getByText('6.67×', { exact: true })).toBeVisible();
+  await expect(stat('Estimated').getByText('199', { exact: true })).toBeVisible();
+  await expect(stat('Really').getByText('29', { exact: true })).toBeVisible();
+  await expect(page.getByRole('status')).toContainText('by histogram');
+  await page.getByRole('spinbutton', { name: 'Buckets' }).fill('100');
+  await expect(stat('q-error').getByText('1.20×', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: '1 bucket', exact: true }).click();
-  await expect(page.getByRole('status')).toHaveText('29.87×');
+  await expect(stat('q-error').getByText('29.87×', { exact: true })).toBeVisible();
   await expect.poll(() => page.url()).toContain('b=1');
   // The preset's even amounts: one bucket is as good as any.
   await page.getByRole('radio', { name: 'transactions.amount' }).click();
-  await expect(page.getByText('181 rows')).toBeVisible();
-  await page.getByRole('button', { name: 'Show as table' }).first().click();
+  await expect(page.getByLabel('Readout')).toContainText('181');
+  await page.getByRole('region', { name: 'Buckets' }).getByRole('radio', { name: 'Table' }).click();
   await expect(page.getByRole('table').filter({ hasText: 'Rows (assumed)' })).toBeVisible();
 });
 
@@ -2213,15 +2262,17 @@ test('the parallel tool runs morsels on scripted workers, and work stealing outr
   await page.goto('/tools/parallel');
   await expect(page.getByRole('heading', { name: 'Parallel execution', exact: true })).toBeVisible();
   // Four workers, the fourth three times slower, work stealing: 3.09×.
-  await expect(page.getByRole('status').first()).toHaveText('3.09×');
+  const speedup = page.getByLabel('Readout').getByText('Speedup', { exact: true }).locator('..');
+  await expect(speedup.getByText('3.09×', { exact: true })).toBeVisible();
   await page.getByRole('radio', { name: 'Static ranges' }).click();
-  await expect(page.getByRole('status').first()).toHaveText('1.34×');
-  await expect(page.getByLabel('Pages per morsel')).toBeDisabled();
+  await expect(speedup.getByText('1.34×', { exact: true })).toBeVisible();
+  await expect(page.getByRole('spinbutton', { name: 'Pages per morsel' })).toHaveCount(0);
+  await expect(page.getByText(/no morsels to size/)).toBeVisible();
   await page.getByRole('radio', { name: 'Shared queue' }).click();
-  await expect(page.getByRole('status').first()).toHaveText('2.67×');
+  await expect(speedup.getByText('2.67×', { exact: true })).toBeVisible();
   await page.getByLabel('Worker 4').selectOption('1');
   await expect.poll(() => page.url()).toContain('s=1111');
-  await page.getByRole('button', { name: 'Show as table' }).first().click();
+  await page.getByRole('region', { name: 'Timeline' }).getByRole('radio', { name: 'Table' }).click();
   await expect(page.getByRole('table').filter({ hasText: 'Stolen from' })).toBeVisible();
 });
 
@@ -2256,31 +2307,36 @@ test('the partitioning tool counts the rows a new node moves under hash, range a
   await page.goto('/tools/partitioning');
   await expect(page.getByRole('heading', { name: 'Partitioning', exact: true })).toBeVisible();
   await page.getByRole('radio', { name: 'Hash', exact: true }).click();
-  await expect(page.getByRole('status').first()).toHaveText('2,399 rows move (80% of the table)');
+  await expect(page.getByRole('status').first()).toContainText('2,399 rows move (80% of the table)');
   await page.getByRole('radio', { name: 'Range' }).click();
-  await expect(page.getByRole('status').first()).toHaveText('375 rows move (13% of the table)');
+  await expect(page.getByRole('status').first()).toContainText('375 rows move (13% of the table)');
   await expect(page.getByText(/Every one lands on the last range/)).toBeVisible();
   await page.getByRole('radio', { name: 'Consistent hashing' }).click();
-  await page.getByLabel('Virtual nodes each').fill('64');
-  await expect(page.getByRole('status').first()).toHaveText('590 rows move (20% of the table)');
+  await page.getByRole('spinbutton', { name: 'Virtual nodes each' }).fill('64');
+  await expect(page.getByRole('status').first()).toContainText('590 rows move (20% of the table)');
   await page.getByRole('radio', { name: 'Remove a node' }).click();
   await expect.poll(() => page.url()).toContain('c=remove');
-  await page.getByRole('button', { name: 'Show as table' }).first().click();
+  await expect(page.getByLabel('Readout')).toContainText('those on the leaving node');
+  await page.getByRole('region', { name: 'Rows on each node' }).getByRole('radio', { name: 'Table' }).click();
   await expect(page.getByRole('table').filter({ hasText: 'Before' })).toBeVisible();
 });
 
 test('the two-phase commit tool draws who is left in doubt, and a coordinator that never returns blocks them', async ({ page }) => {
   await page.goto('/tools/2pc');
   await expect(page.getByRole('heading', { name: 'Two-phase commit', exact: true })).toBeVisible();
-  await expect(page.getByRole('status')).toHaveText('The coordinator decided COMMIT at tick 2');
+  await expect(page.getByRole('status')).toContainText('The coordinator decided COMMIT at tick 2');
   await expect(page.getByText(/The longest time in doubt: 12 ticks/)).toBeVisible();
-  await page.getByRole('button', { name: 'Coordinator crashes before deciding' }).click();
-  await expect(page.getByRole('status')).toHaveText('No decision was ever logged');
+  await page.getByLabel('Scenario').selectOption('crash-before-decision');
+  await expect(page.getByRole('status')).toContainText('No decision was ever logged');
+  const stat = (label: string) => page.getByLabel('Readout').getByText(label, { exact: true }).locator('..');
+  await expect(stat('Decision').getByText('none', { exact: true })).toBeVisible();
   await expect(page.getByText(/P1 aborted at 15/)).toBeVisible();
-  await page.getByRole('button', { name: 'Coordinator never comes back' }).click();
+  await page.getByRole('button', { name: 'Next: Coordinator crashes after deciding' }).click();
+  await page.getByRole('button', { name: 'Next: Coordinator never comes back' }).click();
   await expect(page.getByText(/3 participants are still in doubt when the run ends/)).toBeVisible();
   await expect.poll(() => page.url()).toContain('cr=0');
-  await page.getByRole('button', { name: 'Show as table' }).first().click();
+  await expect(stat('Still in doubt').getByText('3', { exact: true })).toBeVisible();
+  await page.getByRole('region', { name: 'The run, lane by lane' }).getByRole('radio', { name: 'Table' }).click();
   await expect(page.getByRole('table').filter({ hasText: 'writes COMMIT to its log' })).toBeVisible();
 });
 
@@ -2297,15 +2353,29 @@ test('commit after the wait: a crash after COMMIT is logged keeps them waiting, 
 test('the Raft tool elects, replicates, and checks its four safety properties on every run', async ({ page }) => {
   await page.goto('/tools/raft');
   await expect(page.getByRole('heading', { name: 'Raft', exact: true })).toBeVisible();
-  await expect(page.getByRole('status')).toHaveText('1 leader: S2 for term 1 at tick 15');
+  await expect(page.getByText(/^1 leader: S2 for term 1 at tick 15\. Committed through entry 6/)).toBeVisible();
   for (const name of ['Election safety', 'Log matching', 'Leader completeness', 'State machine safety']) {
     await expect(page.getByText(name, { exact: true })).toBeVisible();
   }
-  await page.getByRole('button', { name: 'The leader is cut off' }).click();
-  await expect(page.getByRole('status')).toHaveText('2 leaders: S2 for term 1 at tick 15, S4 for term 4 at tick 84');
+  await expect(page.getByLabel('Readout')).toContainText('4/4 hold');
+  await page.getByLabel('Scenario').selectOption({ label: 'The leader is cut off' });
+  await expect(page.getByText(/^2 leaders: S2 for term 1 at tick 15, S4 for term 4 at tick 84\./)).toBeVisible();
   await expect(page.getByText(/2 times a server dropped entries/)).toBeVisible();
   await expect.poll(() => page.url()).toContain('side=12');
-  await page.getByRole('button', { name: 'Show as table' }).first().click();
+
+  // One transport moves through the run's ticks: the phase chips jump to each election, and the narration, the
+  // readout and the logs follow the playhead.
+  await page.getByRole('button', { name: 'S4 leads T4' }).click();
+  await expect(page.getByRole('status')).toHaveText(/^Tick 84: server 4 wins term 4/);
+  // S2 still thinks it leads term 1 from inside the minority: the readout names the newer leader, and the stale one.
+  await expect(page.getByLabel('Readout')).toContainText('Leader at tick 84S4term 4; S2 still leads T1');
+  await expect(page.getByRole('heading', { name: 'Logs at tick 84' })).toBeVisible();
+
+  // Editing away from every scenario reads Custom.
+  await page.getByRole('button', { name: 'More commands' }).click();
+  await expect(page.getByLabel('Scenario').locator('option:checked')).toHaveText('Custom');
+
+  await page.getByRole('radio', { name: 'Table' }).click();
   await expect(page.getByRole('table').filter({ hasText: 'wins term 4' })).toBeVisible();
 });
 
