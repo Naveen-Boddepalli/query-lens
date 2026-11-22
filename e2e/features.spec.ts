@@ -2262,15 +2262,17 @@ test('the parallel tool runs morsels on scripted workers, and work stealing outr
   await page.goto('/tools/parallel');
   await expect(page.getByRole('heading', { name: 'Parallel execution', exact: true })).toBeVisible();
   // Four workers, the fourth three times slower, work stealing: 3.09×.
-  await expect(page.getByRole('status').first()).toHaveText('3.09×');
+  const speedup = page.getByLabel('Readout').getByText('Speedup', { exact: true }).locator('..');
+  await expect(speedup.getByText('3.09×', { exact: true })).toBeVisible();
   await page.getByRole('radio', { name: 'Static ranges' }).click();
-  await expect(page.getByRole('status').first()).toHaveText('1.34×');
-  await expect(page.getByLabel('Pages per morsel')).toBeDisabled();
+  await expect(speedup.getByText('1.34×', { exact: true })).toBeVisible();
+  await expect(page.getByRole('spinbutton', { name: 'Pages per morsel' })).toHaveCount(0);
+  await expect(page.getByText(/no morsels to size/)).toBeVisible();
   await page.getByRole('radio', { name: 'Shared queue' }).click();
-  await expect(page.getByRole('status').first()).toHaveText('2.67×');
+  await expect(speedup.getByText('2.67×', { exact: true })).toBeVisible();
   await page.getByLabel('Worker 4').selectOption('1');
   await expect.poll(() => page.url()).toContain('s=1111');
-  await page.getByRole('button', { name: 'Show as table' }).first().click();
+  await page.getByRole('region', { name: 'Timeline' }).getByRole('radio', { name: 'Table' }).click();
   await expect(page.getByRole('table').filter({ hasText: 'Stolen from' })).toBeVisible();
 });
 
