@@ -533,7 +533,14 @@ the left, and on phones the settings expand in place. The page has no metric str
 panel already shows hits, misses, evictions and the hit rate. Its scenarios are the buffer-pool
 lesson's seven setups. At 1440×900 the stage starts at 268px on a return visit, and the transport is
 in the first view. The phone transport needed a layout fix: the layout's scroll pane now scrolls only
-from `lg` up, so `position: sticky` sticks to the phone's own viewport. B+Tree is next.
+from `lg` up, so `position: sticky` sticks to the phone's own viewport.
+
+B+Tree followed (2026-11-22). Key, Insert (the one primary), Delete and Find form the command bar.
+The Sample, 1–20 and Clear buttons became a "Starting keys" picker, since Clear and "Empty tree"
+were the same thing, and fan-out became a four-option `Segmented`. The four KPI cards became a
+`MetricStrip`, and the narration moved under the tree. On phones, `FlowTree` takes a `minZoom`: a tree
+too wide to fit at 0.8 is framed at 0.8 from the top and pans, which is §4.5 rule 2, and Fit still
+shows the whole tree. Raft is next.
 
 Each tool migrates as its own commit with before/after screenshots from the Phase 0 spec, matching
 the repo's one-item-per-commit cadence. The URL state (`addressBar.ts`, `walUrl.ts`, `scheduleUrl.ts`

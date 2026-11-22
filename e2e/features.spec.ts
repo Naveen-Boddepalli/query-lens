@@ -99,13 +99,13 @@ test('midpoint LRU keeps the hot set where plain LRU flushes it', async ({ page 
 
 test('the buffer-pool scenarios load a lesson’s setup, and changing it reads Custom', async ({ page }) => {
   await page.goto('/tools/buffer-pool');
-  const picker = page.getByLabel('Scenario', { exact: true });
+  const picker = page.getByLabel('Scenario');
   // The default string, four frames and LRU are the lesson's loop.
   await expect(picker).toHaveValue('loop');
   await picker.selectOption({ label: 'Bélády’s anomaly, four frames' });
   await expect.poll(() => page.url()).toMatch(/frames=4/);
   await expect(page).toHaveURL(/policy=fifo/);
-  await page.getByRole('button', { name: 'Next scenario' }).click();
+  await page.getByRole('button', { name: /^Next:/ }).click();
   await expect(picker).toHaveValue('scan');
   await page.getByRole('button', { name: 'More frames' }).click();
   await expect(picker.locator('option:checked')).toHaveText('Custom');
@@ -132,7 +132,7 @@ test('the parser sandbox shows the token stream and the parser\'s own errors', a
 
 test('the B+Tree sandbox inserts, deletes with rebalancing, and finds', async ({ page }) => {
   await page.goto('/tools/btree');
-  await page.getByRole('button', { name: 'Sample' }).click();
+  await page.getByLabel('Starting keys').selectOption('sample');
   await expect(page.getByText('invariants hold')).toBeVisible();
   expect(await page.locator('.react-flow__node').count()).toBeGreaterThan(3);
 
