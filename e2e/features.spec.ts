@@ -465,20 +465,25 @@ test('latch crabbing: lock coupling blocks threads less than naive latching on t
   await page.goto('/tools/latch-crabbing?fanout=4&threads=3&ops=2&seed=1');
   await expect(page.getByRole('heading', { name: 'Latch crabbing', exact: true })).toBeVisible();
 
-  const column = (heading: string) =>
-    page.locator('div.flex.flex-col.gap-2', { has: page.getByRole('heading', { name: heading, exact: true }) });
-  const stat = (heading: string, label: string) =>
-    column(heading).locator('dt', { hasText: label }).locator('xpath=following-sibling::dd[1]');
+  // Columns: protocol, ticks to finish, ticks blocked, restarts, peak latches by one thread, across threads.
+  const cell = (protocol: string, column: number) =>
+    page.getByRole('row', { name: new RegExp(`^${protocol}`) }).getByRole('cell').nth(column);
 
   // The same six inserts, both protocols. Naive funnels every thread through the root for the whole insert.
-  await expect(stat('Naive latching', 'ticks spent blocked')).toHaveText('30');
-  await expect(stat('Naive latching', 'ticks to finish')).toHaveText('28');
-  await expect(stat('Lock crabbing', 'ticks spent blocked')).toHaveText('20');
-  await expect(stat('Lock crabbing', 'ticks to finish')).toHaveText('24');
+  await expect(cell('Naive latching', 1)).toHaveText('30');
+  await expect(cell('Naive latching', 0)).toHaveText('28');
+  await expect(cell('Lock crabbing', 1)).toHaveText('20');
+  await expect(cell('Lock crabbing', 0)).toHaveText('24');
+
+  // The readout follows the protocol whose timeline is shown, crabbing by default.
+  const stat = (label: string) => page.getByLabel('Readout').getByText(label, { exact: true }).locator('..');
+  await expect(stat('Ticks blocked').getByText('20', { exact: true })).toBeVisible();
 
   // The timeline is the engine's own schedule: switching protocol shows its first action list.
   await page.getByRole('radio', { name: 'Naive timeline' }).click();
   await expect(page.getByRole('cell', { name: 'blocked' }).first()).toBeVisible();
+  await expect(stat('Ticks blocked').getByText('30', { exact: true })).toBeVisible();
+  await expect.poll(() => page.url()).toMatch(/[?&]timeline=naive/);
 });
 
 test('vector index: brute force, IVF and HNSW, scored by distances computed and recall, on the same seeded points', async ({ page }) => {

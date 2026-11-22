@@ -1,15 +1,31 @@
 import { useMemo, useState } from 'react';
 import { DEMO_INITIAL_KEYS, LATCH_LIMITS, demoScripts, planLatchCrabbing } from '../../ui/latchCrabbing.ts';
 import type { LatchProtocol } from '../../ui/latchCrabbing.ts';
-import { PageHeader } from '../../ui/PageHeader.tsx';
-import { btnSecondary, inputField, panelSurface } from '../../ui/primitives.ts';
+import { btnGhost } from '../../ui/primitives.ts';
 import { ScrollRegion } from '../../ui/ScrollRegion.tsx';
 import { useAddressBarQuery } from '../../ui/addressBar.ts';
+import {
+  ControlGroup,
+  ControlRow,
+  hintIdFor,
+  Inspector,
+  MetricStrip,
+  Segmented,
+  StagePanel,
+  Stepper,
+  ToolHeader,
+  ToolSection,
+  ToolShell,
+} from '../../ui/tool/index.ts';
 
 /**
  * The latch-crabbing standalone (plan.md §25.4 F5 `/tools/latch-crabbing`). Its driver, `src/ui/latchCrabbing.ts`,
  * runs the same scripted workload under all three protocols on the real engine B+Tree, so the columns below answer
  * for identical inserts.
+ *
+ * Laid out on the tool workbench (`src/ui/tool/`): the workload in the inspector, the chosen protocol's counts in the
+ * readout, its latch timeline on the stage (the protocol switch in the stage header), and all three protocols side
+ * by side below.
  *
  * URL state: `fanout`, `threads`, `ops`, `seed` and `timeline` (which protocol's actions are listed), parsed
  * defensively. A pasted link is a stranger's input.
@@ -22,6 +38,7 @@ const PROTOCOL_NAMES: Record<LatchProtocol, string> = {
   crabbing: 'Lock crabbing',
   optimistic: 'Optimistic coupling',
 };
+const SHORT_NAMES: Record<LatchProtocol, string> = { naive: 'Naive', crabbing: 'Crabbing', optimistic: 'Optimistic' };
 const RESTART_WORDS = {
   'parent-changed': 'a parent changed under the descent',
   'page-changed': 'the page changed since it was read',
@@ -73,125 +90,152 @@ export function LatchCrabbingToolPage() {
   }, [fanout, threads, ops, seed, protocol]);
   useAddressBarQuery(shareQuery);
 
+  const peakOne = (plan: (typeof plans)[number]) => Math.max(...plan.threads.map((t) => t.peakLatches));
+  const summary = (plan: (typeof plans)[number]) =>
+    `${PROTOCOL_NAMES[plan.protocol].toLowerCase()} ${String(plan.ticks)} with ${String(plan.totalBlockedTicks)} blocked${plan.totalRestarts > 0 ? ` and ${plural(plan.totalRestarts, 'restart')}` : ''}`;
+
   return (
-    <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-4 p-6 sm:p-8">
-      <PageHeader title="Latch crabbing">
-        Concurrent inserts into one B+Tree, latched page by page. Naive latching holds every page on the path until
-        the leaf is written, so every thread funnels through the root. Crabbing releases each ancestor as soon as the
-        child below it is safe, so a thread holds only the pages it is changing. Optimistic coupling latches nothing
-        on the way down — it reads each page and checks its version — and latches only what it will change, at the
-        price of starting again when another thread got there first.
-      </PageHeader>
-
-      <div className="flex flex-wrap items-end gap-4 rounded-xl border border-edge bg-surface-2 p-3 shadow-e1">
-        <label className="flex flex-col gap-1 text-label text-ink-dim">
-          Fanout
-          <select value={fanout} onChange={(e) => { setFanout(Number(e.target.value)); }} className={inputField}>
-            {Array.from({ length: LATCH_LIMITS.maxFanout - LATCH_LIMITS.minFanout + 1 }, (_, i) => LATCH_LIMITS.minFanout + i).map(
-              (v) => <option key={v} value={v}>{v}</option>,
-            )}
-          </select>
-        </label>
-        <label className="flex flex-col gap-1 text-label text-ink-dim">
-          Threads
-          <select value={threads} onChange={(e) => { setThreads(Number(e.target.value)); }} className={inputField}>
-            {Array.from({ length: LATCH_LIMITS.maxThreads - LATCH_LIMITS.minThreads + 1 }, (_, i) => LATCH_LIMITS.minThreads + i).map(
-              (v) => <option key={v} value={v}>{v}</option>,
-            )}
-          </select>
-        </label>
-        <label className="flex flex-col gap-1 text-label text-ink-dim">
-          Inserts per thread
-          <select value={ops} onChange={(e) => { setOps(Number(e.target.value)); }} className={inputField}>
-            {Array.from({ length: LATCH_LIMITS.maxOpsPerThread - LATCH_LIMITS.minOpsPerThread + 1 }, (_, i) => LATCH_LIMITS.minOpsPerThread + i).map(
-              (v) => <option key={v} value={v}>{v}</option>,
-            )}
-          </select>
-        </label>
-        <button type="button" onClick={() => { setSeed(Math.floor(Math.random() * MAX_SEED)); }} className={btnSecondary}>
-          Reshuffle
-        </button>
-      </div>
-
-      <div className="flex flex-col gap-4 lg:flex-row">
-        {plans.map((plan) => (
-          <div key={plan.protocol} className="flex min-w-0 flex-1 flex-col gap-2">
-            <h3 className="text-body font-semibold text-ink">{PROTOCOL_NAMES[plan.protocol]}</h3>
-            <dl className={`${panelSurface} grid grid-cols-[1fr_auto] gap-x-4 gap-y-1.5 p-3 text-label`}>
-              <dt className="text-ink-dim">ticks to finish</dt>
-              <dd className="text-right font-mono tabular-nums text-ink">{plan.ticks}</dd>
-              <dt className="text-ink-dim">ticks spent blocked</dt>
-              <dd className="text-right font-mono tabular-nums text-ink">{plan.totalBlockedTicks}</dd>
-              <dt className="text-ink-dim">inserts restarted</dt>
-              <dd className="text-right font-mono tabular-nums text-ink">{plan.totalRestarts}</dd>
-              <dt className="text-ink-dim">most latches one thread holds</dt>
-              <dd className="text-right font-mono tabular-nums text-ink">{Math.max(...plan.threads.map((t) => t.peakLatches))}</dd>
-              <dt className="text-ink-dim">most latches held across threads</dt>
-              <dd className="text-right font-mono tabular-nums text-ink">{plan.maxConcurrentLatches}</dd>
-            </dl>
-          </div>
-        ))}
-      </div>
-
-      <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Protocol">
-        {PROTOCOLS.map((p) => (
-          <button
-            key={p}
-            type="button"
-            role="radio"
-            aria-checked={protocol === p}
-            onClick={() => { setProtocol(p); }}
-            className={`rounded-lg border px-3 py-1.5 text-body transition ${
-              protocol === p ? 'border-accent bg-accent/15 text-ink' : 'border-edge bg-surface-3 text-ink-dim hover:border-ink-dim/50'
-            }`}
+    <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col p-4 sm:p-6 lg:p-8">
+      <ToolShell
+        category="indexing"
+        header={
+          <ToolHeader
+            id="latch-crabbing"
+            title="Latch crabbing"
+            summary="Run the same concurrent inserts into one B+Tree under three latching protocols, and count the ticks each spends blocked."
+            about={
+              <>
+                <p>
+                  Concurrent inserts into one B+Tree, latched page by page. Naive latching holds every page on the path
+                  until the leaf is written, so every thread funnels through the root. Crabbing releases each ancestor as
+                  soon as the child below it is safe, so a thread holds only the pages it is changing. Optimistic
+                  coupling latches nothing on the way down (it reads each page and checks its version) and latches only
+                  what it will change, at the price of starting again when another thread got there first.
+                </p>
+                <p>
+                  Threads take turns, one latch action per tick, in a fixed order, so every run is reproducible. A thread
+                  that asks for a page another thread holds is marked <span className="text-evict">blocked</span> for
+                  that tick. An optimistic insert <em>reads</em> pages without latching them and{' '}
+                  <span className="text-miss">restarts</span> from the root when a check fails: a page it read has been
+                  changed, or the page it wants to latch is held. It does not wait there, but its next read of that page
+                  waits for the holder. The tree itself is the engine&rsquo;s own B+Tree, and the final shape is checked
+                  by its own validator after every run. The paths each insert takes are those of one serial order of the
+                  same inserts, so a real concurrent run could route them slightly differently.
+                </p>
+              </>
+            }
+          />
+        }
+        inspector={
+          <Inspector summary={`fanout ${String(fanout)} · ${plural(threads, 'thread')} · ${String(ops)} each`}>
+            <ControlGroup legend="Workload">
+              <ControlRow label="Fanout" htmlFor="latch-fanout" hint="Keys a page holds before it splits.">
+                <Stepper id="latch-fanout" value={fanout} min={LATCH_LIMITS.minFanout} max={LATCH_LIMITS.maxFanout} unit="keys" describedBy={hintIdFor('latch-fanout')} onChange={setFanout} />
+              </ControlRow>
+              <ControlRow label="Threads" htmlFor="latch-threads">
+                <Stepper id="latch-threads" value={threads} min={LATCH_LIMITS.minThreads} max={LATCH_LIMITS.maxThreads} unit="threads" onChange={setThreads} />
+              </ControlRow>
+              <ControlRow label="Inserts per thread" htmlFor="latch-ops">
+                <Stepper id="latch-ops" value={ops} min={LATCH_LIMITS.minOpsPerThread} max={LATCH_LIMITS.maxOpsPerThread} unit="inserts" onChange={setOps} />
+              </ControlRow>
+              <button type="button" onClick={() => { setSeed(Math.floor(Math.random() * MAX_SEED)); }} className={`${btnGhost} self-start`}>
+                Shuffle the keys
+              </button>
+            </ControlGroup>
+          </Inspector>
+        }
+        metrics={
+          <MetricStrip
+            items={[
+              { label: 'Ticks to finish', value: shown.ticks, sub: PROTOCOL_NAMES[shown.protocol] },
+              { label: 'Ticks blocked', value: shown.totalBlockedTicks, sub: 'summed over threads', ...(shown.totalBlockedTicks > 0 ? { tone: 'evict' as const } : {}) },
+              { label: 'Inserts restarted', value: shown.totalRestarts, sub: 'optimistic checks that failed', ...(shown.totalRestarts > 0 ? { tone: 'miss' as const } : {}) },
+              { label: 'Peak latches', value: shown.maxConcurrentLatches, sub: `across threads; ${String(peakOne(shown))} by one` },
+            ]}
+          />
+        }
+        stage={
+          <StagePanel
+            title="Timeline"
+            legend={shown.timeline.length > 60 ? `first 60 of ${String(shown.timeline.length)} latch actions` : `${String(shown.timeline.length)} latch actions`}
+            toolbar={
+              <Segmented
+                label="Protocol"
+                size="sm"
+                tone="stage"
+                value={protocol}
+                onChange={setProtocol}
+                options={PROTOCOLS.map((p) => ({ value: p, label: SHORT_NAMES[p], ariaLabel: `${SHORT_NAMES[p]} timeline` }))}
+              />
+            }
           >
-            {p === 'naive' ? 'Naive' : p === 'crabbing' ? 'Crabbing' : 'Optimistic'} timeline
-          </button>
-        ))}
-      </div>
-
-      <div className={`${panelSurface} p-3`}>
-        <ScrollRegion label="Latch actions, in tick order" className="overflow-x-auto">
-        <table className="w-full text-label">
-          <thead>
-            <tr className="text-left text-ink-dim">
-              <th className="pb-2 font-medium">Tick</th>
-              <th className="pb-2 font-medium">Thread</th>
-              <th className="pb-2 font-medium">Action</th>
-              <th className="pb-2 font-medium">Page</th>
-              <th className="pb-2 font-medium">Key</th>
-            </tr>
-          </thead>
-          <tbody>
-            {shown.timeline.slice(0, 60).map((a, i) => (
-              <tr key={`${String(a.tick)}-${String(i)}`} className="border-t border-edge/60">
-                <td className="py-1 font-mono tabular-nums text-ink">{a.tick}</td>
-                <td className="py-1 font-mono text-ink">T{a.thread + 1}</td>
-                <td className={`py-1 ${a.kind === 'blocked' ? 'text-evict' : a.kind === 'restart' ? 'text-miss' : 'text-ink'}`}>
-                  {a.kind}
-                  {a.reason !== undefined && <span className="text-ink-dim"> — {RESTART_WORDS[a.reason]}</span>}
-                </td>
-                <td className="py-1 font-mono text-ink-dim">{a.nodeId ?? '—'}</td>
-                <td className="py-1 font-mono tabular-nums text-ink-dim">{a.key}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        </ScrollRegion>
-        {shown.timeline.length > 60 && (
-          <p className="pt-2 text-label text-ink-dim">Showing the first 60 of {shown.timeline.length} actions.</p>
-        )}
-      </div>
-
-      <p className="text-label leading-relaxed text-ink-dim">
-        Threads take turns, one latch action per tick, in a fixed order, so every run is reproducible. A thread that
-        asks for a page another thread holds is marked <span className="text-evict">blocked</span> for that tick. An
-        optimistic insert <em>reads</em> pages without latching them and <span className="text-miss">restarts</span>{' '}
-        from the root when a check fails: a page it read has been changed, or the page it wants to latch is held — it
-        does not wait there, but its next read of that page waits for the holder. The tree itself is the engine&rsquo;s own B+Tree, and the final shape is checked by its own validator after every
-        run. The paths each insert takes are those of one serial order of the same inserts, so a real concurrent run
-        could route them slightly differently.
-      </p>
+            <ScrollRegion label="Latch actions, in tick order" className="max-h-[32rem] overflow-auto">
+              <table className="w-full text-label">
+                <thead className="sticky top-0 bg-surface-2">
+                  <tr className="text-left text-ink-dim">
+                    <th className="pb-2 font-medium">Tick</th>
+                    <th className="pb-2 font-medium">Thread</th>
+                    <th className="pb-2 font-medium">Action</th>
+                    <th className="pb-2 font-medium">Page</th>
+                    <th className="pb-2 font-medium">Key</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {shown.timeline.slice(0, 60).map((a, i) => (
+                    <tr key={`${String(a.tick)}-${String(i)}`} className="border-t border-edge/60">
+                      <td className="py-1 font-mono text-ink tabular-nums">{a.tick}</td>
+                      <td className="py-1 font-mono text-ink">T{a.thread + 1}</td>
+                      <td className={`py-1 ${a.kind === 'blocked' ? 'text-evict' : a.kind === 'restart' ? 'text-miss' : 'text-ink'}`}>
+                        {a.kind}
+                        {a.reason !== undefined && <span className="text-ink-dim"> — {RESTART_WORDS[a.reason]}</span>}
+                      </td>
+                      <td className="py-1 font-mono text-ink-dim">{a.nodeId ?? '—'}</td>
+                      <td className="py-1 font-mono text-ink-dim tabular-nums">{a.key}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </ScrollRegion>
+          </StagePanel>
+        }
+        narration={`Ticks to finish, and ticks blocked: ${plans.map(summary).join('; ')}.`}
+      >
+        <ToolSection
+          title="Three protocols, the same inserts"
+          description="Each row is the same scripted workload on the same tree; only the latching changes. Ticks is the time to finish every insert; blocked sums the ticks threads spent waiting. Pick a protocol above to read its timeline."
+        >
+          <ScrollRegion label="The three protocols compared" className="overflow-x-auto" stickyFirst>
+            <table className="w-full text-label">
+              <thead>
+                <tr className="text-left text-ink-dim">
+                  <th className="pr-3 pb-2 font-medium">Protocol</th>
+                  <th className="pb-2 pl-4 text-right font-medium whitespace-nowrap">Ticks</th>
+                  <th className="pb-2 pl-4 text-right font-medium whitespace-nowrap">Blocked</th>
+                  <th className="pb-2 pl-4 text-right font-medium whitespace-nowrap">Restarts</th>
+                  <th className="pb-2 pl-4 text-right font-medium whitespace-nowrap">Peak latches, one thread</th>
+                  <th className="pb-2 pl-4 text-right font-medium whitespace-nowrap">Peak latches, all threads</th>
+                </tr>
+              </thead>
+              <tbody>
+                {plans.map((plan) => (
+                  <tr key={plan.protocol} className={`border-t border-edge/60 ${plan.protocol === protocol ? 'text-ink' : 'text-ink-dim'}`}>
+                    <th scope="row" className="py-1.5 pr-3 text-left font-medium whitespace-nowrap">
+                      {PROTOCOL_NAMES[plan.protocol]}
+                    </th>
+                    <td className="py-1.5 pl-4 text-right font-mono tabular-nums">{plan.ticks}</td>
+                    <td className="py-1.5 pl-4 text-right font-mono tabular-nums">{plan.totalBlockedTicks}</td>
+                    <td className="py-1.5 pl-4 text-right font-mono tabular-nums">{plan.totalRestarts}</td>
+                    <td className="py-1.5 pl-4 text-right font-mono tabular-nums">{peakOne(plan)}</td>
+                    <td className="py-1.5 pl-4 text-right font-mono tabular-nums">{plan.maxConcurrentLatches}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </ScrollRegion>
+        </ToolSection>
+      </ToolShell>
     </div>
   );
 }
+
+const plural = (k: number, s: string) => `${String(k)} ${k === 1 ? s : `${s}s`}`;
