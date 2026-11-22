@@ -2229,17 +2229,20 @@ test('the histogram tool reads a range estimate off the buckets ANALYZE builds, 
   await page.goto('/tools/histograms');
   await expect(page.getByRole('heading', { name: 'Histograms', exact: true })).toBeVisible();
   // The clustered column, ten buckets, the range in the gap: 199 estimated for 29.
-  await expect(page.getByRole('status')).toHaveText('6.67×');
-  await expect(page.getByText('199 rows')).toBeVisible();
-  await page.getByLabel('Buckets', { exact: true }).fill('100');
-  await expect(page.getByRole('status')).toHaveText('1.20×');
+  const stat = (label: string) => page.getByLabel('Readout').getByText(label, { exact: true }).locator('..');
+  await expect(stat('q-error').getByText('6.67×', { exact: true })).toBeVisible();
+  await expect(stat('Estimated').getByText('199', { exact: true })).toBeVisible();
+  await expect(stat('Really').getByText('29', { exact: true })).toBeVisible();
+  await expect(page.getByRole('status')).toContainText('by histogram');
+  await page.getByRole('spinbutton', { name: 'Buckets' }).fill('100');
+  await expect(stat('q-error').getByText('1.20×', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: '1 bucket', exact: true }).click();
-  await expect(page.getByRole('status')).toHaveText('29.87×');
+  await expect(stat('q-error').getByText('29.87×', { exact: true })).toBeVisible();
   await expect.poll(() => page.url()).toContain('b=1');
   // The preset's even amounts: one bucket is as good as any.
   await page.getByRole('radio', { name: 'transactions.amount' }).click();
-  await expect(page.getByText('181 rows')).toBeVisible();
-  await page.getByRole('button', { name: 'Show as table' }).first().click();
+  await expect(page.getByLabel('Readout')).toContainText('181');
+  await page.getByRole('region', { name: 'Buckets' }).getByRole('radio', { name: 'Table' }).click();
   await expect(page.getByRole('table').filter({ hasText: 'Rows (assumed)' })).toBeVisible();
 });
 
