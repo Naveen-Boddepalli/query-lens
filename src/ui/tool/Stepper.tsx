@@ -10,6 +10,8 @@ export interface StepperProps {
   step?: number;
   /** A name for the − and + buttons ("frames"): "Fewer frames", "More frames". */
   unit?: string;
+  /** The two buttons' names when "Fewer" and "More" read wrongly, as for picking the next of a list. */
+  buttonLabels?: readonly [decrease: string, increase: string];
   describedBy?: string;
   disabled?: boolean;
 }
@@ -29,7 +31,7 @@ const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(mi
 /** Wide enough for the largest value it can hold: two digits fit w-12, four need w-16. */
 const WIDTH: Record<number, string> = { 1: 'w-12', 2: 'w-12', 3: 'w-14', 4: 'w-16' };
 
-export function Stepper({ id, value, onChange, min, max, step = 1, unit, describedBy, disabled = false }: StepperProps) {
+export function Stepper({ id, value, onChange, min, max, step = 1, unit, buttonLabels, describedBy, disabled = false }: StepperProps) {
   const [draft, setDraft] = useState<string | null>(null);
   const set = (v: number) => {
     const next = clamp(Math.round(v / step) * step, min, max);
@@ -42,7 +44,7 @@ export function Stepper({ id, value, onChange, min, max, step = 1, unit, describ
         className={btn}
         onClick={() => { setDraft(null); set(value - step); }}
         disabled={disabled || value <= min}
-        aria-label={unit ? `Fewer ${unit}` : 'Decrease'}
+        aria-label={buttonLabels?.[0] ?? (unit ? `Fewer ${unit}` : 'Decrease')}
       >
         −
       </button>
@@ -73,7 +75,7 @@ export function Stepper({ id, value, onChange, min, max, step = 1, unit, describ
         className={btn}
         onClick={() => { setDraft(null); set(value + step); }}
         disabled={disabled || value >= max}
-        aria-label={unit ? `More ${unit}` : 'Increase'}
+        aria-label={buttonLabels?.[1] ?? (unit ? `More ${unit}` : 'Increase')}
       >
         +
       </button>
