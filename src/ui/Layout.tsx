@@ -89,8 +89,12 @@ export function Layout() {
             were simply clipped by the shell's `lg:overflow-hidden` above with no
             way to reach the rest of the page. Playground and the /stages and
             /docs layouts size themselves to fit exactly (or scroll a nested
-            panel), so this never shows a second scrollbar for them. */}
-        <div className="flex min-h-0 min-w-0 w-full max-w-full flex-1 overflow-y-auto">
+            panel), so this never shows a second scrollbar for them. Only from
+            `lg` up, where the shell is pinned to the viewport: below it the
+            window scrolls, and a pane that only claimed to scroll became the
+            scroll container `position: sticky` measured against, so a tool's
+            transport never stuck to the bottom of a phone screen. */}
+        <div className="flex min-h-0 min-w-0 w-full max-w-full flex-1 lg:overflow-y-auto">
           <Outlet />
         </div>
       </div>

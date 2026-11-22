@@ -38,7 +38,7 @@ export function findOverflows(page: Page): Promise<Overflow[]> {
     // The page itself, and the layout's own scroll pane (Layout.tsx), which is where 2PC's overflow showed.
     const doc = document.documentElement;
     if (doc.scrollWidth > doc.clientWidth + 1) out.push({ kind: 'page', what: '<html>', by: doc.scrollWidth - doc.clientWidth });
-    for (const pane of document.querySelectorAll('#root .overflow-y-auto')) {
+    for (const pane of document.querySelectorAll('#root [class*="overflow-y-auto"]')) {
       if (pane.scrollWidth > pane.clientWidth + 1) out.push({ kind: 'page', what: describe(pane).slice(0, 80), by: pane.scrollWidth - pane.clientWidth });
     }
 
@@ -87,6 +87,6 @@ export function findOverflows(page: Page): Promise<Overflow[]> {
  */
 export async function unpinLayout(page: Page): Promise<void> {
   await page.addStyleTag({
-    content: `.lg\\:h-dvh{height:auto!important}.lg\\:overflow-hidden{overflow:visible!important}#root .overflow-y-auto{overflow:visible!important}`,
+    content: `.lg\\:h-dvh{height:auto!important}.lg\\:overflow-hidden{overflow:visible!important}#root .lg\\:overflow-y-auto{overflow:visible!important}`,
   });
 }
