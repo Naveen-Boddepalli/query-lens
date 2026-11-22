@@ -295,12 +295,13 @@ test('the LSM tree sandbox flushes, compacts, and shows write/space/read amplifi
   await page.goto('/tools/lsm?n=30&mem=3&trigger=2&base=4&mult=2&seed=1');
   await expect(page.getByRole('heading', { name: 'LSM tree' })).toBeVisible();
 
-  const stat = (label: string) => page.getByText(label, { exact: true }).locator('..');
-  await expect(stat('flushes / compactions').getByText('21', { exact: true })).toBeVisible();
-  await expect(stat('write amplification').getByText('3.83×', { exact: true })).toBeVisible();
-  await expect(stat('read amp., worst case').getByText('1', { exact: true })).toBeVisible();
-  await expect(stat('read amp., measured').getByText('0.50×', { exact: true })).toBeVisible();
-  await expect(stat('false-positive rate').getByText('0.0%', { exact: true })).toBeVisible();
+  const stat = (label: string) => page.getByLabel('Readout').getByText(label, { exact: true }).locator('..');
+  await expect(stat('Flushes').getByText('10', { exact: true })).toBeVisible();
+  await expect(stat('Compactions').getByText('11', { exact: true })).toBeVisible();
+  await expect(stat('Write amplification').getByText('3.83×', { exact: true })).toBeVisible();
+  await expect(stat('Read amplification').getByText('0.50×', { exact: true })).toBeVisible();
+  await expect(stat('Read amplification')).toContainText('worst case 1 table');
+  await expect(stat('False positives').getByText('0.0%', { exact: true })).toBeVisible();
 
   // L0, L1 and L2 all drained down to L3 — the deepest, only non-empty level.
   await expect(page.getByText('L0 (flushed from the memtable)')).toBeVisible();
@@ -322,26 +323,30 @@ test('the LSM tree sandbox flushes, compacts, and shows write/space/read amplifi
 
   // A roomy memtable and level budget: everything fits, no compaction, and the write-amp drops below 1 —
   // the memtable coalescing an overwrite before it is ever flushed, a real reduction, not a bug.
-  await page.getByLabel('Memtable capacity').selectOption('8');
-  await page.getByLabel('L0 compaction trigger').selectOption('6');
-  await page.getByLabel('L1 capacity').selectOption('32');
-  await expect(stat('flushes / compactions').getByText('4', { exact: true })).toBeVisible();
-  await expect(stat('write amplification').getByText('0.90×', { exact: true })).toBeVisible();
-  await expect(stat('false-positive rate').getByText('11.8%', { exact: true })).toBeVisible();
+  await page.getByLabel('Memtable capacity').fill('8');
+  await page.getByLabel('L0 compaction trigger').fill('6');
+  await page.getByRole('radiogroup', { name: 'L1 capacity' }).getByRole('radio', { name: '32' }).click();
+  await expect(stat('Flushes').getByText('4', { exact: true })).toBeVisible();
+  await expect(stat('Compactions').getByText('0', { exact: true })).toBeVisible();
+  await expect(stat('Write amplification').getByText('0.90×', { exact: true })).toBeVisible();
+  await expect(stat('False positives').getByText('11.8%', { exact: true })).toBeVisible();
   await expect.poll(() => page.url()).toMatch(/[?&]mem=8/);
 
   // A narrower Bloom filter (fewer bits per key) raises the measured false-positive rate; a wider one drops
   // it to zero — the filter's own size/accuracy trade-off, not a fixed property of the structure.
-  await page.getByLabel('Bloom bits/key').selectOption('2');
-  await expect(stat('false-positive rate').getByText('67.4%', { exact: true })).toBeVisible();
+  await page.getByLabel('Bits per key').selectOption('2');
+  await expect(stat('False positives').getByText('67.4%', { exact: true })).toBeVisible();
   await expect.poll(() => page.url()).toMatch(/[?&]bits=2/);
 
-  await page.getByLabel('Bloom bits/key').selectOption('20');
-  await expect(stat('false-positive rate').getByText('0.0%', { exact: true })).toBeVisible();
+  await page.getByLabel('Bits per key').selectOption('20');
+  await expect(stat('False positives').getByText('0.0%', { exact: true })).toBeVisible();
   await expect.poll(() => page.url()).toMatch(/[?&]bits=20/);
 
   // An SSTable is selectable and names what built it.
-  const table = page.getByRole('button', { name: /entr(y|ies)/ }).first();
+  const table = page
+    .getByRole('region', { name: 'Levels' })
+    .getByRole('button', { name: /entr(y|ies)/ })
+    .first();
   await table.click();
   await expect(table).toHaveAttribute('aria-pressed', 'true');
   await expect(table.getByText(/flushed from the memtable|compacted from/)).toBeVisible();
@@ -351,29 +356,33 @@ test('switching the LSM sandbox to tiered compaction trades read amplification f
   await page.goto('/tools/lsm?n=30&mem=3&trigger=2&base=4&mult=2&seed=1');
   await expect(page.getByRole('heading', { name: 'LSM tree' })).toBeVisible();
 
-  const stat = (label: string) => page.getByText(label, { exact: true }).locator('..');
+  const stat = (label: string) => page.getByLabel('Readout').getByText(label, { exact: true }).locator('..');
 
   // Leveled (the default): the known baseline from the test above.
-  await expect(stat('write amplification').getByText('3.83×', { exact: true })).toBeVisible();
-  await expect(stat('read amp., worst case').getByText('1', { exact: true })).toBeVisible();
+  await expect(stat('Write amplification').getByText('3.83×', { exact: true })).toBeVisible();
+  await expect(stat('Read amplification')).toContainText('worst case 1 table');
 
   // Tiered never re-splits a merge or touches the next level's existing tables — less data rewritten per
   // compaction, so less write amplification for the identical writes, but more tables can now overlap below
   // L0 too, so more read amplification worst-case. Both directions of the same real trade-off, at once.
-  await page.getByLabel('Compaction strategy').selectOption('tiered');
-  await expect(stat('write amplification').getByText('2.97×', { exact: true })).toBeVisible();
-  await expect(stat('read amp., worst case').getByText('2', { exact: true })).toBeVisible();
+  await page.getByRole('radiogroup', { name: 'Compaction strategy' }).getByRole('radio', { name: 'Tiered' }).click();
+  await expect(stat('Write amplification').getByText('2.97×', { exact: true })).toBeVisible();
+  await expect(stat('Read amplification')).toContainText('worst case 2 tables');
   await expect.poll(() => page.url()).toMatch(/[?&]strategy=tiered/);
 
-  // The leveled-only controls (re-split level capacity/multiplier) are disabled, not just hidden, and the
+  // The leveled-only controls (re-split level capacity/multiplier) give way to a note saying why, and the
   // shared trigger control's label changes to reflect its new, every-level meaning.
-  await expect(page.getByLabel('L1 capacity')).toBeDisabled();
-  await expect(page.getByLabel('Level size ×')).toBeDisabled();
-  await expect(page.getByLabel('Files per tier')).toBeVisible();
+  await expect(page.getByRole('radiogroup', { name: 'L1 capacity' })).toHaveCount(0);
+  await expect(page.getByRole('radiogroup', { name: 'Level size ×' })).toHaveCount(0);
+  await expect(page.getByText(/has no level sizes to set/)).toBeVisible();
+  await expect(page.getByRole('spinbutton', { name: 'Files per tier' })).toBeVisible();
 
   // Any level, not just L0, can now hold overlapping SSTables — clicking one names how many source tables it
   // merged, same as leveled, but every tiered merge creates exactly one new table, never re-split.
-  const table = page.getByRole('button', { name: /entr(y|ies)/ }).first();
+  const table = page
+    .getByRole('region', { name: 'Levels' })
+    .getByRole('button', { name: /entr(y|ies)/ })
+    .first();
   await table.click();
   await expect(table.getByText(/compacted from 2 tables/)).toBeVisible();
 });
