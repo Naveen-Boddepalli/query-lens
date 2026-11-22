@@ -63,7 +63,7 @@ export function Stepper({ id, value, onChange, min, max, step = 1, unit, describ
           if (Number.isFinite(n)) set(n);
           setDraft(null);
         }}
-        className={`${inputField} w-12 px-1 text-center tabular-nums`}
+        className={`${inputField} w-12 [appearance:textfield] px-1 text-center tabular-nums [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none`}
       />
       <button
         type="button"

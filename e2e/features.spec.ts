@@ -256,12 +256,12 @@ test('the external merge sort sandbox trades memory for I/O', async ({ page }) =
   await expect(page.getByRole('heading', { name: 'External merge sort' })).toBeVisible();
 
   // 32 records, 2/page, 3 buffer pages → 16 data pages, 3 merge passes, 128 I/Os.
-  const io = () => page.getByText('page I/Os', { exact: true }).locator('..');
+  const io = () => page.getByLabel('Readout').getByText('Page I/Os', { exact: true }).locator('..');
   await expect(io().getByText('128', { exact: true })).toBeVisible();
   await expect(page.getByText(/3 merge passes then folds/)).toBeVisible();
 
   // Wider merges with more buffer pages: fewer passes, less I/O.
-  await page.getByLabel('Buffer pages').selectOption('6');
+  await page.getByRole('radiogroup', { name: 'Buffer pages' }).getByRole('radio', { name: '6' }).click();
   await expect(io().getByText('64', { exact: true })).toBeVisible();
   await expect(page.getByText(/1 merge pass then folds/)).toBeVisible();
   await expect.poll(() => page.url()).toMatch(/[?&]mem=6/);

@@ -2,9 +2,20 @@ import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { planExternalSort, shuffledRange, SORT_LIMITS } from '../../ui/externalSort.ts';
 import type { SortMerge, SortPass, SortPlan } from '../../ui/externalSort.ts';
-import { PageHeader } from '../../ui/PageHeader.tsx';
-import { btnSecondary, inputField, panelSurface } from '../../ui/primitives.ts';
+import { btnGhost } from '../../ui/primitives.ts';
 import { useAddressBarQuery } from '../../ui/addressBar.ts';
+import {
+  ControlGroup,
+  ControlRow,
+  hintIdFor,
+  Inspector,
+  MetricStrip,
+  Segmented,
+  StagePanel,
+  Stepper,
+  ToolHeader,
+  ToolShell,
+} from '../../ui/tool/index.ts';
 
 /**
  * The sorting standalone (plan.md §22.3 `/tools/sort`). §4's engine has no
@@ -14,6 +25,9 @@ import { useAddressBarQuery } from '../../ui/addressBar.ts';
  * cross-highlighted — change the memory budget and watch the pass count and the
  * I/O move.
  *
+ * Laid out on the tool workbench (`src/ui/tool/`): the data and the memory budget in the inspector, the four
+ * numbers in the readout, and every pass on the stage, with the sentence that explains them as the narration.
+ *
  * URL state: `n` (records), `page` (records per page), `mem` (buffer pages) and
  * `seed` (the shuffle). Parsed defensively — a pasted link is a stranger's
  * input, the rule `src/ui/urlState.ts` follows.
@@ -21,6 +35,8 @@ import { useAddressBarQuery } from '../../ui/addressBar.ts';
 
 const DEFAULTS = { n: 32, pageSize: 2, memPages: 3, seed: 1 };
 const MAX_SEED = 999_999;
+const PAGE_SIZES = [2, 3, 4] as const;
+const MEM_PAGES = [3, 4, 5, 6] as const;
 
 /** One colour per source run while a merge output is selected (fan-in ≤ 5). */
 const TINT = [
@@ -104,143 +120,115 @@ export function SortToolPage() {
     return map;
   }, [selectedMerge]);
 
+  const reset = () => { setSelected(null); };
+
   return (
-    <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-5 p-6 sm:p-8">
-      <PageHeader
-        breadcrumbs={[{ label: 'Tools', to: '/tools' }, { label: 'External Sort' }]}
-        title="External merge sort"
-      >
-        Sorting more records than fit in memory: sort what fits into short runs, then merge the runs
-        together pass after pass until one sorted run remains. The cost is page reads and writes &mdash;
-        change the memory budget and watch pass counts and I/O move.
-      </PageHeader>
-
-      {/* Control Toolbar */}
-      <div className="ql-sheen flex flex-wrap items-end gap-4 rounded-xl border border-edge bg-surface-2/80 p-4 shadow-neu-rest backdrop-blur-md">
-        <label className="flex flex-col gap-1.5 text-label text-ink-dim">
-          <span>Records</span>
-          <input
-            type="number"
-            min={SORT_LIMITS.minRecords}
-            max={SORT_LIMITS.maxRecords}
-            value={n}
-            onChange={(e) => {
-              const v = Number(e.target.value);
-              if (Number.isInteger(v) && v >= SORT_LIMITS.minRecords && v <= SORT_LIMITS.maxRecords) {
-                setN(v);
-                setSelected(null);
-              }
-            }}
-            className={`${inputField} w-24 tabular-nums`}
+    <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col p-4 sm:p-6 lg:p-8">
+      <ToolShell
+        category="query"
+        header={
+          <ToolHeader
+            id="sort"
+            title="External merge sort"
+            summary="Sort more records than fit in memory, and watch the buffer budget set the passes and the I/O."
+            about={
+              <p>
+                Sort what fits into short runs, then merge the runs together pass after pass until one sorted run
+                remains. The cost is page reads and writes. The same interleave drives every{' '}
+                <Link to="/tools/buffer-pool" className="underline underline-offset-2 hover:text-ink">
+                  disk read in the buffer pool
+                </Link>{' '}
+                and every scan in the{' '}
+                <Link to="/playground" className="underline underline-offset-2 hover:text-ink">
+                  Playground
+                </Link>
+                .
+              </p>
+            }
           />
-        </label>
-
-        <label className="flex flex-col gap-1.5 text-label text-ink-dim">
-          <span>Records / page</span>
-          <select
-            value={pageSize}
-            onChange={(e) => { setPageSize(Number(e.target.value)); setSelected(null); }}
-            className={inputField}
-          >
-            {[2, 3, 4].map((v) => <option key={v} value={v}>{v} records</option>)}
-          </select>
-        </label>
-
-        <label className="flex flex-col gap-1.5 text-label text-ink-dim">
-          <span>Buffer pages</span>
-          <select
-            value={memPages}
-            onChange={(e) => { setMemPages(Number(e.target.value)); setSelected(null); }}
-            className={inputField}
-          >
-            {[3, 4, 5, 6].map((v) => <option key={v} value={v}>{v} pages</option>)}
-          </select>
-        </label>
-
-        <button
-          type="button"
-          onClick={() => { setSeed(Math.floor(Math.random() * MAX_SEED)); setSelected(null); }}
-          className={btnSecondary}
-        >
-          Shuffle keys
-        </button>
-      </div>
-
-      {/* Metrics Strip */}
-      <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
-        {[
-          { label: 'data pages', value: String(plan.pageCount), sub: `${plan.recordCount} records` },
-          { label: 'initial runs', value: String(plan.initialRunCount), sub: `${plan.memPages} pages/sort` },
-          {
-            label: 'merge passes',
-            value: String(plan.mergePassCount),
-            sub: plan.mergePassCount === 0 ? 'in-memory' : `${plan.fanIn}-way fan-in`,
-          },
-          {
-            label: 'page I/Os',
-            value: String(plan.totalIO),
-            sub: `${plan.ioPerPass} I/Os × ${plan.passes.length} passes`,
-            color: 'text-accent',
-          },
-        ].map((m) => (
-          <div key={m.label} className="ql-sheen rounded-xl border border-edge bg-surface-2/60 p-3 shadow-neu-rest backdrop-blur-sm">
-            <span className="block font-mono text-[0.7rem] uppercase tracking-wider text-ink-dim">{m.label}</span>
-            <span className={`mt-1 block truncate text-heading font-semibold tabular-nums ${m.color ?? 'text-ink'}`}>
-              {m.value}
-            </span>
-            <span className="text-[0.75rem] text-ink-dim">{m.sub}</span>
-          </div>
-        ))}
-      </div>
-
-      <p className="text-label leading-relaxed text-ink-dim">
-        {plan.fitsInMemory ? (
-          <>
-            All {plan.recordCount} records fit in {plan.memPages} buffer pages, so run generation
-            sorts them in one pass — no merge needed. Add records or drop a buffer page to force a
-            real external sort.
-          </>
-        ) : (
-          <>
-            With <span className="text-ink">{plan.memPages}</span> buffer pages you merge{' '}
-            <span className="text-ink">{plan.fanIn}</span> runs at a time. Run generation makes{' '}
-            <span className="text-ink">{plural(plan.initialRunCount, 'run')}</span>;{' '}
-            <span className="text-ink">{plural(plan.mergePassCount, 'merge pass')}</span> then folds
-            them into one. Every pass reads and writes all{' '}
-            <span className="text-ink">{plan.pageCount}</span> pages, so the sort costs{' '}
-            <span className="text-ink tabular-nums">{plan.totalIO}</span> page I/Os. One more buffer
-            page widens every merge and can drop a whole pass.
-          </>
-        )}
-      </p>
-
-      <div className="flex flex-col gap-3">
-        {plan.passes.map((pass) => (
-          <PassBlock
-            key={pass.index}
-            pass={pass}
-            fanIn={plan.fanIn}
-            selected={selected}
-            related={related}
-            selectedMerge={selectedMerge}
-            sourceSlot={sourceSlot}
-            onSelect={(id) => { setSelected((cur) => (cur === id ? null : id)); }}
+        }
+        inspector={
+          <Inspector summary={`${String(n)} records · ${String(memPages)} buffer pages`}>
+            <ControlGroup legend="Data">
+              <ControlRow label="Records" htmlFor="sort-n">
+                <Stepper
+                  id="sort-n"
+                  value={n}
+                  min={SORT_LIMITS.minRecords}
+                  max={SORT_LIMITS.maxRecords}
+                  unit="records"
+                  onChange={(v) => { setN(v); reset(); }}
+                />
+              </ControlRow>
+              <ControlRow label="Records per page" labelId="sort-page">
+                <Segmented
+                  labelledBy="sort-page"
+                  tone="stage"
+                  value={String(pageSize)}
+                  onChange={(v) => { setPageSize(Number(v)); reset(); }}
+                  options={PAGE_SIZES.map((v) => ({ value: String(v), label: String(v) }))}
+                />
+              </ControlRow>
+              <button
+                type="button"
+                onClick={() => { setSeed(Math.floor(Math.random() * MAX_SEED)); reset(); }}
+                className={`${btnGhost} self-start`}
+              >
+                Shuffle the keys
+              </button>
+            </ControlGroup>
+            <ControlGroup legend="Memory">
+              <ControlRow label="Buffer pages" labelId="sort-mem" hint="Pages to sort in, and to merge through: one is the output.">
+                <Segmented
+                  labelledBy="sort-mem"
+                  describedBy={hintIdFor('sort-mem')}
+                  tone="stage"
+                  value={String(memPages)}
+                  onChange={(v) => { setMemPages(Number(v)); reset(); }}
+                  options={MEM_PAGES.map((v) => ({ value: String(v), label: String(v) }))}
+                />
+              </ControlRow>
+            </ControlGroup>
+          </Inspector>
+        }
+        metrics={
+          <MetricStrip
+            items={[
+              { label: 'Data pages', value: plan.pageCount, sub: `${String(plan.recordCount)} records` },
+              { label: 'Initial runs', value: plan.initialRunCount, sub: `${String(plan.memPages)} pages per sort` },
+              {
+                label: 'Merge passes',
+                value: plan.mergePassCount,
+                sub: plan.mergePassCount === 0 ? 'sorted in memory' : `${String(plan.fanIn)}-way fan-in`,
+              },
+              { label: 'Page I/Os', value: plan.totalIO, sub: `${String(plan.ioPerPass)} per pass × ${String(plan.passes.length)}` },
+            ]}
           />
-        ))}
-      </div>
-
-      <p className="text-label leading-relaxed text-ink-dim">
-        Click any merged run to colour its records by which run each came from, and to light the runs
-        that fed it. The same interleave drives every{' '}
-        <Link to="/tools/buffer-pool" className="underline underline-offset-2 hover:text-ink">
-          disk read in the buffer pool
-        </Link>{' '}
-        and every scan in the{' '}
-        <Link to="/playground" className="underline underline-offset-2 hover:text-ink">
-          Playground
-        </Link>
-        .
-      </p>
+        }
+        stage={
+          <StagePanel title="Passes" legend="Click a merged run to colour its records by the run each came from.">
+            <div className="flex flex-col divide-y divide-edge/60">
+              {plan.passes.map((pass) => (
+                <PassBlock
+                  key={pass.index}
+                  pass={pass}
+                  fanIn={plan.fanIn}
+                  selected={selected}
+                  related={related}
+                  selectedMerge={selectedMerge}
+                  sourceSlot={sourceSlot}
+                  onSelect={(id) => { setSelected((cur) => (cur === id ? null : id)); }}
+                />
+              ))}
+            </div>
+          </StagePanel>
+        }
+        narration={
+          plan.fitsInMemory
+            ? `All ${String(plan.recordCount)} records fit in ${String(plan.memPages)} buffer pages, so run generation sorts them in one pass and no merge is needed. Add records or drop a buffer page to force a real external sort.`
+            : `With ${String(plan.memPages)} buffer pages you merge ${String(plan.fanIn)} runs at a time. Run generation makes ${plural(plan.initialRunCount, 'run')}; ${plural(plan.mergePassCount, 'merge pass')} then folds them into one. Every pass reads and writes all ${String(plan.pageCount)} pages, so the sort costs ${String(plan.totalIO)} page I/Os. One more buffer page widens every merge and can drop a whole pass.`
+        }
+      />
     </div>
   );
 }
@@ -265,9 +253,9 @@ function PassBlock({
   const title = pass.index === 0 ? 'Run generation' : `Merge pass ${pass.index}`;
 
   return (
-    <div className={`${panelSurface} p-3`}>
+    <div className="py-3 first:pt-0 last:pb-0">
       <div className="mb-2 flex items-baseline gap-2 text-label">
-        <span className="font-medium text-ink">{title}</span>
+        <h4 className="font-medium text-ink">{title}</h4>
         <span className="text-ink-dim">
           {plural(pass.runs.length, 'run')}
           {pass.index > 0 && `, ≤ ${fanIn}-way`}
