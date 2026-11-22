@@ -455,6 +455,11 @@ const T = (name: string): string => `src/pages/tools/${name}.tsx`;
  *  - 2026-11-15, v3 merged into main (version/v3-remaining over 2.0.0 and the Spotlight search): every route ceiling
  *    re-measured on the merged build and set to measured + 3, rounded up. v3's lazy Footer and main's lazy Spotlight
  *    dialog both stay out of the entry chunk, which measures 24.2 kB (down from main's 25.4).
+ *  - 2026-11-22, the tool workbench (docs/research/tool-layouts.md): every tool page moved onto the shared shell in
+ *    `src/ui/tool/` (inspector, command bar, readout strip, stage, steppers, segmented controls, scenario picker). That
+ *    is one shared chunk, ~4.7 kB gzip, plus its stylesheet rules, and every tool route now loads it. The 18 tool
+ *    routes that went over are set to measured + 3, rounded up. The chunk is cached after the first tool, so moving
+ *    between tools pays only the page chunk.
  */
 export const ROUTES: readonly RouteBudget[] = [
   { route: '/', roots: [P('LandingPage')], kb: 184, note: 'the landing page' },
@@ -475,31 +480,31 @@ export const ROUTES: readonly RouteBudget[] = [
   { route: '/study', roots: [P('StudyPage')], kb: 122, note: 'the §9 study runner (unlisted); the instrument travels in the link, not the bundle (§25.4 A2)' },
   { route: '/assignments/new', roots: [P('AssignmentsNewPage')], kb: 186, note: 'assignment-link builder' },
   { route: '/tools', roots: [P('ToolsIndexPage')], kb: 119, note: 'the tools index' },
-  { route: '/tools/buffer-pool', roots: [T('BufferPoolToolPage')], kb: 191, note: 'buffer-pool sandbox' },
-  { route: '/tools/parser', roots: [T('ParserToolPage')], kb: 208, note: 'tokenizer + parser sandbox' },
-  { route: '/tools/btree', roots: [T('BTreeToolPage')], kb: 210, note: 'B+Tree sandbox' },
-  { route: '/tools/page', roots: [T('PageToolPage')], kb: 186, note: 'slotted-page inspector' },
-  { route: '/tools/sort', roots: [T('SortToolPage')], kb: 119, note: 'external merge sort' },
-  { route: '/tools/planner', roots: [T('PlannerToolPage')], kb: 210, note: 'planner sandbox' },
-  { route: '/tools/locks', roots: [T('LocksToolPage')], kb: 121, note: 'lock simulator' },
+  { route: '/tools/buffer-pool', roots: [T('BufferPoolToolPage')], kb: 199, note: 'buffer-pool sandbox' },
+  { route: '/tools/parser', roots: [T('ParserToolPage')], kb: 218, note: 'tokenizer + parser sandbox' },
+  { route: '/tools/btree', roots: [T('BTreeToolPage')], kb: 219, note: 'B+Tree sandbox' },
+  { route: '/tools/page', roots: [T('PageToolPage')], kb: 195, note: 'slotted-page inspector' },
+  { route: '/tools/sort', roots: [T('SortToolPage')], kb: 128, note: 'external merge sort' },
+  { route: '/tools/planner', roots: [T('PlannerToolPage')], kb: 220, note: 'planner sandbox' },
+  { route: '/tools/locks', roots: [T('LocksToolPage')], kb: 131, note: 'lock simulator' },
   { route: '/tools/isolation', roots: [T('IsolationToolPage')], kb: 200, note: 'the Hermitage isolation matrix (both engines, computed)' },
   { route: '/tools/recovery', roots: [T('RecoveryToolPage')], kb: 132, note: 'crash recovery: checkpoints, a crash, and ARIES analysis, redo and undo' },
   { route: '/tools/wal', roots: [T('WalToolPage')], kb: 132, note: 'write-ahead log: a pool, a disk, a log and the rule between them' },
   { route: '/tools/concurrency', roots: [T('ConcurrencyToolPage')], kb: 203, note: 'one schedule under five concurrency-control protocols, each really run' },
   { route: '/tools/schedule', roots: [T('ScheduleToolPage')], kb: 212, note: 'transaction schedules (the engine, a shared database, two sessions)' },
   { route: '/tools/grammar', roots: [T('GrammarToolPage')], kb: 117, note: 'the SQL grammar diagram' },
-  { route: '/tools/hash-join', roots: [T('HashJoinToolPage')], kb: 120, note: 'Grace hash join' },
+  { route: '/tools/hash-join', roots: [T('HashJoinToolPage')], kb: 129, note: 'Grace hash join' },
   { route: '/tools/join-order', roots: [T('JoinOrderToolPage')], kb: 189, note: 'Selinger join-order search over the subset lattice' },
-  { route: '/tools/raft', roots: [T('RaftToolPage')], kb: 123, note: 'Raft: election and replication over a scripted schedule, its safety properties checked (plan.md §27.5 X3)' },
-  { route: '/tools/2pc', roots: [T('TwoPhaseCommitToolPage')], kb: 122, note: 'two-phase commit with presumed abort; crashes and lost messages scripted (plan.md §27.5 X2)' },
-  { route: '/tools/partitioning', roots: [T('PartitioningToolPage')], kb: 126, note: 'partitioning by hash, range and consistent hashing; rows moved when a node joins or leaves (plan.md §27.5 X1)' },
-  { route: '/tools/parallel', roots: [T('ParallelToolPage')], kb: 142, note: 'morsel-driven parallel execution and exchange operators, worker speeds scripted (plan.md §27.5 P1)' },
-  { route: '/tools/histograms', roots: [T('HistogramToolPage')], kb: 188, note: 'equi-depth histograms: ANALYZE with a bucket count, and a range estimate’s q-error (plan.md §27.5 T5)' },
-  { route: '/tools/lsm', roots: [T('LsmToolPage')], kb: 121, note: 'log-structured merge-tree sandbox' },
-  { route: '/tools/hash-index', roots: [T('HashIndexToolPage')], kb: 121, note: 'extendible and linear hashing sandbox' },
-  { route: '/tools/columnar', roots: [T('ColumnarToolPage')], kb: 120, note: 'NSM/DSM/PAX row vs. column storage sandbox' },
-  { route: '/tools/vector-index', roots: [T('VectorIndexToolPage')], kb: 120, note: 'brute force vs. IVF vs. HNSW vector search' },
-  { route: '/tools/latch-crabbing', roots: [T('LatchCrabbingToolPage')], kb: 187, note: 'latch crabbing: naive vs. lock coupling vs. optimistic coupling on a scripted B+Tree workload' },
+  { route: '/tools/raft', roots: [T('RaftToolPage')], kb: 135, note: 'Raft: election and replication over a scripted schedule, its safety properties checked (plan.md §27.5 X3)' },
+  { route: '/tools/2pc', roots: [T('TwoPhaseCommitToolPage')], kb: 132, note: 'two-phase commit with presumed abort; crashes and lost messages scripted (plan.md §27.5 X2)' },
+  { route: '/tools/partitioning', roots: [T('PartitioningToolPage')], kb: 136, note: 'partitioning by hash, range and consistent hashing; rows moved when a node joins or leaves (plan.md §27.5 X1)' },
+  { route: '/tools/parallel', roots: [T('ParallelToolPage')], kb: 152, note: 'morsel-driven parallel execution and exchange operators, worker speeds scripted (plan.md §27.5 P1)' },
+  { route: '/tools/histograms', roots: [T('HistogramToolPage')], kb: 198, note: 'equi-depth histograms: ANALYZE with a bucket count, and a range estimate’s q-error (plan.md §27.5 T5)' },
+  { route: '/tools/lsm', roots: [T('LsmToolPage')], kb: 131, note: 'log-structured merge-tree sandbox' },
+  { route: '/tools/hash-index', roots: [T('HashIndexToolPage')], kb: 130, note: 'extendible and linear hashing sandbox' },
+  { route: '/tools/columnar', roots: [T('ColumnarToolPage')], kb: 129, note: 'NSM/DSM/PAX row vs. column storage sandbox' },
+  { route: '/tools/vector-index', roots: [T('VectorIndexToolPage')], kb: 129, note: 'brute force vs. IVF vs. HNSW vector search' },
+  { route: '/tools/latch-crabbing', roots: [T('LatchCrabbingToolPage')], kb: 197, note: 'latch crabbing: naive vs. lock coupling vs. optimistic coupling on a scripted B+Tree workload' },
   { route: '/docs', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 192, note: 'the docs shell and every prose page (one shared chunk)' },
   { route: '/docs/concepts/btree', roots: ['src/ui/DocsLayout.tsx', 'src/pages/DocsContent/concepts/btree.mdx'], kb: 213, note: 'a concept page with a live B+Tree widget' },
   { route: '/docs/essays/index-write-tax', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 192, note: 'an essay: prose, with links into the B+Tree sandbox (plan.md §25.4 H2)' },
