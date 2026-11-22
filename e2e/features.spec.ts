@@ -284,7 +284,7 @@ test('the hash join sandbox partitions, spills, and shows a bucket collision', a
   await expect(page.getByText(/\d+ matches?, \d+ misses?/)).toBeVisible();
 
   // A generous buffer budget needs no partitioning pass at all.
-  await page.getByLabel('Buffer pages').selectOption('6');
+  await page.getByRole('radiogroup', { name: 'Buffer pages' }).getByRole('radio', { name: '6' }).click();
   await expect(page.getByText(/no split needed/)).toBeVisible();
   await expect.poll(() => page.url()).toMatch(/[?&]mem=6/);
 });
