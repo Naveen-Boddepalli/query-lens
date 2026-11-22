@@ -507,14 +507,16 @@ test('the planner sandbox runs the rewrite rules one at a time', async ({ page }
   await expect(page.getByText(/^index-selection — /)).toContainText(/indexed/);
 
   // Drop the index → index-selection has nothing to match; the scan stays sequential.
-  await page.getByLabel('id index').uncheck();
+  const index = page.getByRole('switch', { name: 'users has an index on id' });
+  await index.click();
+  await expect(index).toHaveAttribute('aria-checked', 'false');
   await expect(optimized.getByText(/IndexScan/)).toHaveCount(0);
   await expect(optimized.getByText(/SeqScan/).first()).toBeVisible();
   await expect(page.getByText(/^index-selection — no match/)).toBeVisible();
   await expect.poll(() => page.url()).toMatch(/[?&]idx=0/);
 
   // Turn predicate-pushdown off (index back on): nothing fires — the two plans match.
-  await page.getByLabel('id index').check();
+  await index.click();
   await page.getByLabel('predicate-pushdown', { exact: true }).uncheck();
   await expect(page.getByText('optimized · unchanged')).toBeVisible();
   await expect(page.getByText(/predicate-pushdown — turned off/)).toBeVisible();
