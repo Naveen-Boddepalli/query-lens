@@ -19,7 +19,8 @@ test('the buffer-pool sandbox steps a typed reference string', async ({ page }) 
   await page.goto('/tools/buffer-pool');
   const input = page.getByLabel(/Reference string/);
   await input.fill('0 1 2 0 1 2 3 4');
-  await page.getByRole('button', { name: 'Run' }).click();
+  // No Run button: the string runs on Enter (or when the field loses focus).
+  await input.press('Enter');
 
   // Stepped by raw event (miss/load/evict are each their own step, the same
   // unit the Playground uses) rather than by access, so the eviction is some
@@ -42,8 +43,8 @@ test('the buffer-pool sandbox runs any policy over a reference string typed in',
   // Five distinct pages, four frames: page 0 is loaded first and then made the
   // hottest page — FIFO evicts it anyway when page 4 arrives.
   await page.getByLabel(/Reference string/).fill('0 1 2 3 0 0 0 4');
+  await page.getByLabel(/Reference string/).press('Enter');
   await page.getByLabel('Policy').selectOption('fifo');
-  await page.getByRole('button', { name: 'Run' }).click();
 
   const forward = page.getByRole('button', { name: 'Step forward' });
   const evicted = page.getByText(/is evicted from frame/);
@@ -77,6 +78,7 @@ test('midpoint LRU keeps the hot set where plain LRU flushes it', async ({ page 
   await page.goto('/tools/buffer-pool');
   // Pages 0 and 1 go hot, then a scan of fresh pages, then page 0 once more.
   await page.getByLabel(/Reference string/).fill('0 1 0 1 2 3 4 5 0');
+  await page.getByLabel(/Reference string/).press('Enter');
 
   const stepToEnd = async () => {
     const fwd = page.getByRole('button', { name: 'Step forward' });
@@ -84,16 +86,29 @@ test('midpoint LRU keeps the hot set where plain LRU flushes it', async ({ page 
   };
 
   await page.getByLabel('Policy').selectOption('midpoint');
-  await page.getByRole('button', { name: 'Run' }).click();
   await stepToEnd();
   // Page 0 rode out the scan in the young sublist — the last read is a hit.
   await expect(page.getByText(/Page 0 is already in frame .* a buffer hit/)).toBeVisible();
 
+  // A setting applies as it changes: the same string reruns under LRU.
   await page.getByLabel('Policy').selectOption('lru');
-  await page.getByRole('button', { name: 'Run' }).click();
   await stepToEnd();
   // Plain LRU evicted page 0 during the scan — the same last read hits disk.
   await expect(page.getByText(/Read page 0 from disk/)).toBeVisible();
+});
+
+test('the buffer-pool scenarios load a lesson’s setup, and changing it reads Custom', async ({ page }) => {
+  await page.goto('/tools/buffer-pool');
+  const picker = page.getByLabel('Scenario', { exact: true });
+  // The default string, four frames and LRU are the lesson's loop.
+  await expect(picker).toHaveValue('loop');
+  await picker.selectOption({ label: 'Bélády’s anomaly, four frames' });
+  await expect.poll(() => page.url()).toMatch(/frames=4/);
+  await expect(page).toHaveURL(/policy=fifo/);
+  await page.getByRole('button', { name: 'Next scenario' }).click();
+  await expect(picker).toHaveValue('scan');
+  await page.getByRole('button', { name: 'More frames' }).click();
+  await expect(picker.locator('option:checked')).toHaveText('Custom');
 });
 
 test('the parser sandbox shows the token stream and the parser\'s own errors', async ({ page }) => {

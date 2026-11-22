@@ -525,7 +525,15 @@ needs the pan-instead-of-shrink rule in §4.
 `frontend.md` §8.4), with unit tests in `src/ui/tool/__tests__/`. `e2e/toolLayout.spec.ts` checks all
 25 tools at 1440 and 375px for page overflow, elements escaping their card and content clipped inside
 one. On its first run it found one more bug, in the slotted page's map, which is now fixed.
-`TOOL_SHOTS=1` saves the screenshots. No page uses the shell yet; Phase 1 starts with Buffer pool.
+`TOOL_SHOTS=1` saves the screenshots.
+
+**Phase 1 progress (2026-11-22):** Buffer pool is on the workbench. Open questions 1–3 went with the
+recommendations: there is no Run button (the string applies on Enter or blur), the inspector sits on
+the left, and on phones the settings expand in place. The page has no metric strip, because the frame
+panel already shows hits, misses, evictions and the hit rate. Its scenarios are the buffer-pool
+lesson's seven setups. At 1440×900 the stage starts at 268px on a return visit, and the transport is
+in the first view. The phone transport needed a layout fix: the layout's scroll pane now scrolls only
+from `lg` up, so `position: sticky` sticks to the phone's own viewport. B+Tree is next.
 
 Each tool migrates as its own commit with before/after screenshots from the Phase 0 spec, matching
 the repo's one-item-per-commit cadence. The URL state (`addressBar.ts`, `walUrl.ts`, `scheduleUrl.ts`

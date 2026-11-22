@@ -54,7 +54,7 @@ export function Stepper({ id, value, onChange, min, max, step = 1, unit, describ
           const n = e.target.valueAsNumber;
           if (Number.isFinite(n)) set(Math.round(n / step) * step);
         }}
-        className={`${inputField} w-16 text-center tabular-nums`}
+        className={`${inputField} w-12 px-1 text-center tabular-nums`}
       />
       <button
         type="button"

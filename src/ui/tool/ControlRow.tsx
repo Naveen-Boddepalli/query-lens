@@ -16,6 +16,8 @@ export interface ControlRowProps {
    * `${htmlFor ?? labelId}-hint`: point the control's `aria-describedby` at it.
    */
   hint?: ReactNode;
+  /** Label above the control at every width: for a control that needs the row's whole width (a reference string). */
+  stacked?: boolean;
   children: ReactNode;
 }
 
@@ -23,11 +25,17 @@ export interface ControlRowProps {
  * Label, control, hint. Side by side (a fixed `--control-label` column) where the row has room, stacked where it
  * does not: a container query, so the same row works in the rail, the tablet bar and on a phone.
  */
-export function ControlRow({ label, htmlFor, labelId, hint, children }: ControlRowProps) {
+export function ControlRow({ label, htmlFor, labelId, hint, stacked = false, children }: ControlRowProps) {
   const id = htmlFor ?? labelId;
   return (
     <div className="@container min-w-0">
-      <div className="grid gap-1 @min-[15rem]:grid-cols-[var(--control-label)_minmax(0,1fr)] @min-[15rem]:items-center @min-[15rem]:gap-x-3">
+      <div
+        className={
+          stacked
+            ? 'grid gap-1'
+            : 'grid gap-1 @min-[15rem]:grid-cols-[var(--control-label)_minmax(0,1fr)] @min-[15rem]:items-center @min-[15rem]:gap-x-3'
+        }
+      >
         {htmlFor ? (
           <label htmlFor={htmlFor} className={controlLabel}>
             {label}
@@ -39,7 +47,7 @@ export function ControlRow({ label, htmlFor, labelId, hint, children }: ControlR
         )}
         <div className="flex min-w-0 items-center gap-2">{children}</div>
         {hint && (
-          <p id={id ? hintIdFor(id) : undefined} className="text-label text-ink-dim/80 @min-[15rem]:col-start-2">
+          <p id={id ? hintIdFor(id) : undefined} className={`text-label text-ink-dim/80 ${stacked ? '' : '@min-[15rem]:col-span-2'}`}>
             {hint}
           </p>
         )}
