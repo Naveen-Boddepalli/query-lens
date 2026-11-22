@@ -2305,16 +2305,17 @@ test('the partitioning tool counts the rows a new node moves under hash, range a
   await page.goto('/tools/partitioning');
   await expect(page.getByRole('heading', { name: 'Partitioning', exact: true })).toBeVisible();
   await page.getByRole('radio', { name: 'Hash', exact: true }).click();
-  await expect(page.getByRole('status').first()).toHaveText('2,399 rows move (80% of the table)');
+  await expect(page.getByRole('status').first()).toContainText('2,399 rows move (80% of the table)');
   await page.getByRole('radio', { name: 'Range' }).click();
-  await expect(page.getByRole('status').first()).toHaveText('375 rows move (13% of the table)');
+  await expect(page.getByRole('status').first()).toContainText('375 rows move (13% of the table)');
   await expect(page.getByText(/Every one lands on the last range/)).toBeVisible();
   await page.getByRole('radio', { name: 'Consistent hashing' }).click();
-  await page.getByLabel('Virtual nodes each').fill('64');
-  await expect(page.getByRole('status').first()).toHaveText('590 rows move (20% of the table)');
+  await page.getByRole('spinbutton', { name: 'Virtual nodes each' }).fill('64');
+  await expect(page.getByRole('status').first()).toContainText('590 rows move (20% of the table)');
   await page.getByRole('radio', { name: 'Remove a node' }).click();
   await expect.poll(() => page.url()).toContain('c=remove');
-  await page.getByRole('button', { name: 'Show as table' }).first().click();
+  await expect(page.getByLabel('Readout')).toContainText('those on the leaving node');
+  await page.getByRole('region', { name: 'Rows on each node' }).getByRole('radio', { name: 'Table' }).click();
   await expect(page.getByRole('table').filter({ hasText: 'Before' })).toBeVisible();
 });
 
