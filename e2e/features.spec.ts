@@ -2324,15 +2324,19 @@ test('the partitioning tool counts the rows a new node moves under hash, range a
 test('the two-phase commit tool draws who is left in doubt, and a coordinator that never returns blocks them', async ({ page }) => {
   await page.goto('/tools/2pc');
   await expect(page.getByRole('heading', { name: 'Two-phase commit', exact: true })).toBeVisible();
-  await expect(page.getByRole('status')).toHaveText('The coordinator decided COMMIT at tick 2');
+  await expect(page.getByRole('status')).toContainText('The coordinator decided COMMIT at tick 2');
   await expect(page.getByText(/The longest time in doubt: 12 ticks/)).toBeVisible();
-  await page.getByRole('button', { name: 'Coordinator crashes before deciding' }).click();
-  await expect(page.getByRole('status')).toHaveText('No decision was ever logged');
+  await page.getByLabel('Scenario').selectOption('crash-before-decision');
+  await expect(page.getByRole('status')).toContainText('No decision was ever logged');
+  const stat = (label: string) => page.getByLabel('Readout').getByText(label, { exact: true }).locator('..');
+  await expect(stat('Decision').getByText('none', { exact: true })).toBeVisible();
   await expect(page.getByText(/P1 aborted at 15/)).toBeVisible();
-  await page.getByRole('button', { name: 'Coordinator never comes back' }).click();
+  await page.getByRole('button', { name: 'Next: Coordinator crashes after deciding' }).click();
+  await page.getByRole('button', { name: 'Next: Coordinator never comes back' }).click();
   await expect(page.getByText(/3 participants are still in doubt when the run ends/)).toBeVisible();
   await expect.poll(() => page.url()).toContain('cr=0');
-  await page.getByRole('button', { name: 'Show as table' }).first().click();
+  await expect(stat('Still in doubt').getByText('3', { exact: true })).toBeVisible();
+  await page.getByRole('region', { name: 'The run, lane by lane' }).getByRole('radio', { name: 'Table' }).click();
   await expect(page.getByRole('table').filter({ hasText: 'writes COMMIT to its log' })).toBeVisible();
 });
 
