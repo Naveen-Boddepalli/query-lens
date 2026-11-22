@@ -192,8 +192,9 @@ test('the locks sandbox blocks a conflicting request, then detects and resolves 
 
   // The built-in example: two transactions each holding what the other wants,
   // in exclusive mode — a real cycle the sandbox must detect and resolve.
-  await page.getByRole('button', { name: 'Deadlock example' }).click();
-  await expect(page.getByText(/Deadlock: T2 → T1 → T2/)).toBeVisible();
+  await page.getByLabel('Scenario').selectOption('deadlock');
+  // The narration repeats the last step's lines, the timeline has them all: either will do.
+  await expect(page.getByText(/Deadlock: T2 → T1 → T2/).first()).toBeVisible();
   await expect(page.getByText('aborted', { exact: true })).toBeVisible();
   // The survivor's long-blocked request is granted the moment the victim's lock frees
   // up: T1 ends up holding both pages (T2, the victim, holds nothing — the only

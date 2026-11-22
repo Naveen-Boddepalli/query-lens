@@ -13,19 +13,19 @@ import {
   runLockSteps,
 } from '../../ui/lockScript.ts';
 import type { LockStep, LockTransaction } from '../../ui/lockScript.ts';
-import { PageHeader } from '../../ui/PageHeader.tsx';
-import {
-  btnPrimary,
-  btnSecondary,
-  card,
-  inputField,
-  panelSurface,
-  pill,
-  segBase,
-  segOff,
-  segOn,
-} from '../../ui/primitives.ts';
+import { controlLabel, inputField, pill } from '../../ui/primitives.ts';
 import { useAddressBarQuery } from '../../ui/addressBar.ts';
+import {
+  CommandBar,
+  Inspector,
+  MetricStrip,
+  ScenarioPicker,
+  Segmented,
+  StagePanel,
+  ToolHeader,
+  ToolSection,
+  ToolShell,
+} from '../../ui/tool/index.ts';
 
 /**
  * plan.md §22.2 "enforced concurrency" / §22.3 `/tools/locks`. Fixed at two
@@ -34,6 +34,11 @@ import { useAddressBarQuery } from '../../ui/addressBar.ts';
  * driver; this page just applies one request or release at a time and
  * narrates what happened, the same shape `/tools/btree`'s insert/delete/find
  * already uses.
+ *
+ * Laid out on the tool workbench (`src/ui/tool/`): worked examples in the inspector's scenario picker (the old
+ * "Deadlock example" button was a scenario drawn as an action), the next request's transaction, page and mode in the
+ * command bar with Request as the one primary, the lock table on the stage, and the timeline and the compatibility
+ * matrix as sections below.
  *
  * What was done is a list of steps, not just where it ended: `lockScript.ts` folds the list over an empty lock
  * table, and the list travels in the URL (`s`), so a visit can be sent and a lesson can open the sandbox on the
@@ -57,14 +62,10 @@ const BELOW_WORDS = ['', 'means to read rows below', 'means to write rows below'
 function CompatibilityMatrix() {
   const cells = compatibilityMatrix();
   return (
-    <section className={card} aria-labelledby="matrix-heading">
-      <h2 id="matrix-heading" className="mb-1 text-body font-semibold text-ink">Which modes can share a page</h2>
-      <p className="mb-3 text-label text-ink-dim">
-        Computed, not drawn: each mode is what it lets its holder do to the whole page and to the rows below it, and two
-        modes conflict when one writes something the other reads or writes. The intention modes touch nothing on the
-        page itself — they say what will be locked below, where a real conflict waits — so IS and IX never wait for
-        each other.
-      </p>
+    <ToolSection
+      title="Which modes can share a page"
+      description="Computed, not drawn: each mode is what it lets its holder do to the whole page and to the rows below it, and two modes conflict when one writes something the other reads or writes. The intention modes touch nothing on the page itself (they say what will be locked below, where a real conflict waits), so IS and IX never wait for each other."
+    >
       <ScrollRegion label="Lock modes and their compatibility" className="overflow-x-auto">
         <table className="w-full text-left text-label">
           <caption className="sr-only">Compatibility of a mode held (row) with a mode requested (column)</caption>
@@ -98,7 +99,7 @@ function CompatibilityMatrix() {
           </tbody>
         </table>
       </ScrollRegion>
-    </section>
+    </ToolSection>
   );
 }
 
@@ -123,12 +124,38 @@ function toneFor(text: string): LogEntry['tone'] {
   return 'quiet';
 }
 
-const DEADLOCK_EXAMPLE: LockStep[] = [
-  { op: 'request', transaction: 'T1', page: 0, mode: 'exclusive' },
-  { op: 'request', transaction: 'T2', page: 1, mode: 'exclusive' },
-  { op: 'request', transaction: 'T1', page: 1, mode: 'exclusive' },
-  { op: 'request', transaction: 'T2', page: 0, mode: 'exclusive' },
+const req = (transaction: Transaction, page: number, mode: LockMode): LockStep => ({ op: 'request', transaction, page, mode });
+
+/** Worked examples, each a script of steps. Any step after picking one reads "Custom". */
+const SCENARIOS: readonly { id: string; title: string; blurb: string; steps: readonly LockStep[] }[] = [
+  { id: 'empty', title: 'An empty lock table', blurb: 'Nothing held and nothing waiting. Place requests one at a time.', steps: [] },
+  {
+    id: 'readers',
+    title: 'Two readers',
+    blurb: 'T1 and T2 both read page 0: shared locks are compatible, so neither waits.',
+    steps: [req('T1', 0, 'shared'), req('T2', 0, 'shared')],
+  },
+  {
+    id: 'writer-waits',
+    title: 'A writer waits',
+    blurb: 'T2 asks to write a page T1 is reading: the exclusive request waits until T1 lets go.',
+    steps: [req('T1', 0, 'shared'), req('T2', 0, 'exclusive')],
+  },
+  {
+    id: 'intention',
+    title: 'Intention locks',
+    blurb: 'IX and IS on one page: both only announce what will be locked below, so they share it.',
+    steps: [req('T1', 0, 'intention-exclusive'), req('T2', 0, 'intention-shared')],
+  },
+  {
+    id: 'deadlock',
+    title: 'Deadlock',
+    blurb: 'Each holds the page the other wants. The wait-for graph finds the cycle and aborts the later arrival.',
+    steps: [req('T1', 0, 'exclusive'), req('T2', 1, 'exclusive'), req('T1', 1, 'exclusive'), req('T2', 0, 'exclusive')],
+  },
 ];
+
+const sameSteps = (a: readonly LockStep[], b: readonly LockStep[]) => encodeLockSteps(a) === encodeLockSteps(b);
 
 /** The steps in the link, or none. */
 function readInitialSteps(): LockStep[] {
@@ -174,214 +201,197 @@ export function LocksToolPage() {
     add({ op: 'release', transaction: t, page: r, mode: m });
   }
 
-  function runPreset() {
-    setSteps(DEADLOCK_EXAMPLE);
-  }
-
   function reset() {
     setSteps([]);
   }
 
   const totalHeld = Object.values(state.holders).reduce((acc, h) => acc + h.length, 0);
   const totalWaiting = Object.values(state.waiters).reduce((acc, w) => acc + w.length, 0);
+  const scenario = SCENARIOS.find((sc) => sameSteps(sc.steps, steps));
+  const lastLines = run.entries.at(-1)?.lines ?? [];
 
   return (
-    <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-5 p-6 sm:p-8">
-      <PageHeader
-        breadcrumbs={[{ label: 'Tools', to: '/tools' }, { label: 'Lock Manager' }]}
-        title="Locks sandbox"
-      >
-        Two transactions placing real lock requests against each other. A conflicting request
-        genuinely <em>blocks</em> here &mdash; unlike the{' '}
-        <Link to="/playground" className="underline underline-offset-2 hover:text-ink">
-          Playground
-        </Link>
-        , which runs one query at a time. Form a dependency cycle and watch the wait-for graph
-        resolve: the transaction that arrived more recently is aborted, releasing its held locks.
-      </PageHeader>
-
-      {/* Control Toolbar */}
-      <div className="ql-sheen flex flex-wrap items-end gap-3 rounded-xl border border-edge bg-surface-2/80 p-4 shadow-neu-rest backdrop-blur-md">
-        <div className="flex flex-col gap-1.5 text-label text-ink-dim">
-          <span>Transaction</span>
-          <div className="flex gap-1" role="radiogroup" aria-label="Transaction">
-            {TRANSACTIONS.map((t) => (
-              <button
-                key={t}
-                type="button"
-                role="radio"
-                aria-checked={transaction === t}
-                onClick={() => { setTransaction(t); }}
-                className={`${segBase} ${transaction === t ? segOn : segOff}`}
-              >
-                {t}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <label htmlFor="resource" className="flex flex-col gap-1.5 text-label text-ink-dim">
-          <span>Page</span>
-          <select
-            id="resource"
-            value={resource}
-            onChange={(e) => { setResource(Number(e.target.value)); }}
-            className={`${inputField} w-24 tabular-nums font-mono`}
+    <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col p-4 sm:p-6 lg:p-8">
+      <ToolShell
+        category="transactions"
+        header={
+          <ToolHeader
+            id="locks"
+            title="Locks sandbox"
+            summary="Two transactions request locks on the same pages: conflicts block, and a deadlock is found and broken."
+            about={
+              <p>
+                A conflicting request genuinely blocks here, unlike the{' '}
+                <Link to="/playground" className="underline underline-offset-2 hover:text-ink">
+                  Playground
+                </Link>
+                , which runs one query at a time. Form a cycle of waits and the wait-for graph finds it: the transaction
+                that arrived more recently is aborted, and its locks are released. Every step is kept in the address, so
+                the page can be sent as it stands.
+              </p>
+            }
+          />
+        }
+        inspector={
+          <Inspector summary={`${String(steps.length)} step${steps.length === 1 ? '' : 's'} · ${scenario ? scenario.title : 'custom'}`}>
+            <ScenarioPicker
+              id="locks-scenario"
+              scenarios={SCENARIOS}
+              value={scenario?.id ?? null}
+              onPick={(id) => {
+                const picked = SCENARIOS.find((sc) => sc.id === id);
+                if (picked) setSteps([...picked.steps]);
+              }}
+            />
+          </Inspector>
+        }
+        command={
+          <CommandBar
+            primary={{ label: 'Request lock', onClick: runRequest, disabled: full, ...(full ? { title: `At most ${String(MAX_LOCK_STEPS)} steps` } : {}) }}
+            secondary={[{ label: 'Reset', onClick: reset, disabled: steps.length === 0 }]}
           >
-            {RESOURCES.map((r) => (
-              <option key={r} value={r}>page {r}</option>
-            ))}
-          </select>
-        </label>
-
-        <div className="flex flex-col gap-1.5 text-label text-ink-dim">
-          <span>Lock mode</span>
-          <div className="flex gap-1" role="radiogroup" aria-label="Lock mode">
-            {MODES.map((m) => (
-              <button
-                key={m}
-                type="button"
-                role="radio"
-                aria-checked={mode === m}
-                aria-label={m}
-                onClick={() => { setMode(m); }}
-                className={`${segBase} ${mode === m ? segOn : segOff} font-mono`}
-              >
-                {MODE_SHORT[m]}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2">
-          <button type="button" onClick={runRequest} disabled={full} className={btnPrimary}>
-            Request lock
-          </button>
-          <button type="button" onClick={runPreset} className={btnSecondary}>
-            Deadlock example
-          </button>
-          <button type="button" onClick={reset} className={btnSecondary}>
-            Reset
-          </button>
-        </div>
-      </div>
-
-      {/* Metrics Strip */}
-      <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
-        {[
-          { label: 'Locks Held', value: String(totalHeld), sub: 'active grants', color: 'text-hit' },
-          { label: 'Pending Waiters', value: String(totalWaiting), sub: 'blocked requests', color: totalWaiting > 0 ? 'text-miss' : 'text-ink' },
-          {
-            label: 'Deadlock Status',
-            value: state.aborted.length > 0 ? `${state.aborted.join(', ')} Aborted` : 'None',
-            sub: 'cycle resolution',
-            color: state.aborted.length > 0 ? 'text-evict' : 'text-hit',
-          },
-          { label: 'Model', value: 'Strict 2PL', sub: 'Shared & Exclusive' },
-        ].map((m) => (
-          <div key={m.label} className="ql-sheen rounded-xl border border-edge bg-surface-2/60 p-3 shadow-neu-rest backdrop-blur-sm">
-            <span className="block font-mono text-[0.7rem] uppercase tracking-wider text-ink-dim">{m.label}</span>
-            <span className={`mt-1 block truncate text-heading font-semibold tabular-nums ${m.color ?? 'text-ink'}`}>
-              {m.value}
-            </span>
-            <span className="text-[0.75rem] text-ink-dim">{m.sub}</span>
-          </div>
-        ))}
-      </div>
-
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        {RESOURCES.map((r) => {
-          const holders = state.holders[r] ?? [];
-          const waiters = state.waiters[r] ?? [];
-          return (
-            <div key={r} className={card}>
-              <h3 className="mb-1 text-label font-semibold text-ink">page {r}</h3>
-              {holders.length === 0 && waiters.length === 0 ? (
-                <p className="text-label text-ink-dim">idle</p>
-              ) : (
-                <>
-                  {holders.map((h) => (
-                    <p key={`${h.transaction}-${h.mode}`} className="text-label text-hit">
-                      {h.transaction} holds {modeName(h.mode)}
-                    </p>
-                  ))}
-                  {waiters.map((w) => (
-                    <p key={`${w.transaction}-${w.mode}`} className="text-label text-ink-dim">
-                      {w.transaction} waits {modeName(w.mode)}
-                    </p>
-                  ))}
-                </>
-              )}
+            <div className="flex flex-col gap-1">
+              <span id="locks-txn" className={controlLabel}>Transaction</span>
+              <Segmented
+                labelledBy="locks-txn"
+                tone="stage"
+                value={transaction}
+                onChange={setTransaction}
+                options={TRANSACTIONS.map((t) => ({ value: t, label: t }))}
+              />
             </div>
-          );
-        })}
-      </div>
-
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        {TRANSACTIONS.map((t) => {
-          const holds = heldBy(state, t);
-          const waits = waitingBy(state, t);
-          const aborted = state.aborted.includes(t);
-          return (
-            <div key={t} className={card}>
-              <h3 className="mb-2 flex items-center gap-2 text-body font-semibold text-ink">
-                {t}
-                {aborted && (
-                  <span className="rounded-full border border-evict/50 px-2 py-0.5 text-label text-evict">
-                    aborted
-                  </span>
-                )}
-              </h3>
-              <p className="mb-1 text-label text-ink-dim">Holds</p>
-              <div className="mb-3 flex flex-wrap gap-1.5">
-                {holds.length === 0 && <span className="text-label text-ink-dim">(nothing)</span>}
-                {holds.map(({ resource: r, mode: m }) => (
-                  <button
-                    key={`${r}-${m}`}
-                    type="button"
-                    onClick={() => { runRelease(t, r, m); }}
-                    className={`${pill} hover:border-accent hover:text-ink`}
-                    title={`Release ${t}'s ${modeName(m)} lock on page ${r}`}
-                  >
-                    page {r} · {modeName(m)} · release
-                  </button>
-                ))}
-              </div>
-              <p className="mb-1 text-label text-ink-dim">Waiting for</p>
-              <div className="flex flex-wrap gap-1.5">
-                {waits.length === 0 && <span className="text-label text-ink-dim">(nothing)</span>}
-                {waits.map(({ resource: r, mode: m }) => (
-                  <span key={`${r}-${m}`} className={pill}>
-                    page {r} · {modeName(m)}
-                  </span>
-                ))}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      <CompatibilityMatrix />
-
-      <div className={`${panelSurface} min-h-48 flex-1 overflow-y-auto p-4`}>
-        <h3 className="mb-2 text-body font-semibold text-ink">Timeline</h3>
-        {log.length === 0 ? (
-          <p className="text-label text-ink-dim">Place a request to begin, or try the deadlock example.</p>
-        ) : (
-          <ol className="space-y-1 text-label" aria-live="polite">
-            {log.map((entry) => (
-              <li
-                key={entry.id}
-                className={
-                  entry.tone === 'bad' ? 'text-evict' : entry.tone === 'good' ? 'text-hit' : 'text-ink-dim'
-                }
+            <label htmlFor="resource" className={`flex flex-col gap-1 ${controlLabel}`}>
+              Page
+              <select
+                id="resource"
+                value={resource}
+                onChange={(e) => { setResource(Number(e.target.value)); }}
+                className={`${inputField} font-mono tabular-nums`}
               >
-                {entry.text}
-              </li>
-            ))}
-          </ol>
-        )}
-      </div>
+                {RESOURCES.map((r) => (
+                  <option key={r} value={r}>page {r}</option>
+                ))}
+              </select>
+            </label>
+            <div className="flex min-w-0 flex-col gap-1">
+              <span id="locks-mode" className={controlLabel}>Lock mode</span>
+              <Segmented
+                labelledBy="locks-mode"
+                tone="stage"
+                value={mode}
+                onChange={setMode}
+                options={MODES.map((m) => ({ value: m, label: <span className="font-mono">{MODE_SHORT[m]}</span>, ariaLabel: m }))}
+              />
+            </div>
+          </CommandBar>
+        }
+        metrics={
+          <MetricStrip
+            items={[
+              { label: 'Locks held', value: totalHeld, ...(totalHeld > 0 ? { tone: 'hit' as const } : {}) },
+              { label: 'Waiting', value: totalWaiting, sub: 'blocked requests', ...(totalWaiting > 0 ? { tone: 'miss' as const } : {}) },
+              {
+                label: 'Aborted',
+                value: state.aborted.length > 0 ? state.aborted.join(', ') : 'none',
+                sub: state.aborted.length > 0 ? 'to break a deadlock' : 'no deadlock',
+                ...(state.aborted.length > 0 ? { tone: 'evict' as const } : {}),
+              },
+              { label: 'Steps', value: steps.length, sub: `of ${String(MAX_LOCK_STEPS)}` },
+            ]}
+          />
+        }
+        stage={
+          <StagePanel title="Lock table" legend="Who holds and who waits, on each page and for each transaction. Click a held lock to release it.">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              {RESOURCES.map((r) => {
+                const holders = state.holders[r] ?? [];
+                const waiters = state.waiters[r] ?? [];
+                return (
+                  <div key={r} className="min-w-0 rounded-lg border border-edge/70 p-3">
+                    <h4 className="mb-1 font-mono text-label font-semibold text-ink">page {r}</h4>
+                    {holders.length === 0 && waiters.length === 0 ? (
+                      <p className="text-label text-ink-dim">idle</p>
+                    ) : (
+                      <>
+                        {holders.map((h) => (
+                          <p key={`${h.transaction}-${h.mode}`} className="text-label text-hit">
+                            {h.transaction} holds {modeName(h.mode)}
+                          </p>
+                        ))}
+                        {waiters.map((w) => (
+                          <p key={`${w.transaction}-${w.mode}`} className="text-label text-ink-dim">
+                            {w.transaction} waits {modeName(w.mode)}
+                          </p>
+                        ))}
+                      </>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+              {TRANSACTIONS.map((t) => {
+                const holds = heldBy(state, t);
+                const waits = waitingBy(state, t);
+                const aborted = state.aborted.includes(t);
+                return (
+                  <div key={t} className="min-w-0 rounded-lg border border-edge/70 p-3">
+                    <h4 className="mb-2 flex items-center gap-2 text-body font-semibold text-ink">
+                      {t}
+                      {aborted && <span className="rounded-full border border-evict/50 px-2 py-0.5 text-label text-evict">aborted</span>}
+                    </h4>
+                    <p className="mb-1 text-label text-ink-dim">Holds</p>
+                    <div className="mb-3 flex flex-wrap gap-1.5">
+                      {holds.length === 0 && <span className="text-label text-ink-dim">(nothing)</span>}
+                      {holds.map(({ resource: r, mode: m }) => (
+                        <button
+                          key={`${r}-${m}`}
+                          type="button"
+                          onClick={() => { runRelease(t, r, m); }}
+                          disabled={full}
+                          className={`${pill} hover:border-accent hover:text-ink`}
+                          title={`Release ${t}'s ${modeName(m)} lock on page ${String(r)}`}
+                        >
+                          page {r} · {modeName(m)} · release
+                        </button>
+                      ))}
+                    </div>
+                    <p className="mb-1 text-label text-ink-dim">Waiting for</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {waits.length === 0 && <span className="text-label text-ink-dim">(nothing)</span>}
+                      {waits.map(({ resource: r, mode: m }) => (
+                        <span key={`${r}-${m}`} className={pill}>
+                          page {r} · {modeName(m)}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </StagePanel>
+        }
+        narration={lastLines.length > 0 ? lastLines.join(' ') : 'Place a request to begin, or load a scenario such as the deadlock.'}
+      >
+        <ToolSection title="Timeline" description="Every request and release so far, and what each one did.">
+          {log.length === 0 ? (
+            <p className="text-label text-ink-dim">No steps yet.</p>
+          ) : (
+            <ol className="space-y-1 text-label">
+              {log.map((entry) => (
+                <li
+                  key={entry.id}
+                  className={entry.tone === 'bad' ? 'text-evict' : entry.tone === 'good' ? 'text-hit' : 'text-ink-dim'}
+                >
+                  {entry.text}
+                </li>
+              ))}
+            </ol>
+          )}
+        </ToolSection>
+        <CompatibilityMatrix />
+      </ToolShell>
     </div>
   );
 }
