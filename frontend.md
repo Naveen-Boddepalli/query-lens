@@ -706,7 +706,7 @@ controls into `ToolShell`'s slots:
 | Operations | `CommandBar` | At most one `btnPrimary` per tool. Crash is `btnCritical`. Clusters wrap as units; no `w-px` separators |
 | Visualization | `StagePanel` | Title, legend, view switch and zoom in its header; the canvas at full width, `--stage-min-h` tall from `lg` |
 | Readouts | `MetricStrip` | One KPI style; replaces the hand-built uppercase mono cards |
-| Time | `Transport` | `PlaybackControls` in a sticky bar, with optional phase chips. Every step-based tool uses it |
+| Time | `Transport` | `PlaybackControls` in a sticky bar, with optional phase chips. Every step-based tool uses it. `unit` renames the step ("tick" on Raft's timeline). Its shortcuts leave Space to a focused button and skip a key a control already handled |
 | Deep dive | `ToolSection`, `ResponsiveTable` | Sections below the live model, with their own controls in the header; tables scroll with a sticky first column and an edge fade |
 | Values | `Segmented` (2–5 options), `Stepper` (small integer range), `Switch` (a binary rule), a select or `inputField` otherwise | One idiom per kind of value |
 

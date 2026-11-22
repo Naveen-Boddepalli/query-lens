@@ -15,6 +15,8 @@ export interface TransportProps {
   phases?: readonly Phase[];
   /** Space, arrows, Home and End drive the playback. Off where another control on the page owns those keys. */
   shortcuts?: boolean;
+  /** What one step is ("tick"): names the counter and the scrubber. */
+  unit?: string;
 }
 
 /**
@@ -22,7 +24,7 @@ export interface TransportProps {
  * column, or of the screen on a phone, so stepping never means scrolling back down to find the buttons. Every
  * step-based tool uses this instead of its own back and forward buttons.
  */
-export function Transport({ playback, length, maxStep, phases, shortcuts = true }: TransportProps) {
+export function Transport({ playback, length, maxStep, phases, shortcuts = true, unit }: TransportProps) {
   usePlaybackShortcuts(playback, shortcuts);
   // The phase the current step is in: the last one that has started.
   const current = phases ? phases.reduce((at, p, i) => (p.step <= playback.step ? i : at), -1) : -1;
@@ -33,7 +35,7 @@ export function Transport({ playback, length, maxStep, phases, shortcuts = true 
       aria-label="Playback"
       className="sticky bottom-2 z-10 flex min-w-0 flex-col gap-2 rounded-xl border border-edge bg-surface-2/90 px-3 py-2 shadow-e2 backdrop-blur-md"
     >
-      <PlaybackControls playback={playback} length={length} {...(maxStep !== undefined ? { maxStep } : {})} />
+      <PlaybackControls playback={playback} length={length} {...(maxStep !== undefined ? { maxStep } : {})} {...(unit !== undefined ? { unit } : {})} />
       {phases && phases.length > 0 && (
         <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Phases">
           {phases.map((p, i) => (

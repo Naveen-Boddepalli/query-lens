@@ -146,9 +146,13 @@ export function usePlaybackShortcuts(playback: Playback, enabled = true): void {
     if (!enabled) return;
     const onKey = (e: KeyboardEvent) => {
       if (isTypingTarget(e.target) || e.metaKey || e.ctrlKey || e.altKey) return;
+      // A control that handled the key itself (a segmented control's arrows) keeps it.
+      if (e.defaultPrevented) return;
       // Match on `code` for the space bar: `key` is ' ' on most layouts but
       // 'Spacebar' on older ones, and matching the physical key is layout-proof.
       if (e.code === 'Space' || e.key === ' ') {
+        // Space presses a focused button (Play among them): leave that to the browser, or one key does two things.
+        if (e.target instanceof HTMLElement && e.target.closest('button, a[href], summary') !== null) return;
         e.preventDefault();
         playback.toggle();
         return;
