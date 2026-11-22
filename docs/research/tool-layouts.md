@@ -540,7 +540,23 @@ The Sample, 1–20 and Clear buttons became a "Starting keys" picker, since Clea
 were the same thing, and fan-out became a four-option `Segmented`. The four KPI cards became a
 `MetricStrip`, and the narration moved under the tree. On phones, `FlowTree` takes a `minZoom`: a tree
 too wide to fit at 0.8 is framed at 0.8 from the top and pans, which is §4.5 rule 2, and Fit still
-shows the whole tree. Raft is next.
+shows the whole tree.
+
+Raft finished Phase 1 (2026-11-22). The five scenario buttons became a picker. Cluster settings
+(servers, client commands, a no-op `Switch`) and failures (message loss as a `Segmented`, the
+partition as toggle chips, the crash, with each tick range applied on Enter or blur) are now
+separate groups, and the seed is under Advanced. The detached "logs at tick" slider is gone: one
+`Transport` runs over the run's ticks. It opens on the finished run, lingers on elections and
+crashes, and plays the calm run in about twenty seconds. Its phase chips jump to each election and
+failure. Clicking the timeline, or dragging on it with a mouse, scrubs. The narration says what
+happened at the playhead, the `MetricStrip` (leader, committed, leaders elected, safety) follows it,
+and the logs under the timeline show that tick. Diagram and Table are a view switch in the stage
+header. On phones the timeline keeps a 44rem scale and pans, scrolling to keep the playhead in view
+once it moves. Changes from the sketch: the safety checks are a section below the workbench rather
+than a tab beside the logs, so all four are visible without a click, and the metric carries the
+4/4 summary. Fixed along the way: the playback shortcuts no longer take Space from a focused button
+or arrows from a segmented control. Raft is the first page to put both on one screen.
+Phase 2 is next.
 
 Each tool migrates as its own commit with before/after screenshots from the Phase 0 spec, matching
 the repo's one-item-per-commit cadence. The URL state (`addressBar.ts`, `walUrl.ts`, `scheduleUrl.ts`

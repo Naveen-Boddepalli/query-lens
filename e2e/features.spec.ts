@@ -2312,15 +2312,29 @@ test('commit after the wait: a crash after COMMIT is logged keeps them waiting, 
 test('the Raft tool elects, replicates, and checks its four safety properties on every run', async ({ page }) => {
   await page.goto('/tools/raft');
   await expect(page.getByRole('heading', { name: 'Raft', exact: true })).toBeVisible();
-  await expect(page.getByRole('status')).toHaveText('1 leader: S2 for term 1 at tick 15');
+  await expect(page.getByText(/^1 leader: S2 for term 1 at tick 15\. Committed through entry 6/)).toBeVisible();
   for (const name of ['Election safety', 'Log matching', 'Leader completeness', 'State machine safety']) {
     await expect(page.getByText(name, { exact: true })).toBeVisible();
   }
-  await page.getByRole('button', { name: 'The leader is cut off' }).click();
-  await expect(page.getByRole('status')).toHaveText('2 leaders: S2 for term 1 at tick 15, S4 for term 4 at tick 84');
+  await expect(page.getByLabel('Readout')).toContainText('4/4 hold');
+  await page.getByLabel('Scenario').selectOption({ label: 'The leader is cut off' });
+  await expect(page.getByText(/^2 leaders: S2 for term 1 at tick 15, S4 for term 4 at tick 84\./)).toBeVisible();
   await expect(page.getByText(/2 times a server dropped entries/)).toBeVisible();
   await expect.poll(() => page.url()).toContain('side=12');
-  await page.getByRole('button', { name: 'Show as table' }).first().click();
+
+  // One transport moves through the run's ticks: the phase chips jump to each election, and the narration, the
+  // readout and the logs follow the playhead.
+  await page.getByRole('button', { name: 'S4 leads T4' }).click();
+  await expect(page.getByRole('status')).toHaveText(/^Tick 84: server 4 wins term 4/);
+  // S2 still thinks it leads term 1 from inside the minority: the readout names the newer leader, and the stale one.
+  await expect(page.getByLabel('Readout')).toContainText('Leader at tick 84S4term 4; S2 still leads T1');
+  await expect(page.getByRole('heading', { name: 'Logs at tick 84' })).toBeVisible();
+
+  // Editing away from every scenario reads Custom.
+  await page.getByRole('button', { name: 'More commands' }).click();
+  await expect(page.getByLabel('Scenario').locator('option:checked')).toHaveText('Custom');
+
+  await page.getByRole('radio', { name: 'Table' }).click();
   await expect(page.getByRole('table').filter({ hasText: 'wins term 4' })).toBeVisible();
 });
 
