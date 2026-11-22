@@ -28,11 +28,13 @@ export function ScenarioPicker({ id, scenarios, value, onPick, label = 'Scenario
   const at = scenarios.findIndex((s) => s.id === value);
   const chosen = at >= 0 ? scenarios[at] : undefined;
   const blurbId = `${id}-blurb`;
-  const go = (delta: number) => {
+  /** The scenario an arrow loads: wrapping round, and from Custom the first (›) or the last (‹). */
+  const neighbour = (delta: number) => {
     const from = at >= 0 ? at : delta > 0 ? -1 : scenarios.length;
-    const next = scenarios[(from + delta + scenarios.length) % scenarios.length];
-    if (next) onPick(next.id);
+    return scenarios[(from + delta + scenarios.length) % scenarios.length];
   };
+  const prev = neighbour(-1);
+  const next = neighbour(1);
 
   return (
     <div className="flex min-w-0 flex-col gap-1.5">
@@ -58,10 +60,22 @@ export function ScenarioPicker({ id, scenarios, value, onPick, label = 'Scenario
             </option>
           ))}
         </select>
-        <button type="button" className={`${btnGhost} px-2!`} onClick={() => { go(-1); }} aria-label={`Previous ${label.toLowerCase()}`}>
+        {/* Named by what they load, not by the picker's label: "Previous: Lost update" says more, and a label lookup
+            for the picker then finds the picker alone. */}
+        <button
+          type="button"
+          className={`${btnGhost} px-2!`}
+          onClick={() => { if (prev) onPick(prev.id); }}
+          aria-label={`Previous: ${prev?.title ?? ''}`}
+        >
           ‹
         </button>
-        <button type="button" className={`${btnGhost} px-2!`} onClick={() => { go(1); }} aria-label={`Next ${label.toLowerCase()}`}>
+        <button
+          type="button"
+          className={`${btnGhost} px-2!`}
+          onClick={() => { if (next) onPick(next.id); }}
+          aria-label={`Next: ${next?.title ?? ''}`}
+        >
           ›
         </button>
       </div>

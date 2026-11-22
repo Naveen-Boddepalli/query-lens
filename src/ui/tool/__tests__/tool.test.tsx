@@ -139,9 +139,11 @@ describe('ScenarioPicker', () => {
     const select = screen.getByRole('combobox', { name: 'Scenario' });
     expect(select).toHaveValue('b');
     expect(select).toHaveAccessibleDescription('A reader sees an uncommitted write.');
-    fireEvent.click(screen.getByRole('button', { name: 'Next scenario' }));
+    // Each arrow is named by the scenario it loads, so the picker's own label finds only the picker.
+    expect(screen.getAllByLabelText(/Scenario/)).toHaveLength(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Next: Lost update' }));
     expect(onPick).toHaveBeenLastCalledWith('a');
-    fireEvent.click(screen.getByRole('button', { name: 'Previous scenario' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Previous: Lost update' }));
     expect(onPick).toHaveBeenLastCalledWith('a');
   });
 
@@ -151,7 +153,7 @@ describe('ScenarioPicker', () => {
     expect(screen.getByRole('combobox')).toHaveDisplayValue('Custom');
     fireEvent.change(screen.getByRole('combobox'), { target: { value: 'b' } });
     expect(onPick).toHaveBeenCalledWith('b');
-    fireEvent.click(screen.getByRole('button', { name: 'Next scenario' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Next: Lost update' }));
     expect(onPick).toHaveBeenLastCalledWith('a');
   });
 });
