@@ -101,7 +101,7 @@ test('a visited app opens with the network off, including a route it has not ope
     await expect(page.getByText(/steps in this trace/)).toBeVisible();
 
     await page.goto('/tools/parser');
-    await expect(page.getByText(/Parser sandbox/)).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Parser sandbox' })).toBeVisible();
   } finally {
     await context.setOffline(false);
   }
