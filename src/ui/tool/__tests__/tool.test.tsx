@@ -103,13 +103,31 @@ describe('Stepper', () => {
     expect(screen.getByRole('spinbutton')).toHaveValue(3);
   });
 
-  it('clamps a typed value and ignores a blank one', () => {
+  it('clamps a typed value when the field loses focus, and drops a blank one', () => {
     render(<Harness />);
     const field = screen.getByRole('spinbutton');
     fireEvent.change(field, { target: { value: '99' } });
+    fireEvent.blur(field);
     expect(field).toHaveValue(4);
     fireEvent.change(field, { target: { value: '' } });
+    fireEvent.blur(field);
     expect(field).toHaveValue(4);
+  });
+
+  it('lets a two-digit value be typed through a first digit below the minimum', () => {
+    const changes: number[] = [];
+    function Wide() {
+      const [n, setN] = useState(10);
+      return <Stepper id="records" value={n} onChange={(v) => { changes.push(v); setN(v); }} min={6} max={64} />;
+    }
+    render(<Wide />);
+    const field = screen.getByRole('spinbutton');
+    fireEvent.change(field, { target: { value: '3' } });
+    expect(field).toHaveValue(3); // waiting, not clamped to 6
+    fireEvent.change(field, { target: { value: '32' } });
+    fireEvent.blur(field);
+    expect(field).toHaveValue(32);
+    expect(changes).toEqual([32]);
   });
 });
 

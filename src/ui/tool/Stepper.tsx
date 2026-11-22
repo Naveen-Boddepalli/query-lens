@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { inputField } from '../primitives.ts';
 
 export interface StepperProps {
@@ -21,12 +22,14 @@ const btn =
 const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v));
 
 /**
- * A small integer range (§4.2 rule 5): − n +. The field still takes typing; a typed value outside the range is
- * clamped, and a blank or non-number entry is ignored rather than turned into the minimum.
+ * A small integer range (§4.2 rule 5): − n +. The field still takes typing. A value in range applies as it is typed;
+ * one outside it waits, so "32" in a 6–64 field is not clamped to 6 at the "3", and is clamped when the field loses
+ * focus. A blank or non-number entry is dropped then, rather than turned into the minimum.
  */
 export function Stepper({ id, value, onChange, min, max, step = 1, unit, describedBy, disabled = false }: StepperProps) {
+  const [draft, setDraft] = useState<string | null>(null);
   const set = (v: number) => {
-    const next = clamp(v, min, max);
+    const next = clamp(Math.round(v / step) * step, min, max);
     if (next !== value) onChange(next);
   };
   return (
@@ -34,7 +37,7 @@ export function Stepper({ id, value, onChange, min, max, step = 1, unit, describ
       <button
         type="button"
         className={btn}
-        onClick={() => { set(value - step); }}
+        onClick={() => { setDraft(null); set(value - step); }}
         disabled={disabled || value <= min}
         aria-label={unit ? `Fewer ${unit}` : 'Decrease'}
       >
@@ -47,19 +50,25 @@ export function Stepper({ id, value, onChange, min, max, step = 1, unit, describ
         min={min}
         max={max}
         step={step}
-        value={value}
+        value={draft ?? value}
         disabled={disabled}
         aria-describedby={describedBy}
         onChange={(e) => {
+          setDraft(e.target.value);
           const n = e.target.valueAsNumber;
-          if (Number.isFinite(n)) set(Math.round(n / step) * step);
+          if (Number.isFinite(n) && n >= min && n <= max) set(n);
+        }}
+        onBlur={(e) => {
+          const n = e.target.valueAsNumber;
+          if (Number.isFinite(n)) set(n);
+          setDraft(null);
         }}
         className={`${inputField} w-12 px-1 text-center tabular-nums`}
       />
       <button
         type="button"
         className={btn}
-        onClick={() => { set(value + step); }}
+        onClick={() => { setDraft(null); set(value + step); }}
         disabled={disabled || value >= max}
         aria-label={unit ? `More ${unit}` : 'Increase'}
       >
