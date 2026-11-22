@@ -589,7 +589,38 @@ Fixes along the way, each its own commit:
   (0.8 on a phone) and pans instead, because fitting a clause-heavy statement drew 5px labels even
   on a desktop. The plans use 0.7 on phones.
 
-Phase 3, the parameter-sweep tools, is next.
+**Phase 3 status (2026-11-22): done.** The nine parameter-sweep pages are on the workbench, one
+commit each: LSM tree, Hash index, Row vs. column, Histograms, Vector index, Latch crabbing,
+Partitioning, Parallel execution and Two-phase commit. Every tool page now uses `ToolShell`.
+
+- **Shared shape.** Settings go in the inspector as `Stepper` and `Segmented`. An operation goes in
+  the command bar: a key lookup on LSM and Hash index, a cluster change on Partitioning. The live
+  numbers go in a four- or six-item readout, so phones get even rows. The main picture sits on
+  the stage, and every former `DataView` toggle is now the stage's Diagram | Table switch. Deep dives
+  follow as `ToolSection`s.
+- **Settings that apply to one mode only.** A leveled-only, linear-only, ring-only or
+  shared-queue-only control is no longer greyed out with no reason given. Under the other mode it
+  gives way to a one-line note that says why it does not apply.
+- **Latch crabbing.** The protocol tabs became a `Segmented` in the stage header over the timeline.
+  The readout follows the chosen protocol, and the three side-by-side columns became one
+  comparison table.
+- **Two-phase commit.** The nine scenario buttons became a `ScenarioPicker` with a blurb each,
+  matched to the current settings, and the outcome sentence became the narration.
+- **Shared sections stay.** Partitioning keeps its distributed join section and Parallel its
+  exchange section, which challenges share; both now sit below the workbench.
+
+Fixes along the way:
+
+- `Stepper` sizes its input to its maximum, so four-digit values (Histograms' range, Columnar's
+  rows) no longer clip. It also takes optional `buttonLabels`, so a picker reads "Previous query" and
+  "Next query" rather than "Fewer query".
+- A `ToolSection` description keeps a 16rem basis, so on a phone the header controls wrap below it
+  instead of squeezing it.
+- Chromium can leave a stale zero-height box for an inspector row whose label or hint text changes
+  in place next to rows that appear or vanish. The row vanished from the accessibility tree too, so
+  tests caught it. LSM's trigger row is keyed on the strategy, and Parallel's dispatch hint is fixed
+  text, with the per-dispatch explanation moved into the narration. When a mode switch changes a
+  row's label or hint, check the row after switching.
 
 Each tool migrates as its own commit with before/after screenshots from the Phase 0 spec, matching
 the repo's one-item-per-commit cadence. The URL state (`addressBar.ts`, `walUrl.ts`, `scheduleUrl.ts`

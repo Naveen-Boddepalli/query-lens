@@ -707,8 +707,8 @@ controls into `ToolShell`'s slots:
 | Visualization | `StagePanel` | Title, legend, view switch and zoom in its header; the canvas at full width, `--stage-min-h` tall from `lg` |
 | Readouts | `MetricStrip` | One KPI style; replaces the hand-built uppercase mono cards |
 | Time | `Transport` | `PlaybackControls` in a sticky bar, with optional phase chips. Every step-based tool uses it. `unit` renames the step ("tick" on Raft's timeline). Its shortcuts leave Space to a focused button and skip a key a control already handled |
-| Deep dive | `ToolSection`, `ResponsiveTable` | Sections below the live model, with their own controls in the header; tables scroll with a sticky first column and an edge fade |
-| Values | `Segmented` (2–5 options), `Stepper` (small integer range; typing applies once in range and clamps on blur), `Switch` (a binary rule), a select or `inputField` otherwise | One idiom per kind of value |
+| Deep dive | `ToolSection`, `ResponsiveTable` | Sections below the live model, with their own controls in the header (they wrap below the description on a phone); tables scroll with a sticky first column and an edge fade |
+| Values | `Segmented` (2–5 options), `Stepper` (small integer range; typing applies once in range and clamps on blur; the input widens to its max's digits; `buttonLabels` renames − and + for a picker), `Switch` (a binary rule), a select or `inputField` otherwise | One idiom per kind of value |
 
 `ToolShell` sets `--stage` from the tool's category (`toolCategory.ts`, shared with the Tools index), so the stage
 panel, `tone="stage"` options and the phase chips wear the family's hue. Layout tokens: `--tool-rail`,
