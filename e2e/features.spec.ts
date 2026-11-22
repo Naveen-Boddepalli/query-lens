@@ -391,12 +391,13 @@ test('the hash-index sandbox grows a directory under extendible hashing and a bu
   await page.goto('/tools/hash-index?n=60&cap=4&init=2&seed=1');
   await expect(page.getByRole('heading', { name: 'Hash index', exact: true })).toBeVisible();
 
-  const stat = (label: string) => page.getByText(label, { exact: true }).locator('..');
+  const stat = (label: string) => page.getByLabel('Readout').getByText(label, { exact: true }).locator('..');
 
   // Extendible (the default): a directory, sized by a global depth.
-  await expect(stat('buckets').getByText('10', { exact: true })).toBeVisible();
-  await expect(stat('global depth').getByText('4', { exact: true })).toBeVisible();
-  await expect(page.getByText(/Directory \(16 slots, global depth 4\)/)).toBeVisible();
+  await expect(stat('Buckets').getByText('10', { exact: true })).toBeVisible();
+  await expect(stat('Global depth').getByText('4', { exact: true })).toBeVisible();
+  await expect(stat('Directory slots').getByText('16', { exact: true })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Directory' })).toContainText('16 slots · depth 4');
 
   // A real hit and a genuine miss, both through the actual lookup path.
   await page.getByLabel('Look up a key').fill('27');
@@ -410,16 +411,18 @@ test('the hash-index sandbox grows a directory under extendible hashing and a bu
   await expect(page.getByText(/consecutive keys, right after the highest one actually written/)).toBeVisible();
 
   // Switching to linear hashing: no directory, a bucket array with a split pointer and overflow chains instead.
-  await page.getByLabel('Scheme').selectOption('linear');
-  await expect(stat('level').getByText('2', { exact: true })).toBeVisible();
-  await expect(stat('split pointer').getByText('1', { exact: true })).toBeVisible();
-  await expect(stat('max chain length').getByText('2', { exact: true })).toBeVisible();
-  await expect(page.getByText(/Buckets \(level 2, split pointer at address 1\)/)).toBeVisible();
+  await page.getByRole('radiogroup', { name: 'Scheme' }).getByRole('radio', { name: 'Linear' }).click();
+  await expect(stat('Level').getByText('2', { exact: true })).toBeVisible();
+  await expect(stat('Split pointer').getByText('1', { exact: true })).toBeVisible();
+  await expect(stat('Max chain length').getByText('2', { exact: true })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Buckets' })).toContainText('level 2 · next split at 1');
   await expect.poll(() => page.url()).toMatch(/[?&]strategy=linear/);
 
-  // Extendible's own "initial buckets" control is irrelevant to it and stays disabled.
-  await page.getByLabel('Scheme').selectOption('extendible');
-  await expect(page.getByLabel('Initial buckets')).toBeDisabled();
+  // Linear hashing's starting bucket count means nothing to extendible hashing, which says so in its place.
+  await expect(page.getByRole('spinbutton', { name: 'Initial buckets' })).toBeVisible();
+  await page.getByRole('radiogroup', { name: 'Scheme' }).getByRole('radio', { name: 'Extendible' }).click();
+  await expect(page.getByRole('spinbutton', { name: 'Initial buckets' })).toHaveCount(0);
+  await expect(page.getByText(/no starting bucket count to set/)).toBeVisible();
 });
 
 test('the columnar sandbox computes real compressed sizes, per-layout page counts, and a materialization gap', async ({ page }) => {

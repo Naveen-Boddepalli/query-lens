@@ -1,14 +1,31 @@
 import { useMemo, useState } from 'react';
-import { DataView } from '../../ui/DataView.tsx';
+import { DataTable } from '../../ui/DataView.tsx';
 import { demoWrites, HASH_LIMITS, lookupHashKey, planHashIndex } from '../../ui/hashIndex.ts';
 import type { Bucket, HashStrategy } from '../../ui/hashIndex.ts';
-import { PageHeader } from '../../ui/PageHeader.tsx';
-import { btnPrimary, btnSecondary, inputField, panelSurface } from '../../ui/primitives.ts';
+import { btnGhost, controlLabel, inputField } from '../../ui/primitives.ts';
 import { useAddressBarQuery } from '../../ui/addressBar.ts';
+import {
+  CommandBar,
+  ControlGroup,
+  ControlRow,
+  hintIdFor,
+  Inspector,
+  MetricStrip,
+  Segmented,
+  StagePanel,
+  Stepper,
+  ToolHeader,
+  ToolSection,
+  ToolShell,
+} from '../../ui/tool/index.ts';
 
 /**
  * The extendible/linear hashing standalone (plan.md §25.4 F2 `/tools/hash-index`). Its own driver, `src/ui/hashIndex.ts`
  * — like `/tools/lsm`, the engine has only ever built a B+Tree, so there is no existing structure to reuse.
+ *
+ * Laid out on the tool workbench (`src/ui/tool/`): workload and hashing settings in the inspector, a key lookup in
+ * the command bar, the structure's shape in the readout, the directory or bucket array on the stage with a table
+ * view, and the range-scan scatter below.
  *
  * URL state: `n` (writes), `strategy`, `cap` (bucket capacity), `init` (linear's own starting bucket count)
  * and `seed`, parsed defensively — a pasted link is a stranger's input, the rule `src/ui/urlState.ts` follows.
@@ -43,7 +60,12 @@ export function HashIndexToolPage() {
   const [initialBuckets, setInitialBuckets] = useState(INITIAL.initialBuckets);
   const [seed, setSeed] = useState(INITIAL.seed);
   const [lookupInput, setLookupInput] = useState('');
-  const [lookupState, setLookupState] = useState<{ plan: ReturnType<typeof planHashIndex>; result: ReturnType<typeof lookupHashKey> } | null>(null);
+  const [view, setView] = useState<'diagram' | 'table'>('diagram');
+  const [lookupState, setLookupState] = useState<{
+    plan: ReturnType<typeof planHashIndex>;
+    key: number;
+    result: ReturnType<typeof lookupHashKey>;
+  } | null>(null);
 
   const plan = useMemo(
     () => planHashIndex(demoWrites(n, seed), { strategy, bucketCapacity, initialBuckets }),
@@ -63,167 +85,150 @@ export function HashIndexToolPage() {
   }, [n, strategy, bucketCapacity, initialBuckets, seed]);
   useAddressBarQuery(shareQuery);
 
+  const extendible = strategy === 'extendible';
+  const lookupValid = lookupInput.trim() !== '' && Number.isInteger(Number(lookupInput));
+  const runLookup = () => {
+    if (!lookupValid) return;
+    const key = Number(lookupInput);
+    setLookupState({ plan, key, result: lookupHashKey(plan, key) });
+  };
+  const lookupBucketIds = lookupResult?.bucketsChecked ?? [];
+  const overflowBuckets = plan.primaryBuckets.reduce((sum, id) => {
+    let k = 0;
+    for (let cur = plan.buckets[id]?.next ?? null; cur !== null; cur = plan.buckets[cur]?.next ?? null) k += 1;
+    return sum + k;
+  }, 0);
+
   return (
-    <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-4 p-6 sm:p-8">
-      <PageHeader title="Hash index">
-        Extendible and linear hashing: two schemes for growing a hash table one bucket at a time, without ever
-        rehashing everything at once. Neither can answer a range query — a hash scatters keys by their hash
-        value, not their order, so there is no sorted chain to walk.
-      </PageHeader>
-
-      <div className="flex flex-wrap items-end gap-4 rounded-xl border border-edge bg-surface-2 p-3 shadow-e1">
-        <label className="flex flex-col gap-1 text-label text-ink-dim">
-          Writes
-          <input
-            type="number"
-            min={HASH_LIMITS.minWrites}
-            max={HASH_LIMITS.maxWrites}
-            value={n}
-            onChange={(e) => {
-              const v = Number(e.target.value);
-              if (Number.isInteger(v) && v >= HASH_LIMITS.minWrites && v <= HASH_LIMITS.maxWrites) setN(v);
-            }}
-            className={`${inputField} w-20 tabular-nums`}
+    <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col p-4 sm:p-6 lg:p-8">
+      <ToolShell
+        category="indexing"
+        header={
+          <ToolHeader
+            id="hash-index"
+            title="Hash index"
+            summary="Grow a hash table one bucket at a time, by extendible or linear hashing, and see why neither can range-scan."
+            about={
+              <p>
+                Extendible and linear hashing are two schemes for growing a hash table one bucket at a time, without
+                ever rehashing everything at once. Neither can answer a range query: a hash scatters keys by their
+                hash value, not their order, so there is no sorted chain to walk. Like the LSM tree, this is a
+                self-contained model; the engine has only ever built a B+Tree.
+              </p>
+            }
           />
-        </label>
-
-        <label className="flex flex-col gap-1 text-label text-ink-dim">
-          Scheme
-          <select
-            value={strategy}
-            onChange={(e) => { setStrategy(e.target.value as HashStrategy); }}
-            className={inputField}
-          >
-            <option value="extendible">Extendible</option>
-            <option value="linear">Linear</option>
-          </select>
-        </label>
-
-        <label className="flex flex-col gap-1 text-label text-ink-dim">
-          Bucket capacity
-          <select
-            value={bucketCapacity}
-            onChange={(e) => { setBucketCapacity(Number(e.target.value)); }}
-            className={inputField}
-          >
-            {Array.from({ length: HASH_LIMITS.maxBucketCapacity - HASH_LIMITS.minBucketCapacity + 1 }, (_, i) => HASH_LIMITS.minBucketCapacity + i).map(
-              (v) => <option key={v} value={v}>{v}</option>,
-            )}
-          </select>
-        </label>
-
-        <div className="flex max-w-44 flex-col gap-1 text-label text-ink-dim">
-          <label htmlFor="initial-buckets">Initial buckets</label>
-          <select
-            id="initial-buckets"
-            value={initialBuckets}
-            disabled={strategy === 'extendible'}
-            aria-describedby={strategy === 'extendible' ? 'initial-buckets-hint' : undefined}
-            onChange={(e) => { setInitialBuckets(Number(e.target.value)); }}
-            className={inputField}
-          >
-            {Array.from({ length: HASH_LIMITS.maxInitialBuckets - HASH_LIMITS.minInitialBuckets + 1 }, (_, i) => HASH_LIMITS.minInitialBuckets + i).map(
-              (v) => <option key={v} value={v}>{v}</option>,
-            )}
-          </select>
-          {strategy === 'extendible' && (
-            <span id="initial-buckets-hint" className="text-ink-dim/80">
-              Extendible hashing starts from one bucket and grows its directory itself.
-            </span>
-          )}
-        </div>
-
-        <button
-          type="button"
-          onClick={() => { setSeed(Math.floor(Math.random() * MAX_SEED)); }}
-          className={btnSecondary}
-        >
-          Reshuffle
-        </button>
-      </div>
-
-      <div className={`${panelSurface} flex flex-wrap items-start gap-x-8 gap-y-3 p-4`}>
-        <Stat label="distinct keys" value={plan.distinctKeysWritten} sub={`${String(plan.writes.length)} writes`} />
-        <Stat label="buckets" value={plan.bucketCount} sub="currently holding data" />
-        {strategy === 'extendible' ? (
-          <Stat label="global depth" value={plan.globalDepth} sub={`directory of ${String(plan.directory.length)} slots`} />
-        ) : (
-          <>
-            <Stat label="level" value={plan.level} sub="completed doubling rounds" />
-            <Stat label="split pointer" value={plan.splitPointer} sub="which bucket splits next" />
-          </>
-        )}
-        <Stat label="max chain length" value={plan.maxChainLength} sub={strategy === 'linear' ? 'longest overflow chain' : 'no chaining in extendible hashing'} accent={strategy === 'linear'} />
-      </div>
-
-      <div className={`${panelSurface} flex flex-wrap items-end gap-3 p-3`}>
-        <label className="flex flex-col gap-1 text-label text-ink-dim">
-          Look up a key
-          <input
-            type="number"
-            value={lookupInput}
-            onChange={(e) => { setLookupInput(e.target.value); }}
-            placeholder="e.g. 5"
-            className={`${inputField} w-24 tabular-nums`}
+        }
+        inspector={
+          <Inspector summary={`${String(n)} writes · ${strategy} · capacity ${String(bucketCapacity)}`}>
+            <ControlGroup legend="Workload">
+              <ControlRow label="Writes" htmlFor="hash-n">
+                <Stepper id="hash-n" value={n} min={HASH_LIMITS.minWrites} max={HASH_LIMITS.maxWrites} step={10} unit="writes" onChange={setN} />
+              </ControlRow>
+              <button type="button" onClick={() => { setSeed(Math.floor(Math.random() * MAX_SEED)); }} className={`${btnGhost} self-start`}>
+                Shuffle the keys
+              </button>
+            </ControlGroup>
+            <ControlGroup legend="Hashing">
+              <ControlRow label="Scheme" labelId="hash-scheme" stacked>
+                <Segmented
+                  labelledBy="hash-scheme"
+                  tone="stage"
+                  value={strategy}
+                  onChange={setStrategy}
+                  options={[{ value: 'extendible', label: 'Extendible' }, { value: 'linear', label: 'Linear' }]}
+                />
+              </ControlRow>
+              <ControlRow label="Bucket capacity" htmlFor="hash-cap" hint="Entries a bucket holds before it splits or overflows.">
+                <Stepper id="hash-cap" value={bucketCapacity} min={HASH_LIMITS.minBucketCapacity} max={HASH_LIMITS.maxBucketCapacity} unit="entries" describedBy={hintIdFor('hash-cap')} onChange={setBucketCapacity} />
+              </ControlRow>
+              {extendible ? (
+                <p className="text-label text-ink-dim">
+                  Extendible hashing starts from one bucket and grows its directory itself, so it has no starting
+                  bucket count to set.
+                </p>
+              ) : (
+                <ControlRow label="Initial buckets" htmlFor="hash-init">
+                  <Stepper id="hash-init" value={initialBuckets} min={HASH_LIMITS.minInitialBuckets} max={HASH_LIMITS.maxInitialBuckets} unit="buckets" onChange={setInitialBuckets} />
+                </ControlRow>
+              )}
+            </ControlGroup>
+          </Inspector>
+        }
+        command={
+          <CommandBar primary={{ label: 'Look up', onClick: runLookup, disabled: !lookupValid }}>
+            <label htmlFor="hash-key" className={`flex flex-col gap-1 ${controlLabel}`}>
+              Look up a key
+              <input
+                id="hash-key"
+                type="number"
+                value={lookupInput}
+                onChange={(e) => { setLookupInput(e.target.value); }}
+                onKeyDown={(e) => { if (e.key === 'Enter') runLookup(); }}
+                placeholder="e.g. 5"
+                className={`${inputField} w-28 tabular-nums`}
+              />
+            </label>
+          </CommandBar>
+        }
+        metrics={
+          <MetricStrip
+            items={[
+              { label: 'Distinct keys', value: plan.distinctKeysWritten, sub: plural(plan.writes.length, 'write') },
+              { label: 'Buckets', value: plan.bucketCount, sub: 'holding data' },
+              ...(extendible
+                ? [
+                    { label: 'Global depth', value: plan.globalDepth, sub: 'hash bits the directory reads' },
+                    { label: 'Directory slots', value: plan.directory.length, sub: `2 to the ${String(plan.globalDepth)}` },
+                  ]
+                : [
+                    { label: 'Level', value: plan.level, sub: 'completed doubling rounds' },
+                    { label: 'Split pointer', value: plan.splitPointer, sub: 'the address that splits next' },
+                    { label: 'Overflow buckets', value: overflowBuckets, sub: 'chained past a full primary' },
+                    { label: 'Max chain length', value: plan.maxChainLength, sub: 'longest overflow chain' },
+                  ]),
+            ]}
           />
-        </label>
-        <button
-          type="button"
-          className={btnPrimary}
-          disabled={lookupInput.trim() === '' || !Number.isInteger(Number(lookupInput))}
-          onClick={() => {
-            const key = Number(lookupInput);
-            setLookupState({ plan, result: lookupHashKey(plan, key) });
-          }}
-        >
-          Look up
-        </button>
-        {lookupResult && (
-          <p className="text-label text-ink-dim">
-            Key <span className="tabular-nums text-ink">{Number(lookupInput)}</span>
-            {lookupResult.found ? (
-              <>
-                {' '}found — value <span className="tabular-nums text-ink">{lookupResult.value}</span>, in{' '}
-                <span className="tabular-nums text-ink">{plural(lookupResult.bucketsChecked.length, 'bucket')}</span>.
-              </>
+        }
+        stage={
+          <StagePanel
+            title={extendible ? 'Directory' : 'Buckets'}
+            legend={
+              extendible
+                ? `${plural(plan.directory.length, 'slot')} · depth ${String(plan.globalDepth)}`
+                : `level ${String(plan.level)} · next split at ${String(plan.splitPointer)}`
+            }
+            views={[{ value: 'diagram', label: 'Diagram' }, { value: 'table', label: 'Table' }]}
+            view={view}
+            onView={setView}
+          >
+            {extendible ? (
+              <ExtendibleView plan={plan} lookupBucketIds={lookupBucketIds} view={view} />
             ) : (
-              ' not found.'
+              <LinearView plan={plan} lookupBucketIds={lookupBucketIds} view={view} />
             )}
-          </p>
-        )}
-      </div>
-
-      {strategy === 'extendible' ? (
-        <ExtendibleView plan={plan} lookupBucketIds={lookupResult?.bucketsChecked ?? []} />
-      ) : (
-        <LinearView plan={plan} lookupBucketIds={lookupResult?.bucketsChecked ?? []} />
-      )}
-
-      <div className={`${panelSurface} p-4`}>
-        <h3 className="mb-2 text-body font-semibold text-ink">Why a hash index cannot range-scan</h3>
-        <p className="mb-3 text-label leading-relaxed text-ink-dim">
-          {String(plan.scatter.length)} consecutive keys, right after the highest one actually written — a
-          B+Tree&rsquo;s own sorted leaf chain would put every one of these in the same handful of adjacent
-          leaves. A hash index scatters them by hash value instead:
-        </p>
-        <div className="flex flex-wrap gap-2">
-          {plan.scatter.map((s) => (
-            <span key={s.key} className="rounded-lg border border-edge bg-surface-3 px-2 py-1 text-label tabular-nums text-ink-dim">
-              key {s.key} → bucket {s.bucketId}
-            </span>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function Stat({ label, value, sub, accent = false }: { label: string; value: number; sub: string; accent?: boolean }) {
-  return (
-    <div className="flex flex-col">
-      <span className={`text-heading font-semibold tabular-nums ${accent ? 'text-accent' : 'text-ink'}`}>{value}</span>
-      <span className="text-label text-ink-dim">{label}</span>
-      <span className="text-label text-ink-dim/70">{sub}</span>
+          </StagePanel>
+        }
+        narration={
+          lookupResult
+            ? lookupResult.found
+              ? `Key ${String(lookupState?.key)} found — value ${String(lookupResult.value)}, in ${plural(lookupResult.bucketsChecked.length, 'bucket')} checked.`
+              : `Key ${String(lookupState?.key)} not found, after checking ${plural(lookupResult.bucketsChecked.length, 'bucket')}.`
+            : 'Look up a key to see which bucket its hash sends it to.'
+        }
+      >
+        <ToolSection
+          title="Why a hash index cannot range-scan"
+          description={`${String(plan.scatter.length)} consecutive keys, right after the highest one actually written. A B+Tree's sorted leaf chain would put every one of these in the same handful of adjacent leaves; a hash index scatters them by hash value instead.`}
+        >
+          <ul className="flex flex-wrap gap-2" aria-label="Where consecutive keys land">
+            {plan.scatter.map((s) => (
+              <li key={s.key} className="rounded-lg border border-edge/70 px-2 py-1 text-label tabular-nums text-ink-dim">
+                key {s.key} → bucket {s.bucketId}
+              </li>
+            ))}
+          </ul>
+        </ToolSection>
+      </ToolShell>
     </div>
   );
 }
@@ -239,7 +244,7 @@ function BucketChip({
 }) {
   return (
     <div
-      className={`flex flex-col gap-1 rounded-lg border border-edge bg-surface-3 p-2 text-left ${isHit ? 'ring-2 ring-hit' : ''}`}
+      className={`flex flex-col gap-1 rounded-lg border border-edge/70 bg-surface-3/60 p-2 text-left ${isHit ? 'ring-2 ring-hit' : ''}`}
     >
       <span className="text-label tabular-nums text-ink-dim/70">
         bucket {bucket.id} · {bucket.entries.length} entr{bucket.entries.length === 1 ? 'y' : 'ies'}
@@ -253,7 +258,13 @@ function BucketChip({
   );
 }
 
-function ExtendibleView({ plan, lookupBucketIds }: { plan: ReturnType<typeof planHashIndex>; lookupBucketIds: readonly number[] }) {
+interface ViewProps {
+  plan: ReturnType<typeof planHashIndex>;
+  lookupBucketIds: readonly number[];
+  view: 'diagram' | 'table';
+}
+
+function ExtendibleView({ plan, lookupBucketIds, view }: ViewProps) {
   // Group consecutive directory slots pointing at the same bucket, so several slots sharing one bucket render
   // as one wide chip rather than N identical copies.
   const groups: { from: number; to: number; bucketId: number }[] = [];
@@ -270,10 +281,9 @@ function ExtendibleView({ plan, lookupBucketIds }: { plan: ReturnType<typeof pla
     hit: lookupBucketIds.includes(bucketId),
   }));
 
-  return (
-    <div className={`${panelSurface} flex flex-col gap-3 p-4`}>
-      <h3 className="text-body font-semibold text-ink">Directory ({plan.directory.length} slots, global depth {plan.globalDepth})</h3>
-      <DataView
+  if (view === 'table')
+    return (
+      <DataTable
         caption={`Directory: ${String(plan.directory.length)} slots, global depth ${String(plan.globalDepth)}`}
         rows={slots}
         keyOf={(r) => String(r.slot)}
@@ -284,7 +294,10 @@ function ExtendibleView({ plan, lookupBucketIds }: { plan: ReturnType<typeof pla
           { header: 'Keys', cell: (r) => (r.bucket.entries.length === 0 ? 'empty' : r.bucket.entries.map((e) => e.key).join(', ')) },
           { header: 'Checked by the lookup', cell: (r) => (r.hit ? 'yes' : '') },
         ]}
-      >
+      />
+    );
+
+  return (
         <div className="flex flex-wrap gap-2">
           {groups.map((g) => {
             const bucket = plan.buckets[g.bucketId]!;
@@ -298,12 +311,10 @@ function ExtendibleView({ plan, lookupBucketIds }: { plan: ReturnType<typeof pla
             );
           })}
         </div>
-      </DataView>
-    </div>
   );
 }
 
-function LinearView({ plan, lookupBucketIds }: { plan: ReturnType<typeof planHashIndex>; lookupBucketIds: readonly number[] }) {
+function LinearView({ plan, lookupBucketIds, view }: ViewProps) {
   const chains = plan.primaryBuckets.map((primaryId, address) => {
     const chain: Bucket[] = [];
     let cur: number | null = primaryId;
@@ -318,12 +329,9 @@ function LinearView({ plan, lookupBucketIds }: { plan: ReturnType<typeof planHas
     chain.map((b, i) => ({ address, bucket: b, overflow: i > 0, hit: lookupBucketIds.includes(b.id) })),
   );
 
-  return (
-    <div className={`${panelSurface} flex flex-col gap-3 p-4`}>
-      <h3 className="text-body font-semibold text-ink">
-        Buckets (level {plan.level}, split pointer at address {plan.splitPointer})
-      </h3>
-      <DataView
+  if (view === 'table')
+    return (
+      <DataTable
         caption={`Buckets: level ${String(plan.level)}, split pointer at address ${String(plan.splitPointer)}`}
         rows={rows}
         keyOf={(r) => String(r.bucket.id)}
@@ -334,7 +342,10 @@ function LinearView({ plan, lookupBucketIds }: { plan: ReturnType<typeof planHas
           { header: 'Keys', cell: (r) => (r.bucket.entries.length === 0 ? 'empty' : r.bucket.entries.map((e) => e.key).join(', ')) },
           { header: 'Checked by the lookup', cell: (r) => (r.hit ? 'yes' : '') },
         ]}
-      >
+      />
+    );
+
+  return (
         <div className="flex flex-col gap-2">
           {chains.map(({ address, chain }) => (
             <div key={address} className="flex flex-wrap items-center gap-2">
@@ -348,8 +359,6 @@ function LinearView({ plan, lookupBucketIds }: { plan: ReturnType<typeof planHas
             </div>
           ))}
         </div>
-      </DataView>
-    </div>
   );
 }
 
