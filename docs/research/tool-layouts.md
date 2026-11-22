@@ -556,7 +556,40 @@ once it moves. Changes from the sketch: the safety checks are a section below th
 than a tab beside the logs, so all four are visible without a click, and the metric carries the
 4/4 summary. Fixed along the way: the playback shortcuts no longer take Space from a focused button
 or arrows from a segmented control. Raft is the first page to put both on one screen.
-Phase 2 is next.
+**Phase 2 status (2026-11-22): done.** The six older-generation pages (breadcrumbs, uppercase KPI
+cards, a 4xl column) are on the workbench, one commit each: Sort, Hash join, Slotted page, Parser,
+Planner and Locks. That retires the second page style.
+
+- **Sort and Hash join** are the plain parameter-sweep shape: Data and Memory groups (`Stepper`,
+  `Segmented`), a readout, every pass on one stage, and the cost sentence as the narration.
+- **Slotted page** has one size field. 512 B, 4 KB and 8 KB are shortcut chips into it, not a
+  second control for the same value. The slot table sits on the stage under the map, so picking a
+  tuple in either picks it out in both. Typing a size no longer snaps back on each digit.
+- **Parser** has no inspector, because the SQL is its only input. The SQL goes in the command
+  region with a menu of six examples, and the token ribbon sits over the tree on the stage.
+- **Planner** puts the index `Switch` and a rule checklist (All, None, and a "fired" mark per rule)
+  in the inspector. The query and five worked examples go in the command region, and both plans
+  sit side by side on the stage.
+- **Parser and Planner** both dropped their readouts. Every number in them was already in the
+  stage header, the checklist or the plan captions, and the readout pushed the trees down.
+- **Locks:** the "Deadlock example" button became one of five scenarios. The next request's
+  transaction, page and mode moved into the command bar with Request lock as the one primary.
+  The narration repeats the last step's lines, and the timeline and the compatibility matrix are
+  sections below.
+
+Fixes along the way, each its own commit:
+
+- `Stepper` clamped on every keystroke, so 32 could not be typed into a 6–64 field. It now applies
+  a value once it is in range and clamps on blur. It also hides the browser's spin arrows, which
+  clipped two digits.
+- Plan nodes with a long cost basis outgrew the tree's 144px row and ran into the row below, in
+  the Planner and the Playground alike. The basis is clamped to two lines (still whole for a screen
+  reader and in the hover title), and wide nodes get a 192px row.
+- `AstTree` and `PlanTree` take `FlowTree`'s `minZoom`. The parser tree is never framed below 0.7
+  (0.8 on a phone) and pans instead, because fitting a clause-heavy statement drew 5px labels even
+  on a desktop. The plans use 0.7 on phones.
+
+Phase 3, the parameter-sweep tools, is next.
 
 Each tool migrates as its own commit with before/after screenshots from the Phase 0 spec, matching
 the repo's one-item-per-commit cadence. The URL state (`addressBar.ts`, `walUrl.ts`, `scheduleUrl.ts`
