@@ -111,8 +111,10 @@ function NodeView({ id, data }: NodeProps<TreeFlowNode>) {
       )}
       {data.estRows !== undefined && (
         <div className="mt-0.5 text-label break-words text-ink-dim/80" title={data.estBasis}>
-          <span className="font-mono">~{data.estRows} row{data.estRows === 1 ? '' : 's'}</span>
-          {data.estBasis && <span className="opacity-70"> · {data.estBasis}</span>}
+          <div className="font-mono">~{data.estRows} row{data.estRows === 1 ? '' : 's'}</div>
+          {/* Clamped: a join's cost basis runs to six lines, and a node taller than the layout's row ran into the
+              one below. The whole basis is still in the DOM for a screen reader, and in the hover title. */}
+          {data.estBasis && <div className="line-clamp-2 opacity-70">{data.estBasis}</div>}
         </div>
       )}
       <Handle id="out" type="source" position={Position.Bottom} className="!opacity-0" />
@@ -211,7 +213,8 @@ function build(
   // d3-hierarchy does the layout maths; flowinger only draws it.
   const h = hierarchy<FlowNode>(root, (d) => d.children);
   const width = props.wide ? 200 : props.compact ? 104 : 132;
-  const height = props.wide ? 144 : props.compact ? 84 : 96;
+  // Wide (plan) nodes: a three-line operator name, its detail and a two-line estimate.
+  const height = props.wide ? 192 : props.compact ? 84 : 96;
   tree<FlowNode>().nodeSize([width, height])(h);
 
   const relations = treeRelations(root);
