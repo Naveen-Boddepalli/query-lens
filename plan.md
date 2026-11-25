@@ -1,7 +1,7 @@
 # Project Plan: QueryLens — Interactive Database Internals Visualizer
 
-**Document Status**: v1 shipped and live (first deploy 2026-09-23) · v2 built — retrospective §24, plan §25, after the merge §26 · **v3 planned** — §27, on `version/v3`
-**Last Updated**: 2026-10-18
+**Document Status**: v1 shipped and live (first deploy 2026-09-23) · v2 built — retrospective §24, plan §25, after the merge §26 · v3 built and released as **3.0.0** (2026-11-26) — §27
+**Last Updated**: 2026-11-26
 
 ## Executive Summary
 QueryLens is a 100% client-side, interactive database internals visualizer built for educational purposes. It executes real SQL queries inside the browser (zero server), rendering step-by-step visualizations of parsing, query planning, B+Tree index traversal, buffer pool eviction, locking, and execution. Designed specifically for students and educators, QueryLens focuses on pedagogical clarity over enterprise performance.
@@ -3087,6 +3087,7 @@ Costs are against the modules that exist today (paths checked 2026-10-18).
 | Item | Verdict | Earliest | Trigger to revisit |
 |---|---|---|---|
 | v3 on `version/v3`, one item per commit | **Decided, 2026-10-18 (owner)** — "do the work on a new branch" | now | — |
+| **Release `3.0.0`** | **Cut, 2026-11-26 (owner)** — every buildable §27 item in one version (3.0–3.4 were built before any was cut), with the Prism theme and the tool workbench; merged to `main` through `merge/v3-into-main` and PRs #43–#44, with the zod bump of PR #48. L4 stays open and does not hold the release, as §27.5 says | now | — |
 | `EXISTS` / `NOT EXISTS` (S1) | **Built, 2026-10-18** — semi- and anti-joins under all four algorithms, oracle-checked; its lesson and challenge built with S2 | now | — |
 | A multi-table preset (S2) | **Built, 2026-10-18** — `shop`, with S1's lesson and challenge | now | — |
 | Set operations (S3) | **Built, 2026-10-18** — ∪ ∩ − over members planned on their own; INTERSECT never mixed with the others; no `INTERSECT ALL`/`EXCEPT ALL` | now | — |

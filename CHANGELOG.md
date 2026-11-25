@@ -7,10 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Work toward **v3** (plan.md §27), built on `version/v3` and `version/v3-remaining` and merged into `main` after
-2.0.0, together with the interface work that landed on `main` since 2.0.0. v3's five new tools — histograms,
-parallel execution, partitioning, two-phase commit and Raft — are listed in the redesigned tools index (under a new
-*Parallel & Distributed* category for the last three) and in Spotlight search.
+## [3.0.0] - 2026-11-26
+
+QueryLens v3 (plan.md §27), built on `version/v3` and `version/v3-remaining` and merged into `main` after 2.0.0,
+together with the interface work that landed on `main` since 2.0.0. It ships every buildable item of §27's five
+releases: **the SQL a textbook asks for** (`EXISTS`/`NOT EXISTS` as semi- and anti-joins, a multi-table preset,
+`UNION`/`INTERSECT`/`EXCEPT`, `RIGHT`/`FULL`/`CROSS` joins, `COUNT(DISTINCT …)`, scalar subqueries, aliases and
+self-joins — each checked against SQLite), **theory you can see** (the precedence graph, intention locks, next-key
+locks, bushy plans, equi-depth histograms), **parallel execution** and **distributed databases** — the course map's
+last two *Not covered* rows — and narration detail levels. v3's five new tools — histograms, parallel execution,
+partitioning, two-phase commit and Raft — are listed in the redesigned tools index (under a new *Parallel &
+Distributed* category for the last three) and in Spotlight search. The interface gains the Prism theme and moves
+every tool onto one shared workbench layout. Still open from §27, and the owner's: the domain, the launch post and
+the npm organisation (L4).
 
 ### Added
 
@@ -319,6 +328,13 @@ parallel execution, partitioning, two-phase commit and Raft — are listed in th
   belongs to (storage is the buffer pool's coral everywhere), and difficulty reads as a three-bar meter.
 - **A slow route shows it is loading.** A lazy page that takes longer than 250 ms shows a thin spectrum sweep under the
   header instead of a blank page.
+- **Every tool shares one workbench layout** (`docs/research/tool-layouts.md`). All 25 tool pages sit on `ToolShell`
+  (`src/ui/tool/`): a header, the stage that draws the mechanism, a metric strip, and an inspector of controls that is
+  a sticky rail on a wide screen and a collapsed summary bar on a phone. Controls are shared too — segmented choices,
+  steppers, switches, a scenario picker, a transport bar — and the stage panel takes the tool family's colour. A new
+  e2e check loads every tool at 1440px and 375px and fails on a page wider than the screen, content sticking out of its
+  card, or a clipped box; its first run caught the slotted page clipping its labels on a phone. Labels are now sentence
+  case, and the tools' visible text no longer cites plan.md.
 
 - **A qualifier naming a table a one-table query does not read** (`SELECT orders.id FROM customers`) is now told
   *There is no table called `orders` in this query*, not that the column needs no table name.
@@ -332,6 +348,20 @@ parallel execution, partitioning, two-phase commit and Raft — are listed in th
 
 ### Fixed
 
+- **Nothing could stick to the bottom of a phone screen.** The content pane counted as the scroll container at every
+  width though only a desktop's is height-constrained; it now scrolls from the `lg` breakpoint up, so sticky bars
+  work on phones.
+- **Space on a focused button also toggled playback**, and the arrow keys a segmented control had used also stepped
+  the trace. The playback shortcuts now leave both alone.
+- **A stepper clamped on every keystroke**, so typing 32 into a 6–64 field gave 6; and four-digit values were cut off.
+  A value in range applies as typed, anything else is clamped on blur, and the field widens to its maximum's digits.
+- **Tall plan nodes ran into the row below** in the Planner and the Playground (a join's cost basis ran to six lines),
+  and the Planner's optimized tree lost its bottom row to a nominal node height. The basis is clamped to two lines
+  and trees fit each node's real height.
+- **Wide tables looked cut off on a phone**; they now fade the edge with more behind it and can pin the first column.
+  Two-phase commit's crash selects no longer push the page wider than 375px.
+- **The scenario picker's arrows** were named "Previous/Next scenario", so a lookup by the picker's label found three
+  controls; they are named by what they load ("Next: Lost update").
 - **54 labels were rendering at the wrong size.** They used `text-micro`, a size step retired when the 13px type floor
   was set, so each silently inherited its parent's size (often the 15px body). They are 13px labels again.
 - **The header crowded the nav at 1024px.** The wordmark and the first nav link sat 16px apart; between 1024px and
@@ -379,7 +409,7 @@ parallel execution, partitioning, two-phase commit and Raft — are listed in th
 - **Header and footer cleanup** — the GitHub star element and placeholder badges are removed from the header and
   hero, and the footer is back to a plain three-column layout without fake status indicators.
 - **Dependency updates** (Dependabot): `@modelcontextprotocol/sdk` 1.32.1 → 1.32.2, `actions/upload-artifact`
-  7.0.1 → 7.0.2, `actions/setup-node` 7.0.0 → 7.1.0, `pnpm/action-setup` 6.0.10 → 6.1.1.
+  7.0.1 → 7.0.2, `actions/setup-node` 7.0.0 → 7.1.0, `pnpm/action-setup` 6.0.10 → 6.1.1, `zod` 4.5.4 → 4.6.6.
 
 ### Fixed (on `main` since 2.0.0)
 
@@ -1933,7 +1963,8 @@ the plan for what comes next is §25. (The tag marks the deployed commit; this v
 - Tested CSP security headers
 - 326 unit tests, 14 end-to-end tests
 
-[Unreleased]: https://github.com/Naveen-Boddepalli/query-lens/compare/v2.0.0...HEAD
+[Unreleased]: https://github.com/Naveen-Boddepalli/query-lens/compare/v3.0.0...HEAD
+[3.0.0]: https://github.com/Naveen-Boddepalli/query-lens/releases/tag/v3.0.0
 [2.0.0]: https://github.com/Naveen-Boddepalli/query-lens/releases/tag/v2.0.0
 [2.0.0-rc.3]: https://github.com/Naveen-Boddepalli/query-lens/releases/tag/v2.0.0-rc.3
 [2.0.0-rc.2]: https://github.com/Naveen-Boddepalli/query-lens/releases/tag/v2.0.0-rc.2
