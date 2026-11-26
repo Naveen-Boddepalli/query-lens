@@ -1,6 +1,6 @@
 # Project Plan: QueryLens — Interactive Database Internals Visualizer
 
-**Document Status**: v1 shipped and live (first deploy 2026-09-23) · v2 built — retrospective §24, plan §25, after the merge §26 · v3 built and released as **3.0.0** (2026-11-26) — §27
+**Document Status**: v1 shipped and live (first deploy 2026-09-23) · v2 built — retrospective §24, plan §25, after the merge §26 · v3 built and released as **3.0.0** (2026-11-26) — §27 · **v4 in progress** — §28, on `version/v4`
 **Last Updated**: 2026-11-26
 
 ## Executive Summary
@@ -3129,7 +3129,237 @@ Costs are against the modules that exist today (paths checked 2026-10-18).
 
 ---
 
+## 28. QueryLens v4 — One Engine, Not a Shelf of Models
+
+> Added 2026-11-25, after v3 reached `main` (the `merge/v3-into-main` merge, then PR #43 and PR #44) and before
+> 3.0.0 is cut, on the owner's request to plan the next version. This section plans **product v4** as a release cut
+> (R0) and five releases, 4.0–4.4, milestones **M27–M31**. Item IDs use new letters — **I**, **Q**, **R**, **U** — so
+> none collides with §25's A–H or §27's S, T, P, X and L. Evidence, all in the repository: the course map's *What is
+> missing* column (`src/pages/DocsContent/study/course-map.mdx`), `reference/limits.mdx`'s *Durability*,
+> *Transactions* and *What's out of scope entirely*, the open triggers in §25.9 and §27.9, and PR #43's CI failure.
+
+### 28.1 Where v3 leaves off
+
+v3 built every item §27 planned except L4, the owner's launch item. For the first time **no course-map row reads
+*Not covered***. Read the *What is missing* column, though, and one phrase keeps coming back: the mechanism is a
+model *beside* the engine, or priced and never run.
+
+| Course-map row | What is missing (the map's or `limits.mdx`'s own words) | Kind of gap |
+|---|---|---|
+| Logging and recovery | "The log is a model of its own … not the engine's buffer pool; log truncation" | Beside the engine |
+| Storage models and compression | "the sandbox models columnar storage standalone, not wired into `EXPLAIN`/the Playground" | Beside the engine (`ColumnScan` declined 2026-10-05) |
+| Index concurrency | "Concurrent queries in the Playground still never contest a latch" | Beside the engine |
+| Cost models and join ordering | "Statistics on two columns together …; bushy plans are priced but never run" | Priced, not run; an estimate v2 showed failing and nothing fixed |
+| Query execution models | "Materialization (what a pipeline breaker holds in memory)" | Missing operator |
+| Parallel execution | "operators past the aggregate (a parallel sort, a parallel join over morsels)" | Half built |
+| Concurrency-control theory | "PostgreSQL's serializable snapshot isolation" — `SERIALIZABLE` under versions "aborts more transactions than PostgreSQL's own scheme" | An approximation |
+| Two-phase locking | "Gap locks under versions: InnoDB's `REPEATABLE READ` writes take next-key locks, and the matrix's InnoDB column does not model them" | An approximation |
+| Distributed databases | "Replication; Raft's membership changes and snapshots; three-phase commit; Paxos" | A sub-topic not covered |
+| SQL | "Correlated subqueries outside `EXISTS`, subqueries in `FROM`, window functions, CTEs, DDL" | Declined in §27.10, two of them with a trigger |
+| Relational model and algebra | "Division" | Declined (a double `NOT EXISTS` runs) |
+
+And one no row names: **the Playground has no transactions** — `limits.mdx`: "no transactions in the Playground
+(they exist only in Transaction schedules)". The SQL box a visitor meets first cannot `BEGIN` or `ROLLBACK`.
+
+Four more facts, none of them a feature:
+
+1. **The docs have drifted from the code.** The course map's *Joins* row still lists "multi-way joins and join
+   order; outer joins" as missing (C3–C5 and S4 built them); *Tree indexes* lists clustered tables (B3e, built
+   2026-09-28); *The biggest holes* says everything "from transactions onward" is absent or begun, with "no recovery"
+   (D, E and X built them); `limits.mdx`'s *Durability* says ARIES's "recovery is not built yet" two paragraphs above
+   the paragraph describing it. A wrong *missing* undersells; a wrong *covered* would mislead, and nothing tests either.
+2. **The trace has no ceiling.** PR #43's CI died because `runQuery` on the parallel tool's big-big join recorded
+   13.5 million trace events (~2.6 GB), past CI's default Node heap. The fix (`b9d6a77`) changed the *test*, not the
+   engine: a visitor's Custom schema can still do it in a tab. C6's Web Worker trigger ("main-thread jank, or a
+   dataset past 10,000 rows") never named memory, which is the limit that was actually hit.
+3. **3.0.0 is not cut.** `package.json` says `2.0.0`; CHANGELOG's `[Unreleased]` holds all of v3 and the
+   redesign since 2.0.0.
+4. **The §9 time-box is 2026-12-31** (§25.6): with fewer than 10 completed per arm, decide with what exists and
+   record that *no data is not no effect*. The pilot (n = 2) ran 2026-10-10. The date falls inside v4's first release.
+
+### 28.2 The thesis
+
+1. **One engine.** v2 and v3 widened by building faithful models *beside* the engine — the right call while each
+   subject needed its own proof, and the small models stay (§28.6 rule 11). The seams are now the most missing
+   lesson: a textbook's write-ahead log logs *the* buffer pool's pages, a real optimizer runs the bushy plan it
+   prices, and a transaction is something you `BEGIN` in the same SQL box. Wiring them in **deepens** §9's contrast,
+   in the Playground, rather than widening away from it — §22.1's fifth question answered "deepens" for the first
+   time since 2.1.
+2. **Exact where a reader can check it.** Two approximations have a published answer to be held against:
+   serializable snapshot isolation (PostgreSQL's algorithm for PostgreSQL's column of the matrix) and extended
+   statistics (C2's 11.0× q-error, built in v2 to show the independence assumption failing, and never fixed).
+3. **The last syllabus sub-topic** — replication — under §27.6 rule 9: messages and failures are inputs.
+4. **Keep the SQL line where §4 drew it, and move it once.** Derived tables and a non-recursive `WITH` are one new
+   planner input; a correlated scalar subquery is the decorrelation lesson S1 began (§27.9's trigger has fired).
+   Window functions, recursive CTEs and DDL stay out.
+
+So the order is **honest and bounded → one engine → exact → replication**, with the learning layer moving with
+each item rather than after it.
+
+### 28.3 The filter — §27.3's nine, plus one
+
+§20.1's four, §22.1's fifth, §25.2's Q6–Q8 and §27.3's Q9 apply unchanged. One more, earned by §28.1's table:
+
+10. **Is it in the engine, or beside it?** A new mechanism goes into the engine the Playground runs, or its page and
+    `limits.mdx` say why it cannot. A model beside the engine is still allowed — R1 is one — but it is no longer the
+    default.
+
+### 28.4 Release plan
+
+| Release | Milestone | Theme | Scope (item IDs, §28.5) | Est. | Gate |
+|---|---|---|---|---|---|
+| **R0** | — | Cut 3.0.0 | U1 — **done, 2026-11-26** | 1–2 days | Owner's go-ahead to push `main`; the owner runs `git tag` |
+| **4.0** | **M27** | Honest and bounded | U2, I1 | 1–2 wk | none — start now |
+| **4.1** | **M28** | One engine | I2–I5 | 6–8 wk | I1 (a logged, transactional Playground makes longer traces) |
+| **4.2** | **M29** | Exact where it can be checked | Q1–Q5 | 5–6 wk | Q3's `MATERIALIZED` needs I4's materialize node; the rest can run beside 4.1 where files do not overlap |
+| **4.3** | **M30** | Replication | R1, R2 | 3–4 wk | none beyond §27.6 rule 9 |
+| **4.4** | **M31** | Learning & reach | U3–U6 | parallel track | U3 on 2026-12-31 |
+
+Estimates are §25.3's units and, like v2's and v3's, ceilings: v3's twenty buildable items were estimated at 17–23 weeks
+plus L2 and built in three days, 2026-10-18 to 2026-10-20. The schedule risk is still validation and maintenance — here, pinned numbers (§28.7) — not
+typing.
+
+### 28.5 The item catalogue
+
+Costs are against the modules that exist today (paths checked 2026-11-25).
+
+#### I. One engine
+
+| ID | Rel. | Item | Shape | Cost |
+|---|---|---|---|---|
+| **I1** | 4.0 | **A trace ceiling** | `runQuery` takes an event budget. Past it the run still finishes and its counters and result stay exact, but step events stop being recorded, and the trace ends in one event that says how many it did not keep — so a step-through says "this run took 13.5 million steps; showing the first N" instead of exhausting the tab. The budget is measured (the largest preset trace × a margin), not guessed. A test runs the parallel tool's big-big join under `NODE_OPTIONS=--max-old-space-size=1536`, CI's real ceiling. The measurement re-decides C6's Web Worker (U6). | 3–4 days |
+| **I2** | 4.1 | **The engine logs** | The SQL pipeline's `INSERT`/`UPDATE`/`DELETE` go through a write-ahead log on the engine's own buffer pool: real dirty frames, a pageLSN on each real heap page, log-before-data enforced when the pool evicts, steal/force as pool options, and **log truncation** at a checkpoint (the oldest recLSN or active transaction's first record, whichever is older). The *Durability* dialog drives this log instead of the separate model, so its eight-spare-slot and sixty-row limits go. **Off by default** (§28.6 rule 10): a session turns it on, so no preset's pinned counters move. `/tools/wal` and `/tools/recovery` keep their four-page model, which becomes the engine's oracle (rule 11). | 2 wk |
+| **I3** | 4.1 | **Transactions in the Playground** | `BEGIN`, `COMMIT` and `ROLLBACK` in the SQL box, one session: statements inside see their own changes, `ROLLBACK` undoes newest first through I2's compensation records, and the trace shows the undo. A crash from the *Durability* dialog mid-transaction makes it a loser in recovery. One session only — two sessions remain `/tools/schedule`'s; no savepoints. Oracle: SQLite runs the same statements with the same `BEGIN`/`ROLLBACK`. | 1 wk |
+| **I4** | 4.1 | **Bushy plans run, and a materialize node** | The planner may choose a bushy tree when T4's `searchJoinShapes` prices it cheaper; the executor runs a join whose inner side is itself a join through a new `Materialize` node (its rows held, its pages written and read through the buffer pool, counted). The *Why not?* panel names the left-deep runner-up. Closes *Query execution models*' materialization gap on the way. Whether `runJoinOrderDP` adopts `joinShapes`'s exact per-subset estimate (T4's finding) is decided by measurement: only if no preset's chosen plan changes, otherwise as an option. Oracle-checked. | 1–1.5 wk |
+| **I5** | 4.1 | **Parallel sort and a shared-table hash join** | `/tools/parallel` gains the two operators its course-map row says it lacks: a parallel external sort (each worker sorts its morsels into runs, a k-way merge at the gather) and a hash join over morsels building **one shared** hash table, set beside P2's partitioned exchange — the morsel paper's choice against the exchange paper's. Ticks and scripted speeds as P1; every answer held to the serial engine's. A section, not a new tool (§27.7's one-tool rule). | 1–1.5 wk |
+
+#### Q. Exact where it can be checked
+
+| ID | Rel. | Item | Shape | Cost |
+|---|---|---|---|---|
+| **Q1** | 4.2 | **Extended statistics** | `CREATE STATISTICS name (dependencies, ndistinct) ON a, b FROM t`, PostgreSQL's spelling — a statistics statement like `ANALYZE`, not DDL (decision row, §28.9). The estimator uses the functional-dependency degree for an `AND` of equalities on the two columns and the pair's distinct count for a `GROUP BY` of both. On C2's `employees`, `EXPLAIN ANALYZE`'s 11.0× q-error falls to about 1×, and the page shows both. A step in the statistics lesson, a challenge. | 1 wk |
+| **Q2** | 4.2 | **Serializable snapshot isolation** | In the versions engine: SIREAD marks on what each transaction read, rw-antidependencies recorded as they form, and an abort when a transaction would become the pivot of two consecutive rw edges with the out-edge's transaction committed first (Cahill; Ports & Grittner). The matrix's PostgreSQL `SERIALIZABLE` cells run on it (their verdicts should not change — they already agree with PostgreSQL's page); the commit-time read check stays as an option, and fuzzed schedules count both schemes' aborts (SSI's ≤ the check's, both serializable by T1's precedence graph) and show an SSI false positive. | 1.5 wk |
+| **Q3** | 4.2 | **Subqueries in `FROM` and a non-recursive `WITH`** | A derived table is a planner input with its own scope, as an alias is (S7); `WITH name AS (…)` is a named one, inlined by default and kept apart by `AS MATERIALIZED` through I4's node — and the lesson is the difference: inlined, a predicate pushes down into it; materialized, it cannot (PostgreSQL 12's change). No `RECURSIVE`. The oracle generates both shapes. Reverses §27.10's 3.0 decline, so it is the owner's call (§28.9). | 1.5 wk |
+| **Q4** | 4.2 | **Correlated scalar subqueries, decorrelated** | `SELECT name, (SELECT COUNT(*) FROM orders o WHERE o.customerId = c.id) FROM customers c`, and the same in `WHERE`. Run two ways in `/compare`: re-run per outer row (an *apply*, which S1 already narrates for `EXISTS`) or unnested into a grouped `LEFT JOIN` — and the lesson is **the COUNT bug**, where the naive rewrite turns a customer's zero into NULL. §27.9's trigger ("S1 and S6 both shipped, and a lesson needs one") has fired. Two rows still an error, as S6. Oracle-checked. | 1 wk |
+| **Q5** | 4.2 | **InnoDB's locking writes under versions** | The matrix's InnoDB `REPEATABLE READ` column takes next-key locks on its writes (`UPDATE`/`DELETE` and locking reads) over T3's gaps while plain reads stay snapshot reads — which is what InnoDB does, and closes *Two-phase locking*'s last missing item. Every InnoDB cell still has to agree with MySQL's published page. | 3–4 days |
+
+#### R. Replication (the *Distributed databases* row's first missing word)
+
+| ID | Rel. | Item | Shape | Cost |
+|---|---|---|---|---|
+| **R1** | 4.3 | **`/tools/replication` — leader and followers** | One leader, two to four followers, a log shipped over a scripted message schedule (delays, drops, a partition, a crash — inputs, seeded, as X3). Synchronous, asynchronous and semi-synchronous acknowledgement; a failover that **loses an acknowledged write** under asynchronous replication, drawn; replication lag shown as the anomalies a client sees — read-your-writes and monotonic reads broken, then kept by routing. Property-tested: under synchronous acknowledgement no acknowledged write is lost on any single failure. A model beside the engine, by §28.3's Q10, because the engine is one node. | 2 wk |
+| **R2** | 4.3 | **Quorums** | A section of R1: leaderless replication with N, R and W, a stale read when R + W ≤ N, read repair, and the latency each choice costs in ticks. No sloppy quorums or hinted handoff — labelled. | 1 wk |
+
+#### U. Release, honesty and reach
+
+| ID | Rel. | Item | Shape | Cost |
+|---|---|---|---|---|
+| **U1** | R0 | **Cut 3.0.0** | **Done, 2026-11-26** — `9214558` on `main`, deployed and post-deploy checked; the owner tagged `v3.0.0` on it. CI #220 on that commit was cancelled when PR #49 reached `main` behind it, so the tag rests on the full local gate (3,325 unit, 761 e2e). As planned: CHANGELOG `[Unreleased]` → `[3.0.0]`, `package.json` → `3.0.0`, §27.9's rows, RELEASING.md's checklist; pushed to `main` on the owner's go-ahead (a production deploy), CI and the deploy checked, then the owner tags. | 1–2 days |
+| **U2** | 4.0 | **The course map and `limits.mdx`, re-read against the code** | Every row of the course map and every section of `limits.mdx`, checked against what is built (§28.1's four stale places first), and *The biggest holes* rewritten. A `courseMap.test.ts` parses every SQL fragment the *SQL* row claims and resolves every route and lesson it links, so the checkable half cannot drift again. | 3 days |
+| **U3** | 4.4 | **The §9 decision** (owner's people) | On 2026-12-31, read §25.6's table with the n that exists and record the verdict and its n in §25.9 — inconclusive is a result. Recruiting is the owner's; the kit needs nothing. | — |
+| **U4** | 4.4 | **Carry-overs** (owner's) | L4 — the domain (`querylens.org` recommended), the launch post, the npm organisation — and H6's manual screen-reader pass. | — |
+| **U5** | 4.4 | **A lesson, a challenge and a text view per item; the course map and `limits.mdx` move with each** (Q6, §25.5 rule 6) | In each item's own commit; `toolCoverage.test.ts` already fails a tool without them. | per item |
+| **U6** | 4.4 | **The Web Worker, re-decided** (C6's deferred half) | With I1's measurement: if the largest preset trace still janks the main thread or nears the budget, build the Worker; if not, record why and keep it deferred. | — or 1–1.5 wk |
+
+### 28.6 Engineering rules for v4
+
+§25.5's seven rules and §27.6's 8–9 stand. Two more:
+
+10. **Pinned numbers do not move silently.** A change wired into the engine that alters counters — logging, a
+    different join estimate, a materialized inner — is opt-in, or lands with every pinned lesson, challenge and e2e
+    number re-derived in the same commit and said in its message. A number is never edited just to make a test pass.
+11. **The small models stay, as oracles.** `/tools/wal`, `/tools/recovery` and the bushy-plan explorer keep their
+    small, readable models; the engine-wired version is held to the model by a differential test (the same script
+    gives the same crash image, the same recovered state, the same price) — the model becomes the engine's oracle as
+    SQLite is for SQL.
+
+### 28.7 Risks specific to v4
+
+| Risk | Why it matters | Mitigation |
+|---|---|---|
+| **Pinned-number churn** | Wiring into the engine moves counters every lesson, challenge and e2e test pins | Rule 10: opt-in by default; re-derive, never edit |
+| **Bundle** | Tool routes sit at measured + 3 kB and non-tool routes have little slack; `/playground` was at 355.9 of 356 kB before L2 went lazy | I2's logging and I3's transaction UI are opt-in lazy chunks, as L2's narration is; budget rows as measured + 3 |
+| **A ceiling that hides a bug** | I1 could truncate the very step a reader needed | The counters and result stay exact; the cut-off is one visible event; the budget is far above every preset |
+| **SQL creep** | Q3 and Q4 are the first SQL since 3.0; window functions are one request away | §28.10 keeps them out with a trigger; Q3 and Q4 are owner decisions (§28.9) |
+| **SSI subtlety** | A wrong rw-edge rule aborts too little and looks right | T1's precedence graph checks every fuzzed SSI commit is serializable; Hermitage cells unchanged |
+| **Model honesty for replication** | A lag toy that looks like a database's replication is §12's "plausible but false" | Assert properties, label simplifications, as X2 and X3 |
+| **Memory in CI** | The PR #43 failure is the shape of the next one | I1 first; `--max-old-space-size=1536` in the test that holds it |
+
+### 28.8 Definition of done
+
+**R0 — 3.0.0**
+- [x] `3.0.0` in `package.json` and CHANGELOG, deployed from `main`, tagged by the owner. *(2026-11-26.)*
+
+**4.0 — Honest and bounded**
+- [ ] No course-map row or `limits.mdx` section names as missing something that is built, or claims something that
+  is not; `courseMap.test.ts` holds the SQL row's fragments and every link.
+- [ ] The parallel tool's big-big join runs in the Playground and in a test under a 1,536 MB heap, its counters and
+  result exact, its trace cut off with a visible note.
+
+**4.1 — One engine**
+- [ ] In the Playground: `BEGIN`, an `UPDATE`, a crash from the *Durability* dialog, recovery — the update is
+  undone by ARIES on the engine's own heap pages, and the four-page model, given the same script, agrees.
+- [ ] A query whose cheapest plan is bushy runs bushy, its answer SQLite's, its materialized inner counted.
+- [ ] The course map's *Logging and recovery*, *Query execution models* and *Parallel execution* rows lose their
+  engine-side missing items.
+
+**4.2 — Exact where it can be checked**
+- [ ] `employees`' correlated estimate's q-error is under 1.5× with extended statistics, beside the 11.0× without.
+- [ ] Under SSI every Hermitage cell still agrees with PostgreSQL's page, and fuzzed schedules abort no more than
+  under the commit-time check.
+- [ ] If the owner approves Q3/Q4: the SQL row loses "subqueries in `FROM`", "correlated subqueries outside
+  `EXISTS`" and non-recursive CTEs, each oracle-generated with a coverage threshold.
+
+**4.3 — Replication**
+- [ ] The *Distributed databases* row's missing column no longer says "Replication": an acknowledged write lost to
+  an asynchronous failover is shown, and synchronous replication's guarantee is property-tested.
+
+### 28.9 Decision log
+
+| Item | Verdict | Earliest | Trigger to revisit |
+|---|---|---|---|
+| **The v4 plan (§28)** | **Decided, 2026-11-26 (owner)** — "start v4 with 4.0"; on `version/v4` (cut from `main` after 3.0.0), one item per commit, as v3 was | now | — |
+| Cut 3.0.0 before v4 builds (U1) | **Done, 2026-11-26** — tag `v3.0.0` on `9214558` | now | — |
+| Trace ceiling (I1) | **Proposed for 4.0** — PR #43's 13.5M-event run | now | — |
+| WAL on the engine's pool; Playground transactions (I2, I3) | **Proposed for 4.1** — opt-in, the small model kept as oracle | after I1 | — |
+| Bushy plans executed (I4) | **Proposed for 4.1** | after I1 | — |
+| Subqueries in `FROM`, non-recursive `WITH` (Q3) | **Owner to decide** — reverses §27.10's decline "for 3.0" (owner, 2026-10-19) | 4.2 | — |
+| Correlated scalar subquery (Q4) | **Owner to decide** — §27.9's trigger has fired; the COUNT bug is the lesson | 4.2 | — |
+| `CREATE STATISTICS` (Q1) | **Proposed** — PostgreSQL's statement; a statistics object, not DDL, so §4's DDL line holds | 4.2 | — |
+| Replication (R1, R2) | **Proposed for 4.3** — one tool, quorums as its section | 4.3 | — |
+| Web Worker (C6's deferred half) | **Re-decided after I1** (U6) | after I1 | I1's measurement |
+| `ColumnScan` in `EXPLAIN` | **Still declined** (2026-10-05) | — | A course asking for column storage in the engine, not the sandbox |
+| Latch contention in the Playground | **Declined for v4** — the Playground has one session; `/tools/latch-crabbing` covers it | — | Two Playground sessions |
+| Raft membership changes and snapshots, 3PC, Paxos | **Declined for v4** — one consensus protocol, honestly labelled (§27.10) | — | A course adoption that asks |
+| Window functions, recursive CTEs, DDL | **Still declined** (§4, §25.10, §27.10) | — | A course adoption that asks for them |
+| Relational division | **Still declined** — a double `NOT EXISTS` runs; a lesson may use it | — | A course adoption that asks |
+| i18n (H5) | **Conditional** | — | A named locale maintainer |
+| In-app LLM explainer | **Still declined** (§25.6's kill criteria) | — | — |
+
+### 28.10 What v4 deliberately does not add
+
+- **No window functions, no recursive CTEs, no DDL** — §4's reasoning stands. `CREATE STATISTICS` is a statistics
+  statement, and the Custom schema editor stays the way to make a table.
+- **No second Playground session.** Two sessions on one table are `/tools/schedule`'s; I3 is one session.
+- **No savepoints**, and no log shipping to disk — the log lives in the tab.
+- **No real threads, no real network.** I5 and R run scripted schedules in D's and E's pure-function shape.
+- **No Raft membership changes or snapshots, no Paxos, no 3PC, no sloppy quorums.**
+- **No bundled or local LLM, no accounts, no telemetry, no graded submission** — §25.10 unchanged.
+- **No Rust / WASM rewrite.**
+
+---
+
 ## Appendix: Development Changelog
+
+> **v24 — 2026-11-25.** A **plan for product v4** — new **§28**, on branch `version/v4` — after v3 reached `main`
+> unreleased. Its claim: v2 and v3 built faithful models *beside* the engine (a write-ahead log on a four-page disk,
+> bushy plans priced and never run, a parallel tool that stops at the aggregate), and the seams are now the most
+> missing lesson, so v4 wires them in — the engine logs, the Playground gets `BEGIN`/`ROLLBACK`, bushy plans run —
+> with the small models kept as the engine's oracles. Then two approximations made exact against published answers
+> (serializable snapshot isolation; extended statistics against C2's 11.0× q-error), replication as the last
+> syllabus sub-topic, and two SQL items for the owner to decide (derived tables with a non-recursive `WITH`;
+> correlated scalar subqueries with the COUNT bug as the lesson). Preparing it found four stale docs claims, the
+> trace's missing ceiling (PR #43's 13.5M-event CI crash, fixed in the test only), and that 3.0.0 is not cut.
 
 > **v23 — 2026-09-25.** Work on product v2 begins on branch `version/v2`, one commit per §25 item.
 > **A1, the SQLite oracle, is built** — and its first run found two real bugs in an engine that had 1,170
