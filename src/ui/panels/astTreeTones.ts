@@ -32,6 +32,8 @@ export const TONES: Record<string, string> = {
   DeleteStatement: STMT,
   InsertStatement: STMT,
   UpdateStatement: STMT,
+  // A compound query (plan.md §27.5 S3) is a statement whose children are statements — the same tone.
+  CompoundStatement: STMT,
   SelectList: LIST,
   ColumnList: LIST,
   Values: LIST,
@@ -47,6 +49,8 @@ export const TONES: Record<string, string> = {
   IsNull: AMBER_50,
   In: AMBER_50,
   Like: AMBER_50,
+  // A test on a row like the rest (plan.md §27.5 S1) — that its answer comes from another table is in its children.
+  Exists: AMBER_50,
   Compare: AMBER_50,
   Column: EMERALD_50,
   Table: VIOLET_50,
@@ -54,6 +58,8 @@ export const TONES: Record<string, string> = {
   Star: NEUTRAL,
   Limit: ORANGE_60,
   Aggregate: ORANGE_60,
+  // A scalar subquery (plan.md §27.5 S6) is a value worked out too — by a whole query, whose tree sits inside it.
+  Subquery: ORANGE_60,
   Expression: ORANGE_60,
   Arith: ORANGE_50,
   OrderBy: EMERALD_60,

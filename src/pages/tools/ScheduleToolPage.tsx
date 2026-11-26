@@ -23,6 +23,9 @@ import {
   segOff,
   segOn,
 } from '../../ui/primitives.ts';
+import { modeName } from '../../engine/locks/lockTable.ts';
+import { GapLocksView } from '../../ui/GapLocksView.tsx';
+import { PrecedencePanel } from '../../ui/PrecedencePanel.tsx';
 import { ScrollRegion } from '../../ui/ScrollRegion.tsx';
 import { useAddressBarQuery } from '../../ui/addressBar.ts';
 
@@ -44,6 +47,10 @@ const LOCKING_MODES: { value: LockingMode; label: string }[] = [
 const TABLE_SIZES = [3, 20] as const;
 type TableSize = (typeof TABLE_SIZES)[number];
 
+/** Lock escalation (plan.md §27.5 T2): off, or the leaf locks on one table a transaction may hold before it escalates. */
+const ESCALATIONS = [0, 2, 5] as const;
+type Escalation = (typeof ESCALATIONS)[number];
+
 const ISOLATION_BUTTONS: Record<IsolationLevel, string> = {
   'read-uncommitted': 'Read uncommitted',
   'read-committed': 'Read committed',
@@ -57,6 +64,9 @@ interface Preset {
   locking: LockingMode;
   rows: TableSize;
   isolation?: IsolationLevel;
+  escalation?: Escalation;
+  /** Next-key locks (plan.md §27.5 T3), under row locks. */
+  nextKey?: boolean;
 }
 
 const PRESETS: Preset[] = [
@@ -145,6 +155,23 @@ const PRESETS: Preset[] = [
     ],
   },
   {
+    // plan.md §27.5 T3: a range read locks its keys and the gaps between them; a row outside it is free, an insert past
+    // it waits — and the re-read finds the same rows.
+    label: 'Gap lock',
+    locking: 'row',
+    rows: 20,
+    isolation: 'repeatable-read',
+    nextKey: true,
+    steps: [
+      { session: 'A', sql: 'BEGIN' },
+      { session: 'A', sql: 'SELECT * FROM accounts WHERE id > 18' },
+      { session: 'B', sql: 'UPDATE accounts SET balance = 0 WHERE id = 5' },
+      { session: 'B', sql: "INSERT INTO accounts VALUES (25, 'zed', 100)" },
+      { session: 'A', sql: 'SELECT * FROM accounts WHERE id > 18' },
+      { session: 'A', sql: 'COMMIT' },
+    ],
+  },
+  {
     label: 'Snapshot read',
     locking: 'mvcc',
     rows: 20,
@@ -203,6 +230,21 @@ const PRESETS: Preset[] = [
     ],
   },
   {
+    // plan.md §27.5 T2: three row locks become one table lock, and a reader of a row nobody touched has to wait.
+    label: 'Escalation',
+    locking: 'row',
+    rows: 20,
+    escalation: 2,
+    steps: [
+      { session: 'A', sql: 'BEGIN' },
+      { session: 'A', sql: 'UPDATE accounts SET balance = 1 WHERE id = 1' },
+      { session: 'A', sql: 'UPDATE accounts SET balance = 1 WHERE id = 2' },
+      { session: 'A', sql: 'UPDATE accounts SET balance = 1 WHERE id = 3' },
+      { session: 'B', sql: 'SELECT balance FROM accounts WHERE id = 10' },
+      { session: 'A', sql: 'COMMIT' },
+    ],
+  },
+  {
     label: 'Deadlock',
     locking: 'row',
     rows: 20,
@@ -225,12 +267,21 @@ const CONTROL: { label: string; sql: string }[] = [
   { label: 'ROLLBACK', sql: 'ROLLBACK' },
 ];
 
-function readInitial(): { steps: ScheduleStep[]; locking: LockingMode; rows: TableSize; isolation: IsolationLevel } {
+function readInitial(): {
+  steps: ScheduleStep[];
+  locking: LockingMode;
+  rows: TableSize;
+  isolation: IsolationLevel;
+  escalation: Escalation;
+  nextKey: boolean;
+} {
   const params = new URLSearchParams(typeof location === 'undefined' ? '' : location.search);
   const steps = decodeSchedule(params.get('s'));
   const lockingRaw = params.get('l');
   const rowsRaw = Number(params.get('n'));
   const isolationRaw = params.get('i');
+  const escalation: Escalation = ESCALATIONS.find((e) => e > 0 && String(e) === params.get('e')) ?? 0;
+  const nextKey = params.get('g') === '1';
   const locking: LockingMode =
     lockingRaw === 'page' || lockingRaw === 'row' || lockingRaw === 'mvcc' ? lockingRaw : 'none';
   const rows: TableSize = rowsRaw === 20 ? 20 : 3;
@@ -238,9 +289,16 @@ function readInitial(): { steps: ScheduleStep[]; locking: LockingMode; rows: Tab
     ISOLATION_LEVELS.find((level) => level === isolationRaw) ?? DEFAULT_ISOLATION;
   if (steps === null) {
     const first = PRESETS[0]!;
-    return { steps: first.steps, locking: first.locking, rows: first.rows, isolation: first.isolation ?? DEFAULT_ISOLATION };
+    return {
+      steps: first.steps,
+      locking: first.locking,
+      rows: first.rows,
+      isolation: first.isolation ?? DEFAULT_ISOLATION,
+      escalation: first.escalation ?? 0,
+      nextKey: first.nextKey ?? false,
+    };
   }
-  return { steps, locking, rows, isolation };
+  return { steps, locking, rows, isolation, escalation, nextKey };
 }
 
 const INITIAL = readInitial();
@@ -530,13 +588,21 @@ function StepCard({
             {step.locks.map((l) => (
               <li key={l.resource}>
                 <span className="text-ink">{l.resource}</span>
-                {l.holders.length > 0 && <> — held by {l.holders.map((h) => `${h.session} (${h.mode})`).join(', ')}</>}
+                {l.holders.length > 0 && <> — held by {l.holders.map((h) => `${h.session} (${modeName(h.mode)})`).join(', ')}</>}
                 {l.waiters.length > 0 && (
-                  <span className="text-evict"> — {l.waiters.map((w) => `${w.session} waits (${w.mode})`).join(', ')}</span>
+                  <span className="text-evict"> — {l.waiters.map((w) => `${w.session} waits (${modeName(w.mode)})`).join(', ')}</span>
                 )}
               </li>
             ))}
           </ul>
+        </details>
+      )}
+
+      {/* plan.md §27.5 T3: the same locks on the index they cover, open where an insert is waiting for a gap. */}
+      {step.keyLocks?.some((k) => k.part === 'gap') && (
+        <details className="mt-2" open={step.phase === 'blocked' && step.keyLocks.some((k) => k.part === 'gap' && k.waiters.length > 0)}>
+          <summary className="cursor-pointer text-label text-ink-dim">Gap locks on the index after this step</summary>
+          <GapLocksView keyLocks={step.keyLocks} db={step.after} rowsPerPage={DEFAULT_ENGINE_OPTIONS.rowsPerPage} />
         </details>
       )}
 
@@ -572,6 +638,8 @@ export function ScheduleToolPage() {
   const [locking, setLocking] = useState<LockingMode>(INITIAL.locking);
   const [rows, setRows] = useState<TableSize>(INITIAL.rows);
   const [isolation, setIsolation] = useState<IsolationLevel>(INITIAL.isolation);
+  const [escalation, setEscalation] = useState<Escalation>(INITIAL.escalation);
+  const [nextKey, setNextKey] = useState(INITIAL.nextKey);
   const [session, setSession] = useState<SessionName>('A');
   const [sql, setSql] = useState('');
 
@@ -580,8 +648,14 @@ export function ScheduleToolPage() {
     () =>
       locking === 'none'
         ? undefined
-        : { granularity: locking === 'page' ? 'page' : 'row', isolation, ...(locking === 'mvcc' ? { mvcc: true } : {}) },
-    [locking, isolation],
+        : {
+            granularity: locking === 'page' ? 'page' : 'row',
+            isolation,
+            ...(locking === 'mvcc' ? { mvcc: true } : {}),
+            ...(escalation > 0 ? { escalateAt: escalation } : {}),
+            ...(locking === 'row' && nextKey ? { nextKey: true } : {}),
+          },
+    [locking, isolation, escalation, nextKey],
   );
   const result = useMemo(
     () => runSchedule(steps, database, undefined, lockingOptions),
@@ -595,8 +669,10 @@ export function ScheduleToolPage() {
     if (locking !== 'none') params.set('l', locking);
     if (rows !== 3) params.set('n', String(rows));
     if (locking !== 'none' && isolation !== DEFAULT_ISOLATION) params.set('i', isolation);
+    if (locking !== 'none' && escalation > 0) params.set('e', String(escalation));
+    if (locking === 'row' && nextKey) params.set('g', '1');
     return params.toString();
-  }, [steps, locking, rows, isolation]);
+  }, [steps, locking, rows, isolation, escalation, nextKey]);
   useAddressBarQuery(shareQuery, 0);
 
   function add(statement: string) {
@@ -620,7 +696,7 @@ export function ScheduleToolPage() {
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-4 p-6 sm:p-8">
       <PageHeader title="Transaction schedules">
-        Two sessions, one database, and an interleaving you choose (plan.md §25.4 D1, D2). With{' '}
+        Two sessions, one database, and an interleaving you choose. With{' '}
         <strong>no locking</strong>, a statement sees and changes whatever the table holds, another session&rsquo;s
         uncommitted work included, and <code>ROLLBACK</code> really undoes — the page names what that lets through. Turn
         on <strong>page or row locks</strong> and the same schedule runs under strict two-phase locking, enforced by the
@@ -640,57 +716,59 @@ export function ScheduleToolPage() {
         <RowsTable caption="accounts at the start" columns={columns} rows={database.tables.accounts?.rows ?? []} />
       </div>
 
-      <div className="flex flex-wrap items-end gap-3 rounded-xl border border-edge bg-surface-2 p-3 shadow-e1">
-        <div className="flex flex-col gap-1 text-label text-ink-dim">
-          Session
-          <div className="flex gap-1" role="radiogroup" aria-label="Session">
-            {SESSIONS.map((s) => (
-              <button
-                key={s}
-                type="button"
-                role="radio"
-                aria-checked={session === s}
-                onClick={() => { setSession(s); }}
-                className={`${segBase} ${session === s ? segOn : segOff}`}
-              >
-                {s}
-              </button>
-            ))}
+      <div className="flex flex-wrap items-end gap-x-6 gap-y-3 rounded-xl border border-edge bg-surface-2 p-3 shadow-e1">
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="flex flex-col gap-1 text-label text-ink-dim">
+            Session
+            <div className="flex gap-1" role="radiogroup" aria-label="Session">
+              {SESSIONS.map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  role="radio"
+                  aria-checked={session === s}
+                  onClick={() => { setSession(s); }}
+                  className={`${segBase} ${session === s ? segOn : segOff}`}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
           </div>
+
+          <label htmlFor="statement" className="flex min-w-64 flex-1 flex-col gap-1 text-label text-ink-dim">
+            Statement
+            <input
+              id="statement"
+              type="text"
+              value={sql}
+              maxLength={MAX_STATEMENT_LENGTH}
+              spellCheck={false}
+              placeholder="UPDATE accounts SET balance = 0 WHERE id = 1"
+              onChange={(e) => { setSql(e.target.value); }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') submit();
+              }}
+              className={`${inputField} font-mono`}
+            />
+          </label>
+
+          <button type="button" onClick={submit} disabled={full} className={btnPrimary}>
+            Add step
+          </button>
         </div>
-
-        <label htmlFor="statement" className="flex min-w-64 flex-1 flex-col gap-1 text-label text-ink-dim">
-          Statement
-          <input
-            id="statement"
-            type="text"
-            value={sql}
-            maxLength={MAX_STATEMENT_LENGTH}
-            spellCheck={false}
-            placeholder="UPDATE accounts SET balance = 0 WHERE id = 1"
-            onChange={(e) => { setSql(e.target.value); }}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') submit();
-            }}
-            className={`${inputField} font-mono`}
-          />
-        </label>
-
-        <button type="button" onClick={submit} disabled={full} className={btnPrimary}>
-          Add step
-        </button>
-
-        <span className="mx-1 h-6 w-px bg-edge" aria-hidden />
-        {CONTROL.map((c) => (
-          <button key={c.label} type="button" disabled={full} onClick={() => { add(c.sql); }} className={btnSecondary}>
-            {c.label}
-          </button>
-        ))}
-        {locking === 'mvcc' && (
-          <button type="button" disabled={full} onClick={() => { add('VACUUM'); }} className={btnSecondary}>
-            VACUUM
-          </button>
-        )}
+        <div className="flex flex-wrap items-end gap-3">
+          {CONTROL.map((c) => (
+            <button key={c.label} type="button" disabled={full} onClick={() => { add(c.sql); }} className={btnSecondary}>
+              {c.label}
+            </button>
+          ))}
+          {locking === 'mvcc' && (
+            <button type="button" disabled={full} onClick={() => { add('VACUUM'); }} className={btnSecondary}>
+              VACUUM
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="flex flex-wrap items-end gap-4 rounded-xl border border-edge bg-surface-2 p-3 shadow-e1">
@@ -725,6 +803,44 @@ export function ScheduleToolPage() {
                   className={`${segBase} ${isolation === level ? segOn : segOff}`}
                 >
                   {ISOLATION_BUTTONS[level]}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        {locking !== 'none' && (
+          <div className="flex flex-col gap-1 text-label text-ink-dim">
+            Escalation
+            <div className="flex gap-1" role="radiogroup" aria-label="Lock escalation">
+              {ESCALATIONS.map((e) => (
+                <button
+                  key={e}
+                  type="button"
+                  role="radio"
+                  aria-checked={escalation === e}
+                  onClick={() => { setEscalation(e); }}
+                  className={`${segBase} ${escalation === e ? segOn : segOff}`}
+                >
+                  {e === 0 ? 'Off' : `After ${String(e)} locks`}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        {locking === 'row' && (
+          <div className="flex flex-col gap-1 text-label text-ink-dim">
+            Gap locks
+            <div className="flex gap-1" role="radiogroup" aria-label="Gap locks">
+              {[false, true].map((on) => (
+                <button
+                  key={String(on)}
+                  type="button"
+                  role="radio"
+                  aria-checked={nextKey === on}
+                  onClick={() => { setNextKey(on); }}
+                  className={`${segBase} ${nextKey === on ? segOn : segOff}`}
+                >
+                  {on ? 'Next-key' : 'Off'}
                 </button>
               ))}
             </div>
@@ -768,11 +884,26 @@ export function ScheduleToolPage() {
                 isolation === 'read-uncommitted'
                   ? 'Read uncommitted takes no read locks, so it reads changes that are not committed.'
                   : isolation === 'read-committed'
-                    ? 'Read committed gives each read lock back as the statement ends, so a repeated read can change.'
-                    : isolation === 'repeatable-read'
-                      ? 'Repeatable read holds read locks to the end, but locks only rows that exist: a new matching row can still appear.'
-                      : 'Serializable also holds each read’s WHERE as a lock, so an insert that would match it waits.'
+                    ? `Read committed gives each read lock back as the statement ends, so a repeated read can change.${
+                        locking === 'row' && nextKey ? ' It locks no gaps, but its inserts still wait for the gap locks of others.' : ''
+                      }`
+                    : locking === 'row' && nextKey
+                      ? isolation === 'repeatable-read'
+                        ? 'Repeatable read holds read locks to the end, and a next-key lock covers the gap below its key too: a row inserted where a transaction read has to wait, so no phantom appears. That is InnoDB’s answer.'
+                        : 'Serializable needs no predicate lock here: next-key locks already keep phantoms out. (InnoDB’s serializable only turns its snapshot reads into locking ones.)'
+                      : isolation === 'repeatable-read'
+                        ? 'Repeatable read holds read locks to the end, but locks only rows that exist: a new matching row can still appear — unless gap locks are on.'
+                        : 'Serializable also holds each read’s WHERE as a lock, so an insert that would match it waits.'
               }`}
+          {/* plan.md §27.5 T2: the hierarchy above every lock, and what escalation trades. */}
+          {locking !== 'none' &&
+            ` Above each ${locking === 'page' ? 'page' : 'row'} lock it takes an intention lock — IS to read, IX to write — on the table${
+              locking === 'page' ? '' : ' and the page'
+            }, so a lock on the whole table could see it (the locks sandbox computes which modes can share).${
+              escalation > 0
+                ? ` Past ${String(escalation)} ${locking === 'page' ? 'page' : 'row'} locks on the table, a transaction escalates: one S or X on the table instead, its finer locks let go — and every other transaction's intention on the table waits.`
+                : ''
+            }`}
         </p>
       </div>
 
@@ -787,6 +918,8 @@ export function ScheduleToolPage() {
               setLocking(p.locking);
               setRows(p.rows);
               setIsolation(p.isolation ?? DEFAULT_ISOLATION);
+              setEscalation(p.escalation ?? 0);
+              setNextKey(p.nextKey ?? false);
             }}
             className={btnSecondary}
           >
@@ -853,6 +986,9 @@ export function ScheduleToolPage() {
           </p>
         )}
       </div>
+
+      {/* plan.md §27.5 T1: the same run as a precedence graph, beside the replay check. */}
+      {result.steps.length > 0 && <PrecedencePanel result={result} start={database} />}
 
       {result.bloat !== null && (
         <div className={card}>

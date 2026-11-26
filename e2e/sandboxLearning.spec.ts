@@ -88,12 +88,12 @@ test('the lock sandbox keeps what was done in its address, and a script in the a
   await page.goto('/learn/lock-table');
   await page.getByRole('link', { name: /Open the deadlock/ }).click();
   await expect(page).toHaveURL(/\/tools\/locks\?s=/);
-  await expect(page.getByText(/Deadlock: T2 → T1 → T2/)).toBeVisible();
+  await expect(page.getByText(/Deadlock: T2 → T1 → T2/).first()).toBeVisible();
   await expect(page.getByText('aborted', { exact: true })).toBeVisible();
 
   // Reloading the address replays the same script into the same state.
   await page.reload();
-  await expect(page.getByText(/Deadlock: T2 → T1 → T2/)).toBeVisible();
+  await expect(page.getByText(/Deadlock: T2 → T1 → T2/).first()).toBeVisible();
 
   // Further steps are added to the address, so the page can be sent as it stands.
   const before = page.url();
@@ -105,7 +105,7 @@ test('the lock sandbox keeps what was done in its address, and a script in the a
 test('the lock sandbox takes a script that is not one as no script at all', async ({ page }) => {
   await page.goto('/tools/locks?s=' + encodeURIComponent('not json'));
   await expect(page.getByRole('heading', { name: 'T1' })).toBeVisible();
-  await expect(page.getByText('Place a request to begin, or try the deadlock example.')).toBeVisible();
+  await expect(page.getByText('Place a request to begin, or load a scenario such as the deadlock.')).toBeVisible();
 });
 
 for (const id of SETTINGS_IDS) {
@@ -149,9 +149,10 @@ test('a string of page numbers is a setting, and an empty one is refused in word
 test('rules are checkboxes, and two of them are enough for the lookup', async ({ page }) => {
   await page.goto('/challenges/index-with-two-rules');
   const rules = page.getByRole('group', { name: 'Rules that are on' });
-  await expect(rules.getByRole('checkbox')).toHaveCount(7);
+  await expect(rules.getByRole('checkbox')).toHaveCount(8);
   for (const rule of [
     'constant-folding',
+    'product-to-join',
     'join-predicate-pushdown',
     'join-algorithm-selection',
     'range-index-selection',
@@ -210,7 +211,7 @@ test('a lock script is run, line by line, and the solved one links to the sandbo
 
   await page.getByRole('link', { name: /Open this run in its tool/ }).click();
   await expect(page).toHaveURL(/\/tools\/locks\?s=/);
-  await expect(page.getByText(/Deadlock: T2 → T1 → T2/)).toBeVisible();
+  await expect(page.getByText(/Deadlock: T2 → T1 → T2/).first()).toBeVisible();
 });
 
 test('a lock script that is not one says which line, and runs nothing', async ({ page }) => {

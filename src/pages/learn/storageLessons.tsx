@@ -135,6 +135,181 @@ export const EXECUTION_STEPS: Record<string, LessonStep[]> = {
       link: to('joinOrder', 'Open the winning order'),
     },
   ],
+  histograms: [
+    {
+      heading: 'Ten buckets, and one of them spans a gap',
+      body: (
+        <>
+          Three thousand values in three dense bands, with a hundred scattered between them. {code('ANALYZE')} cuts them
+          into ten buckets of equal depth, and one bucket runs from the end of the first band to the start of the second.
+          Asked for {code('v BETWEEN 500 AND 2000')}, the planner spreads that bucket&rsquo;s rows evenly across it and
+          estimates <strong>199</strong> rows. There are <strong>29</strong>: a q-error of 6.67×.
+        </>
+      ),
+      link: to('histogramGap', 'Open the ten buckets'),
+    },
+    {
+      heading: 'More buckets, narrower guesses',
+      body: (
+        <>
+          {code('ANALYZE … WITH 100 BUCKETS')}: the gap is now cut into buckets of its own, few rows each, and the estimate
+          is <strong>35</strong> — 1.20×. The q-error falls as the buckets rise, from 29.87× with one bucket. Each bucket
+          is one more value the planner stores and reads; PostgreSQL&rsquo;s default is a hundred.
+        </>
+      ),
+      link: to('histogramGapFine', 'Open it with a hundred'),
+    },
+    {
+      heading: 'But not always',
+      body: (
+        <>
+          A narrow range, {code('2400 to 2410')}, at the start of the second band: 110 rows. With ten buckets it falls
+          where one bucket ends and the next begins, the planner credits it with a sliver of each, and estimates{' '}
+          <strong>1</strong> — 55.50× too few. Twenty buckets give 83. More buckets usually help; a range at a
+          boundary can still be a guess.
+        </>
+      ),
+      link: to('histogramEdge', 'Open the narrow range'),
+    },
+    {
+      heading: 'On even data, one bucket is enough',
+      body: (
+        <>
+          The transactions preset&rsquo;s amounts are spread almost evenly from 10 to 4,999. One bucket — the column&rsquo;s
+          minimum and maximum — estimates <strong>181</strong> rows for {code('amount BETWEEN 100 AND 400')}; there are
+          183. A histogram earns its buckets on a column with a shape.
+        </>
+      ),
+      link: to('histogramEven', 'Open the even column'),
+      tryThis: (
+        <>
+          In the Playground, on the transactions preset, run {code('ANALYZE transactions WITH 1 BUCKETS')} and then{' '}
+          {code('EXPLAIN ANALYZE SELECT * FROM transactions WHERE amount BETWEEN 100 AND 400')}: the estimate beside the
+          count is the one this step quotes.
+        </>
+      ),
+    },
+  ],
+  parallel: [
+    {
+      heading: 'Four workers, four quarters',
+      body: (
+        <>
+          The transactions totalled by status: 750 pages and 3,000 rows, <strong>3,750</strong> ticks for one worker
+          alone. Give each of four workers a quarter of the pages and they finish in <strong>948</strong> — 3.96× sooner.
+          Each aggregates its quarter into a partial result, and one of them merges the four: 8 ticks no number of
+          workers shortens.
+        </>
+      ),
+      link: to('parallelEven', 'Open four even workers'),
+    },
+    {
+      heading: 'One slow worker',
+      body: (
+        <>
+          Make the fourth worker three times slower. Its quarter now takes it three times as long, and the static split
+          never moves work off it: the other three finish and wait. <strong>2,798</strong> ticks — 1.34×. An even split is
+          even in pages, not in time.
+        </>
+      ),
+      link: to('parallelSlowStatic', 'Open the slow fourth'),
+    },
+    {
+      heading: 'Morsels from a shared queue',
+      body: (
+        <>
+          Cut the pages into morsels of 16 and keep them in one queue: whoever is free takes the next. The slow worker
+          simply takes fewer. 2.67× — better, but not the 3.96 the work allows, because a worker taking whatever comes
+          next mostly reads pages that live in another&rsquo;s memory, a second tick each.
+        </>
+      ),
+      link: to('parallelSlowShared', 'Open the shared queue'),
+    },
+    {
+      heading: 'Work stealing',
+      body: (
+        <>
+          Give each worker a queue of the morsels in its own quarter, and let one that runs out take the last morsel of
+          whoever has the most left. Everyone reads their own pages until the end; then 6 morsels change hands.{' '}
+          <strong>1,213</strong> ticks, 3.09× — the morsel-driven scheme of HyPer and its descendants.
+        </>
+      ),
+      link: to('parallelSlowStealing', 'Open work stealing'),
+      tryThis: (
+        <>
+          Switch to <em>One corner</em>, where only the first 600 rows match: static ranges give one worker all the
+          aggregating (1.71×), stealing spreads it (3.22×). Then make the morsels one page each: 93 steals, and the
+          dispatching costs more than it saves.
+        </>
+      ),
+    },
+    {
+      heading: 'Amdahl’s ceiling',
+      body: (
+        <>
+          Total by account instead — 40 groups — on eight full-speed workers, in Compare: <strong>4.66×</strong>.
+          Amdahl&rsquo;s law, given the one-worker run&rsquo;s serial part (its merge, 1.04% of the ticks), promises 7.46.
+          The serial part is not fixed: every worker meets all 40 accounts, so the merge folds in one partial result per
+          worker and grows with them. The Karp–Flatt column, the serial fraction each speedup implies, climbs from 0.054
+          to 0.102 to say so.
+        </>
+      ),
+      link: to('compareByAccount', 'Compare serial and parallel'),
+    },
+  ],
+  exchange: [
+    {
+      heading: 'Broadcast the small side',
+      body: (
+        <>
+          200 employees against 5,000 timesheets, on four workers, each holding a quarter of both. Rows with equal keys must
+          meet on one worker. Copy the employees to every worker and leave the timesheets where they are: 200 rows to three
+          other workers, <strong>603</strong> rows moved, and every worker joins its own timesheets locally — 3.58× one
+          worker alone.
+        </>
+      ),
+      link: to('joinSmallBroadcast', 'Open the broadcast join'),
+    },
+    {
+      heading: 'Or repartition both sides',
+      body: (
+        <>
+          Hash every row of both tables on the join key and send it to that key&rsquo;s worker: equal keys meet wherever
+          they started. Three quarters of every row moves — <strong>3,903</strong> rows — and the join is 2.84×. For a small
+          side, copying it is cheaper than shuffling the big one.
+        </>
+      ),
+      link: to('joinSmallRepartition', 'Open the repartition'),
+    },
+    {
+      heading: 'Two big tables',
+      body: (
+        <>
+          2,000 orders against 3,000 payments. Broadcasting the orders now moves 6,003 rows and leaves each worker building a
+          hash table of all 2,000 — 1.60×. Repartitioning moves <strong>3,751</strong>, each worker builds a quarter, and
+          the join is 2.72×. Which exchange wins depends on the sizes.
+        </>
+      ),
+      link: to('joinBigRepartition', 'Open the big join'),
+    },
+    {
+      heading: 'A key with five values',
+      body: (
+        <>
+          Projects against employees on the department: five departments, eight workers. Repartitioning by department can
+          fill at most five workers, and here three get nothing at all — 4.44×, where broadcasting the 30 projects keeps all
+          eight busy and reaches 5.96×. A hash spreads keys, not rows.
+        </>
+      ),
+      link: to('joinFewKeys', 'Open the five keys'),
+      tryThis: (
+        <>
+          Pick <em>Every row back</em>: the same small-with-big join, but every joined row goes to the first worker. On four
+          workers the gather alone takes 3,750 of 6,600 ticks — count where the rows are, and gather only the counts.
+        </>
+      ),
+    },
+  ],
 };
 
 /** The slotted page, and the structures that are alternatives to the engine's heap and B+Tree. */

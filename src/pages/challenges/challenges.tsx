@@ -735,6 +735,87 @@ export const CHALLENGES: Challenge[] = [
     ),
   },
   {
+    // plan.md §27.5 S1, on the `shop` preset (S2): the NOT IN trap, where NOT EXISTS is the plain answer.
+    id: 'never-ordered',
+    title: 'Customers who never ordered',
+    difficulty: 'Intermediate',
+    category: 'Query Planning',
+    requirements: ['Execute without error', 'Return every customer with no order, and only them'],
+    brief: (
+      <>
+        Return the customers who have never placed an order. The starting query asks with{' '}
+        <code className="font-mono">NOT IN</code>, and finds no one.
+      </>
+    ),
+    hint: (
+      <>
+        Two orders were placed by a guest, so <code className="font-mono">customerId</code> holds a NULL, and{' '}
+        <code className="font-mono">NOT IN</code> against a list with a NULL is never true. Ask whether a matching order{' '}
+        <em>exists</em> instead — or keep the NULLs out of the list.
+      </>
+    ),
+    starter: 'SELECT name FROM customers WHERE id NOT IN (SELECT customerId FROM orders);',
+    dataset: 'shop',
+    // The exact set of customers with no order — by any query that finds it, told apart by `id` or `name` (unique here),
+    // bare or, after a JOIN, as `customers.id` / `customers.name`.
+    check: (r) => {
+      const keys = (['id', 'name'] as const).flatMap((c) => [c, `customers.${c}`]);
+      const at = keys.find((k) => r.rows.length > 0 && r.rows.every((row) => k in row));
+      if (r.error || at === undefined) return false;
+      const column = at.replace('customers.', '');
+      const shop = DATASETS.shop.make().tables;
+      const ordered = new Set(shop.orders!.rows.map((row) => row['customerId']));
+      const want = shop.customers!.rows.filter((row) => !ordered.has(row['id'] ?? null)).map((row) => row[column]);
+      const got = r.rows.map((row) => row[at]);
+      return want.length > 0 && got.length === want.length && want.every((v) => got.includes(v));
+    },
+    misconception: (
+      <>
+        <code className="font-mono">NOT IN</code> and <code className="font-mono">NOT EXISTS</code> are two spellings of
+        one question. They part company at a NULL: <code className="font-mono">NOT IN</code> compares the value with
+        every item in the list, and a comparison with NULL is unknown, so one NULL leaves no row true.{' '}
+        <code className="font-mono">NOT EXISTS</code> only asks whether a matching row exists, and a NULL matches nothing.
+      </>
+    ),
+  },
+  {
+    // plan.md §27.5 S3, on the `shop` preset: EXCEPT, with its columns matched by position.
+    id: 'nobody-ordered-it',
+    title: 'Products nobody ordered',
+    difficulty: 'Warm-up',
+    category: 'Storage & Execution',
+    requirements: ['Execute without error', 'Use EXCEPT, not a subquery', 'Return the one product no order mentions'],
+    brief: (
+      <>
+        Return the product that no order mentions — with <code className="font-mono">EXCEPT</code>, not a subquery.
+      </>
+    ),
+    hint: (
+      <>
+        <code className="font-mono">EXCEPT</code> keeps the rows of the first SELECT that the second does not return. The
+        two columns need not share a name: <code className="font-mono">products.id</code> and{' '}
+        <code className="font-mono">orders.productId</code> are matched by position.
+      </>
+    ),
+    starter: 'SELECT id FROM products UNION SELECT productId FROM orders;',
+    dataset: 'shop',
+    // An EXCEPT ran, and its one row is the vase — by its id or its name, in whichever single column was selected.
+    check: (r) => {
+      if (r.error || r.rows.length !== 1) return false;
+      const values = Object.values(r.rows[0]!);
+      const vase = DATASETS.shop.make().tables.products!.rows.find((p) => !DATASETS.shop.make().tables.orders!.rows.some((o) => o['productId'] === p['id']))!;
+      const usedExcept = r.events.some((e) => e.stage === 'execute' && e.op === 'SetOp' && e.label.startsWith('Except'));
+      return usedExcept && values.length === 1 && (values[0] === vase['id'] || values[0] === vase['name']);
+    },
+    misconception: (
+      <>
+        Set operators match columns by name, so <code className="font-mono">id</code> and{' '}
+        <code className="font-mono">productId</code> cannot be compared. They are matched by position — the first column
+        of one SELECT with the first of the other — and the result takes the first SELECT's names.
+      </>
+    ),
+  },
+  {
     id: 'keep-the-unmatched',
     title: 'Keep the authors who have no posts',
     difficulty: 'Intermediate',
@@ -768,6 +849,169 @@ export const CHALLENGES: Challenge[] = [
         A <code className="font-mono">LEFT JOIN</code> keeps the unmatched rows no matter what the{' '}
         <code className="font-mono">WHERE</code> says. A condition on the joined table drops them — and the way to keep
         exactly the unmatched rows is to test that table for NULL.
+      </>
+    ),
+  },
+  {
+    // plan.md §27.5 S4, on the `shop` preset: a FULL JOIN, each unmatched row once.
+    id: 'leave-no-one-out',
+    title: 'Leave no one out',
+    difficulty: 'Intermediate',
+    category: 'Storage & Execution',
+    requirements: ['Execute without error', 'Keep unmatched customers and unmatched orders, each once'],
+    brief: (
+      <>
+        Return <code className="font-mono">customers.name</code> and <code className="font-mono">orders.id</code> for
+        every customer and every order: each order beside the customer who placed it, a customer with no order on a row of
+        their own, and an order with no customer on a row of its own.
+      </>
+    ),
+    hint: (
+      <>
+        A <code className="font-mono">LEFT JOIN</code> keeps the customers nothing matched, a{' '}
+        <code className="font-mono">RIGHT JOIN</code> the orders. One kind of join keeps both, padding whichever side is
+        missing with NULL.
+      </>
+    ),
+    starter: 'SELECT customers.name, orders.id\nFROM customers\nLEFT JOIN orders ON customers.id = orders.customerId;',
+    dataset: 'shop',
+    // Every matched pair once, the three customers who never ordered, and the two guest orders — however it was written.
+    check: (r) => {
+      if (r.error || !r.rows[0] || !('customers.name' in r.rows[0]) || !('orders.id' in r.rows[0])) return false;
+      const { customers, orders } = DATASETS.shop.make().tables;
+      const expected: string[] = [];
+      for (const o of orders!.rows) {
+        const c = customers!.rows.find((row) => o['customerId'] !== null && row['id'] === o['customerId']);
+        expected.push(`${String(c?.['name'] ?? null)}|${String(o['id'])}`);
+      }
+      for (const c of customers!.rows) if (!orders!.rows.some((o) => o['customerId'] === c['id'])) expected.push(`${String(c['name'])}|null`);
+      const got = r.rows.map((row) => `${String(row['customers.name'])}|${String(row['orders.id'])}`);
+      return got.length === expected.length && [...got].sort().join() === [...expected].sort().join();
+    },
+    misconception: (
+      <>
+        A <code className="font-mono">FULL JOIN</code> is a <code className="font-mono">LEFT JOIN</code> and a{' '}
+        <code className="font-mono">RIGHT JOIN</code> stacked together. Stack them with{' '}
+        <code className="font-mono">UNION ALL</code> and every matched pair comes back twice — once from each. A{' '}
+        <code className="font-mono">FULL JOIN</code> returns each pair once, then each row nothing matched once.
+      </>
+    ),
+  },
+  {
+    // plan.md §27.5 S5, on the `shop` preset: COUNT(DISTINCT x), and the NULL it never counts.
+    id: 'count-each-once',
+    title: 'Count each customer once',
+    difficulty: 'Warm-up',
+    category: 'Storage & Execution',
+    requirements: ['Execute without error', 'One row: the number of different customers who ordered'],
+    brief: (
+      <>
+        How many different customers have placed an order? Answer from <code className="font-mono">orders</code> alone:
+        one row, one number.
+      </>
+    ),
+    hint: (
+      <>
+        <code className="font-mono">COUNT(customerId)</code> counts every order that has a customer, so a customer with
+        seven orders counts seven times. Put <code className="font-mono">DISTINCT</code> inside the call — and see what
+        happens to the guests&rsquo; NULL.
+      </>
+    ),
+    starter: 'SELECT COUNT(customerId)\nFROM orders;',
+    dataset: 'shop',
+    // One value, nine — and a DISTINCT aggregate kept those nine, rather than a subquery over customers.
+    check: (r) => {
+      if (r.error || r.rows.length !== 1) return false;
+      const values = Object.values(r.rows[0]!);
+      const keptNine = r.events.some((e) => e.stage === 'execute' && /read \d+ values? and kept 9\b/.test(e.label));
+      return values.length === 1 && values[0] === 9 && keptNine;
+    },
+    misconception: (
+      <>
+        <code className="font-mono">SELECT DISTINCT customerId</code> returns ten rows — one of them the guests&rsquo;
+        NULL — so <code className="font-mono">COUNT(DISTINCT customerId)</code> must be ten. It is nine: no aggregate
+        but <code className="font-mono">COUNT(*)</code> ever counts a NULL, with <code className="font-mono">DISTINCT</code>{' '}
+        or without.
+      </>
+    ),
+  },
+  {
+    // plan.md §27.5 S6, on the `shop` preset: a scalar subquery, run once before planning.
+    id: 'above-average',
+    title: 'Above average',
+    difficulty: 'Intermediate',
+    category: 'Query Planning',
+    requirements: ['Execute without error', 'Compute the average with a subquery, run once before planning'],
+    brief: (
+      <>
+        Return the <code className="font-mono">name</code> of every product that costs more than the average product —
+        with the average worked out by the query itself, not typed in.
+      </>
+    ),
+    hint: (
+      <>
+        A <code className="font-mono">SELECT</code> in parentheses stands for its one value:{' '}
+        <code className="font-mono">(SELECT AVG(price) FROM products)</code> can sit wherever a number could.
+      </>
+    ),
+    starter: 'SELECT name\nFROM products\nWHERE price > 85;',
+    dataset: 'shop',
+    // The right products, and the average came from a subquery that ran — not from a number someone worked out.
+    check: (r) => {
+      if (r.error || r.rows.length === 0 || !('name' in r.rows[0]!)) return false;
+      const products = DATASETS.shop.make().tables.products!.rows;
+      const average = products.reduce((sum, p) => sum + Number(p['price']), 0) / products.length;
+      const want = products.filter((p) => Number(p['price']) > average).map((p) => String(p['name'])).sort();
+      const got = r.rows.map((row) => String(row['name'])).sort();
+      const ranOnce = r.events.some((e) => e.stage === 'plan' && /The subquery `\(SELECT .*\)` names nothing from the outer query/.test(e.label));
+      return ranOnce && got.length === want.length && got.every((name, i) => name === want[i]);
+    },
+    misconception: (
+      <>
+        <code className="font-mono">WHERE price &gt; AVG(price)</code> compares each product with the average. It cannot:
+        WHERE runs before anything is aggregated, so there is no average yet to compare with. A subquery works it out
+        first — once, before the plan is even built — and WHERE compares every row with that one number.
+      </>
+    ),
+  },
+  {
+    // plan.md §27.5 S7, on the `customers` preset: one table under two names.
+    id: 'who-referred-whom',
+    title: 'Who referred whom',
+    difficulty: 'Intermediate',
+    category: 'Query Planning',
+    requirements: ['Execute without error', 'Join customers to itself under two names', 'NULL where nobody referred them'],
+    brief: (
+      <>
+        Return every customer&rsquo;s name beside the name of the customer who referred them — NULL where nobody did.
+      </>
+    ),
+    hint: (
+      <>
+        Both names are in <code className="font-mono">customers</code>. Read it twice, under two names —{' '}
+        <code className="font-mono">FROM customers AS c … JOIN customers AS r ON …</code> — and keep the customers no one
+        referred.
+      </>
+    ),
+    starter: 'SELECT name, referrer\nFROM customers;',
+    dataset: 'customers',
+    // Twenty rows: each customer once, beside a referrer's name — in either column order.
+    check: (r) => {
+      if (r.error || r.rows.length === 0 || Object.keys(r.rows[0]!).length !== 2) return false;
+      const rows = DATASETS.customers.make().tables.customers!.rows;
+      const want = rows
+        .map((c) => `${String(c['name'])}|${String(rows.find((x) => c['referrer'] !== null && x['id'] === c['referrer'])?.['name'] ?? null)}`)
+        .sort();
+      const got = r.rows.map((row) => Object.values(row).map(String));
+      const forwards = got.map(([a, b]) => `${a!}|${b!}`).sort();
+      const backwards = got.map(([a, b]) => `${b!}|${a!}`).sort();
+      return [forwards, backwards].some((g) => g.length === want.length && g.every((v, i) => v === want[i]));
+    },
+    misconception: (
+      <>
+        A table can appear only once in a query, so finding a customer&rsquo;s referrer needs a second copy of the
+        table. It needs a second <em>name</em>: <code className="font-mono">c</code> and{' '}
+        <code className="font-mono">r</code> are two scans of the one table — the same pages, read twice.
       </>
     ),
   },

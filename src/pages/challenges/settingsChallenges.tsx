@@ -26,6 +26,11 @@ export type SettingsTool =
   | 'sort'
   | 'hash-join'
   | 'join-order'
+  | 'histograms'
+  | 'parallel'
+  | 'partitioning'
+  | 'two-phase-commit'
+  | 'raft'
   | 'page'
   | 'hash-index'
   | 'lsm'
@@ -81,6 +86,7 @@ const POLICIES = [
 const RULES = [
   { value: 'constant-folding', label: 'constant-folding' },
   { value: 'predicate-pushdown', label: 'predicate-pushdown' },
+  { value: 'product-to-join', label: 'product-to-join' },
   { value: 'join-predicate-pushdown', label: 'join-predicate-pushdown' },
   { value: 'join-algorithm-selection', label: 'join-algorithm-selection' },
   { value: 'index-selection', label: 'index-selection' },
@@ -206,6 +212,338 @@ export const SETTINGS_CHALLENGES: SettingsChallenge[] = [
         Join the tables in the order the query names them, or smallest first. Any order returns the same rows; the order
         decides how big the intermediate results get. The cheapest orders here all finish on {code('projects')} — the
         written order joins it second, and pays for it in every join after.
+      </>
+    ),
+  },
+  {
+    id: 'enough-buckets',
+    title: 'Enough buckets for the gap',
+    group: 'storage',
+    tool: 'histograms',
+    brief: (
+      <>
+        On the clustered column, {code('v BETWEEN 500 AND 2000')} lies in the gap between two dense bands: 29 rows. With
+        the default ten buckets the planner estimates 199. Choose a bucket count for {code('ANALYZE … WITH n BUCKETS')},
+        no more than 50, that brings the estimate within 1.5× of the truth.
+      </>
+    ),
+    hint: (
+      <>
+        The tool&rsquo;s sweep tries 1, 2, 5, 10, 20, 50 and 100, and 50 is not good enough — 2.33×. The q-error is not a
+        smooth curve in the bucket count: where the bucket boundaries fall decides it. Try counts in the forties.
+      </>
+    ),
+    needs: 'a bucket count of at most 50 with a q-error of at most 1.5',
+    controls: [{ kind: 'number', key: 'buckets', label: 'Buckets', min: 1, max: 100 }],
+    starter: { buckets: '10' },
+    misconception: (
+      <>
+        More buckets always give a better estimate. Usually — but 50 buckets miss by 2.33× where 46 come within 1.5×,
+        because each count moves every boundary, and a boundary inside the gap decides how much of a dense band the
+        planner smears across it.
+      </>
+    ),
+  },
+  {
+    id: 'outrun-the-slow-worker',
+    title: 'Outrun the slow worker',
+    group: 'storage',
+    tool: 'parallel',
+    brief: (
+      <>
+        Four workers total the transactions by status, and the fourth is three times slower than the rest. Alone, one
+        worker takes 3,750 ticks. Choose how the morsels are handed out, and how many pages each holds, so the four
+        finish at least three times sooner.
+      </>
+    ),
+    hint: (
+      <>
+        Static ranges give the slow worker a quarter of the table and make the others wait for it. A shared queue keeps
+        everyone busy, but most of what a worker reads then lives in another&rsquo;s memory. What would let a worker read
+        its own pages first, and help only at the end?
+      </>
+    ),
+    needs: 'a speedup of at least 3×',
+    controls: [
+      {
+        kind: 'select',
+        key: 'dispatch',
+        label: 'Dispatch',
+        options: [
+          { value: 'static', label: 'Static ranges' },
+          { value: 'shared', label: 'Shared queue' },
+          { value: 'stealing', label: 'Work stealing' },
+        ],
+      },
+      { kind: 'number', key: 'morsel', label: 'Pages per morsel', min: 1, max: 64 },
+    ],
+    starter: { dispatch: 'static', morsel: '16' },
+    misconception: (
+      <>
+        Splitting the work evenly is what makes it parallel. An even split is even in pages, not in time: a slow worker,
+        or rows that cluster on some pages, leaves the others idle. Morsels, handed out as workers come free, even it out —
+        and stealing does it while keeping most reads local.
+      </>
+    ),
+  },
+  {
+    id: 'meet-the-rows',
+    title: 'Bring the rows together',
+    group: 'storage',
+    tool: 'parallel',
+    brief: (
+      <>
+        Three joins, each run by eight workers: 200 employees with 5,000 timesheets, 2,000 orders with 3,000 payments,
+        and 30 projects with 200 employees on a department key with five values. For each, choose the exchange that
+        finishes sooner: broadcast the smaller side to every worker, or repartition both sides on the join key.
+      </>
+    ),
+    hint: (
+      <>
+        A broadcast moves the smaller side once per worker; a repartition moves most of both sides once. And a key with
+        five values can only ever fill five of eight workers.
+      </>
+    ),
+    needs: 'the faster exchange for all three joins',
+    controls: [
+      { kind: 'select', key: 'smallBig', label: 'Small with big', options: [
+          { value: 'broadcast', label: 'Broadcast the smaller side' },
+          { value: 'repartition', label: 'Repartition both' },
+        ] },
+      { kind: 'select', key: 'bigBig', label: 'Big with big', options: [
+          { value: 'broadcast', label: 'Broadcast the smaller side' },
+          { value: 'repartition', label: 'Repartition both' },
+        ] },
+      { kind: 'select', key: 'fiveKeys', label: 'Five keys', options: [
+          { value: 'broadcast', label: 'Broadcast the smaller side' },
+          { value: 'repartition', label: 'Repartition both' },
+        ] },
+    ],
+    starter: { smallBig: 'repartition', bigBig: 'repartition', fiveKeys: 'repartition' },
+    misconception: (
+      <>
+        Repartitioning is the parallel way to join. It is one way: it moves almost every row once, which is cheap only
+        when both sides are big, and it can never spread a key with few values over more workers than it has values. A
+        small side is cheaper to copy to everyone.
+      </>
+    ),
+  },
+  {
+    id: 'efficiency-floor',
+    title: 'Where a worker stops paying',
+    group: 'storage',
+    tool: 'parallel',
+    brief: (
+      <>
+        The transactions totalled by account — 40 groups — by full-speed workers stealing morsels of 16 pages. A
+        worker&rsquo;s efficiency is the speedup divided by the number of workers: 100% if every worker counts in full.
+        What is the most workers, one to eight, at which every one is still at least 80% efficient?
+      </>
+    ),
+    hint: (
+      <>
+        Compare&rsquo;s <em>Serial vs. parallel</em> mode runs this query on one to eight workers. Each worker meets all 40
+        accounts, so the merge at the end has one more partial result to fold in for every worker you add.
+      </>
+    ),
+    needs: 'the largest number of workers still at least 80% efficient',
+    controls: [{ kind: 'number', key: 'workers', label: 'Workers', min: 1, max: 8 }],
+    starter: { workers: '8' },
+    misconception: (
+      <>
+        Twice the workers, half the time. Only while nothing grows with the workers: here the merge does, one partial
+        result per worker, and dispatching and the last uneven morsels add their share — past four workers each new one
+        is worth less than four fifths of the first.
+      </>
+    ),
+  },
+  {
+    id: 'grow-without-churn',
+    title: 'Grow without the churn',
+    group: 'storage',
+    tool: 'partitioning',
+    brief: (
+      <>
+        The transactions preset&rsquo;s 3,000 rows are partitioned by {code('id')} over four nodes, and a fifth joins. Choose
+        a scheme, and for consistent hashing how many points each node gets on the ring, so that at most a quarter of the
+        rows move and the five nodes end up within a fifth of even (skew at most 1.2).
+      </>
+    ),
+    hint: (
+      <>
+        Hash partitioning changes every row&rsquo;s remainder when the divisor changes. Range partitioning moves little, but
+        splits one range and leaves two nodes half-full. On a ring, a node with few points owns a few long arcs; with many,
+        many short ones.
+      </>
+    ),
+    needs: 'at most 750 rows moved, and a skew of at most 1.2 after',
+    controls: [
+      {
+        kind: 'select',
+        key: 'scheme',
+        label: 'Scheme',
+        options: [
+          { value: 'hash', label: 'Hash' },
+          { value: 'range', label: 'Range' },
+          { value: 'consistent', label: 'Consistent hashing' },
+        ],
+      },
+      { kind: 'number', key: 'virtual', label: 'Virtual nodes each', min: 1, max: 64 },
+    ],
+    starter: { scheme: 'hash', virtual: '1' },
+    misconception: (
+      <>
+        An even spread is all a partitioning scheme needs. All three can spread rows evenly; what tells them apart is
+        what a change costs. Hash moves nearly everything, range moves little but unevenly, and consistent hashing moves
+        about one node&rsquo;s fair share — once each node has enough points on the ring.
+      </>
+    ),
+  },
+  {
+    id: 'join-in-place',
+    title: 'Join in place',
+    group: 'storage',
+    tool: 'partitioning',
+    brief: (
+      <>
+        2,000 orders and 3,000 payments over four nodes, joined on {code('orders.id = payments.orderId')}. Choose how to
+        partition each table so the join sends no rows over the network at all.
+      </>
+    ),
+    hint: (
+      <>
+        Rows with the same key must meet on one node. They already do when both tables put a key on a node by the same
+        function of it — which column must each table be partitioned by, and which schemes put equal keys in the same
+        place?
+      </>
+    ),
+    needs: 'a co-located join: no rows over the network',
+    controls: [
+      {
+        kind: 'select',
+        key: 'orders',
+        label: 'Orders partitioned by',
+        options: [
+          { value: 'hash-id', label: 'hash of id' },
+          { value: 'hash-customer', label: 'hash of customer' },
+          { value: 'range-id', label: 'ranges of id' },
+          { value: 'consistent-id', label: 'the ring, by id' },
+        ],
+      },
+      {
+        kind: 'select',
+        key: 'payments',
+        label: 'Payments partitioned by',
+        options: [
+          { value: 'hash-id', label: 'hash of its own id' },
+          { value: 'hash-orderId', label: 'hash of orderId' },
+          { value: 'range-orderId', label: 'ranges of orderId' },
+          { value: 'consistent-orderId', label: 'the ring, by orderId' },
+        ],
+      },
+    ],
+    starter: { orders: 'hash-id', payments: 'hash-id' },
+    misconception: (
+      <>
+        Partitioning both tables evenly is enough for a cheap join. Even is not aligned: unless both are spread by the same
+        function of their join columns, every order&rsquo;s payments are somewhere else, and the join pays to bring them
+        together — a broadcast per node, or a shuffle of most rows.
+      </>
+    ),
+  },
+  {
+    id: 'commit-after-the-wait',
+    title: 'Commit after the wait',
+    group: 'transactions',
+    tool: 'two-phase-commit',
+    brief: (
+      <>
+        Three participants, every one voting yes. Crash the coordinator somewhere in the protocol, and bring it back
+        after some ticks, so that the participants spend at least ten ticks in doubt — voted, locks held, not yet told —
+        and still all commit in the end.
+      </>
+    ),
+    hint: (
+      <>
+        After a crash, the coordinator decides by what its log says. Which crash leaves COMMIT in the log, and which
+        leaves nothing — so that recovery presumes abort?
+      </>
+    ),
+    needs: 'every participant committed, after at least 10 ticks in doubt',
+    controls: [
+      {
+        kind: 'select',
+        key: 'crash',
+        label: 'The coordinator crashes',
+        options: [
+          { value: 'none', label: 'never' },
+          { value: 'before-prepare', label: 'before sending PREPARE' },
+          { value: 'after-prepare', label: 'after sending PREPARE' },
+          { value: 'after-votes', label: 'with every vote in, before deciding' },
+          { value: 'after-decision', label: 'after logging COMMIT, before sending it' },
+          { value: 'after-first-commit', label: 'after sending COMMIT to the first participant' },
+        ],
+      },
+      { kind: 'number', key: 'recover', label: 'Ticks until it recovers (0: never)', min: 0, max: 40 },
+    ],
+    starter: { crash: 'after-votes', recover: '10' },
+    misconception: (
+      <>
+        A participant that voted yes has committed. It has only promised to: until the coordinator writes COMMIT, the
+        transaction can still abort — a crash a moment before that write ends in abort, a moment after in commit, and the
+        participants wait the same either way.
+      </>
+    ),
+  },
+  {
+    id: 'lost-in-the-minority',
+    title: 'Lost in the minority',
+    group: 'transactions',
+    tool: 'raft',
+    brief: (
+      <>
+        Five Raft servers, seed 1: server 2 is elected leader of term 1 at tick 15, and the client sends eight commands,
+        one every five ticks from tick 30. Cut some servers off from the rest for a while, so that a leader accepts at
+        least one command that is then lost — without any committed entry ever being lost.
+      </>
+    ),
+    hint: (
+      <>
+        An entry is committed only once a majority holds it. Which leader could go on taking commands while unable to
+        reach a majority — and what happens to those entries when it hears from the other side?
+      </>
+    ),
+    needs: 'a command a leader accepted that ends up in no log, and every safety property intact',
+    controls: [
+      {
+        kind: 'select',
+        key: 'side',
+        label: 'Cut off',
+        options: [
+          { value: '4', label: 'server 4' },
+          { value: '1', label: 'server 1' },
+          { value: '2', label: 'server 2' },
+          { value: '12', label: 'servers 1 and 2' },
+          { value: '345', label: 'servers 3, 4 and 5' },
+        ],
+      },
+      {
+        kind: 'select',
+        key: 'window',
+        label: 'For',
+        options: [
+          { value: 'early', label: 'ticks 10 to 25' },
+          { value: 'middle', label: 'ticks 40 to 90' },
+          { value: 'late', label: 'ticks 100 to 140' },
+        ],
+      },
+    ],
+    starter: { side: '4', window: 'middle' },
+    misconception: (
+      <>
+        A leader that accepted a command has stored it. It has written it to its own log; until a majority holds the
+        entry, it is not committed, and a leader on the minority side of a partition will see it replaced. Raft never
+        loses a committed entry — the client is only told a command is done once it is committed.
       </>
     ),
   },
@@ -607,7 +945,7 @@ export const SETTINGS_CHALLENGES: SettingsChallenge[] = [
     tool: 'planner',
     brief: (
       <>
-        The planner has seven rewrite rules, all on. For {code('SELECT name, email FROM users WHERE id = 5 AND age > 30')}{' '}
+        The planner has eight rewrite rules, all on. For {code('SELECT name, email FROM users WHERE id = 5 AND age > 30')}{' '}
         the result is an {code('IndexScan')}. Switch rules off until <strong>at most two remain</strong> and the plan is
         still an {code('IndexScan')}.
       </>
@@ -622,7 +960,7 @@ export const SETTINGS_CHALLENGES: SettingsChallenge[] = [
     controls: [{ kind: 'checks', key: 'rules', label: 'Rules that are on', options: RULES }],
     starter: {
       rules:
-        'constant-folding,predicate-pushdown,join-predicate-pushdown,join-algorithm-selection,index-selection,range-index-selection,index-only-scan',
+        'constant-folding,predicate-pushdown,product-to-join,join-predicate-pushdown,join-algorithm-selection,index-selection,range-index-selection,index-only-scan',
     },
     misconception: (
       <>

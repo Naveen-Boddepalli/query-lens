@@ -35,6 +35,11 @@ export interface TraceState {
   dataset: DatasetId;
   /** `null` when the rows are that dataset's untouched set (kept out, like the URL's `d`). */
   rows: Row[] | null;
+  /**
+   * A multi-table preset's other tables whose rows were changed, by name (plan.md §27.5 S2) — the file's form of the
+   * URL's `d.<table>`. Absent when none were, which is every file a single-table preset writes.
+   */
+  otherRows?: Record<string, Row[]>;
 }
 
 interface TraceFile extends Omit<TraceState, 'dataset'> {
@@ -67,6 +72,7 @@ export function serializeTraceFile(state: TraceState): string {
     // Omitted for the default, so a `users` file reads identically to a v1 one.
     ...(state.dataset !== DEFAULT_DATASET ? { dataset: state.dataset } : {}),
     rows: state.rows,
+    ...(state.otherRows && Object.keys(state.otherRows).length > 0 ? { otherRows: state.otherRows } : {}),
     meta: {
       app: 'QueryLens',
       build: BUILD_SHA,
@@ -137,9 +143,26 @@ export function parseTraceFile(text: string): TraceParseResult {
     rows = decoded;
   }
 
+  // The other tables of a multi-table preset (plan.md §27.5 S2): each must be one the dataset really has, and match it.
+  let otherRows: Record<string, Row[]> | undefined;
+  if (o.otherRows !== undefined) {
+    if (typeof o.otherRows !== 'object' || o.otherRows === null || Array.isArray(o.otherRows)) {
+      return { ok: false, error: 'The "otherRows" field must map table names to rows.' };
+    }
+    const tables = spec.make().tables;
+    otherRows = {};
+    for (const [name, raw] of Object.entries(o.otherRows as Record<string, unknown>)) {
+      const table = name === spec.table ? undefined : tables[name];
+      if (!table) return { ok: false, error: `The ${dataset} dataset has no other table called ${name}.` };
+      const decoded = decodeRows(raw, table.columns);
+      if (decoded === null) return { ok: false, error: `The "otherRows" for ${name} do not match its schema.` };
+      otherRows[name] = decoded;
+    }
+  }
+
   return {
     ok: true,
-    value: { sql: o.sql, policy: o.policy, predictOn: o.predictOn, step: o.step, dataset, rows },
+    value: { sql: o.sql, policy: o.policy, predictOn: o.predictOn, step: o.step, dataset, rows, ...(otherRows ? { otherRows } : {}) },
   };
 }
 

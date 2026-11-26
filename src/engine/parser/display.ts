@@ -10,6 +10,7 @@ import type { ASTNode, Span } from '../types.ts';
 import type { Emit } from '../trace.ts';
 import type {
   AnalyzeStatement,
+  CompoundStatement,
   DeleteStatement,
   Expr,
   GroupByClause,
@@ -25,7 +26,7 @@ import type {
   UpdateAssignment,
   UpdateStatement,
 } from './ast.ts';
-import { columnKey, selectItemKey } from './ast.ts';
+import { columnKey, selectItemKey, tableRefSql } from './ast.ts';
 import { aggregateKeyOf, exprToSql } from './print.ts';
 
 function selectItemNode(item: SelectItem, id: string): ASTNode {
@@ -87,9 +88,9 @@ function fromNode(from: TableRef): ASTNode {
     id: 'from',
     kind: 'From',
     label: 'FROM',
-    detail: from.name,
+    detail: tableRefSql(from),
     span: from.span,
-    children: [{ id: 'from.table', kind: 'Table', label: from.name, span: from.span }],
+    children: [{ id: 'from.table', kind: 'Table', label: tableRefSql(from), span: from.span }],
   };
 }
 
@@ -139,7 +140,7 @@ function exprNode(expr: Expr, id: string): ASTNode {
             id,
             kind: 'In',
             label: expr.negated ? 'NOT IN' : 'IN',
-            detail: `subquery — SELECT ${expr.subquery.column.name} FROM ${expr.subquery.from.name}`,
+            detail: `subquery — SELECT ${expr.subquery.column.name} FROM ${tableRefSql(expr.subquery.from)}`,
             span: expr.span,
             children: [exprNode(expr.operand, `${id}.o`)],
           }
@@ -166,6 +167,18 @@ function exprNode(expr: Expr, id: string): ASTNode {
       };
     case 'neg':
       return { id, kind: 'Arith', label: '−', detail: 'negate', span: expr.span, children: [exprNode(expr.operand, `${id}.o`)] };
+    case 'exists':
+      return {
+        id,
+        kind: 'Exists',
+        label: 'EXISTS',
+        detail: `subquery — SELECT ${expr.subquery.select} FROM ${tableRefSql(expr.subquery.from)}${expr.subquery.where ? ' WHERE …' : ''}`,
+        span: expr.span,
+        children: [
+          { id: `${id}.from`, kind: 'Table', label: tableRefSql(expr.subquery.from), span: expr.subquery.from.span },
+          ...(expr.subquery.where ? [exprNode(expr.subquery.where, `${id}.w`)] : []),
+        ],
+      };
     case 'like':
       return {
         id,
@@ -173,6 +186,16 @@ function exprNode(expr: Expr, id: string): ASTNode {
         label: expr.negated ? 'NOT LIKE' : 'LIKE',
         span: expr.span,
         children: [exprNode(expr.operand, `${id}.o`), exprNode(expr.pattern, `${id}.p`)],
+      };
+    // A value worked out by a whole query of its own (plan.md §27.5 S6): that query's tree, under one node.
+    case 'scalar':
+      return {
+        id,
+        kind: 'Subquery',
+        label: 'Subquery',
+        detail: 'one value, run once before planning',
+        span: expr.span,
+        children: [withIdPrefix(toDisplayTree(expr.select), id)],
       };
   }
 }
@@ -316,6 +339,68 @@ export function toDisplayTree(ast: SelectStatement): ASTNode {
 
 function countNodes(node: ASTNode): number {
   return 1 + (node.children ?? []).reduce((n, c) => n + countNodes(c), 0);
+}
+
+/** `node` with every id under `prefix`, so several SELECTs' trees can sit in one tree without two nodes sharing an id. */
+function withIdPrefix(node: ASTNode, prefix: string): ASTNode {
+  return { ...node, id: `${prefix}.${node.id}`, ...(node.children ? { children: node.children.map((c) => withIdPrefix(c, prefix)) } : {}) };
+}
+
+/** A compound query's operators, as its root reads: `UNION`, `UNION ALL · EXCEPT`. */
+function compoundLabel(ast: CompoundStatement): string {
+  return [...new Set(ast.ops.map((o) => `${o.op.toUpperCase()}${o.all ? ' ALL' : ''}`))].join(' · ');
+}
+
+/** The root of a compound query's tree (plan.md §27.5 S3): each member's whole SELECT tree, then the result's own clauses. */
+function compoundRoot(ast: CompoundStatement, children: ASTNode[]): ASTNode {
+  return { id: 'compound', kind: 'CompoundStatement', label: compoundLabel(ast), detail: `${String(ast.members.length)} SELECTs`, span: ast.span, children };
+}
+
+/** The complete display tree for a compound query (plan.md §27.5 S3). */
+export function compoundDisplayTree(ast: CompoundStatement): ASTNode {
+  const children = ast.members.map((m, i) => withIdPrefix(toDisplayTree(m), `m${String(i)}`));
+  if (ast.orderBy) children.push(orderByNode({ ...ast.orderBy }));
+  if (ast.limit) children.push(limitNode(ast.limit));
+  return compoundRoot(ast, children);
+}
+
+/**
+ * The parse stage for a compound query (plan.md §27.5 S3): one step per SELECT, each read whole, then the result's
+ * `ORDER BY` and `LIMIT` — the tree growing under one root that names the operators.
+ */
+export function emitCompoundParseEvents(emit: Emit, ast: CompoundStatement): void {
+  const children: ASTNode[] = [];
+  ast.members.forEach((member, i) => {
+    children.push(withIdPrefix(toDisplayTree(member), `m${String(i)}`));
+    const op = i === 0 ? null : ast.ops[i - 1]!;
+    emit(
+      i === 0
+        ? `Read the first SELECT, whole: it reads \`${member.from.name}\`, and its columns name the result's. ${/^[AEIOU]/.test(compoundLabel(ast)) ? 'An' : 'A'} ${compoundLabel(ast)} combines it with ${String(ast.members.length - 1)} more.`
+        : `Read ${op!.op.toUpperCase()}${op!.all ? ' ALL' : ''}, then SELECT ${String(i + 1)}: it reads \`${member.from.name}\`, and its columns are matched to the first SELECT's by position, not by name.`,
+      { stage: 'parse', ast: compoundRoot(ast, [...children]), span: member.span },
+    );
+  });
+  if (ast.orderBy) {
+    children.push(orderByNode({ ...ast.orderBy }));
+    emit(`Read the ORDER BY clause: it sorts the combined result by \`${ast.orderBy.column}\`, ${ast.orderBy.direction === 'asc' ? 'ascending' : 'descending'} — once, after the SELECTs are combined.`, {
+      stage: 'parse',
+      ast: compoundRoot(ast, [...children]),
+      span: ast.orderBy.span,
+    });
+  }
+  if (ast.limit) {
+    children.push(limitNode(ast.limit));
+    emit(
+      `Read the LIMIT clause: cap the combined result at ${String(ast.limit.value)}${ast.limit.offset === undefined ? '' : `, after skipping ${String(ast.limit.offset)}`}.`,
+      { stage: 'parse', ast: compoundRoot(ast, [...children]), span: ast.limit.span },
+    );
+  }
+  const tree = compoundRoot(ast, children);
+  emit(`Parsing is done: ${String(countNodes(tree))} AST nodes over ${String(ast.members.length)} SELECTs, and no data touched.`, {
+    stage: 'parse',
+    ast: tree,
+    span: ast.span,
+  });
 }
 
 /** Emit the parse stage one clause at a time, so it can be stepped through. */

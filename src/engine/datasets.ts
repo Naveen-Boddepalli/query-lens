@@ -3,8 +3,9 @@ import type { Database, Row } from './types.ts';
 
 /**
  * plan.md §22.7: the preset *table* library — a companion to §19.2's preset
- * *query* chips. §4's engine is one table at a time and JOIN-free, so each
- * dataset is a single table; the value is a curated *shape*:
+ * *query* chips. §4's engine was one table at a time and JOIN-free, so each
+ * dataset began as a single table; `shop` (plan.md §27.5 S2) is the first with
+ * several. The value is a curated *shape*:
  *
  *   - `users`     — the 48-row baseline (`seed.ts`), a 12-page scan against 8 frames
  *   - `orders`    — 120 rows: a deeper B+Tree and a scan that evicts far harder
@@ -15,18 +16,21 @@ import type { Database, Row } from './types.ts';
  *   - `transactions` — 3,000 rows (plan.md §25.4 C6): a genuinely taller B+Tree (height 7, measured, against
  *                   `employees`'s 5) and a scan that evicts hard enough to be a real demonstration, not a
  *                   token one — a point lookup or a narrow indexed range still stays a short trace either way
- *   - `customers` — 20 rows with NULLs in three columns (plan.md §26 Feature 3), the only preset that has any:
- *                   `= NULL`, `<>`, `COUNT(col)`, `AVG`, `NOT IN` and `ORDER BY` all behave differently on them
+ *   - `customers` — 20 rows with NULLs in three columns (plan.md §26 Feature 3): `= NULL`, `<>`, `COUNT(col)`,
+ *                   `AVG`, `NOT IN` and `ORDER BY` all behave differently on them
+ *   - `shop`      — three tables, `customers`, `products` and `orders` (plan.md §27.5 S2): joins, `LEFT JOIN`,
+ *                   `EXISTS` and join order on a preset. Three customers never order and two orders are a guest's,
+ *                   with no customer — so `NOT IN` meets a NULL where `NOT EXISTS` does not
  *
  * Pure data, like `seed.ts`. The UI copy (labels, starter query, preset chips)
  * lives in `src/ui/datasetCatalogue.ts` so the engine stays free of it.
  */
 
-export type DatasetId = 'users' | 'orders' | 'logins' | 'employees' | 'transactions' | 'customers';
+export type DatasetId = 'users' | 'orders' | 'logins' | 'employees' | 'transactions' | 'customers' | 'shop';
 
 export const DEFAULT_DATASET: DatasetId = 'users';
 
-export const DATASET_IDS: readonly DatasetId[] = ['users', 'orders', 'logins', 'employees', 'transactions', 'customers'];
+export const DATASET_IDS: readonly DatasetId[] = ['users', 'orders', 'logins', 'employees', 'transactions', 'customers', 'shop'];
 
 export function isDatasetId(value: unknown): value is DatasetId {
   return typeof value === 'string' && (DATASET_IDS as readonly string[]).includes(value);
@@ -34,7 +38,11 @@ export function isDatasetId(value: unknown): value is DatasetId {
 
 export interface DatasetSpec {
   id: DatasetId;
-  /** The one table this dataset defines — the name a query's `FROM` must use. */
+  /**
+   * The dataset's main table: what its starter query reads, what **Edit data** opens first, and whose edited rows a
+   * link carries as `d`. For every single-table preset it is the only table; `shop`'s others (plan.md §27.5 S2) are
+   * in `make()` beside it, and travel in a link as `d.<table>`.
+   */
   table: string;
   make: () => Database;
 }
@@ -154,7 +162,81 @@ const CUSTOMER_ROWS: readonly Row[] = [
   { id: 20, name: 'tara', city: 'Osaka', referrer: 16, discount: 10 },
 ];
 
+const SHOP_CUSTOMERS: readonly Row[] = [
+  { id: 1, name: 'alice', city: 'Paris' },
+  { id: 2, name: 'bruno', city: 'Lagos' },
+  { id: 3, name: 'carmen', city: 'Lima' },
+  { id: 4, name: 'dmitri', city: 'Osaka' },
+  { id: 5, name: 'esme', city: 'Paris' },
+  { id: 6, name: 'farid', city: 'Lagos' },
+  { id: 7, name: 'greta', city: 'Lima' },
+  { id: 8, name: 'hugo', city: 'Osaka' },
+  { id: 9, name: 'ines', city: 'Paris' },
+  { id: 10, name: 'jonas', city: 'Lagos' },
+  { id: 11, name: 'keiko', city: 'Lima' },
+  { id: 12, name: 'lars', city: 'Osaka' },
+];
+
+const SHOP_PRODUCTS: readonly Row[] = [
+  { id: 1, name: 'lamp', price: 40 },
+  { id: 2, name: 'desk', price: 220 },
+  { id: 3, name: 'chair', price: 85 },
+  { id: 4, name: 'mug', price: 12 },
+  { id: 5, name: 'shelf', price: 140 },
+  { id: 6, name: 'rug', price: 95 },
+  { id: 7, name: 'clock', price: 30 },
+  { id: 8, name: 'vase', price: 55 },
+];
+
+/**
+ * Who placed each of the 40 orders, in order (plan.md §27.5 S2). Written out so each fact is placed on purpose:
+ * `dmitri` (4), `ines` (9) and `lars` (12) never appear — the customers `NOT EXISTS` finds — and orders 17 and 33 are
+ * a guest's, with no customer at all. Those two NULLs are what turn `id NOT IN (SELECT customerId FROM orders)` into
+ * an empty answer. `alice` (1) orders seven times, so a JOIN repeats her and a semi-join does not.
+ */
+const SHOP_ORDER_CUSTOMERS: readonly (number | null)[] = [
+  1, 2, 1, 3, 5, 1, 6, 2, 7, 8, 1, 3, 10, 5, 11, 2, null, 1, 6, 7,
+  3, 8, 1, 10, 2, 5, 11, 6, 1, 3, 7, 2, null, 8, 5, 10, 11, 6, 3, 7,
+];
+
+/** 40 orders over seven products — `vase` (8) is never ordered — one to four of each. */
+function shopOrderRows(): Row[] {
+  return SHOP_ORDER_CUSTOMERS.map((customerId, i) => ({
+    id: i + 1,
+    customerId,
+    productId: ((i * 3) % 7) + 1,
+    qty: ((i * 5) % 4) + 1,
+  }));
+}
+
 export const DATASETS: Record<DatasetId, DatasetSpec> = {
+  shop: {
+    id: 'shop',
+    table: 'customers',
+    make: () => ({
+      tables: {
+        customers: {
+          name: 'customers',
+          columns: ['id', 'name', 'city'],
+          rows: SHOP_CUSTOMERS.map((r) => ({ ...r })),
+          indexedColumns: ['id'],
+        },
+        products: {
+          name: 'products',
+          columns: ['id', 'name', 'price'],
+          rows: SHOP_PRODUCTS.map((r) => ({ ...r })),
+          indexedColumns: ['id'],
+        },
+        orders: {
+          name: 'orders',
+          columns: ['id', 'customerId', 'productId', 'qty'],
+          rows: shopOrderRows(),
+          // `customerId` is the foreign key, and it repeats: the index a join's inner side can probe.
+          indexedColumns: ['id', 'customerId'],
+        },
+      },
+    }),
+  },
   customers: {
     id: 'customers',
     table: 'customers',

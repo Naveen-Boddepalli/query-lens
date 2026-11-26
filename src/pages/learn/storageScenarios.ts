@@ -82,6 +82,35 @@ export interface JoinOrderScenario {
   tool: 'join-order';
 }
 
+/** A query, workers, a dispatcher, a morsel size and the workers' speeds (plan.md §27.5 P1). */
+export interface ParallelScenario {
+  tool: 'parallel';
+  q: 'grouped' | 'corner';
+  w: number;
+  d: 'static' | 'shared' | 'stealing';
+  m: number;
+  s: readonly number[];
+  /** The exchange section (plan.md §27.5 P2): join, workers and exchange. */
+  jq?: 'small-big' | 'big-big' | 'few-keys' | 'all-rows';
+  jw?: number;
+  jx?: 'broadcast' | 'repartition';
+}
+
+/** `/compare`'s serial-against-parallel mode on one of its queries (plan.md §27.5 P3). */
+export interface CompareParallelScenario {
+  tool: 'compare-parallel';
+  q: 'status' | 'account' | 'id';
+}
+
+/** A column, a bucket count and a range (plan.md §27.5 T5). */
+export interface HistogramScenario {
+  tool: 'histograms';
+  c: 'amount' | 'skewed' | 'clustered';
+  b: number;
+  lo: number;
+  hi: number;
+}
+
 export type StorageScenario =
   | LsmScenario
   | HashIndexScenario
@@ -91,7 +120,10 @@ export type StorageScenario =
   | PageScenario
   | SortScenario
   | HashJoinScenario
-  | JoinOrderScenario;
+  | JoinOrderScenario
+  | HistogramScenario
+  | ParallelScenario
+  | CompareParallelScenario;
 
 const LSM = { tool: 'lsm', n: 60, mem: 4, trigger: 3, base: 8, mult: 2, seed: 1 } as const;
 const HASH = { tool: 'hash-index', n: 60, cap: 4, init: 2, seed: 1 } as const;
@@ -138,12 +170,30 @@ export const STORAGE_SCENARIOS = {
 
   // — Join order —
   joinOrder: { tool: 'join-order' },
+
+  // — Histograms —
+  histogramGap: { tool: 'histograms', c: 'clustered', b: 10, lo: 500, hi: 2000 },
+  histogramGapFine: { tool: 'histograms', c: 'clustered', b: 100, lo: 500, hi: 2000 },
+  histogramEdge: { tool: 'histograms', c: 'clustered', b: 10, lo: 2400, hi: 2410 },
+  histogramEven: { tool: 'histograms', c: 'amount', b: 1, lo: 100, hi: 400 },
+
+  // — Parallel execution —
+  parallelEven: { tool: 'parallel', q: 'grouped', w: 4, d: 'static', m: 16, s: [1, 1, 1, 1] },
+  parallelSlowStatic: { tool: 'parallel', q: 'grouped', w: 4, d: 'static', m: 16, s: [1, 1, 1, 3] },
+  parallelSlowShared: { tool: 'parallel', q: 'grouped', w: 4, d: 'shared', m: 16, s: [1, 1, 1, 3] },
+  parallelSlowStealing: { tool: 'parallel', q: 'grouped', w: 4, d: 'stealing', m: 16, s: [1, 1, 1, 3] },
+  joinSmallBroadcast: { tool: 'parallel', q: 'grouped', w: 4, d: 'stealing', m: 16, s: [1, 1, 1, 3], jq: 'small-big', jw: 4, jx: 'broadcast' },
+  joinSmallRepartition: { tool: 'parallel', q: 'grouped', w: 4, d: 'stealing', m: 16, s: [1, 1, 1, 3], jq: 'small-big', jw: 4, jx: 'repartition' },
+  joinBigRepartition: { tool: 'parallel', q: 'grouped', w: 4, d: 'stealing', m: 16, s: [1, 1, 1, 3], jq: 'big-big', jw: 4, jx: 'repartition' },
+  compareByAccount: { tool: 'compare-parallel', q: 'account' },
+  joinFewKeys: { tool: 'parallel', q: 'grouped', w: 4, d: 'stealing', m: 16, s: [1, 1, 1, 3], jq: 'few-keys', jw: 8, jx: 'repartition' },
 } as const satisfies Record<string, StorageScenario>;
 
 export type StorageScenarioName = keyof typeof STORAGE_SCENARIOS;
 
 /** `/tools/…?…` for a scenario, in the URL scheme the tool itself writes. */
 export function storageHref(scenario: StorageScenario): string {
+  if (scenario.tool === 'compare-parallel') return `/compare?mode=parallel&q=${scenario.q}`;
   const p = new URLSearchParams();
   switch (scenario.tool) {
     case 'lsm':
@@ -199,6 +249,22 @@ export function storageHref(scenario: StorageScenario): string {
       p.set('seed', String(scenario.seed));
       break;
     case 'join-order':
+      break;
+    case 'parallel':
+      p.set('q', scenario.q);
+      p.set('w', String(scenario.w));
+      p.set('d', scenario.d);
+      p.set('m', String(scenario.m));
+      p.set('s', scenario.s.join(''));
+      if (scenario.jq !== undefined) p.set('jq', scenario.jq);
+      if (scenario.jw !== undefined) p.set('jw', String(scenario.jw));
+      if (scenario.jx !== undefined) p.set('jx', scenario.jx);
+      break;
+    case 'histograms':
+      p.set('c', scenario.c);
+      p.set('b', String(scenario.b));
+      p.set('lo', String(scenario.lo));
+      p.set('hi', String(scenario.hi));
       break;
   }
   const query = p.toString();

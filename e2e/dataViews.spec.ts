@@ -11,13 +11,18 @@ const pages: [string, RegExp][] = [
 for (const [path, caption] of pages) {
   test(`${path} has a table view of its data that is clean under axe (plan.md §H6)`, async ({ page }) => {
     await page.goto(path);
-    const toggle = page.getByRole('button', { name: 'Show as table' }).first();
+    // A page still on DataView has a 'Show as table' button; one on the tool workbench has a Diagram | Table
+    // switch in its stage header.
+    const toggle = page
+      .getByRole('button', { name: 'Show as table' })
+      .or(page.getByRole('radio', { name: 'Table', exact: true }))
+      .first();
     await expect(toggle).toBeVisible();
     await toggle.click();
 
-    const table = page.getByRole('table');
+    // The view's own table: a page may have others that are always tables (the join-order page's growth table).
+    const table = page.getByRole('table').filter({ has: page.getByRole('caption').filter({ hasText: caption }) });
     await expect(table).toBeVisible();
-    await expect(table.getByRole('caption')).toContainText(caption);
     await expect(table.getByRole('columnheader').first()).toBeVisible();
 
     const results = await new AxeBuilder({ page })
@@ -26,8 +31,12 @@ for (const [path, caption] of pages) {
       .analyze();
     expect(results.violations.map((v) => `${v.id}: ${v.help}`)).toEqual([]);
 
-    await page.getByRole('button', { name: 'Show as diagram' }).first().click();
-    await expect(page.getByRole('table')).toHaveCount(0);
+    await page
+      .getByRole('button', { name: 'Show as diagram' })
+      .or(page.getByRole('radio', { name: 'Diagram', exact: true }))
+      .first()
+      .click();
+    await expect(table).toHaveCount(0);
   });
 }
 

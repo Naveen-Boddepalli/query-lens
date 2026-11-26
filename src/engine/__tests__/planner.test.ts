@@ -587,8 +587,11 @@ describe('optimize — index-only scan', () => {
     expect(scan).toMatchObject({ op: 'IndexOnlyScan', column: 'id', key: 5 });
   });
 
-  it('fires for repeats of the same column too — SELECT id, id', () => {
-    expect(shape(final('SELECT id, id FROM users WHERE id = 5'))).toEqual(['Project', 'IndexOnlyScan']);
+  it('never meets a column selected twice — SELECT id, id is refused before planning (plan.md §27.5 S3)', () => {
+    // A result row is keyed by column name, so the second `id` would silently overwrite the first.
+    const parsed = parse('SELECT id, id FROM users WHERE id = 5');
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) expect(parsed.error.message).toMatch(/selected twice/);
   });
 
   it('does not fire when the SELECT list needs any other column', () => {
@@ -749,6 +752,7 @@ describe('optimize — rule filter (plan.md §22.3 /tools/planner)', () => {
     expect([...OPTIMIZER_RULES]).toEqual([
       'constant-folding',
       'predicate-pushdown',
+      'product-to-join',
       'join-predicate-pushdown',
       'join-algorithm-selection',
       'index-selection',

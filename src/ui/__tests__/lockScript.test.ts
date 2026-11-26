@@ -19,6 +19,22 @@ describe('a lock step as text', () => {
     expect(parseLockStep('  T1   s   1  ')).toEqual({ op: 'request', transaction: 'T1', mode: 'shared', page: 1 });
   });
 
+  it('reads the intention modes, by name or by their letters, and writes them back (plan.md §27.5 T2)', () => {
+    expect(parseLockStep('T1 is 0')?.mode).toBe('intention-shared');
+    expect(parseLockStep('T2 IX 1')?.mode).toBe('intention-exclusive');
+    expect(parseLockStep('T1 six 2')?.mode).toBe('shared-intention-exclusive');
+    expect(parseLockStep('T1 release shared-intention-exclusive 3')).toEqual({
+      op: 'release',
+      transaction: 'T1',
+      mode: 'shared-intention-exclusive',
+      page: 3,
+    });
+    const script = steps('T1 ix 0', 'T2 is 0', 'T2 s 0');
+    expect(decodeLockSteps(encodeLockSteps(script))).toEqual(script);
+    // IX and IS share a page; S waits for the IX.
+    expect(runLockSteps(script).entries.map((e) => e.kind)).toEqual(['granted', 'granted', 'blocked']);
+  });
+
   it('reads a release', () => {
     expect(parseLockStep('T1 release shared 0')).toEqual({ op: 'release', transaction: 'T1', mode: 'shared', page: 0 });
     expect(parseLockStep('T2 unlock x 2')).toEqual({ op: 'release', transaction: 'T2', mode: 'exclusive', page: 2 });

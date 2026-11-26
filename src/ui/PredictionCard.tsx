@@ -18,7 +18,7 @@ const Icon = ({ ok }: { ok: boolean }) => (
 );
 
 const card = 'rounded-xl border border-edge bg-surface-2/80 shadow-neu-rest backdrop-blur-md';
-const kbdCls = 'rounded border border-edge bg-surface-3 px-1.5 py-0.5 font-mono text-micro text-ink shadow-neu-rest';
+const kbdCls = 'rounded border border-edge bg-surface-3 px-1.5 py-0.5 font-mono text-label text-ink shadow-neu-rest';
 
 export function PredictionCard({
   prompt,
@@ -35,7 +35,7 @@ export function PredictionCard({
   return (
     <section className={`ql-sheen p-4 ${card}`}>
       <div className="mb-2.5 flex items-center gap-2">
-        <span className="inline-flex items-center gap-1.5 rounded-full border border-accent/60 bg-accent-soft px-3 py-0.5 text-micro font-semibold tracking-[0.14em] text-accent uppercase shadow-glow">
+        <span className="inline-flex items-center gap-1.5 rounded-full border border-accent/60 bg-accent-soft px-3 py-0.5 text-label font-semibold tracking-[0.14em] text-accent uppercase shadow-glow">
           <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-accent-strong shadow-glow animate-pulse" />
           predict
         </span>

@@ -202,7 +202,7 @@ export function RecoveryToolPage() {
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-4 p-6 sm:p-8">
       <PageHeader title="Crash recovery">
-        The write-ahead log, stopped and restarted (plan.md §25.4 E3). Run a script, press <strong>Crash</strong> — the
+        The write-ahead log, stopped and restarted. Run a script, press <strong>Crash</strong> — the
         pool, the log buffer and every transaction are gone; the disk, the durable log and the master record stay — and{' '}
         <strong>Recover</strong>. ARIES restarts from the last checkpoint in three passes: <em>analysis</em> rebuilds the
         dirty page table and the transaction table and names the losers, <em>redo</em> repeats history, <em>undo</em>{' '}
@@ -294,104 +294,109 @@ export function RecoveryToolPage() {
         </p>
       </div>
 
-      <div className="flex flex-wrap items-end gap-3 rounded-xl border border-edge bg-surface-2 p-3 shadow-e1">
-        <label className="flex flex-col gap-1 text-label text-ink-dim">
-          Transaction
-          <select className={inputField} value={txn} onChange={(e) => { setTxn(e.target.value); }}>
-            {TXNS.map((t) => (
-              <option key={t}>{t}</option>
-            ))}
-          </select>
-        </label>
-        <label className="flex flex-col gap-1 text-label text-ink-dim">
-          Cell
-          <select className={inputField} value={key} onChange={(e) => { setKey(e.target.value); }}>
-            {KEYS.map((k) => (
-              <option key={k}>{k}</option>
-            ))}
-          </select>
-        </label>
-        <label className="flex flex-col gap-1 text-label text-ink-dim">
-          New value
-          <input
-            type="number"
-            value={value}
-            onChange={(e) => { setValue(e.target.value); }}
-            className={`${inputField} w-24 tabular-nums`}
-          />
-        </label>
-        <button
-          type="button"
-          disabled={full || !valueOk}
-          onClick={() => { add({ op: 'set', txn, key, value: valueNumber }); }}
-          className={btnPrimary}
-        >
-          Add change
-        </button>
-        {(['begin', 'commit', 'abort'] as const).map((op) => (
-          <button key={op} type="button" disabled={full} onClick={() => { add({ op, txn }); }} className={btnSecondary}>
-            {op === 'abort' ? 'Roll back' : op === 'begin' ? 'Begin' : 'Commit'} {txn}
-          </button>
-        ))}
-        <span className="mx-1 h-6 w-px bg-edge" aria-hidden />
-        <label className="flex flex-col gap-1 text-label text-ink-dim">
-          Page
-          <select className={inputField} value={page} onChange={(e) => { setPage(Number(e.target.value)); }}>
-            {PAGES.map((p) => (
-              <option key={p} value={p}>
-                {p}
-              </option>
-            ))}
-          </select>
-        </label>
-        <button type="button" disabled={full} onClick={() => { add({ op: 'write-page', page }); }} className={btnSecondary}>
-          Write page
-        </button>
-        <button type="button" disabled={full} onClick={() => { add({ op: 'read-page', page }); }} className={btnSecondary}>
-          Read page
-        </button>
-        <button type="button" disabled={full} onClick={() => { add({ op: 'flush-log' }); }} className={btnSecondary}>
-          Flush log
-        </button>
-        <span className="mx-1 h-6 w-px bg-edge" aria-hidden />
-        <button type="button" disabled={full} onClick={() => { add({ op: 'checkpoint' }); }} className={btnSecondary}>
-          Checkpoint
-        </button>
-        <button type="button" disabled={full} onClick={() => { add({ op: 'checkpoint-begin' }); }} className={btnSecondary}>
-          Begin checkpoint
-        </button>
-        <button type="button" disabled={full} onClick={() => { add({ op: 'checkpoint-end' }); }} className={btnSecondary}>
-          End checkpoint
-        </button>
-        <span className="mx-1 h-6 w-px bg-edge" aria-hidden />
-        <button type="button" disabled={full} onClick={() => { add({ op: 'crash' }); }} className={btnPrimary}>
-          Crash
-        </button>
-        <button type="button" disabled={full} onClick={() => { add({ op: 'recover' }); }} className={btnPrimary}>
-          Recover
-        </button>
-        <label className="flex flex-col gap-1 text-label text-ink-dim">
-          …stopping again after
-          <span className="flex items-center gap-1">
+      <div className="flex flex-wrap items-end gap-x-6 gap-y-3 rounded-xl border border-edge bg-surface-2 p-3 shadow-e1">
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="flex flex-col gap-1 text-label text-ink-dim">
+            Transaction
+            <select className={inputField} value={txn} onChange={(e) => { setTxn(e.target.value); }}>
+              {TXNS.map((t) => (
+                <option key={t}>{t}</option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1 text-label text-ink-dim">
+            Cell
+            <select className={inputField} value={key} onChange={(e) => { setKey(e.target.value); }}>
+              {KEYS.map((k) => (
+                <option key={k}>{k}</option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1 text-label text-ink-dim">
+            New value
             <input
               type="number"
-              min={1}
-              max={20}
-              value={cut}
-              onChange={(e) => { setCut(e.target.value); }}
-              className={`${inputField} w-16 tabular-nums`}
-              aria-label="Undo records to write before the machine stops again"
+              value={value}
+              onChange={(e) => { setValue(e.target.value); }}
+              className={`${inputField} w-24 tabular-nums`}
             />
-            <button
-              type="button"
-              disabled={full || !cutOk}
-              onClick={() => { add({ op: 'recover', crashAfter: cutNumber }); }}
-              className={btnSecondary}
-            >
-              Recover, then crash
+          </label>
+          <button
+            type="button"
+            disabled={full || !valueOk}
+            onClick={() => { add({ op: 'set', txn, key, value: valueNumber }); }}
+            className={btnPrimary}
+          >
+            Add change
+          </button>
+          {(['begin', 'commit', 'abort'] as const).map((op) => (
+            <button key={op} type="button" disabled={full} onClick={() => { add({ op, txn }); }} className={btnSecondary}>
+              {op === 'abort' ? 'Roll back' : op === 'begin' ? 'Begin' : 'Commit'} {txn}
             </button>
-          </span>
-        </label>
+          ))}
+        </div>
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="flex flex-col gap-1 text-label text-ink-dim">
+            Page
+            <select className={inputField} value={page} onChange={(e) => { setPage(Number(e.target.value)); }}>
+              {PAGES.map((p) => (
+                <option key={p} value={p}>
+                  {p}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button type="button" disabled={full} onClick={() => { add({ op: 'write-page', page }); }} className={btnSecondary}>
+            Write page
+          </button>
+          <button type="button" disabled={full} onClick={() => { add({ op: 'read-page', page }); }} className={btnSecondary}>
+            Read page
+          </button>
+          <button type="button" disabled={full} onClick={() => { add({ op: 'flush-log' }); }} className={btnSecondary}>
+            Flush log
+          </button>
+        </div>
+        <div className="flex flex-wrap items-end gap-3">
+          <button type="button" disabled={full} onClick={() => { add({ op: 'checkpoint' }); }} className={btnSecondary}>
+            Checkpoint
+          </button>
+          <button type="button" disabled={full} onClick={() => { add({ op: 'checkpoint-begin' }); }} className={btnSecondary}>
+            Begin checkpoint
+          </button>
+          <button type="button" disabled={full} onClick={() => { add({ op: 'checkpoint-end' }); }} className={btnSecondary}>
+            End checkpoint
+          </button>
+        </div>
+        <div className="flex flex-wrap items-end gap-3">
+          <button type="button" disabled={full} onClick={() => { add({ op: 'crash' }); }} className={btnPrimary}>
+            Crash
+          </button>
+          <button type="button" disabled={full} onClick={() => { add({ op: 'recover' }); }} className={btnPrimary}>
+            Recover
+          </button>
+          <label className="flex flex-col gap-1 text-label text-ink-dim">
+            …stopping again after
+            <span className="flex items-center gap-1">
+              <input
+                type="number"
+                min={1}
+                max={20}
+                value={cut}
+                onChange={(e) => { setCut(e.target.value); }}
+                className={`${inputField} w-16 tabular-nums`}
+                aria-label="Undo records to write before the machine stops again"
+              />
+              <button
+                type="button"
+                disabled={full || !cutOk}
+                onClick={() => { add({ op: 'recover', crashAfter: cutNumber }); }}
+                className={btnSecondary}
+              >
+                Recover, then crash
+              </button>
+            </span>
+          </label>
+        </div>
       </div>
 
       <div className="flex flex-wrap items-center gap-2 text-label text-ink-dim">

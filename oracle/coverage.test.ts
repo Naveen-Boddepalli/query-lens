@@ -19,7 +19,7 @@ import { runQuery } from '../src/engine/runQuery.ts';
 import { optionsArb, sessionArb } from './generate.ts';
 import { toDatabase } from './harness.ts';
 import { applyWrite } from './harness.ts';
-import { isWrite, renderQuery, walkPred } from './model.ts';
+import { isWrite, renderQuery, renderRef, walkPred } from './model.ts';
 import type { TableSpec } from './model.ts';
 
 const N = 3000;
@@ -76,7 +76,53 @@ describe('the generators reach what the oracle is meant to check', () => {
     /** Aggregate queries over a join that returned rows, by aggregate strategy, and ones grouping a LEFT JOIN (F1c). */
     joinAggregates: new Map<string, number>(),
     leftJoinGroups: 0,
+    /**
+     * Reads with a `[NOT] EXISTS` (plan.md §27.5 S1): how many, how many returned rows, and of those, the correlated
+     * semi- and anti-joins by join algorithm, ones with a residual, and the uncorrelated ones run once.
+     */
+    existsReads: 0,
+    existsWithRows: 0,
+    semiJoins: new Map<string, number>(),
+    antiJoins: new Map<string, number>(),
+    existsResiduals: 0,
+    existsOnce: 0,
+    /** Compound reads (plan.md §27.5 S3) that returned rows: by operator (UNION's by distinct strategy), self-compounds, ordered ones. */
+    compounds: new Map<string, number>(),
+    /** Join and grouped-join reads with a RIGHT, FULL or CROSS step (plan.md §27.5 S4) that returned rows; cross ones by form. */
+    newJoins: new Map<string, number>(),
+    selfCompounds: 0,
+    orderedCompounds: 0,
+    /**
+     * Aggregate reads with a DISTINCT aggregate in the SELECT list or ORDER BY that returned rows (plan.md §27.5 S5), by
+     * strategy and whether they group — and ones whose DISTINCT aggregates read two columns, which one sort cannot order.
+     */
+    distinctAggregates: new Map<string, number>(),
+    /**
+     * Reads with a scalar subquery that returned rows (plan.md §27.5 S6), by what the subquery picks — an aggregate or a
+     * sorted column — and ones whose subquery found no row, so the outer comparison met a NULL (or COUNT's 0).
+     */
+    scalars: new Map<string, number>(),
+    /** Reads that name a table twice through an alias and returned rows (plan.md §27.5 S7): self-joins, and EXISTS. */
+    aliases: new Map<string, number>(),
   };
+  // Compounds are rare in the mixed sessions on purpose; their coverage is sampled from their own generator.
+  for (const [{ tables: initial, steps }, options] of fc.sample(fc.tuple(sessionArb('compound'), optionsArb), { seed: COVERAGE_SEED, numRuns: N / 3 })) {
+    let tables: TableSpec[] = [...initial];
+    for (const q of steps) {
+      const result = runQuery(renderQuery(q), toDatabase(tables), options);
+      if (isWrite(q)) {
+        if (!result.error) tables = applyWrite(tables, q, result);
+        continue;
+      }
+      if (q.kind !== 'compound' || result.error || result.rows.length === 0) continue;
+      for (const step of q.ops) {
+        const key = step.op === 'union' ? `union${step.all ? '-all' : `:${options.aggregateStrategy ?? 'hash'}`}` : step.op;
+        stats.compounds.set(key, (stats.compounds.get(key) ?? 0) + 1);
+      }
+      if (new Set(q.members.map((m) => m.table)).size < q.members.length) stats.selfCompounds += 1;
+      if (q.order && result.rows.length > 1) stats.orderedCompounds += 1;
+    }
+  }
 
   for (const [{ tables: initial, steps }, options] of sessions) {
     let tables: TableSpec[] = [...initial];
@@ -121,6 +167,15 @@ describe('the generators reach what the oracle is meant to check', () => {
       if (isWrite(q) && planned.includes('"op":"IndexRangeScan"')) stats.rangeWrites += 1;
       if (isWrite(q) && result.events.some((e) => e.label.includes('so the key is free'))) stats.uniqueChecks += 1;
       if (result.events.some((e) => e.label.includes('finding no values at all'))) stats.emptySubqueries += 1;
+      if ((q.kind === 'join' || (q.kind === 'aggregate' && q.joins)) && result.rows.length > 0) {
+        for (const j of q.joins ?? []) {
+          if (j.type === 'right' || j.type === 'full') stats.newJoins.set(j.type, (stats.newJoins.get(j.type) ?? 0) + 1);
+          if (j.type === 'cross') {
+            const key = `cross${j.comma ? ':comma' : ''}${j.keyInWhere ? ':keyed' : ''}`;
+            stats.newJoins.set(key, (stats.newJoins.get(key) ?? 0) + 1);
+          }
+        }
+      }
       if (q.kind === 'join' && result.rows.length > 0) {
         if (q.joins.some((j) => j.type === 'left')) stats.leftJoins += 1;
         if (q.joins.length > 1) stats.chains += 1;
@@ -136,6 +191,22 @@ describe('the generators reach what the oracle is meant to check', () => {
       } else {
         stats.reads += 1;
         if (result.rows.length > 0) stats.readsWithRows += 1;
+        const exists = q.kind === 'compound' ? [] : q.where.flatMap((p) => (p.k === 'exists' ? [p] : []));
+        if (exists.length > 0) {
+          stats.existsReads += 1;
+          if (result.rows.length > 0) {
+            stats.existsWithRows += 1;
+            const algorithm = options.joinStrategy ?? 'cost';
+            for (const p of exists) {
+              if (!p.sub.key) stats.existsOnce += 1;
+              else {
+                const into = p.neg ? stats.antiJoins : stats.semiJoins;
+                into.set(algorithm, (into.get(algorithm) ?? 0) + 1);
+                if (p.sub.where.some((w) => w.k === 'colcmp' && w.a.table !== w.b.table)) stats.existsResiduals += 1;
+              }
+            }
+          }
+        }
         if (q.kind === 'join') stats.joins.set(options.joinStrategy ?? 'nested-loop', (stats.joins.get(options.joinStrategy ?? 'nested-loop') ?? 0) + (result.rows.length > 0 ? 1 : 0));
         if (q.kind === 'aggregate' && q.joins && result.rows.length > 0) {
           const strategy = options.aggregateStrategy ?? 'hash';
@@ -152,6 +223,34 @@ describe('the generators reach what the oracle is meant to check', () => {
           stats.orderedGroups.set(key, (stats.orderedGroups.get(key) ?? 0) + 1);
         }
         if (q.kind === 'aggregate' && q.group.length > 0) stats.aggregates.set(options.aggregateStrategy ?? 'hash', (stats.aggregates.get(options.aggregateStrategy ?? 'hash') ?? 0) + (result.rows.length > 0 ? 1 : 0));
+        if (result.rows.length > 0) {
+          const steps = q.kind === 'join' || q.kind === 'aggregate' ? (q.joins ?? []) : [];
+          const keys = [
+            ...(steps.some((j) => j.source) ? [q.kind === 'aggregate' ? 'self-join:grouped' : 'self-join'] : []),
+            ...('where' in q ? q.where.flatMap((w) => (w.k === 'exists' && w.sub.source ? [w.neg ? 'self-not-exists' : 'self-exists'] : [])) : []),
+          ];
+          for (const key of keys) stats.aliases.set(key, (stats.aliases.get(key) ?? 0) + 1);
+        }
+        if ('where' in q && result.rows.length > 0) {
+          for (const w of [...q.where, ...(q.kind === 'aggregate' && q.having ? [q.having] : [])]) {
+            walkPred(w, (p) => {
+              if (p.k !== 'scmp') return;
+              const empty = p.sub.where.some((c) => c.k === 'cmp' && c.ref.name === 'id' && c.op === '<' && c.lit === 0);
+              for (const key of [p.sub.pick.k, ...(empty ? ['empty'] : []), ...(q.kind === 'aggregate' && q.having === w ? ['having'] : [])]) {
+                stats.scalars.set(key, (stats.scalars.get(key) ?? 0) + 1);
+              }
+            });
+          }
+        }
+        if (q.kind === 'aggregate' && result.rows.length > 0) {
+          const read = [...q.aggs, ...(q.order?.by.k === 'agg' ? [q.order.by.agg] : [])];
+          const columns = new Set(read.flatMap((a) => (a.distinct && a.arg !== '*' ? [renderRef(a.arg)] : [])));
+          if (columns.size > 0) {
+            const key = `${options.aggregateStrategy ?? 'hash'}:${q.group.length > 0 ? 'grouped' : 'whole'}`;
+            stats.distinctAggregates.set(key, (stats.distinctAggregates.get(key) ?? 0) + 1);
+            if (columns.size > 1) stats.distinctAggregates.set('two-columns', (stats.distinctAggregates.get('two-columns') ?? 0) + 1);
+          }
+        }
       }
     }
   }
@@ -167,7 +266,7 @@ describe('the generators reach what the oracle is meant to check', () => {
   });
 
   it('generates every predicate form, including the negated ones and the NULL-in-list trap', () => {
-    for (const form of ['cmp', 'colcmp', 'litcmp', 'between', 'not-between', 'isnull', 'is-not-null', 'in', 'not-in', 'insub', 'not-insub', 'pnull', 'like', 'not-like', 'not', 'and', 'or', '<>', 'acmp', 'ccmp', 'hagg']) {
+    for (const form of ['cmp', 'colcmp', 'litcmp', 'between', 'not-between', 'isnull', 'is-not-null', 'in', 'not-in', 'insub', 'not-insub', 'pnull', 'like', 'not-like', 'not', 'and', 'or', '<>', 'acmp', 'ccmp', 'hagg', 'scmp']) {
       expect(stats.preds.get(form) ?? 0, `predicate form ${form}`).toBeGreaterThan(N / 30);
     }
   });
@@ -213,7 +312,9 @@ describe('the generators reach what the oracle is meant to check', () => {
     // 2026-10-15): the fixed seed now draws a different sample, and the new predicate forms dilute the plain ones the
     // composite lookups are built from — measured at 28.
     expect(stats.compositeScans, 'lookups through a composite index').toBeGreaterThan(20);
-    expect(stats.compositeCovering, 'queries a composite index covers').toBeGreaterThan(5);
+    // Measured at 5 since compound queries joined the mix (plan.md §27.5 S3, 2026-10-18): a covering scan needs a query
+    // projecting only a composite index's columns with an equality on its leading one, which a sample of 3,000 meets rarely.
+    expect(stats.compositeCovering, 'queries a composite index covers').toBeGreaterThan(3);
     expect(stats.compositeRefused, 'composite indexes refused for lack of a leading column').toBeGreaterThan(10);
     expect(stats.compositeWrites, 'writes finding rows through a composite index').toBeGreaterThan(10);
     expect(stats.compositeProbes, 'joins probing a composite index').toBeGreaterThan(3);
@@ -222,7 +323,8 @@ describe('the generators reach what the oracle is meant to check', () => {
   });
 
   it('runs LEFT JOINs and two-step chains to a non-empty answer, and empty subqueries (plan.md §25.4 C3)', () => {
-    expect(stats.leftJoins, 'joins with a LEFT step that returned rows').toBeGreaterThan(N / 30);
+    // Measured at 99 since RIGHT, FULL and CROSS steps joined the mix (plan.md §27.5 S4, 2026-10-19).
+    expect(stats.leftJoins, 'joins with a LEFT step that returned rows').toBeGreaterThan(80);
     // A second step joins a third, smaller table and must find partners in both, so fewer chains return rows than
     // single joins do — measured at 83 with the fixed seed above.
     expect(stats.chains, 'two-step join chains that returned rows').toBeGreaterThan(50);
@@ -250,6 +352,60 @@ describe('the generators reach what the oracle is meant to check', () => {
       expect(stats.joinAggregates.get(strategy) ?? 0, `join aggregates, ${strategy}`).toBeGreaterThan(50);
     }
     expect(stats.leftJoinGroups, 'GROUP BY over a LEFT JOIN, with rows').toBeGreaterThan(30);
+  });
+
+  it('runs EXISTS and NOT EXISTS as semi- and anti-joins under every join algorithm, and once when uncorrelated (plan.md §27.5 S1)', () => {
+    // Measured with the fixed seed above: 161 of 517 EXISTS reads return rows; semi-joins with rows 5–11 per algorithm,
+    // anti-joins 15–22 (a semi-join must find a partner past the outer WHERE, an anti-join only miss one); 29 with a
+    // residual; 33 uncorrelated.
+    expect(stats.existsWithRows / stats.existsReads, 'EXISTS reads that return rows').toBeGreaterThan(0.25);
+    // Since S4 reshuffled the sample (2026-10-19): semi-joins with rows 1–15 per algorithm, 42 in all; anti-joins 10–21.
+    // Every algorithm's semi- and anti-join path also has a unit test of its own (`exists.test.ts`).
+    for (const algorithm of ['cost', 'nested-loop', 'hash', 'sort-merge', 'index-nested-loop']) {
+      expect(stats.semiJoins.get(algorithm) ?? 0, `semi-joins by ${algorithm}`).toBeGreaterThan(0);
+      expect(stats.antiJoins.get(algorithm) ?? 0, `anti-joins by ${algorithm}`).toBeGreaterThan(5);
+    }
+    expect([...stats.semiJoins.values()].reduce((a, b) => a + b, 0), 'semi-joins with rows, in all').toBeGreaterThan(30);
+    expect(stats.existsResiduals, 'semi- and anti-joins with a residual').toBeGreaterThan(15);
+    expect(stats.existsOnce, 'uncorrelated EXISTS, run once').toBeGreaterThan(15);
+  });
+
+  it('runs RIGHT, FULL and CROSS joins to rows, a cross join in both forms and with its key in WHERE (plan.md §27.5 S4)', () => {
+    // Measured with the fixed seed above: RIGHT 62, FULL 72; cross joins 13–32 in each of their four forms.
+    for (const key of ['right', 'full']) expect(stats.newJoins.get(key) ?? 0, `joins with ${key}`).toBeGreaterThan(30);
+    for (const key of ['cross', 'cross:comma', 'cross:keyed', 'cross:comma:keyed']) {
+      expect(stats.newJoins.get(key) ?? 0, `joins with ${key}`).toBeGreaterThan(5);
+    }
+  });
+
+  it('reads a table twice under two names — joined to itself and in its own EXISTS — to rows (plan.md §27.5 S7)', () => {
+    // Measured with the fixed seed above: 45 self-joins and 57 grouped ones, 32 same-table EXISTS and 50 NOT EXISTS.
+    const floors = { 'self-join': 20, 'self-join:grouped': 25, 'self-exists': 15, 'self-not-exists': 25 };
+    for (const [key, floor] of Object.entries(floors)) expect(stats.aliases.get(key) ?? 0, `aliases, ${key}`).toBeGreaterThan(floor);
+  });
+
+  it('runs scalar subqueries to rows — aggregates and sorted columns, empty ones, and in HAVING (plan.md §27.5 S6)', () => {
+    // Measured with the fixed seed above: 53 aggregates, 23 sorted columns, 11 empty, 14 in HAVING.
+    const floors = { agg: 25, top: 10, empty: 5, having: 6 };
+    for (const [key, floor] of Object.entries(floors)) expect(stats.scalars.get(key) ?? 0, `scalar subqueries, ${key}`).toBeGreaterThan(floor);
+  });
+
+  it('runs DISTINCT aggregates to rows under both strategies, grouped and not, and over two columns (plan.md §27.5 S5)', () => {
+    // Measured with the fixed seed above: 32–42 per strategy and shape, 27 reading two DISTINCT columns.
+    for (const key of ['hash:grouped', 'hash:whole', 'sort:grouped', 'sort:whole']) {
+      expect(stats.distinctAggregates.get(key) ?? 0, `DISTINCT aggregates, ${key}`).toBeGreaterThan(15);
+    }
+    expect(stats.distinctAggregates.get('two-columns') ?? 0, 'DISTINCT aggregates over two columns').toBeGreaterThan(12);
+  });
+
+  it('runs every set operator to rows, UNION under both distinct strategies, a table against itself, and ordered (plan.md §27.5 S3)', () => {
+    // Measured with the fixed seed above, over 1,000 compound sessions: 81–170 per operator, 282 a table against itself,
+    // 201 ordered with two or more rows.
+    for (const key of ['union-all', 'union:hash', 'union:sort', 'intersect', 'except']) {
+      expect(stats.compounds.get(key) ?? 0, `compounds with ${key}`).toBeGreaterThan(50);
+    }
+    expect(stats.selfCompounds, 'a table compounded with itself').toBeGreaterThan(100);
+    expect(stats.orderedCompounds, 'an ordered compound').toBeGreaterThan(100);
   });
 
   it('writes through UNIQUE indexes without tripping them (plan.md §25.4 B3c)', () => {

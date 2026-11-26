@@ -43,7 +43,7 @@ const ENGINES: { kind: EngineKind; title: string; blurb: string; reference: stri
     kind: 'innodb',
     title: 'InnoDB (MySQL)',
     blurb:
-      'READ COMMITTED is a snapshot for each statement. REPEATABLE READ is one snapshot for plain reads and the latest committed row for writes, so a lost update gets through. SERIALIZABLE turns every read into a locking read. MySQL published only some of these cells; the rest are marked.',
+      'READ COMMITTED is a snapshot for each statement. REPEATABLE READ is one snapshot for plain reads and the latest committed row for writes, so a lost update gets through. SERIALIZABLE turns every read into a locking read, with next-key locks on the gaps between index keys. MySQL published only some of these cells; the rest are marked.',
     reference: 'MySQL 5.6, the cells its page ran',
   },
 ];
@@ -95,7 +95,7 @@ export function IsolationToolPage() {
     <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-4 p-6 sm:p-8">
       <PageHeader title="Isolation matrix">
         Ten anomalies from the Hermitage suite, each a fixed schedule of three transactions, run at four isolation
-        levels on three engines (plan.md §25.4 D5). A <strong>—</strong> means the anomaly <em>happened</em> in that
+        levels on three engines. A <strong>—</strong> means the anomaly <em>happened</em> in that
         schedule at that level; a <strong>✓</strong> means it did not. Every cell was computed by running the schedule
         and checking what its transactions saw and wrote, and opens the run. The tables are held against what
         PostgreSQL, SQL Server and MySQL publish — for MySQL only the cells its page ran; the{' '}
@@ -118,7 +118,7 @@ export function IsolationToolPage() {
             <p className="mb-2 text-label text-ink-dim">
               {engine.blurb} Compared with {engine.reference}.
             </p>
-            <ScrollRegion label={`Which anomalies can occur, by isolation level, under ${engine.title}`} className="overflow-x-auto">
+            <ScrollRegion label={`Which anomalies can occur, by isolation level, under ${engine.title}`} className="overflow-x-auto" stickyFirst>
               <table className="w-full min-w-[34rem] text-left text-label">
                 <caption className="sr-only">
                   Which anomalies can occur, by isolation level, under {engine.title}

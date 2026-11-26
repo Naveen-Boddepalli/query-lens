@@ -87,9 +87,11 @@ function lessonsOf(group: LessonGroupId) {
 const TRANSACTION_LESSONS = lessonsOf('transactions').filter((l) => l.id !== 'lock-table');
 
 describe('the transaction lessons are wired into the track', () => {
-  it('come last in the track, with unique ids', () => {
-    // The transactions group is last in the track; the lessons before it are checked in `storageLessons.test.ts`.
-    expect(LESSONS.slice(-TRANSACTION_LESSONS.length)).toEqual(TRANSACTION_LESSONS);
+  it('come just before the distributed group, with unique ids', () => {
+    // The transactions group is followed only by the distributed one (plan.md §27.5 X1–X4); the lessons before it are
+    // checked in `storageLessons.test.ts`.
+    const distributed = LESSON_GROUPS.find((g) => g.id === 'distributed')!.lessons.length;
+    expect(LESSONS.slice(-TRANSACTION_LESSONS.length - distributed, LESSONS.length - distributed)).toEqual(TRANSACTION_LESSONS);
     const ids = LESSONS.map((l) => l.id);
     expect(new Set(ids).size).toBe(ids.length);
     expect(TRANSACTION_LESSONS.length).toBe(7);

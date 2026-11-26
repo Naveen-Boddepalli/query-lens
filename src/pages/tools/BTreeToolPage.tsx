@@ -13,9 +13,23 @@ import {
 } from '../../engine/index.ts';
 import type { BPlusTree, DeleteStep } from '../../engine/index.ts';
 import { BTreePanel } from '../../ui/panels/BTreePanel.tsx';
-import { PageHeader } from '../../ui/PageHeader.tsx';
-import { btnPrimary, btnSecondary, inputField, panelSurface } from '../../ui/primitives.ts';
+import { controlLabel, inputField } from '../../ui/primitives.ts';
 import { useAddressBarQuery } from '../../ui/addressBar.ts';
+import {
+  CommandBar,
+  ControlGroup,
+  ControlRow,
+  hintIdFor,
+  Inspector,
+  MetricStrip,
+  ScenarioPicker,
+  Segmented,
+  StagePanel,
+  ToolHeader,
+  ToolSection,
+  ToolShell,
+  useMediaQuery,
+} from '../../ui/tool/index.ts';
 
 /**
  * The DSA-course standalone (plan.md §20.4, §21.3). The pipeline builds one of
@@ -31,6 +45,10 @@ import { useAddressBarQuery } from '../../ui/addressBar.ts';
  * the root-to-leaf path it walked; `delete` highlights the nodes it touched,
  * with `deleteKey`'s own step log narrated below.
  *
+ * Laid out on the tool workbench (`src/ui/tool/`): the starting keys and the fan-out in the inspector, the key
+ * field with Insert, Delete and Find in the command bar above the tree, and the narration under it. On a phone the
+ * tree is framed at a readable zoom and pans, rather than shrinking to fit 290px.
+ *
  * URL state: `keys` (the contents) and `fanout` (`maxKeys`), both parsed
  * defensively — a pasted link is a stranger's input, the same rule
  * `urlState.ts` follows.
@@ -40,6 +58,21 @@ const MIN_FANOUT = 3;
 const MAX_FANOUT = 6;
 const MAX_KEYS_IN_TREE = 200;
 const SAMPLE = [10, 20, 30, 40, 50, 15, 25, 35, 5, 45, 12, 28, 33, 48];
+const FANOUTS = Array.from({ length: MAX_FANOUT - MIN_FANOUT + 1 }, (_, i) => MIN_FANOUT + i);
+/** On a phone, the tree is never framed smaller than this on its own: node labels stay about 11px. */
+const PHONE_MIN_ZOOM = 0.8;
+
+/** Starting contents. The tree always holds its keys in order, so a scenario is just a set of keys. */
+const SCENARIOS: readonly { id: string; title: string; blurb: string; keys: readonly number[] }[] = [
+  { id: 'sample', title: 'Sample keys', blurb: 'Fourteen keys between 5 and 50: enough for a few levels of splits.', keys: SAMPLE },
+  {
+    id: 'sequence',
+    title: '1 to 20',
+    blurb: 'Twenty consecutive keys. Raise or lower the fan-out to watch the same keys take more or fewer levels.',
+    keys: Array.from({ length: 20 }, (_, i) => i + 1),
+  },
+  { id: 'empty', title: 'Empty tree', blurb: 'No keys: a single leaf that is also the root. Insert to grow it.', keys: [] },
+];
 
 const pointerFor = (key: number) => ({ pageId: Math.abs(key) >> 2, slot: Math.abs(key) & 3 });
 
@@ -183,141 +216,124 @@ export function BTreeToolPage() {
     setMessage(next.length === 0 ? 'Empty tree — a single leaf that is also the root.' : `Loaded ${next.length} keys.`);
   }
 
+  const phone = !useMediaQuery('(min-width: 640px)');
+  const sortedKey = (ks: readonly number[]) => [...new Set(ks)].sort((a, b) => a - b).join(',');
+  const scenario = SCENARIOS.find((sc) => sortedKey(sc.keys) === keys.join(','));
+  const nodeCount = Object.keys(tree.nodes).length;
+
   return (
-    <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-5 p-6 sm:p-8">
-      <PageHeader
-        breadcrumbs={[{ label: 'Tools', to: '/tools' }, { label: 'B+Tree' }]}
-        title="B+Tree sandbox"
-      >
-        Insert, delete, and search keys against a live B+Tree — the same structure the{' '}
-        <Link to="/playground" className="underline underline-offset-2 hover:text-ink">
-          Playground
-        </Link>{' '}
-        builds for an indexed column, here with nothing else attached. Watch it split on insert,
-        and borrow from a sibling or merge on delete.
-      </PageHeader>
-
-      {/* Control Toolbar */}
-      <div className="ql-sheen flex flex-wrap items-end gap-3 rounded-xl border border-edge bg-surface-2/80 p-4 shadow-neu-rest backdrop-blur-md">
-        <label htmlFor="fanout" className="flex flex-col gap-1.5 text-label text-ink-dim">
-          <span>Fan-out <span className="text-ink-dim/60 font-mono text-[0.75rem]">(max keys/node)</span></span>
-          <select
-            id="fanout"
-            value={fanout}
-            onChange={(e) => {
-              setFanout(Number(e.target.value));
-              setHighlight([]);
-              setOutcome(null);
-              setMessage(`Rebuilt tree at fan-out ${e.target.value}.`);
-            }}
-            className={`${inputField} w-24 tabular-nums`}
-          >
-            {Array.from({ length: MAX_FANOUT - MIN_FANOUT + 1 }, (_, i) => MIN_FANOUT + i).map((n) => (
-              <option key={n} value={n}>{n} keys</option>
-            ))}
-          </select>
-        </label>
-
-        <label htmlFor="key" className="flex flex-col gap-1.5 text-label text-ink-dim">
-          <span>Key</span>
-          <input
-            id="key"
-            type="text"
-            inputMode="numeric"
-            placeholder="e.g. 25"
-            value={keyInput}
-            onChange={(e) => { setKeyInput(e.target.value); }}
-            onKeyDown={(e) => { if (e.key === 'Enter') runFind(); }}
-            className={`${inputField} w-28 font-mono tabular-nums`}
-            spellCheck={false}
+    <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col p-4 sm:p-6 lg:p-8">
+      <ToolShell
+        category="indexing"
+        header={
+          <ToolHeader
+            id="btree"
+            title="B+Tree sandbox"
+            summary="Insert, delete and find keys, and watch the tree split, borrow and merge to stay balanced."
+            about={
+              <p>
+                The same structure the{' '}
+                <Link to="/playground" className="underline underline-offset-2 hover:text-ink">
+                  Playground
+                </Link>{' '}
+                builds for an indexed column, here with nothing else attached. Every edit is followed by a structural
+                check of the tree&rsquo;s invariants; if one ever fails, that is a real bug, shown rather than hidden.
+              </p>
+            }
           />
-        </label>
-
-        <div className="flex items-center gap-1.5">
-          <button type="button" onClick={runInsert} className={btnPrimary}>
-            Insert
-          </button>
-          <button type="button" onClick={runDelete} className={btnSecondary}>
-            Delete
-          </button>
-          <button type="button" onClick={runFind} className={btnSecondary}>
-            Find
-          </button>
-        </div>
-
-        <span className="mx-1 hidden h-6 w-px bg-edge sm:inline-block" aria-hidden="true" />
-
-        <div className="flex items-center gap-1.5">
-          <button type="button" onClick={() => { reseed(SAMPLE); }} className={btnSecondary}>
-            Sample
-          </button>
-          <button
-            type="button"
-            onClick={() => { reseed(Array.from({ length: 20 }, (_, i) => i + 1)); }}
-            className={btnSecondary}
+        }
+        inspector={
+          <Inspector summary={`${String(treeKeys.length)} keys · fan-out ${String(fanout)}`}>
+            <ScenarioPicker
+              id="bt-scenario"
+              label="Starting keys"
+              scenarios={SCENARIOS}
+              value={scenario?.id ?? null}
+              onPick={(id) => {
+                const picked = SCENARIOS.find((sc) => sc.id === id);
+                if (picked) reseed([...picked.keys]);
+              }}
+            />
+            <ControlGroup legend="Tree">
+              <ControlRow label="Fan-out" labelId="bt-fanout" stacked hint="The most keys a node holds before it splits.">
+                <Segmented
+                  labelledBy="bt-fanout"
+                  describedBy={hintIdFor('bt-fanout')}
+                  tone="stage"
+                  value={String(fanout)}
+                  onChange={(v) => {
+                    setFanout(Number(v));
+                    setHighlight([]);
+                    setOutcome(null);
+                    setMessage(`Rebuilt the tree at fan-out ${v}.`);
+                  }}
+                  options={FANOUTS.map((n) => ({ value: String(n), label: String(n), ariaLabel: `${String(n)} keys per node` }))}
+                />
+              </ControlRow>
+            </ControlGroup>
+          </Inspector>
+        }
+        command={
+          <CommandBar
+            primary={{ label: 'Insert', onClick: runInsert }}
+            secondary={[
+              { label: 'Delete', onClick: runDelete },
+              { label: 'Find', onClick: runFind },
+            ]}
           >
-            1&ndash;20
-          </button>
-          <button type="button" onClick={() => { reseed([]); }} className={btnSecondary}>
-            Clear
-          </button>
-        </div>
-      </div>
-
-      {/* Metrics Strip */}
-      <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
-        {[
-          { label: 'Tree Height', value: String(height(tree)), sub: 'root to leaf levels' },
-          { label: 'Resident Keys', value: String(treeKeys.length), sub: 'indexed values', color: 'text-accent' },
-          { label: 'Total Nodes', value: String(Object.keys(tree.nodes).length), sub: `fan-out ${fanout}` },
-          {
-            label: 'Invariants',
-            value: problems.length === 0 ? 'invariants hold' : `${problems.length} Fail`,
-            sub: 'structural check',
-            color: problems.length === 0 ? 'text-hit' : 'text-evict',
-          },
-        ].map((m) => (
-          <div key={m.label} className="ql-sheen rounded-xl border border-edge bg-surface-2/60 p-3 shadow-neu-rest backdrop-blur-sm">
-            <span className="block font-mono text-[0.7rem] uppercase tracking-wider text-ink-dim">{m.label}</span>
-            <span className={`mt-1 block truncate text-heading font-semibold tabular-nums ${m.color ?? 'text-ink'}`}>
-              {m.value}
-            </span>
-            <span className="text-[0.75rem] text-ink-dim">{m.sub}</span>
-          </div>
-        ))}
-      </div>
-
-      {/* Operation Log & Narration */}
-      <div className="ql-sheen rounded-xl border border-edge bg-surface-2/80 p-4 shadow-neu-rest backdrop-blur-sm">
-        <h3 className="mb-1 text-label font-medium tracking-[0.12em] text-ink-dim uppercase font-mono">
-          Operation Narration
-        </h3>
-        <p className="min-h-8 text-body leading-relaxed text-ink" aria-live="polite">
-          {message}
-        </p>
-      </div>
-
-      {problems.length > 0 && (
-        <ul className="rounded-xl border border-evict/40 bg-evict/10 p-3 text-label text-ink space-y-1">
-          {problems.map((p) => (
-            <li key={p} className="flex items-center gap-2">
-              <span className="font-mono text-evict font-bold">[FAIL]</span>
-              <span>{p}</span>
-            </li>
-          ))}
-        </ul>
-      )}
-
-      {/* Visualization Panel */}
-      <div className={`${panelSurface} min-h-96 flex-1 p-5`}>
-        <BTreePanel tree={display} path={highlight} outcome={outcome} />
-      </div>
-
-      {/* Keys Registry Strip */}
-      <div className="ql-sheen flex flex-wrap items-center gap-2 rounded-xl border border-edge bg-surface-2/60 p-3 shadow-neu-rest backdrop-blur-sm text-label font-mono text-[0.78rem]">
-        <span className="uppercase tracking-wider text-ink-dim">Keys:</span>
-        <span className="text-ink break-words">{treeKeys.length === 0 ? '(none)' : treeKeys.join(' ')}</span>
-      </div>
+            <label htmlFor="key" className={`flex flex-col gap-1 ${controlLabel}`}>
+              Key
+              <input
+                id="key"
+                type="text"
+                inputMode="numeric"
+                placeholder="e.g. 25"
+                value={keyInput}
+                onChange={(e) => { setKeyInput(e.target.value); }}
+                onKeyDown={(e) => { if (e.key === 'Enter') runFind(); }}
+                className={`${inputField} w-28 font-mono tabular-nums`}
+                spellCheck={false}
+              />
+            </label>
+          </CommandBar>
+        }
+        metrics={
+          <MetricStrip
+            items={[
+              { label: 'Height', value: height(tree), sub: 'levels, root to leaf' },
+              { label: 'Keys', value: treeKeys.length },
+              { label: 'Nodes', value: nodeCount, sub: `fan-out ${String(fanout)}` },
+              {
+                label: 'Invariants',
+                value: problems.length === 0 ? 'invariants hold' : `${String(problems.length)} failing`,
+                tone: problems.length === 0 ? 'hit' : 'evict',
+              },
+            ]}
+          />
+        }
+        stage={
+          <StagePanel title="Tree" legend={`fan-out ${String(fanout)} · ${String(nodeCount)} nodes`}>
+            {problems.length > 0 && (
+              <ul className="mb-3 space-y-1 rounded-xl border border-evict/40 bg-evict/10 p-3 text-label text-ink">
+                {problems.map((p) => (
+                  <li key={p} className="flex items-center gap-2">
+                    <span className="font-mono font-bold text-evict">Failed</span>
+                    <span>{p}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className="h-[26rem] min-h-0 lg:h-[28rem]">
+              <BTreePanel tree={display} path={highlight} outcome={outcome} {...(phone ? { minZoom: PHONE_MIN_ZOOM } : {})} />
+            </div>
+          </StagePanel>
+        }
+        narration={message}
+      >
+        <ToolSection title="Keys, in order" description="What a range scan along the leaf chain would read.">
+          <p className="font-mono text-label break-words text-ink">{treeKeys.length === 0 ? '(none)' : treeKeys.join(' ')}</p>
+        </ToolSection>
+      </ToolShell>
     </div>
   );
 }

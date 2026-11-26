@@ -1,6 +1,6 @@
 import { DEFAULT_DATASET, isDatasetId } from '../engine/index.ts';
 import { isReplacementPolicyName } from '../engine/types.ts';
-import type { DatasetId, ReplacementPolicyName, Row, SqlValue, Table } from '../engine/index.ts';
+import type { Database, DatasetId, ReplacementPolicyName, Row, SqlValue, Table } from '../engine/index.ts';
 
 /**
  * The address bar as the app's only persistence layer (plan.md §8, §15.2).
@@ -22,8 +22,13 @@ export interface ShareState {
   step: number;
   /** The preset dataset (plan.md §22.7); absent means the default (`users`). */
   dataset?: DatasetId;
-  /** Present only when the rows differ from the seed set. */
+  /** Present only when the rows differ from the seed set — the dataset's main table's (`d`). */
   rows?: Row[];
+  /**
+   * A multi-table preset's other tables whose rows differ from the seed (plan.md §27.5 S2), by name — each its own
+   * `d.<table>` parameter, so a link to `shop` after a `DELETE FROM orders` still reproduces it.
+   */
+  otherRows?: Record<string, Row[]>;
   /**
    * Assignment mode (plan.md §20.5): the playhead cannot move past the
    * prediction at the landing step until it is answered, and the prompt has no
@@ -106,10 +111,14 @@ function decodeRows(raw: string, columns: readonly string[]): Row[] | undefined 
   return rows;
 }
 
-/** Reads a shared moment out of a query string. Unknown fields are ignored. */
+/**
+ * Reads a shared moment out of a query string. Unknown fields are ignored. `columns` are the main table's; `others`,
+ * a multi-table preset's other tables' columns by name (plan.md §27.5 S2) — a `d.<table>` naming none of them is ignored.
+ */
 export function readShareState(
   search: string,
   columns: readonly string[],
+  others: Readonly<Record<string, readonly string[]>> = {},
 ): Partial<ShareState> {
   const params = new URLSearchParams(search);
   const state: Partial<ShareState> = {};
@@ -144,11 +153,25 @@ export function readShareState(
     if (decoded !== undefined) state.rows = decoded;
   }
 
+  for (const [name, tableColumns] of Object.entries(others)) {
+    const raw = params.get(`${PARAM.rows}.${name}`);
+    if (raw === null) continue;
+    const decoded = decodeRows(raw, tableColumns);
+    if (decoded !== undefined) state.otherRows = { ...state.otherRows, [name]: decoded };
+  }
+
   return state;
 }
 
-/** The query string for a moment, without the leading `?`. */
-export function encodeShareState(state: ShareState, table: Table | undefined): string {
+/**
+ * The query string for a moment, without the leading `?`. `table` is the main table, whose columns `rows` are encoded
+ * by; `tables` holds the others (plan.md §27.5 S2), each of `otherRows` encoded by its own columns, in name order.
+ */
+export function encodeShareState(
+  state: ShareState,
+  table: Table | undefined,
+  tables: Readonly<Record<string, Table>> = {},
+): string {
   const params = new URLSearchParams();
   params.set(PARAM.sql, state.sql);
   params.set(PARAM.policy, state.policy);
@@ -164,7 +187,36 @@ export function encodeShareState(state: ShareState, table: Table | undefined): s
   // reproducible from the code, so putting it in every link would be 2 kB of
   // URL saying "unchanged".
   if (state.rows && table) params.set(PARAM.rows, encodeRows({ ...table, rows: state.rows }));
+  for (const name of Object.keys(state.otherRows ?? {}).sort()) {
+    const other = tables[name];
+    const rows = state.otherRows?.[name];
+    if (other && rows) params.set(`${PARAM.rows}.${name}`, encodeRows({ ...other, rows }));
+  }
   return params.toString();
+}
+
+/** A preset's tables other than `main`, by name, with their columns — what `readShareState` checks `d.<table>` against (plan.md §27.5 S2). */
+export function otherColumnsOf(seed: Database, main: string): Record<string, readonly string[]> {
+  return Object.fromEntries(Object.entries(seed.tables).filter(([name]) => name !== main).map(([name, t]) => [name, t.columns]));
+}
+
+/**
+ * A preset's seed database with edited rows put back — `main`'s from `rows`, and each other table's from `otherRows`
+ * (plan.md §27.5 S2). How a link and a trace file restore the data they carry; a table with no edit keeps its seed.
+ */
+export function presetWithRows(
+  seed: Database,
+  main: string,
+  rows: readonly Row[] | null | undefined,
+  otherRows: Readonly<Record<string, Row[]>> = {},
+): Database {
+  const tables = { ...seed.tables };
+  const edits: [string, readonly Row[] | null | undefined][] = [[main, rows], ...Object.entries(otherRows)];
+  for (const [name, edited] of edits) {
+    const table = tables[name];
+    if (table && edited) tables[name] = { ...table, rows: [...edited] };
+  }
+  return { tables };
 }
 
 /**

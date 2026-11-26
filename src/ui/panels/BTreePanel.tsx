@@ -8,9 +8,11 @@ export interface BTreePanelProps {
   tree: IndexNode | null;
   path: readonly string[];
   outcome: 'searching' | 'found' | 'not-found' | null;
+  /** Passed to FlowTree: the smallest zoom it frames at on its own before it pans instead. */
+  minZoom?: number;
 }
 
-export function BTreePanel({ tree, path, outcome }: BTreePanelProps) {
+export function BTreePanel({ tree, path, outcome, minZoom }: BTreePanelProps) {
   // The element FlowTree portals its zoom buttons into (see the header below).
   const [toolbar, setToolbar] = useState<HTMLDivElement | null>(null);
 
@@ -82,6 +84,7 @@ export function BTreePanel({ tree, path, outcome }: BTreePanelProps) {
           compact
           controls
           toolbarTarget={toolbar}
+          {...(minZoom !== undefined ? { minZoom } : {})}
         />
       </div>
     </div>

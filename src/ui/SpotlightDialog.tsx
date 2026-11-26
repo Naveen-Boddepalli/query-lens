@@ -24,7 +24,7 @@ export interface SpotlightItem {
 }
 
 const STATIC_ITEMS: readonly Omit<SpotlightItem, 'action'>[] = [
-  // --- Tools (19) ---
+  // --- Tools (25) ---
   {
     id: 'tool-buffer-pool',
     title: 'Buffer pool sandbox',
@@ -244,6 +244,61 @@ const STATIC_ITEMS: readonly Omit<SpotlightItem, 'action'>[] = [
     description: 'Concurrent B+Tree index traversal: naive locking vs. lock coupling (crabbing) vs. optimistic coupling.',
     tags: ['latch', 'crabbing', 'coupling', 'concurrency', 'multithreading', 'btree'],
     href: '/tools/latch-crabbing',
+  },
+  {
+    id: 'tool-histograms',
+    title: 'Histograms',
+    category: 'tools',
+    filterCategory: 'tools',
+    subtitle: 'Query • Intermediate',
+    badge: 'Equi-depth, 1–100 buckets',
+    description: 'ANALYZE with the bucket count you choose: the equi-depth histogram, a range estimate read off it, and its q-error.',
+    tags: ['histogram', 'analyze', 'statistics', 'selectivity', 'cardinality', 'estimate', 'buckets'],
+    href: '/tools/histograms',
+  },
+  {
+    id: 'tool-parallel',
+    title: 'Parallel execution',
+    category: 'tools',
+    filterCategory: 'tools',
+    subtitle: 'Query • Advanced',
+    badge: 'Morsels, up to 8 workers',
+    description: 'Morsel-driven parallelism with static ranges, a shared queue or work stealing; exchange operators and a parallel hash join.',
+    tags: ['parallel', 'morsel', 'workers', 'exchange', 'work-stealing', 'speedup', 'amdahl'],
+    href: '/tools/parallel',
+  },
+  {
+    id: 'tool-partitioning',
+    title: 'Partitioning',
+    category: 'tools',
+    filterCategory: 'tools',
+    subtitle: 'Distributed • Intermediate',
+    badge: 'Hash, range, consistent hashing',
+    description: 'A table spread over nodes by hash, range or consistent hashing; count the rows that move, and join across partitions.',
+    tags: ['partitioning', 'sharding', 'consistent-hashing', 'distributed', 'nodes', 'shuffle', 'broadcast'],
+    href: '/tools/partitioning',
+  },
+  {
+    id: 'tool-2pc',
+    title: 'Two-phase commit',
+    category: 'tools',
+    filterCategory: 'tools',
+    subtitle: 'Distributed • Advanced',
+    badge: 'Presumed abort, scripted failures',
+    description: 'A coordinator and participants commit one transaction across machines; crash either side or lose a message.',
+    tags: ['2pc', 'two-phase-commit', 'distributed', 'coordinator', 'commit', 'abort', 'in-doubt'],
+    href: '/tools/2pc',
+  },
+  {
+    id: 'tool-raft',
+    title: 'Raft',
+    category: 'tools',
+    filterCategory: 'tools',
+    subtitle: 'Distributed • Advanced',
+    badge: '4 safety properties checked',
+    description: 'Leader election and log replication over a scripted schedule of lost messages, partitions and crashes.',
+    tags: ['raft', 'consensus', 'leader', 'election', 'replication', 'log', 'distributed'],
+    href: '/tools/raft',
   },
 
   // --- Pipeline Stages (8) ---
@@ -874,7 +929,7 @@ export function SpotlightDialog({ onClose }: SpotlightDialogProps) {
       className="fixed inset-0 z-50 flex items-start justify-center pt-[8vh] sm:pt-[12vh] px-3 sm:px-4"
       role="presentation"
     >
-      {/* Minimal Backdrop — keeps underlying content sharp so the lens refracts vivid color */}
+      {/* Click-outside Backdrop — keeps the rest of the page unblurred like macOS Spotlight */}
       <div
         onClick={handleClose}
         className="ql-liquid-backdrop fixed inset-0"

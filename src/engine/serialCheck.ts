@@ -19,8 +19,11 @@ export type Fate = 'committed' | 'rolled-back' | 'aborted' | 'open';
 
 export interface TransactionOutcome {
   session: string;
-  /** The statements that ran in it, in order, with the rows each returned. Statements that failed are not here. */
-  statements: { sql: string; rows: Row[]; write: boolean }[];
+  /**
+   * The statements that ran in it, in order, with the rows each returned and where in the run's record each ran.
+   * Statements that failed are not here.
+   */
+  statements: { sql: string; rows: Row[]; write: boolean; at: number }[];
   fate: Fate;
   /** Why the protocol ended it, for `aborted`. */
   reason?: string;
@@ -94,7 +97,7 @@ export function transactionsOf(result: ScheduleResult): TransactionOutcome[] {
       return;
     }
     if (r.kind === 'statement' && r.error === undefined && r.run !== undefined) {
-      const done = { sql: r.sql, rows: r.rows, write: r.run.write !== undefined };
+      const done = { sql: r.sql, rows: r.rows, write: r.run.write !== undefined, at };
       if (txn) {
         txn.statements.push(done);
         if (done.write) txn.writes = true;
@@ -116,9 +119,9 @@ export function transactionsOf(result: ScheduleResult): TransactionOutcome[] {
 }
 
 export interface SerialCheck {
-  /** The table a serial run of the committed transactions leaves, in the natural order asked for. */
+  /** The table a serial run of the committed transactions leaves, in the natural order asked for — `accounts`, or the start's first table. */
   rows: Row[];
-  /** True when the table that is left, ignoring row order, is the one that serial run leaves. */
+  /** True when every table that is left, ignoring row order, is the one that serial run leaves. */
   sameTable: boolean;
   /** The first statement that serial run would have answered differently, if any. */
   differentRead: { session: string; sql: string; saw: Row[]; serialSaw: Row[] } | null;
@@ -190,7 +193,12 @@ export function serialCheck(
   budget: number = SEARCH_BUDGET,
 ): SerialCheck {
   const committed = transactionsOf(result).filter((t) => t.fate === 'committed');
-  const target = result.committed.tables.accounts?.rows ?? [];
+  // Every table of the database the run started from — `accounts` here, `test` for a Hermitage schedule (plan.md §27.5
+  // T1 holds its precedence graph against this check on those too).
+  const names = Object.keys(start.tables);
+  const main = names.includes('accounts') ? 'accounts' : (names[0] ?? 'accounts');
+  const sameState = (db: Database): boolean =>
+    names.every((name) => sameRows(result.committed.tables[name]?.rows ?? [], db.tables[name]?.rows ?? []));
   const byCommit = [...committed].sort((a, b) => a.ended - b.ended);
   const byBegin = [...committed].sort((a, b) => a.began - b.began);
 
@@ -206,8 +214,8 @@ export function serialCheck(
   };
 
   const natural = attempt(order === 'begin' ? byBegin : byCommit);
-  const naturalRows = natural.db.tables.accounts?.rows ?? [];
-  const sameTable = sameRows(target, naturalRows);
+  const naturalRows = natural.db.tables[main]?.rows ?? [];
+  const sameTable = sameState(natural.db);
   const base = {
     rows: naturalRows,
     sameTable,
@@ -219,7 +227,7 @@ export function serialCheck(
   }
 
   const other = attempt(order === 'begin' ? byCommit : byBegin);
-  if (sameRows(target, other.db.tables.accounts?.rows ?? []) && other.different === null) {
+  if (sameState(other.db) && other.different === null) {
     const found = (order === 'begin' ? byCommit : byBegin).map((t) => t.session);
     return { ...base, serializable: true, found, exhaustive: true };
   }
@@ -230,7 +238,7 @@ export function serialCheck(
   let exhaustive = true;
   const failed = new Set<string>();
   const place = (db: Database, placed: number[], mask: bigint): number[] | null => {
-    if (placed.length === committed.length) return sameRows(target, db.tables.accounts?.rows ?? []) ? placed : null;
+    if (placed.length === committed.length) return sameState(db) ? placed : null;
     const key = `${String(mask)}|${stateKey(db)}`;
     if (failed.has(key)) return null;
     for (let i = 0; i < committed.length; i += 1) {

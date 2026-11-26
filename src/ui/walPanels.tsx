@@ -342,7 +342,7 @@ function RecoveryStepper({
             max={rows.length}
             value={at}
             onChange={(e) => { onChange(Number(e.target.value)); }}
-            className="flex-1 accent-[var(--color-accent)]"
+            className="min-w-0 flex-1 accent-[var(--color-accent)]"
           />
         </label>
         <button

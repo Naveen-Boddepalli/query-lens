@@ -16,16 +16,19 @@ the current one. This page is for building one by hand.
 | `p` | Eviction policy — `lru`, `clock`, `fifo`, `second-chance`, `optimal`, `midpoint`, `lru-k` or `two-q`. An unknown value is ignored | `p=two-q` |
 | `x` | Predict-then-reveal — `1` on, `0` off | `x=0` |
 | `s` | The step to land on | `s=25` |
-| `t` | Preset dataset — `users` (default), `orders`, `logins`, `employees`, `transactions` or `customers`. Absent means `users`; an unknown value falls back to it | `t=orders` |
+| `t` | Preset dataset — `users` (default), `orders`, `logins`, `employees`, `transactions`, `customers` or `shop`. Absent means `users`; an unknown value falls back to it | `t=shop` |
 | `l` | Assignment lock — `l=1` seals the trace at step `s` until its prediction is answered (no skip, no scrubbing ahead); forces `x=1` | `l=1` |
 | `d` | Custom row data, only present when the seed rows have been edited | *(generated, not hand-written — see below)* |
+| `d.<table>` | The same, for one of a multi-table preset's other tables — `d.orders` on `shop` | *(generated — see below)* |
 | `present` | `present=1` opens **presenter mode** — a full-viewport view of the current stage for a lecture hall, keyboard-driven, with prediction suppressed. `Esc` leaves it | `present=1` |
+| `detail` | `detail=novice` or `detail=expert` tells the trace's narration at that level of detail. Novice adds a plain-words sentence the first time each kind of step happens; expert gives a terse line of the step's own fields. Absent means standard, or the default chosen in Settings. A view flag, like `present`: written back when you change it, not part of the moment | `detail=novice` |
 | `tour` | `tour=1` opens the **60-second tour** on load — five spotlights over the real interface, for a course link or a first walkthrough. `Esc` or *Skip* leaves it; it is not written back into the URL | `tour=1` |
 
 A link that omits a parameter falls back to that setting's default, so the shortest working link is
 just `?q=...`.
 
-The [trace inspector](/trace) reads the same `q`, `p`, `d` and `t` keys, so a link copied from the
+The [trace inspector](/trace) reads the same `q`, `p`, `d`, `d.<table>` and `t` keys, and keeps them in every link it
+writes, so a link copied from the
 Playground opens there and shows the raw event stream for that exact query (it ignores `x` and `s` —
 the whole trace is on one screen). Its `p` also accepts the three buffer-pool-only policies
 (`fifo`, `second-chance`, `optimal`); the Playground still recognises only `lru` and `clock`. Add
@@ -47,7 +50,7 @@ stranger — so every field is capped and anything malformed or out of range fal
 rather than erroring:
 
 - **`q`**: 2000 characters
-- **`d`** (custom rows): 500 characters per cell, 500 rows
+- **`d`** and each **`d.<table>`** (custom rows): 500 characters per cell, 500 rows
 - **`s`**: an integer from 0 to 100,000
 
 ## Custom row data (`d`)
@@ -56,13 +59,19 @@ Only appears once you've edited the seed data through **Edit data**, so a link t
 stays short. It's a generated, compact encoding — not meant to be written by hand — that round-trips
 through the app: edit rows, copy the link, and reopening it reproduces exactly that table.
 
+`shop` has three tables (plan.md §27.5 S2). Its main one, `customers`, travels as `d`; `orders` and `products` each
+as `d.orders` and `d.products` — and only a table whose rows changed, by **Edit data** (pick the table beside the
+button) or by an `INSERT`, `UPDATE` or `DELETE` you ran. A `d.<table>` naming a table the preset does not have is
+ignored; one whose rows do not fit that table is dropped, like a bad `d`.
+
 ## Trace files
 
 For a dataset too large to sit comfortably in a URL — or a bug report you want the seed data attached
 to — **Download trace** (next to *Copy link to this step*) saves the same moment as a small JSON
 file, and **Load trace** restores it. The file carries `sql`, `policy`, `predictOn`, `step`, the
-edited `rows` (or `null`), and a build stamp. It deliberately does **not** store the event stream:
+edited `rows` (or `null`), a multi-table preset's other edited tables as `otherRows` (only when there are any), and
+a build stamp. It deliberately does **not** store the event stream:
 the engine is deterministic, so those re-derive exactly — use the [trace inspector](/trace)'s *Copy
 JSON* if you need them frozen. It is parsed with the same suspicion as the URL — a field that is
-missing, out of range, or a row that doesn't match the `users` schema fails the whole load rather
+missing, out of range, or a row that doesn't match its table's schema fails the whole load rather
 than half-applying it.

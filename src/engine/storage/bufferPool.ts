@@ -132,6 +132,25 @@ function ringReason(size: number): string {
  * caller's business, which is why heap and index pages can share one pool and
  * compete for the same frames.
  */
+/**
+ * Every frame is pinned, so a page has nowhere to be read into. A scan holds the page it is reading pinned while the
+ * scans inside a nested loop run, so a plan that reads more tables at once than the pool has frames runs out —
+ * PostgreSQL stops with "no unpinned buffers available". Before plan.md §27.5 S7 a `SeqScan` here quietly ended, as if
+ * its table had: the SQLite oracle found the answers that made wrong once self-joins let a query read four tables at
+ * once. Thrown by the scan, reported by `runQuery` as the query's error.
+ */
+export class PoolExhausted extends Error {
+  readonly pageId: number;
+  readonly frames: number;
+
+  constructor(pageId: number, frames: number) {
+    super(`every one of ${String(frames)} frames is pinned`);
+    this.name = 'PoolExhausted';
+    this.pageId = pageId;
+    this.frames = frames;
+  }
+}
+
 export function createBufferPool(
   pageCount: number,
   options: EngineOptions,

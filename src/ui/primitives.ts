@@ -16,14 +16,14 @@
 
 /* ----- buttons ----------------------------------------------------------- */
 
-/** The one primary action on a view. Translucent-accent fill, crisp border,
- *  clean elevation, and hover glow so a resting page stays calm. */
+/** The one primary action on a view. A solid iris→orchid fill (`.ql-fill-accent`
+ *  in index.css) with white text — the only saturated block on most screens, so
+ *  the eye lands on it first. Hover lifts it a hair and lights the glow. */
 export const btnPrimary =
-  'inline-flex items-center justify-center gap-1.5 rounded-lg border border-accent/60 ' +
-  'bg-accent/15 px-4 py-2 text-body font-medium text-ink shadow-e1 transition duration-150 ease-out select-none ' +
-  'hover:border-accent hover:bg-accent/25 hover:shadow-glow ' +
-  'active:translate-y-px active:bg-accent/35 ' +
-  'disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-accent/60 disabled:hover:bg-accent/15 disabled:hover:shadow-e1 disabled:active:translate-y-0';
+  'ql-fill-accent inline-flex items-center justify-center gap-1.5 rounded-lg border ' +
+  'px-4 py-2 text-body font-semibold transition duration-150 ease-out select-none ' +
+  'hover:-translate-y-px active:translate-y-px ' +
+  'disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:translate-y-0 disabled:active:translate-y-0';
 
 /** A secondary action that sits next to the primary one. */
 export const btnSecondary =
@@ -40,6 +40,15 @@ export const btnGhost =
   'hover:border-edge hover:bg-surface-3 hover:text-ink active:translate-y-px ' +
   'disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-transparent disabled:hover:bg-transparent disabled:hover:text-ink-dim disabled:hover:shadow-none disabled:active:translate-y-0';
 
+/** An action that destroys state on purpose: Crash, Delete all. Not the primary
+ *  (that is the thing you came to do), but never just another secondary either:
+ *  an outline in the evict red, filled on hover so the press is a decision. */
+export const btnCritical =
+  'inline-flex items-center justify-center gap-1.5 rounded-lg border border-evict/60 ' +
+  'bg-transparent px-3.5 py-2 text-body font-semibold text-evict transition duration-150 ease-out select-none ' +
+  'hover:bg-evict hover:text-surface active:translate-y-px ' +
+  'disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-evict disabled:active:translate-y-0';
+
 /* ----- surfaces -------------------------------------------------------- */
 
 /** A static elevated container — a panel that holds a diagram or an editor. */
@@ -50,10 +59,11 @@ export const panelSurface =
 export const card =
   'ql-sheen rounded-xl border border-edge bg-surface-2 p-4 shadow-e1';
 
-/** A card that is also a link or a button: lifts and lights its edge on hover. */
+/** A card that is also a link or a button: lifts on hover, and its edge lights
+ *  up in the stage spectrum (`.ql-ring-spectrum`). */
 export const cardInteractive =
-  'cell ql-sheen group block rounded-xl border border-edge bg-surface-2 p-4 shadow-e1 transition duration-150 ease-out ' +
-  'hover:-translate-y-0.5 hover:border-accent/50 hover:bg-surface-3 hover:shadow-e2 ' +
+  'cell ql-sheen ql-ring-spectrum group block rounded-xl border border-edge bg-surface-2 p-4 shadow-e1 transition duration-150 ease-out ' +
+  'hover:-translate-y-0.5 hover:border-transparent hover:shadow-e2 ' +
   'active:translate-y-0';
 
 /* ----- text -------------------------------------------------------------- */
@@ -62,6 +72,14 @@ export const cardInteractive =
  *  and lowercase on purpose: the wide-tracked all-caps accent version reads as
  *  a template. */
 export const eyebrow = 'text-label font-medium text-ink-dim';
+
+/** The label beside or above a control. Sentence case, never a mono all-caps kicker. */
+export const controlLabel = 'text-label text-ink-dim';
+
+/** A readout's number and its name, the one KPI style every tool shares
+ *  (`MetricStrip`), replacing the per-page `text-[0.7rem]` uppercase mono labels. */
+export const metricValue = 'text-heading font-semibold tabular-nums text-ink';
+export const metricLabel = 'text-label text-ink-dim';
 
 /** A small rounded tag — a status, a hint, a count. */
 export const pill =
@@ -72,7 +90,7 @@ export const pill =
 
 /** An `<input>`, `<select>` or `<textarea>`. */
 export const inputField =
-  'rounded-lg border border-edge bg-surface-3 px-2.5 py-1.5 text-body text-ink shadow-e1 transition duration-150 ease-out ' +
+  'max-w-full rounded-lg border border-edge bg-surface-3 px-2.5 py-1.5 text-body text-ink shadow-e1 transition duration-150 ease-out ' +
   'hover:border-ink-dim/50 focus:border-accent disabled:cursor-not-allowed disabled:opacity-40';
 
 /** One option in a segmented control or radio group. Compose with the
@@ -80,7 +98,7 @@ export const inputField =
 export const segBase =
   'inline-flex items-center justify-center rounded-lg border px-3 py-1.5 text-body font-medium select-none ' +
   'transition duration-150 ease-out active:translate-y-px';
-export const segOn = 'border-accent bg-accent-soft text-ink shadow-e1';
+export const segOn = 'border-accent/70 bg-accent-soft text-ink shadow-e1';
 export const segOff =
   'border-edge text-ink-dim hover:border-ink-dim/50 hover:bg-surface-3 hover:text-ink';
 

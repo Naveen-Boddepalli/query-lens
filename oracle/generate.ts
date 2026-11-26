@@ -10,8 +10,8 @@
 
 import fc from 'fast-check';
 import type { EngineOptions, IndexBuildOptions, JoinAlgorithm, ReplacementPolicyName, Row, SqlValue } from '../src/engine/types.ts';
-import { renderRef } from './model.ts';
-import type { AggItem, Arith, ArithOp, ColSpec, ColType, GroupOrderSpec, JoinStep, Op, Pred, Query, ReadQuery, Ref, SubSelect, TableSpec, WriteQuery } from './model.ts';
+import { crossKeysOf, renderAgg, renderRef } from './model.ts';
+import type { AggItem, Arith, ArithOp, ColSpec, ColType, ExistsSub, ScalarSub, GroupOrderSpec, JoinStep, MemberSelect, Op, Pred, Query, ReadQuery, Ref, SubSelect, TableSpec, WriteQuery } from './model.ts';
 
 /* -------------------------------------------------------------------------- */
 /* Tables                                                                      */
@@ -232,9 +232,22 @@ const computedArb = (refs: readonly Ref[]): fc.Arbitrary<{ e: Arith; alias: stri
 /** A table an `IN (subquery)` may read: its columns unqualified, and literals drawn from its own rows. */
 export interface SubSource {
   table: string;
+  /** The stored table, when `table` is an alias for it (plan.md §27.5 S7). */
+  source?: string;
   refs: Ref[];
   pool: Pool;
 }
+
+/**
+ * The names `t` goes by when a query reads it twice (plan.md §27.5 S7): joined to itself, and in its own `EXISTS`.
+ * Distinct, so a self-join and a same-table EXISTS can share a query.
+ */
+export const SELF_JOIN = 'ts';
+export const SELF_EXISTS = 'tx';
+
+/** `pool`, reading an alias of `t` as `t` itself — the values its columns hold are `t`'s. */
+export const aliasAwarePool = (pool: Pool, t: string): Pool => (ref) =>
+  pool(ref.table === SELF_JOIN || ref.table === SELF_EXISTS ? { ...ref, table: t } : ref);
 
 export function subSources(tables: readonly TableSpec[], pool: Pool): SubSource[] {
   return tables.map((t) => ({ table: t.name, refs: refsOf(t, false), pool: (ref) => pool({ name: ref.name, table: t.name }) }));
@@ -261,6 +274,85 @@ function subArb(outer: readonly Ref[], subs: readonly SubSource[]): fc.Arbitrary
       return where.map((w): Pred => ({ k: 'insub', ref, neg, sub: { table: source.table, col: col.name, where: w } satisfies SubSelect }));
     }),
   ];
+}
+
+/**
+ * `ref op (SELECT …)` (plan.md §27.5 S6) over every outer column and every source it can be compared with: an aggregate
+ * of the source with no GROUP BY, or one of its columns sorted by itself and cut to one row (`ScalarSub`). COUNT
+ * compares with any number; SUM and AVG only over whole numbers, so the two engines' float rounding never decides a
+ * comparison; MIN, MAX and the sorted column with a column of their own type. One in four finds no row on purpose
+ * (`id < 0`), where an aggregate is NULL — COUNT's 0 aside — and a sorted column is NULL too.
+ */
+function scalarArb(outer: readonly Ref[], subs: readonly SubSource[]): fc.Arbitrary<Pred>[] {
+  const candidates = outer.flatMap((ref) =>
+    subs.flatMap((source) => {
+      const picks: ScalarSub['pick'][] = [];
+      if (numeric(ref.type)) picks.push({ k: 'agg', agg: { fn: 'COUNT', arg: '*' } });
+      for (const col of source.refs) {
+        if (numeric(ref.type)) picks.push({ k: 'agg', agg: { fn: 'COUNT', arg: col, distinct: true } });
+        if (numeric(ref.type) && col.type === 'int') {
+          picks.push({ k: 'agg', agg: { fn: 'SUM', arg: col } }, { k: 'agg', agg: { fn: 'AVG', arg: col } });
+        }
+        if (comparable(ref, col)) {
+          picks.push({ k: 'agg', agg: { fn: 'MIN', arg: col } }, { k: 'agg', agg: { fn: 'MAX', arg: col } });
+          picks.push({ k: 'top', col: col.name, dir: 'asc' }, { k: 'top', col: col.name, dir: 'desc' });
+        }
+      }
+      return picks.map((pick) => ({ ref, source, pick }));
+    }),
+  );
+  if (candidates.length === 0) return [];
+  return [
+    fc.tuple(fc.constantFrom(...candidates), opArb).chain(([{ ref, source, pick }, op]) => {
+      const id = source.refs.find((r) => r.name === 'id')!;
+      const where: fc.Arbitrary<Pred[]> = fc.oneof(
+        { weight: 3, arbitrary: fc.constant<Pred[]>([]) },
+        { weight: 3, arbitrary: fc.array(leafArb(source.refs, source.pool), { minLength: 1, maxLength: 2 }) },
+        { weight: 2, arbitrary: fc.constant<Pred[]>([{ k: 'cmp', ref: id, op: '<', lit: 0 }]) },
+      );
+      return where.map((w): Pred => ({ k: 'scmp', ref, op, sub: { table: source.table, pick, where: w } }));
+    }),
+  ];
+}
+
+/**
+ * Zero or one `[NOT] EXISTS` to add to a SELECT's `where` list (plan.md §27.5 S1), reading one of `sources` — a table
+ * the outer query does not have — against `outer`, the outer query's columns, qualified (the subquery can see both).
+ * Mostly correlated, through the foreign-key shape when there is one (`u.t_id = t.id`, `w.u_id = u.id`) and any
+ * comparable pair otherwise; with a key, a further condition may name both sides (the semi-join's residual). Without
+ * one it names only its own table, so it is uncorrelated — QueryLens refuses a correlation with no equality to join on.
+ */
+export function existsArb(outer: readonly Ref[], sources: readonly SubSource[]): fc.Arbitrary<Pred[]> {
+  if (sources.length === 0 || outer.length === 0) return fc.constant([]);
+  const one = fc.tuple(fc.constantFrom(...sources), fc.boolean()).chain(([source, neg]) => {
+    const inner = source.refs.map((r) => ({ ...r, table: source.table }));
+    const pool: Pool = (ref) => source.pool({ name: ref.name });
+    const fks = inner.flatMap((i) => outer.filter((o) => (i.name === `${o.table}_id` && o.name === 'id')).map((o) => ({ inner: i, outer: o })));
+    const pairs = inner.flatMap((i) => outer.filter((o) => comparable(i, o)).map((o) => ({ inner: i, outer: o })));
+    const key: fc.Arbitrary<ExistsSub['key']> = fc.oneof(
+      { weight: fks.length > 0 ? 5 : 0, arbitrary: fks.length > 0 ? fc.constantFrom(...fks) : fc.constant(undefined) },
+      { weight: pairs.length > 0 ? 2 : 0, arbitrary: pairs.length > 0 ? fc.constantFrom(...pairs) : fc.constant(undefined) },
+      { weight: 1, arbitrary: fc.constant(undefined) },
+    );
+    // Conditions on the subquery's own table, now and then: each one on top of the key makes a match rarer.
+    const own = fc.oneof(
+      { weight: 3, arbitrary: fc.constant<Pred[]>([]) },
+      { weight: 1, arbitrary: fc.array(leafArb(inner, pool), { minLength: 1, maxLength: 2 }) },
+    );
+    const residual = (k: ExistsSub['key']): fc.Arbitrary<Pred[]> =>
+      k === undefined || pairs.length === 0
+        ? fc.constant([])
+        : fc.oneof(
+            { weight: 3, arbitrary: fc.constant<Pred[]>([]) },
+            { weight: 1, arbitrary: fc.tuple(fc.constantFrom(...pairs), opArb).map(([{ inner: a, outer: b }, op]): Pred[] => [{ k: 'colcmp', a, op, b }]) },
+          );
+    return key.chain((k) =>
+      fc.tuple(own, residual(k)).map(([o, r]): Pred => ({ k: 'exists', neg, sub: { table: source.table, ...(source.source ? { source: source.source } : {}), ...(k ? { key: k } : {}), where: [...o, ...r] } })),
+    );
+  });
+  // One read in four: an EXISTS is one more condition a row must pass, and every one makes an empty answer likelier
+  // (`whereArb`'s note) — the coverage suite's non-empty share is what this weight protects.
+  return fc.oneof({ weight: 3, arbitrary: fc.constant<Pred[]>([]) }, { weight: 1, arbitrary: one.map((p) => [p]) });
 }
 
 const LIKE_PATTERNS = ['a%', '%a', '_b', 'a_c', '%b%', '%', 'ab', '', 'z%', 'Z%', '_', '__', '%_', "it%", "i_'s", 'b_', '%z'] as const;
@@ -337,6 +429,7 @@ function leafArb(refs: readonly Ref[], pool: Pool, subs: readonly SubSource[] = 
     ...like,
     ...colcmp,
     ...subArb(refs, subs).map((arbitrary) => ({ weight: 2, arbitrary })),
+    ...scalarArb(refs, subs).map((arbitrary) => ({ weight: 2, arbitrary })),
   );
 }
 
@@ -494,12 +587,13 @@ function fixedProj(
   return proj;
 }
 
-export function selectArb(t: TableSpec, pool: Pool, subs: readonly SubSource[] = []): fc.Arbitrary<Query> {
+export function selectArb(t: TableSpec, pool: Pool, subs: readonly SubSource[] = [], exists: readonly SubSource[] = []): fc.Arbitrary<Query> {
   const refs = refsOf(t, false);
   const general = fc
     .record({
       proj: fc.oneof({ weight: 1, arbitrary: fc.constant('*' as const) }, { weight: 2, arbitrary: uniqueRefs(refs, 1, 4) }),
-      where: whereArb(refs, pool, 3, subs),
+      // An EXISTS (plan.md §27.5 S1) is a whole element of the list, beside whatever else WHERE holds.
+      where: fc.tuple(whereArb(refs, pool, 3, subs), existsArb(refsOf(t, true), exists)).map(([w, e]) => [...w, ...e]),
       order: fc.option(fc.record({ ref: fc.constantFrom(...refs), dir: fc.constantFrom('asc', 'desc') }), {
         nil: undefined,
         freq: 2,
@@ -529,8 +623,8 @@ export function selectArb(t: TableSpec, pool: Pool, subs: readonly SubSource[] =
   return fc.oneof({ weight: 3, arbitrary: general }, { weight: 3, arbitrary: lookupArb(t, pool) });
 }
 
-export function aggregateArb(t: TableSpec, pool: Pool, subs: readonly SubSource[] = []): fc.Arbitrary<Query> {
-  return aggregateOver(refsOf(t, false), pool, subs, { table: t.name });
+export function aggregateArb(t: TableSpec, pool: Pool, subs: readonly SubSource[] = [], exists: readonly SubSource[] = []): fc.Arbitrary<Query> {
+  return aggregateOver(refsOf(t, false), pool, subs, { table: t.name }, existsArb(refsOf(t, true), exists));
 }
 
 /**
@@ -542,14 +636,21 @@ function aggregateOver(
   pool: Pool,
   subs: readonly SubSource[],
   from: { table: string; joins?: JoinStep[] },
+  /** `[NOT] EXISTS` elements for the `where` list (plan.md §27.5 S1) — `existsArb`'s, or none. */
+  exists: fc.Arbitrary<Pred[]> = fc.constant([]),
 ): fc.Arbitrary<Query> {
   const numericRefs = refs.filter((r) => numeric(r.type));
-  const agg: fc.Arbitrary<AggItem> = fc.oneof(
+  const plainAgg: fc.Arbitrary<AggItem> = fc.oneof(
     fc.constant<AggItem>({ fn: 'COUNT', arg: '*' }),
     fc.constantFrom(...refs).map((arg): AggItem => ({ fn: 'COUNT', arg })),
     fc.tuple(fc.constantFrom('SUM', 'AVG'), fc.constantFrom(...numericRefs)).map(([fn, arg]): AggItem => ({ fn, arg })),
     fc.tuple(fc.constantFrom('MIN', 'MAX'), fc.constantFrom(...refs)).map(([fn, arg]): AggItem => ({ fn, arg })),
   );
+  // One column argument in four is DISTINCT (plan.md §27.5 S5) — the collision-heavy pools make repeats, and NULLs,
+  // common enough that a DISTINCT aggregate rarely equals its plain one.
+  const agg: fc.Arbitrary<AggItem> = fc
+    .tuple(plainAgg, fc.integer({ min: 0, max: 3 }))
+    .map(([a, n]): AggItem => (a.arg !== '*' && n === 0 ? { ...a, distinct: true } : a));
   const groupCandidates = refs.filter((r) => r.type !== 'real'); // grouping by a REAL is legal but adds nothing the others don't
   // HAVING (plan.md §25.4 B2): a predicate over the groups. Its aggregates need not be in the SELECT list, and its
   // plain columns must be grouped ones — so the leaves are drawn from the group columns chosen *for this query*.
@@ -572,6 +673,7 @@ function aggregateOver(
         : [{ weight: 2, arbitrary: fc.constantFrom(...group).chain((ref) => fc.tuple(opArb, literalFor(ref, pool)).map(([op, lit]): Pred => ({ k: 'cmp', ref, op, lit }))) }]),
       // A grouped column against a subquery: HAVING resolves its subqueries like WHERE does.
       ...subArb(group, subs).map((arbitrary) => ({ weight: 1, arbitrary })),
+      ...scalarArb(group, subs).map((arbitrary) => ({ weight: 1, arbitrary })),
     );
   const havingArb = (group: readonly Ref[]): fc.Arbitrary<Pred | undefined> => {
     const leaf = havingLeaf(group);
@@ -583,7 +685,7 @@ function aggregateOver(
       { weight: 1, arbitrary: leaf.map((p): Pred => ({ k: 'not', p })) },
     );
   };
-  const aggKey = (a: AggItem): string => `${a.fn}(${a.arg === '*' ? '*' : renderRef(a.arg)})`;
+  const aggKey = renderAgg;
   const dirArb = fc.constantFrom<'asc' | 'desc'>('asc', 'desc');
   // ORDER BY over the groups (plan.md §26 Feature 1, slice a): a grouped column — shown or not — or any aggregate,
   // selected or not. With a LIMIT this is "the top n groups", which is what the order is for.
@@ -601,7 +703,7 @@ function aggregateOver(
       aggs: fc.uniqueArray(agg, { minLength: 0, maxLength: 3, selector: aggKey }),
       showAll: fc.boolean(),
       distinct: fc.integer({ min: 0, max: 5 }).map((x) => x === 0),
-      where: whereArb(refs, pool, 2, subs),
+      where: fc.tuple(whereArb(refs, pool, 2, subs), exists).map(([w, e]) => [...w, ...e]),
       page: pageArb,
     })
     .chain((base) => fc.tuple(havingArb(base.group), orderArb(base.group)).map(([having, order]) => ({ ...base, having, order })))
@@ -629,7 +731,19 @@ function aggregateOver(
     });
 }
 
-const joinTypeArb = fc.oneof({ weight: 3, arbitrary: fc.constant<JoinStep['type']>('inner') }, { weight: 2, arbitrary: fc.constant<JoinStep['type']>('left') });
+const joinTypeArb = fc.oneof(
+  { weight: 5, arbitrary: fc.constant<JoinStep['type']>('inner') },
+  { weight: 5, arbitrary: fc.constant<JoinStep['type']>('left') },
+  // RIGHT, FULL and CROSS (plan.md §27.5 S4), rarer than the two the coverage floors were measured on; a cross join is
+  // written with a comma half the time, and three times in four its would-be key goes into WHERE — the textbook join,
+  // and what `product-to-join` rewrites.
+  { weight: 1, arbitrary: fc.constant<JoinStep['type']>('right') },
+  { weight: 1, arbitrary: fc.constant<JoinStep['type']>('full') },
+  { weight: 2, arbitrary: fc.constant<JoinStep['type']>('cross') },
+);
+const stepOf = (table: string, type: JoinStep['type'], on: JoinStep['on'], comma: boolean, keyInWhere: boolean): JoinStep =>
+  type === 'cross' ? { table, type, on, ...(comma ? { comma } : {}), ...(keyInWhere ? { keyInWhere } : {}) } : { table, type, on };
+const crossShape = fc.tuple(fc.boolean(), fc.integer({ min: 0, max: 3 }).map((x) => x > 0));
 
 /**
  * `t [LEFT] JOIN u ON …`, and two times in five a second step, `[LEFT] JOIN w ON …` (plan.md §25.4 C3 slices a and
@@ -646,11 +760,11 @@ function chainArb(t: TableSpec, u: TableSpec, w: TableSpec): fc.Arbitrary<{ join
     left.flatMap((l) => right.filter((r) => comparable(l, r)).map((r) => ({ l, r })));
   const onArb = (candidates: { l: Ref; r: Ref }[]) =>
     fc.tuple(fc.constantFrom(...candidates), fc.boolean()).map(([{ l, r }, flip]) => (flip ? { l: r, r: l } : { l, r }));
-  const toU = fc.tuple(joinTypeArb, onArb(pairs(tRefs, uRefs))).map(([type, on]): JoinStep => ({ table: u.name, type, on }));
+  const toU = fc.tuple(joinTypeArb, onArb(pairs(tRefs, uRefs)), crossShape).map(([type, on, [comma, key]]) => stepOf(u.name, type, on, comma, key));
   const fk = { l: uRefs.find((r) => r.name === 'id')!, r: wRefs.find((r) => r.name === 'u_id')! };
   const toW = fc
-    .tuple(joinTypeArb, fc.oneof({ weight: 3, arbitrary: onArb([fk]) }, { weight: 2, arbitrary: onArb(pairs([...tRefs, ...uRefs], wRefs)) }))
-    .map(([type, on]): JoinStep => ({ table: w.name, type, on }));
+    .tuple(joinTypeArb, fc.oneof({ weight: 3, arbitrary: onArb([fk]) }, { weight: 2, arbitrary: onArb(pairs([...tRefs, ...uRefs], wRefs)) }), crossShape)
+    .map(([type, on, [comma, key]]) => stepOf(w.name, type, on, comma, key));
   const chain = fc.oneof(
     { weight: 3, arbitrary: toU.map((a) => [a]) },
     { weight: 2, arbitrary: fc.tuple(toU, toW).map(([a, b]) => [a, b]) },
@@ -658,14 +772,37 @@ function chainArb(t: TableSpec, u: TableSpec, w: TableSpec): fc.Arbitrary<{ join
   return chain.map((joins) => ({ joins, all: joins.length === 1 ? [...tRefs, ...uRefs] : [...tRefs, ...uRefs, ...wRefs] }));
 }
 
-export function joinArb(t: TableSpec, u: TableSpec, w: TableSpec, pool: Pool, subs: readonly SubSource[] = []): fc.Arbitrary<Query> {
-  return chainArb(t, u, w).chain(({ joins, all }) => {
+/**
+ * The `EXISTS` sources a join query may read: those its chain does not already name — and none at all after two
+ * steps. A nested loop holds a pinned page per table it reads at once, and the smallest pool here has three frames:
+ * a fourth table makes QueryLens stop with `PoolExhausted`, as a real engine does (a unit test holds that), which is
+ * a refusal, not an answer to compare. Before self-joins (plan.md §27.5 S7) a two-step chain had used every table.
+ */
+const outsideChain = (exists: readonly SubSource[], left: string, joins: readonly JoinStep[]): SubSource[] =>
+  joins.length >= 2 ? [] : exists.filter((source) => source.table !== left && !joins.some((j) => j.table === source.table));
+
+/**
+ * `chainArb`, and one time in five a self-join (plan.md §27.5 S7): `t` joined to itself under another name, `ts`, in the
+ * place of `u` — on any comparable pair of its columns, a step `w` may then join to as it would to `u`.
+ */
+function chainOrSelfArb(t: TableSpec, u: TableSpec, w: TableSpec): fc.Arbitrary<{ joins: JoinStep[]; all: Ref[] }> {
+  const self = chainArb(t, { ...t, name: SELF_JOIN }, w).map(({ joins, all }) => ({
+    joins: joins.map((j): JoinStep => (j.table === SELF_JOIN ? { ...j, source: t.name } : j)),
+    all,
+  }));
+  return fc.oneof({ weight: 4, arbitrary: chainArb(t, u, w) }, { weight: 1, arbitrary: self });
+}
+
+export function joinArb(t: TableSpec, u: TableSpec, w: TableSpec, pool: Pool, subs: readonly SubSource[] = [], exists: readonly SubSource[] = []): fc.Arbitrary<Query> {
+  return chainOrSelfArb(t, u, w).chain(({ joins, all }) => {
     return fc
       .record({
         proj: uniqueRefs(all, 1, 5),
         computed: fc.oneof({ weight: 3, arbitrary: fc.constant<{ e: Arith; alias: string }[]>([]) }, { weight: 1, arbitrary: computedArb(all) }),
         distinct: fc.integer({ min: 0, max: 3 }).map((x) => x === 0),
-        where: whereArb(all, pool, 2, subs),
+        // A semi- or anti-join on top of the chain, correlated with any of its tables (plan.md §27.5 S1); and the keys of
+        // any cross join that states them in WHERE (S4).
+        where: fc.tuple(whereArb(all, pool, 2, subs), existsArb(all, outsideChain(exists, t.name, joins))).map(([wh, e]) => [...crossKeysOf(joins), ...wh, ...e]),
         // ORDER BY over the joined rows (plan.md §26 Feature 1, slice b): any column of any table in the chain —
         // a LEFT JOIN's NULL padding included, which is where NULL placement shows.
         order: fc.option(fc.record({ ref: fc.constantFrom(...all), dir: fc.constantFrom<'asc' | 'desc'>('asc', 'desc') }), {
@@ -690,8 +827,77 @@ export function joinArb(t: TableSpec, u: TableSpec, w: TableSpec, pool: Pool, su
 }
 
 /** `GROUP BY` / aggregates / `HAVING` / `ORDER BY` over a join chain (plan.md §26 Feature 1, slice c). */
-export function joinAggregateArb(t: TableSpec, u: TableSpec, w: TableSpec, pool: Pool, subs: readonly SubSource[] = []): fc.Arbitrary<Query> {
-  return chainArb(t, u, w).chain(({ joins, all }) => aggregateOver(all, pool, subs, { table: t.name, joins }));
+export function joinAggregateArb(t: TableSpec, u: TableSpec, w: TableSpec, pool: Pool, subs: readonly SubSource[] = [], exists: readonly SubSource[] = []): fc.Arbitrary<Query> {
+  return chainOrSelfArb(t, u, w).chain(({ joins, all }) =>
+    aggregateOver(all, pool, subs, { table: t.name, joins }, existsArb(all, outsideChain(exists, t.name, joins)).map((e) => [...crossKeysOf(joins), ...e])),
+  );
+}
+
+/**
+ * `SELECT … UNION [ALL] | INTERSECT | EXCEPT SELECT …` (plan.md §27.5 S3): two members, sometimes three, over any of the
+ * three tables — the same one twice included, which is where a self-union's NULLs and repeats show. Every member
+ * projects columns of one *type signature*, position by position (an int beside an int, text beside text: a mixed-type
+ * comparison is a ledger entry, not a generated case). The operators are all INTERSECT, or a mix of UNION, UNION ALL and
+ * EXCEPT — what QueryLens accepts. Sometimes an ORDER BY on a result column, and a page.
+ */
+export function compoundArb(tables: readonly TableSpec[], pool: Pool): fc.Arbitrary<Query> {
+  const SIGNATURES: readonly (readonly ColType[])[] = [['int'], ['text'], ['real'], ['int', 'int'], ['int', 'text'], ['int', 'real']];
+  const ofType = (t: TableSpec, type: ColType) => refsOf(t, false).filter((r) => r.type === type);
+  const need = (sig: readonly ColType[], type: ColType) => sig.filter((x) => x === type).length;
+  const fits = (t: TableSpec, sig: readonly ColType[]) => sig.every((type) => ofType(t, type).length >= need(sig, type));
+  // Distinct columns, in the signature's order: QueryLens refuses a SELECT that names one column twice, since a row
+  // is keyed by name (SQLite allows it — a deliberate difference, not a generated case).
+  const projOf = (t: TableSpec, sig: readonly ColType[]): fc.Arbitrary<Ref[]> => {
+    const types = [...new Set(sig)];
+    return fc
+      .tuple(...types.map((type) => fc.shuffledSubarray(ofType(t, type), { minLength: need(sig, type), maxLength: need(sig, type) })))
+      .map((picked) => {
+        const queues = new Map(types.map((type, i) => [type, [...picked[i]]]));
+        return sig.map((type) => queues.get(type)!.shift()!);
+      });
+  };
+  const member = (sig: readonly ColType[]): fc.Arbitrary<MemberSelect> => {
+    const able = tables.filter((t) => fits(t, sig));
+    return fc.constantFrom(...able).chain((t) => {
+      const refs = refsOf(t, false);
+      const tablePool: Pool = (ref) => pool({ name: ref.name, table: t.name });
+      return fc
+        .record({
+          proj: projOf(t, sig),
+          where: fc.oneof({ weight: 3, arbitrary: fc.constant<Pred[]>([]) }, { weight: 2, arbitrary: fc.array(predArb(refs, tablePool, 1), { minLength: 1, maxLength: 2 }) }),
+          distinct: fc.integer({ min: 0, max: 5 }).map((x) => x === 0),
+        })
+        .map(({ proj, where, distinct }): MemberSelect => ({ table: t.name, proj, where, ...(distinct ? { distinct } : {}) }));
+    });
+  };
+  type Step = Extract<Query, { kind: 'compound' }>['ops'][number];
+  const opsArb = (n: number): fc.Arbitrary<Step[]> =>
+    fc.boolean().chain((intersect) =>
+      fc.array<Step>(
+        intersect
+          ? fc.constant<Step>({ op: 'intersect', all: false })
+          : fc.constantFrom<Step>({ op: 'union', all: false }, { op: 'union', all: true }, { op: 'except', all: false }),
+        { minLength: n, maxLength: n },
+      ),
+    );
+  return fc
+    .tuple(fc.constantFrom(...SIGNATURES), fc.oneof({ weight: 4, arbitrary: fc.constant(2) }, { weight: 1, arbitrary: fc.constant(3) }))
+    .chain(([sig, n]) =>
+      fc
+        .record({
+          members: fc.tuple(...Array.from({ length: n }, () => member(sig))),
+          ops: opsArb(n - 1),
+          order: fc.option(fc.record({ at: fc.integer({ min: 0, max: sig.length - 1 }), dir: fc.constantFrom<'asc' | 'desc'>('asc', 'desc') }), { nil: undefined, freq: 2 }),
+          page: pageArb,
+        })
+        .map(({ members, ops, order, page }): Query => ({
+          kind: 'compound',
+          members,
+          ops,
+          ...(order ? { order: { column: members[0].proj[order.at].name, dir: order.dir } } : {}),
+          ...page,
+        })),
+    );
 }
 
 /* -------------------------------------------------------------------------- */
@@ -845,22 +1051,38 @@ export const tablesArb: fc.Arbitrary<[TableSpec, TableSpec, TableSpec]> = tableT
   tableU(t).chain((u) => tableW(u).map((w): [TableSpec, TableSpec, TableSpec] => [t, u, w])),
 );
 
-export const sessionArb = (final: 'select' | 'aggregate' | 'join' | 'join-aggregate' | 'any' = 'any'): fc.Arbitrary<Session> =>
+export const sessionArb = (final: 'select' | 'aggregate' | 'join' | 'join-aggregate' | 'compound' | 'any' = 'any'): fc.Arbitrary<Session> =>
   tablesArb.chain(([t, u, w]) => {
-    const pool = poolOf([t, u, w]);
+    const pool = aliasAwarePool(poolOf([t, u, w]), t.name);
     // An `IN (subquery)` may read any of the three — `t` itself included, which is still uncorrelated.
     const subs = subSources([u, w, t], pool);
+    // An `EXISTS` (plan.md §27.5 S1) reads a table the outer query does not have — or `t` itself under another name
+    // (S7), which is how a subquery is correlated with its own table.
+    const exists: SubSource[] = [
+      ...subSources([u, w], pool),
+      { table: SELF_EXISTS, source: t.name, refs: refsOf(t, false), pool: (ref) => pool({ name: ref.name, table: t.name }) },
+    ];
     const write = fc.oneof(insertArb(t), updateArb(t, pool, subs), deleteArb(t, pool, subs));
     const read: fc.Arbitrary<ReadQuery> = (
       final === 'select'
-        ? selectArb(t, pool, subs)
+        ? selectArb(t, pool, subs, exists)
         : final === 'aggregate'
-          ? aggregateArb(t, pool, subs)
+          ? aggregateArb(t, pool, subs, exists)
           : final === 'join'
-            ? joinArb(t, u, w, pool, subs)
+            ? joinArb(t, u, w, pool, subs, exists)
             : final === 'join-aggregate'
-              ? joinAggregateArb(t, u, w, pool, subs)
-              : fc.oneof(selectArb(t, pool, subs), aggregateArb(t, pool, subs), joinArb(t, u, w, pool, subs), joinAggregateArb(t, u, w, pool, subs))
+              ? joinAggregateArb(t, u, w, pool, subs, exists)
+              : final === 'compound'
+                ? compoundArb([t, u, w], pool)
+                : fc.oneof(
+                    { weight: 4, arbitrary: selectArb(t, pool, subs, exists) },
+                    { weight: 4, arbitrary: aggregateArb(t, pool, subs, exists) },
+                    { weight: 4, arbitrary: joinArb(t, u, w, pool, subs, exists) },
+                    { weight: 4, arbitrary: joinAggregateArb(t, u, w, pool, subs, exists) },
+                    // Rarer here than the rest: compounds have a differential suite of their own (`sessionArb('compound')`),
+                    // and every read kind added to this mix thins the others the coverage floors were measured on.
+                    { weight: 1, arbitrary: compoundArb([t, u, w], pool) },
+                  )
     ) as fc.Arbitrary<ReadQuery>;
     return fc
       .tuple(fc.array(write, { minLength: 0, maxLength: 3 }), read)

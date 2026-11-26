@@ -1,5 +1,7 @@
 import { isReplacementPolicyName } from '../engine/types.ts';
 import type { ReplacementPolicyName } from '../engine/index.ts';
+import { isDetailLevel } from './detailLevel.ts';
+import type { DetailLevel } from './detailLevel.ts';
 
 /**
  * Session-spanning defaults, set from `/settings` (plan.md §21.3). Same
@@ -46,6 +48,27 @@ export function writeDefaultPredictOn(predictOn: boolean | null): void {
   try {
     if (predictOn === null) localStorage.removeItem(PREDICT_KEY);
     else localStorage.setItem(PREDICT_KEY, predictOn ? '1' : '0');
+  } catch {
+    // Same as above.
+  }
+}
+
+const DETAIL_KEY = 'querylens:default-detail';
+
+/** plan.md §27.5 L2: the narration's detail level. `null` is standard — the engine's own words. */
+export function readDefaultDetail(): DetailLevel | undefined {
+  try {
+    const stored = localStorage.getItem(DETAIL_KEY);
+    return isDetailLevel(stored) ? stored : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function writeDefaultDetail(level: DetailLevel | null): void {
+  try {
+    if (level === null || level === 'standard') localStorage.removeItem(DETAIL_KEY);
+    else localStorage.setItem(DETAIL_KEY, level);
   } catch {
     // Same as above.
   }

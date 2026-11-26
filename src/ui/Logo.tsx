@@ -4,8 +4,8 @@
  * the other) and gives the wordmark something to sit beside so the header is
  * not just text, which every published list of "unchosen" design tells names.
  *
- * Inline SVG, not an asset: it inherits `currentColor` for the prism and uses
- * the accent token for the refracted rays, so it is theme-correct for free and
+ * Inline SVG, not an asset: it inherits `currentColor` for the prism and draws
+ * the refracted rays in three of the stage colours (the Prism spectrum), so it is theme-correct for free and
  * costs no request. Always decorative — the adjacent wordmark is the label.
  */
 export function Logo({ className = 'h-7 w-7' }: { className?: string }) {
@@ -28,9 +28,9 @@ export function Logo({ className = 'h-7 w-7' }: { className?: string }) {
       {/* incoming ray */}
       <path d="M1 15.5h7.5" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" />
       {/* refracted spectrum */}
-      <path d="M18 19.5h13" stroke="var(--color-accent-strong)" strokeWidth="1.75" strokeLinecap="round" />
-      <path d="M18 23h13" stroke="var(--color-accent)" strokeWidth="1.75" strokeLinecap="round" opacity="0.75" />
-      <path d="M18 26.5h13" stroke="var(--color-hue-violet)" strokeWidth="1.75" strokeLinecap="round" opacity="0.6" />
+      <path d="M18 19.5h13" stroke="var(--color-stage-parse)" strokeWidth="1.75" strokeLinecap="round" />
+      <path d="M18 23h13" stroke="var(--color-stage-optimize)" strokeWidth="1.75" strokeLinecap="round" />
+      <path d="M18 26.5h13" stroke="var(--color-stage-index)" strokeWidth="1.75" strokeLinecap="round" />
     </svg>
   );
 }

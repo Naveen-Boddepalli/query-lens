@@ -175,6 +175,25 @@ describe('usePlaybackShortcuts', () => {
     expect(result.current.step).toBe(0);
   });
 
+  it('leaves Space to a focused button, so pressing it does one thing, not two', () => {
+    const { result } = setup();
+    const button = document.createElement('button');
+    document.body.append(button);
+    act(() => { button.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', code: 'Space', bubbles: true })); });
+    expect(result.current.playing).toBe(false);
+    button.remove();
+  });
+
+  it('leaves a key a control already handled, such as a segmented control’s arrows', () => {
+    const { result } = setup();
+    const radio = document.createElement('button');
+    radio.addEventListener('keydown', (e) => { e.preventDefault(); });
+    document.body.append(radio);
+    act(() => { radio.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true })); });
+    expect(result.current.step).toBe(0);
+    radio.remove();
+  });
+
   it('does nothing while disabled, so the data editor keeps its keys', () => {
     const { result } = setup(false);
     press('ArrowRight');

@@ -215,7 +215,7 @@ export function ConcurrencyToolPage() {
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-4 p-6 sm:p-8">
       <PageHeader title="Concurrency-control compare">
-        One schedule, five ways to keep it correct (plan.md §25.4 D6): locks that make a statement wait, timestamps that
+        One schedule, five ways to keep it correct: locks that make a statement wait, timestamps that
         abort what arrives too late, validation that checks at <code>COMMIT</code>, and snapshots with and without a
         read check. Each row is that protocol actually running the schedule below; the table is its bill. Edit the
         schedule, or build your own, in the{' '}
@@ -225,34 +225,37 @@ export function ConcurrencyToolPage() {
         tool.
       </PageHeader>
 
-      <div className="flex flex-wrap items-center gap-2 text-label text-ink-dim">
-        Examples
-        {PRESETS.map((p) => (
-          <button
-            key={p.label}
-            type="button"
-            aria-pressed={preset === p}
-            onClick={() => { setSteps(p.steps); }}
-            className={`${btnSecondary} ${preset === p ? 'border-accent' : ''}`}
-          >
-            {p.label}
-          </button>
-        ))}
-        <span className="mx-1 h-6 w-px bg-edge" aria-hidden />
-        <span>Accounts</span>
-        <div className="flex gap-1" role="radiogroup" aria-label="Number of accounts">
-          {TABLE_SIZES.map((n) => (
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-3 text-label text-ink-dim">
+        <div className="flex flex-wrap items-center gap-2">
+          Examples
+          {PRESETS.map((p) => (
             <button
-              key={n}
+              key={p.label}
               type="button"
-              role="radio"
-              aria-checked={rows === n}
-              onClick={() => { setRows(n); }}
-              className={`${segBase} ${rows === n ? segOn : segOff}`}
+              aria-pressed={preset === p}
+              onClick={() => { setSteps(p.steps); }}
+              className={`${btnSecondary} ${preset === p ? 'border-accent' : ''}`}
             >
-              {n}
+              {p.label}
             </button>
           ))}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <span>Accounts</span>
+          <div className="flex gap-1" role="radiogroup" aria-label="Number of accounts">
+            {TABLE_SIZES.map((n) => (
+              <button
+                key={n}
+                type="button"
+                role="radio"
+                aria-checked={rows === n}
+                onClick={() => { setRows(n); }}
+                className={`${segBase} ${rows === n ? segOn : segOff}`}
+              >
+                {n}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -288,7 +291,7 @@ export function ConcurrencyToolPage() {
           Counted off the runs below. A statement outside a transaction is one of its own. Choose a row to see its rule,
           its verdict, and the run itself.
         </p>
-        <ScrollRegion label="The same schedule under each concurrency-control protocol" className="overflow-x-auto">
+        <ScrollRegion label="The same schedule under each concurrency-control protocol" className="overflow-x-auto" stickyFirst>
           <table className="w-full min-w-[44rem] text-left text-label">
             <caption className="sr-only">The same schedule under each concurrency-control protocol</caption>
             <thead>

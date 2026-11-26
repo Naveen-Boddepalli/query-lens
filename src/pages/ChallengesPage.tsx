@@ -59,11 +59,11 @@ export function ChallengesPage() {
               <span className="font-mono text-heading font-semibold text-ink tabular-nums">
                 {doneCount} of {allChallenges.length} solved
               </span>
-              <span className="rounded-full border border-edge bg-surface-3 px-2 py-0.5 font-mono text-micro text-ink tabular-nums">
+              <span className="rounded-full border border-edge bg-surface-3 px-2 py-0.5 font-mono text-label text-ink tabular-nums">
                 {percentDone}%
               </span>
             </div>
-            <p className="font-mono text-micro text-ink-dim">
+            <p className="font-mono text-label text-ink-dim">
               Pure client-side verification · Instant AST &amp; buffer execution feedback
             </p>
           </div>
@@ -85,14 +85,14 @@ export function ChallengesPage() {
         {/* Tactile Sunken Progress Bar */}
         <div className="mt-4 h-2 w-full overflow-hidden rounded-full border border-edge/60 bg-surface/80 p-0.5 shadow-neu-track">
           <div
-            className="h-full rounded-full bg-accent transition-all duration-500 ease-out"
+            className="h-full rounded-full bg-[image:var(--gradient-spectrum)] transition-all duration-500 ease-out"
             style={{ width: `${percentDone}%` }}
           />
         </div>
 
         {/* Category Filters */}
         <div className="mt-5 flex flex-wrap items-center gap-1.5 border-t border-edge/60 pt-4">
-          <span className="mr-2 font-mono text-micro uppercase tracking-wider text-ink-dim">
+          <span className="mr-2 font-mono text-label uppercase tracking-wider text-ink-dim">
             Category:
           </span>
           {GROUP_FILTERS.map((f) => {
@@ -143,15 +143,15 @@ export function ChallengesPage() {
                       >
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <div className="flex items-center gap-2">
-                            <span className="flex h-5 w-5 items-center justify-center rounded-full border border-edge bg-surface-3 font-mono text-micro text-ink-dim">
+                            <span className="flex h-5 w-5 items-center justify-center rounded-full border border-edge bg-surface-3 font-mono text-label text-ink-dim">
                               {challengeNum}
                             </span>
-                            <span className="rounded border border-edge bg-surface-3/80 px-2 py-0.5 font-mono text-micro text-ink-dim">
+                            <span className="rounded border border-edge bg-surface-3/80 px-2 py-0.5 font-mono text-label text-ink-dim">
                               {group.title}
                             </span>
                           </div>
 
-                          <div className="flex items-center gap-2 font-mono text-micro text-ink-dim">
+                          <div className="flex items-center gap-2 font-mono text-label text-ink-dim">
                             {isSolved && (
                               <span className="inline-flex items-center gap-1 rounded-full border border-hit/40 bg-hit/10 px-2 py-0.5 font-medium text-hit">
                                 <CheckIcon className="h-3 w-3" />
@@ -168,7 +168,7 @@ export function ChallengesPage() {
                           <div className="mt-1 text-label leading-relaxed text-ink-dim">{c.brief}</div>
                         </div>
 
-                        <div className="flex items-center justify-between border-t border-edge/40 pt-2 text-micro text-ink-dim">
+                        <div className="flex items-center justify-between border-t border-edge/40 pt-2 text-label text-ink-dim">
                           <span className="font-mono">Interactive objective</span>
                           <span className="inline-flex items-center gap-1 font-medium text-ink group-hover:text-accent transition-colors">
                             {isSolved ? 'Review challenge' : 'Solve challenge'}

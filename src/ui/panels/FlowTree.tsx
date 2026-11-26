@@ -111,8 +111,10 @@ function NodeView({ id, data }: NodeProps<TreeFlowNode>) {
       )}
       {data.estRows !== undefined && (
         <div className="mt-0.5 text-label break-words text-ink-dim/80" title={data.estBasis}>
-          <span className="font-mono">~{data.estRows} row{data.estRows === 1 ? '' : 's'}</span>
-          {data.estBasis && <span className="opacity-70"> · {data.estBasis}</span>}
+          <div className="font-mono">~{data.estRows} row{data.estRows === 1 ? '' : 's'}</div>
+          {/* Clamped: a join's cost basis runs to six lines, and a node taller than the layout's row ran into the
+              one below. The whole basis is still in the DOM for a screen reader, and in the hover title. */}
+          {data.estBasis && <div className="line-clamp-2 opacity-70">{data.estBasis}</div>}
         </div>
       )}
       <Handle id="out" type="source" position={Position.Bottom} className="!opacity-0" />
@@ -187,6 +189,13 @@ export interface FlowTreeProps {
   focusIds?: readonly string[] | undefined;
   /** The tree's accessible name, e.g. "Parse tree": what a screen reader announces on entering it. */
   label?: string;
+  /**
+   * The smallest zoom the tree is ever framed at on its own (docs/research/tool-layouts.md §4.5 rule 2). A tree
+   * too wide to fit at this zoom is framed at it instead, top-aligned on the part being shown, and pans: on a phone a
+   * B+Tree fitted to 290px was too small to read. The Fit button still shows the whole tree. Unset, the tree always
+   * fits, as before.
+   */
+  minZoom?: number | undefined;
   empty?: string;
 }
 
@@ -204,7 +213,8 @@ function build(
   // d3-hierarchy does the layout maths; flowinger only draws it.
   const h = hierarchy<FlowNode>(root, (d) => d.children);
   const width = props.wide ? 200 : props.compact ? 104 : 132;
-  const height = props.wide ? 144 : props.compact ? 84 : 96;
+  // Wide (plan) nodes: a three-line operator name, its detail and a two-line estimate.
+  const height = props.wide ? 192 : props.compact ? 84 : 96;
   tree<FlowNode>().nodeSize([width, height])(h);
 
   const relations = treeRelations(root);
@@ -295,6 +305,7 @@ function Canvas({
   toolbarTarget,
   focusIds,
   label,
+  minZoom,
 }: FlowTreeProps & {
   kindIcons: Record<string, string>;
   wide: boolean;
@@ -387,8 +398,11 @@ function Canvas({
    *
    * Returns whether it had enough information to frame anything.
    */
+  /** Each node's element, by id: for keyboard focus, and for the real height `frame` fits. */
+  const nodeEls = useRef(new Map<string, HTMLDivElement>());
+
   const frame = useCallback(
-    (targets: TreeFlowNode[], animate: boolean) => {
+    (targets: TreeFlowNode[], animate: boolean, whole = false) => {
       if (targets.length === 0 || size.w === 0 || size.h === 0) return false;
 
       const nodeW = wide ? 200 : compact ? 104 : 132;
@@ -396,11 +410,15 @@ function Canvas({
 
       const minX = Math.min(...targets.map((n) => n.position.x));
       const maxX = Math.max(...targets.map((n) => n.position.x)) + nodeW;
+      // A plan operator with a detail line and an estimate is twice the nominal height, and fitting the
+      // nominal one clipped the bottom row (the Planner's optimized tree). Fit each node's rendered height
+      // where it has one; offsetHeight is layout size, unaffected by the current zoom.
+      const heightOf = (n: TreeFlowNode) => nodeEls.current.get(n.id)?.offsetHeight || nodeH;
       const minY = Math.min(...targets.map((n) => n.position.y));
-      const maxY = Math.max(...targets.map((n) => n.position.y)) + nodeH;
+      const maxY = Math.max(...targets.map((n) => n.position.y + heightOf(n)));
 
       const margin = 1.35;
-      const zoom = Math.max(
+      const fit = Math.max(
         Math.min(
           size.w / Math.max(maxX - minX, 1) / margin,
           size.h / Math.max(maxY - minY, 1) / margin,
@@ -408,6 +426,9 @@ function Canvas({
         ),
         0.1,
       );
+      // Below the readable floor, hold the floor and pan instead, unless the reader asked for the whole tree.
+      const clamped = !whole && minZoom !== undefined && fit < minZoom;
+      const zoom = clamped ? minZoom : fit;
 
       /**
        * Whether this move may be a *transition* — the other half of the fix.
@@ -435,7 +456,8 @@ function Canvas({
       void setViewport(
         {
           x: size.w / 2 - ((minX + maxX) / 2) * zoom,
-          y: size.h / 2 - ((minY + maxY) / 2) * zoom,
+          // A clamped frame starts at the top of what it shows, so the root (or the hop) is in view, not cut in half.
+          y: clamped ? 24 - minY * zoom : size.h / 2 - ((minY + maxY) / 2) * zoom,
           zoom,
         },
         {
@@ -447,7 +469,7 @@ function Canvas({
       );
       return true;
     },
-    [setViewport, wide, compact, glide, size],
+    [setViewport, wide, compact, glide, size, minZoom],
   );
 
   /**
@@ -458,7 +480,6 @@ function Canvas({
   const framedFor = useRef<typeof panZoom>(null);
 
   const [tabStop, setTabStop] = useState<string | null>(null);
-  const nodeEls = useRef(new Map<string, HTMLDivElement>());
   const register = useCallback((id: string, el: HTMLDivElement | null) => {
     if (el) nodeEls.current.set(id, el);
     else nodeEls.current.delete(id);
@@ -517,7 +538,7 @@ function Canvas({
         // dimensions, which these graphs never report.
         // Animated: a button press is the most causal move there is, and the
         // viewer is by definition looking at the tab when they press it.
-        onClick={() => { frame(nodes, true); }}
+        onClick={() => { frame(nodes, true, true); }}
         aria-label="Fit the whole tree"
         className={`${ZOOM_BUTTON} w-auto px-2 text-label`}
       >
@@ -568,6 +589,7 @@ export function FlowTree({
   focusIds,
   empty,
   label = 'Tree diagram',
+  minZoom,
 }: FlowTreeProps) {
   if (!root) {
     return <p className="text-body text-ink-dim">{empty ?? 'Nothing to show yet.'}</p>;
@@ -587,6 +609,7 @@ export function FlowTree({
           toolbarTarget={toolbarTarget}
           focusIds={focusIds}
           label={label}
+          minZoom={minZoom}
         />
       </FlowingerProvider>
     </div>

@@ -13,6 +13,8 @@ test('the sandbox shows sequential read-ahead as prefetches, and a later request
 test('the read-ahead control is in the URL, and off leaves no prefetches (plan.md §25.4 F7)', async ({ page }) => {
   await page.goto('/tools/buffer-pool?ref=0%201%202%203%204%205&frames=8&policy=lru');
   await expect(page.locator('dt', { hasText: 'prefetched' })).toHaveCount(0);
+  // Read-ahead and the scan ring are expert settings, collapsed under Advanced until one is on.
+  await page.locator('summary', { hasText: 'Advanced' }).click();
   await page.getByLabel('Read-ahead').selectOption('1');
   await expect.poll(() => page.url()).toMatch(/ra=1/);
   await page.getByLabel('Scrub to step').press('End');
