@@ -74,7 +74,7 @@ export function TopNav() {
             type="button"
             onClick={openSpotlight}
             className="ql-liquid-pill group flex items-center justify-between h-9 px-2.5 sm:px-3.5 lg:px-2.5 xl:px-3.5 w-9 sm:w-40 lg:w-9 xl:w-48 rounded-full backdrop-blur-md text-ink-dim hover:text-ink cursor-pointer"
-            aria-label={`Spotlight search (${MOD_KEY === '⌘' ? 'Command' : 'Control'}+K)`}
+            aria-label={`Search... ${MOD_KEY}K`}
             aria-keyshortcuts="Meta+K Control+K"
           >
             <div className="flex items-center gap-2 min-w-0">
