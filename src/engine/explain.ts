@@ -20,7 +20,7 @@
  */
 
 import type { ExplainStatement } from './parser/index.ts';
-import { createTracer } from './trace.ts';
+import { createTracer, cutNote, cutOf } from './trace.ts';
 import type { PlanNode, RunResult, StepEvent } from './types.ts';
 
 export const EXPLAIN_COLUMN = 'QUERY PLAN';
@@ -89,17 +89,20 @@ export function explainResult(sql: string, ast: ExplainStatement, run: (sql: str
 
   // What ran, per operator: the largest count it reported. Bookkeeping events (a discarded candidate, a hash build
   // announcement) can carry a 0 that lands after the real count has grown, so the last event is not always the total.
+  // A trace past its ceiling (plan.md §28.5 I1) no longer has every step to sum; its result step carries the totals.
+  const cut = cutOf(inner.events);
   const actual = new Map<string, number>();
-  for (const e of inner.events) {
-    if (e.stage !== 'execute') continue;
+  const operatorSteps = cut ? cut.actualRows : inner.events.flatMap((e) => (e.stage === 'execute' ? [e] : []));
+  for (const e of operatorSteps) {
     const key = nodeKey(e.op, e.table);
     actual.set(key, Math.max(actual.get(key) ?? 0, e.rowsProduced));
   }
 
   const lines = planLines(plan, ast.analyze ? actual : null);
   if (ast.analyze) {
+    const totals = { hit: cut?.bufferStats.hits, miss: cut?.bufferStats.misses, evict: cut?.bufferStats.evictions };
     const count = (action: 'hit' | 'miss' | 'evict') =>
-      inner.events.filter((e) => e.stage === 'buffer' && e.action === action).length;
+      totals[action] ?? inner.events.filter((e) => e.stage === 'buffer' && e.action === action).length;
     lines.push(
       `Result: ${String(inner.rows.length)} row${inner.rows.length === 1 ? '' : 's'}`,
       `Buffer pool: ${String(count('hit'))} hit${count('hit') === 1 ? '' : 's'}, ${String(count('miss'))} miss${count('miss') === 1 ? '' : 'es'}, ${String(count('evict'))} eviction${count('evict') === 1 ? '' : 's'}`,
@@ -121,9 +124,10 @@ export function explainResult(sql: string, ast: ExplainStatement, run: (sql: str
   }
   emit(
     ast.analyze
-      ? `EXPLAIN ANALYZE ran the query for real — the trace above is that run — and reports the cost model's estimate next to the executor's actual row count for every operator, then what the buffer pool did.`
+      ? `EXPLAIN ANALYZE ran the query for real — the trace above is that run — and reports the cost model's estimate next to the executor's actual row count for every operator, then what the buffer pool did.${cut ? ` ${cutNote(cut)}` : ''}`
       : `EXPLAIN shows the plan the optimizer chose and the cost model's estimate for each operator. Nothing was executed and no page was read — that is what separates EXPLAIN from EXPLAIN ANALYZE.`,
-    { stage: 'result', rows },
+    // Plain EXPLAIN keeps none of the run's steps, so none of its totals either.
+    { stage: 'result', rows, ...(cut && ast.analyze ? { cut } : {}) },
   );
 
   return { events: drain(), rows };

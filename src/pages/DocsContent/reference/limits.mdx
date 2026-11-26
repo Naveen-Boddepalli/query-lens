@@ -684,6 +684,19 @@ shows, and every panel, is the same at all three. There is no translation. The `
 looked up by is the half of plan.md §25.4 H5's refactor that L2 shares, and a locale would still need the
 parameters that today appear only in a sentence.
 
+## Trace length
+
+A trace keeps at most **200,000 steps** and its result step (plan.md §28.5 I1). A run that takes more still runs to
+the end: its rows are exact, and so are the counters at its last step — buffer hits, misses, evictions, writes,
+locks taken, each operator's rows, and `EXPLAIN ANALYZE`'s actual rows — because the result step carries the whole
+run's totals. Only the steps in between are not kept, and the result step says so: "This run took 569,073 steps; the
+trace keeps the first 200,000 and this one, and the counts here are the whole run's." Stepping back from it goes to
+step 200,000, not to the step before the result.
+
+The number is measured. The longest trace any preset, lesson or challenge makes is 9,749 steps (a full scan of
+`transactions`), so nothing shipped comes near it. Without it, a join of two big tables — the parallel tool's
+2,000 orders against 3,000 payments takes 13.5 million steps — used gigabytes and could take the tab down.
+
 ## What's out of scope entirely
 
 Subqueries in three places only: `IN (SELECT …)` (uncorrelated, plan.md §25.4 C3), `[NOT] EXISTS` (plan.md §27.5

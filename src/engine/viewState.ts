@@ -16,6 +16,7 @@ import type {
   Stage,
   StepEvent,
 } from './types.ts';
+import { countBufferStep } from './trace.ts';
 
 export interface BufferFrame {
   frameId: number;
@@ -138,6 +139,7 @@ export function applyEvent(state: ViewState, event: StepEvent): ViewState {
     }
 
     case 'buffer': {
+      next.bufferStats = countBufferStep(state.bufferStats, event);
       switch (event.action) {
         case 'hit': {
           const frame = frameById(state.frames, event.frameId);
@@ -145,14 +147,9 @@ export function applyEvent(state: ViewState, event: StepEvent): ViewState {
             usageCount: Math.min((frame?.usageCount ?? 0) + 1, USAGE_COUNT_CAP),
             lastTouchedAt: event.id,
           });
-          next.bufferStats = { ...state.bufferStats, hits: state.bufferStats.hits + 1 };
           return next;
         }
         case 'miss':
-          next.bufferStats = {
-            ...state.bufferStats,
-            misses: state.bufferStats.misses + 1,
-          };
           return next;
         case 'load':
           next.frames = touchFrame(state.frames, event.frameId, {
@@ -167,7 +164,6 @@ export function applyEvent(state: ViewState, event: StepEvent): ViewState {
             usageCount: 0,
             lastTouchedAt: event.id,
           });
-          next.bufferStats = { ...state.bufferStats, prefetches: state.bufferStats.prefetches + 1 };
           return next;
         case 'write':
           next.frames = touchFrame(state.frames, event.frameId, {
@@ -175,7 +171,6 @@ export function applyEvent(state: ViewState, event: StepEvent): ViewState {
             usageCount: 1,
             lastTouchedAt: event.id,
           });
-          next.bufferStats = { ...state.bufferStats, writes: state.bufferStats.writes + 1 };
           return next;
         case 'evict':
           next.frames = touchFrame(state.frames, event.frameId, {
@@ -183,14 +178,6 @@ export function applyEvent(state: ViewState, event: StepEvent): ViewState {
             usageCount: 0,
             lastTouchedAt: event.id,
           });
-          next.bufferStats = {
-            ...state.bufferStats,
-            evictions: state.bufferStats.evictions + 1,
-            // A dirty victim costs a write on the way out — the pool's own
-            // `stats.writes` counts it too (bufferPool.ts), so the fold must
-            // match or the panel and the engine would silently disagree.
-            writes: state.bufferStats.writes + (event.writtenBack ? 1 : 0),
-          };
           if (event.clockHand !== undefined) next.clockHand = event.clockHand;
           return next;
         case 'sweep':
@@ -243,6 +230,13 @@ export function applyEvent(state: ViewState, event: StepEvent): ViewState {
 
     case 'result':
       next.rows = event.rows;
+      // A trace past its ceiling (plan.md §28.5 I1) dropped steps these counters would have summed; the result step
+      // carries the whole run's totals, so the last step's counts are exact even though its steps are not all here.
+      if (event.cut) {
+        next.bufferStats = event.cut.bufferStats;
+        next.locksTaken = event.cut.locksTaken;
+        next.operators = event.cut.operators;
+      }
       return next;
   }
 }

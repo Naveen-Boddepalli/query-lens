@@ -17,6 +17,13 @@ Work toward **v4** (plan.md §28), on `version/v4`.
   cell names must still be refused, so building one fails the test until the row is updated. It reads the pages
   as text through `?raw`, which the MDX plugin now leaves alone (it used to compile Vite's `export default "…"`
   line as MDX).
+- **A trace ceiling** (plan.md §28.5 I1). A trace keeps at most 200,000 steps and its result step. A longer run still
+  finishes with exact rows, and its last step shows the whole run's counters — buffer counts, locks, operator rows
+  and `EXPLAIN ANALYZE`'s actual rows — and says how many steps it took and how many it kept. The parallel tool's
+  big-with-big join took 13.5 million steps and about 2.6 GB. It now keeps 200,001 steps, runs in 1.4 s, and is
+  checked against the engine again in `exchangePresets.test.ts` instead of being skipped. The `optimal` policy's
+  rehearsal sees every page read, kept or not, so what it evicts never changes. The ceiling is twenty times the
+  longest preset trace (9,749 steps), so no preset, lesson or challenge is cut.
 
 ### Changed
 

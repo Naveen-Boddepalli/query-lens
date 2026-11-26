@@ -3227,7 +3227,7 @@ Costs are against the modules that exist today (paths checked 2026-11-25).
 
 | ID | Rel. | Item | Shape | Cost |
 |---|---|---|---|---|
-| **I1** | 4.0 | **A trace ceiling** | `runQuery` takes an event budget. Past it the run still finishes and its counters and result stay exact, but step events stop being recorded, and the trace ends in one event that says how many it did not keep — so a step-through says "this run took 13.5 million steps; showing the first N" instead of exhausting the tab. The budget is measured (the largest preset trace × a margin), not guessed. A test runs the parallel tool's big-big join under `NODE_OPTIONS=--max-old-space-size=1536`, CI's real ceiling. The measurement re-decides C6's Web Worker (U6). | 3–4 days |
+| **I1** | 4.0 | **A trace ceiling** — **built, 2026-11-26** (`TRACE_BUDGET` = 200,000 in `trace.ts`; the result step carries a `TraceCut` with the whole run's counters; big-big keeps 200,001 of 13.5M steps, 1.4 s, ~150 MB) | `runQuery` takes an event budget. Past it the run still finishes and its counters and result stay exact, but step events stop being recorded, and the trace ends in one event that says how many it did not keep — so a step-through says "this run took 13.5 million steps; showing the first N" instead of exhausting the tab. The budget is measured (the largest preset trace × a margin), not guessed. A test runs the parallel tool's big-big join under `NODE_OPTIONS=--max-old-space-size=1536`, CI's real ceiling. The measurement re-decides C6's Web Worker (U6). | 3–4 days |
 | **I2** | 4.1 | **The engine logs** | The SQL pipeline's `INSERT`/`UPDATE`/`DELETE` go through a write-ahead log on the engine's own buffer pool: real dirty frames, a pageLSN on each real heap page, log-before-data enforced when the pool evicts, steal/force as pool options, and **log truncation** at a checkpoint (the oldest recLSN or active transaction's first record, whichever is older). The *Durability* dialog drives this log instead of the separate model, so its eight-spare-slot and sixty-row limits go. **Off by default** (§28.6 rule 10): a session turns it on, so no preset's pinned counters move. `/tools/wal` and `/tools/recovery` keep their four-page model, which becomes the engine's oracle (rule 11). | 2 wk |
 | **I3** | 4.1 | **Transactions in the Playground** | `BEGIN`, `COMMIT` and `ROLLBACK` in the SQL box, one session: statements inside see their own changes, `ROLLBACK` undoes newest first through I2's compensation records, and the trace shows the undo. A crash from the *Durability* dialog mid-transaction makes it a loser in recovery. One session only — two sessions remain `/tools/schedule`'s; no savepoints. Oracle: SQLite runs the same statements with the same `BEGIN`/`ROLLBACK`. | 1 wk |
 | **I4** | 4.1 | **Bushy plans run, and a materialize node** | The planner may choose a bushy tree when T4's `searchJoinShapes` prices it cheaper; the executor runs a join whose inner side is itself a join through a new `Materialize` node (its rows held, its pages written and read through the buffer pool, counted). The *Why not?* panel names the left-deep runner-up. Closes *Query execution models*' materialization gap on the way. Whether `runJoinOrderDP` adopts `joinShapes`'s exact per-subset estimate (T4's finding) is decided by measurement: only if no preset's chosen plan changes, otherwise as an option. Oracle-checked. | 1–1.5 wk |
@@ -3293,8 +3293,9 @@ Costs are against the modules that exist today (paths checked 2026-11-25).
 **4.0 — Honest and bounded**
 - [x] No course-map row or `limits.mdx` section names as missing something that is built, or claims something that
   is not; `courseMap.test.ts` holds the SQL row's fragments and every link. *(2026-11-26, U2.)*
-- [ ] The parallel tool's big-big join runs in the Playground and in a test under a 1,536 MB heap, its counters and
-  result exact, its trace cut off with a visible note.
+- [x] The parallel tool's big-big join runs in the Playground and in a test under a 1,536 MB heap, its counters and
+  result exact, its trace cut off with a visible note. *(2026-11-26, I1. The test is `exchangePresets.test.ts`. The
+  Playground has no exchange tables, so the browser check ran a 569,073-step cross join of `transactions`.)*
 
 **4.1 — One engine**
 - [ ] In the Playground: `BEGIN`, an `UPDATE`, a crash from the *Durability* dialog, recovery — the update is
@@ -3320,14 +3321,14 @@ Costs are against the modules that exist today (paths checked 2026-11-25).
 |---|---|---|---|
 | **The v4 plan (§28)** | **Decided, 2026-11-26 (owner)** — "start v4 with 4.0"; on `version/v4` (cut from `main` after 3.0.0), one item per commit, as v3 was | now | — |
 | Cut 3.0.0 before v4 builds (U1) | **Done, 2026-11-26** — tag `v3.0.0` on `9214558` | now | — |
-| Trace ceiling (I1) | **Proposed for 4.0** — PR #43's 13.5M-event run | now | — |
+| Trace ceiling (I1) | **Built, 2026-11-26** — 200,000 steps, twenty times the longest preset trace (9,749) | now | — |
 | WAL on the engine's pool; Playground transactions (I2, I3) | **Proposed for 4.1** — opt-in, the small model kept as oracle | after I1 | — |
 | Bushy plans executed (I4) | **Proposed for 4.1** | after I1 | — |
 | Subqueries in `FROM`, non-recursive `WITH` (Q3) | **Owner to decide** — reverses §27.10's decline "for 3.0" (owner, 2026-10-19) | 4.2 | — |
 | Correlated scalar subquery (Q4) | **Owner to decide** — §27.9's trigger has fired; the COUNT bug is the lesson | 4.2 | — |
 | `CREATE STATISTICS` (Q1) | **Proposed** — PostgreSQL's statement; a statistics object, not DDL, so §4's DDL line holds | 4.2 | — |
 | Replication (R1, R2) | **Proposed for 4.3** — one tool, quorums as its section | 4.3 | — |
-| Web Worker (C6's deferred half) | **Re-decided after I1** (U6) | after I1 | I1's measurement |
+| Web Worker (C6's deferred half) | **Re-decided after I1** (U6) — I1 measured: the longest preset trace is 9,749 steps, 5% of the budget; a run past it takes ~1.4 s on the main thread before the cut | 4.4 | I1's measurement (in) |
 | `ColumnScan` in `EXPLAIN` | **Still declined** (2026-10-05) | — | A course asking for column storage in the engine, not the sandbox |
 | Latch contention in the Playground | **Declined for v4** — the Playground has one session; `/tools/latch-crabbing` covers it | — | Two Playground sessions |
 | Raft membership changes and snapshots, 3PC, Paxos | **Declined for v4** — one consensus protocol, honestly labelled (§27.10) | — | A course adoption that asks |

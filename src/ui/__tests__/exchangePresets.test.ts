@@ -35,25 +35,16 @@ function pairCount(sql: string, db: Database): number {
   return found;
 }
 
-/**
- * Joins whose serial trace is too big to hold in a test worker: `big-big` runs 13.5 million steps through
- * `runQuery` — about 2.6 GB of heap for the trace alone — which aborted the worker on CI's 7 GB runners
- * (Node's default heap limit there is under 2 GB). Their expected count comes from `pairCount`, which the test
- * checks against `runQuery` on every other preset.
- */
-const TRACE_TOO_BIG = new Set(['big-big']);
-
 describe('the exchange section’s joins (plan.md §27.5 P2)', () => {
   it('counts what the engine returns alone, for every preset join, strategy and number of workers', () => {
     const db = exchangeDatabase();
     for (const q of JOIN_QUERIES) {
-      let expected = pairCount(q.sql, db);
-      if (!TRACE_TOO_BIG.has(q.id)) {
-        const serial = runQuery(q.sql, db, DEFAULT_ENGINE_OPTIONS);
-        const engine = q.sql.startsWith('SELECT COUNT(*)') ? (serial.rows[0]!['COUNT(*)'] as number) : serial.rows.length;
-        expect(engine, `${q.id}: the engine alone agrees with the hash count`).toBe(expected);
-        expected = engine;
-      }
+      // `big-big` runs 13.5 million steps through `runQuery`; before the trace had a ceiling (plan.md §28.5 I1) that
+      // was 2.6 GB of heap and aborted CI's worker, so this check skipped it. It keeps 200,001 steps now.
+      const expected = pairCount(q.sql, db);
+      const serial = runQuery(q.sql, db, DEFAULT_ENGINE_OPTIONS);
+      const engine = q.sql.startsWith('SELECT COUNT(*)') ? (serial.rows[0]!['COUNT(*)'] as number) : serial.rows.length;
+      expect(engine, `${q.id}: the engine alone agrees with the hash count`).toBe(expected);
       for (const strategy of ['broadcast', 'repartition'] as JoinExchange[]) {
         for (let workers = 1; workers <= 8; workers++) {
           expect(ok(runParallelJoin(q.sql, db, { workers, strategy })).count, `${q.id} ${strategy} ${String(workers)}`).toBe(expected);

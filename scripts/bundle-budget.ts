@@ -460,9 +460,12 @@ const T = (name: string): string => `src/pages/tools/${name}.tsx`;
  *    is one shared chunk, ~4.7 kB gzip, plus its stylesheet rules, and every tool route now loads it. The 18 tool
  *    routes that went over are set to measured + 3, rounded up. The chunk is cached after the first tool, so moving
  *    between tools pays only the page chunk.
+ *  - 2026-11-26, the trace ceiling (plan.md §28.5 I1): the tracer's running totals and `TraceCut` are engine code
+ *    every route that runs a query loads, and they put / at 184.4 kB of its 184: 184 → 188, measured + 3, rounded up.
+ *    Nothing else moved over its ceiling.
  */
 export const ROUTES: readonly RouteBudget[] = [
-  { route: '/', roots: [P('LandingPage')], kb: 184, note: 'the landing page' },
+  { route: '/', roots: [P('LandingPage')], kb: 188, note: 'the landing page' },
   { route: '/playground', roots: [P('PlaygroundPage')], kb: 362, note: 'the Playground: the editor, every stage panel, the engine — the heaviest route, and the one most people land on' },
   { route: '/stages', roots: ['src/ui/StagesLayout.tsx', P('StagesIndex')], kb: 185, note: 'the stage explainers, index' },
   { route: '/stages/:id', roots: ['src/ui/StagesLayout.tsx', P('StagePage')], kb: 222, note: 'one stage explainer' },

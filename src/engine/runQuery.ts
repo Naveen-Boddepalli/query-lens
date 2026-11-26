@@ -54,7 +54,7 @@ import { existsNodesIn, resolveExists } from './exists.ts';
 import { scopedDatabase, storedTable } from './scope.ts';
 import { createTracer } from './trace.ts';
 import { DEFAULT_ENGINE_OPTIONS } from './types.ts';
-import type { Database, EngineOptions, QueryError, Row, RunResult, Table } from './types.ts';
+import type { Database, EngineOptions, QueryError, Row, RunResult, StepEventBody, Table } from './types.ts';
 
 /** The error a rejected `INSERT` or `UPDATE` reports: which key is taken, by which row, and that nothing changed. */
 function uniqueError(violation: UniqueViolation, heap: Heap, span: { from: number; to: number }): QueryError {
@@ -81,6 +81,10 @@ export interface RunHooks {
    * itself, by running the statement once first; a caller never needs to pass it.
    */
   rehearsedReferences?: readonly number[];
+  /** The most steps the trace keeps (`trace.ts`'s `TRACE_BUDGET` when absent, plan.md §28.5 I1). */
+  traceBudget?: number;
+  /** Sees every step as it is emitted, kept or not — how the `optimal` rehearsal reads a run it does not keep. */
+  observe?: (body: StepEventBody) => void;
 }
 
 /**
@@ -204,14 +208,22 @@ export function runQuery(
   // as the future. Without it `optimal` would quietly act as FIFO while its narration claimed otherwise. Nothing here
   // changes `db` (a write's new rows are returned, not stored), so the rehearsal leaves nothing behind.
   if (options.policy === 'optimal' && hooks.rehearsedReferences === undefined) {
-    const rehearsal = runQuery(sql, db, { ...options, policy: 'fifo' });
-    const references = rehearsal.events.flatMap((e) =>
-      e.stage === 'buffer' && (e.action === 'hit' || e.action === 'miss') ? [e.pageId] : [],
-    );
+    // Its page reads are watched as they happen rather than read back from its trace, which keeps nothing: a trace
+    // past its ceiling (plan.md §28.5 I1) would no longer hold them all.
+    const references: number[] = [];
+    runQuery(sql, db, { ...options, policy: 'fifo' }, {
+      traceBudget: 0,
+      observe: (e) => {
+        if (e.stage === 'buffer' && (e.action === 'hit' || e.action === 'miss')) references.push(e.pageId);
+      },
+    });
     return runQuery(sql, db, options, { ...hooks, rehearsedReferences: references });
   }
 
-  const { emit, drain } = createTracer();
+  const { emit, drain } = createTracer({
+    ...(hooks.traceBudget === undefined ? {} : { budget: hooks.traceBudget }),
+    ...(hooks.observe ? { observe: hooks.observe } : {}),
+  });
   const poolFor = (pageCount: number) =>
     createBufferPool(pageCount, options, emit, hooks.rehearsedReferences, 'query');
 

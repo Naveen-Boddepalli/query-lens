@@ -242,7 +242,27 @@ export type StepEventBody =
       pageId: number;
       mode: 'shared' | 'exclusive';
     }
-  | { stage: 'result'; rows: Row[] };
+  /** `cut` is set only when the trace hit its ceiling (`trace.ts`'s `TRACE_BUDGET`, plan.md §28.5 I1). */
+  | { stage: 'result'; rows: Row[]; cut?: TraceCut };
+
+/**
+ * A trace past its ceiling keeps its first steps and its result step; this, on the result step, is what the steps it
+ * dropped would have added up to — so the counters at the last step, and `EXPLAIN ANALYZE`, are the whole run's.
+ */
+export interface TraceCut {
+  /** Steps kept before the result step. */
+  kept: number;
+  /** Steps the run took before the result step, kept or not. */
+  total: number;
+  /** The buffer pool's counts over the whole run, folded as `viewState.ts` folds them. */
+  bufferStats: { hits: number; misses: number; evictions: number; writes: number; prefetches: number };
+  /** Locks acquired over the whole run. */
+  locksTaken: number;
+  /** Each operator's last reported row count, in first-reported order — the view state's `operators`. */
+  operators: { op: string; rowsProduced: number }[];
+  /** Each operator's largest reported row count, by operator and table — what `EXPLAIN ANALYZE` calls actual. */
+  actualRows: { op: string; table?: string; rowsProduced: number }[];
+}
 
 export type StepEvent = StepEventBase & StepEventBody;
 
