@@ -575,7 +575,7 @@ index entries of the rows it touches.
   last record applied to it (**pageLSN**) and of the one that first dirtied it since it was last written
   (**recLSN**). A commit forces the log through its commit record and writes **no** data page. Rolling back undoes
   newest first and writes a **compensation record** for each undo, so the undo is itself logged and is never done
-  twice. This is ARIES's logging; its recovery is not built yet.
+  twice. This is ARIES's logging; its recovery is described below.
 - **The rule is enforced, and can be switched off.** Before a dirty page is written — on request, or because the pool
   needs its frame — the log is flushed through that page's pageLSN, and only that far. With the rule off the page is
   written anyway, and the page names what a crash would then find: a change on disk that nothing records. A property
@@ -661,8 +661,8 @@ Three decisions are made by comparing estimated page costs (plan.md §25.4 C5), 
 Each is the default whenever the caller does not force something explicit — [Compare](/compare) and the
 Planner sandbox still force a specific `joinStrategy` to compare algorithms directly, and that is never
 overridden. The planner's *Why not?* note shows the runner-up each of these beat. Every other rewrite rule —
-constant folding, predicate pushdown, join predicate pushdown, and the index-only scan — still fires on a
-structural match alone; the cost estimates shown beside those plans only justify the narration, they do not
+constant folding, predicate pushdown, product-to-join, join predicate pushdown, and the index-only scan — still
+fires on a structural match alone; the cost estimates shown beside those plans only justify the narration, they do not
 decide whether the rewrite happens.
 
 ## Narration detail

@@ -40,10 +40,14 @@ for exactly what runs today. The one thing still outside this repo's control is
 against a text-explanation control. The study kit (`/study` and `pnpm study`, [STUDY.md §4](STUDY.md))
 now makes it runnable end to end without a server; it still needs real participants, not commits.
 
-**v1 is shipped and live.** [plan.md §24](plan.md#24-where-v1-stands--the-retrospective) summarises what
-it is and what it did and did not prove; **[§25](plan.md#25-querylens-v2--trust-ceiling-and-the-next-two-subjects)
-plans v2** — prove the claims first, raise the engine's ceiling, then transactions and recovery — on the
-evidence in [RESEARCH.md Part IV](RESEARCH.md#part-iv--v2-research).
+**3.0.0 is the current release.** [plan.md §24](plan.md#24-where-v1-stands--the-retrospective) summarises
+v1 and what it did and did not prove; **[§25](plan.md#25-querylens-v2--trust-ceiling-and-the-next-two-subjects)**
+planned v2 — prove the claims first, raise the engine's ceiling, then transactions and recovery — on the
+evidence in [RESEARCH.md Part IV](RESEARCH.md#part-iv--v2-research), released as 2.0.0;
+**[§27](plan.md#27-querylens-v3--the-sql-a-textbook-asks-for-and-the-last-two-subjects)** planned v3 — the
+SQL a textbook asks for, theory you can see, parallel execution and distributed databases — released as
+3.0.0. **[§28](plan.md#28-querylens-v4--one-engine-not-a-shelf-of-models)** plans v4, which wires the models
+built beside the engine into it, and is being built on `version/v4`.
 
 ## Commands
 

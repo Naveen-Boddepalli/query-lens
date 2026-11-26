@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Work toward **v4** (plan.md §28), on `version/v4`.
+
+### Added
+
+- **The course map is held to the code** (plan.md §28.5 U2). A new test, `courseMap.test.ts`, resolves every link on
+  the [course map](/docs/study/course-map) — page, tool, lesson, challenge and heading anchor — and runs its SQL row
+  on the `shop` preset: each construct the row says you can practise must run, and each one its *What is missing*
+  cell names must still be refused, so building one fails the test until the row is updated. It reads the pages
+  as text through `?raw`, which the MDX plugin now leaves alone (it used to compile Vite's `export default "…"`
+  line as MDX).
+
+### Changed
+
+- **Dependency updates** (Dependabot #49, the dev group): `@axe-core/playwright` 4.13.0 → 4.14.0, `@playwright/test`
+  1.64.0 → 1.65.1, `@tailwindcss/vite` and `tailwindcss` 4.3.3 → 4.3.5, `@vitejs/plugin-react` 6.1.2 → 6.3.0,
+  `eslint` 10.12.0 → 10.15.0, `jsdom` 30.1.2 → 31.0.1, `typescript-eslint` 8.70.0 → 8.73.0, `vite` 8.3.4 → 8.3.8,
+  `vitest` 5.0.1 → 5.1.1, and smaller bumps.
+
+### Fixed
+
+- **Four docs claims the code had outgrown** (plan.md §28.5 U2). The course map listed outer joins, join order and
+  clustered tables as missing, and its *Biggest holes* said everything from transactions onward was absent; it now
+  says what is built and names the gaps that remain (mechanisms modelled beside the engine, replication, the SQL a
+  course still needs, tries). [Architecture](/docs/architecture) described six optimizer rules that never consult
+  cost and a parser with at most one `JOIN`; it now lists the eight rules in order, the three decisions cost makes,
+  the join-order search, every plan operator and every algebra symbol. The [engine limits](/docs/reference/limits)
+  said ARIES recovery was not built, two paragraphs above describing it. The README's status still said v2 was
+  being planned.
+- **Accessible names that did not match visible labels** (axe's *label-content-name-mismatch*, in #49): the docs and
+  stages menu buttons and the plan-tree nodes take their names from their visible text, and the search trigger's
+  name begins with what it shows.
+
 ## [3.0.0] - 2026-11-26
 
 QueryLens v3 (plan.md §27), built on `version/v3` and `version/v3-remaining` and merged into `main` after 2.0.0,

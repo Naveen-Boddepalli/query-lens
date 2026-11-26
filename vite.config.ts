@@ -2,6 +2,7 @@ import { execSync } from 'node:child_process';
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { defineConfig } from 'vitest/config';
+import type { Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import mdx from '@mdx-js/rollup';
@@ -28,6 +29,20 @@ function buildSha(): string {
 
 const BUILD_SHA = buildSha();
 const BUILD_TIME = new Date().toISOString();
+
+// `page.mdx?raw` is the page's own text (plan.md §28.5 U2: `courseMap.test.ts` reads the course map's links and
+// SQL row that way). Vite's `?raw` loader hands over `export default "…"`, and the MDX plugin, which drops the
+// query before it filters, would then compile that one line as MDX. It leaves any `?raw` id alone instead.
+function rawSkipping(plugin: Plugin): Plugin {
+  const transform = plugin.transform;
+  if (typeof transform !== 'function') return plugin;
+  return {
+    ...plugin,
+    transform(code, id, options) {
+      return id.includes('?raw') ? null : transform.call(this, code, id, options);
+    },
+  };
+}
 
 // og:image and canonical have to be absolute — a relative one is dropped by
 // most scrapers, and the preview card *is* the landing page (plan.md §14.1
@@ -155,10 +170,10 @@ export default defineConfig({
     // reference pages (SQL, shortcuts, URL parameters) had exactly that bug
     // since the docs migration, invisible until something rendered the raw
     // text rather than a table.
-    { enforce: 'pre', ...mdx({
+    rawSkipping({ enforce: 'pre', ...mdx({
       remarkPlugins: [remarkFrontmatter, remarkMdxFrontmatter, remarkGfm],
       rehypePlugins: [rehypeSlug, rehypeFocusablePre],
-    }) },
+    }) }),
     react(),
     tailwindcss(),
     {

@@ -3255,7 +3255,7 @@ Costs are against the modules that exist today (paths checked 2026-11-25).
 | ID | Rel. | Item | Shape | Cost |
 |---|---|---|---|---|
 | **U1** | R0 | **Cut 3.0.0** | **Done, 2026-11-26** — `9214558` on `main`, deployed and post-deploy checked; the owner tagged `v3.0.0` on it. CI #220 on that commit was cancelled when PR #49 reached `main` behind it, so the tag rests on the full local gate (3,325 unit, 761 e2e). As planned: CHANGELOG `[Unreleased]` → `[3.0.0]`, `package.json` → `3.0.0`, §27.9's rows, RELEASING.md's checklist; pushed to `main` on the owner's go-ahead (a production deploy), CI and the deploy checked, then the owner tags. | 1–2 days |
-| **U2** | 4.0 | **The course map and `limits.mdx`, re-read against the code** | Every row of the course map and every section of `limits.mdx`, checked against what is built (§28.1's four stale places first), and *The biggest holes* rewritten. A `courseMap.test.ts` parses every SQL fragment the *SQL* row claims and resolves every route and lesson it links, so the checkable half cannot drift again. | 3 days |
+| **U2** | 4.0 | **The course map and `limits.mdx`, re-read against the code** | **Built, 2026-11-26** — the course map's *Tree indexes* and *Joins* rows, *Where it is strongest* and *The biggest holes* rewritten; `architecture.mdx`'s optimizer section (six rules that consult no cost and a one-`JOIN` parser, against eight rules, three cost decisions and the join-order search), operator list, algebra symbols and *Extending it*; `limits.mdx`'s ARIES sentence and its list of structural rules; the README's status. `src/pages/__tests__/courseMap.test.ts` resolves every link (pages, tools, lessons, challenges, heading anchors) and runs the SQL row on `shop`: 14 claimed constructs must run, the five missing items must still be refused. No other docs page names a stale count. As planned: every row of the course map and every section of `limits.mdx`, checked against what is built (§28.1's four stale places first), and *The biggest holes* rewritten. A `courseMap.test.ts` parses every SQL fragment the *SQL* row claims and resolves every route and lesson it links, so the checkable half cannot drift again. | 3 days |
 | **U3** | 4.4 | **The §9 decision** (owner's people) | On 2026-12-31, read §25.6's table with the n that exists and record the verdict and its n in §25.9 — inconclusive is a result. Recruiting is the owner's; the kit needs nothing. | — |
 | **U4** | 4.4 | **Carry-overs** (owner's) | L4 — the domain (`querylens.org` recommended), the launch post, the npm organisation — and H6's manual screen-reader pass. | — |
 | **U5** | 4.4 | **A lesson, a challenge and a text view per item; the course map and `limits.mdx` move with each** (Q6, §25.5 rule 6) | In each item's own commit; `toolCoverage.test.ts` already fails a tool without them. | per item |
@@ -3291,8 +3291,8 @@ Costs are against the modules that exist today (paths checked 2026-11-25).
 - [x] `3.0.0` in `package.json` and CHANGELOG, deployed from `main`, tagged by the owner. *(2026-11-26.)*
 
 **4.0 — Honest and bounded**
-- [ ] No course-map row or `limits.mdx` section names as missing something that is built, or claims something that
-  is not; `courseMap.test.ts` holds the SQL row's fragments and every link.
+- [x] No course-map row or `limits.mdx` section names as missing something that is built, or claims something that
+  is not; `courseMap.test.ts` holds the SQL row's fragments and every link. *(2026-11-26, U2.)*
 - [ ] The parallel tool's big-big join runs in the Playground and in a test under a 1,536 MB heap, its counters and
   result exact, its trace cut off with a visible note.
 

@@ -63,8 +63,9 @@ events in a trace shows.
 Current operators: `SeqScan`, `IndexScan` (equality), `IndexOnlyScan` (equality, never touches the
 heap), `IndexRangeScan` (a range predicate, walking the leaf sibling chain), `Join` (dispatching to
 `nested-loop`, `hash`, `sort-merge`, or `index-nested-loop` — whose inner side is an `IndexProbe`, a
-lookup keyed by the current outer row), `Filter`, `HashAggregate`, `SortAggregate`, `Sort`,
-`Project`, `Limit`. `DELETE`/`INSERT`/`UPDATE` have their own executors (`exec/delete.ts`,
+lookup keyed by the current outer row — and typed inner, `left`, `right`, `full`, `cross`, or `semi`/`anti`
+for `[NOT] EXISTS`), `Filter`, `HashAggregate`, `SortAggregate`, `Having`, `HashDistinct`, `SortDistinct`,
+`Sort`, `Project`, `Limit`, and `SetOp` (`UNION`/`INTERSECT`/`EXCEPT` over members each planned on its own). `DELETE`/`INSERT`/`UPDATE` have their own executors (`exec/delete.ts`,
 `exec/insert.ts`, `exec/update.ts`) that reuse the same scan/index-lookup machinery to find their
 target rows.
 
@@ -77,42 +78,52 @@ right.
 
 ## The optimizer
 
-Rule-based, deterministic, and — this is a design principle, not an oversight — **the rules
-themselves consult no cost model**. `index-selection` fires whenever an equality on an indexed
-column is present, not when a cheaper plan happens to be costed lower. The cost model in
-`planner/cost.ts` produces *estimates* purely to justify a rewrite's narration ("the index reads
-about 3 pages; the scan reads 12") without the decision to rewrite ever depending on a number
+Rule-based and deterministic, with cost deciding in exactly three places (plan.md §25.4 C5): whether an
+index is used, which algorithm runs a join, and the order of a chain of inner joins. Every other rule
+fires on a structural match alone. The cost model in `planner/cost.ts` is the one formula behind all
+three decisions, behind `EXPLAIN`, and behind the narration of every other rewrite ("the index reads
+about 3 pages; the scan reads 12") — never a number invented for one comparison, which
 [plan.md §12](https://github.com/Naveen-Boddepalli/query-lens/blob/main/plan.md) would call
-plausible-but-false.
+plausible-but-false. A choice made by cost carries a *Why not?* note naming the runner-up.
 
-Six rules, applied in this order, each producing one `optimize` event with before/after trees and
-the changed nodes highlighted:
+Eight rules, applied in this order (`OPTIMIZER_RULES` in `planner/optimize.ts`), each producing one
+`optimize` event with before/after trees and the changed nodes highlighted:
 
 1. **`constant-folding`** — drops a conjunct that is always true regardless of the row (two
    literals). A column compared with *itself* is not folded: `age = age` is UNKNOWN where `age` is
    NULL, and only TRUE passes a filter.
 2. **`predicate-pushdown`** — folds a `Filter` into the scan beneath it, so rows are discarded as
    they're read rather than materialised and thrown away.
-3. **`join-predicate-pushdown`** — the `Join` counterpart: pushes each `WHERE` conjunct naming only
-   one side of a `JOIN` into that side's own scan.
-4. **`index-selection`** — swaps `SeqScan` for `IndexScan` when a conjunct is an equality on an
-   indexed column; picks the more selective of two candidates by distinct-value count when more
-   than one matches.
-5. **`range-index-selection`** — the same idea for a range (`<`, `>`, `<=`, `>=`, `BETWEEN`), only
+3. **`product-to-join`** — turns σ over × into ⋈: a `CROSS JOIN` or `FROM a, b` with a `WHERE` equality
+   between the two sides becomes a join on it, except under a later `RIGHT` or `FULL` join.
+4. **`join-predicate-pushdown`** — the `Join` counterpart of predicate pushdown: pushes each `WHERE`
+   conjunct naming only one side of a `JOIN` into that side's own scan, never into a side a join pads.
+5. **`join-algorithm-selection`** — prices nested-loop, hash, sort-merge and (where the inner table has an
+   index on its join column) index nested-loop for each join, and the cheapest wins.
+6. **`index-selection`** — swaps `SeqScan` for `IndexScan` when a conjunct is an equality on an
+   indexed column, picking the candidate that pins the most rows down — then declines it if its
+   estimated cost does not beat the scan.
+7. **`range-index-selection`** — the same idea for a range (`<`, `>`, `<=`, `>=`, `BETWEEN`), only
    ever firing on a scan `index-selection` left untouched, since an equality always wins first.
-6. **`index-only-scan`** — narrows an `IndexScan` further when the SELECT list needs nothing but
-   the indexed column itself, so the lookup never fetches the heap page at all.
+8. **`index-only-scan`** — narrows an `IndexScan` further when the SELECT list needs nothing but
+   the index's own columns, so the lookup never fetches the heap page at all.
 
-When nothing fires, the optimizer says so out loud rather than silently emitting nothing.
-Deliberately absent: **join order** (needs multi-join grammar this parser doesn't have — a query
-has at most one `JOIN`) and **clustered (index-organized) tables** — every table is a heap, and each
-index (plain or composite) is a separate B+Tree pointing at it.
+When nothing fires, the optimizer says so out loud rather than silently emitting nothing. The join
+order is not a rule: `planner/emit.ts` runs a Selinger-style search over the subset lattice
+(`runJoinOrderDP`, `planner/joinOrder.ts`) when the plan is first built, and a chain of plain inner joins
+runs in the cheapest left-deep order it finds; a chain with an outer join keeps its written order.
+`planner/joinShapes.ts` prices bushy trees beside the left-deep ones for `/tools/join-order`, but the
+planner never runs one. A table may also be **clustered** (index-organized) on one of its `UNIQUE`
+indexes, its other indexes then carrying the clustering key instead of a row address — see
+[The B+Tree](/docs/concepts/btree#clustered-index-organized-tables).
 
 ### The plan as relational algebra
 
 Every plan node carries an `ra` field (`{ symbol, sub, rel }`) derived from the real `Plan`, not parsed back out
-of its label: `Filter` and a filtered `SeqScan` and an `IndexScan` are all `σ`; `Project` is `π`; `Join` is `⋈`;
-the aggregate nodes are `γ`; `Sort` is `τ`; `Limit` is `λ`; the distinct nodes are `δ`. The algebra is *logical*
+of its label: `Filter` and a filtered `SeqScan` and an `IndexScan` are all `σ`; `Project` is `π`; a scan under an
+alias is `ρ`; `Join` is `⋈`, or `⟕`/`⟖`/`⟗` for an outer join, `×` for a product and `⋉`/`▷` for a semi- or
+anti-join; `SetOp` is `∪`, `∩` or `−`; the aggregate nodes are `γ`; `Sort` is `τ`; `Limit` is `λ`; the
+distinct nodes are `δ`. The algebra is *logical*
 — it says what is computed — while the node's label stays *physical* — how. `src/export/toRelationalAlgebra.ts`
 turns a tree of them into `π_{name}(σ_{age > 30}(users))` (or LaTeX) and the plan panels can draw the tree in
 either notation; the colours follow the physical operator in both, so switching never changes which node is which.
@@ -153,7 +164,9 @@ translation (`planner/optimize.ts`); a cost estimate (`planner/cost.ts`); an exe
 a `buildOperator` case (`exec/operators.ts`); and narration wherever the plan is first built
 (`planner/emit.ts` or the statement-specific `emitDeletePlanEvents`/`emitUpdatePlanEvents`).
 Every new `StepEventBody` variant (`types.ts`) needs a fold branch in `viewState.ts`'s
-`applyEvent`, or the UI has nothing to render it with.
+`applyEvent`, or the UI has nothing to render it with, and a key in `eventKey.ts` with a novice line of its
+own in `ui/narrationDetail.ts` (a corpus test fails without one). New SQL is supported only once SQLite
+agrees: the change extends `oracle/` with a generator for its shape and a coverage threshold.
 
 Tests come before visualization — a new B+Tree operation, in particular, gets a property test
 first, since a subtly wrong split or merge rule produces a tree that *looks* plausible and silently
