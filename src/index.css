@@ -74,29 +74,43 @@
 
 @theme {
   /**
-   * The surface ramp — reworked for the "premium dark-minimal" pass.
+   * The "Prism" theme (design/aurora-theme).
    *
-   * The base is a step deeper than the old design (0.155 vs 0.17) with a touch
-   * more chroma in the blue, so elevated panels read as genuinely lifted rather
-   * than merely a shade lighter. Four steps still, each one further from the
-   * page than the last, so a hover is always an *increase* in contrast.
+   * The logo is a prism: one ray in, a spectrum out. The theme takes that
+   * literally. The eight pipeline stages are one spectrum, walking the hue
+   * wheel from sky (parse) to mint (result). The chrome stays out of the way:
+   * a plum-tinted near-black (hue 285) whose warmth makes the spectrum glow
+   * instead of competing with it, and a single iris accent for "the thing you
+   * can act on".
+   *
+   * The surface ramp still has four steps, each further from the page than the
+   * last, so a hover always *increases* contrast.
    */
-  --color-surface: oklch(0.14 0.015 260);
-  --color-surface-2: oklch(0.195 0.016 264);
-  --color-surface-3: oklch(0.238 0.018 264);
+  --color-surface: oklch(0.145 0.022 285);
+  --color-surface-2: oklch(0.19 0.027 286);
+  --color-surface-3: oklch(0.235 0.031 287);
   /* plan.md §16.2 item 4. The palette had no step to hover *to*: a cell already
      sitting on surface-3 has nowhere to go. One more step on the same ramp
      rather than a per-panel improvisation. "Further from the page background"
      in both themes — lighter on dark, darker on light. */
-  --color-surface-4: oklch(0.29 0.02 264);
-  --color-edge: oklch(0.34 0.02 264);
-  --color-ink: oklch(0.96 0.004 264);
-  --color-ink-dim: oklch(0.72 0.016 264);
+  --color-surface-4: oklch(0.285 0.035 288);
+  --color-edge: oklch(0.345 0.036 289);
+  --color-ink: oklch(0.965 0.008 290);
+  --color-ink-dim: oklch(0.755 0.03 290);
 
-  /* Primary Accent: Precision Cyan / Sapphire (oklch(0.76 0.16 215)) */
-  --color-accent: oklch(0.76 0.16 215);
-  --color-accent-strong: oklch(0.84 0.16 215);
-  --color-accent-soft: oklch(0.76 0.16 215 / 0.14);
+  /* Iris — the one accent. Violet sits in the middle of the stage spectrum,
+     so the accent never collides with a stage colour on either side. */
+  --color-accent: oklch(0.74 0.17 292);
+  --color-accent-strong: oklch(0.84 0.13 295);
+  --color-accent-soft: oklch(0.74 0.17 292 / 0.15);
+  /* Ember — the warm counterweight, used only inside gradients and for the
+     "live" glow, never as a second link colour. */
+  --color-ember: oklch(0.8 0.14 52);
+  /* Text on a solid accent fill (the primary button). White in both themes:
+     the fill is dark enough for 5:1 either way. */
+  --color-on-accent: oklch(0.99 0.004 290);
+  --color-accent-fill: oklch(0.56 0.21 292);
+  --color-accent-fill-2: oklch(0.55 0.22 330);
 
   /* A 1px inner highlight along the top edge of an elevated surface — the
      detail that separates a flat box from a lit one. Barely-there on purpose. */
@@ -104,12 +118,12 @@
 
   /* A dedicated colour for the hierarchy edges flowinger draws, one step
      brighter than `--color-edge` so a connector reads against a tinted node. */
-  --color-flow-edge: oklch(0.44 0.02 264);
+  --color-flow-edge: oklch(0.46 0.04 289);
 
   /* Storage-layer semantics — reused everywhere a page is drawn. */
-  --color-hit: oklch(0.78 0.16 155);
-  --color-miss: oklch(0.80 0.16 75);
-  --color-evict: oklch(0.70 0.20 25);
+  --color-hit: oklch(0.8 0.15 160);
+  --color-miss: oklch(0.83 0.14 78);
+  --color-evict: oklch(0.72 0.19 20);
 
   /* BusTub's convention, which CMU students already have in their heads. */
   --color-node-internal: oklch(0.75 0.15 340);
@@ -146,26 +160,27 @@
   --color-hue-orange: oklch(75% 0.183 55.934);
   --color-hue-orange-ink: oklch(90.1% 0.076 70.697);
 
-  /* The pipeline tracker's per-stage accents. A separate scale from the
-     pair above (Tailwind's 300, one step darker than an `-ink`) because
-     they label a chip rather than a node, and mixing the two would make
-     the tracker and the diagrams disagree about what "the parse colour"
-     is. One token per stage, matching STAGE_META. */
-  --color-stage-parse: oklch(82.8% 0.111 230.318);
-  --color-stage-plan: oklch(81.1% 0.111 293.571);
-  --color-stage-optimize: oklch(83.3% 0.145 321.434);
-  --color-stage-execute: oklch(87.9% 0.169 91.605);
-  --color-stage-buffer: oklch(84.5% 0.143 164.978);
-  --color-stage-index: oklch(82.3% 0.12 346.018);
-  --color-stage-lock: oklch(83.7% 0.128 66.29);
-  --color-stage-result: oklch(86.5% 0.127 207.078);
+  /* The pipeline tracker's per-stage accents — the Prism spectrum. One hue
+     step (~40°) per stage, in pipeline order, at an equal perceptual lightness
+     so no stage shouts louder than its neighbours. Laid end to end they are
+     `--gradient-spectrum`: the hero headline, the brand line and the logo's
+     rays are literally the pipeline's colours. One token per stage, matching
+     STAGE_META. */
+  --color-stage-parse: oklch(0.83 0.12 225);
+  --color-stage-plan: oklch(0.81 0.12 265);
+  --color-stage-optimize: oklch(0.81 0.14 302);
+  --color-stage-execute: oklch(0.8 0.15 345);
+  --color-stage-buffer: oklch(0.81 0.13 22);
+  --color-stage-index: oklch(0.85 0.14 68);
+  --color-stage-lock: oklch(0.87 0.15 118);
+  --color-stage-result: oklch(0.84 0.13 165);
 
   /* Editor chrome that has to invert: a 4%-white active line is invisible on
      a white page. Tokens rather than literals so the light block can flip them
      alongside everything else. */
   --color-line-active: oklch(1 0 0 / 4%);
-  --color-select: oklch(0.76 0.16 215 / 25%);
-  --color-span-active: oklch(0.76 0.16 215 / 16%);
+  --color-select: oklch(0.74 0.17 292 / 28%);
+  --color-span-active: oklch(0.74 0.17 292 / 18%);
 
   /**
    * Elevation — the depth the "instrument" design deliberately did without,
@@ -175,10 +190,10 @@
    * which is what reads as a real light rather than a drop shadow. The light
    * theme's equivalents are in the `[data-theme='light']` block.
    */
-  --shadow-e1: 0 1px 2px oklch(0 0 0 / 0.28), 0 1px 1px oklch(0 0 0 / 0.22);
-  --shadow-e2: 0 6px 16px -4px oklch(0 0 0 / 0.4), 0 2px 6px -2px oklch(0 0 0 / 0.3);
-  --shadow-e3: 0 24px 48px -12px oklch(0 0 0 / 0.55), 0 6px 16px -6px oklch(0 0 0 / 0.35);
-  --shadow-glow: 0 0 0 1px oklch(0.76 0.16 215 / 0.45), 0 0 28px -6px oklch(0.84 0.16 215 / 0.5);
+  --shadow-e1: 0 1px 2px oklch(0.05 0.03 290 / 0.4), 0 1px 1px oklch(0.05 0.03 290 / 0.3);
+  --shadow-e2: 0 8px 20px -6px oklch(0.05 0.03 290 / 0.55), 0 2px 6px -2px oklch(0.05 0.03 290 / 0.35);
+  --shadow-e3: 0 28px 56px -14px oklch(0.05 0.03 290 / 0.7), 0 8px 18px -6px oklch(0.05 0.03 290 / 0.4);
+  --shadow-glow: 0 0 0 1px oklch(0.74 0.17 292 / 0.5), 0 0 32px -6px oklch(0.74 0.17 292 / 0.55);
 
   /* Elevation aliases */
   --shadow-neu-rest: var(--shadow-e1);
@@ -330,45 +345,51 @@
   --space-12: calc(var(--spacing) * 12);
   --space-16: calc(var(--spacing) * 16);
 
+  /* The tool workbench's layout (src/ui/tool/, docs/research/tool-layouts.md §4).
+     Lengths only, kept out of @theme so they generate no utilities; components
+     read them through arbitrary values, e.g. `lg:grid-cols-[var(--tool-rail)_1fr]`. */
+  --tool-rail: 18rem; /* the inspector's width from lg up */
+  --tool-gap: 1rem; /* between the workbench's regions */
+  --control-label: 7.5rem; /* a ControlRow's label column */
+  --stage-min-h: 22rem; /* the stage panel's minimum height from lg up */
+
   /**
    * Compound decorative values — kept out of `@theme` because they are not a
    * single colour or length, so no utility should be generated for them. Each
    * flips in the light block.
    */
 
-  /* A single soft wash behind the hero — light falling from where the text
-     starts, not a two-colour "aurora". Static. */
+  /* Light through the prism: an iris wash falling from where the headline
+     starts, an ember one answering from the far side. Static — no drift. */
   --gradient-hero:
-    radial-gradient(90% 55% at 20% -10%, oklch(0.76 0.16 215 / 0.16), transparent 68%);
+    radial-gradient(60% 60% at 12% -8%, oklch(0.74 0.17 292 / 0.2), transparent 70%),
+    radial-gradient(45% 50% at 92% 18%, oklch(0.8 0.14 52 / 0.09), transparent 70%);
+
+  /* The eight stage colours laid end to end, in pipeline order. Built from
+     the stage tokens, so it flips with them in the light theme. */
+  --gradient-spectrum: linear-gradient(
+    90deg var(--in-oklch),
+    var(--color-stage-parse),
+    var(--color-stage-plan),
+    var(--color-stage-optimize),
+    var(--color-stage-execute),
+    var(--color-stage-buffer),
+    var(--color-stage-index),
+    var(--color-stage-lock),
+    var(--color-stage-result)
+  );
+
+  /* The solid primary-action fill: iris into orchid. */
+  --gradient-accent: linear-gradient(
+    135deg var(--in-oklch),
+    var(--color-accent-fill),
+    var(--color-accent-fill-2)
+  );
 
   /* A 1px top highlight for the lit edge of a card. `--color-hairline` is the
      colour; this is the ready-made gradient a `::before`/`background-image`
      can drop in. */
   --sheen: linear-gradient(180deg, var(--color-hairline), transparent 40%);
-
-  /* Design Tokens Architecture: OKLCH Ramp Aliases */
-  --ql-canvas: var(--color-surface);
-  --ql-surface-glass-1: oklch(0.18 0.016 264 / 0.72);
-  --ql-surface-glass-2: oklch(0.20 0.018 264 / 0.82);
-  --ql-surface-glass-3: oklch(0.24 0.020 264 / 0.90);
-  --ql-surface-solid: var(--color-surface-2);
-  --ql-glass-border: var(--color-edge);
-  --ql-glass-border-focus: var(--color-accent);
-  --ql-glass-sheen: var(--color-hairline);
-  --ql-glass-sheen-active: oklch(1 0 0 / 0.16);
-  --ql-shadow-neu-rest: var(--shadow-neu-rest);
-  --ql-shadow-neu-hover: var(--shadow-neu-hover);
-  --ql-shadow-neu-pressed: var(--shadow-neu-pressed);
-  --ql-shadow-neu-track: var(--shadow-neu-track);
-  --ql-ink: var(--color-ink);
-  --ql-ink-dim: var(--color-ink-dim);
-  --ql-ink-muted: oklch(0.55 0.018 264);
-  --ql-accent-cyan: var(--color-accent);
-  --ql-accent-sapphire: oklch(0.70 0.18 245);
-  --ql-accent-emerald: var(--color-hit);
-  --ql-accent-amber: var(--color-miss);
-  --ql-accent-rose: var(--color-evict);
-
 }
 
 html,
@@ -401,23 +422,28 @@ html {
 :root[data-theme='light'] {
   color-scheme: light;
 
-  --color-surface: oklch(0.98 0.005 260);
-  --color-surface-2: oklch(0.965 0.006 260);
-  --color-surface-3: oklch(0.935 0.008 260);
-  --color-surface-4: oklch(0.89 0.012 260);
-  --color-edge: oklch(0.82 0.015 260);
-  --color-ink: oklch(0.22 0.02 262);
-  /* 0.38 gives 5.8:1 on alabaster, comfortably exceeding WCAG AA even when rendered at /80. */
-  --color-ink-dim: oklch(0.38 0.02 262);
-  --color-accent: oklch(0.52 0.14 218);
-  --color-accent-strong: oklch(0.46 0.16 222);
-  --color-accent-soft: oklch(0.52 0.14 218 / 0.12);
-  --color-hairline: oklch(1 0 0 / 0.85);
-  --color-flow-edge: oklch(0.78 0.014 260);
+  /* Warm paper: the page is a soft cream, panels are near-white sheets laid
+     on it, and the hover/input step dips back below the page. Plum ink. */
+  --color-surface: oklch(0.973 0.01 85);
+  --color-surface-2: oklch(0.993 0.004 85);
+  --color-surface-3: oklch(0.948 0.012 84);
+  --color-surface-4: oklch(0.91 0.015 82);
+  --color-edge: oklch(0.86 0.016 80);
+  --color-ink: oklch(0.21 0.03 292);
+  /* 0.4 gives > 6:1 on the cream page, so it still clears AA at /80. */
+  --color-ink-dim: oklch(0.4 0.03 292);
+  --color-accent: oklch(0.5 0.21 292);
+  --color-accent-strong: oklch(0.43 0.22 292);
+  --color-accent-soft: oklch(0.5 0.21 292 / 0.11);
+  --color-ember: oklch(0.6 0.17 45);
+  --color-accent-fill: oklch(0.52 0.22 292);
+  --color-accent-fill-2: oklch(0.52 0.22 335);
+  --color-hairline: oklch(1 0 0 / 0.9);
+  --color-flow-edge: oklch(0.76 0.02 80);
 
-  --color-hit: oklch(0.48 0.15 155);
-  --color-miss: oklch(0.54 0.15 65);
-  --color-evict: oklch(0.50 0.19 25);
+  --color-hit: oklch(0.47 0.13 155);
+  --color-miss: oklch(0.52 0.14 60);
+  --color-evict: oklch(0.5 0.19 25);
 
   --color-node-internal: oklch(0.52 0.2 340);
   --color-node-leaf: oklch(0.48 0.14 155);
@@ -433,23 +459,25 @@ html {
   --color-hue-orange: oklch(64.6% 0.222 41.116);
   --color-hue-orange-ink: oklch(47% 0.157 37.304);
 
-  --color-stage-parse: oklch(50% 0.134 242.749);
-  --color-stage-plan: oklch(49.1% 0.27 292.581);
-  --color-stage-optimize: oklch(51.8% 0.253 323.949);
-  --color-stage-execute: oklch(47.3% 0.137 46.201);
-  --color-stage-buffer: oklch(43.2% 0.095 166.913);
-  --color-stage-index: oklch(52.5% 0.223 3.958);
-  --color-stage-lock: oklch(47% 0.157 37.304);
-  --color-stage-result: oklch(52% 0.105 223.128);
+  /* The same spectrum, deepened to ~0.48 lightness so every stage label
+     clears 5:1 on the paper surfaces. */
+  --color-stage-parse: oklch(0.48 0.13 235);
+  --color-stage-plan: oklch(0.47 0.17 268);
+  --color-stage-optimize: oklch(0.48 0.21 302);
+  --color-stage-execute: oklch(0.5 0.2 350);
+  --color-stage-buffer: oklch(0.5 0.17 27);
+  --color-stage-index: oklch(0.5 0.12 62);
+  --color-stage-lock: oklch(0.48 0.12 128);
+  --color-stage-result: oklch(0.48 0.1 168);
 
-  --color-line-active: oklch(0 0 0 / 4%);
-  --color-select: oklch(0.52 0.14 218 / 22%);
-  --color-span-active: oklch(0.52 0.14 218 / 16%);
+  --color-line-active: oklch(0.3 0.04 85 / 5%);
+  --color-select: oklch(0.5 0.21 292 / 20%);
+  --color-span-active: oklch(0.5 0.21 292 / 14%);
 
-  --shadow-e1: 0 1px 2px oklch(0.40 0.03 262 / 0.08), 0 1px 3px oklch(0.40 0.03 262 / 0.05);
-  --shadow-e2: 0 4px 12px -2px oklch(0.40 0.03 262 / 0.12), 0 2px 6px -1px oklch(0.40 0.03 262 / 0.08);
-  --shadow-e3: 0 20px 40px -8px oklch(0.40 0.03 262 / 0.16), 0 6px 16px -4px oklch(0.40 0.03 262 / 0.10);
-  --shadow-glow: 0 0 0 1px oklch(0.52 0.14 218 / 0.4), 0 0 24px -6px oklch(0.52 0.14 218 / 0.35);
+  --shadow-e1: 0 1px 2px oklch(0.35 0.04 60 / 0.08), 0 1px 3px oklch(0.35 0.04 60 / 0.05);
+  --shadow-e2: 0 6px 16px -4px oklch(0.35 0.04 60 / 0.12), 0 2px 6px -1px oklch(0.35 0.04 60 / 0.07);
+  --shadow-e3: 0 24px 48px -10px oklch(0.35 0.04 60 / 0.18), 0 6px 16px -4px oklch(0.35 0.04 60 / 0.09);
+  --shadow-glow: 0 0 0 1px oklch(0.5 0.21 292 / 0.4), 0 0 26px -6px oklch(0.5 0.21 292 / 0.35);
 
   --shadow-neu-rest: var(--shadow-e1);
   --shadow-neu-hover: var(--shadow-e2);
@@ -457,15 +485,8 @@ html {
   --shadow-neu-track: inset 0 1px 2px oklch(0 0 0 / 0.08);
 
   --gradient-hero:
-    radial-gradient(90% 55% at 20% -10%, oklch(0.52 0.14 218 / 0.1), transparent 68%);
-
-  --ql-surface-glass-1: oklch(0.99 0.002 260 / 0.76);
-  --ql-surface-glass-2: oklch(0.975 0.004 260 / 0.86);
-  --ql-surface-glass-3: oklch(0.95 0.006 260 / 0.94);
-  --ql-glass-sheen: oklch(1 0 0 / 0.90);
-  --ql-glass-sheen-active: oklch(1 0 0 / 1.0);
-  --ql-ink-muted: oklch(0.50 0.02 262);
-  --ql-accent-sapphire: oklch(0.46 0.16 250);
+    radial-gradient(60% 60% at 12% -8%, oklch(0.6 0.2 292 / 0.13), transparent 70%),
+    radial-gradient(45% 50% at 92% 18%, oklch(0.75 0.15 52 / 0.14), transparent 70%);
 }
 
 body {
@@ -574,6 +595,22 @@ body {
   background-repeat: no-repeat;
 }
 
+/* A faint engineering grid under the hero, faded out toward the edges so it
+   reads as graph paper behind the prism rather than a pattern. */
+.ql-hero-grid {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(var(--color-edge) 1px, transparent 1px),
+    linear-gradient(90deg, var(--color-edge) 1px, transparent 1px);
+  background-size: 44px 44px;
+  opacity: 0.28;
+  -webkit-mask-image: radial-gradient(ellipse 65% 70% at 65% 40%, #000, transparent 72%);
+  mask-image: radial-gradient(ellipse 65% 70% at 65% 40%, #000, transparent 72%);
+}
+
 /**
  * The lit top edge shared by every elevated card. A `::before` rather than a
  * border so it sits *inside* the radius and does not fight the real border.
@@ -592,6 +629,214 @@ body {
   -webkit-mask-composite: xor;
   mask-composite: exclude;
   pointer-events: none;
+}
+
+/**
+ * Prism utilities — the few places the spectrum is allowed to show up as
+ * decoration. Each is tied to something the spectrum *means* (the pipeline),
+ * never sprinkled.
+ */
+
+/* The primary-action fill. A class rather than utilities because the hover
+   swaps a multi-layer shadow and the gradient lives in a custom property. */
+.ql-fill-accent {
+  border-color: oklch(1 0 0 / 0.12);
+  background-image: var(--gradient-accent);
+  color: var(--color-on-accent);
+  box-shadow: var(--shadow-e1), inset 0 1px 0 oklch(1 0 0 / 0.22);
+}
+.ql-fill-accent:hover:not(:disabled) {
+  box-shadow: var(--shadow-glow), inset 0 1px 0 oklch(1 0 0 / 0.3);
+}
+
+/* Text painted in the pipeline's colours. */
+.ql-spectrum-text {
+  background-image: var(--gradient-spectrum);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* A 2px rule in the pipeline's colours — the brand line atop the header. */
+.ql-spectrum-line {
+  height: 2px;
+  background-image: var(--gradient-spectrum);
+}
+
+/* A card's edge lighting up in the spectrum on hover. `::after`, because
+   `.ql-sheen` already owns `::before`; same mask trick so it stays a 1px ring
+   inside the radius. */
+.ql-ring-spectrum {
+  position: relative;
+}
+.ql-ring-spectrum::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 1px;
+  background-image: var(--gradient-spectrum);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  opacity: 0;
+  transition: opacity var(--dur-base) var(--ease-morph);
+  pointer-events: none;
+}
+.ql-ring-spectrum:hover::after,
+.ql-ring-spectrum:focus-visible::after {
+  opacity: 1;
+}
+
+/* Stage colour as a registered property, so a panel or chip that changes
+   stage *fades* between the two colours instead of snapping. */
+@property --stage {
+  syntax: '<color>';
+  inherits: true;
+  initial-value: transparent;
+}
+
+/* The live tracker chip, lit in its own stage colour. */
+.ql-stage-chip-current {
+  border-color: var(--stage);
+  background-color: color-mix(in oklch, var(--stage) 16%, transparent);
+  box-shadow:
+    0 0 0 1px color-mix(in oklch, var(--stage) 35%, transparent),
+    0 0 22px -6px var(--stage);
+}
+/* A chosen Segmented option inside a ToolShell (`tone="stage"`): the tool
+   family's hue instead of the accent, so a storage tool's view switch is coral. */
+.ql-seg-on-stage {
+  border-color: color-mix(in oklch, var(--stage) 70%, transparent);
+  background-color: color-mix(in oklch, var(--stage) 16%, transparent);
+  color: var(--color-ink);
+  box-shadow: var(--shadow-e1);
+}
+.ql-stage-dot-current {
+  background-color: var(--stage);
+  box-shadow: 0 0 8px var(--stage);
+}
+.ql-stage-connector {
+  background-image: linear-gradient(90deg, var(--from), var(--to));
+}
+
+/* The Playground's main panel wears the stage it is showing: a 2px rule of
+   that colour along the top and a faint wash in the far corner. */
+.ql-stage-panel {
+  transition: --stage var(--dur-slow) var(--ease-morph);
+  background-image: radial-gradient(
+    60% 45% at 100% 0%,
+    color-mix(in oklch, var(--stage) 9%, transparent),
+    transparent 70%
+  );
+}
+.ql-stage-panel::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 12%;
+  right: 12%;
+  height: 2px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent, var(--stage), transparent);
+  pointer-events: none;
+}
+
+/* A card tinted by its stage (Tools index): a faint wash in its corner. */
+.ql-card-stage {
+  background-image: radial-gradient(
+    80% 60% at 0% 0%,
+    color-mix(in oklch, var(--stage) 16%, transparent),
+    transparent 70%
+  );
+}
+
+/* The route-loading bar: hidden for the first 250ms so a fast chunk never
+   flashes it, then a slice of the spectrum sweeping under the header. */
+@keyframes ql-route-slide {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(250%); }
+}
+.ql-route-progress {
+  position: absolute;
+  inset: 0 0 auto;
+  height: 2px;
+  overflow: hidden;
+  animation: ql-fade 200ms 250ms both;
+}
+.ql-route-progress::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  width: 40%;
+  background-image: var(--gradient-spectrum);
+  animation: ql-route-slide 1.1s var(--ease-morph) infinite;
+}
+
+/* A ScrollRegion that is wider than its box fades the edge that has more behind
+   it, so a table cut off at a phone's width reads as "scroll", not as clipped.
+   ScrollRegion sets data-more-start / data-more-end from its scroll position.
+   The fade is a mask, which would also clip a focus ring and a card's border or
+   shadow: it is dropped while the box has keyboard focus, and a region that is
+   itself a bordered card opts out (`cue={false}`). */
+.ql-scroll-cue[data-more-end] {
+  mask-image: linear-gradient(to right, #000 calc(100% - 2.5rem), transparent);
+}
+.ql-scroll-cue[data-more-start]:not(.ql-sticky-first) {
+  mask-image: linear-gradient(to right, transparent, #000 2.5rem);
+}
+.ql-scroll-cue[data-more-start][data-more-end]:not(.ql-sticky-first) {
+  mask-image: linear-gradient(to right, transparent, #000 2.5rem, #000 calc(100% - 2.5rem), transparent);
+}
+.ql-scroll-cue:focus-visible {
+  mask-image: none;
+}
+/* Pins a table's first column (the row's name) while the rest scrolls under
+   it. The cell needs the card's own fill to hide what passes beneath. */
+.ql-sticky-first :is(th, td):first-child {
+  position: sticky;
+  inset-inline-start: 0;
+  z-index: 1;
+  background-color: var(--color-surface-2);
+}
+.ql-sticky-first[data-more-start] :is(th, td):first-child {
+  box-shadow: inset -1px 0 var(--color-edge);
+}
+
+/* The hero prism's rays drawing themselves once (paths carry pathLength=1).
+   `both` keeps them hidden before their delay and drawn after; reduced motion
+   shrinks the duration to ~0 so the final frame shows at once. */
+@keyframes ql-draw {
+  from { stroke-dashoffset: 1; }
+  to { stroke-dashoffset: 0; }
+}
+@keyframes ql-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.ql-draw {
+  fill: none;
+  stroke-dasharray: 1;
+  animation: ql-draw 520ms var(--ease-enter) both;
+}
+.ql-fade {
+  animation: ql-fade 360ms var(--ease-enter) both;
+}
+.ql-ray-glow {
+  filter: drop-shadow(0 0 6px oklch(0.74 0.17 292 / 0.35));
+}
+:root[data-theme='light'] .ql-ray-glow {
+  filter: none;
+}
+
+@media (forced-colors: active) {
+  .ql-spectrum-text {
+    background: none;
+    color: CanvasText;
+  }
+  .ql-ring-spectrum::after {
+    display: none;
+  }
 }
 
 /* The animated dash on a highlighted flowinger edge (the active B+Tree hop,
@@ -922,12 +1167,11 @@ select:disabled {
 /* Liquid Glass Spotlight — high optical refraction, saturated backdrop bloom,
    and specular Fresnel rim highlights tuned per theme (`:root` vs `[data-theme='light']`). */
 .ql-liquid-backdrop {
-  background: oklch(0.06 0.015 260 / 0.34);
-  animation: ql-liquid-backdrop-in 180ms var(--ease-enter) both;
+  background: transparent;
 }
 
 :root[data-theme='light'] .ql-liquid-backdrop {
-  background: oklch(0.85 0.015 255 / 0.24);
+  background: transparent;
 }
 
 .ql-liquid-glass {
@@ -936,79 +1180,46 @@ select:disabled {
   border-radius: var(--radius-3xl);
   background:
     linear-gradient(
-      145deg var(--in-oklch),
-      oklch(1 0 0 / 0.14) 0%,
-      oklch(1 0 0 / 0.03) 38%,
-      oklch(0.76 0.16 215 / 0.06) 72%,
-      oklch(1 0 0 / 0.09) 100%
+      180deg var(--in-oklch),
+      oklch(1 0 0 / 0.06) 0%,
+      oklch(1 0 0 / 0.02) 100%
     ),
-    oklch(0.16 0.022 258 / 0.44);
-  backdrop-filter: blur(44px) saturate(215%) brightness(1.06);
-  -webkit-backdrop-filter: blur(44px) saturate(215%) brightness(1.06);
-  border: 1px solid oklch(1 0 0 / 0.22);
+    oklch(0.12 0.018 260 / 0.42);
+  -webkit-backdrop-filter: blur(40px) saturate(190%) contrast(105%);
+  backdrop-filter: blur(40px) saturate(190%) contrast(105%);
+  border: 1px solid oklch(1 0 0 / 0.18);
   box-shadow:
-    inset 0 1px 0.5px 0 oklch(1 0 0 / 0.42),
-    inset 1px 0 0.5px 0 oklch(1 0 0 / 0.16),
-    inset 0 -1px 1px 0 oklch(0 0 0 / 0.30),
-    inset 0 0 36px 0 oklch(0.82 0.08 220 / 0.07),
-    0 28px 80px -12px oklch(0 0 0 / 0.65),
-    0 10px 28px -6px oklch(0 0 0 / 0.42);
+    inset 0 1px 0 0 oklch(1 0 0 / 0.28),
+    inset 0 -1px 0 0 oklch(0 0 0 / 0.25),
+    0 24px 64px -12px oklch(0 0 0 / 0.65),
+    0 8px 24px -4px oklch(0 0 0 / 0.45);
   animation: ql-liquid-enter 200ms var(--ease-enter) both;
-}
-
-.ql-liquid-glass::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  pointer-events: none;
-  z-index: 0;
-  background: radial-gradient(
-    115% 55% at 22% -12%,
-    oklch(1 0 0 / 0.20) 0%,
-    oklch(1 0 0 / 0.05) 42%,
-    transparent 72%
-  );
-  mix-blend-mode: screen;
 }
 
 :root[data-theme='light'] .ql-liquid-glass {
   background:
     linear-gradient(
-      145deg var(--in-oklch),
-      oklch(1 0 0 / 0.78) 0%,
-      oklch(1 0 0 / 0.38) 42%,
-      oklch(0.88 0.04 225 / 0.26) 100%
+      180deg var(--in-oklch),
+      oklch(1 0 0 / 0.70) 0%,
+      oklch(1 0 0 / 0.45) 100%
     ),
-    oklch(0.98 0.006 250 / 0.48);
-  backdrop-filter: blur(44px) saturate(210%) brightness(1.04);
-  -webkit-backdrop-filter: blur(44px) saturate(210%) brightness(1.04);
-  border: 1px solid oklch(1 0 0 / 0.78);
+    oklch(0.98 0.005 250 / 0.55);
+  -webkit-backdrop-filter: blur(40px) saturate(180%) contrast(105%);
+  backdrop-filter: blur(40px) saturate(180%) contrast(105%);
+  border: 1px solid oklch(1 0 0 / 0.85);
   box-shadow:
-    inset 0 1.5px 0 0 oklch(1 0 0 / 0.95),
-    inset 1px 0 0.5px 0 oklch(1 0 0 / 0.65),
-    inset 0 -1px 1px 0 oklch(0.45 0.03 255 / 0.12),
-    inset 0 0 28px 0 oklch(1 0 0 / 0.35),
-    0 28px 72px -12px oklch(0.22 0.04 255 / 0.26),
-    0 10px 24px -6px oklch(0.22 0.04 255 / 0.14);
-}
-
-:root[data-theme='light'] .ql-liquid-glass::before {
-  background: radial-gradient(
-    115% 55% at 22% -12%,
-    oklch(1 0 0 / 0.65) 0%,
-    oklch(1 0 0 / 0.15) 45%,
-    transparent 72%
-  );
-  mix-blend-mode: normal;
+    inset 0 1px 0 0 oklch(1 0 0 / 1),
+    inset 0 -1px 0 0 oklch(0.2 0.03 260 / 0.06),
+    0 24px 64px -12px oklch(0.2 0.03 260 / 0.18),
+    0 8px 24px -4px oklch(0.2 0.03 260 / 0.10);
 }
 
 .ql-liquid-divider {
-  border-color: oklch(1 0 0 / 0.11);
+  border-color: oklch(1 0 0 / 0.08);
 }
 
 :root[data-theme='light'] .ql-liquid-divider {
-  border-color: oklch(0.25 0.02 260 / 0.10);
+  border-color: oklch(0.25 0.02 260 / 0.08);
 }
 
 .ql-liquid-pill {
@@ -1129,8 +1340,8 @@ select:disabled {
   .ql-glass-floating,
   .ql-liquid-glass,
   .ql-liquid-pill {
-    backdrop-filter: none !important;
     -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
     background: var(--color-surface-2) !important;
   }
 }
@@ -1144,6 +1355,7 @@ select:disabled {
   .ql-glass-header,
   .ql-glass-floating,
   .ql-liquid-glass {
+    -webkit-backdrop-filter: none !important;
     backdrop-filter: none !important;
     border: 2px solid currentColor !important;
     box-shadow: none !important;

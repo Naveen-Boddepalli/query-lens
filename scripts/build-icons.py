@@ -40,9 +40,9 @@ CHECK_DIR = ROOT / "build"
 # below is readable; verified against favicon.svg by `check_svg_matches()`, so
 # an edit to one without the other fails the build rather than shipping two
 # different logos.
-BG = "#12151c"
-PAGE = "#5ec9d8"
-LENS = "#7de3b0"
+BG = "#090913"
+PAGE = "#ae94ff"
+LENS = "#ffa264"
 
 PAGES = [  # x, y, w, h, radius, opacity — the storage layer the product is about
     (7, 7.0, 13, 4, 1.4, 1.00),

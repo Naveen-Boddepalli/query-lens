@@ -2,10 +2,19 @@ import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { buildHeap, createSeedDatabase, DEFAULT_ENGINE_OPTIONS } from '../../engine/index.ts';
 import { layOutPage } from '../../ui/slottedPage.ts';
-import { PageHeader } from '../../ui/PageHeader.tsx';
-import { inputField, panelSurface } from '../../ui/primitives.ts';
+import { inputField } from '../../ui/primitives.ts';
 import { ScrollRegion } from '../../ui/ScrollRegion.tsx';
 import { useAddressBarQuery } from '../../ui/addressBar.ts';
+import {
+  ControlGroup,
+  ControlRow,
+  hintIdFor,
+  Inspector,
+  MetricStrip,
+  StagePanel,
+  ToolHeader,
+    ToolShell,
+} from '../../ui/tool/index.ts';
 
 /**
  * The storage-course standalone (plan.md §22.3): one heap page, laid out to the
@@ -15,6 +24,10 @@ import { useAddressBarQuery } from '../../ui/addressBar.ts';
  * with the seed rows as the payload. The point is to make "rows per page" a
  * real number: four toy rows barely dent a 4 KB page, and the size slider lets
  * you shrink the page until they fill it.
+ *
+ * Laid out on the tool workbench (`src/ui/tool/`): the page and its size in the inspector (one size field, with
+ * common sizes as shortcuts into it), the byte totals in the readout, and the page map with its slot table on the stage,
+ * where picking a tuple in either picks it out in both.
  *
  * URL state: `page` (which page) and `bytes` (the page size), both parsed
  * defensively — a pasted link is a stranger's input (`urlState.ts`'s rule).
@@ -27,6 +40,7 @@ const LAST_PAGE = HEAP.pages.length - 1;
 const MIN_BYTES = 128;
 const MAX_BYTES = 16384;
 const DEFAULT_BYTES = 4096;
+const PRESETS = [['512 B', 512], ['4 KB', 4096], ['8 KB', 8192]] as const;
 
 function readInitial() {
   const params = new URLSearchParams(typeof location === 'undefined' ? '' : location.search);
@@ -49,6 +63,8 @@ export function PageToolPage() {
   const [pageId, setPageId] = useState(INITIAL.pageId);
   const [pageBytes, setPageBytes] = useState(INITIAL.pageBytes);
   const [selected, setSelected] = useState<number | null>(null);
+  /** What is typed in the size field while it is not yet a valid size, so a partial entry is not snapped back. */
+  const [bytesDraft, setBytesDraft] = useState<string | null>(null);
 
   const page = HEAP.pages[pageId]!;
   const layout = useMemo(
@@ -65,240 +81,235 @@ export function PageToolPage() {
   useAddressBarQuery(shareQuery);
 
   const usedPct = Math.min(100, Math.round((layout.usedBytes / pageBytes) * 100));
+  const select = (slot: number) => { setSelected((cur) => (cur === slot ? null : slot)); };
 
   return (
-    <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-5 p-6 sm:p-8">
-      <PageHeader
-        breadcrumbs={[{ label: 'Tools', to: '/tools' }, { label: 'Slotted Page' }]}
-        title="Slotted page inspector"
-      >
-        One heap page of <code className="font-mono text-ink">users</code>, laid out to the byte &mdash;
-        the header, the slot array, the tuples, and the free space between them. The engine models a
-        page as a list of rows; this illustrates the physical binary layout on disk.
-      </PageHeader>
-
-      {/* Control Toolbar */}
-      <div className="ql-sheen flex flex-wrap items-end gap-4 rounded-xl border border-edge bg-surface-2/80 p-4 shadow-neu-rest backdrop-blur-md">
-        <label className="flex flex-col gap-1.5 text-label text-ink-dim">
-          <span>Target Page</span>
-          <select
-            value={pageId}
-            onChange={(e) => { setPageId(Number(e.target.value)); setSelected(null); }}
-            className={inputField}
-          >
-            {HEAP.pages.map((p) => (
-              <option key={p.pageId} value={p.pageId}>
-                Page {p.pageId} &middot; rows {HEAP.firstRowIndex[p.pageId]}&ndash;
-                {HEAP.firstRowIndex[p.pageId]! + p.rows.length - 1}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <label className="flex flex-col gap-1.5 text-label text-ink-dim">
-          <span>Page Size (bytes)</span>
-          <input
-            type="number"
-            min={MIN_BYTES}
-            max={MAX_BYTES}
-            step={256}
-            value={pageBytes}
-            onChange={(e) => {
-              const n = Number(e.target.value);
-              if (Number.isInteger(n) && n >= MIN_BYTES && n <= MAX_BYTES) setPageBytes(n);
-            }}
-            className={`${inputField} w-28 tabular-nums`}
+    <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col p-4 sm:p-6 lg:p-8">
+      <ToolShell
+        category="storage"
+        header={
+          <ToolHeader
+            id="page"
+            title="Slotted page inspector"
+            summary="One heap page laid out to the byte: the header, the slot array, the tuples and the free space between."
+            about={
+              <p>
+                The engine models a page as a list of rows; this draws the physical layout a real engine would write
+                to disk, with the <code className="font-mono text-ink">users</code> rows as the payload. Every stage
+                that reads a row goes through a page like this. See it in motion in the{' '}
+                <Link to="/playground" className="underline underline-offset-2 hover:text-ink">
+                  Playground
+                </Link>
+                , or against a replacement policy in the{' '}
+                <Link to="/tools/buffer-pool" className="underline underline-offset-2 hover:text-ink">
+                  buffer pool sandbox
+                </Link>
+                .
+              </p>
+            }
           />
-        </label>
-
-        <div className="flex flex-col gap-1.5 text-label text-ink-dim">
-          <span>Preset Sizes</span>
-          <div className="flex gap-1.5">
-            {([['512 B', 512], ['4 KB', 4096], ['8 KB', 8192]] as const).map(([label, n]) => (
-              <button
-                key={n}
-                type="button"
-                onClick={() => { setPageBytes(n); }}
-                className={`rounded-lg border px-3 py-1.5 text-label font-medium transition duration-150 ease-out select-none ${
-                  pageBytes === n
-                    ? 'border-accent bg-accent-soft text-ink shadow-neu-rest backdrop-blur-sm'
-                    : 'border-edge bg-surface-2/80 text-ink-dim hover:border-ink-dim/50 hover:bg-surface-3 hover:text-ink'
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* Metrics Strip */}
-      <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
-        {[
-          { label: 'Page Size', value: B(pageBytes), sub: `${pageBytes} B disk frame` },
-          { label: 'Space Used', value: `${usedPct}%`, sub: `${B(layout.usedBytes)} allocated`, color: 'text-accent' },
-          {
-            label: 'Free Space',
-            value: layout.overflow ? 'Overflow' : B(layout.freeBytes),
-            sub: layout.overflow ? 'exceeds capacity' : `${100 - usedPct}% remaining`,
-            color: layout.overflow ? 'text-evict' : 'text-hit',
-          },
-          { label: 'Tuples', value: String(layout.tuples.length), sub: `~${layout.moreRowsFit} more fit` },
-        ].map((m) => (
-          <div key={m.label} className="ql-sheen rounded-xl border border-edge bg-surface-2/60 p-3 shadow-neu-rest backdrop-blur-sm">
-            <span className="block font-mono text-[0.7rem] uppercase tracking-wider text-ink-dim">{m.label}</span>
-            <span className={`mt-1 block truncate text-heading font-semibold tabular-nums ${m.color ?? 'text-ink'}`}>
-              {m.value}
-            </span>
-            <span className="text-[0.75rem] text-ink-dim">{m.sub}</span>
-          </div>
-        ))}
-      </div>
-
-      {/* The map. A proportional strip: header, slot array, free space, then the
-          tuple region — drawn slot-0-rightmost, because tuples pack from the
-          high end of the page down. Tiny segments keep a min width so their
-          labels stay legible; the exact ratio is in the table below. */}
-      <div className={`${panelSurface} p-4`}>
-        <div className="mb-2 flex items-baseline justify-between text-label text-ink-dim">
-          <span>0</span>
-          <span className="tabular-nums">
-            {usedPct}% used · {layout.overflow ? 'overflows' : `${B(layout.freeBytes)} free`}
-          </span>
-          <span className="tabular-nums">{B(pageBytes)}</span>
-        </div>
-
-        <div className="flex h-14 w-full overflow-hidden rounded-lg border border-edge">
-          <Seg grow={layout.headerBytes} min={64} className="bg-surface-4 text-ink-dim">
-            header
-          </Seg>
-          <Seg
-            grow={layout.slotArrayBytes}
-            min={layout.tuples.length === 0 ? 0 : 56}
-            className="border-l border-edge bg-accent/10 text-accent"
-          >
-            {layout.tuples.length} slot{layout.tuples.length === 1 ? '' : 's'}
-          </Seg>
-          <Seg
-            grow={Math.max(layout.freeBytes, layout.overflow ? 0 : 1)}
-            min={0}
-            className="border-l border-dashed border-edge bg-transparent text-ink-dim"
-          >
-            {layout.overflow ? '' : 'free space'}
-          </Seg>
-          <div className="flex flex-1 flex-row-reverse" style={{ flexGrow: countBytes(layout) }}>
-            {layout.tuples.map((t) => {
-              const on = selected === t.slot;
-              return (
-                <button
-                  key={t.slot}
-                  type="button"
-                  onClick={() => { setSelected((cur) => (cur === t.slot ? null : t.slot)); }}
-                  style={{ flexGrow: t.length }}
-                  className={[
-                    'flex min-w-11 items-center justify-center border-l border-edge font-mono text-label transition',
-                    on
-                      ? 'bg-hit/25 text-ink'
-                      : 'bg-hit/10 text-hit hover:bg-hit/20',
-                  ].join(' ')}
-                  title={`slot ${t.slot} · offset ${t.offset} · ${t.length} B`}
+        }
+        inspector={
+          <Inspector summary={`page ${String(pageId)} · ${B(pageBytes)}`}>
+            <ControlGroup legend="Page">
+              <ControlRow label="Heap page" htmlFor="page-id" stacked>
+                <select
+                  id="page-id"
+                  value={pageId}
+                  onChange={(e) => { setPageId(Number(e.target.value)); setSelected(null); }}
+                  className={inputField}
                 >
-                  #{t.slot}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-label text-ink-dim">
-          <span><span className="text-ink">header</span> {B(layout.headerBytes)}</span>
-          <span>
-            <span className="text-accent">slot array</span> {layout.tuples.length} ×{' '}
-            {B(layout.slotBytes)} = {B(layout.slotArrayBytes)}
-          </span>
-          <span><span className="text-hit">tuples</span> {B(countBytes(layout))}</span>
-          <span>
-            <span className="text-ink">free</span>{' '}
-            {layout.overflow ? '—' : `${B(layout.freeBytes)} (${100 - usedPct}%)`}
-          </span>
-        </div>
-
-        <p className="mt-2 text-label leading-relaxed text-ink-dim">
-          {layout.overflow ? (
-            <>These {layout.tuples.length} rows do not fit a {B(pageBytes)} page — a real engine
-            would spill onto another. Raise the size.</>
-          ) : (
-            <>
-              About <span className="text-ink tabular-nums">{layout.moreRowsFit}</span> more rows of
-              this size would fit here. The pipeline caps a page at{' '}
-              {DEFAULT_ENGINE_OPTIONS.rowsPerPage} rows so the contents stay readable (§7); a real
-              4 KB page holds a hundred or more.
-            </>
-          )}
-        </p>
-      </div>
-
-      <ScrollRegion label="The slots and tuples of the page" className={`${panelSurface} overflow-auto p-0`}>
-        <table className="w-full border-collapse text-left font-mono text-label">
-          <thead>
-            <tr className="border-b border-edge bg-surface-2 text-ink-dim">
-              <th className="px-3 py-2 font-medium tabular-nums">slot</th>
-              <th className="px-3 py-2 font-medium tabular-nums">offset</th>
-              <th className="px-3 py-2 font-medium tabular-nums">bytes</th>
-              {USERS.columns.map((c) => (
-                <th key={c} className="px-3 py-2 font-medium tracking-[0.06em] uppercase">{c}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {layout.tuples.length === 0 && (
-              <tr>
-                <td colSpan={3 + USERS.columns.length} className="px-3 py-6 text-center text-ink-dim">
-                  This page holds no rows.
-                </td>
-              </tr>
-            )}
-            {layout.tuples.map((t) => {
-              const on = selected === t.slot;
-              return (
-                <tr
-                  key={t.slot}
-                  aria-selected={on}
-                  onClick={() => { setSelected((cur) => (cur === t.slot ? null : t.slot)); }}
-                  className={`cursor-pointer border-b border-edge/40 ${
-                    on ? 'bg-hit/15' : 'hover:bg-surface-4'
-                  }`}
-                >
-                  <td className="px-3 py-1.5 tabular-nums text-ink-dim">#{t.slot}</td>
-                  <td className="px-3 py-1.5 tabular-nums text-ink-dim">{t.offset}</td>
-                  <td className="px-3 py-1.5 tabular-nums">
-                    {t.length}
-                    <span className="text-ink-dim/70"> ({t.headerBytes}+{t.length - t.headerBytes})</span>
-                  </td>
-                  {t.fields.map((f) => (
-                    <td key={f.column} className="px-3 py-1.5">
-                      {f.value}
-                      <span className="text-ink-dim/60"> {f.bytes}B</span>
-                    </td>
+                  {HEAP.pages.map((p) => (
+                    <option key={p.pageId} value={p.pageId}>
+                      Page {p.pageId} · rows {HEAP.firstRowIndex[p.pageId]}–{HEAP.firstRowIndex[p.pageId]! + p.rows.length - 1}
+                    </option>
                   ))}
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </ScrollRegion>
+                </select>
+              </ControlRow>
+              <ControlRow
+                label="Page size (bytes)"
+                htmlFor="page-bytes"
+                stacked
+                hint={`${B(MIN_BYTES)} to ${B(MAX_BYTES)}. Shrink it until the rows no longer fit.`}
+              >
+                <div className="flex flex-col gap-2">
+                  <input
+                    id="page-bytes"
+                    type="number"
+                    inputMode="numeric"
+                    min={MIN_BYTES}
+                    max={MAX_BYTES}
+                    step={256}
+                    value={bytesDraft ?? pageBytes}
+                    aria-describedby={hintIdFor('page-bytes')}
+                    onChange={(e) => {
+                      setBytesDraft(e.target.value);
+                      const n = Number(e.target.value);
+                      if (Number.isInteger(n) && n >= MIN_BYTES && n <= MAX_BYTES) setPageBytes(n);
+                    }}
+                    onBlur={() => { setBytesDraft(null); }}
+                    className={`${inputField} w-28 tabular-nums`}
+                  />
+                  {/* Common sizes, as shortcuts into the one field rather than a second control for the same value. */}
+                  <div className="flex flex-wrap gap-1.5" role="group" aria-label="Common page sizes">
+                    {PRESETS.map(([label, n]) => (
+                      <button
+                        key={n}
+                        type="button"
+                        aria-pressed={pageBytes === n}
+                        onClick={() => { setPageBytes(n); setBytesDraft(null); }}
+                        className={`rounded-full border px-2.5 py-0.5 text-label transition duration-150 ease-out ${
+                          pageBytes === n ? 'ql-stage-chip-current text-ink' : 'border-edge text-ink-dim hover:text-ink'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </ControlRow>
+            </ControlGroup>
+          </Inspector>
+        }
+        metrics={
+          <MetricStrip
+            items={[
+              { label: 'Page size', value: B(pageBytes) },
+              { label: 'Space used', value: `${String(usedPct)}%`, sub: `${B(layout.usedBytes)} allocated` },
+              {
+                label: 'Free space',
+                value: layout.overflow ? 'overflow' : B(layout.freeBytes),
+                sub: layout.overflow ? 'the rows exceed the page' : `${String(100 - usedPct)}% left`,
+                tone: layout.overflow ? 'evict' : 'hit',
+              },
+              { label: 'Tuples', value: layout.tuples.length, sub: layout.overflow ? 'more than the page holds' : `about ${String(layout.moreRowsFit)} more fit` },
+            ]}
+          />
+        }
+        stage={
+          <StagePanel
+            title="Page map"
+            legend={`${String(usedPct)}% used · ${layout.overflow ? 'overflows' : `${B(layout.freeBytes)} free`}`}
+          >
+            {/* A proportional strip: header, slot array, free space, then the tuple region, drawn slot 0 rightmost
+                because tuples pack from the high end of the page down. Tiny segments keep a minimum width so their
+                labels stay legible; the exact ratio is in the table under it. */}
+            <div className="mb-2 flex items-baseline justify-between text-label text-ink-dim">
+              <span>0</span>
+              <span className="tabular-nums">{B(pageBytes)}</span>
+            </div>
+            <div className="flex h-14 w-full overflow-hidden rounded-lg border border-edge">
+              <Seg grow={layout.headerBytes} min={64} className="bg-surface-4 text-ink-dim">
+                header
+              </Seg>
+              <Seg
+                grow={layout.slotArrayBytes}
+                min={layout.tuples.length === 0 ? 0 : 56}
+                className="border-l border-edge bg-accent/10 text-accent"
+              >
+                {layout.tuples.length} slot{layout.tuples.length === 1 ? '' : 's'}
+              </Seg>
+              <Seg
+                grow={Math.max(layout.freeBytes, layout.overflow ? 0 : 1)}
+                min={0}
+                className="min-w-0 overflow-hidden border-l border-dashed border-edge bg-transparent text-ink-dim"
+              >
+                {/* The first thing to give way on a phone: the label ellipsises before any slot loses its target. */}
+                {layout.overflow ? '' : <span className="truncate">free space</span>}
+              </Seg>
+              <div className="flex flex-1 flex-row-reverse" style={{ flexGrow: countBytes(layout) }}>
+                {layout.tuples.map((t) => {
+                  const on = selected === t.slot;
+                  return (
+                    <button
+                      key={t.slot}
+                      type="button"
+                      aria-pressed={on}
+                      onClick={() => { select(t.slot); }}
+                      style={{ flexGrow: t.length }}
+                      className={[
+                        'flex min-w-6 items-center justify-center border-l border-edge font-mono text-label transition',
+                        on ? 'bg-hit/25 text-ink' : 'bg-hit/10 text-hit hover:bg-hit/20',
+                      ].join(' ')}
+                      title={`slot ${t.slot} · offset ${t.offset} · ${t.length} B`}
+                    >
+                      #{t.slot}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
 
-      <p className="text-label leading-relaxed text-ink-dim">
-        Every stage that reads a row goes through a page like this — see it in motion in the{' '}
-        <Link to="/playground" className="underline underline-offset-2 hover:text-ink">
-          Playground
-        </Link>{' '}
-        or against a replacement policy in the{' '}
-        <Link to="/tools/buffer-pool" className="underline underline-offset-2 hover:text-ink">
-          buffer pool sandbox
-        </Link>
-        .
-      </p>
+            <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-label text-ink-dim">
+              <span><span className="text-ink">header</span> {B(layout.headerBytes)}</span>
+              <span>
+                <span className="text-accent">slot array</span> {layout.tuples.length} × {B(layout.slotBytes)} ={' '}
+                {B(layout.slotArrayBytes)}
+              </span>
+              <span><span className="text-hit">tuples</span> {B(countBytes(layout))}</span>
+              <span>
+                <span className="text-ink">free</span> {layout.overflow ? '—' : `${B(layout.freeBytes)} (${String(100 - usedPct)}%)`}
+              </span>
+            </div>
+
+            <h4 className="mt-5 mb-2 text-label font-semibold text-ink">Slots and tuples</h4>
+            <div className="overflow-hidden rounded-lg border border-edge">
+              <ScrollRegion label="The slots and tuples of the page" className="overflow-x-auto" stickyFirst>
+                <table className="w-full border-collapse text-left font-mono text-label whitespace-nowrap">
+                  <thead>
+                    <tr className="border-b border-edge bg-surface-2 text-ink-dim">
+                      <th className="px-3 py-2 font-medium tabular-nums">slot</th>
+                      <th className="px-3 py-2 font-medium tabular-nums">offset</th>
+                      <th className="px-3 py-2 font-medium tabular-nums">bytes</th>
+                      {USERS.columns.map((c) => (
+                        <th key={c} className="px-3 py-2 font-medium">{c}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {layout.tuples.length === 0 && (
+                      <tr>
+                        <td colSpan={3 + USERS.columns.length} className="px-3 py-6 text-center text-ink-dim">
+                          This page holds no rows.
+                        </td>
+                      </tr>
+                    )}
+                    {layout.tuples.map((t) => {
+                      const on = selected === t.slot;
+                      return (
+                        <tr
+                          key={t.slot}
+                          aria-selected={on}
+                          onClick={() => { select(t.slot); }}
+                          className={`cursor-pointer border-b border-edge/40 ${on ? 'bg-hit/15' : 'hover:bg-surface-4'}`}
+                        >
+                          <td className="px-3 py-1.5 tabular-nums text-ink-dim">#{t.slot}</td>
+                          <td className="px-3 py-1.5 tabular-nums text-ink-dim">{t.offset}</td>
+                          <td className="px-3 py-1.5 tabular-nums">
+                            {t.length}
+                            <span className="text-ink-dim/70"> ({t.headerBytes}+{t.length - t.headerBytes})</span>
+                          </td>
+                          {t.fields.map((f) => (
+                            <td key={f.column} className="px-3 py-1.5">
+                              {f.value}
+                              <span className="text-ink-dim/60"> {f.bytes}B</span>
+                            </td>
+                          ))}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </ScrollRegion>
+            </div>
+          </StagePanel>
+        }
+        narration={
+          layout.overflow
+            ? `These ${String(layout.tuples.length)} rows do not fit a ${B(pageBytes)} page; a real engine would spill onto another. Raise the size.`
+            : `About ${String(layout.moreRowsFit)} more rows of this size would fit here. The pipeline caps a page at ${String(DEFAULT_ENGINE_OPTIONS.rowsPerPage)} rows so the contents stay readable; a real 4 KB page holds a hundred or more.`
+        }
+      />
     </div>
   );
 }

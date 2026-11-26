@@ -2,7 +2,7 @@
  * `src/export/` — pure, on the same rules as `src/engine/`.
  *
  * A plan as **relational algebra** (plan.md §25.4 B5): the notation a database
- * course opens with, σ π ⋈ γ, derived from the plan the engine actually built.
+ * course opens with, σ π ⋈ γ — and ⋉ ▷ for `EXISTS` (§27.5 S1) — derived from the plan the engine actually built.
  * The plan tree says *how* a query runs (a `SeqScan` with a filter, an
  * `IndexScan`, a `HashJoin`); the algebra says *what* it computes — so both
  * `SeqScan users` + a filter and an index lookup read as `σ_{id = 5}(users)`.
@@ -14,13 +14,23 @@
 
 import type { PlanNode, RaInfo } from '../engine/index.ts';
 
+/** A leaf's relation — `users`, or `ρ_c(customers)` for a table read under an alias (plan.md §27.5 S7). */
+const relation = (ra: RaInfo): string => (ra.source === undefined ? (ra.rel ?? '') : `ρ_{${ra.rel ?? ''}}(${ra.source})`);
+
 /** A node's label in the tree view: `σ age > 30`, `π id, name`, `users`. */
 export function raLabel(ra: RaInfo): string {
-  if (ra.symbol === 'rel') return ra.rel ?? '';
+  if (ra.symbol === 'rel') return relation(ra);
   return ra.sub === undefined ? ra.symbol : `${ra.symbol} ${ra.sub}`;
 }
 
 const isScanSelection = (ra: RaInfo): boolean => ra.symbol === 'σ' && ra.rel !== undefined;
+
+/**
+ * The binary operators, written between their two arguments: a join, a semi- or anti-join (plan.md §27.5 S1), and the
+ * set operators ∪ ∩ − (§27.5 S3).
+ */
+const BINARY: ReadonlySet<RaInfo['symbol']> = new Set(['⋈', '⟕', '⟖', '⟗', '×', '⋉', '▷', '∪', '∩', '−']);
+const isJoin = (ra: RaInfo | undefined): boolean => ra !== undefined && BINARY.has(ra.symbol);
 
 /** `σ_{p}` — the operator and its subscript, without its argument. */
 function head(ra: RaInfo): string {
@@ -31,12 +41,12 @@ function head(ra: RaInfo): string {
 function inline(node: PlanNode): string {
   const ra = node.ra;
   if (!ra) return node.label;
-  if (ra.symbol === 'rel') return ra.rel ?? '';
-  if (isScanSelection(ra)) return `${head(ra)}(${ra.rel ?? ''})`;
+  if (ra.symbol === 'rel') return relation(ra);
+  if (isScanSelection(ra)) return `${head(ra)}(${relation(ra)})`;
 
   const [first, second] = node.children ?? [];
-  if (ra.symbol === '⋈' && first && second) {
-    const side = (n: PlanNode): string => (n.ra?.symbol === '⋈' ? `(${inline(n)})` : inline(n));
+  if (isJoin(ra) && first && second) {
+    const side = (n: PlanNode): string => (isJoin(n.ra) ? `(${inline(n)})` : inline(n));
     return `${side(first)} ${head(ra)} ${side(second)}`;
   }
   if (!first) return head(ra);
@@ -54,7 +64,7 @@ function pretty(node: PlanNode, indent: string, width: number): string {
   const [first, second] = node.children ?? [];
   if (!ra || !first) return flat;
 
-  if (ra.symbol === '⋈' && second) {
+  if (isJoin(ra) && second) {
     const side = (n: PlanNode) => pretty(n, `${indent}  `, width);
     return `${side(first)}\n${indent}${head(ra)}\n${indent}${side(second)}`;
   }
@@ -78,6 +88,16 @@ const LATEX_SYMBOL: Record<Exclude<RaInfo['symbol'], 'rel'>, string> = {
   σ: '\\sigma',
   π: '\\pi',
   '⋈': '\\bowtie',
+  // No standard LaTeX command draws the outer joins; the Unicode glyphs need XeLaTeX, LuaLaTeX, KaTeX or MathJax.
+  '⟕': '\\mathbin{⟕}',
+  '⟖': '\\mathbin{⟖}',
+  '⟗': '\\mathbin{⟗}',
+  '×': '\\times',
+  '⋉': '\\ltimes',
+  '▷': '\\triangleright',
+  '∪': '\\cup',
+  '∩': '\\cap',
+  '−': '\\setminus',
   γ: '\\gamma',
   τ: '\\tau',
   λ: '\\lambda',
@@ -109,15 +129,19 @@ function latexHead(ra: RaInfo): string {
 
 const latexRel = (name: string): string => `\\text{${latexText(name)}}`;
 
+/** A leaf's relation in LaTeX — `\\rho_{\\text{c}}(\\text{customers})` under an alias (plan.md §27.5 S7). */
+const latexRelation = (ra: RaInfo): string =>
+  ra.source === undefined ? latexRel(ra.rel ?? '') : `\\rho_{${latexRel(ra.rel ?? '')}}\\left(${latexRel(ra.source)}\\right)`;
+
 function latexInline(node: PlanNode): string {
   const ra = node.ra;
   if (!ra) return `\\text{${latexText(node.label)}}`;
-  if (ra.symbol === 'rel') return latexRel(ra.rel ?? '');
-  if (isScanSelection(ra)) return `${latexHead(ra)}\\left(${latexRel(ra.rel ?? '')}\\right)`;
+  if (ra.symbol === 'rel') return latexRelation(ra);
+  if (isScanSelection(ra)) return `${latexHead(ra)}\\left(${latexRelation(ra)}\\right)`;
 
   const [first, second] = node.children ?? [];
-  if (ra.symbol === '⋈' && first && second) {
-    const side = (n: PlanNode): string => (n.ra?.symbol === '⋈' ? `(${latexInline(n)})` : latexInline(n));
+  if (isJoin(ra) && first && second) {
+    const side = (n: PlanNode): string => (isJoin(n.ra) ? `(${latexInline(n)})` : latexInline(n));
     return `${side(first)} ${latexHead(ra)} ${side(second)}`;
   }
   if (!first) return latexHead(ra);

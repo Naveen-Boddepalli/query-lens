@@ -11,6 +11,8 @@ test('a scan ring keeps the hot set resident across one long scan (plan.md §25.
   await page.getByLabel('Scrub to step').press('End');
   await expect(stat('misses')).toHaveText('51');
 
+  // Read-ahead and the scan ring are expert settings, collapsed under Advanced until one is on.
+  await page.locator('summary', { hasText: 'Advanced' }).click();
   await page.getByLabel('Scan ring').selectOption('3');
   await expect.poll(() => page.url()).toMatch(/sr=3/);
   await page.getByLabel('Scrub to step').press('End');

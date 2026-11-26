@@ -10,16 +10,85 @@
  * Pure and total — every function takes a state and returns a new one, never mutating its argument — so a caller can
  * step forward and back through a sequence of requests, and a schedule is a value.
  *
- * Compatibility is the standard rule: any number of `shared` holders may coexist; `exclusive` conflicts with everything,
- * including another `exclusive`. A request that cannot be granted joins the FIFO waiter queue for that resource; a
- * release (or an abort) promotes the queue's front, granting consecutive compatible `shared` waiters together but
- * stopping at the first `exclusive` — the fairness/throughput trade-off every real lock manager makes the same way.
+ * Five modes (plan.md §27.5 T2), for a hierarchy of resources — a table, its pages, their rows: `shared` (S) and
+ * `exclusive` (X) on a resource cover everything beneath it, and the *intention* modes say a finer lock is held below —
+ * `intention-shared` (IS), `intention-exclusive` (IX), and `shared-intention-exclusive` (SIX), S on the whole plus IX
+ * below. Compatibility is not a table typed in: each mode is what it lets its holder do to the whole resource and
+ * below it (`RIGHTS`), and two modes conflict exactly when one writes something the other reads or writes — so any
+ * number of S holders coexist, X conflicts with everything, and IS and IX never conflict with each other, since
+ * whatever they mean to touch is locked again below. A request that cannot be granted joins the FIFO waiter queue for
+ * that resource; a release (or an abort) promotes the queue's front, granting consecutive compatible waiters together
+ * and stopping at the first that is not — the fairness/throughput trade-off every real lock manager makes the same
+ * way.
  *
  * Victim selection: the *youngest* transaction in the cycle — the one that made its first request most recently — is
  * aborted. Older transactions have more invested and survive; one deterministic rule instead of a timestamp comparison.
  */
 
-export type LockMode = 'shared' | 'exclusive';
+export type LockMode = 'intention-shared' | 'intention-exclusive' | 'shared' | 'shared-intention-exclusive' | 'exclusive';
+
+/** Every mode, weakest first. */
+export const LOCK_MODES: readonly LockMode[] = ['intention-shared', 'intention-exclusive', 'shared', 'shared-intention-exclusive', 'exclusive'];
+
+/** IS, IX, S, SIX, X. */
+export const MODE_SHORT: Record<LockMode, string> = {
+  'intention-shared': 'IS',
+  'intention-exclusive': 'IX',
+  shared: 'S',
+  'shared-intention-exclusive': 'SIX',
+  exclusive: 'X',
+};
+
+/** What a mode lets its holder do: nothing (0), read (1) or write (2) — to the whole resource, and to what is below it. */
+type Access = 0 | 1 | 2;
+
+/**
+ * The definition every rule here is computed from (plan.md §27.5 T2). S reads the whole resource and X writes it; an
+ * intention mode touches nothing at this level itself, and only says what its holder will lock below; SIX is both an
+ * S here and an IX below.
+ */
+export const RIGHTS: Record<LockMode, { whole: Access; below: Access }> = {
+  'intention-shared': { whole: 0, below: 1 },
+  'intention-exclusive': { whole: 0, below: 2 },
+  shared: { whole: 1, below: 0 },
+  'shared-intention-exclusive': { whole: 1, below: 2 },
+  exclusive: { whole: 2, below: 0 },
+};
+
+/** A write against anything, read or written, is a conflict. */
+const clash = (a: Access, b: Access): boolean => (a === 2 && b > 0) || (b === 2 && a > 0);
+
+/**
+ * Can two transactions hold these two modes on one resource at once? Only if neither's access to the whole resource
+ * clashes with the other's access to the whole or below it. Two intentions never clash with each other: what they mean
+ * to touch below is locked again there, where a real conflict waits.
+ */
+export function compatibleModes(a: LockMode, b: LockMode): boolean {
+  const x = RIGHTS[a];
+  const y = RIGHTS[b];
+  return !clash(x.whole, y.whole) && !clash(x.whole, y.below) && !clash(x.below, y.whole);
+}
+
+/** Does holding `held` already give everything `wanted` would? A lock on the whole covers the same access below. */
+export function covers(held: LockMode, wanted: LockMode): boolean {
+  const h = RIGHTS[held];
+  const w = RIGHTS[wanted];
+  return h.whole >= w.whole && Math.max(h.whole, h.below) >= w.below;
+}
+
+/** The weakest mode that covers both: holding S and asking for IX means holding SIX. */
+export function combine(a: LockMode, b: LockMode): LockMode {
+  const whole = Math.max(RIGHTS[a].whole, RIGHTS[b].whole);
+  const below = Math.max(RIGHTS[a].below, RIGHTS[b].below);
+  if (whole === 2) return 'exclusive';
+  if (whole === 1) return below === 2 ? 'shared-intention-exclusive' : 'shared';
+  return below === 2 ? 'intention-exclusive' : 'intention-shared';
+}
+
+/** The compatibility matrix, computed from `RIGHTS` rather than written out: row mode held, column mode requested. */
+export function compatibilityMatrix(): { held: LockMode; requested: LockMode; compatible: boolean }[] {
+  return LOCK_MODES.flatMap((held) => LOCK_MODES.map((requested) => ({ held, requested, compatible: compatibleModes(held, requested) })));
+}
 
 export interface Holder {
   transaction: string;
@@ -56,15 +125,23 @@ function clone(state: LockTableState): LockTableState {
   return structuredClone(state);
 }
 
-/** "a shared lock", "an exclusive lock" — the narration reads it out loud often enough to earn this. */
-function article(mode: LockMode): 'a' | 'an' {
-  return mode === 'exclusive' ? 'an' : 'a';
+/**
+ * "a shared lock", "an intention-exclusive (IX) lock" — the narration reads it out loud often enough to earn this. S and
+ * X keep the words they always had.
+ */
+export function modePhrase(mode: LockMode): string {
+  if (mode === 'shared') return 'a shared';
+  if (mode === 'exclusive') return 'an exclusive';
+  return `${mode === 'shared-intention-exclusive' ? 'a' : 'an'} ${mode} (${MODE_SHORT[mode]})`;
+}
+
+/** "shared", "exclusive" — the words the pages always used — and the intention modes with their letters: "intention-shared (IS)". */
+export function modeName(mode: LockMode): string {
+  return mode === 'shared' || mode === 'exclusive' ? mode : `${mode} (${MODE_SHORT[mode]})`;
 }
 
 function compatible(existingOthers: Holder[], mode: LockMode): boolean {
-  if (existingOthers.length === 0) return true;
-  if (mode === 'exclusive') return false;
-  return existingOthers.every((h) => h.mode === 'shared');
+  return existingOthers.every((h) => compatibleModes(h.mode, mode));
 }
 
 /** Wait-for edges, rebuilt fresh from the current waiters every time — nothing here goes stale. */
@@ -132,9 +209,7 @@ function promoteWaiters(
     if (!compatible(others, front.mode)) break;
 
     next.holders[resource] = [...others, { transaction: front.transaction, mode: front.mode }];
-    narration.push(
-      `${front.transaction} is promoted from waiting to holding ${article(front.mode)} ${front.mode} lock on ${label(resource)}.`,
-    );
+    narration.push(`${front.transaction} is promoted from waiting to holding ${modePhrase(front.mode)} lock on ${label(resource)}.`);
     promoted.push(front.transaction);
     queue = queue.slice(1);
 
@@ -224,15 +299,18 @@ export function request(
 
   const existing = next.holders[resource] ?? [];
   const ownHold = existing.find((h) => h.transaction === transaction);
-  if (ownHold && (ownHold.mode === mode || ownHold.mode === 'exclusive')) {
+  if (ownHold && covers(ownHold.mode, mode)) {
     return {
       kind: 'already-held',
       state: next,
-      narration: [
-        `${transaction} already holds ${article(ownHold.mode)} ${ownHold.mode} lock on ${label(resource)} — no change.`,
-      ],
+      narration: [`${transaction} already holds ${modePhrase(ownHold.mode)} lock on ${label(resource)} — no change.`],
     };
   }
+  // A transaction holds one lock per resource: asking for more than it holds asks for both together — S held and IX
+  // asked for is SIX (plan.md §27.5 T2).
+  const asked = mode;
+  mode = ownHold ? combine(ownHold.mode, asked) : asked;
+  const upgrade = ownHold && mode !== asked ? ` — with the ${MODE_SHORT[ownHold.mode]} it holds, ${MODE_SHORT[mode]}` : '';
 
   const othersHolding = existing.filter((h) => h.transaction !== transaction);
   if (compatible(othersHolding, mode)) {
@@ -240,18 +318,18 @@ export function request(
     return {
       kind: 'granted',
       state: next,
-      narration: [`${transaction} is granted ${article(mode)} ${mode} lock on ${label(resource)}.`],
+      narration: [`${transaction} is granted ${modePhrase(mode)} lock on ${label(resource)}${upgrade}.`],
     };
   }
 
-  const waitingOn = [...new Set(othersHolding.map((h) => h.transaction))];
+  const waitingOn = [...new Set(othersHolding.filter((h) => !compatibleModes(h.mode, mode)).map((h) => h.transaction))];
   const alreadyWaiting = (next.waiters[resource] ?? []).some((w) => w.transaction === transaction);
   if (!alreadyWaiting) {
     next.waiters[resource] = [...(next.waiters[resource] ?? []), { transaction, mode, waitingOn }];
   }
 
   const narration = [
-    `${transaction} requests ${article(mode)} ${mode} lock on ${label(resource)}, held by ${waitingOn.join(', ')} — it must wait.`,
+    `${transaction} requests ${modePhrase(mode)} lock on ${label(resource)}, held by ${waitingOn.join(', ')} — it must wait.`,
   ];
 
   const cycle = findCycle(next, transaction);
@@ -282,7 +360,7 @@ export function release(
   if (!held.some((h) => h.transaction === transaction && h.mode === mode)) {
     return {
       state,
-      narration: [`${transaction} does not hold ${article(mode)} ${mode} lock on ${label(resource)}.`],
+      narration: [`${transaction} does not hold ${modePhrase(mode)} lock on ${label(resource)}.`],
       promoted: [],
     };
   }
@@ -295,6 +373,32 @@ export function release(
   next = result.state;
   narration.push(...result.narration);
 
+  return { state: next, narration, promoted: result.promoted };
+}
+
+/**
+ * Trades the lock `transaction` holds on `resource` for a weaker one it covers — an insert's X on a gap back to the S
+ * gap lock its transaction already had there (plan.md §27.5 T3) — and promotes whoever that makes room for. Unlike a
+ * release followed by a fresh request, nobody can slip in between and take the resource away.
+ */
+export function downgrade(
+  state: LockTableState,
+  transaction: string,
+  resource: string,
+  to: LockMode,
+  label: Label,
+): { state: LockTableState; narration: string[]; promoted: string[] } {
+  const held = state.holders[resource] ?? [];
+  const own = held.find((h) => h.transaction === transaction);
+  if (!own || own.mode === to || !covers(own.mode, to)) {
+    return { state, narration: [], promoted: [] };
+  }
+  let next = clone(state);
+  next.holders[resource] = held.map((h) => (h.transaction === transaction ? { transaction, mode: to } : h));
+  const narration = [`${transaction} keeps only ${modePhrase(to)} lock on ${label(resource)}.`];
+  const result = promoteWaiters(next, resource, label);
+  next = result.state;
+  narration.push(...result.narration);
   return { state: next, narration, promoted: result.promoted };
 }
 
@@ -331,5 +435,5 @@ export function waitingBy(state: LockTableState, transaction: string): { resourc
 /** Does `transaction` hold a lock on `resource` at least as strong as `mode`? */
 export function holds(state: LockTableState, transaction: string, resource: string, mode: LockMode): boolean {
   const own = (state.holders[resource] ?? []).find((h) => h.transaction === transaction);
-  return own !== undefined && (own.mode === 'exclusive' || own.mode === mode);
+  return own !== undefined && covers(own.mode, mode);
 }

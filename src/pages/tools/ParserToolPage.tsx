@@ -1,11 +1,11 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type CSSProperties } from 'react';
 import { Link } from 'react-router-dom';
-import { parse, toDisplayTree, tokenize } from '../../engine/index.ts';
+import { compoundDisplayTree, parseQueryStatement, toDisplayTree, tokenize } from '../../engine/index.ts';
 import type { ASTNode, Token, TokenType } from '../../engine/index.ts';
 import { AstTree } from '../../ui/panels/AstTree.tsx';
-import { PageHeader } from '../../ui/PageHeader.tsx';
-import { inputField, panelSurface } from '../../ui/primitives.ts';
+import { controlLabel, inputField, panelSurface } from '../../ui/primitives.ts';
 import { useAddressBarQuery } from '../../ui/addressBar.ts';
+import { ScenarioPicker, StagePanel, ToolHeader, ToolShell, useMediaQuery } from '../../ui/tool/index.ts';
 
 /**
  * The compilers-course standalone (plan.md §20.4, §21.3): arbitrary text →
@@ -22,12 +22,57 @@ import { useAddressBarQuery } from '../../ui/addressBar.ts';
  * type. Stepping the parser's cursor through the ribbon is the obvious next
  * addition (it needs new event kinds; plan.md §20.4).
  *
+ * Laid out on the tool workbench (`src/ui/tool/`) without an inspector: the SQL is the only input, so it sits in
+ * the command region with a menu of examples, and the stage holds the token ribbon over the tree, framed at a readable zoom that pans. No readout:
+ * the counts are in the stage's own header, and a rejection is the error box in place of the tree.
+ *
  * URL state is one field, `src`, parsed defensively for the same reason
  * `urlState.ts` is: a pasted link is input from a stranger.
  */
 
 const DEFAULT_SRC = "SELECT name, age FROM users WHERE age > 30 AND name < 'M'";
 const MAX_SRC = 2000;
+/**
+ * The tree is never framed smaller than this on its own: node labels stay readable, and a wider tree pans, with Fit
+ * to see all of it. A clause-heavy statement is wide, and fitting it to the stage drew 5px labels even on a desktop.
+ */
+const MIN_ZOOM = 0.7;
+const PHONE_MIN_ZOOM = 0.8;
+
+/** Starting points, each showing the parser doing something different. Editing the SQL reads "Custom". */
+const EXAMPLES: readonly { id: string; title: string; blurb: string; sql: string }[] = [
+  { id: 'filter', title: 'A filtered SELECT', blurb: 'Two columns and a WHERE with AND: the clauses become the root’s children.', sql: DEFAULT_SRC },
+  {
+    id: 'join',
+    title: 'A join',
+    blurb: 'Two tables under aliases, joined ON an equality: the FROM clause grows a join node.',
+    sql: 'SELECT u.name, o.total FROM users u JOIN orders o ON u.id = o.user_id WHERE o.total > 50',
+  },
+  {
+    id: 'group',
+    title: 'Grouping',
+    blurb: 'GROUP BY, HAVING, ORDER BY and LIMIT: every clause the subset knows, in one statement.',
+    sql: 'SELECT age, COUNT(*) FROM users GROUP BY age HAVING COUNT(*) > 1 ORDER BY age DESC LIMIT 5',
+  },
+  {
+    id: 'union',
+    title: 'A UNION',
+    blurb: 'Two SELECTs joined by UNION ALL: one root names the operator, with a subtree per SELECT.',
+    sql: 'SELECT id FROM users UNION ALL SELECT id FROM logins',
+  },
+  {
+    id: 'subquery',
+    title: 'A subquery',
+    blurb: 'A scalar subquery in the WHERE: a whole SELECT, drawn inside the comparison.',
+    sql: 'SELECT name FROM products WHERE price > (SELECT AVG(price) FROM products)',
+  },
+  {
+    id: 'unsupported',
+    title: 'Not supported yet',
+    blurb: 'JOIN … USING tokenizes fine, and the parser says by name what it does not handle.',
+    sql: 'SELECT * FROM users JOIN logins USING (id)',
+  },
+];
 
 /** Syntactic category → chip classes, matching `AstTree`'s node palette so the
  *  ribbon and the tree name the same things the same colour. Both lines of a
@@ -106,9 +151,10 @@ export function ParserToolPage() {
   const [src, setSrc] = useState(readInitialSrc);
 
   const lexed = useMemo(() => lex(src), [src]);
-  const parsed = useMemo(() => parse(src), [src]);
+  // A SELECT, or several joined by UNION, INTERSECT or EXCEPT (plan.md §27.5 S3), each drawn as its own subtree.
+  const parsed = useMemo(() => parseQueryStatement(src), [src]);
   const tree = useMemo(
-    () => (parsed.ok ? toDisplayTree(parsed.ast) : null),
+    () => (parsed.ok ? (parsed.ast.kind === 'compound' ? compoundDisplayTree(parsed.ast) : toDisplayTree(parsed.ast)) : null),
     [parsed],
   );
 
@@ -120,144 +166,124 @@ export function ParserToolPage() {
   useAddressBarQuery(shareQuery);
 
   const visibleTokens = lexed.ok ? lexed.tokens.filter((t) => t.type !== 'eof') : [];
+  const phone = !useMediaQuery('(min-width: 640px)');
+  const example = EXAMPLES.find((x) => x.sql === src);
 
   return (
-    <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-5 p-6 sm:p-8">
-      <PageHeader
-        breadcrumbs={[{ label: 'Tools', to: '/tools' }, { label: 'SQL Parser' }]}
-        title="Parser sandbox"
-      >
-        Type SQL &mdash; including SQL QueryLens does not yet support &mdash; and watch the tokenizer
-        split the input into a live token ribbon and the recursive-descent parser construct the AST.
-        This provides direct visibility into lexical and syntactic analysis stages.
-      </PageHeader>
-
-      {/* SQL Source Input */}
-      <div className="ql-sheen flex flex-col gap-2 rounded-xl border border-edge bg-surface-2/80 p-4 shadow-neu-rest backdrop-blur-md">
-        <label htmlFor="src" className="font-mono uppercase tracking-wider text-[0.75rem] text-ink-dim">
-          SQL source
-        </label>
-        <textarea
-          id="src"
-          value={src}
-          onChange={(e) => { setSrc(e.target.value.slice(0, MAX_SRC)); }}
-          rows={3}
-          spellCheck={false}
-          className={`${inputField} resize-y font-mono text-[0.85rem]`}
-        />
-      </div>
-
-      {/* Metrics Strip */}
-      <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
-        {[
-          { label: 'Lexed Tokens', value: String(visibleTokens.length), sub: lexed.ok ? 'token stream' : 'lexer error' },
-          {
-            label: 'Parser Status',
-            value: parsed.ok ? 'Valid AST' : 'Parse Error',
-            sub: parsed.ok ? 'statement accepted' : 'syntax rejected',
-            color: parsed.ok ? 'text-hit' : 'text-evict',
-          },
-          { label: 'AST Nodes', value: String(tree ? countNodes(tree) : 0), sub: 'syntax nodes', color: 'text-accent' },
-          { label: 'Recursion Depth', value: String(tree ? treeDepth(tree) : 0), sub: 'call stack height' },
-        ].map((m) => (
-          <div key={m.label} className="ql-sheen rounded-xl border border-edge bg-surface-2/60 p-3 shadow-neu-rest backdrop-blur-sm">
-            <span className="block font-mono text-[0.7rem] uppercase tracking-wider text-ink-dim">{m.label}</span>
-            <span className={`mt-1 block truncate text-heading font-semibold tabular-nums ${m.color ?? 'text-ink'}`}>
-              {m.value}
-            </span>
-            <span className="text-[0.75rem] text-ink-dim">{m.sub}</span>
-          </div>
-        ))}
-      </div>
-
-      {/* --- token ribbon ------------------------------------------------- */}
-      <section
-        aria-labelledby="ribbon-h"
-        className="ql-sheen flex flex-col gap-2.5 rounded-xl border border-edge bg-surface-2/80 p-4 shadow-neu-rest backdrop-blur-sm"
-      >
-        <div className="flex items-center justify-between border-b border-edge/60 pb-1.5">
-          <h3 id="ribbon-h" className="font-mono text-[0.75rem] font-medium uppercase tracking-[0.12em] text-ink-dim">
-            Tokens
-          </h3>
-          {lexed.ok && visibleTokens.length > 0 && (
-            <span className="font-mono text-[0.72rem] text-ink-dim">
-              {visibleTokens.length} tokens, then EOF.
-            </span>
-          )}
-        </div>
-
-        {lexed.ok ? (
-          visibleTokens.length === 0 ? (
-            <p className="text-label text-ink-dim">Nothing to tokenize yet. Enter SQL in the prompt above.</p>
-          ) : (
-            <ol className="flex flex-wrap gap-1.5">
-              {visibleTokens.map((t, i) => (
-                <li
-                  key={`${String(t.from)}-${String(i)}`}
-                  className={`flex flex-col items-center gap-0.5 rounded-lg border px-2 py-1 shadow-neu-rest backdrop-blur-sm ${TOKEN_TONE[t.type]}`}
-                  title={`${t.type} &middot; chars ${String(t.from)}&ndash;${String(t.to)}`}
-                >
-                  <span className="font-mono text-label leading-tight break-all font-medium">
-                    {t.type === 'string' ? `'${t.value}'` : t.value}
-                  </span>
-                  <span className="text-[0.68rem] font-mono leading-none tracking-[0.08em] uppercase opacity-75">
-                    {t.type}
-                  </span>
-                </li>
-              ))}
-            </ol>
-          )
-        ) : (
-          <div className="flex flex-col gap-2 rounded-xl border border-evict/40 bg-evict/10 p-3.5">
-            <p className="text-label font-medium text-ink">{lexed.message}</p>
-            <MarkedSource src={src} from={lexed.from} to={lexed.to} />
-          </div>
-        )}
-      </section>
-
-      {/* --- AST / parse result --------------------------------------------- */}
-      <section aria-labelledby="ast-h" className="flex flex-1 flex-col gap-2.5">
-        <h3 id="ast-h" className="font-mono text-[0.75rem] font-medium uppercase tracking-[0.12em] text-ink-dim">
-          Abstract Syntax Tree
-        </h3>
-
-        {parsed.ok && tree ? (
-          <>
-            <p className="text-label text-ink-dim tabular-nums">
-              Parsed · {countNodes(tree)} nodes · recursion depth {treeDepth(tree)}
-            </p>
-            <div className={`${panelSurface} min-h-64 flex-1 p-5`}>
-              <AstTree root={tree} />
-            </div>
-          </>
-        ) : (
-          <div className="flex flex-col gap-2.5 rounded-xl border border-evict/40 bg-evict/10 p-4">
-            <p className="text-label font-medium text-ink">{parsed.ok ? 'No statement.' : parsed.error.message}</p>
-            {!parsed.ok && parsed.error.hint && (
-              <p className="text-label text-ink-dim">{parsed.error.hint}</p>
-            )}
-            {!parsed.ok && parsed.error.from !== undefined && (
-              <MarkedSource
-                src={src}
-                from={parsed.error.from}
-                to={parsed.error.to ?? parsed.error.from + 1}
+    <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col p-4 sm:p-6 lg:p-8">
+      <ToolShell
+        category="query"
+        header={
+          <ToolHeader
+            id="parser"
+            title="Parser sandbox"
+            summary="Type SQL and watch the tokenizer split it and the parser build its syntax tree, live."
+            about={
+              <p>
+                Any SQL works here, including SQL QueryLens does not run yet: the tokenizer and the recursive-descent
+                parser report what they cannot read in their own words. Compare the tree with the{' '}
+                <Link to="/tools/grammar" className="underline underline-offset-2 hover:text-ink">
+                  SQL grammar explorer
+                </Link>
+                , or follow a query through every stage in the{' '}
+                <Link to="/playground" className="underline underline-offset-2 hover:text-ink">
+                  Playground
+                </Link>
+                .
+              </p>
+            }
+          />
+        }
+        command={
+          <div className={`${panelSurface} grid min-w-0 gap-4 p-4 md:grid-cols-[minmax(0,16rem)_minmax(0,1fr)]`}>
+            <ScenarioPicker
+              id="parser-example"
+              label="Example"
+              scenarios={EXAMPLES}
+              value={example?.id ?? null}
+              onPick={(id) => {
+                const picked = EXAMPLES.find((x) => x.id === id);
+                if (picked) setSrc(picked.sql);
+              }}
+            />
+            <div className="flex min-w-0 flex-col gap-1.5">
+              <label htmlFor="src" className={controlLabel}>
+                SQL source
+              </label>
+              <textarea
+                id="src"
+                value={src}
+                onChange={(e) => { setSrc(e.target.value.slice(0, MAX_SRC)); }}
+                rows={3}
+                spellCheck={false}
+                className={`${inputField} w-full resize-y font-mono`}
               />
-            )}
+            </div>
           </div>
-        )}
-      </section>
+        }
+        stage={
+          <StagePanel
+            title="Syntax tree"
+            legend={parsed.ok && tree ? `Parsed · ${String(countNodes(tree))} nodes · recursion depth ${String(treeDepth(tree))}` : undefined}
+          >
+            <section aria-labelledby="ribbon-h" className="mb-4 flex flex-col gap-2 border-b border-edge/60 pb-4">
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <h4 id="ribbon-h" className="text-label font-semibold text-ink">
+                  Tokens
+                </h4>
+                {lexed.ok && visibleTokens.length > 0 && (
+                  <span className="text-label text-ink-dim">{visibleTokens.length} tokens, then EOF.</span>
+                )}
+              </div>
+              {lexed.ok ? (
+                visibleTokens.length === 0 ? (
+                  <p className="text-label text-ink-dim">Nothing to tokenize yet. Type some SQL above.</p>
+                ) : (
+                  <ol className="flex flex-wrap gap-1.5">
+                    {visibleTokens.map((t, i) => (
+                      <li
+                        key={`${String(t.from)}-${String(i)}`}
+                        className={`flex flex-col items-center gap-0.5 rounded-lg border px-2 py-1 ${TOKEN_TONE[t.type]}`}
+                        title={`${t.type} · chars ${String(t.from)}–${String(t.to)}`}
+                      >
+                        <span className="font-mono text-label leading-tight font-medium break-all">
+                          {t.type === 'string' ? `'${t.value}'` : t.value}
+                        </span>
+                        <span className="font-mono text-[0.68rem] leading-none tracking-[0.08em] uppercase opacity-75">
+                          {t.type}
+                        </span>
+                      </li>
+                    ))}
+                  </ol>
+                )
+              ) : (
+                <div className="flex flex-col gap-2 rounded-xl border border-evict/40 bg-evict/10 p-3.5">
+                  <p className="text-label font-medium text-ink">{lexed.message}</p>
+                  <MarkedSource src={src} from={lexed.from} to={lexed.to} />
+                </div>
+              )}
+            </section>
 
-      <p className="text-label leading-relaxed text-ink-dim">
-        Compare this token stream and syntax tree with the{' '}
-        <Link to="/tools/grammar" className="underline underline-offset-2 hover:text-ink">
-          SQL grammar explorer
-        </Link>{' '}
-        or see the full query lifecycle in the{' '}
-        <Link to="/playground" className="underline underline-offset-2 hover:text-ink">
-          Playground
-        </Link>
-        .
-      </p>
+            {parsed.ok && tree ? (
+              <div
+                className="h-[26rem] min-h-0 sm:h-(--tree-h)"
+                // The tree's depth sets the canvas height from `sm` up; a fixed height fitted a 14-node tree to a third of its size.
+                style={{ '--tree-h': `${String(Math.min(560, Math.max(288, treeDepth(tree) * 72 + 96)))}px` } as CSSProperties}
+              >
+                <AstTree root={tree} minZoom={phone ? PHONE_MIN_ZOOM : MIN_ZOOM} />
+              </div>
+            ) : (
+              <div className="flex flex-col gap-2.5 rounded-xl border border-evict/40 bg-evict/10 p-4">
+                <p className="text-label font-medium text-ink">{parsed.ok ? 'No statement.' : parsed.error.message}</p>
+                {!parsed.ok && parsed.error.hint && <p className="text-label text-ink-dim">{parsed.error.hint}</p>}
+                {!parsed.ok && parsed.error.from !== undefined && (
+                  <MarkedSource src={src} from={parsed.error.from} to={parsed.error.to ?? parsed.error.from + 1} />
+                )}
+              </div>
+            )}
+          </StagePanel>
+        }
+      />
     </div>
   );
 }

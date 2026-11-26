@@ -47,7 +47,6 @@ export function DocsLayout() {
           onClick={() => { setMobileMenuOpen((o) => !o); }}
           className="inline-flex items-center gap-2 rounded-lg border border-edge bg-surface-3 px-3 py-1.5 text-label font-medium text-ink shadow-e1 transition hover:border-accent/40"
           aria-expanded={mobileMenuOpen}
-          aria-label="Toggle documentation navigation"
         >
           <svg
             aria-hidden="true"

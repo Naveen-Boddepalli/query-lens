@@ -147,3 +147,50 @@ test('dead versions can push a heap past the pool, and a VACUUM brings it back',
   const cost = page.getByRole('region', { name: 'What the dead versions cost' });
   await expect(cost.getByRole('status')).toContainText('read 18 pages from disk as it is (6 pages), and 5 after a VACUUM (5 pages)');
 });
+
+// plan.md §27.5 T1: the run as a precedence graph, its cycle named, beside the replay check.
+test('a lost update draws a cycle in the precedence graph, and the replay check agrees', async ({ page }) => {
+  await page.goto('/tools/schedule');
+  await page.getByRole('button', { name: 'Lost update' }).click();
+  const panel = page.getByRole('region', { name: 'Precedence graph' });
+  await expect(panel.getByRole('status')).toContainText(/^Cycle: (A → B → A|B → A → B)\./);
+  await expect(panel.getByRole('img', { name: /^Precedence graph:/ })).toBeVisible();
+  await expect(panel.getByText('The replay check agrees')).toBeVisible();
+  await expect(panel.getByRole('cell', { name: 'rw — read it, then the other overwrote it' })).toBeVisible();
+});
+
+// plan.md §27.5 T2: intention locks above every row lock, and escalation's price.
+test('escalation trades three row locks for a table lock, and a reader of another row waits', async ({ page }) => {
+  await page.goto('/tools/schedule');
+  await page.getByRole('button', { name: 'Escalation' }).click();
+  await expect(page.getByRole('radio', { name: 'After 2 locks' })).toHaveAttribute('aria-checked', 'true');
+  await expect(page.getByText(/A would hold more than 2 locks on accounts, so it escalates/)).toBeVisible();
+  await expect(page.getByText('B requests an intention-shared (IS) lock on the table accounts, held by A — it must wait.')).toBeVisible();
+  await expect.poll(() => page.url()).toContain('e=2');
+});
+
+test('next-key locks keep the phantom out: the insert waits on a gap, drawn on the index leaf', async ({ page }) => {
+  await page.goto('/tools/schedule');
+  await page.getByRole('button', { name: 'Phantom', exact: true }).click();
+  await expect(page.getByText(/^Phantom: A ran this query twice/)).toBeVisible();
+  await page.getByRole('radiogroup', { name: 'Gap locks' }).getByRole('radio', { name: 'Next-key' }).click();
+  await expect(page.getByText(/^Phantom: A ran this query twice/)).toHaveCount(0);
+  await expect(page.getByText('B requests an exclusive lock on the gap above the last key in accounts.id, held by A — it must wait.')).toBeVisible();
+  // Open where the insert waits: every gap of the index is A's, and B waits on the last.
+  const leaves = page.getByRole('list', { name: 'Leaves of accounts.id, with their gaps' }).first();
+  await expect(leaves.getByText('the gap past the last key: A holds S, B waits for X')).toBeAttached();
+  await expect(leaves.getByText('the gap below id = 1: A holds S')).toBeAttached();
+  await expect.poll(() => page.url()).toContain('g=1');
+});
+
+test('the gap-lock example: a range locks its own gaps, a row outside it is free, an insert past it waits', async ({ page }) => {
+  await page.goto('/tools/schedule');
+  await page.getByRole('button', { name: 'Gap lock', exact: true }).click();
+  await expect(page.getByRole('radiogroup', { name: 'Gap locks' }).getByRole('radio', { name: 'Next-key' })).toHaveAttribute('aria-checked', 'true');
+  await expect(page.getByText(/A also locks 3 gaps in accounts\.id/)).toBeVisible();
+  await expect(page.getByText('1 row updated in accounts, committed at once (autocommit).')).toBeVisible();
+  const leaves = page.getByRole('list', { name: 'Leaves of accounts.id, with their gaps' }).first();
+  await expect(leaves.getByText('the gap below id = 19: A holds S')).toBeAttached();
+  await expect(leaves.getByText('the gap below id = 18: A holds S')).toHaveCount(0);
+  await expect(page.getByText('B is promoted from waiting to holding an exclusive lock on the gap above the last key in accounts.id.')).toBeVisible();
+});

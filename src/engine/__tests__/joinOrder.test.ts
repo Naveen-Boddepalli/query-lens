@@ -183,7 +183,7 @@ describe('rebuildJoinsForOrder / reorderJoinsIfCheaper (plan.md §25.4 C5 slice 
     expect(result!.from.name).toBe('departments');
     expect(result!.joins.map((j) => j.table.name)).toEqual(['employees', 'timesheets', 'projects']);
     // Every predicate is exactly the one originally written for that table — nothing invented.
-    expect(result!.joins.map((j) => exprToSql(j.on))).toEqual([
+    expect(result!.joins.map((j) => exprToSql(j.on!))).toEqual([
       'departments.id = employees.deptId',
       'employees.id = timesheets.employeeId',
       'departments.id = projects.deptId',
@@ -205,7 +205,7 @@ describe('rebuildJoinsForOrder / reorderJoinsIfCheaper (plan.md §25.4 C5 slice 
     expect(rebuilt!.joins).toHaveLength(1);
     expect(rebuilt!.joins[0]!.table.name).toBe('authors');
     // The same predicate, unchanged — just now introducing `authors` instead of `posts`.
-    expect(exprToSql(rebuilt!.joins[0]!.on)).toBe('authors.id = posts.authorId');
+    expect(exprToSql(rebuilt!.joins[0]!.on!)).toBe('authors.id = posts.authorId');
     expect(nodes.map((n) => n.name)).toContain('authors');
   });
 

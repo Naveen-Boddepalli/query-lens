@@ -11,10 +11,10 @@
 import type { Emit } from '../trace.ts';
 import type { EngineOptions, Row, SqlValue, Table } from '../types.ts';
 import type { Expr } from '../parser/index.ts';
-import { lookupKeysOf } from '../planner/index.ts';
+import { distinctSortColumn, lookupKeysOf } from '../planner/index.ts';
 import type { AggregateSpec, Plan, ProjectList, RangeBound } from '../planner/index.ts';
 import type { BufferPool, Heap, ScanRing } from '../storage/index.ts';
-import { scanUsesRing } from '../storage/index.ts';
+import { PoolExhausted, scanUsesRing } from '../storage/index.ts';
 import type { LockManager } from '../locks/index.ts';
 import type { BPlusTree, RowPointer } from '../index/index.ts';
 import { columnsOfIndex, emitIndexLookup, emitRangeStart, nextInRange, pageCountFor, resolveClustered } from '../index/index.ts';
@@ -61,6 +61,12 @@ export interface ExecContext {
   aggregateSortBase?: number;
   sortBase?: number;
   distinctBase?: number;
+  /**
+   * A compound query's own contexts (plan.md §27.5 S3), keyed by plan node: each member SELECT's root, with its own
+   * table, heap, partners and sort blocks — every member shares the one buffer pool — and a `DISTINCT` inside a chain,
+   * with its own sort block. A `SetOp` builds each input with the context named here, or its own.
+   */
+  members?: Map<Plan, ExecContext>;
 }
 
 /**
@@ -129,7 +135,8 @@ function seqScan(plan: Extract<Plan, { op: 'SeqScan' }>, ctx: ExecContext): Oper
           lockedPage = page.pageId;
           // The heap's pages end where this table's last page does: that is the scan's extent for read-ahead.
           const fetched = ctx.pool.fetch(page.pageId, ring, lastHeapPage + 1);
-          if (!fetched) return null;
+          // Never the end of the table: a page it cannot read is an error (plan.md §27.5 S7).
+          if (!fetched) throw new PoolExhausted(page.pageId, ctx.options.bufferFrames);
           // Held while its rows are read; released when we move on. Only an
           // unpinned frame can be evicted.
           pinnedFrame = fetched.frameId;
@@ -445,14 +452,30 @@ function groupKeyOf(row: Row, groupBy: readonly string[]): string {
   return JSON.stringify(groupBy.map((col) => row[col] ?? null));
 }
 
-function computeAggregate(spec: AggregateSpec, rows: readonly Row[]): SqlValue {
-  if (spec.fn === 'COUNT') {
-    return spec.column === null
-      ? rows.length
-      : rows.filter((r) => (r[spec.column!] ?? null) !== null).length;
-  }
-
+/**
+ * The non-NULL values `spec` reads from `rows` — each distinct one once, for a DISTINCT aggregate (plan.md §27.5 S5).
+ * `adjacent` says the rows are sorted on the column, so a repeat sits right after the value it repeats and comparing
+ * with the one before finds it (the sort strategy); otherwise a set remembers every value seen (the hash strategy).
+ */
+function aggregateValues(spec: AggregateSpec, rows: readonly Row[], adjacent: boolean): SqlValue[] {
   const values = rows.map((r) => r[spec.column!] ?? null).filter((v) => v !== null);
+  if (!spec.distinct) return values;
+  // Two values are one exactly when `SELECT DISTINCT` would say so — the same key its hash set and its sort compare.
+  const keys = values.map((v) => equalityKeyOf(v));
+  if (adjacent) return values.filter((_, i) => i === 0 || keys[i] !== keys[i - 1]);
+  const seen = new Set<string>();
+  return values.filter((_, i) => {
+    const key = keys[i]!;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function computeAggregate(spec: AggregateSpec, rows: readonly Row[], adjacent = false): SqlValue {
+  if (spec.fn === 'COUNT' && spec.column === null) return rows.length;
+  const values = aggregateValues(spec, rows, adjacent);
+  if (spec.fn === 'COUNT') return values.length;
   if (values.length === 0) return null;
 
   switch (spec.fn) {
@@ -469,6 +492,33 @@ function computeAggregate(spec: AggregateSpec, rows: readonly Row[]): SqlValue {
     case 'MAX':
       return values.reduce((max, v) => (compare('>', v, max) === true ? v : max));
   }
+}
+
+/**
+ * What a DISTINCT aggregate did, for the narration (plan.md §27.5 S5) — `COUNT(DISTINCT customerId) read 38 values
+ * and kept 9`, summed over the groups — or `null` when no aggregate is DISTINCT.
+ */
+function distinctNote(rows: readonly Row[], groupBy: readonly string[], aggregates: readonly AggregateSpec[]): string | null {
+  const specs = aggregates.filter((a) => a.distinct);
+  if (specs.length === 0) return null;
+  const groups = new Map<string, Row[]>();
+  for (const row of rows) {
+    const key = groupKeyOf(row, groupBy);
+    const group = groups.get(key);
+    if (group) group.push(row);
+    else groups.set(key, [row]);
+  }
+  return specs
+    .map((spec) => {
+      let read = 0;
+      let kept = 0;
+      for (const group of groups.values()) {
+        read += aggregateValues({ ...spec, distinct: false }, group, false).length;
+        kept += aggregateValues(spec, group, false).length;
+      }
+      return `${spec.key} read ${String(read)} value${read === 1 ? '' : 's'} and kept ${String(kept)}${groups.size > 1 ? ` across ${String(groups.size)} groups` : ''}`;
+    })
+    .join('; ');
 }
 
 /** Groups `rows` by `groupBy` (or one group over everything, if empty) and computes each aggregate per group. */
@@ -529,6 +579,13 @@ function hashAggregate(plan: Extract<Plan, { op: 'HashAggregate' }>, child: Oper
         }
         child.close();
         rows = runHashAggregate(materialised, plan.groupBy, plan.aggregates);
+        const distinct = distinctNote(materialised, plan.groupBy, plan.aggregates);
+        if (distinct) {
+          ctx.emit(
+            `HashAggregate kept a set of the values ${plan.groupBy.length > 0 ? 'each group had' : 'it had'} seen, so ${distinct} — a value counts the first time only, and a NULL never.`,
+            { stage: 'execute', op: 'HashAggregate', rowsProduced: 0 },
+          );
+        }
       }
 
       const row = rows[index];
@@ -549,22 +606,27 @@ function hashAggregate(plan: Extract<Plan, { op: 'HashAggregate' }>, child: Oper
   };
 }
 
-/** One streaming pass over rows already sorted by `groupBy`: each run of equal keys collapses into one group. */
+/**
+ * One streaming pass over rows already sorted by `groupBy` — and by `sortedOn` within each group, when a DISTINCT
+ * aggregate reads it (plan.md §27.5 S5): each run of equal keys collapses into one group.
+ */
 function collapseSortedGroups(
   sorted: readonly Row[],
   groupBy: readonly string[],
   aggregates: readonly AggregateSpec[],
+  sortedOn: string | null = null,
 ): Row[] {
+  const compute = (spec: AggregateSpec, rows: readonly Row[]) => computeAggregate(spec, rows, spec.column === sortedOn);
   if (groupBy.length === 0) {
     const groupRow: Row = {};
-    for (const spec of aggregates) groupRow[spec.key] = computeAggregate(spec, sorted);
+    for (const spec of aggregates) groupRow[spec.key] = compute(spec, sorted);
     return [groupRow];
   }
 
   const finishBucket = (bucket: readonly Row[]): Row => {
     const groupRow: Row = {};
     for (const col of groupBy) groupRow[col] = bucket[0]![col] ?? null;
-    for (const spec of aggregates) groupRow[spec.key] = computeAggregate(spec, bucket);
+    for (const spec of aggregates) groupRow[spec.key] = compute(spec, bucket);
     return groupRow;
   };
 
@@ -621,9 +683,13 @@ function sortAggregate(
         }
         child.close();
 
+        // A DISTINCT aggregate's column joins the sort key (plan.md §27.5 S5): sorted on (group, value), a repeat sits
+        // right after the value it repeats.
+        const sortedOn = distinctSortColumn(plan.aggregates);
+        const sortKey = sortedOn === null ? plan.groupBy : [...plan.groupBy, sortedOn];
         const sorted = externalMergeSort(
           materialised,
-          (r) => plan.groupBy.map((col) => r[col] ?? null),
+          (r) => sortKey.map((col) => r[col] ?? null),
           'asc',
           {
             pool: ctx.pool,
@@ -635,7 +701,16 @@ function sortAggregate(
           'SortAggregate',
           'SortAggregate',
         );
-        rows = collapseSortedGroups(sorted, plan.groupBy, plan.aggregates);
+        rows = collapseSortedGroups(sorted, plan.groupBy, plan.aggregates, sortedOn);
+        const distinct = distinctNote(materialised, plan.groupBy, plan.aggregates);
+        if (distinct) {
+          ctx.emit(
+            sortedOn === null
+              ? `SortAggregate sorted on the groups alone: its DISTINCT aggregates read different columns, and one sort cannot order both, so each kept a set of the values seen, as a hash aggregate does — ${distinct}.`
+              : `SortAggregate sorted on (${sortKey.join(', ')}), so within each group equal ${sortedOn} values sit side by side: a value counts only where it differs from the one before — no set to keep — and ${distinct}.`,
+            { stage: 'execute', op: 'SortAggregate', rowsProduced: 0 },
+          );
+        }
       }
 
       const row = rows[index];
@@ -928,6 +1003,48 @@ function nullPaddedRow(leftTable: string, leftRow: Row, rightTable: string, righ
 }
 
 /**
+ * The tables whose columns a plan's rows carry, in the order a joined row holds them — its scan's table, then each
+ * joined table; a semi- or anti-join adds none, since only its left side's columns come out. What a RIGHT or FULL
+ * join (plan.md §27.5 S4) pads with NULLs for a right row nothing on the left matched.
+ */
+function tablesOf(plan: Plan): string[] {
+  switch (plan.op) {
+    case 'SeqScan':
+    case 'IndexScan':
+    case 'IndexOnlyScan':
+    case 'IndexRangeScan':
+    case 'IndexProbe':
+      return [plan.table];
+    case 'Join':
+      return plan.joinType === 'semi' || plan.joinType === 'anti' ? tablesOf(plan.left) : [...tablesOf(plan.left), plan.rightTable];
+    case 'SetOp':
+      return tablesOf(plan.left);
+    default:
+      return tablesOf(plan.child);
+  }
+}
+
+/** Every column of `plan.left`'s tables, qualified — the keys a RIGHT or FULL join's padded row sets to NULL. */
+function leftColumnsOf(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): string[] {
+  return tablesOf(plan.left).flatMap((name) => {
+    const table = name === ctx.table.name ? ctx.table : ctx.joinPartners?.[name]?.table;
+    return (table?.columns ?? []).map((c) => `${name}.${c}`);
+  });
+}
+
+/** A RIGHT or FULL join's row for a `right` row nothing on the left matched (plan.md §27.5 S4): the left side all NULL. */
+function rightPaddedRow(leftColumns: readonly string[], rightTable: string, rightRow: Row): Row {
+  const merged: Row = {};
+  for (const key of leftColumns) merged[key] = null;
+  for (const [key, value] of Object.entries(rightRow)) merged[`${rightTable}.${key}`] = value;
+  return merged;
+}
+
+/** A RIGHT or FULL join's narration for that row, in its own words. */
+const keptRight = (plan: Extract<Plan, { op: 'Join' }>): string =>
+  `${plan.joinType === 'full' ? 'FULL' : 'RIGHT'} JOIN keeps it, with every column on the ${plan.leftTable} side NULL`;
+
+/**
  * Reads a `Join`'s own left-hand join-key value off `row` — `column` bare if `row` came straight off a base-table
  * scan (a query's first `JOIN`), or `table.column` if an earlier `Join` in the chain already merged and qualified it
  * (plan.md §25.4 C3 slice b). Only ever needed for the *left* side: a left-deep chain's `right` side is always a
@@ -943,6 +1060,26 @@ function leftJoinValue(row: Row, table: string, column: string): SqlValue {
 function leftJoinKeyOf(row: Row, table: string, column: string): string | null {
   const value = leftJoinValue(row, table, column);
   return value === null ? null : equalityKeyOf(value);
+}
+
+/** Which of the two subquery joins a `Join` is (plan.md §27.5 S1), or `null` for an inner or LEFT join. */
+function semiKindOf(plan: Extract<Plan, { op: 'Join' }>): 'semi' | 'anti' | null {
+  return plan.joinType === 'semi' || plan.joinType === 'anti' ? plan.joinType : null;
+}
+
+/**
+ * A semi- or anti-join's own test of a pair whose keys already matched (plan.md §27.5 S1): the rest of the
+ * subquery's `WHERE` that names both tables — `residual`, qualified — must hold too, read off the two rows merged the
+ * way an inner join would merge them. With no residual, a key match is the whole test.
+ */
+function residualHolds(plan: Extract<Plan, { op: 'Join' }>, leftRow: Row, rightRow: Row): boolean {
+  return plan.residual === undefined || passes(plan.residual, mergeJoinedRow(plan.leftTable, leftRow, plan.rightTable, rightRow));
+}
+
+/** How a semi- or anti-join's decision reads in the trace: the subquery's answer for this row, and what follows from it. */
+function semiVerdict(kind: 'semi' | 'anti', found: boolean): string {
+  if (kind === 'semi') return found ? 'EXISTS is TRUE, so the row is kept — once' : 'EXISTS is FALSE, so the row is dropped';
+  return found ? 'NOT EXISTS is FALSE, so the row is dropped' : 'NOT EXISTS is TRUE, so the row is kept';
 }
 
 /**
@@ -962,7 +1099,17 @@ function leftJoinKeyOf(row: Row, table: string, column: string): string | null {
 function join(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): Operator {
   const joinRight = ctx.joinPartners?.[plan.rightTable];
   if (!joinRight) throw new Error("unreachable: a Join plan implies ExecContext.joinPartners has this Join's rightTable");
-  const isLeft = plan.joinType === 'left';
+  const isLeft = plan.joinType === 'left' || plan.joinType === 'full';
+  // A semi- or anti-join (plan.md §27.5 S1) is this same loop with one change: the rescan of `right` stops at the first
+  // match, because one is all EXISTS asks for. That is exactly what running the subquery again for every outer row does.
+  const semi = semiKindOf(plan);
+  // RIGHT and FULL (plan.md §27.5 S4) remember every inner row that matched, then read the inner table once more for
+  // the rest. A cross join keeps every pair, with no key to compare.
+  const keepsRight = plan.joinType === 'right' || plan.joinType === 'full';
+  const cross = plan.joinType === 'cross';
+  const leftColumns = keepsRight ? leftColumnsOf(plan, ctx) : [];
+  let matchedRight = new Set<Row>();
+  let sweeping = false;
 
   const left = buildOperator(plan.left, ctx);
   const right = buildOperator(plan.right, {
@@ -978,6 +1125,8 @@ function join(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): Operator {
   let checked = 0;
   // LEFT JOIN only (plan.md §25.4 C3): whether the current left row has matched anything yet.
   let matched = false;
+  // Semi- and anti-joins only: how many inner rows this outer row's rescan has read.
+  let readThisRow = 0;
 
   return {
     name: 'Join',
@@ -987,13 +1136,34 @@ function join(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): Operator {
       rightOpen = false;
       checked = 0;
       matched = false;
+      readThisRow = 0;
+      matchedRight = new Set();
+      sweeping = false;
     },
     next() {
       for (;;) {
+        // The last pass of a RIGHT or FULL join: every inner row no outer row matched, padded on the left.
+        if (sweeping) {
+          const rightRow = right.next();
+          if (!rightRow) return null;
+          if (matchedRight.has(rightRow)) continue;
+          produced(`Join's last pass finds a row of ${plan.rightTable} no row of ${plan.leftTable} matched — ${keptRight(plan)}.`);
+          return rightPaddedRow(leftColumns, plan.rightTable, rightRow);
+        }
         if (!rightOpen) {
           leftRow = left.next();
-          if (!leftRow) return null;
+          if (!leftRow) {
+            if (!keepsRight) return null;
+            ctx.emit(
+              `Join has paired every row of ${plan.leftTable}; it reads ${plan.rightTable} once more, for the rows no pairing used.`,
+              { stage: 'execute', op: 'Join', rowsProduced: matchedRight.size, table: plan.rightTable },
+            );
+            sweeping = true;
+            right.open();
+            continue;
+          }
           matched = false;
+          readThisRow = 0;
           right.open();
           rightOpen = true;
         }
@@ -1001,22 +1171,47 @@ function join(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): Operator {
         const rightRow = right.next();
         if (!rightRow) {
           rightOpen = false;
-          // The whole inner table was rescanned and nothing matched this left row — a LEFT JOIN keeps it anyway.
+          // The whole inner table was read and nothing matched: NOT EXISTS keeps the row; EXISTS has already moved on.
+          if (semi === 'anti') {
+            produced(`Join reads all ${String(readThisRow)} row${readThisRow === 1 ? '' : 's'} of ${plan.rightTable} and finds no match for a row from ${plan.leftTable} — ${semiVerdict('anti', false)}.`);
+            return leftRow;
+          }
+          if (semi === 'semi') continue;
+          // The whole inner table was rescanned and nothing matched this left row — a LEFT (or FULL) JOIN keeps it anyway.
           if (isLeft && !matched) {
-            produced(`Join finds no match in ${plan.rightTable} for a row from ${plan.leftTable} — LEFT JOIN keeps it, with ${plan.rightTable}'s columns NULL.`);
+            produced(`Join finds no match in ${plan.rightTable} for a row from ${plan.leftTable} — ${plan.joinType === 'full' ? 'FULL' : 'LEFT'} JOIN keeps it, with ${plan.rightTable}'s columns NULL.`);
             return nullPaddedRow(plan.leftTable, leftRow!, plan.rightTable, joinRight.table.columns);
           }
           continue;
         }
         checked += 1;
+        readThisRow += 1;
 
         // NULL never matches NULL — the same three-valued rule an ordinary
         // `=` predicate follows, so a NULL join key simply finds no partner.
-        if (compare('=', leftJoinValue(leftRow!, plan.leftTable, plan.leftColumn), rightRow[plan.rightColumn] ?? null) !== true) {
+        if (!cross && compare('=', leftJoinValue(leftRow!, plan.leftTable, plan.leftColumn), rightRow[plan.rightColumn] ?? null) !== true) {
           continue;
         }
 
+        if (cross) {
+          produced(`Join pairs a row from ${plan.leftTable} with one from ${plan.rightTable} — a cross join keeps every pair (${String(checked)} so far).`);
+          return mergeJoinedRow(plan.leftTable, leftRow!, plan.rightTable, rightRow);
+        }
+
+        if (semi) {
+          if (!residualHolds(plan, leftRow!, rightRow)) continue;
+          // One match settles it either way: the rest of the inner table is never read for this row. The next outer
+          // row reopens the scan from its first page.
+          rightOpen = false;
+          if (semi === 'anti') continue;
+          produced(
+            `Join finds a match in ${plan.rightTable} for a row from ${plan.leftTable} after reading ${String(readThisRow)} of its rows — ${semiVerdict('semi', true)}, and the rest of ${plan.rightTable} is not read for it.`,
+          );
+          return leftRow;
+        }
+
         matched = true;
+        if (keepsRight) matchedRight.add(rightRow);
         produced(
           `Join matches a row from ${plan.leftTable} with one from ${plan.rightTable} (${checked} candidate${
             checked === 1 ? '' : 's'
@@ -1051,7 +1246,17 @@ function join(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): Operator {
 function hashJoin(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): Operator {
   const joinRight = ctx.joinPartners?.[plan.rightTable];
   if (!joinRight) throw new Error("unreachable: a Join plan implies ExecContext.joinPartners has this Join's rightTable");
-  const isLeft = plan.joinType === 'left';
+  const isLeft = plan.joinType === 'left' || plan.joinType === 'full';
+  // A semi- or anti-join (plan.md §27.5 S1) builds the same table and probes it the same way, but an outer row comes out
+  // at most once: kept if any row in its bucket passes the residual (semi), or if none does (anti).
+  const semi = semiKindOf(plan);
+  // RIGHT and FULL (plan.md §27.5 S4) mark each built row a probe matches; once the probe side runs out, every unmarked
+  // one — a NULL key included, which was never in a bucket — comes out padded on the left.
+  const keepsRight = plan.joinType === 'right' || plan.joinType === 'full';
+  const leftColumns = keepsRight ? leftColumnsOf(plan, ctx) : [];
+  let builtRows: Row[] = [];
+  let matchedRight = new Set<Row>();
+  let unmatched: Row[] | null = null;
 
   const left = buildOperator(plan.left, ctx);
   const right = buildOperator(plan.right, {
@@ -1078,6 +1283,9 @@ function hashJoin(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): Operat
       bucket = [];
       bucketIndex = 0;
       matched = 0;
+      builtRows = [];
+      matchedRight = new Set();
+      unmatched = null;
     },
     next() {
       if (!built) {
@@ -1085,6 +1293,7 @@ function hashJoin(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): Operat
         for (;;) {
           const row = right.next();
           if (!row) break;
+          if (keepsRight) builtRows.push(row);
           const value = row[plan.rightColumn] ?? null;
           if (value === null) continue;
           const key = equalityKeyOf(value);
@@ -1100,16 +1309,47 @@ function hashJoin(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): Operat
         );
       }
 
+      if (semi) {
+        for (;;) {
+          const row = left.next();
+          if (!row) return null;
+          const value = leftJoinValue(row, plan.leftTable, plan.leftColumn);
+          const candidates = value === null ? [] : (built.get(equalityKeyOf(value)) ?? []);
+          const found = candidates.some((candidate) => residualHolds(plan, row, candidate));
+          if (found !== (semi === 'semi')) continue;
+          produced(
+            found
+              ? `Join probes the hash table with a row from ${plan.leftTable} and finds ${candidates.length === 1 ? 'a match' : `${String(candidates.length)} rows with its key`} in ${plan.rightTable} — ${semiVerdict('semi', true)}, however many rows share its key.`
+              : `Join probes the hash table with a row from ${plan.leftTable} and finds nothing in ${plan.rightTable} — ${semiVerdict('anti', false)}.`,
+          );
+          return row;
+        }
+      }
+
       for (;;) {
+        if (unmatched) {
+          const rightRow = unmatched.shift();
+          if (!rightRow) return null;
+          produced(`Join finds a row of ${plan.rightTable} no probe matched — ${keptRight(plan)}.`);
+          return rightPaddedRow(leftColumns, plan.rightTable, rightRow);
+        }
         if (bucketIndex >= bucket.length) {
           leftRow = left.next();
-          if (!leftRow) return null;
+          if (!leftRow) {
+            if (!keepsRight) return null;
+            unmatched = builtRows.filter((r) => !matchedRight.has(r));
+            ctx.emit(
+              `Join has probed with every row of ${plan.leftTable}; ${String(unmatched.length)} row${unmatched.length === 1 ? '' : 's'} of ${plan.rightTable} matched nothing, and come out next.`,
+              { stage: 'execute', op: 'Join', rowsProduced: matched, table: plan.rightTable },
+            );
+            continue;
+          }
           const value = leftJoinValue(leftRow, plan.leftTable, plan.leftColumn);
           bucket = value === null ? [] : (built.get(equalityKeyOf(value)) ?? []);
           bucketIndex = 0;
           // Empty bucket, or a NULL key that was never even looked up — nothing matched this left row at all.
           if (isLeft && bucket.length === 0) {
-            produced(`Join probes the hash table with a row from ${plan.leftTable} and finds nothing in ${plan.rightTable} — LEFT JOIN keeps it, with ${plan.rightTable}'s columns NULL.`);
+            produced(`Join probes the hash table with a row from ${plan.leftTable} and finds nothing in ${plan.rightTable} — ${plan.joinType === 'full' ? 'FULL' : 'LEFT'} JOIN keeps it, with ${plan.rightTable}'s columns NULL.`);
             return nullPaddedRow(plan.leftTable, leftRow, plan.rightTable, joinRight.table.columns);
           }
           continue;
@@ -1118,6 +1358,7 @@ function hashJoin(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): Operat
         const rightRow = bucket[bucketIndex]!;
         bucketIndex += 1;
         matched += 1;
+        if (keepsRight) matchedRight.add(rightRow);
         produced(
           `Join probes the hash table with a row from ${plan.leftTable} and finds a match in ${plan.rightTable} (${matched} match${matched === 1 ? '' : 'es'} so far).`,
         );
@@ -1156,7 +1397,14 @@ function indexNestedLoopJoin(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecConte
   if (inner.op !== 'IndexProbe') throw new Error('unreachable: an index nested-loop Join has an IndexProbe as its inner side');
   const tree = joinRight.trees[inner.column];
   if (!tree) throw new Error('unreachable: an index nested-loop Join implies its inner index was built');
+  // A probe never visits the inner rows nothing matched, so RIGHT, FULL and CROSS never run here (plan.md §27.5 S4).
+  if (plan.joinType === 'right' || plan.joinType === 'full' || plan.joinType === 'cross') {
+    throw new Error('unreachable: effectiveJoinAlgorithm runs RIGHT, FULL and CROSS joins by another algorithm');
+  }
   const isLeft = plan.joinType === 'left';
+  // A semi- or anti-join (plan.md §27.5 S1) probes once per outer row like the inner join, but stops fetching the
+  // probe's entries at the first that passes: one is all EXISTS needs.
+  const semi = semiKindOf(plan);
 
   const left = buildOperator(plan.left, ctx);
   const produced = counter(ctx, 'Join', plan.rightTable);
@@ -1180,6 +1428,49 @@ function indexNestedLoopJoin(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecConte
       matchedThisRow = false;
     },
     next() {
+      if (semi) {
+        for (;;) {
+          const row = left.next();
+          if (!row) return null;
+          const key = leftJoinValue(row, plan.leftTable, plan.leftColumn);
+          let found = false;
+          let fetched = 0;
+          // A NULL key matches nothing, so there is nothing to probe — EXISTS is FALSE and NOT EXISTS TRUE for it.
+          if (key !== null) {
+            probes += 1;
+            ctx.emit(
+              `Join takes a row from ${plan.leftTable} whose ${plan.leftColumn} is ${typeof key === 'string' ? `'${key}'` : String(key)} and probes ${plan.rightTable}'s B+Tree on ${plan.rightColumn} for it (probe ${String(probes)}).`,
+              { stage: 'execute', op: 'Join', rowsProduced: matched, table: plan.rightTable },
+            );
+            const entries = emitIndexLookup(ctx.emit, tree, [key], ctx.pool, inner.column, ctx.locks).pointers;
+            for (let at = 0; at < entries.length && !found; at++) {
+              const pointer = entries[at]!;
+              // The lookup itself fetched the first entry's heap page; each later one is fetched only if it is needed.
+              if (at > 0) fetchHeapPage(ctx, pointer);
+              fetched = at + 1;
+              const rightRow = rowAt(ctx, pointer, joinRight.heap);
+              if (!rightRow) continue;
+              if (compare('=', key, rightRow[plan.rightColumn] ?? null) !== true) continue;
+              found = residualHolds(plan, row, rightRow);
+            }
+            if (found && entries.length > fetched) {
+              ctx.emit(
+                `Join stops after ${String(fetched)} of the ${String(entries.length)} entries the probe found — one match settles it.`,
+                { stage: 'execute', op: 'Join', rowsProduced: matched, table: plan.rightTable },
+              );
+            }
+          }
+          if (found !== (semi === 'semi')) continue;
+          matched += 1;
+          produced(
+            found
+              ? `Join's probe of ${plan.rightTable} finds a match for a row from ${plan.leftTable} — ${semiVerdict('semi', true)}.`
+              : `Join's probe of ${plan.rightTable} finds nothing for a row from ${plan.leftTable} — ${semiVerdict('anti', false)}.`,
+          );
+          return row;
+        }
+      }
+
       for (;;) {
         const pointer = pointers[cursor];
         if (pointer === undefined) {
@@ -1274,9 +1565,12 @@ function* sortMergeMatches(
   leftColumn: string,
   rightColumn: string,
   isLeft: boolean,
-): Generator<readonly [Row, Row | null]> {
+  /** RIGHT or FULL (plan.md §27.5 S4): after the merge, every right row no run of equal keys paired, as `[null, row]`. */
+  keepRight = false,
+): Generator<readonly [Row | null, Row | null]> {
   let i = 0;
   let j = 0;
+  const paired = new Set<Row>();
   while (i < left.length) {
     const leftKey = leftJoinKeyOf(left[i]!, leftTable, leftColumn);
     if (leftKey === null) {
@@ -1302,12 +1596,49 @@ function* sortMergeMatches(
     const runStart = j;
     while (i < left.length && leftJoinKeyOf(left[i]!, leftTable, leftColumn) === leftKey) {
       for (let k = runStart; k < right.length && joinKeyOf(right[k]!, rightColumn) === leftKey; k++) {
+        if (keepRight) paired.add(right[k]!);
         yield [left[i]!, right[k]!];
       }
       i += 1;
     }
     j = runStart;
     while (j < right.length && joinKeyOf(right[j]!, rightColumn) === leftKey) j += 1;
+  }
+  if (keepRight) {
+    for (const row of right) if (!paired.has(row)) yield [null, row];
+  }
+}
+
+/**
+ * The merge phase of a sort-merge semi- or anti-join (plan.md §27.5 S1), as a generator of the `left` rows that
+ * survive: each left row is checked against the run of equal keys on `right` — the same walk `sortMergeMatches`
+ * makes — and comes out once if a row in that run passes `test` (semi), or if none does (anti). A NULL left key has
+ * no run at all, so an anti-join keeps it and a semi-join drops it.
+ */
+function* sortMergeSemi(
+  left: readonly Row[],
+  right: readonly Row[],
+  leftTable: string,
+  leftColumn: string,
+  rightColumn: string,
+  kind: 'semi' | 'anti',
+  test: (leftRow: Row, rightRow: Row) => boolean,
+): Generator<Row> {
+  let j = 0;
+  for (const row of left) {
+    const leftKey = leftJoinKeyOf(row, leftTable, leftColumn);
+    let found = false;
+    if (leftKey !== null) {
+      while (j < right.length) {
+        const aheadKey = joinKeyOf(right[j]!, rightColumn);
+        if (aheadKey !== null && aheadKey >= leftKey) break;
+        j += 1;
+      }
+      for (let k = j; k < right.length && joinKeyOf(right[k]!, rightColumn) === leftKey && !found; k++) {
+        found = test(row, right[k]!);
+      }
+    }
+    if (found === (kind === 'semi')) yield row;
   }
 }
 
@@ -1335,7 +1666,10 @@ function sortMergeJoin(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): O
   if (!joinRight) throw new Error("unreachable: a Join plan implies ExecContext.joinPartners has this Join's rightTable");
   const bases = ctx.sortMergeBases?.get(plan);
   if (!bases) throw new Error('unreachable: a sort-merge Join plan implies runQuery.ts reserved its scratch bases');
-  const isLeft = plan.joinType === 'left';
+  const isLeft = plan.joinType === 'left' || plan.joinType === 'full';
+  const semi = semiKindOf(plan);
+  const keepsRight = plan.joinType === 'right' || plan.joinType === 'full';
+  const leftColumns = keepsRight ? leftColumnsOf(plan, ctx) : [];
 
   const left = buildOperator(plan.left, ctx);
   const right = buildOperator(plan.right, {
@@ -1346,7 +1680,9 @@ function sortMergeJoin(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): O
   });
 
   const produced = counter(ctx, 'Join', plan.rightTable);
-  let matches: Generator<readonly [Row, Row | null]> | null = null;
+  let matches: Generator<readonly [Row | null, Row | null]> | null = null;
+  // A semi- or anti-join's survivors (plan.md §27.5 S1), in place of `matches`' pairs.
+  let survivors: Generator<Row> | null = null;
   let matched = 0;
 
   return {
@@ -1355,6 +1691,7 @@ function sortMergeJoin(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): O
       left.open();
       right.open();
       matches = null;
+      survivors = null;
       matched = 0;
     },
     next() {
@@ -1411,14 +1748,33 @@ function sortMergeJoin(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): O
           { stage: 'execute', op: 'Join', rowsProduced: 0, table: plan.rightTable },
         );
 
-        matches = sortMergeMatches(leftSorted, rightSorted, plan.leftTable, plan.leftColumn, plan.rightColumn, isLeft);
+        if (semi) {
+          survivors = sortMergeSemi(leftSorted, rightSorted, plan.leftTable, plan.leftColumn, plan.rightColumn, semi, (l, r) => residualHolds(plan, l, r));
+        }
+        matches = sortMergeMatches(leftSorted, rightSorted, plan.leftTable, plan.leftColumn, plan.rightColumn, isLeft, keepsRight);
+      }
+
+      if (survivors) {
+        const kept = survivors.next();
+        if (kept.done) return null;
+        matched += 1;
+        produced(
+          semi === 'semi'
+            ? `Join's merge finds a run of matching keys on ${plan.rightTable} for a row from ${plan.leftTable} — ${semiVerdict('semi', true)}.`
+            : `Join's merge finds no run of matching keys on ${plan.rightTable} for a row from ${plan.leftTable} — ${semiVerdict('anti', false)}.`,
+        );
+        return kept.value;
       }
 
       const step = matches.next();
       if (step.done) return null;
       const [leftRow, rightRow] = step.value;
+      if (leftRow === null) {
+        produced(`Join's merge leaves a row of ${plan.rightTable} that no run of keys paired — ${keptRight(plan)}.`);
+        return rightPaddedRow(leftColumns, plan.rightTable, rightRow!);
+      }
       if (rightRow === null) {
-        produced(`Join's merge passes a row from ${plan.leftTable} with no run of matching keys on ${plan.rightTable} — LEFT JOIN keeps it, with ${plan.rightTable}'s columns NULL.`);
+        produced(`Join's merge passes a row from ${plan.leftTable} with no run of matching keys on ${plan.rightTable} — ${plan.joinType === 'full' ? 'FULL' : 'LEFT'} JOIN keeps it, with ${plan.rightTable}'s columns NULL.`);
         return nullPaddedRow(plan.leftTable, leftRow, plan.rightTable, joinRight.table.columns);
       }
       matched += 1;
@@ -1432,6 +1788,90 @@ function sortMergeJoin(plan: Extract<Plan, { op: 'Join' }>, ctx: ExecContext): O
         left.close();
         right.close();
       }
+    },
+  };
+}
+
+/**
+ * A set operator over two inputs (plan.md §27.5 S3). `UNION ALL` streams `left`, then `right` — renaming `right`'s
+ * columns to the result's, by position. `INTERSECT` and `EXCEPT` first read all of `right` into a hash set of whole
+ * rows (`rowKey`: NULLs equal, a number and its numeric string equal, as `DISTINCT` counts them), then stream `left`,
+ * passing each distinct row that is in the set (INTERSECT) or not (EXCEPT). Each input runs in its own context — its
+ * member's table and pages — looked up in `ctx.members`.
+ */
+function setOp(plan: Extract<Plan, { op: 'SetOp' }>, ctx: ExecContext): Operator {
+  const contextOf = (child: Plan): ExecContext => ctx.members?.get(child) ?? ctx;
+  const left = buildOperator(plan.left, contextOf(plan.left));
+  const right = buildOperator(plan.right, contextOf(plan.right));
+  const produced = counter(ctx, 'SetOp', `SELECT ${String(plan.position)}`);
+  const name = plan.kind === 'union' ? 'Union all' : plan.kind === 'intersect' ? 'Intersect' : 'Except';
+  const fromLeft = (row: Row): Row => Object.fromEntries(plan.columns.map((c) => [c, row[c] ?? null]));
+  const fromRight = (row: Row): Row => Object.fromEntries(plan.columns.map((c, i) => [c, row[plan.rightColumns[i]!] ?? null]));
+  let onRight = false;
+  let built: Set<string> | null = null;
+  let passed = new Set<string>();
+
+  return {
+    name: 'SetOp',
+    open() {
+      left.open();
+      onRight = false;
+      built = null;
+      passed = new Set();
+    },
+    next() {
+      if (plan.kind === 'union') {
+        if (!onRight) {
+          const row = left.next();
+          if (row) {
+            produced(`${name} passes on a row from the SELECTs before SELECT ${String(plan.position)}.`);
+            return fromLeft(row);
+          }
+          left.close();
+          right.open();
+          onRight = true;
+        }
+        const row = right.next();
+        if (!row) return null;
+        produced(`${name} passes on a row from SELECT ${String(plan.position)}${plan.rightColumns.some((c, i) => c !== plan.columns[i]) ? ', its columns renamed to the first SELECT’s' : ''}.`);
+        return fromRight(row);
+      }
+
+      if (!built) {
+        const set = new Set<string>();
+        right.open();
+        for (;;) {
+          const row = right.next();
+          if (!row) break;
+          set.add(rowKey(fromRight(row)));
+        }
+        right.close();
+        built = set;
+        ctx.emit(
+          `${name} reads every row SELECT ${String(plan.position)} returns into an in-memory hash set (${String(set.size)} distinct), then checks each row before it against the set.`,
+          { stage: 'execute', op: 'SetOp', rowsProduced: 0, table: `SELECT ${String(plan.position)}` },
+        );
+      }
+      for (;;) {
+        const raw = left.next();
+        if (!raw) return null;
+        const row = fromLeft(raw);
+        const key = rowKey(row);
+        if (passed.has(key)) continue;
+        const inRight = built.has(key);
+        if (inRight !== (plan.kind === 'intersect')) continue;
+        passed.add(key);
+        produced(
+          plan.kind === 'intersect'
+            ? `${name} finds this row in SELECT ${String(plan.position)}'s set too — it comes out, once.`
+            : `${name} does not find this row in SELECT ${String(plan.position)}'s set — it comes out, once.`,
+        );
+        return row;
+      }
+    },
+    close() {
+      if (!onRight) left.close();
+      else right.close();
     },
   };
 }
@@ -1466,6 +1906,8 @@ export function buildOperator(plan: Plan, ctx: ExecContext): Operator {
       throw new Error('unreachable: an IndexProbe is driven by its Join, never built on its own');
     case 'Join':
       return buildJoinOperator(plan, ctx);
+    case 'SetOp':
+      return setOp(plan, ctx);
     case 'Filter':
       return filter(plan.predicate, buildOperator(plan.child, ctx), ctx);
     case 'Having':

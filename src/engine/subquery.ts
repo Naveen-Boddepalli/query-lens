@@ -1,13 +1,15 @@
 /**
- * Resolves an `IN (subquery)` predicate (plan.md §25.4 C3 slice c, closing C3) exactly once, before the query
- * that names it is planned — the one place `runQuery.ts`'s SELECT, DELETE and UPDATE paths all share.
+ * Resolves an `IN (subquery)` predicate (plan.md §25.4 C3 slice c, closing C3) — and a scalar subquery used as a value
+ * (plan.md §27.5 S6) — exactly once, before the query that names it is planned: the one place `runQuery.ts`'s SELECT,
+ * DELETE and UPDATE paths all share.
  *
  * `mapChildren` (`parser/ast.ts`) rebuilds every `Expr` kind from its children; this walks the tree with it and,
- * at any `in` node that carries a `subquery`, turns the subquery into `items` — which needs a real sub-run of the
- * engine, not a pure tree transform.
+ * at any `in` node that carries a `subquery`, turns the subquery into `items`, and any `scalar` node into the literal
+ * it returned — which needs a real sub-run of the engine, not a pure tree transform.
  */
 
 import { mapChildren } from './parser/ast.ts';
+import { sqlString } from './parser/print.ts';
 import type { DeleteStatement, Expr, InSubquery, SelectItem, SelectStatement, UpdateStatement } from './parser/ast.ts';
 import type { QueryError, Row, RunResult, SqlValue } from './types.ts';
 
@@ -26,11 +28,11 @@ function distinctColumnValues(rows: readonly Row[], column: string): SqlValue[] 
 }
 
 /** A resolved value, as the literal `Expr` an ordinary `IN (1, 2, 3)` would already have held. */
-function literalFor(value: SqlValue, span: Expr['span']): Expr {
+function literalFor(value: SqlValue, span: Expr['span']): Extract<Expr, { kind: 'literal' }> {
   return {
     kind: 'literal',
     value,
-    raw: value === null ? 'NULL' : typeof value === 'string' ? `'${value}'` : String(value),
+    raw: value === null ? 'NULL' : typeof value === 'string' ? sqlString(value) : String(value),
     span,
   };
 }
@@ -68,6 +70,51 @@ function resolveOne(
 }
 
 /**
+ * Runs one scalar subquery (plan.md §27.5 S6) the way `resolveOne` runs an `IN`'s, and puts the literal it returned in
+ * its place — still marked as a subquery's, for the plan's narration, but planned as the constant it now is: an index
+ * can serve `price > (SELECT AVG(price) FROM products)` once the subquery has run. No row is NULL; more than one is an
+ * error, as in PostgreSQL — SQLite quietly takes the first, a difference the oracle's ledger records.
+ */
+function resolveScalar(
+  expr: Extract<Expr, { kind: 'scalar' }>,
+  sql: string,
+  run: (sql: string) => RunResult,
+): { ok: true; expr: Expr } | { ok: false; error: QueryError } {
+  const { from, to } = expr.select.span;
+  const inner = run(' '.repeat(from) + sql.slice(from, to));
+  if (inner.error) {
+    // A column its own table lacks is, almost always, the outer query's: a correlated subquery.
+    const correlated = /has no column called/.test(inner.error.message);
+    return {
+      ok: false,
+      error: {
+        message: `The subquery used as a value failed: ${inner.error.message}`,
+        ...(correlated
+          ? { hint: 'A subquery used as a value runs once, on its own, before the outer query — so it cannot read the outer query’s columns. QueryLens has no correlated scalar subqueries; for a per-row test against another table, use EXISTS.' }
+          : inner.error.hint
+            ? { hint: inner.error.hint }
+            : {}),
+        from: inner.error.from ?? expr.span.from,
+        to: inner.error.to ?? expr.span.to,
+      },
+    };
+  }
+  if (inner.rows.length > 1) {
+    return {
+      ok: false,
+      error: {
+        message: `The subquery \`(${expr.sql})\` returned ${String(inner.rows.length)} rows, but a subquery used as a value must return at most one.`,
+        hint: 'Make it return one row: an aggregate such as MAX(price), a WHERE on a unique column, or ORDER BY … LIMIT 1. (PostgreSQL refuses this too; SQLite would quietly use the first row.)',
+        from: expr.span.from,
+        to: expr.span.to,
+      },
+    };
+  }
+  const value = inner.rows[0] ? (Object.values(inner.rows[0])[0] ?? null) : null;
+  return { ok: true, expr: { ...literalFor(value, expr.span), scalarSubquery: expr.sql } };
+}
+
+/**
  * `resolveOne`, recursively, for every `IN (subquery)` anywhere in `expr` — through every child an `Expr` can have
  * (`mapChildren`), not only `AND`/`OR`/`NOT`. A predicate can sit in a value's place: `(x IN (SELECT …)) IS NULL`,
  * `(x IN (SELECT …)) = TRUE`, or an `IN` whose own operand is one. Walking only the boolean connectives left those
@@ -90,6 +137,7 @@ function resolveInSubqueries(
   });
   if (error) return { ok: false, error };
   if (resolved.kind === 'in' && resolved.subquery) return resolveOne(resolved, resolved.subquery, sql, run);
+  if (resolved.kind === 'scalar') return resolveScalar(resolved, sql, run);
   return { ok: true, expr: resolved };
 }
 

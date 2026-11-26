@@ -19,7 +19,6 @@ export function StagesLayout() {
           onClick={() => { setMobileOpen((o) => !o); }}
           className="rounded-lg border border-edge bg-surface-3 px-2.5 py-1 text-label font-medium text-ink shadow-e1"
           aria-expanded={mobileOpen}
-          aria-label="Toggle pipeline stages navigation"
         >
           {mobileOpen ? 'Close Menu' : 'Stages Menu'}
         </button>

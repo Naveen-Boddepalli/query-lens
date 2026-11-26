@@ -19,9 +19,14 @@ import { Layout } from './ui/Layout.tsx';
  * footer stay put while a page chunk loads.
  */
 
-/** Holds the shell's height so the footer does not jump while a chunk loads. */
+/** Holds the shell's height so the footer does not jump while a chunk loads,
+ *  and shows a thin progress sweep if the load takes longer than a blink. */
 function PageFallback() {
-  return <div className="flex-1" aria-hidden />;
+  return (
+    <div className="relative flex-1" aria-hidden>
+      <div className="ql-route-progress" />
+    </div>
+  );
 }
 
 /** Wraps a lazy page in the one Suspense boundary every route shares. */
@@ -33,12 +38,13 @@ function suspended(Component: ComponentType) {
   );
 }
 
-const LandingPage = lazy(() =>
-  import('./pages/LandingPage.tsx').then((m) => ({ default: m.LandingPage })),
-);
-const PlaygroundPage = lazy(() =>
-  import('./pages/PlaygroundPage.tsx').then((m) => ({ default: m.PlaygroundPage })),
-);
+/** A lazy page: the module's named export `name`, loaded the first time its route is visited. */
+function page<K extends string>(load: () => Promise<Record<K, ComponentType>>, name: K) {
+  return lazy(() => load().then((m) => ({ default: m[name] })));
+}
+
+const LandingPage = page(() => import('./pages/LandingPage.tsx'), 'LandingPage');
+const PlaygroundPage = page(() => import('./pages/PlaygroundPage.tsx'), 'PlaygroundPage');
 
 /**
  * `/` is the landing page — unless it carries a shared-moment query string, in
@@ -58,148 +64,87 @@ function IndexRoute() {
   }
   return suspended(LandingPage);
 }
-const StagesLayout = lazy(() =>
-  import('./ui/StagesLayout.tsx').then((m) => ({ default: m.StagesLayout })),
-);
-const StagesIndex = lazy(() =>
-  import('./pages/StagesIndex.tsx').then((m) => ({ default: m.StagesIndex })),
-);
-const StagePage = lazy(() =>
-  import('./pages/StagePage.tsx').then((m) => ({ default: m.StagePage })),
-);
-const ExamplesPage = lazy(() =>
-  import('./pages/ExamplesPage.tsx').then((m) => ({ default: m.ExamplesPage })),
-);
-const GalleryPage = lazy(() =>
-  import('./pages/GalleryPage.tsx').then((m) => ({ default: m.GalleryPage })),
-);
-const ToolsIndexPage = lazy(() =>
-  import('./pages/ToolsIndexPage.tsx').then((m) => ({ default: m.ToolsIndexPage })),
-);
-const BufferPoolToolPage = lazy(() =>
-  import('./pages/tools/BufferPoolToolPage.tsx').then((m) => ({ default: m.BufferPoolToolPage })),
-);
-const ParserToolPage = lazy(() =>
-  import('./pages/tools/ParserToolPage.tsx').then((m) => ({ default: m.ParserToolPage })),
-);
-const BTreeToolPage = lazy(() =>
-  import('./pages/tools/BTreeToolPage.tsx').then((m) => ({ default: m.BTreeToolPage })),
-);
-const PageToolPage = lazy(() =>
-  import('./pages/tools/PageToolPage.tsx').then((m) => ({ default: m.PageToolPage })),
-);
-const SortToolPage = lazy(() =>
-  import('./pages/tools/SortToolPage.tsx').then((m) => ({ default: m.SortToolPage })),
-);
-const PlannerToolPage = lazy(() =>
-  import('./pages/tools/PlannerToolPage.tsx').then((m) => ({ default: m.PlannerToolPage })),
-);
-const LocksToolPage = lazy(() =>
-  import('./pages/tools/LocksToolPage.tsx').then((m) => ({ default: m.LocksToolPage })),
-);
-const ScheduleToolPage = lazy(() =>
-  import('./pages/tools/ScheduleToolPage.tsx').then((m) => ({ default: m.ScheduleToolPage })),
-);
-const IsolationToolPage = lazy(() =>
-  import('./pages/tools/IsolationToolPage.tsx').then((m) => ({ default: m.IsolationToolPage })),
-);
-const ConcurrencyToolPage = lazy(() =>
-  import('./pages/tools/ConcurrencyToolPage.tsx').then((m) => ({ default: m.ConcurrencyToolPage })),
-);
-const WalToolPage = lazy(() =>
-  import('./pages/tools/WalToolPage.tsx').then((m) => ({ default: m.WalToolPage })),
-);
-const RecoveryToolPage = lazy(() =>
-  import('./pages/tools/RecoveryToolPage.tsx').then((m) => ({ default: m.RecoveryToolPage })),
-);
-const GrammarToolPage = lazy(() =>
-  import('./pages/tools/GrammarToolPage.tsx').then((m) => ({ default: m.GrammarToolPage })),
-);
-const HashJoinToolPage = lazy(() =>
-  import('./pages/tools/HashJoinToolPage.tsx').then((m) => ({ default: m.HashJoinToolPage })),
-);
-const JoinOrderToolPage = lazy(() =>
-  import('./pages/tools/JoinOrderToolPage.tsx').then((m) => ({ default: m.JoinOrderToolPage })),
-);
-const LsmToolPage = lazy(() =>
-  import('./pages/tools/LsmToolPage.tsx').then((m) => ({ default: m.LsmToolPage })),
-);
-const HashIndexToolPage = lazy(() =>
-  import('./pages/tools/HashIndexToolPage.tsx').then((m) => ({ default: m.HashIndexToolPage })),
-);
-const ColumnarToolPage = lazy(() =>
-  import('./pages/tools/ColumnarToolPage.tsx').then((m) => ({ default: m.ColumnarToolPage })),
-);
-const LatchCrabbingToolPage = lazy(() =>
-  import('./pages/tools/LatchCrabbingToolPage.tsx').then((m) => ({ default: m.LatchCrabbingToolPage })),
-);
-const VectorIndexToolPage = lazy(() =>
-  import('./pages/tools/VectorIndexToolPage.tsx').then((m) => ({ default: m.VectorIndexToolPage })),
-);
-const ComparePage = lazy(() =>
-  import('./pages/ComparePage.tsx').then((m) => ({ default: m.ComparePage })),
-);
-const TracePage = lazy(() =>
-  import('./pages/TracePage.tsx').then((m) => ({ default: m.TracePage })),
-);
-const LearnPage = lazy(() =>
-  import('./pages/LearnPage.tsx').then((m) => ({ default: m.LearnPage })),
-);
-const ProgressPage = lazy(() =>
-  import('./pages/ProgressPage.tsx').then((m) => ({ default: m.ProgressPage })),
-);
-const PracticePage = lazy(() =>
-  import('./pages/PracticePage.tsx').then((m) => ({ default: m.PracticePage })),
-);
-const ChallengesPage = lazy(() =>
-  import('./pages/ChallengesPage.tsx').then((m) => ({ default: m.ChallengesPage })),
-);
-const ChallengePage = lazy(() =>
-  import('./pages/ChallengePage.tsx').then((m) => ({ default: m.ChallengePage })),
-);
-const LessonPage = lazy(() =>
-  import('./pages/LessonPage.tsx').then((m) => ({ default: m.LessonPage })),
-);
-const SettingsPage = lazy(() =>
-  import('./pages/SettingsPage.tsx').then((m) => ({ default: m.SettingsPage })),
-);
+const StagesLayout = page(() => import('./ui/StagesLayout.tsx'), 'StagesLayout');
+const StagesIndex = page(() => import('./pages/StagesIndex.tsx'), 'StagesIndex');
+const StagePage = page(() => import('./pages/StagePage.tsx'), 'StagePage');
+const ToolsIndexPage = page(() => import('./pages/ToolsIndexPage.tsx'), 'ToolsIndexPage');
+/** The pages with no nested routes, by path, each its own lazy chunk: a table for the same reason as `TOOL_PAGES`. */
+const PAGES: Record<string, ComponentType> = {
+  examples: page(() => import('./pages/ExamplesPage.tsx'), 'ExamplesPage'),
+  gallery: page(() => import('./pages/GalleryPage.tsx'), 'GalleryPage'),
+  compare: page(() => import('./pages/ComparePage.tsx'), 'ComparePage'),
+  trace: page(() => import('./pages/TracePage.tsx'), 'TracePage'),
+  progress: page(() => import('./pages/ProgressPage.tsx'), 'ProgressPage'),
+  practice: page(() => import('./pages/PracticePage.tsx'), 'PracticePage'),
+  settings: page(() => import('./pages/SettingsPage.tsx'), 'SettingsPage'),
+  study: page(() => import('./pages/StudyPage.tsx'), 'StudyPage'),
+  'assignments/new': page(() => import('./pages/AssignmentsNewPage.tsx'), 'AssignmentsNewPage'),
+};
+
+/** Every tool page, by its path under `/tools`, each its own lazy chunk. A table, not 22 routes written out: the
+ *  entry chunk every page pays carries it (plan.md §25.4 H8 keeps that under 24 kB). */
+const TOOL_PAGES: Record<string, ComponentType> = {
+  'buffer-pool': page(() => import('./pages/tools/BufferPoolToolPage.tsx'), 'BufferPoolToolPage'),
+  parser: page(() => import('./pages/tools/ParserToolPage.tsx'), 'ParserToolPage'),
+  btree: page(() => import('./pages/tools/BTreeToolPage.tsx'), 'BTreeToolPage'),
+  page: page(() => import('./pages/tools/PageToolPage.tsx'), 'PageToolPage'),
+  sort: page(() => import('./pages/tools/SortToolPage.tsx'), 'SortToolPage'),
+  planner: page(() => import('./pages/tools/PlannerToolPage.tsx'), 'PlannerToolPage'),
+  locks: page(() => import('./pages/tools/LocksToolPage.tsx'), 'LocksToolPage'),
+  schedule: page(() => import('./pages/tools/ScheduleToolPage.tsx'), 'ScheduleToolPage'),
+  isolation: page(() => import('./pages/tools/IsolationToolPage.tsx'), 'IsolationToolPage'),
+  concurrency: page(() => import('./pages/tools/ConcurrencyToolPage.tsx'), 'ConcurrencyToolPage'),
+  wal: page(() => import('./pages/tools/WalToolPage.tsx'), 'WalToolPage'),
+  recovery: page(() => import('./pages/tools/RecoveryToolPage.tsx'), 'RecoveryToolPage'),
+  grammar: page(() => import('./pages/tools/GrammarToolPage.tsx'), 'GrammarToolPage'),
+  'hash-join': page(() => import('./pages/tools/HashJoinToolPage.tsx'), 'HashJoinToolPage'),
+  'join-order': page(() => import('./pages/tools/JoinOrderToolPage.tsx'), 'JoinOrderToolPage'),
+  histograms: page(() => import('./pages/tools/HistogramToolPage.tsx'), 'HistogramToolPage'),
+  parallel: page(() => import('./pages/tools/ParallelToolPage.tsx'), 'ParallelToolPage'),
+  partitioning: page(() => import('./pages/tools/PartitioningToolPage.tsx'), 'PartitioningToolPage'),
+  '2pc': page(() => import('./pages/tools/TwoPhaseCommitToolPage.tsx'), 'TwoPhaseCommitToolPage'),
+  raft: page(() => import('./pages/tools/RaftToolPage.tsx'), 'RaftToolPage'),
+  lsm: page(() => import('./pages/tools/LsmToolPage.tsx'), 'LsmToolPage'),
+  'hash-index': page(() => import('./pages/tools/HashIndexToolPage.tsx'), 'HashIndexToolPage'),
+  columnar: page(() => import('./pages/tools/ColumnarToolPage.tsx'), 'ColumnarToolPage'),
+  'latch-crabbing': page(() => import('./pages/tools/LatchCrabbingToolPage.tsx'), 'LatchCrabbingToolPage'),
+  'vector-index': page(() => import('./pages/tools/VectorIndexToolPage.tsx'), 'VectorIndexToolPage'),
+};
+const LearnPage = page(() => import('./pages/LearnPage.tsx'), 'LearnPage');
+const ChallengesPage = page(() => import('./pages/ChallengesPage.tsx'), 'ChallengesPage');
+const ChallengePage = page(() => import('./pages/ChallengePage.tsx'), 'ChallengePage');
+const LessonPage = page(() => import('./pages/LessonPage.tsx'), 'LessonPage');
 // Unlisted (plan.md §25.4 A2): the §9 study kit's runner. Inert without a pack
 // in the link's fragment; not in `routes.ts`, so no nav or footer entry.
-const StudyPage = lazy(() =>
-  import('./pages/StudyPage.tsx').then((m) => ({ default: m.StudyPage })),
-);
-const AssignmentsNewPage = lazy(() =>
-  import('./pages/AssignmentsNewPage.tsx').then((m) => ({ default: m.AssignmentsNewPage })),
-);
-const NotFoundPage = lazy(() =>
-  import('./pages/NotFoundPage.tsx').then((m) => ({ default: m.NotFoundPage })),
-);
-const DocsLayout = lazy(() =>
-  import('./ui/DocsLayout.tsx').then((m) => ({ default: m.DocsLayout })),
-);
+const NotFoundPage = page(() => import('./pages/NotFoundPage.tsx'), 'NotFoundPage');
+const DocsLayout = page(() => import('./ui/DocsLayout.tsx'), 'DocsLayout');
 
 // The docs pages are MDX/Markdown compiled to components by @mdx-js/rollup;
 // each has a default export. Lazy so they form their own async chunk — folded
 // into one `docs-*.js` by vite.config.ts — rather than first-paint weight.
 const DocsIndex = lazy(() => import('./pages/DocsContent/index.mdx'));
-const DocsGettingStarted = lazy(() => import('./pages/DocsContent/getting-started.mdx'));
-const DocsFaq = lazy(() => import('./pages/DocsContent/faq.mdx'));
-const DocsArchitecture = lazy(() => import('./pages/DocsContent/architecture.mdx'));
-const DocsBufferPool = lazy(() => import('./pages/DocsContent/concepts/buffer-pool.mdx'));
-const DocsBTree = lazy(() => import('./pages/DocsContent/concepts/btree.mdx'));
-const DocsEssayIndexWriteTax = lazy(() => import('./pages/DocsContent/essays/index-write-tax.mdx'));
-const DocsEssayScanResistance = lazy(() => import('./pages/DocsContent/essays/scan-resistance.mdx'));
-const DocsEssayRepeatableRead = lazy(() => import('./pages/DocsContent/essays/repeatable-read.mdx'));
-const DocsAccessibility = lazy(() => import('./pages/DocsContent/accessibility.mdx'));
-const DocsManualEviction = lazy(() => import('./pages/DocsContent/manual/eviction.mdx'));
-const DocsManualBTreeSplit = lazy(() => import('./pages/DocsContent/manual/btree-split.mdx'));
-const DocsCourseMap = lazy(() => import('./pages/DocsContent/study/course-map.mdx'));
-const DocsInterviewRoadmap = lazy(() => import('./pages/DocsContent/study/interview-roadmap.mdx'));
-const DocsSql = lazy(() => import('./pages/DocsContent/reference/sql.mdx'));
-const DocsUrlParameters = lazy(() => import('./pages/DocsContent/reference/url-parameters.mdx'));
-const DocsShortcuts = lazy(() => import('./pages/DocsContent/reference/shortcuts.mdx'));
-const DocsLimits = lazy(() => import('./pages/DocsContent/reference/limits.mdx'));
-const DocsAnswers = lazy(() => import('./pages/DocsContent/reference/answers.mdx'));
+/** Every docs page but the index, by its path under `/docs`: MDX, each its own lazy chunk. A table for the same reason
+ *  as `TOOL_PAGES`. */
+const DOC_PAGES: Record<string, ComponentType> = {
+  'getting-started': lazy(() => import('./pages/DocsContent/getting-started.mdx')),
+  'faq': lazy(() => import('./pages/DocsContent/faq.mdx')),
+  'concepts/buffer-pool': lazy(() => import('./pages/DocsContent/concepts/buffer-pool.mdx')),
+  'concepts/btree': lazy(() => import('./pages/DocsContent/concepts/btree.mdx')),
+  'essays/index-write-tax': lazy(() => import('./pages/DocsContent/essays/index-write-tax.mdx')),
+  'essays/scan-resistance': lazy(() => import('./pages/DocsContent/essays/scan-resistance.mdx')),
+  'essays/repeatable-read': lazy(() => import('./pages/DocsContent/essays/repeatable-read.mdx')),
+  'accessibility': lazy(() => import('./pages/DocsContent/accessibility.mdx')),
+  'manual/eviction': lazy(() => import('./pages/DocsContent/manual/eviction.mdx')),
+  'manual/btree-split': lazy(() => import('./pages/DocsContent/manual/btree-split.mdx')),
+  'study/course-map': lazy(() => import('./pages/DocsContent/study/course-map.mdx')),
+  'study/interview-roadmap': lazy(() => import('./pages/DocsContent/study/interview-roadmap.mdx')),
+  'reference/sql': lazy(() => import('./pages/DocsContent/reference/sql.mdx')),
+  'reference/url-parameters': lazy(() => import('./pages/DocsContent/reference/url-parameters.mdx')),
+  'reference/shortcuts': lazy(() => import('./pages/DocsContent/reference/shortcuts.mdx')),
+  'reference/limits': lazy(() => import('./pages/DocsContent/reference/limits.mdx')),
+  'reference/answers': lazy(() => import('./pages/DocsContent/reference/answers.mdx')),
+  'architecture': lazy(() => import('./pages/DocsContent/architecture.mdx')),
+};
 
 export default function App() {
   return (
@@ -219,65 +164,27 @@ export default function App() {
               <Route index element={suspended(LearnPage)} />
               <Route path=":lessonId" element={suspended(LessonPage)} />
             </Route>
-
-            <Route path="examples" element={suspended(ExamplesPage)} />
-            <Route path="gallery" element={suspended(GalleryPage)} />
-            <Route path="compare" element={suspended(ComparePage)} />
-            <Route path="trace" element={suspended(TracePage)} />
-            <Route path="progress" element={suspended(ProgressPage)} />
-              <Route path="practice" element={suspended(PracticePage)} />
             <Route path="challenges">
               <Route index element={suspended(ChallengesPage)} />
               <Route path=":challengeId" element={suspended(ChallengePage)} />
             </Route>
-            <Route path="settings" element={suspended(SettingsPage)} />
-            <Route path="study" element={suspended(StudyPage)} />
-            <Route path="assignments/new" element={suspended(AssignmentsNewPage)} />
+
+            {Object.entries(PAGES).map(([path, Page]) => (
+              <Route key={path} path={path} element={suspended(Page)} />
+            ))}
 
             <Route path="tools">
               <Route index element={suspended(ToolsIndexPage)} />
-              <Route path="buffer-pool" element={suspended(BufferPoolToolPage)} />
-              <Route path="parser" element={suspended(ParserToolPage)} />
-              <Route path="btree" element={suspended(BTreeToolPage)} />
-              <Route path="page" element={suspended(PageToolPage)} />
-              <Route path="sort" element={suspended(SortToolPage)} />
-              <Route path="planner" element={suspended(PlannerToolPage)} />
-              <Route path="locks" element={suspended(LocksToolPage)} />
-              <Route path="schedule" element={suspended(ScheduleToolPage)} />
-              <Route path="isolation" element={suspended(IsolationToolPage)} />
-              <Route path="concurrency" element={suspended(ConcurrencyToolPage)} />
-              <Route path="wal" element={suspended(WalToolPage)} />
-              <Route path="recovery" element={suspended(RecoveryToolPage)} />
-              <Route path="grammar" element={suspended(GrammarToolPage)} />
-              <Route path="hash-join" element={suspended(HashJoinToolPage)} />
-              <Route path="join-order" element={suspended(JoinOrderToolPage)} />
-              <Route path="lsm" element={suspended(LsmToolPage)} />
-              <Route path="hash-index" element={suspended(HashIndexToolPage)} />
-              <Route path="columnar" element={suspended(ColumnarToolPage)} />
-              <Route path="latch-crabbing" element={suspended(LatchCrabbingToolPage)} />
-              <Route path="vector-index" element={suspended(VectorIndexToolPage)} />
+              {Object.entries(TOOL_PAGES).map(([path, Tool]) => (
+                <Route key={path} path={path} element={suspended(Tool)} />
+              ))}
             </Route>
 
             <Route path="docs" element={suspended(DocsLayout)}>
               <Route index element={<DocsIndex />} />
-              <Route path="getting-started" element={<DocsGettingStarted />} />
-              <Route path="faq" element={<DocsFaq />} />
-              <Route path="concepts/buffer-pool" element={<DocsBufferPool />} />
-              <Route path="concepts/btree" element={<DocsBTree />} />
-              <Route path="essays/index-write-tax" element={<DocsEssayIndexWriteTax />} />
-              <Route path="essays/scan-resistance" element={<DocsEssayScanResistance />} />
-              <Route path="essays/repeatable-read" element={<DocsEssayRepeatableRead />} />
-              <Route path="accessibility" element={<DocsAccessibility />} />
-              <Route path="manual/eviction" element={<DocsManualEviction />} />
-              <Route path="manual/btree-split" element={<DocsManualBTreeSplit />} />
-              <Route path="study/course-map" element={<DocsCourseMap />} />
-              <Route path="study/interview-roadmap" element={<DocsInterviewRoadmap />} />
-              <Route path="reference/sql" element={<DocsSql />} />
-              <Route path="reference/url-parameters" element={<DocsUrlParameters />} />
-              <Route path="reference/shortcuts" element={<DocsShortcuts />} />
-              <Route path="reference/limits" element={<DocsLimits />} />
-              <Route path="reference/answers" element={<DocsAnswers />} />
-              <Route path="architecture" element={<DocsArchitecture />} />
+              {Object.entries(DOC_PAGES).map(([path, Doc]) => (
+                <Route key={path} path={path} element={<Doc />} />
+              ))}
             </Route>
 
             <Route path="*" element={suspended(NotFoundPage)} />

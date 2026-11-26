@@ -28,11 +28,25 @@ export interface LockStep {
   mode: LockMode;
 }
 
-const MODES: Record<string, LockMode> = { shared: 'shared', s: 'shared', exclusive: 'exclusive', x: 'exclusive' };
+const MODES: Record<string, LockMode> = {
+  shared: 'shared',
+  s: 'shared',
+  exclusive: 'exclusive',
+  x: 'exclusive',
+  // The intention modes (plan.md §27.5 T2), by name or by their letters.
+  'intention-shared': 'intention-shared',
+  is: 'intention-shared',
+  'intention-exclusive': 'intention-exclusive',
+  ix: 'intention-exclusive',
+  'shared-intention-exclusive': 'shared-intention-exclusive',
+  six: 'shared-intention-exclusive',
+};
 
-/** `T1 shared 0`, `t2 x 1` or `T1 release shared 0`; null for anything else. */
+/** `T1 shared 0`, `t2 x 1`, `T1 ix 2` or `T1 release shared 0`; null for anything else. */
 export function parseLockStep(text: string): LockStep | null {
-  const m = /^(t[12])\s+(?:(release|unlock)\s+)?(shared|exclusive|s|x)\s+([0-3])$/i.exec(text.trim());
+  const m = /^(t[12])\s+(?:(release|unlock)\s+)?(shared-intention-exclusive|intention-shared|intention-exclusive|shared|exclusive|six|is|ix|s|x)\s+([0-3])$/i.exec(
+    text.trim(),
+  );
   if (!m) return null;
   return {
     op: m[2] === undefined ? 'request' : 'release',

@@ -21,9 +21,12 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// Every route is the same document, so a navigation gets the cached shell whatever the URL. The shell is cached as `/`:
-// the platform redirects `/index.html` to `/`, and a navigation answered with a redirected response fails outright —
-// which is how the first production build of this worker broke every visit after the first (CHANGELOG, 2.0.0-rc.2).
+// Every route is the same document, so an offline navigation gets the cached shell whatever the URL. Online
+// navigations go network-first so returning visitors see new deployments right away without waiting for every open
+// tab to close; hashed `/assets/*` stay cache-first so an open tab still resolves its own build's lazy chunks.
+// The shell is cached as `/`: the platform redirects `/index.html` to `/`, and a navigation answered with a
+// redirected response fails outright — which is how the first production build of this worker broke every visit
+// after the first (CHANGELOG, 2.0.0-rc.2).
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
@@ -33,10 +36,21 @@ self.addEventListener('fetch', (event) => {
 
 async function answer(request, url) {
   const cache = await caches.open(CACHE);
-  const cached = await cache.match(request.mode === 'navigate' ? '/' : url.pathname);
-  if (!cached) return fetch(request);
-  // Belt and braces: a response that arrived by redirect is handed back as a fresh one, which a navigation accepts.
-  return cached.redirected
-    ? new Response(cached.body, { status: cached.status, statusText: cached.statusText, headers: cached.headers })
-    : cached;
+  if (request.mode === 'navigate') {
+    let networkResponse;
+    try {
+      networkResponse = await fetch(request);
+      if (networkResponse.ok || networkResponse.type === 'opaqueredirect') return networkResponse;
+    } catch {
+      // Offline or transient network failure: fall back to the precached shell below.
+    }
+    const cached = await cache.match('/');
+    if (!cached) return networkResponse ?? fetch(request);
+    // Belt and braces: a response that arrived by redirect is handed back as a fresh one, which a navigation accepts.
+    return cached.redirected
+      ? new Response(cached.body, { status: cached.status, statusText: cached.statusText, headers: cached.headers })
+      : cached;
+  }
+  const cached = await cache.match(url.pathname);
+  return cached ?? fetch(request);
 }

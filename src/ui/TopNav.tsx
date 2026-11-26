@@ -9,10 +9,10 @@ import { MOD_KEY } from './platform.ts';
 
 const desktopLinkClass = ({ isActive }: { isActive: boolean }) =>
   [
-    'inline-flex items-center rounded-lg px-2.5 py-1.5 text-label font-medium transition duration-150 ease-out select-none',
+    'relative inline-flex items-center rounded-full px-3 py-1.5 text-label font-medium transition duration-150 ease-out select-none',
     isActive
-      ? 'border border-accent/40 bg-accent-soft text-ink shadow-e1'
-      : 'border border-transparent text-ink-dim hover:bg-surface-3 hover:text-ink',
+      ? 'bg-accent-soft text-ink ring-1 ring-inset ring-accent/40'
+      : 'text-ink-dim hover:bg-surface-3 hover:text-ink',
   ].join(' ');
 
 const PRIMARY_ITEMS = NAV_ITEMS.filter((item) => item.nav);
@@ -43,7 +43,7 @@ export function TopNav() {
   }, [isMobileOpen]);
 
   return (
-    <header className="sticky top-0 z-30 flex w-full max-w-full min-w-0 flex-col border-b border-edge bg-surface/85 backdrop-blur-md">
+    <header className="sticky top-0 z-30 flex w-full max-w-full min-w-0 flex-col border-b border-edge/70 bg-surface/80 backdrop-blur-xl backdrop-saturate-150">
       <div className="flex w-full max-w-full min-w-0 items-center justify-between gap-x-2 sm:gap-x-4 px-3 sm:px-4 py-2.5">
         {/* Brand Lockup */}
         <div className="flex min-w-0 shrink items-center gap-2">
@@ -52,7 +52,9 @@ export function TopNav() {
             className="flex min-w-0 shrink items-center gap-2 sm:gap-2.5 text-ink transition hover:opacity-90"
           >
             <Logo className="h-7 w-7 shrink-0" />
-            <h1 className="text-display font-semibold tracking-tight">QueryLens</h1>
+            <h1 className="text-heading font-semibold tracking-tight">
+              Query<span className="ql-spectrum-text">Lens</span>
+            </h1>
           </NavLink>
         </div>
 
@@ -71,8 +73,8 @@ export function TopNav() {
           <button
             type="button"
             onClick={openSpotlight}
-            className="ql-liquid-pill group flex items-center justify-between h-9 px-2.5 sm:px-3.5 w-9 sm:w-40 lg:w-48 rounded-full backdrop-blur-md text-ink-dim hover:text-ink cursor-pointer"
-            aria-label={`Search QueryLens (${MOD_KEY === '⌘' ? 'Command' : 'Control'}+K)`}
+            className="ql-liquid-pill group flex items-center justify-between h-9 px-2.5 sm:px-3.5 lg:px-2.5 xl:px-3.5 w-9 sm:w-40 lg:w-9 xl:w-48 rounded-full backdrop-blur-md text-ink-dim hover:text-ink cursor-pointer"
+            aria-label={`Search... ${MOD_KEY}K`}
             aria-keyshortcuts="Meta+K Control+K"
           >
             <div className="flex items-center gap-2 min-w-0">
@@ -85,13 +87,13 @@ export function TopNav() {
                 <circle cx="8.5" cy="8.5" r="5.5" />
                 <path d="M13 13l4.5 4.5" strokeLinecap="round" />
               </svg>
-              <span className="hidden sm:inline text-label text-ink-dim group-hover:text-ink truncate">
+              <span className="hidden sm:inline lg:hidden xl:inline text-label text-ink-dim group-hover:text-ink truncate">
                 Search...
               </span>
             </div>
             <kbd
               aria-hidden="true"
-              className="ql-liquid-kbd hidden sm:inline-flex items-center rounded-full px-2 py-0.5 font-mono text-[10px] text-ink-dim group-hover:text-ink transition-colors"
+              className="ql-liquid-kbd hidden sm:inline-flex lg:hidden xl:inline-flex items-center rounded-full px-2 py-0.5 font-mono text-[10px] text-ink-dim group-hover:text-ink transition-colors"
             >
               {MOD_KEY}K
             </kbd>
@@ -141,7 +143,7 @@ export function TopNav() {
                 <circle cx="8.5" cy="8.5" r="5.5" />
                 <path d="M13 13l4.5 4.5" strokeLinecap="round" />
               </svg>
-              <span className="font-medium text-ink">Search QueryLens...</span>
+              <span className="font-medium text-ink">Spotlight search...</span>
             </div>
             <kbd className="rounded border border-edge bg-surface-3 px-1.5 py-0.5 font-mono text-[10px] text-ink-dim">
               {MOD_KEY}K

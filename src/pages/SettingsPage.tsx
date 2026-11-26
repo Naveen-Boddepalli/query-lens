@@ -2,12 +2,16 @@ import { useState } from 'react';
 import { REPLACEMENT_POLICY_LABELS, REPLACEMENT_POLICY_NAMES } from '../engine/types.ts';
 import type { ReplacementPolicyName } from '../engine/index.ts';
 import {
+  readDefaultDetail,
   readDefaultPolicy,
   readDefaultPredictOn,
+  writeDefaultDetail,
   writeDefaultPolicy,
   writeDefaultPredictOn,
 } from '../ui/preferences.ts';
 import { useThemeContext } from '../ui/ThemeContext.tsx';
+import { DETAIL_LABELS, DETAIL_LEVELS } from '../ui/detailLevel.ts';
+import type { DetailLevel } from '../ui/detailLevel.ts';
 import { PageHeader } from '../ui/PageHeader.tsx';
 import { btnGhost, card, segBase, segOff, segOn, segmentedTrack } from '../ui/primitives.ts';
 
@@ -79,6 +83,10 @@ const PREDICT_OPTIONS = [
   ['off', 'Always off'],
 ] as const;
 
+const DETAIL_OPTIONS = DETAIL_LEVELS.map(
+  (level) => [level, level === 'standard' ? 'Standard (default)' : DETAIL_LABELS[level]] as const,
+);
+
 const SPEED_OPTIONS = [
   ['default', 'Engine default (1×)'],
   ['0.5', '0.5× Slow'],
@@ -97,6 +105,13 @@ export function SettingsPage() {
     return stored === undefined ? 'default' : stored ? 'on' : 'off';
   });
   const [speed, setSpeed] = useState<string>(readDefaultSpeed);
+
+  const [detail, setDetail] = useState<DetailLevel>(() => readDefaultDetail() ?? 'standard');
+
+  function chooseDetail(next: DetailLevel) {
+    setDetail(next);
+    writeDefaultDetail(next);
+  }
 
   function choosePolicy(next: ReplacementPolicyName | 'default') {
     setPolicy(next);
@@ -117,6 +132,7 @@ export function SettingsPage() {
     choosePolicy('default');
     choosePredict('default');
     chooseSpeed('default');
+    chooseDetail('standard');
     setThemeChoice('system');
   }
 
@@ -152,6 +168,15 @@ export function SettingsPage() {
           value={predictOn}
           onChange={choosePredict}
           options={PREDICT_OPTIONS}
+        />
+
+        <SettingSection
+          title="Narration detail"
+          desc="How much each step of the trace tells you. Novice adds a sentence in plain words the first time each kind of step happens; expert gives a terse line of the step’s own numbers instead."
+          label="Default narration detail"
+          value={detail}
+          onChange={chooseDetail}
+          options={DETAIL_OPTIONS}
         />
 
         <SettingSection

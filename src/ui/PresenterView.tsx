@@ -26,7 +26,7 @@ const presBtn =
   'rounded-full border px-2.5 py-0.5 text-label font-medium select-none transition-all border-edge text-ink-dim hover:border-ink-dim/50 hover:text-ink active:scale-95';
 
 const kbdCls =
-  'rounded border border-edge bg-surface-3 px-1.5 py-0.5 font-mono text-micro text-ink shadow-e1';
+  'rounded border border-edge bg-surface-3 px-1.5 py-0.5 font-mono text-label text-ink shadow-e1';
 
 const card = 'rounded-xl border border-edge bg-surface-2 shadow-e2';
 
@@ -99,7 +99,7 @@ export function PresenterView({
       className="fixed inset-0 z-50 flex flex-col gap-4 bg-surface/95 p-4 backdrop-blur-xl sm:p-6"
     >
       <header className={`flex flex-wrap items-center gap-3 p-3 ${card}`}>
-        <span className="text-micro font-semibold tracking-[0.14em] text-accent uppercase">Presenter</span>
+        <span className="text-label font-semibold tracking-[0.14em] text-accent uppercase">Presenter</span>
         <span className="font-mono text-body tabular-nums text-ink-dim">
           step {playback.step} / {length}
         </span>

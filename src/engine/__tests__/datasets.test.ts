@@ -17,18 +17,36 @@ describe('preset datasets', () => {
     expect(DATASET_IDS).toContain(DEFAULT_DATASET);
   });
 
-  it.each([...DATASET_IDS])('%s builds a database whose one table matches its declared name', (id) => {
+  it.each([...DATASET_IDS])('%s builds a database with its main table, every table named as it is keyed', (id) => {
     const spec = DATASETS[id];
     const db = spec.make();
-    expect(Object.keys(db.tables)).toEqual([spec.table]);
-    const table = db.tables[spec.table]!;
-    expect(table.name).toBe(spec.table);
-    expect(table.rows.length).toBeGreaterThan(0);
-    // Every row has exactly the declared columns.
-    for (const row of table.rows) {
-      expect(Object.keys(row).sort()).toEqual([...table.columns].sort());
+    expect(Object.keys(db.tables)).toContain(spec.table);
+    // Only `shop` has more than one (plan.md §27.5 S2).
+    expect(Object.keys(db.tables).length).toBe(id === 'shop' ? 3 : 1);
+    for (const [name, table] of Object.entries(db.tables)) {
+      expect(table.name).toBe(name);
+      expect(table.rows.length).toBeGreaterThan(0);
+      // Every row has exactly the declared columns.
+      for (const row of table.rows) {
+        expect(Object.keys(row).sort()).toEqual([...table.columns].sort());
+      }
+      for (const column of table.indexedColumns ?? []) expect(table.columns).toContain(column);
     }
-    for (const column of table.indexedColumns ?? []) expect(table.columns).toContain(column);
+  });
+
+  it('shop holds the facts its lesson and challenge quote (plan.md §27.5 S2)', () => {
+    const { customers, products, orders } = DATASETS.shop.make().tables;
+    const ordered = new Set(orders!.rows.map((r) => r['customerId']));
+    // Three customers never order; two orders are a guest's; one product is never ordered; alice orders seven times.
+    expect(customers!.rows.filter((r) => !ordered.has(r['id'] ?? null)).map((r) => r['name'])).toEqual(['dmitri', 'ines', 'lars']);
+    expect(orders!.rows.filter((r) => r['customerId'] === null)).toHaveLength(2);
+    expect(products!.rows.filter((p) => !orders!.rows.some((o) => o['productId'] === p['id'])).map((p) => p['name'])).toEqual(['vase']);
+    expect(orders!.rows.filter((r) => r['customerId'] === 1)).toHaveLength(7);
+    // Every non-NULL foreign key points at a row that exists.
+    for (const o of orders!.rows) {
+      if (o['customerId'] !== null) expect(customers!.rows.some((c) => c['id'] === o['customerId'])).toBe(true);
+      expect(products!.rows.some((p) => p['id'] === o['productId'])).toBe(true);
+    }
   });
 
   it.each([...DATASET_IDS])('a point lookup on %s runs without an engine error', (id) => {
@@ -93,13 +111,14 @@ describe('preset datasets', () => {
     expect(range.rows).toHaveLength(21);
   });
 
-  it('customers is the one preset with NULLs, in city, referrer and discount (plan.md §26 Feature 3)', () => {
-    const nullColumns = (id: (typeof DATASET_IDS)[number]) => {
-      const table = DATASETS[id].make().tables[DATASETS[id].table]!;
-      return table.columns.filter((c) => table.rows.some((r) => r[c] === null));
-    };
-    expect(nullColumns('customers')).toEqual(['city', 'referrer', 'discount']);
-    for (const id of DATASET_IDS.filter((d) => d !== 'customers')) expect(nullColumns(id), id).toEqual([]);
+  it('NULLs are only where they are placed on purpose: customers, and shop’s guest orders (plan.md §26 F3, §27.5 S2)', () => {
+    const nullColumns = (id: (typeof DATASET_IDS)[number]) =>
+      Object.values(DATASETS[id].make().tables).flatMap((table) =>
+        table.columns.filter((c) => table.rows.some((r) => r[c] === null)).map((c) => `${table.name}.${c}`),
+      );
+    expect(nullColumns('customers')).toEqual(['customers.city', 'customers.referrer', 'customers.discount']);
+    expect(nullColumns('shop')).toEqual(['orders.customerId']);
+    for (const id of DATASET_IDS.filter((d) => d !== 'customers' && d !== 'shop')) expect(nullColumns(id), id).toEqual([]);
     // A 0 discount beside the NULLs, so COUNT(discount) can be seen to count a 0 and not a NULL.
     expect(DATASETS.customers.make().tables.customers!.rows.some((r) => r['discount'] === 0)).toBe(true);
   });

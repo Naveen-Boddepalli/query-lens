@@ -1,12 +1,12 @@
 import type { Emit } from '../trace.ts';
 import type { JoinAlgorithm, Table } from '../types.ts';
-import { columnKey, selectItemKey } from '../parser/index.ts';
-import type { SelectStatement } from '../parser/index.ts';
-import { buildAggregatePlan, buildJoinPlan, buildPlan, distinctNodeFor, isAggregateQuery, projectListFor } from './buildPlan.ts';
+import { columnKey, selectItemKey, tableRefSql } from '../parser/index.ts';
+import type { SelectStatement, SemiJoinClause } from '../parser/index.ts';
+import { buildAggregatePlan, buildJoinPlan, buildPlan, buildSemiJoin, distinctNodeFor, isAggregateQuery, projectListFor } from './buildPlan.ts';
 import { estimatePlan, rootEstimate } from './cost.ts';
 import { costOfOrder, joinGraphFromAst, runJoinOrderDP, writtenOrderFromAst } from './joinOrder.ts';
 import { OPTIMIZER_RULES, leftmostPrefixNote, optimize } from './optimize.ts';
-import { exprToSql, joinsIn, subqueryResolutionNotes, toPlanDisplay } from './plan.ts';
+import { distinctSortColumn, exprToSql, joinsIn, renamesOf, subqueryNotesText, subqueryResolutionNotes, toPlanDisplay } from './plan.ts';
 import type { Plan, ProjectList } from './plan.ts';
 
 /**
@@ -71,8 +71,10 @@ export function emitPlanEvents(
   // own `Join` node concerns — which is `table` (the original FROM table) again once the recursion reaches the
   // bottom of the chain — so `table.name` has to resolve through this same map at every depth, not just the top.
   const otherTables = joinTables && Object.keys(joinTables).length > 0 ? { ...joinTables, [table.name]: table } : undefined;
+  // Each alias and the stored table it names, so the tree and the algebra say both (plan.md §27.5 S7).
+  const renames = renamesOf([table, ...Object.values(joinTables ?? {})]);
   const display = (plan: Plan, changed?: ReadonlySet<Plan>) =>
-    toPlanDisplay(plan, changed, estimatePlan(plan, table, rowsPerPage, otherTables));
+    toPlanDisplay(plan, changed, estimatePlan(plan, table, rowsPerPage, otherTables), renames);
 
   const leftScan: Plan = { op: 'SeqScan', table: ast.from.name };
 
@@ -99,7 +101,7 @@ export function emitPlanEvents(
   }
 
   emit(
-    `Start at the bottom: every plan begins by reading a table, so the base of the tree is a sequential scan of \`${ast.from.name}\`.`,
+    `Start at the bottom: every plan begins by reading a table, so the base of the tree is a sequential scan of \`${tableRefSql(ast.from)}\`.`,
     { stage: 'plan', planTree: display(leftScan) },
   );
 
@@ -114,23 +116,38 @@ export function emitPlanEvents(
     const j = current as Extract<Plan, { op: 'Join' }>;
     const algorithm = j.algorithm;
     // Asked for an index join, but this step's inner table has no index on the join column: say so, and run the plain one.
+    // A cross join has no key, and RIGHT and FULL keep inner rows a probe never visits (plan.md §27.5 S4).
+    const outerRight = join.joinType === 'right' || join.joinType === 'full';
     const fallback =
-      structuralJoinStrategy === 'index-nested-loop' && algorithm !== 'index-nested-loop'
-        ? `You asked for an index nested-loop join, but \`${join.table.name}\` has no index on \`${j.rightColumn}\` for it to probe — so this runs as an ordinary nested-loop. `
-        : '';
+      join.joinType === 'cross' && structuralJoinStrategy !== 'nested-loop'
+        ? `A cross join has no key to hash, sort or probe on, so whatever algorithm was asked for, this runs as a nested-loop. `
+        : structuralJoinStrategy === 'index-nested-loop' && algorithm !== 'index-nested-loop'
+          ? outerRight
+            ? `You asked for an index nested-loop join, but a ${join.joinType!.toUpperCase()} JOIN keeps the rows of \`${join.table.name}\` nothing matched, which a probe never visits — so this runs as an ordinary nested-loop. `
+            : `You asked for an index nested-loop join, but \`${join.table.name}\` has no index on \`${j.rightColumn}\` for it to probe — so this runs as an ordinary nested-loop. `
+          : '';
     const mechanism =
-      algorithm === 'index-nested-loop'
+      join.joinType === 'cross'
+        ? `for every row \`${j.leftTable}\` produces, it reads all of \`${j.rightTable}\` and keeps every pair — no key, no match to look for: about ${String(rootEstimate(j.left, table, rowsPerPage, otherTables).estRows)} × ${String(joinTables?.[j.rightTable]?.rows.length ?? 0)} rows, the whole product`
+        : algorithm === 'index-nested-loop'
         ? `for every row \`${j.leftTable}\` produces, it descends \`${j.rightTable}\`'s B+Tree on \`${j.rightColumn}\` with that row's \`${j.leftColumn}\` — a few page reads per outer row instead of a rescan of the whole inner table, which is why a small outer over a big indexed inner is where this algorithm wins`
         : algorithm === 'hash'
         ? `it builds an in-memory hash table over all of \`${j.rightTable}\`, keyed on \`${j.rightColumn}\`, once — then probes it with each \`${j.leftTable}\` row's \`${j.leftColumn}\`, reading \`${j.rightTable}\` exactly once regardless of how many rows \`${j.leftTable}\` has`
         : algorithm === 'sort-merge'
           ? `it sorts both \`${j.leftTable}\` and \`${j.rightTable}\` on the join key, then merges the two sorted lists in a single pass — no per-row rescan and no table held in memory, at the cost of sorting both sides first`
           : `for every row \`${j.leftTable}\` produces, it rescans all of \`${j.rightTable}\` looking for a match on \`${j.leftColumn}\` = \`${j.rightColumn}\` — nested-loop, the simplest join algorithm, and the most expensive once neither side has an index to speed the inner scan up`;
-    const outer = join.joinType === 'left'
-      ? ` This is a LEFT JOIN: every row from \`${j.leftTable}\` survives even when nothing on \`${j.rightTable}\` matches it, with \`${j.rightTable}\`'s columns NULL.`
-      : '';
+    const outer =
+      join.joinType === 'left'
+        ? ` This is a LEFT JOIN: every row from \`${j.leftTable}\` survives even when nothing on \`${j.rightTable}\` matches it, with \`${j.rightTable}\`'s columns NULL.`
+        : join.joinType === 'right'
+          ? ` This is a RIGHT JOIN: every row of \`${j.rightTable}\` survives even when nothing on the left matches it, with the left side's columns NULL — the join remembers which rows of \`${j.rightTable}\` matched, and the rest come out at the end.`
+          : join.joinType === 'full'
+            ? ` This is a FULL JOIN: every row of both sides survives — a row from the left with nothing in \`${j.rightTable}\` NULL-padded on the right, a row of \`${j.rightTable}\` nothing matched NULL-padded on the left, each once.`
+            : join.joinType === 'cross' && join.comma
+              ? ' The comma in FROM is a cross join, written the way a textbook writes one; a WHERE equality between the two is what will turn it into a join.'
+              : '';
     emit(
-      `${fallback}JOIN adds ${algorithm === 'index-nested-loop' ? 'an index probe on' : 'a second scan of'} \`${j.rightTable}\` and a Join above ${i === 0 ? 'that' : 'the chain so far'}: ${mechanism}.${outer}`,
+      `${fallback}${join.joinType === 'cross' ? 'CROSS JOIN' : 'JOIN'} adds ${algorithm === 'index-nested-loop' ? 'an index probe on' : 'a second scan of'} \`${tableRefSql(join.table)}\` and a Join above ${i === 0 ? 'that' : 'the chain so far'}: ${mechanism}.${outer}`,
       { stage: 'plan', planTree: display(current) },
     );
   }
@@ -142,19 +159,20 @@ export function emitPlanEvents(
   // C1's stats and C2's q-error already take, and (plan.md §25.4 C5 slice 3) still the only stance a chain with a
   // `LEFT JOIN` in it ever gets, since that is never reordered for real. `/tools/join-order` is the same search,
   // with the whole subset lattice visible.
-  if (allJoins.length >= 2 && joinTables && !writtenJoinOrder) {
+  // A cross join has no edge to price (plan.md §27.5 S4), so a chain with one gets no join-order note.
+  if (allJoins.length >= 2 && joinTables && !writtenJoinOrder && allJoins.every((j) => j.on)) {
     const allTables: Record<string, Table> = { ...joinTables, [table.name]: table };
     const { nodes, edges } = joinGraphFromAst(ast, allTables, rowsPerPage);
     const dp = runJoinOrderDP(nodes, edges);
     const written = writtenOrderFromAst(ast);
     const writtenCost = costOfOrder(nodes, edges, written);
     const ratio = writtenCost.pages / dp.winner.pages;
-    const hasLeftJoin = allJoins.some((j) => j.joinType === 'left');
+    const outerJoin = allJoins.find((j) => j.joinType === 'left' || j.joinType === 'right' || j.joinType === 'full');
     emit(
       ratio >= 1.05
         ? `A cost-based join-order search (plan.md §25.4 C4) would instead join these ${String(nodes.length)} tables as ${dp.winner.tables.join(' → ')}: an estimated ${String(dp.winner.pages)} pages, against the ${String(writtenCost.pages)} the order actually written above costs — about ${ratio.toFixed(1)}× cheaper.${
-            hasLeftJoin
-              ? ' This chain is never reordered for real (plan.md §25.4 C5 slice 3): a LEFT JOIN is not commutative or associative in general, so the order above is what actually runs.'
+            outerJoin
+              ? ` This chain is never reordered for real (plan.md §25.4 C5 slice 3): a ${outerJoin.joinType!.toUpperCase()} JOIN is not commutative or associative in general, so the order above is what actually runs.`
               : ' This query still runs in the order it was written; nothing here changes that.'
           }`
         : `A cost-based join-order search (plan.md §25.4 C4) agrees with the order written above — among left-deep orderings of these ${String(nodes.length)} tables, this is already about as cheap as it gets.`,
@@ -171,6 +189,16 @@ export function emitPlanEvents(
           : {}),
       },
     );
+  }
+
+  // Each correlated EXISTS (plan.md §27.5 S1), already moved out of WHERE by `resolveExists`, joins the plan here.
+  for (const sj of ast.semiJoins ?? []) {
+    const below = current;
+    current = buildSemiJoin(current, sj, structuralJoinStrategy, joinTables);
+    emit(semiJoinNarration(sj, current, below === leftScan, structuralJoinStrategy), {
+      stage: 'plan',
+      planTree: display(current),
+    });
   }
 
   if (ast.where) {
@@ -192,18 +220,36 @@ export function emitPlanEvents(
         ? current.aggregates.map((a) => a.key).join(', ')
         : '';
     const nodeName = aggregateStrategy === 'sort' ? 'SortAggregate' : 'HashAggregate';
+    // `COUNT(DISTINCT x)` (plan.md §27.5 S5): the hash strategy keeps a set per group; the sort strategy sorts on
+    // (group, x) instead, when one column is all its DISTINCT aggregates read.
+    const specs = current.op === 'HashAggregate' || current.op === 'SortAggregate' ? current.aggregates : [];
+    const distinctKeys = specs.filter((a) => a.distinct).map((a) => a.key);
+    const sortedOn = aggregateStrategy === 'sort' ? distinctSortColumn(specs) : null;
+    const sortKey = sortedOn === null ? groupBy : [...groupBy, sortedOn];
     const mechanism =
       aggregateStrategy === 'sort'
-        ? `by sorting on ${groupBy.join(', ') || 'nothing'} first — spilling through the buffer pool exactly as ORDER BY's Sort does — then collapsing runs of equal keys in one pass`
+        ? `by sorting on ${sortKey.join(', ') || 'nothing'} first — spilling through the buffer pool exactly as ORDER BY's Sort does — then collapsing runs of equal keys in one pass`
         : 'with a hash table keyed on the group';
+    const distinctNote =
+      distinctKeys.length === 0
+        ? ''
+        : aggregateStrategy === 'hash'
+          ? ` For ${distinctKeys.join(' and ')}, each group also keeps a set of the values it has seen, so a repeat counts once and a NULL never.`
+          : sortedOn !== null
+            ? ` For ${distinctKeys.join(' and ')}, ${groupBy.length > 0 ? `\`${sortedOn}\` joins the sort key, so within a group` : 'the sort puts'} equal values ${groupBy.length > 0 ? 'land ' : ''}side by side${groupBy.length > 0 ? ' and' : ', so'} a repeat is spotted against the value before it — no set to keep.`
+            : ` Its DISTINCT aggregates read different columns, and one sort cannot order both, so each keeps a set of the values seen, as a hash aggregate would.`;
     emit(
       groupBy.length > 0
         ? `GROUP BY becomes a ${nodeName} above that: rows are grouped by ${groupBy.join(', ')}${
             aggregateLabels ? `, computing ${aggregateLabels} per group` : ''
-          }, ${mechanism}. Like Sort, it cannot produce a row until it has seen every one — the last group is not known to be complete until the input runs out.`
+          }, ${mechanism}. Like Sort, it cannot produce a row until it has seen every one — the last group is not known to be complete until the input runs out.${distinctNote}`
         : `${aggregateLabels} becomes a ${nodeName} above that: with no GROUP BY, the whole ${ast.joins ? 'joined result' : 'table'} is one group, so it collapses every row into one${
-            aggregateStrategy === 'sort' ? ', sorting first even though there is only ever one group to produce' : ''
-          }. Like Sort, it cannot produce a row until it has seen all of them.`,
+            aggregateStrategy === 'sort'
+              ? sortedOn === null
+                ? ', sorting first even though there is only ever one group to produce'
+                : `, sorting on ${sortedOn} first`
+              : ''
+          }. Like Sort, it cannot produce a row until it has seen all of them.${distinctNote}`,
       { stage: 'plan', planTree: display(current) },
     );
   }
@@ -211,7 +257,7 @@ export function emitPlanEvents(
   if (ast.having) {
     current = { op: 'Having', predicate: ast.having, child: current };
     emit(
-      `HAVING becomes a Having filter above the aggregate: \`${exprToSql(ast.having)}\` is tested on each finished group, after its aggregates are computed. That is the difference from WHERE, which filters rows *before* they are grouped and so can never mention an aggregate.`,
+      `HAVING becomes a Having filter above the aggregate: \`${exprToSql(ast.having)}\` is tested on each finished group, after its aggregates are computed. That is the difference from WHERE, which filters rows *before* they are grouped and so can never mention an aggregate.${subqueryNotesText([ast.having])}`,
       { stage: 'plan', planTree: display(current) },
     );
   }
@@ -248,7 +294,7 @@ export function emitPlanEvents(
         ? `The SELECT list becomes a Project on top, keeping ${columns.names.join(', ')}.`
         : `The SELECT list becomes a Project on top that *computes* each item for every row: ${columns.items
             .map((i) => `\`${i.sql}\``)
-            .join(', ')}. Arithmetic on a NULL is NULL, and dividing by zero gives NULL.`,
+            .join(', ')}. Arithmetic on a NULL is NULL, and dividing by zero gives NULL.${subqueryNotesText(columns.items.map((i) => i.expr))}`,
     { stage: 'plan', planTree: display(current) },
   );
 
@@ -311,8 +357,11 @@ export function emitPlanEvents(
   if (optimised === canonical) {
     const rows = rootEstimate(canonical, table, rowsPerPage, otherTables).estRows;
     const chainJoins = joinsIn(canonical);
+    const only = chainJoins[0];
     const note =
-      chainJoins.length === 1
+      chainJoins.length === 1 && (only!.joinType === 'semi' || only!.joinType === 'anti')
+        ? `No rewrite rule applies to this ${only!.joinType}-join — ${describeJoin(only!.algorithm, only!.leftTable, only!.rightTable)} is what runs.`
+        : chainJoins.length === 1
         ? `No rewrite rule applies to this JOIN — ${describeJoin(chainJoins[0]!.algorithm, chainJoins[0]!.leftTable, chainJoins[0]!.rightTable)} is what runs.`
         : chainJoins.length > 1
           ? `No rewrite rule applies to this chain of ${String(chainJoins.length)} JOINs — ${chainJoins
@@ -368,3 +417,35 @@ export function emitPlanEvents(
 }
 
 const plural = (n: number, noun: string): string => `${String(n)} ${noun}${n === 1 ? '' : 's'}`;
+
+/**
+ * What a correlated `[NOT] EXISTS` becomes in the plan (plan.md §27.5 S1), said once as it joins the tree: which rows
+ * survive, why that is a join and not a subquery run per row, and where each part of the subquery's `WHERE` went.
+ * `onScan` is whether it sits straight on the FROM table's scan, for the wording.
+ */
+function semiJoinNarration(
+  sj: SemiJoinClause,
+  join: Extract<Plan, { op: 'Join' }>,
+  onScan: boolean,
+  requested: JoinAlgorithm,
+): string {
+  const outer = `\`${sj.outerTable}\``;
+  const inner = `\`${sj.table.name}\``;
+  const key = `\`${sj.table.name}.${sj.innerColumn}\` = \`${sj.outerTable}.${sj.outerColumn}\``;
+  const what =
+    sj.kind === 'semi'
+      ? `\`${exprToSql(sj.source)}\` becomes a semi-join (⋉) above ${onScan ? 'that scan' : 'the plan so far'}: a row of ${outer} is kept if at least one row of ${inner} has ${key} — kept once, however many match, which is what a JOIN would not do — and ${inner}'s columns never reach the rows above.`
+      : `\`${exprToSql(sj.source)}\` becomes an anti-join (▷) above ${onScan ? 'that scan' : 'the plan so far'}: a row of ${outer} is kept only if no row of ${inner} has ${key}. A NULL on either side simply matches nothing, so unlike NOT IN, NOT EXISTS never turns UNKNOWN.`;
+  const why = `The subquery is correlated through that equality, so rather than running it again for every ${outer} row, the planner joins on it`;
+  const how =
+    join.algorithm === 'nested-loop'
+      ? `${why} — starting, like every join here, as a nested-loop: for each ${outer} row it reads ${inner} until the first match and stops, which is exactly what running the subquery once per row would cost. The optimizer may choose a cheaper algorithm below.`
+      : `${why}, as ${describeJoin(join.algorithm, sj.outerTable, sj.table.name)}.`;
+  const fallback =
+    requested === 'index-nested-loop' && join.algorithm !== 'index-nested-loop'
+      ? ` An index nested-loop was asked for, but ${sj.innerFilter ? `the subquery's own condition has to filter ${inner} as it is read, and an index probe has nowhere to put it` : `${inner} has no index on \`${sj.innerColumn}\` to probe`} — so this runs as a nested-loop.`
+      : '';
+  const own = sj.innerFilter ? ` The subquery's condition on ${inner} alone, \`${exprToSql(sj.innerFilter)}\`, filters that scan as it reads.` : '';
+  const both = sj.residual ? ` \`${exprToSql(sj.residual)}\` names both tables, so it is checked on each pair whose keys match.` : '';
+  return `${what} ${how}${fallback}${own}${both}`;
+}

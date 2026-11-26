@@ -10,6 +10,7 @@ import {
   writtenOrderFromAst,
 } from '../../engine/index.ts';
 import type { JoinOrderCandidate, SubsetPlan } from '../../engine/index.ts';
+import { BushyPlans } from '../../ui/BushyPlans.tsx';
 import { DataView } from '../../ui/DataView.tsx';
 import { PageHeader } from '../../ui/PageHeader.tsx';
 import { btnSecondary, panelSurface, pill } from '../../ui/primitives.ts';
@@ -127,8 +128,8 @@ export function JoinOrderToolPage() {
 
       <p className="text-label leading-relaxed text-ink-dim">
         Both are estimates from the same cost model the rest of the app uses — this page never runs a query, it
-        only costs hypothetical ones. The demo query above is a plain chain of inner JOINs, though (plan.md §25.4
-        C5 slice 3), so unlike a chain with a LEFT JOIN in it, this <em>is</em> what actually runs — in the{' '}
+        only costs hypothetical ones. The demo query above is a plain chain of inner JOINs, though, so
+        unlike a chain with a LEFT JOIN in it, this <em>is</em> what actually runs — in the{' '}
         <Link to="/playground" className="underline underline-offset-2 hover:text-ink">
           Playground
         </Link>{' '}
@@ -206,13 +207,15 @@ export function JoinOrderToolPage() {
       <p className="text-label leading-relaxed text-ink-dim">
         No edge between two tables never means "forbidden," only "expensive": a cross join (no shared join
         column, so no row is ever excluded) is always one of the candidates a subset considers — it just almost
-        always loses on cost. Restricted to left-deep orders on purpose: the engine&rsquo;s own{' '}
+        always loses on cost. The planner searches left-deep orders only, because the engine&rsquo;s own{' '}
         <Link to="/docs/reference/limits#join" className="underline underline-offset-2 hover:text-ink">
           <code className="font-mono text-ink">JOIN</code> chains
         </Link>{' '}
-        only ever run left-deep, so a bushy plan this page might otherwise consider is one nothing could
-        actually execute.
+        only ever run left-deep. Bushy plans, below, are priced anyway, to show what that leaves out.
       </p>
+
+      {/* plan.md §27.5 T4: bushy trees beside left-deep ones, over the same subset lattice. */}
+      <BushyPlans nodes={GRAPH_NODES} edges={GRAPH_EDGES} rowsPerPage={DEFAULT_ENGINE_OPTIONS.rowsPerPage} />
     </div>
   );
 }

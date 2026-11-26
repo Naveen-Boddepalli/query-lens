@@ -29,6 +29,11 @@ pnpm test:e2e     # Playwright (needs: pnpm exec playwright install chromium)
 
 CI runs exactly this sequence. If it passes locally, it will pass in CI.
 
+CI only runs what a change can affect (`scripts/ci-scope.ts`): a PR that touches nothing but Markdown, `docs/`,
+licences or issue templates skips every check, and one confined to `oracle/`, `bin/`, `mcp/`, `packages/` or
+`scripts/` skips the Playwright shards. `STUDY.md` and `CHANGELOG.md` are read by tests, so they still run
+everything. If you add a test that reads another Markdown file, add it to `MARKDOWN_UNDER_TEST` there.
+
 ## Development Workflow
 
 1. **Fork and branch.** Create a branch from `main` with a descriptive name:

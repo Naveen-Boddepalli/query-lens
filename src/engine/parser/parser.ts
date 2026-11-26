@@ -3,11 +3,16 @@
  *
  *   statement     := explain | analyze | select | delete | insert | update
  *   explain       := EXPLAIN [ANALYZE] select
- *   analyze       := ANALYZE identifier [';'] EOF
- *   select        := SELECT [DISTINCT] selectList FROM identifier [join]* [WHERE expr]
+ *   analyze       := ANALYZE identifier [WITH number BUCKETS] [';'] EOF
+ *   query         := select | compound
+ *   select        := selectCore [ORDER BY identifier [ASC|DESC]] [LIMIT number [OFFSET number]] [';'] EOF
+ *   selectCore    := SELECT [DISTINCT] selectList FROM identifier [join]* [WHERE expr]
  *                     [GROUP BY identifier (',' identifier)*] [HAVING expr]
- *                     [ORDER BY identifier [ASC|DESC]] [LIMIT number [OFFSET number]] [';'] EOF
- *   join          := [INNER | LEFT [OUTER]] JOIN identifier ON qualifiedColumn '=' qualifiedColumn
+ *   compound      := selectCore setOp+ [ORDER BY qualifiedColumn [ASC|DESC]]
+ *                     [LIMIT number [OFFSET number]] [';'] EOF
+ *   setOp         := (UNION [ALL] | INTERSECT | EXCEPT) selectCore
+ *   join          := [INNER | LEFT [OUTER] | RIGHT [OUTER] | FULL [OUTER]] JOIN identifier ON qualifiedColumn '=' qualifiedColumn
+ *                  | CROSS JOIN identifier | ',' identifier
  *   delete        := DELETE FROM identifier [WHERE expr] [';'] EOF
  *   insert        := INSERT INTO identifier [columnList] VALUES valueList [';'] EOF
  *   update        := UPDATE identifier SET assignment (',' assignment)* [WHERE expr] [';'] EOF
@@ -36,6 +41,8 @@
  *   unary         := '-' unary | primary
  *   primary       := qualifiedColumn | number | string | NULL | TRUE | FALSE | '(' expr ')'
  *                    | aggregateCall              -- only inside HAVING
+ *                    | EXISTS '(' existsSubquery ')'   -- only in a SELECT's WHERE, as a part joined by AND
+ *   existsSubquery := SELECT ('*' | value | qualifiedColumn) FROM identifier [WHERE expr]
  *   qualifiedColumn := identifier ['.' identifier]
  *
  * `GROUP BY` and `ORDER BY` are mutually exclusive — the parser rejects a
@@ -57,6 +64,16 @@
  * that already applies to a bare non-`JOIN` query). `runQuery.ts`'s `resolveStatementSubqueries` runs it exactly once,
  * before the outer query is planned, replacing it with the literal-list shape everything downstream already knew.
  *
+ * `existsSubquery` (plan.md §27.5 S1) may be *correlated*: its `WHERE` can name the outer query's tables as well as
+ * its own, so — the same rule a `JOIN` follows — every column there carries its table name. `EXISTS` is a part of a
+ * SELECT's `WHERE` joined by `AND` (or one under `NOT`), never under `OR` or inside another test: `resolveExists`
+ * runs each as a semi-join or an anti-join, which keeps or drops whole rows (`checkExistsSubqueries`).
+ *
+ * A `compound` (plan.md §27.5 S3) joins SELECTs left to right. Its `ORDER BY` and `LIMIT` belong to the whole result
+ * and name a column the first SELECT returns; no member may have its own. `INTERSECT` is never mixed with `UNION` or
+ * `EXCEPT` — the standard binds it tighter and SQLite does not — and `INTERSECT ALL` / `EXCEPT ALL` are refused, since
+ * SQLite, which checks QueryLens's answers, has neither.
+ *
  * Hand-written rather than generated: the error messages are half the teaching
  * value, and they need to name the v0 scope explicitly.
  *
@@ -73,24 +90,28 @@ import type {
   AggregateFn,
   AnalyzeStatement,
   CompareOp,
+  CompoundStatement,
   DeleteStatement,
   ExplainStatement,
+  ExistsSubquery,
   Expr,
   GroupByClause,
   InSubquery,
   InsertStatement,
   JoinClause,
+  LimitClause,
   SelectItem,
   SelectList,
   SelectStatement,
+  SetOperator,
   Span,
   Statement,
   TableRef,
   UpdateAssignment,
   UpdateStatement,
 } from './ast.ts';
-import { aggregateKeyOf, columnKey, selectItemKey, walkExpr } from './ast.ts';
-import { exprToSql } from './print.ts';
+import { aggregateKeyOf, baseTableOf, columnKey, mapChildren, selectItemKey, walkExpr } from './ast.ts';
+import { exprToSql, sqlString } from './print.ts';
 import { arithmetic, negate } from '../value.ts';
 import { TokenizeError, tokenize } from './tokenizer.ts';
 import type { Token } from './tokenizer.ts';
@@ -111,12 +132,8 @@ class ParseError extends Error {
 
 /** Keywords that tokenise cleanly but land outside the v0 subset. */
 const OUT_OF_SCOPE: Record<string, string> = {
-  RIGHT: 'RIGHT JOIN is not in the v0 subset — write it the other way round: swap the two tables and use a LEFT JOIN.',
-  FULL: 'FULL (OUTER) JOIN is not in the v0 subset — an inner or a LEFT JOIN only.',
-  CROSS: 'CROSS JOIN is not in the v0 subset — JOIN ... ON needs an equality.',
   USING: 'USING is not in the v0 subset — write the equality out: JOIN t ON a.x = t.y.',
-  DISTINCT: 'DISTINCT applies to the whole SELECT list — write `SELECT DISTINCT a, b …`. Inside an aggregate, `COUNT(DISTINCT x)` is not supported yet.',
-  UNION: 'UNION is not in the v0 subset.',
+  DISTINCT: 'DISTINCT applies to the whole SELECT list — write `SELECT DISTINCT a, b …` — or to an aggregate\'s argument, as in `COUNT(DISTINCT x)`.',
   CREATE: 'QueryLens only runs SELECT, DELETE, INSERT and UPDATE. Edit the seed data to change the table.',
   DROP: 'QueryLens only runs SELECT, DELETE, INSERT and UPDATE. Edit the seed data to change the table.',
 };
@@ -134,6 +151,15 @@ interface Cursor {
    * there — the group's `COUNT(*)` — and an error anywhere else, where it would have no group to read.
    */
   allowAggregates: boolean;
+  /**
+   * True only while a SELECT's own `WHERE` is being parsed (plan.md §27.5 S1): the one place `EXISTS` can run, as a
+   * semi-join under the rows that clause filters.
+   */
+  allowExists: boolean;
+  /** True while an `EXISTS` subquery's `WHERE` is being parsed: no subquery may sit inside it. */
+  inSubquery: boolean;
+  /** The text being parsed — a scalar subquery keeps its own slice of it (plan.md §27.5 S6). */
+  sql: string;
   peek: () => Token;
   /** `n` tokens past the current one (`peekAt(0)` is `peek()`); the EOF token once past the end. */
   peekAt: (n: number) => Token;
@@ -144,7 +170,7 @@ interface Cursor {
   expectIdentifier: (what: string) => Token;
 }
 
-function makeCursor(tokens: Token[]): Cursor {
+function makeCursor(tokens: Token[], sql: string): Cursor {
   let pos = 0;
   const peek = (): Token => tokens[pos]!;
   const peekAt = (n: number): Token => tokens[Math.min(pos + n, tokens.length - 1)]!;
@@ -179,7 +205,7 @@ function makeCursor(tokens: Token[]): Cursor {
     throw new ParseError(`Expected ${what}, found ${describe(token)}.`, token);
   }
 
-  return { allowAggregates: false, peek, peekAt, next, atEnd, guardScope, expectKeyword, expectIdentifier };
+  return { allowAggregates: false, allowExists: false, inSubquery: false, sql, peek, peekAt, next, atEnd, guardScope, expectKeyword, expectIdentifier };
 }
 
 /** The v0 aggregate functions. Not tokenizer keywords — they parse as identifiers, recognised by name here. */
@@ -254,19 +280,22 @@ function parseAggregateArgs(c: Cursor, upper: string): { arg: AggregateArg; clos
     }
     arg = { kind: 'star', span: { from: argToken.from, to: argToken.to } };
   } else {
-    if (isKeyword(argToken, 'DISTINCT')) {
+    // `COUNT(DISTINCT x)` (plan.md §27.5 S5): each distinct non-NULL value once.
+    const distinct = isKeyword(argToken, 'DISTINCT') ? c.next() : undefined;
+    if (distinct && c.peek().type === 'star') {
       throw new ParseError(
-        '`COUNT(DISTINCT …)` is not supported yet.',
-        argToken,
-        '`SELECT DISTINCT` is supported; inside an aggregate it is not — count the distinct rows another way.',
+        `\`${upper}(DISTINCT *)\` is not valid SQL.`,
+        c.peek(),
+        `DISTINCT needs a column whose distinct values to read — \`${upper}(DISTINCT col)\`. To count distinct rows, write \`SELECT DISTINCT …\`.`,
       );
     }
-    const colToken = c.expectIdentifier(`a column name, or \`*\` for COUNT`);
+    const colToken = c.expectIdentifier(distinct ? 'a column name after DISTINCT' : `a column name, or \`*\` for COUNT`);
     const ref = parseQualifiedColumnTail(c, colToken);
     arg = {
       kind: 'column',
       name: ref.name,
       ...(ref.table === undefined ? {} : { table: ref.table }),
+      ...(distinct ? { distinct: true } : {}),
       span: { from: ref.from, to: ref.to },
     };
   }
@@ -312,8 +341,21 @@ function parseSelectList(c: Cursor): SelectList {
   }
 
   const items: SelectItem[] = [];
+  const names = new Set<string>();
   for (;;) {
-    items.push(parseSelectItem(c));
+    const item = parseSelectItem(c);
+    // A result row is keyed by column name, so a second column of one name would overwrite the first — silently
+    // dropping a column (and, under UNION, comparing the wrong ones; the SQLite oracle found it, plan.md §27.5 S3).
+    const key = selectItemKey(item);
+    if (names.has(key)) {
+      throw new ParseError(
+        `\`${key}\` is selected twice.`,
+        item.span,
+        `Each column of the result needs its own name here — QueryLens keys a row by column name, so a second \`${key}\` would overwrite the first. Give one an alias: \`… AS ${key.replace(/[^A-Za-z0-9_]/g, '_')}_2\`.`,
+      );
+    }
+    names.add(key);
+    items.push(item);
     if (c.peek().type !== 'comma') break;
     c.next();
   }
@@ -475,14 +517,18 @@ function parseOrderKey(
       );
     }
     if (arg.kind === 'column') checkColumnQualifier(arg, joins, from);
-    const aggregate = { kind: 'aggregate' as const, fn: upper as AggregateFn, arg, span };
-    return { column: aggregateKeyOf(aggregate.fn, arg), aggregate, span };
+    // The query's one table named, as `unqualifyOwn` drops it everywhere else (plan.md §27.5 S7).
+    const own = joins.length === 0 && arg.kind === 'column' && arg.table === from.name ? withoutTable(arg) : arg;
+    const aggregate = { kind: 'aggregate' as const, fn: upper as AggregateFn, arg: own, span };
+    return { column: aggregateKeyOf(aggregate.fn, own), aggregate, span };
   }
 
   const first = c.expectIdentifier('a column name to sort by');
-  const ref = parseQualifiedColumnTail(c, first);
-  const span = { from: ref.from, to: ref.to };
-  checkColumnQualifier({ name: ref.name, ...(ref.table === undefined ? {} : { table: ref.table }), span }, joins, from);
+  const written = parseQualifiedColumnTail(c, first);
+  const span = { from: written.from, to: written.to };
+  checkColumnQualifier({ name: written.name, ...(written.table === undefined ? {} : { table: written.table }), span }, joins, from);
+  // The query's one table named, as `unqualifyOwn` drops it everywhere else (plan.md §27.5 S7).
+  const ref: { name: string; table?: string } = joins.length === 0 && written.table === from.name ? withoutTable(written) : written;
   const column = ref.table === undefined ? ref.name : `${ref.table}.${ref.name}`;
   if (grouping && !(groupBy?.columns.some((g) => columnKey(g) === column) ?? false)) {
     throw new ParseError(
@@ -496,28 +542,55 @@ function parseOrderKey(
   return { column, ...(ref.table === undefined ? {} : { table: ref.table }), span };
 }
 
-function parseTableRef(c: Cursor): TableRef {
+/**
+ * A table name — and, where a SELECT names a table (`aliases`), an alias after it (plan.md §27.5 S7): `employees AS
+ * e`, or `employees e`. Nothing but an alias can follow a table name as a plain identifier, so the bare form is safe to
+ * read. The alias becomes the name the query uses; the stored table goes in `source`. A write names one table, and
+ * takes none.
+ */
+function parseTableRef(c: Cursor, aliases = false): TableRef {
   const token = c.expectIdentifier('a table name');
-  return { name: token.value, span: { from: token.from, to: token.to } };
+  const span = { from: token.from, to: token.to };
+  if (!aliases) return { name: token.value, span };
+  const as = isKeyword(c.peek(), 'AS') ? c.next() : undefined;
+  if (!as && c.peek().type !== 'identifier') return { name: token.value, span };
+  const alias = c.expectIdentifier(`a name for \`${token.value}\` after AS`);
+  return { name: alias.value, source: token.value, span: { from: token.from, to: alias.to } };
 }
 
 /** `[INNER | LEFT [OUTER]] JOIN identifier ON qualifiedColumn '=' qualifiedColumn`, if present (plan.md §25.4 C3). */
 function parseJoin(c: Cursor): JoinClause | undefined {
   const first = c.peek();
-  const isLeft = isKeyword(first, 'LEFT');
-  const isInner = isKeyword(first, 'INNER');
-  if (!isLeft && !isInner && !isKeyword(first, 'JOIN')) return undefined;
+  // `FROM a, b` (plan.md §27.5 S4): a cross join, written as a textbook writes one — a WHERE then says how they match.
+  if (first.type === 'comma') {
+    c.next();
+    const table = parseTableRef(c, true);
+    return { table, joinType: 'cross', comma: true, span: { from: first.from, to: table.span.to } };
+  }
+  const word = isKeyword(first, 'LEFT', 'RIGHT', 'FULL', 'CROSS', 'INNER') ? first.upper : null;
+  if (word === null && !isKeyword(first, 'JOIN')) return undefined;
 
   let joinType: JoinClause['joinType'];
-  if (isLeft) {
+  if (word !== null) {
     c.next();
-    if (isKeyword(c.peek(), 'OUTER')) c.next();
-    joinType = 'left';
-  } else if (isInner) {
-    c.next();
+    if (word !== 'CROSS' && word !== 'INNER' && isKeyword(c.peek(), 'OUTER')) c.next();
+    if (word === 'LEFT') joinType = 'left';
+    else if (word === 'RIGHT') joinType = 'right';
+    else if (word === 'FULL') joinType = 'full';
+    else if (word === 'CROSS') joinType = 'cross';
   }
-  c.expectKeyword('JOIN', isLeft || isInner ? 'after LEFT/INNER' : 'to begin a join');
-  const table = parseTableRef(c);
+  c.expectKeyword('JOIN', word !== null ? `after ${word}` : 'to begin a join');
+  const table = parseTableRef(c, true);
+  if (joinType === 'cross') {
+    if (isKeyword(c.peek(), 'ON')) {
+      throw new ParseError(
+        'CROSS JOIN takes no ON.',
+        c.peek(),
+        'A cross join keeps every pair of rows. For a condition, write `JOIN … ON`, or put it in WHERE — the optimizer turns a product with an equality into a join.',
+      );
+    }
+    return { table, joinType, span: { from: first.from, to: table.span.to } };
+  }
   c.expectKeyword('ON', 'after the joined table name');
   const on = parseComparison(c);
   checkJoinOn(on);
@@ -557,16 +630,17 @@ function checkJoinOn(on: Extract<Expr, { kind: 'compare' }>): void {
  * `ON` was never actually checked against `FROM`'s and its own table name; `buildJoinPlan` just assumed it).
  */
 function checkJoinChain(join: JoinClause, known: ReadonlySet<string>): void {
-  const { left, right } = join.on;
-  if (left.kind !== 'column' || right.kind !== 'column') return; // unreachable: checkJoinOn already guarantees this
   const newTable = join.table.name;
   if (known.has(newTable)) {
     throw new ParseError(
       `\`${newTable}\` is already in this query.`,
       join.table.span,
-      'Joining the same table twice needs an alias, which v0 does not have — give the table a different name in a copy of the data instead.',
+      `To join a table to itself, give one of the two its own name — \`JOIN ${baseTableOf(join.table)} AS ${baseTableOf(join.table).slice(0, 1)}2 ON …\` — and qualify its columns with that name (plan.md §27.5 S7).`,
     );
   }
+  if (!join.on) return; // a cross join has no ON to check (plan.md §27.5 S4)
+  const { left, right } = join.on;
+  if (left.kind !== 'column' || right.kind !== 'column') return; // unreachable: checkJoinOn already guarantees this
   const leftIsNew = left.table === newTable;
   const rightIsNew = right.table === newTable;
   if (!leftIsNew && !rightIsNew) {
@@ -636,6 +710,20 @@ function checkColumnQualifier(ref: { name: string; table?: string; span: Span },
       `Write ${known.map((t) => `\`${t}.${ref.name}\``).join(' or ')}, whichever table it is actually on.`,
     );
   }
+  // A stored table's own name, where the query calls it by an alias (plan.md §27.5 S7): say what it is called here.
+  const renamed = [from, ...joins.map((j) => j.table)].find((t) => t.source === ref.table);
+  const aliasHint = renamed ? `In this query \`${ref.table}\` is called \`${renamed.name}\` — write \`${renamed.name}.${ref.name}\`.` : undefined;
+  // The query's one table, by its own name or its alias (plan.md §27.5 S7): `SELECT c.name FROM customers c`. Fine —
+  // `unqualifyOwn` drops the qualifier, since a one-table query's rows are never qualified.
+  if (!hasJoin && ref.table === from.name) return;
+  if (!hasJoin && ref.table !== undefined && ref.table !== from.name) {
+    // Another table altogether — inside a subquery, nearly always the outer query's (plan.md §27.5 S6).
+    throw new ParseError(
+      `There is no table called \`${ref.table}\` in this query.`,
+      ref.span,
+      aliasHint ?? `This query only reads \`${from.name}\`.`,
+    );
+  }
   if (!hasJoin && ref.table !== undefined) {
     // A single-table query's rows are never qualified — `authors.id` would
     // look up a key that does not exist, since the row is just `{id, ...}`.
@@ -651,7 +739,7 @@ function checkColumnQualifier(ref: { name: string; table?: string; span: Span },
     throw new ParseError(
       `There is no table called \`${ref.table}\` in this query.`,
       ref.span,
-      `This query only knows about ${known.map((t) => `\`${t}\``).join(', ')}.`,
+      aliasHint ?? `This query only knows about ${known.map((t) => `\`${t}\``).join(', ')}.`,
     );
   }
 }
@@ -700,7 +788,8 @@ function parsePrimary(c: Cursor): Expr {
     return {
       kind: 'literal',
       value: token.value,
-      raw: `'${token.value}'`,
+      // Re-escaped, so `exprToSql` prints SQL that reads back as this same string (`'it''s'`, not `'it's'`).
+      raw: sqlString(token.value),
       span: { from: token.from, to: token.to },
     };
   }
@@ -714,6 +803,7 @@ function parsePrimary(c: Cursor): Expr {
       span: { from: token.from, to: token.to },
     };
   }
+  if (token.type === 'lparen' && isKeyword(c.peekAt(1), 'SELECT')) return parseScalarSubquery(c);
   if (token.type === 'lparen') {
     c.next();
     // Inside parentheses a bare value is fine — `(a + 1) * 2`; the caller decides whether it is a valid predicate.
@@ -728,11 +818,40 @@ function parsePrimary(c: Cursor): Expr {
     return { ...inner, span: { from: token.from, to: close.to } };
   }
 
+  if (isKeyword(token, 'EXISTS')) {
+    if (c.inSubquery) {
+      throw new ParseError(
+        'An EXISTS inside another subquery is not supported yet.',
+        token,
+        'QueryLens runs one level of subquery. Join the inner tables in the outer query instead.',
+      );
+    }
+    if (!c.allowExists) {
+      throw new ParseError(
+        '`EXISTS` is not supported here.',
+        token,
+        "EXISTS works in a SELECT's WHERE clause, where QueryLens runs it as a semi-join that keeps or drops the rows that clause filters.",
+      );
+    }
+    c.next();
+    const open = c.peek();
+    if (open.type !== 'lparen' || !isKeyword(c.peekAt(1), 'SELECT')) {
+      c.guardScope(open);
+      throw new ParseError(
+        `Expected \`(SELECT\` after EXISTS, found ${describe(open.type === 'lparen' ? c.peekAt(1) : open)}.`,
+        open.type === 'lparen' ? c.peekAt(1) : open,
+        'EXISTS takes a subquery in parentheses: `EXISTS (SELECT * FROM posts WHERE posts.authorId = authors.id)`.',
+      );
+    }
+    c.next(); // '('
+    const { subquery, close } = parseExistsSubquery(c);
+    return { kind: 'exists', subquery, span: { from: token.from, to: close.to } };
+  }
   if (isKeyword(token, 'SELECT')) {
     throw new ParseError(
-      'A subquery is not supported here.',
+      'A subquery needs parentheses.',
       token,
-      'v2 has no subqueries yet — write the values out, or join the two tables.',
+      'Write it as a value in parentheses — `x = (SELECT MAX(y) FROM t)` (plan.md §27.5 S6) — or use `IN (SELECT …)` or `EXISTS (SELECT …)`.',
     );
   }
   c.guardScope(token);
@@ -890,6 +1009,13 @@ function parsePredicate(c: Cursor, bare = false): Expr {
     // `IN (SELECT …)` (plan.md §25.4 C3 slice c) vs. `IN (1, 2, 3)` — both start with `(`, so the token right after
     // it is the only thing that tells them apart.
     if (isKeyword(c.peekAt(1), 'SELECT')) {
+      if (c.inSubquery) {
+        throw new ParseError(
+          'A subquery inside an EXISTS subquery is not supported yet.',
+          c.peekAt(1),
+          'QueryLens runs one level of subquery. Write the values out, or join the tables in the outer query.',
+        );
+      }
       c.next(); // '('
       const { subquery, close } = parseInSubquery(c);
       return { kind: 'in', operand: left, items: [], subquery, negated, span: { from: left.span.from, to: close.to } };
@@ -957,7 +1083,7 @@ function parseInSubquery(c: Cursor): { subquery: InSubquery; close: Token } {
     );
   }
   c.expectKeyword('FROM', "after the subquery's column");
-  const from = parseTableRef(c);
+  const from = parseTableRef(c, true);
   const afterFrom = c.peek();
   if (isKeyword(afterFrom, 'JOIN') || isKeyword(afterFrom, 'LEFT') || isKeyword(afterFrom, 'INNER')) {
     throw new ParseError(
@@ -1007,6 +1133,178 @@ function parseInSubquery(c: Cursor): { subquery: InSubquery; close: Token } {
     },
     close,
   };
+}
+
+/**
+ * `SELECT * | value | column FROM table [WHERE expr]` — the subquery `EXISTS` takes (plan.md §27.5 S1), starting right
+ * after its `(`. What it selects is never read — EXISTS asks only whether any row comes back — so `*`, a value or a
+ * column all do, kept as written. An aggregate is refused for the trap it is: with no `GROUP BY` it always returns
+ * exactly one row, so `EXISTS (SELECT COUNT(*) …)` is TRUE whatever the table holds. `JOIN`, `GROUP BY`, `ORDER BY`,
+ * `LIMIT` and `DISTINCT` are refused rather than parsed and ignored. Its columns are checked against the outer query's
+ * tables by `checkExistsSubqueries`, once those are known.
+ */
+function parseExistsSubquery(c: Cursor): { subquery: ExistsSubquery; close: Token } {
+  const selectToken = c.expectKeyword('SELECT', 'to begin the subquery');
+  if (isKeyword(c.peek(), 'DISTINCT')) {
+    throw new ParseError(
+      'DISTINCT makes no difference inside an EXISTS subquery.',
+      c.peek(),
+      'EXISTS only asks whether at least one row comes back. Drop DISTINCT.',
+    );
+  }
+  const first = c.peek();
+  let select: string;
+  if (first.type === 'star') {
+    c.next();
+    select = '*';
+  } else if (first.type === 'identifier' && AGGREGATE_FNS.has(first.value.toUpperCase()) && c.peekAt(1).type === 'lparen') {
+    throw new ParseError(
+      'An aggregate inside an EXISTS subquery is always TRUE.',
+      first,
+      `With no GROUP BY, \`SELECT ${first.value.toUpperCase()}(…)\` returns exactly one row even from an empty table — so EXISTS would find it every time. Write \`SELECT *\`.`,
+    );
+  } else if (first.type === 'identifier') {
+    c.next();
+    const tail = parseQualifiedColumnTail(c, first);
+    select = tail.table ? `${tail.table}.${tail.name}` : tail.name;
+  } else {
+    select = parseLiteralValue(c).raw;
+  }
+  if (c.peek().type === 'comma') {
+    throw new ParseError(
+      'EXISTS never reads what its subquery selects.',
+      c.peek(),
+      'It only asks whether a row comes back — select one thing, `*` or `1`.',
+    );
+  }
+  c.expectKeyword('FROM', "after what the subquery selects");
+  const from = parseTableRef(c, true);
+  const afterFrom = c.peek();
+  if (isKeyword(afterFrom, 'JOIN') || isKeyword(afterFrom, 'LEFT') || isKeyword(afterFrom, 'INNER')) {
+    throw new ParseError(
+      'JOIN is not supported yet inside an EXISTS subquery.',
+      afterFrom,
+      'Query one table in the subquery, or join the tables in the outer query.',
+    );
+  }
+  const outer = { allowExists: c.allowExists, inSubquery: c.inSubquery };
+  c.allowExists = false;
+  c.inSubquery = true;
+  let where: Expr | undefined;
+  try {
+    where = parseOptionalWhere(c);
+  } finally {
+    c.allowExists = outer.allowExists;
+    c.inSubquery = outer.inSubquery;
+  }
+  const after = c.peek();
+  if (isKeyword(after, 'GROUP', 'HAVING')) {
+    throw new ParseError(
+      `${after.upper === 'GROUP' ? 'GROUP BY' : 'HAVING'} is not supported inside an EXISTS subquery.`,
+      after,
+      'EXISTS only asks whether a row comes back — put the condition in its WHERE.',
+    );
+  }
+  if (isKeyword(after, 'ORDER')) {
+    throw new ParseError(
+      'ORDER BY makes no difference inside an EXISTS subquery.',
+      after,
+      'EXISTS only asks whether a row comes back, not which one comes first. Drop it.',
+    );
+  }
+  if (isKeyword(after, 'LIMIT')) {
+    throw new ParseError(
+      'LIMIT is not needed inside an EXISTS subquery.',
+      after,
+      'EXISTS already stops at the first row it finds. Drop it.',
+    );
+  }
+  const close = c.peek();
+  if (close.type !== 'rparen') {
+    c.guardScope(close);
+    throw new ParseError(`Expected \`)\` to close the subquery, found ${describe(close)}.`, close);
+  }
+  c.next();
+  return {
+    subquery: { select, from, ...(where ? { where } : {}), span: { from: selectToken.from, to: close.from } },
+    close,
+  };
+}
+
+/** The `EXISTS` a part of `WHERE` is, directly or under one `NOT`; `null` for any other part. */
+function existsConjunct(part: Expr): Extract<Expr, { kind: 'exists' }> | null {
+  if (part.kind === 'exists') return part;
+  if (part.kind === 'not' && part.operand.kind === 'exists') return part.operand;
+  return null;
+}
+
+/**
+ * Every `EXISTS` in a SELECT's `WHERE` (plan.md §27.5 S1), checked once the outer query's tables are known (`known`:
+ * `FROM`'s and every `JOIN`'s). Each must be a part of the clause joined by `AND`, or one under `NOT` — a semi-join or
+ * an anti-join keeps or drops a whole row, so it cannot sit under `OR` or inside another test. Its table must not be
+ * one the outer query already has, or one another `EXISTS` reads: with no table aliases, `users.id` could not say
+ * which of the two it meant. And
+ * every column in its `WHERE` names its table — the subquery's own, or one of the outer query's — which is what lets a
+ * reference to the outer row (a correlation) be told from the subquery's own column.
+ */
+function checkExistsSubqueries(where: Expr, known: readonly string[]): void {
+  const placed = new Set<Expr>();
+  const used = new Set<string>();
+  for (const part of conjunctsOf(where)) {
+    const node = existsConjunct(part);
+    if (node) placed.add(node);
+  }
+  walkExpr(where, (e) => {
+    if (e.kind !== 'exists') return;
+    if (!placed.has(e)) {
+      throw new ParseError(
+        'EXISTS has to be one of the conditions WHERE joins with AND.',
+        e.span,
+        'QueryLens runs EXISTS as a semi-join, which keeps or drops whole rows — so it cannot sit under OR or inside another test. `NOT EXISTS (…)` is fine.',
+      );
+    }
+    const inner = e.subquery.from;
+    if (known.includes(inner.name)) {
+      throw new ParseError(
+        `The subquery's table \`${inner.name}\` is already in the outer query.`,
+        inner.span,
+        `\`${inner.name}.column\` could not say which of the two it means. Give the subquery's table its own name — \`FROM ${baseTableOf(inner)} AS ${baseTableOf(inner).slice(0, 1)}2\` — and qualify its columns with that (plan.md §27.5 S7).`,
+      );
+    }
+    // A table appears once per query — no aliases, so two of its scans could not be told apart in the plan.
+    if (used.has(inner.name)) {
+      throw new ParseError(
+        `\`${inner.name}\` is already read by another EXISTS subquery in this query.`,
+        inner.span,
+        'Two scans under one name could not be told apart. Give one of them its own name with AS — or put both conditions in one subquery, if they are about the same row.',
+      );
+    }
+    used.add(inner.name);
+    const visible = [inner.name, ...known];
+    if (!e.subquery.where) return;
+    walkExpr(e.subquery.where, (ref) => {
+      if (ref.kind !== 'column') return;
+      if (ref.table === undefined) {
+        throw new ParseError(
+          `\`${ref.name}\` needs a table name inside this subquery.`,
+          ref.span,
+          `The subquery can see ${visible.map((t) => `\`${t}\``).join(' and ')} — write ${visible.map((t) => `\`${t}.${ref.name}\``).join(' or ')}, whichever table it is on.`,
+        );
+      }
+      if (!visible.includes(ref.table)) {
+        throw new ParseError(
+          `There is no table called \`${ref.table}\` in this subquery or the query around it.`,
+          ref.span,
+          `It can see ${visible.map((t) => `\`${t}\``).join(', ')}.`,
+        );
+      }
+    });
+  });
+}
+
+/** An `AND` tree's parts — `plan.ts`'s `conjuncts`, which the parser does not import. */
+function conjunctsOf(expr: Expr): Expr[] {
+  return expr.kind === 'and' ? [...conjunctsOf(expr.left), ...conjunctsOf(expr.right)] : [expr];
 }
 
 function parseNotExpr(c: Cursor, bare = false): Expr {
@@ -1144,12 +1442,118 @@ function expectStatementEnd(c: Cursor): void {
 /* SELECT                                                                      */
 /* -------------------------------------------------------------------------- */
 
-function parseSelectBody(c: Cursor): SelectStatement {
-  const selectToken = c.expectKeyword('SELECT', 'to begin the query');
+/** `UNION`, `INTERSECT` or `EXCEPT` — a set operator that continues a compound query (plan.md §27.5 S3). */
+const isSetOp = (t: Token): boolean => isKeyword(t, 'UNION', 'INTERSECT', 'EXCEPT');
+
+/** Refuses an `ORDER BY` or `LIMIT` that sits before a set operator, where it would order one SELECT of several. */
+function refuseMidCompound(c: Cursor): void {
+  if (!isSetOp(c.peek())) return;
+  throw new ParseError(
+    `ORDER BY and LIMIT go after the last SELECT of a ${c.peek().upper}.`,
+    c.peek(),
+    'They sort and cut the combined result, so they are written once, at the end — no SELECT inside a compound query may have its own.',
+  );
+}
+
+/**
+ * One SELECT. `mode` says where it stands (plan.md §27.5 S3): `whole` is a query on its own, as every caller had
+ * before compounds; `first` may be followed by a set operator, and then stops before it, as `member` — any SELECT
+ * after one — always does, leaving `ORDER BY` and `LIMIT` to the compound.
+ */
+/** `ref` without its table qualifier. */
+function withoutTable<T extends { table?: string }>(ref: T): Omit<T, 'table'> {
+  const { table: _table, ...rest } = ref;
+  return rest;
+}
+
+/**
+ * `expr` with every column qualified by `table` — a one-table query's own table, by its name or its alias (plan.md
+ * §27.5 S7) — written plainly, as that query's rows are keyed. An `EXISTS` or scalar subquery is a scope of its own and
+ * is not entered: there, `c.id` is the outer query's column, and keeps its name.
+ */
+function unqualifyOwn(expr: Expr, table: string): Expr {
+  if (expr.kind === 'column') return expr.table === table ? withoutTable(expr) : expr;
+  if (expr.kind === 'aggregate' && expr.arg.kind === 'column' && expr.arg.table === table) return { ...expr, arg: withoutTable(expr.arg) };
+  return mapChildren(expr, (child) => unqualifyOwn(child, table));
+}
+
+/** `unqualifyOwn` over a SELECT list's items. */
+function unqualifySelectList(select: SelectList, table: string): SelectList {
+  if (select.kind === 'star') return select;
+  return {
+    ...select,
+    items: select.items.map((item): SelectItem => {
+      if (item.kind === 'column') return item.table === table ? withoutTable(item) : item;
+      if (item.kind === 'expression') return { ...item, expr: unqualifyOwn(item.expr, table) };
+      return item.arg.kind === 'column' && item.arg.table === table ? { ...item, arg: withoutTable(item.arg) } : item;
+    }),
+  };
+}
+
+/**
+ * `(SELECT … )` where a value goes (plan.md §27.5 S6): a whole SELECT of its own, in its own scope — the cursor's
+ * flags are the outer clause's, so they are set aside while it is read and put back after — selecting exactly one
+ * column. It may not read the outer query's tables: QueryLens runs it once, before planning, not once per row.
+ */
+function parseScalarSubquery(c: Cursor): Expr {
+  const open = c.next(); // '('
+  if (c.inSubquery) {
+    throw new ParseError(
+      'A subquery inside an EXISTS subquery is not supported yet.',
+      c.peek(),
+      'QueryLens runs one level of subquery inside EXISTS. Compute the value in the outer query instead.',
+    );
+  }
+  const outer = { allowAggregates: c.allowAggregates, allowExists: c.allowExists };
+  c.allowAggregates = false;
+  c.allowExists = false;
+  let select: SelectStatement;
+  try {
+    select = parseSelectBody(c, 'scalar');
+  } catch (err) {
+    // A table the subquery cannot see is, almost always, the outer query's: a correlated subquery.
+    if (err instanceof ParseError && /no table called/.test(err.message)) {
+      throw new ParseError(err.message, { from: err.from, to: err.to }, CORRELATED_SCALAR_HINT);
+    }
+    throw err;
+  } finally {
+    c.allowAggregates = outer.allowAggregates;
+    c.allowExists = outer.allowExists;
+  }
+  if (select.select.kind === 'star' || select.select.items.length !== 1) {
+    throw new ParseError(
+      'A subquery used as a value must select exactly one column.',
+      select.select.span,
+      'It stands for one value: select one column, or one aggregate — `(SELECT AVG(price) FROM products)`.',
+    );
+  }
+  const close = c.peek();
+  if (close.type !== 'rparen') {
+    if (isSetOp(close)) {
+      throw new ParseError(
+        `\`${close.upper}\` is not supported inside a subquery used as a value.`,
+        close,
+        'A subquery used as a value is one SELECT. Combine the results in the outer query instead.',
+      );
+    }
+    c.guardScope(close);
+    throw new ParseError(`Expected \`)\` to close the subquery, found ${describe(close)}.`, close);
+  }
+  c.next();
+  const sql = c.sql.slice(select.span.from, select.span.to).replace(/\s+/g, ' ');
+  return { kind: 'scalar', select, sql, span: { from: open.from, to: close.to } };
+}
+
+/** What a scalar subquery that names the outer query's tables is told (plan.md §27.10: none are correlated in 3.0). */
+const CORRELATED_SCALAR_HINT =
+  'A subquery used as a value runs once, on its own, before the outer query — so it cannot read the outer query’s rows. QueryLens has no correlated scalar subqueries; for a per-row test against another table, use EXISTS.';
+
+function parseSelectBody(c: Cursor, mode: 'whole' | 'first' | 'member' | 'scalar' = 'whole'): SelectStatement {
+  const selectToken = c.expectKeyword('SELECT', mode === 'member' ? 'after the set operator' : 'to begin the query');
   const distinct = isKeyword(c.peek(), 'DISTINCT') ? (c.next(), true) : false;
-  const select = parseSelectList(c);
+  let select = parseSelectList(c);
   c.expectKeyword('FROM', 'after the column list');
-  const from = parseTableRef(c);
+  const from = parseTableRef(c, true);
   const joins: JoinClause[] = [];
   const known = new Set([from.name]);
   for (;;) {
@@ -1160,12 +1564,27 @@ function parseSelectBody(c: Cursor): SelectStatement {
     joins.push(join);
   }
   const hasJoin = joins.length > 0;
-  const where = parseOptionalWhere(c);
-  const groupBy = parseGroupBy(c);
+  // EXISTS is legal in this WHERE and nowhere else (plan.md §27.5 S1): a semi-join filters this query's own rows.
+  c.allowExists = true;
+  let where: Expr | undefined;
+  try {
+    where = parseOptionalWhere(c);
+  } finally {
+    c.allowExists = false;
+  }
+  if (where) checkExistsSubqueries(where, [...known]);
+  let groupBy = parseGroupBy(c);
   // Qualifiers first, so `GROUP BY name` in a join is told it needs a table name rather than that `authors.name`
   // is not grouped.
   checkJoinValidity(select, joins, where, from);
   for (const column of groupBy?.columns ?? []) checkColumnQualifier(column, joins, from);
+  // A one-table query may qualify its columns with its table's name (plan.md §27.5 S7); its rows are not qualified,
+  // so the qualifier goes — before anything compares one clause's columns with another's.
+  if (!hasJoin) {
+    select = unqualifySelectList(select, from.name);
+    if (where) where = unqualifyOwn(where, from.name);
+    if (groupBy) groupBy = { ...groupBy, columns: groupBy.columns.map((col) => (col.table === from.name ? withoutTable(col) : col)) };
+  }
   checkGroupingValidity(select, groupBy);
 
   let having: Expr | undefined;
@@ -1181,9 +1600,36 @@ function parseSelectBody(c: Cursor): SelectStatement {
       if (e.kind === 'column') checkColumnQualifier(e, joins, from);
       else if (e.kind === 'aggregate' && e.arg.kind === 'column') checkColumnQualifier(e.arg, joins, from);
     });
+    if (!hasJoin) having = unqualifyOwn(having, from.name);
     checkHavingValidity(having, select, groupBy, havingToken);
   }
 
+  const statement = (orderBy?: SelectStatement['orderBy'], limit?: SelectStatement['limit']): SelectStatement => {
+    const end =
+      limit?.span.to ??
+      orderBy?.span.to ??
+      having?.span.to ??
+      groupBy?.span.to ??
+      where?.span.to ??
+      joins.at(-1)?.span.to ??
+      from.span.to;
+    return {
+      kind: 'select',
+      select,
+      ...(distinct ? { distinct } : {}),
+      from,
+      ...(hasJoin ? { joins } : {}),
+      ...(where === undefined ? {} : { where }),
+      ...(groupBy === undefined ? {} : { groupBy }),
+      ...(having === undefined ? {} : { having }),
+      ...(orderBy === undefined ? {} : { orderBy }),
+      ...(limit === undefined ? {} : { limit }),
+      span: { from: selectToken.from, to: end },
+    };
+  };
+
+  // A compound query's member ends here (plan.md §27.5 S3): what follows belongs to the whole result.
+  if (mode === 'member' || (mode === 'first' && isSetOp(c.peek()))) return statement();
   let orderBy: SelectStatement['orderBy'];
   if (c.peek().type === 'keyword' && c.peek().upper === 'ORDER') {
     const orderToken = c.next();
@@ -1216,8 +1662,18 @@ function parseSelectBody(c: Cursor): SelectStatement {
     };
   }
 
+  const limit = parseLimit(c);
+  // A scalar subquery (plan.md §27.5 S6) ends at its `)`, which the caller reads.
+  if (mode === 'scalar') return statement(orderBy, limit);
+  refuseMidCompound(c);
+  expectStatementEnd(c);
+  return statement(orderBy, limit);
+}
+
+/** `LIMIT n [OFFSET m]`, if present — shared by a SELECT and a compound query's whole result. */
+function parseLimit(c: Cursor): LimitClause | undefined {
   const limitToken = c.peek().type === 'keyword' && c.peek().upper === 'LIMIT' ? c.next() : undefined;
-  let limit: SelectStatement['limit'];
+  let limit: LimitClause | undefined;
   if (limitToken) {
     const token = c.peek();
     if (token.type !== 'number' || token.value.includes('.')) {
@@ -1246,39 +1702,142 @@ function parseSelectBody(c: Cursor): SelectStatement {
       'Write `LIMIT n OFFSET m` — skip m rows, then return the next n.',
     );
   }
+  return limit;
+}
 
+/**
+ * A SELECT, or several joined by `UNION [ALL]`, `INTERSECT` or `EXCEPT` (plan.md §27.5 S3) — what `parseStatement`
+ * and `EXPLAIN` take. The members are combined left to right; the compound's own `ORDER BY` names a column of its
+ * result, which is the first member's.
+ */
+function parseQuery(c: Cursor): SelectStatement | CompoundStatement {
+  const first = parseSelectBody(c, 'first');
+  if (!isSetOp(c.peek())) return first;
+
+  const members: SelectStatement[] = [first];
+  const ops: CompoundStatement['ops'] = [];
+  while (isSetOp(c.peek())) {
+    const opToken = c.next();
+    const op = opToken.upper.toLowerCase() as SetOperator;
+    let to = opToken.to;
+    let all = false;
+    if (isKeyword(c.peek(), 'ALL')) {
+      all = true;
+      to = c.next().to;
+      if (op !== 'union') {
+        throw new ParseError(
+          `\`${opToken.upper} ALL\` is not supported yet.`,
+          { from: opToken.from, to },
+          `SQLite, which QueryLens checks its answers against, has no ${opToken.upper} ALL either. Without ALL, ${opToken.upper} returns each row once.`,
+        );
+      }
+    }
+    if (isKeyword(c.peek(), 'DISTINCT')) {
+      throw new ParseError(
+        `\`${opToken.upper} DISTINCT\` is not needed.`,
+        c.peek(),
+        `${opToken.upper} already returns each row once — drop DISTINCT${op === 'union' ? ', or write UNION ALL to keep the repeats' : ''}.`,
+      );
+    }
+    if (!isKeyword(c.peek(), 'SELECT')) {
+      c.guardScope(c.peek());
+      throw new ParseError(
+        `Expected a SELECT after ${opToken.upper}${all ? ' ALL' : ''}, found ${describe(c.peek())}.`,
+        c.peek(),
+        c.peek().type === 'lparen'
+          ? 'A SELECT in parentheses is not supported here — write the SELECT itself.'
+          : `${opToken.upper} combines two SELECTs: \`SELECT … ${opToken.upper} SELECT …\`.`,
+      );
+    }
+    ops.push({ op, all, span: { from: opToken.from, to } });
+    members.push(parseSelectBody(c, 'member'));
+  }
+
+  // INTERSECT binds tighter than UNION and EXCEPT in the standard and in PostgreSQL; SQLite reads them left to right.
+  const intersect = ops.find((o) => o.op === 'intersect');
+  const other = ops.find((o) => o.op !== 'intersect');
+  if (intersect && other) {
+    const later = intersect.span.from > other.span.from ? intersect : other;
+    throw new ParseError(
+      'INTERSECT cannot share a query with UNION or EXCEPT.',
+      later.span,
+      'Standard SQL (and PostgreSQL) does INTERSECT first; SQLite reads the operators left to right — so the same text means two different things. QueryLens refuses rather than pick one: use one kind of operator per query.',
+    );
+  }
+
+  let orderBy: CompoundStatement['orderBy'];
+  if (isKeyword(c.peek(), 'ORDER')) {
+    const orderToken = c.next();
+    c.expectKeyword('BY', 'after ORDER');
+    const keys = first.select.kind === 'columns' ? first.select.items.map(selectItemKey) : null;
+    const operator = ops[0]!.op.toUpperCase();
+    const token = c.peek();
+    if (token.type !== 'identifier' || (AGGREGATE_FNS.has(token.value.toUpperCase()) && c.peekAt(1).type === 'lparen')) {
+      c.guardScope(token);
+      throw new ParseError(
+        `After ${operator}, ORDER BY names a column of the combined result, found ${describe(token)}.`,
+        token,
+        `Name one of the first SELECT's columns${keys ? ` — ${keys.map((k) => `\`${k}\``).join(', ')}` : ''}; give a computed one a name with AS.`,
+      );
+    }
+    c.next();
+    const tail = parseQualifiedColumnTail(c, token);
+    const column = tail.table === undefined ? tail.name : `${tail.table}.${tail.name}`;
+    if (keys && !keys.includes(column)) {
+      throw new ParseError(
+        `\`${column}\` is not a column of the combined result.`,
+        { from: tail.from, to: tail.to },
+        `After ${operator}, ORDER BY sorts the rows of every SELECT together, so it names one of the result's columns — named by the first SELECT: ${keys.map((k) => `\`${k}\``).join(', ')}.`,
+      );
+    }
+    let direction: 'asc' | 'desc' = 'asc';
+    let end = tail.to;
+    if (isKeyword(c.peek(), 'ASC', 'DESC')) {
+      const dir = c.next();
+      direction = dir.upper === 'ASC' ? 'asc' : 'desc';
+      end = dir.to;
+    }
+    orderBy = { column, direction, span: { from: orderToken.from, to: end } };
+  }
+  const limit = parseLimit(c);
+  refuseMidCompound(c);
   expectStatementEnd(c);
 
-  const end =
-    limit?.span.to ??
-    orderBy?.span.to ??
-    having?.span.to ??
-    groupBy?.span.to ??
-    where?.span.to ??
-    joins.at(-1)?.span.to ??
-    from.span.to;
   return {
-    kind: 'select',
-    select,
-    ...(distinct ? { distinct } : {}),
-    from,
-    ...(hasJoin ? { joins } : {}),
-    ...(where === undefined ? {} : { where }),
-    ...(groupBy === undefined ? {} : { groupBy }),
-    ...(having === undefined ? {} : { having }),
-    ...(orderBy === undefined ? {} : { orderBy }),
-    ...(limit === undefined ? {} : { limit }),
-    span: { from: selectToken.from, to: end },
+    kind: 'compound',
+    members,
+    ops,
+    ...(orderBy ? { orderBy } : {}),
+    ...(limit ? { limit } : {}),
+    span: { from: first.span.from, to: limit?.span.to ?? orderBy?.span.to ?? members.at(-1)!.span.to },
   };
 }
 
 export type ParseOutcome = { ok: true; ast: SelectStatement } | { ok: false; error: QueryError };
 
-/** The SELECT-only entry point — every existing caller's contract, unchanged. */
+/** The SELECT-only entry point — every existing caller's contract, unchanged. A compound query is refused here. */
 export function parse(sql: string): ParseOutcome {
   return runParse(sql, (c) => {
     if (c.atEnd()) throw new ParseError('Nothing to run — the query is empty.', c.peek());
-    return parseSelectBody(c);
+    const ast = parseQuery(c);
+    if (ast.kind === 'compound') {
+      throw new ParseError(
+        `This takes one SELECT, not a ${ast.ops[0]!.op.toUpperCase()}.`,
+        ast.ops[0]!.span,
+        'A UNION, INTERSECT or EXCEPT runs in the Playground.',
+      );
+    }
+    return ast;
+  });
+}
+
+export type QueryOutcome = { ok: true; ast: SelectStatement | CompoundStatement } | { ok: false; error: QueryError };
+
+/** A SELECT or a compound of several (plan.md §27.5 S3) — for a caller that can show either, such as the parse tree. */
+export function parseQueryStatement(sql: string): QueryOutcome {
+  return runParse(sql, (c) => {
+    if (c.atEnd()) throw new ParseError('Nothing to run — the query is empty.', c.peek());
+    return parseQuery(c);
   });
 }
 
@@ -1416,7 +1975,7 @@ function parseExplainBody(c: Cursor): ExplainStatement {
     throw new ParseError('EXPLAIN cannot be nested.', next, 'One EXPLAIN, then the SELECT.');
   }
 
-  const select = parseSelectBody(c);
+  const select = parseQuery(c);
   return { kind: 'explain', analyze, select, span: { from: explainToken.from, to: select.span.to } };
 }
 
@@ -1424,9 +1983,38 @@ function parseExplainBody(c: Cursor): ExplainStatement {
 /* ANALYZE                                                                     */
 /* -------------------------------------------------------------------------- */
 
+/** The most buckets `ANALYZE … WITH n BUCKETS` builds a histogram with (plan.md §27.5 T5); PostgreSQL's own cap is 10,000. */
+export const MAX_HISTOGRAM_BUCKETS = 100;
+
+/**
+ * Words the parser reads by their spelling in one place only, and so are not keywords: a column may still be called
+ * `buckets`. `ANALYZE t WITH n BUCKETS` (plan.md §27.5 T5) is where.
+ */
+export const CONTEXTUAL_WORDS: ReadonlySet<string> = new Set(['WITH', 'BUCKETS']);
+
 function parseAnalyzeBody(c: Cursor): AnalyzeStatement {
   const analyzeToken = c.expectKeyword('ANALYZE', 'to begin an analyze');
   const table = parseTableRef(c);
+  // `WITH n BUCKETS` (plan.md §27.5 T5) — neither word is a keyword anywhere else, so both are read as words here.
+  const word = (token: ReturnType<Cursor['peek']>, upper: string) =>
+    CONTEXTUAL_WORDS.has(upper) && token.type === 'identifier' && token.upper === upper;
+  if (word(c.peek(), 'WITH')) {
+    c.next();
+    const count = c.peek();
+    if (count.type !== 'number' || count.value.includes('.')) {
+      throw new ParseError(`Expected a whole number of buckets after WITH, found ${describe(count)}.`, count, 'For example: ANALYZE transactions WITH 20 BUCKETS');
+    }
+    const buckets = Number(count.value);
+    if (buckets < 1 || buckets > MAX_HISTOGRAM_BUCKETS) {
+      throw new ParseError(`A histogram has between 1 and ${String(MAX_HISTOGRAM_BUCKETS)} buckets, not ${count.value}.`, count);
+    }
+    c.next();
+    const end = c.peek();
+    if (!word(end, 'BUCKETS')) throw new ParseError(`Expected BUCKETS after the bucket count, found ${describe(end)}.`, end);
+    c.next();
+    expectStatementEnd(c);
+    return { kind: 'analyze', table, buckets, span: { from: analyzeToken.from, to: end.to } };
+  }
   expectStatementEnd(c);
   return { kind: 'analyze', table, span: { from: analyzeToken.from, to: table.span.to } };
 }
@@ -1447,7 +2035,7 @@ export function parseStatement(sql: string): StatementOutcome {
     if (first.type === 'keyword' && first.upper === 'DELETE') return parseDeleteBody(c);
     if (first.type === 'keyword' && first.upper === 'INSERT') return parseInsertBody(c);
     if (first.type === 'keyword' && first.upper === 'UPDATE') return parseUpdateBody(c);
-    return parseSelectBody(c);
+    return parseQuery(c);
   });
 }
 
@@ -1456,7 +2044,7 @@ export function parseStatement(sql: string): StatementOutcome {
 function runParse<T>(sql: string, body: (c: Cursor) => T): { ok: true; ast: T } | { ok: false; error: QueryError } {
   try {
     const tokens = tokenize(sql);
-    return { ok: true, ast: body(makeCursor(tokens)) };
+    return { ok: true, ast: body(makeCursor(tokens, sql)) };
   } catch (err) {
     if (err instanceof ParseError || err instanceof TokenizeError) {
       return {

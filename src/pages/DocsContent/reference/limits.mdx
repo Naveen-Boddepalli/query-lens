@@ -13,6 +13,12 @@ concept explanation.
   [challenges](/challenges) and [Compare](/compare) modes, to make an algorithm's actual behaviour
   visible rather than hidden by a pool big enough to cache everything.
 - **4 rows per page.**
+- **A plan cannot pin more pages than the pool has frames.** A scan holds the page it is reading pinned while the
+  scans inside a nested loop run, so a nested loop over *n* tables needs *n* frames at once. With fewer, the query
+  stops with an error that says so — as PostgreSQL stops with *no unpinned buffers available* — rather than
+  answering: until plan.md §27.5 S7 the scan that found no free frame quietly ended, as if its table had, and a
+  three-table nested loop in a two-frame pool returned no rows. A hash or sort-merge join reads one side whole first
+  and needs fewer.
 - **Eight replacement policies**, all implemented in the engine itself: LRU, clock sweep, FIFO,
   second-chance, optimal (unbuildable for real; the fewest-misses bound the others are measured
   against), midpoint LRU (what InnoDB does), and the two scan-resistant ones, LRU-2 and 2Q. The
@@ -106,17 +112,22 @@ concept explanation.
 
 ## JOIN
 
-- **Zero or more `JOIN`s, chained left-deep** (plan.md §25.4 C3 slice b): `[INNER | LEFT [OUTER]] JOIN
-  table ON a.col = b.col`, always an equality between one qualified column from each side, one of which
+- **Zero or more `JOIN`s, chained left-deep** (plan.md §25.4 C3 slice b): `[INNER | LEFT [OUTER] | RIGHT
+  [OUTER] | FULL [OUTER]] JOIN table ON a.col = b.col`, always an equality between one qualified column from each side, one of which
   must name the table this `JOIN` introduces and the other some table already in the query — `FROM`'s,
   or an earlier `JOIN`'s, not necessarily the one written just before it. `FROM a JOIN b ON … JOIN c ON
-  …` joins `c` against whatever `a ⋈ b` already produced, never against `a` and `b` independently. No
-  aliasing, so the same table can never appear twice in one chain. A bare `JOIN`/`INNER JOIN` drops an
+  …` joins `c` against whatever `a ⋈ b` already produced, never against `a` and `b` independently. A table
+  can appear twice under two names (plan.md §27.5 S7): `customers AS c JOIN customers AS r ON …` — two scans of one
+  heap, which share its pages in the pool and its indexes. A bare `JOIN`/`INNER JOIN` drops an
   unmatched row on either side; `LEFT [OUTER] JOIN` (plan.md §25.4 C3) keeps every row on the *other*
   side of that one join, NULL-padding the introduced table's columns when nothing on it matches —
   including when the join column itself is NULL, since NULL never matches NULL there either. A chain may
   mix `LEFT` and inner freely, step by step — a row a `LEFT` step padded is itself a real row, so a later
-  inner step in the same chain can still drop it if nothing matches its own NULLs. No `RIGHT`/`FULL`/`CROSS`.
+  inner step in the same chain can still drop it if nothing matches its own NULLs. `RIGHT` and `FULL` (plan.md
+  §27.5 S4) pad the other way, or both ways; a `WHERE` on a side a join pads is never pushed below that join.
+  `CROSS JOIN` and `FROM a, b` are the Cartesian product, always a nested loop, until a `WHERE` equality between
+  the two sides turns one into a join (the **product-to-join** rule). Join reordering only ever considers a chain
+  of inner joins: an outer join is not commutative, and the trace says so.
 - **Four algorithms** — nested-loop, hash, sort-merge, and **index nested-loop** — **chosen by cost**
   (plan.md §25.4 C5 slice 2) whenever the caller does not force one: every algorithm that could run each
   step is priced with the same formula [EXPLAIN](/docs/reference/sql) shows, and the cheapest wins, with
@@ -153,6 +164,18 @@ concept explanation.
   and this DP does not attempt the harder problem of reordering *around* that constraint. For a chain like
   that, the plan-stage narration and `/tools/join-order` still show what the search would have picked —
   purely informational there, never a rewrite, exactly as every chain's order used to be before this.
+- **Bushy plans are priced, never run** (plan.md §27.5 T4). [`/tools/join-order`](/tools/join-order) searches the
+  same subset lattice a second way, trying every split of a subset into an outer and an inner part rather than only
+  which table goes last: `2^k − 2` splits for a `k`-table subset where left-deep tries `k`, over `(2n − 2)!/(n − 1)!`
+  plans where left-deep has `n!` (120 against 24 for four tables). A join whose inner side is itself a join computes
+  it once, writes it out — a page per four rows — and reads it once per outer row. That search gives every plan for
+  the same tables one row estimate, System R's (each predicate keeps one row in the larger of its columns' distinct
+  counts), so plans differ only in shape and the search is exact — a test prices every plan outright to check. The
+  planner's own search estimates each join from the table it adds, so the same tables can get a different size in
+  a different order; keeping only the cheapest plan per subset then is not always exact, and on random graphs it
+  sometimes misses the cheapest left-deep order its own estimates allow. On the demo query the two agree. The
+  page's explorer — four tables joined by foreign keys, chain or star, sizes from a menu — searches all 2,592
+  graphs its menus make: a bushy plan is cheaper in 425 of them, never by more than 1.32×.
 
 ## IN subquery
 
@@ -163,8 +186,8 @@ concept explanation.
   one column's distinct values.
 - **Always uncorrelated.** The subquery's own `WHERE`, if it has one, can only name a column on its own
   `FROM` table — the same "no table name needed" rule a bare single-table query already enforces — so
-  there is no path for it to read a value from the outer query's own row. `EXISTS` and a scalar subquery
-  (`x = (SELECT …)`) both stay unsupported; `IN`'s subquery form is the only one.
+  there is no path for it to read a value from the outer query's own row. A correlated subquery is
+  `EXISTS`'s (below); one that stands for a single value is a scalar subquery (below).
 - **Runs exactly once, as its own complete sub-run of the engine** — its own buffer pool, its own real
   disk reads — before the outer query is planned at all, the same way `EXPLAIN`'s own inner query does.
   Its result becomes an ordinary literal list from that point on: the cost model, the executor, and every
@@ -176,12 +199,60 @@ concept explanation.
   that subquery's result contains even one NULL — the identical three-valued-logic trap a literal
   `NOT IN (1, 2, NULL)` already has, since resolution produces the exact same shape.
 
+## EXISTS subquery
+
+- **`[NOT] EXISTS (SELECT … FROM table [WHERE …])`** (plan.md §27.5 S1) — what the subquery selects is never
+  read (`*`, `1` or a column all do); an aggregate is refused, since with no `GROUP BY` it always returns a row.
+  No `JOIN`/`GROUP BY`/`HAVING`/`ORDER BY`/`LIMIT`/`DISTINCT` inside it, and no subquery inside it.
+- **One level of correlation, through one equality.** Every column in the subquery names its table. The first
+  equality between one of its own columns and an outer one is the join key; the rest of its `WHERE` naming only
+  its own table filters its scan, and anything naming both is a residual checked on each key-matched pair. A
+  subquery that names the outer query only through something else (`posts.authorId > authors.id`) is refused.
+- **A semi-join or an anti-join**, placed after every `JOIN` in the query and run by any of the four join
+  algorithms — chosen by cost when nothing forces one. An index nested-loop needs the subquery to have no
+  condition of its own on its table (an index probe has nowhere to apply it), and falls back to a nested-loop.
+  The estimate assumes *containment*: `min(1, distinct inner keys ÷ distinct outer keys)` of the outer rows match.
+- **Uncorrelated, it runs once**, as `SELECT * FROM table WHERE … LIMIT 1`, its own sub-run of the engine; the
+  WHERE clause's narration says what it found.
+- **Only in a `SELECT`'s `WHERE`, as a condition joined by `AND`** (or under one `NOT`). Its table must not be
+  one the outer query already has, or one another `EXISTS` in the query reads — by name: an alias (plan.md §27.5
+  S7) lets a subquery read the outer query's own table, `FROM customers r WHERE r.referrer = c.id`.
+
+## Scalar subquery
+
+- **`(SELECT one_column FROM …)` where a value goes** (plan.md §27.5 S6) — `WHERE`, `HAVING`, a computed column, an
+  `UPDATE … SET` value; in `SELECT`, `DELETE` and `UPDATE`. Not inside an `EXISTS` subquery, and not as a set
+  operation (`(SELECT a … UNION SELECT b …)`). Inside, any one-column SELECT the engine runs.
+- **Runs exactly once, before planning**, its own sub-run of the engine like an `IN` subquery's, and becomes the
+  literal it returned: the planner, the cost model and every rewrite rule see a constant, so `constant-folding` can
+  fold `(SELECT MAX(qty) FROM orders) - 1` and an index can serve a comparison with it.
+- **At most one row.** No row is `NULL`; two or more is an error, as in PostgreSQL (SQLite takes the first — the
+  `scalar-subquery-many-rows` ledger entry).
+- **Never correlated** (plan.md §27.10): it cannot read the outer query's rows. A qualified reference to an outer
+  table is refused at parse time, an unqualified one when the subquery's own table has no such column, and both
+  errors point at `EXISTS`.
+
+## UNION, INTERSECT, EXCEPT
+
+- **Combined left to right**, every SELECT returning as many columns as the first, matched by position (plan.md
+  §27.5 S3). `INTERSECT` is never mixed with `UNION` or `EXCEPT`; `ALL` is accepted on `UNION` only.
+- **Each member is planned on its own**: no rewrite rule crosses the set operation, so a predicate is never pushed
+  from one SELECT into another, and two SELECTs that read the same table are not merged into one scan.
+- **`INTERSECT` and `EXCEPT` run by hash only** — the right-hand SELECT into a hash set; `UNION`'s duplicate removal
+  follows the hash-or-sort choice `SELECT DISTINCT` already has. No partitioned or spilled hash set: it lives in memory,
+  the same simplification `HashAggregate` makes.
+- **A SELECT in parentheses is not accepted**, so there is no grouping but left to right, and no `ORDER BY` or `LIMIT`
+  on one member.
+
 ## GROUP BY and aggregates
 
-- `COUNT(*)`, and `COUNT`/`SUM`/`AVG`/`MIN`/`MAX` over a column.
+- `COUNT(*)`, and `COUNT`/`SUM`/`AVG`/`MIN`/`MAX` over a column — each with `DISTINCT` if you like (plan.md §27.5
+  S5), which reads each distinct non-NULL value once.
 - **Two strategies** — a hash aggregate (default) and a sort aggregate, which sorts the input on
   the `GROUP BY` columns first, spilling through the buffer pool exactly as `ORDER BY` does. Same
-  groups out either way; [Compare](/compare)'s aggregate mode scores the difference in I/O.
+  groups out either way; [Compare](/compare)'s aggregate mode scores the difference in I/O. For a `DISTINCT`
+  aggregate the hash one keeps a set of values per group, and the sort one adds the column to its sort key — (group,
+  value) — so repeats sit together; two `DISTINCT` aggregates over different columns make it keep sets as well.
 - **`ORDER BY` sorts the groups**, by a grouped column or an aggregate, in a `Sort` above the aggregate. It is
   never dropped, even when a sort aggregate has already left the groups in that order: the plan stays a literal
   reading of the query. A sort aggregate and the `Sort` above it each spill to scratch pages of their own.
@@ -201,6 +272,19 @@ index entries of the rows it touches.
   equi-depth histogram over what is left, and how much the column's own order tracks the table's
   physical row order (correlation, `-1` to `1`; a [clustered table](/docs/concepts/btree) achieves
   exactly `1` on its clustering key). Shaped after PostgreSQL's own `pg_stats`.
+- **How many buckets is yours to choose** (plan.md §27.5 T5): `ANALYZE table WITH n BUCKETS`, 1 to 100, and 10
+  without it (PostgreSQL's default target is 100; MySQL's own histograms default to 100 buckets too). A column
+  with fewer values left to split gets fewer. [Histograms](/tools/histograms) draws the buckets the engine's own
+  `ANALYZE` builds over a column and reads a range estimate off them at every bucket count from 1 to 100, against
+  the rows really there: on the transactions preset's even amounts the count hardly matters, and on two columns
+  made there — one skewed, one in three dense bands — it does — 30× off with one or two buckets on a range in a gap — and not monotonically: a
+  narrow range at a bucket's edge can be guessed worse with more buckets. Its estimate is the one `EXPLAIN` gives
+  the same range after the same `ANALYZE`, which a test holds.
+- **A column bounded from both sides is one range.** `amount BETWEEN 100 AND 400` — or
+  `amount >= 100 AND amount <= 400` — is priced as one bounded range on `amount`, the way an index range scan always priced it, not as the
+  product of two half-open ranges, which counts the rows outside each bound twice. Until plan.md §27.5 T5 a
+  sequential scan's filter did multiply them: 230 rows estimated for the 183 in that range, where the bounded
+  range says 181.
 - **The result *is* the statistics** — one row per column — shown in the same Result panel any
   other query's answer would be. There is no separate stats panel to open; opening the result is
   opening the statistics.
@@ -227,6 +311,99 @@ index entries of the rows it touches.
   `employees` headline query measures **11×**. Nothing here *corrects* for the correlation; naming
   it honestly is the whole feature.
 
+## Parallel execution
+
+- **[Parallel execution](/tools/parallel) is a model, not threads** (plan.md §27.5 P1). A scan, a filter and an
+  aggregate on the transactions preset — `SELECT [grouped columns,] aggregates FROM one table [WHERE …] [GROUP BY …]`
+  — are cut into **morsels** of 1 to 64 pages and run by 1 to 8 workers, after Leis et al.'s *Morsel-Driven
+  Parallelism*. Each worker aggregates what it reads into a partial result; once every morsel is done, one worker
+  merges the partials. Nothing runs in parallel in the browser and nothing waits on a timer: time is **ticks**,
+  counted, and each worker's speed is a number you set, so the same settings always draw the same timeline.
+- **What a tick buys:** reading a page is one tick and each row that passes the filter one more; a worker of speed
+  3 takes three times as long. Every page has a home — the table cut into one equal range per worker, the paper's
+  NUMA nodes — and reading a page from another worker's memory costs a second tick. Taking a morsel costs a tick,
+  stealing one two, and the merge a tick per group per partial result. The speedup is one full-speed worker's ticks,
+  with no dispatching and no merge, over the run's.
+- **Three dispatchers:** *static ranges* give each worker its home range and never rebalance — every read local, and
+  a slow worker or a range where the matching rows cluster decides the end; a *shared queue* hands the next morsel
+  to whoever is free — balanced, but most pages a worker reads are another's; *work stealing* gives each worker a
+  queue of its own range's morsels and lets one that runs out take the last morsel of the longest queue. The merged
+  answer is held, by a test over random queries, worker counts, dispatchers, morsel sizes and speeds, to be the rows
+  the engine returns running the query alone. `COUNT(DISTINCT …)` is refused: partial distinct counts do not add up.
+- **Exchange operators and a parallel hash join** (plan.md §27.5 P2), the same page's second section: `SELECT *` or
+  `SELECT COUNT(*) FROM a JOIN b ON a.x = b.y` on 1 to 8 workers, each table starting spread over them in equal
+  ranges. The hash table is built on the smaller side. **Broadcast** copies that side to every worker and leaves the
+  other where it lies; **repartition** hashes every row of both sides on the join key and sends it to that key's
+  worker; a **gather** brings the results to the first worker — every row for `SELECT *`, one partial count each
+  for `COUNT(*)`. A tick moves a row, inserts one into a hash table, or probes one (and one more per match), and each
+  phase — exchange, build, probe, gather — ends when its slowest worker does. The page shows the rows each worker sent
+  each other as a table, what each then holds, and the other strategy's figures beside the chosen one's. On the
+  join-order demo's tables and two made there (2,000 orders, 3,000 payments): broadcast wins small with big,
+  repartition big with big, and a key with five values cannot fill eight workers however it is hashed. The count is
+  held to the engine's own over every preset join, strategy and worker count, and to a nested loop's over random
+  tables.
+- **Serial against parallel** (plan.md §27.5 P3) is a mode of [Compare](/compare?mode=parallel): one query on the
+  transactions preset, run once by the engine as its own plan says, and by 1 to 8 full-speed workers in the morsel
+  model — the ticks side by side, and a table of speedup, efficiency, what **Amdahl's law** predicts from the
+  one-worker run's serial fraction (its merge), and the **Karp–Flatt** serial fraction each measured speedup implies.
+  Grouped by status (2 groups) it scales nearly linearly; by `id` (3,000 groups) the merge is 44% of the work, the
+  same however many workers, and Amdahl's law predicts the run within 3%; by account (40 groups) every worker meets
+  every group, the merge grows with the workers, and the Karp–Flatt fraction climbs — 4.66× on eight against Amdahl's
+  7.46. The speedup is against the same query on one worker under the same dispatcher and morsel size, so dispatching
+  counts on both sides.
+- **Not modelled:** contention for the shared queue (taking a morsel costs the same however many workers want one),
+  the memory each partial result takes, caches, and any operator past the aggregate. A join, `ORDER BY` or `LIMIT` is
+  refused rather than run serially in disguise.
+
+## Distributed databases
+
+- **[Partitioning](/tools/partitioning)** (plan.md §27.5 X1) spreads the transactions preset's 3,000 rows over 2 to
+  10 nodes by `id` (every key different) or `account` (40 keys of 75 rows). **Hash** puts a row on node
+  `hash(key) mod n`; **range** cuts the keys into one equal-depth range per node, and a node that joins takes the
+  upper half of the fullest range while one that leaves hands its range to a neighbour; **consistent hashing** puts
+  each node on a ring at 1 to 64 points and gives a row to the first point clockwise from its key's hash. Add a node
+  or take one away and the page counts the rows that move, against the least any change must move (a newcomer's fair
+  share, or every row of the node that leaves), shows each node's rows before and after with the skew (the fullest
+  node over the average), draws the ring or lists the ranges, and says where the next 300 rows would land — under
+  range partitioning by `id`, all on the last node. The hash is FNV-1a with MurmurHash3's finalizer, so alike strings
+  land far apart on the ring. A property test holds that range and consistent hashing only ever move rows onto a
+  joining node or off a leaving one. A node is a number: there is no network, no replication, and nothing fails.
+- **A join across the nodes** (plan.md §27.5 X4) is the same page's second section: 2,000 orders and 3,000 payments
+  (the parallel tool's two big tables), each partitioned as you choose — by hash, range or the ring, of the join
+  column or another — joined on `orders.id = payments.orderId` over 2 to 10 nodes, and priced in **rows over the
+  network** three ways. **Co-located** — both tables spread by the same hash (or the same ring) of their own join
+  columns — moves nothing; ranges never count, since each table's ranges are cut from its own keys. A **broadcast**
+  copies the smaller table to every other node; a **shuffle** sends each row whose key hashes to another node. The
+  page shows each strategy's rows moved, its busiest node's share, and its matches, which a property test holds to a
+  join of the two tables in one place for every strategy and partitioning.
+- **[Two-phase commit](/tools/2pc)** (plan.md §27.5 X2) runs one transaction's commit across a coordinator and 2
+  to 5 participants, with **presumed abort**, as a script: each participant's vote, a crash of the coordinator at one
+  of five points (before PREPARE, after it, with every vote in, after logging COMMIT, after telling one participant),
+  a crash of a participant before or after its vote, each back after some ticks or never, and one lost message. A
+  message takes a tick; one that reaches a machine that is down is lost too. A participant forces PREPARED before it
+  votes yes and is **in doubt** from then until it learns the decision; the coordinator forces COMMIT, which is the
+  moment of commit, and writes END once every acknowledgement is in. An abort is never forced or acknowledged: a
+  coordinator that recovers to a log with no decision has forgotten the transaction, and answers anyone who asks
+  with ABORT. Timers: votes 5 ticks, a participant's question every 4, COMMIT resent every 4, a participant that
+  never heard PREPARE gives up at tick 12, and the run ends at 60. The page draws each machine's lane, every message,
+  log write and crash, and each participant's time in doubt. Two property tests over random scripts hold it **atomic**
+  — no participant commits where another aborts, and none commits before the coordinator's COMMIT — and **live**
+  whenever every crashed machine comes back. A coordinator that logs COMMIT and never returns leaves every participant
+  in doubt for good: two-phase commit's blocking, drawn, not fixed (three-phase commit is not modelled).
+- **[Raft](/tools/raft)** (plan.md §27.5 X3) runs leader election and log replication on three or five servers,
+  after the paper's Figure 2, over a scripted schedule: a seed draws each election timeout (12 to 23 ticks) and each
+  message's delay (1 to 3), a drop rate loses that share of messages, and you choose a partition (which servers are
+  cut off, from when to when) and a crash (which server, down from when to when). A leader sends AppendEntries every 4
+  ticks; a new leader appends a no-op (§8, which can be turned off); a server votes only for a candidate whose log is
+  at least as up to date as its own; a leader commits by counting only entries of its own term; and `currentTerm`,
+  `votedFor` and the log survive a crash. The client sends each command to the leader it last knew, and a command
+  that finds none is lost. The page draws each server's role over time, every log at any tick, and checks the paper's
+  four safety properties on the run — **election safety, log matching, leader completeness and state machine
+  safety** — which property tests also assert over hundreds of seeded random schedules of losses, partitions, crashes
+  and commands; a test pins a schedule that elects two leaders in one term if a recovering server forgets its vote,
+  and the commit rule is tested on the paper's Figure 8 state. **Not modelled**, and said so on the page: membership
+  changes, snapshots and log compaction, client sessions and retries, and read leases.
+
 ## Locks
 
 - **Page-level**, coarse-grained: one shared read lock per page, taken and released as a scan or
@@ -235,6 +412,21 @@ index entries of the rows it touches.
   on another there. The panel draws what a real engine's lock manager would be doing. The enforced
   version is the [locks sandbox](/tools/locks) (two transactions placing lock requests directly) and
   [Transaction schedules](/tools/schedule) (the same lock table applied to real statements).
+
+- **Five modes over a hierarchy** (plan.md §27.5 T2) in the enforced lock table: `IS`, `IX`, `S`, `SIX` and `X` on
+  a table → page → row hierarchy. In [Transaction schedules](/tools/schedule) every page or row lock sits under an
+  intention lock on each resource above it, taken top down — IS above a read, IX above a write, so `SELECT` under
+  row locks holds IS on the table, IS on the page and S on the row. The compatibility matrix is **computed, not
+  typed in**: each mode is what it lets its holder do to the whole resource and below it (S reads the whole, X writes
+  it, an intention touches nothing at this level and says what it will lock below, SIX is S plus IX), and two modes
+  conflict when one writes something the other reads or writes. A transaction holds one mode per resource: asking for
+  more asks for the weakest mode covering both (S held, IX asked: SIX). At `READ COMMITTED` a statement's IS locks go
+  with its S locks. The [locks sandbox](/tools/locks) offers all five modes on its pages and draws the matrix.
+- **Lock escalation** is off unless asked for (*Escalation* on the schedules page, `e` in its link): past 2 or 5
+  row (or page) locks on one table, a transaction asks for one lock on the whole table instead — S if it has only
+  read there, X if it has written — and, once granted, lets its finer locks go. Fewer locks to keep, and every other
+  transaction's intention on that table now waits, a reader of a row nobody touched included. No real engine
+  escalates this early; SQL Server's threshold is about 5,000 locks.
 
 ## Transactions
 
@@ -269,6 +461,21 @@ index entries of the rows it touches.
   `WHERE` as a **predicate lock** until the transaction ends: a write that would add a matching row waits for
   it, whatever level the writer runs at. The schedule has a default level, and a transaction may ask for its
   own with `BEGIN ISOLATION LEVEL …`. The page names each anomaly when it happens.
+- **Next-key locks** (plan.md §27.5 T3) are InnoDB's answer to the phantom, under row locks with *Gap locks: Next-key*
+  (`g=1` in the link). At `REPEATABLE READ` and `SERIALIZABLE` a statement locks each index record it reads — S to
+  read, X to change, the record that ends its range included — **and the gap below it**, and the gap past the last
+  key when it reads to the end. A full scan walks the table's first unique index, so it locks every record and every
+  gap; a range scan locks only its own; a lookup of a whole unique key that finds its row locks just the row, since
+  no other row can ever have that key. An `INSERT` — or an `UPDATE` that moves a key — asks for **X on the gap** its
+  new key goes into, in every index, and waits for any S another transaction holds there: so a row cannot appear
+  where a transaction read, and `REPEATABLE READ` has no phantom. Gap locks never wait for one another, and two
+  inserts into one gap do not either: each holds its X only while it inserts, then gives it back — or back to the S
+  it already had, and then its new key has split the gap and it holds both halves. A deleted key stays in the index
+  until the schedule ends, so a gap never widens out from under a lock on it. `SERIALIZABLE` takes no predicate lock
+  here — the gaps already do its work — and `READ COMMITTED` and below lock no gaps, as in InnoDB, though their
+  inserts still wait for others' gap locks. Each step draws the locks on the index's leaf level, keys in order with a
+  gap between every two. A test holds it to the precedence graph: no fuzzed schedule at either level has a cycle,
+  a phantom or a changed re-read.
 - **With versions (MVCC)** a row is a chain of versions, each stamped with the transaction that made it (`xmin`)
   and the one that deleted or replaced it (`xmax`), and a reader takes **no lock at all**: it sees, for every
   row, the version its *snapshot* can see — one created by a transaction that had committed when the snapshot was
@@ -294,7 +501,8 @@ index entries of the rows it touches.
   aborted and intermediate reads, circular information flow, observed-transaction-vanishes,
   predicate-many-preceders, lost update, read skew, and write skew on an item and on a predicate — at the four
   levels on three engines: locks, snapshots, and InnoDB, which is built from the other two level by level — and,
-  at `REPEATABLE READ`, lets a write work from the latest committed row where PostgreSQL's refuses it. Each cell is
+  at `REPEATABLE READ`, lets a write work from the latest committed row where PostgreSQL's refuses it, and at
+  `SERIALIZABLE` keeps phantoms out with next-key locks rather than the locks engine's predicate lock. Each cell is
   a three-transaction schedule that was *run*, and the anomaly is judged by what its transactions saw and wrote.
   The results are held, in a test, against what PostgreSQL (for versions), SQL Server's locking levels (for locks)
   and MySQL (for InnoDB) publish: 79 of 80 cells agree for the first two, and the one that does not — `OTV` at
@@ -325,6 +533,18 @@ index entries of the rows it touches.
   table it leaves is one a serial run could leave, because each transaction read something no serial order would
   have shown it. It is a check on one run, not a proof about the protocol; the protocols that claim
   serializability are held to it, in tests, over thousands of fuzzed schedules.
+- **The precedence graph** (plan.md §27.5 T1) on [Transaction schedules](/tools/schedule) draws the same run the
+  textbook way: a node for each committed transaction, and an edge for each pair of conflicting operations on a
+  row — **ww**, **wr**, **rw** — with a cycle named when there is one. Edges come from the version of each row a
+  statement actually *saw*, so the graph is the multiversion one, and under snapshots a read that ran after a write
+  but did not see it is an **rw** edge, not a **wr**. A statement reads by its `WHERE`: only rows it picks out count,
+  and a row inserted later that it would have picked out is a conflict too (a phantom); a statement with a join or a
+  subquery reads every row. Three things it cannot draw, being over committed transactions only, are listed beneath
+  it: a read of a version no committed transaction kept (G1a, G1b), and a table a rollback left holding something
+  other than every row's last committed version. It is held against the replay check on every Hermitage cell and on
+  thousands of random schedules under every protocol: no cycle and nothing unseen always means a serial order
+  explains the run, and a run no order explains always shows a cycle or something unseen. The two can differ one
+  way — a cycle the replay check passes, because the values happened to agree — and the page says so when they do.
 - **A row another open transaction has deleted or re-keyed** keeps its old image, still locked, until that
   transaction ends — otherwise a lookup for the old key finds nothing, touches no page, takes no lock, and
   reads a change nobody committed.
@@ -332,8 +552,9 @@ index entries of the rows it touches.
   executor reading them (it does not skip invisible tuples, and the index has no entries for dead versions),
   and a wait for another session's uncommitted row on a `UNIQUE` key — a duplicate is rejected at once, where a
   real engine would wait to find out whether the other insert commits. The predicate lock is a *toy*: it
-  matches a `WHERE` against the rows a write would add, which is enough for these tables and nothing like an
-  index-range or next-key lock.
+  matches a `WHERE` against the rows a write would add, which is enough for these tables; next-key locks are the
+  real thing, and replace it where they are on. They are not modelled under versions: InnoDB's `REPEATABLE READ`
+  writes take next-key locks too, and the matrix's InnoDB column does not.
 - A statement outside `BEGIN … COMMIT` is its own transaction. A statement that fails changes nothing and
   leaves the transaction open, as MySQL does; PostgreSQL would instead refuse everything until
   `ROLLBACK`. There are no savepoints.
@@ -444,11 +665,32 @@ constant folding, predicate pushdown, join predicate pushdown, and the index-onl
 structural match alone; the cost estimates shown beside those plans only justify the narration, they do not
 decide whether the rewrite happens.
 
+## Narration detail
+
+The Playground's narration has three levels (plan.md §27.5 L2), chosen in the Narration box, by `detail=` in a link,
+or as a default in [Settings](/settings):
+
+- **Standard** is the engine's own sentence for each step.
+- **Novice** adds a sentence in plain words, but only on the first step of each kind in a trace: the first buffer
+  miss, the first index descent, the first rewrite of each rule. Later steps of that kind are told as standard.
+- **Expert** replaces the sentence with a line built from the step's recorded fields alone: page and frame numbers,
+  the key a node compared, the plan on one line, the counters at the result. It says nothing the event did not
+  record, so it is terser than standard, and sometimes less. A traverse step's separators, or the rows a scan has
+  rejected so far, are in the sentence and not in the event.
+
+Only the Playground's narration line (and its presenter view) changes. [The trace inspector](/trace), the
+transcript and the printed worksheet are always told as standard. The levels change words only: what a step
+shows, and every panel, is the same at all three. There is no translation. The `{key, params}` the levels are
+looked up by is the half of plan.md §25.4 H5's refactor that L2 shares, and a locale would still need the
+parameters that today appear only in a sentence.
+
 ## What's out of scope entirely
 
-No subqueries anywhere but an uncorrelated `IN (SELECT …)` (plan.md §25.4 C3, closing C3 — no `EXISTS`, no
-scalar subquery like `x = (SELECT …)`, no correlated subquery). No `RIGHT`/`FULL`/`CROSS` join, no transactions in
+Subqueries in three places only: `IN (SELECT …)` (uncorrelated, plan.md §25.4 C3), `[NOT] EXISTS` (plan.md §27.5
+S1 — correlated through one equality, as a semi- or anti-join), and a scalar subquery used as a value (S6,
+uncorrelated). No correlated subquery outside `EXISTS`, and none in `FROM`. A SELECT list may not name one column twice (`SELECT n, n`): a result row is
+keyed by column name, so the second would overwrite the first. No `USING` or `NATURAL` join, no transactions in
 the Playground (they exist only in [Transaction schedules](/tools/schedule)), no real
-concurrency there (the Locks panel is visual only). `UNION` and `COUNT(DISTINCT …)` are also not accepted.
+concurrency there (the Locks panel is visual only). `INTERSECT ALL` and `EXCEPT ALL` are also not accepted.
 These are deliberate exclusions for this release, not bugs — see the parser's own error messages in
 [Supported SQL](/docs/reference/sql) for exactly which keywords are recognised and rejected.
