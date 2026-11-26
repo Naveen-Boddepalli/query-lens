@@ -1,4 +1,5 @@
-@import 'tailwindcss';
+/* Scope Tailwind scanning to src/ so prose in docs/, CHANGELOG.md and plan.md cannot emit unused utilities into app CSS. */
+@import 'tailwindcss' source('.');
 @plugin '@tailwindcss/typography';
 
 /**
