@@ -8,6 +8,7 @@
  * tree is unaffected by the fact that it is being watched.
  */
 
+import type { StatementLog } from '../recovery/engineLog.ts';
 import type { Emit } from '../trace.ts';
 import type { EngineOptions, Row, SqlValue, Table } from '../types.ts';
 import type { Expr } from '../parser/index.ts';
@@ -30,6 +31,8 @@ export interface Operator {
 
 export interface ExecContext {
   emit: Emit;
+  /** A logged write's hold on the write-ahead log (plan.md §28.5 I2): each row it changes is logged before it is made. */
+  log?: StatementLog;
   pool: BufferPool;
   locks: LockManager;
   /** The `FROM` table — or a `Join`'s left side, when the plan has one. */
@@ -204,6 +207,12 @@ export function rangeHolds(row: Row, plan: { column: string; prefix?: SqlValue[]
 }
 
 /** The row an index entry points at, read out of `heap` — this query's own, unless a join's other side is meant. */
+/** The fixed slot of the row at `pointer`, on a logged heap (plan.md §28.5 I2); elsewhere, its place on the page. */
+export function ridOf(ctx: ExecContext, pointer: RowPointer): number {
+  const page = ctx.heap.pages.find((p) => p.pageId === pointer.pageId);
+  return page?.rids?.[pointer.slot] ?? pointer.slot;
+}
+
 export function rowAt(ctx: ExecContext, pointer: RowPointer, heap: Heap = ctx.heap): Row | null {
   const page = heap.pages.find((p) => p.pageId === pointer.pageId);
   return page?.rows[pointer.slot] ?? null;

@@ -463,18 +463,24 @@ const T = (name: string): string => `src/pages/tools/${name}.tsx`;
  *  - 2026-11-26, the trace ceiling (plan.md §28.5 I1): the tracer's running totals and `TraceCut` are engine code
  *    every route that runs a query loads, and they put / at 184.4 kB of its 184: 184 → 188, measured + 3, rounded up.
  *    Nothing else moved over its ceiling.
+ *  - 2026-11-26, the engine logs (plan.md §28.5 I2): the statement log and the dialog's operations are not in the
+ *    engine — `runQuery` takes them with the log, from the lazy Durability dialog — but the pool's attachment point,
+ *    the two new buffer steps (`log`, `flush`) and their narration are, and they put /stages, /stages/:id, /trace and
+ *    /tools/isolation 0.1–0.4 kB over; limits.mdx's longer Durability section put the docs chunk 0.5 kB over. Each
+ *    is set to measured + 3, rounded up. The Durability chunk now carries the engine-side log as well as the
+ *    dialog's ARIES operations: 23.8 kB, so 17 → 27.
  */
 export const ROUTES: readonly RouteBudget[] = [
   { route: '/', roots: [P('LandingPage')], kb: 188, note: 'the landing page' },
   { route: '/playground', roots: [P('PlaygroundPage')], kb: 362, note: 'the Playground: the editor, every stage panel, the engine — the heaviest route, and the one most people land on' },
-  { route: '/stages', roots: ['src/ui/StagesLayout.tsx', P('StagesIndex')], kb: 185, note: 'the stage explainers, index' },
-  { route: '/stages/:id', roots: ['src/ui/StagesLayout.tsx', P('StagePage')], kb: 222, note: 'one stage explainer' },
+  { route: '/stages', roots: ['src/ui/StagesLayout.tsx', P('StagesIndex')], kb: 189, note: 'the stage explainers, index' },
+  { route: '/stages/:id', roots: ['src/ui/StagesLayout.tsx', P('StagePage')], kb: 226, note: 'one stage explainer' },
   { route: '/learn', roots: [P('LearnPage')], kb: 120, note: 'the lesson track' },
   { route: '/learn/:id', roots: [P('LessonPage')], kb: 222, note: 'one lesson' },
   { route: '/examples', roots: [P('ExamplesPage')], kb: 117, note: 'preset queries' },
   { route: '/gallery', roots: [P('GalleryPage')], kb: 185, note: 'named moments' },
   { route: '/compare', roots: [P('ComparePage')], kb: 199, note: 'index vs scan, policy vs policy, hash vs sort, join algorithms, B+Tree vs. LSM' },
-  { route: '/trace', roots: [P('TracePage')], kb: 188, note: 'the trace inspector' },
+  { route: '/trace', roots: [P('TracePage')], kb: 192, note: 'the trace inspector' },
   { route: '/progress', roots: [P('ProgressPage')], kb: 122, note: 'the progress dashboard' },
   { route: '/practice', roots: [P('PracticePage')], kb: 198, note: 'generated questions with engine-computed answers, and a Leitner schedule' },
   { route: '/challenges', roots: [P('ChallengesPage')], kb: 209, note: 'challenge index' },
@@ -490,7 +496,7 @@ export const ROUTES: readonly RouteBudget[] = [
   { route: '/tools/sort', roots: [T('SortToolPage')], kb: 128, note: 'external merge sort' },
   { route: '/tools/planner', roots: [T('PlannerToolPage')], kb: 220, note: 'planner sandbox' },
   { route: '/tools/locks', roots: [T('LocksToolPage')], kb: 131, note: 'lock simulator' },
-  { route: '/tools/isolation', roots: [T('IsolationToolPage')], kb: 200, note: 'the Hermitage isolation matrix (both engines, computed)' },
+  { route: '/tools/isolation', roots: [T('IsolationToolPage')], kb: 204, note: 'the Hermitage isolation matrix (both engines, computed)' },
   { route: '/tools/recovery', roots: [T('RecoveryToolPage')], kb: 132, note: 'crash recovery: checkpoints, a crash, and ARIES analysis, redo and undo' },
   { route: '/tools/wal', roots: [T('WalToolPage')], kb: 132, note: 'write-ahead log: a pool, a disk, a log and the rule between them' },
   { route: '/tools/concurrency', roots: [T('ConcurrencyToolPage')], kb: 203, note: 'one schedule under five concurrency-control protocols, each really run' },
@@ -508,11 +514,11 @@ export const ROUTES: readonly RouteBudget[] = [
   { route: '/tools/columnar', roots: [T('ColumnarToolPage')], kb: 129, note: 'NSM/DSM/PAX row vs. column storage sandbox' },
   { route: '/tools/vector-index', roots: [T('VectorIndexToolPage')], kb: 129, note: 'brute force vs. IVF vs. HNSW vector search' },
   { route: '/tools/latch-crabbing', roots: [T('LatchCrabbingToolPage')], kb: 197, note: 'latch crabbing: naive vs. lock coupling vs. optimistic coupling on a scripted B+Tree workload' },
-  { route: '/docs', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 192, note: 'the docs shell and every prose page (one shared chunk)' },
+  { route: '/docs', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 196, note: 'the docs shell and every prose page (one shared chunk)' },
   { route: '/docs/concepts/btree', roots: ['src/ui/DocsLayout.tsx', 'src/pages/DocsContent/concepts/btree.mdx'], kb: 213, note: 'a concept page with a live B+Tree widget' },
-  { route: '/docs/essays/index-write-tax', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 192, note: 'an essay: prose, with links into the B+Tree sandbox (plan.md §25.4 H2)' },
-  { route: '/docs/essays/repeatable-read', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 192, note: 'an essay: prose, with links into the isolation matrix and the schedule tool (plan.md §25.4 H2)' },
-  { route: '/docs/essays/scan-resistance', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 192, note: 'an essay: prose, with links into the buffer-pool sandbox under LRU and LRU-2 (plan.md §25.4 H2)' },
+  { route: '/docs/essays/index-write-tax', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 196, note: 'an essay: prose, with links into the B+Tree sandbox (plan.md §25.4 H2)' },
+  { route: '/docs/essays/repeatable-read', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 196, note: 'an essay: prose, with links into the isolation matrix and the schedule tool (plan.md §25.4 H2)' },
+  { route: '/docs/essays/scan-resistance', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 196, note: 'an essay: prose, with links into the buffer-pool sandbox under LRU and LRU-2 (plan.md §25.4 H2)' },
   { route: '/docs/concepts/buffer-pool', roots: ['src/ui/DocsLayout.tsx', 'src/pages/DocsContent/concepts/buffer-pool.mdx'], kb: 193, note: 'a concept page with a live buffer-pool widget' },
   { route: '/* (404)', roots: [P('NotFoundPage')], kb: 115, note: 'the not-found page' },
 ];
@@ -558,7 +564,7 @@ export const OPT_IN: readonly { key: string; kb: number; note: string; after?: s
   { key: 'src/ui/Footer.tsx', kb: 5, after: 'index.html', note: 'the footer and the docs navigation it maps — below the fold on every page, so fetched after the page itself, not with the shell (§25.4 H8)' },
   { key: 'src/ui/ParallelCompare.tsx', kb: 9, after: 'src/pages/ComparePage.tsx', note: 'Compare’s serial-against-parallel mode (plan.md §27.5 P3): the morsel model and its scaling table — fetched only when that mode is chosen' },
   { key: 'src/ui/narrationDetail.ts', kb: 7, after: 'src/pages/PlaygroundPage.tsx', note: 'the narration\'s novice and expert lines (plan.md §27.5 L2) and the event keys they are looked up by — fetched only when one of those levels is chosen' },
-  { key: 'src/ui/DurabilityDialog.tsx', kb: 17, after: 'src/pages/PlaygroundPage.tsx', note: 'the Durability dialog (§25.4 E4): the write-ahead-log machine, crash and recovery — fetched only when the Playground\'s Durability button is pressed' },
+  { key: 'src/ui/DurabilityDialog.tsx', kb: 27, after: 'src/pages/PlaygroundPage.tsx', note: 'the Durability dialog (§25.4 E4, §28.5 I2): the engine\'s write-ahead log, crash and recovery — fetched only when the Playground\'s Durability button is pressed' },
   { key: 'src/pages/challenges/ScriptChallengeView.tsx', kb: 35, after: 'src/pages/ChallengePage.tsx', note: 'a transaction or durability challenge: the schedule runner, the protocol comparison and the log machine — fetched only when one of those challenges is opened' },
   { key: 'src/pages/challenges/SettingsChallengeView.tsx', kb: 8, after: 'src/pages/ChallengePage.tsx', note: 'a storage, execution or isolation challenge: the form and the runner — no driver; each tool\'s own checks are the rows below, fetched when one of its challenges is opened' },
   ...SETTINGS_TOOL_CHECKS.map(([tool, kb, what]) => ({

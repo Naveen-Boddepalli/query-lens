@@ -28,6 +28,7 @@ import { deleteKey, entryFor, height, indexNameOf, indexSpecsOf, insert, keyText
 import type { RowPointer } from '../index/index.ts';
 import { summarizeSteps } from './delete.ts';
 import { summarizeInsert } from './insert.ts';
+import { ridOf } from './operators.ts';
 
 const UPDATE: WriteVerb = { name: 'UPDATE', does: 'modify' };
 
@@ -150,6 +151,8 @@ export function executeUpdate(plan: Plan, assignments: UpdateAssignment[], ctx: 
     before.push(row);
     after.push(updated);
     produced += 1;
+    // Logged first, then made (plan.md §28.5 I2): the record is in the log buffer before the page changes.
+    ctx.log?.change(pointer.pageId, ridOf(ctx, pointer), row, updated);
 
     const indexDetail = reindexRow(ctx, row, updated, pointer);
     ctx.emit(

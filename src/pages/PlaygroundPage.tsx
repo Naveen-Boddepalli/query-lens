@@ -27,8 +27,7 @@ import { publishRepro } from '../ui/errorReport.ts';
 import { ReportStepLink } from '../ui/ReportStepLink.tsx';
 import type { Moment } from '../ui/stepReport.ts';
 import { PipelineTracker } from '../ui/PipelineTracker.tsx';
-import { appendStep, carryOn, openLog, recordWrite } from '../ui/durableLog.ts';
-import type { DurableLog } from '../ui/durableLog.ts';
+import type { Durability } from '../ui/DurabilityDialog.tsx';
 import { PlaybackControls } from '../ui/PlaybackControls.tsx';
 import { SqlEditor } from '../ui/SqlEditor.tsx';
 import { DataEditor } from '../ui/DataEditor.tsx';
@@ -212,9 +211,9 @@ export function PlaygroundPage() {
   const askToPredict = predictOn && !presenting;
 
   const options = useMemo(() => ({ ...DEFAULT_ENGINE_OPTIONS, policy }), [policy]);
-  // The write statements run here, as log steps (plan.md §25.4 E4). Kept as plain data; the machine runs only when
-  // the Durability dialog is opened.
-  const [durable, setDurable] = useState<DurableLog>(() => openLog(START.db, DEFAULT_ENGINE_OPTIONS.rowsPerPage));
+  // The write-ahead log on the engine's own pool (plan.md §28.5 I2): null while it is off, which it is until the
+  // Durability dialog turns it on. While it is on and holds this database, every write runs through it.
+  const [durability, setDurability] = useState<Durability | null>(null);
   const tableName = DATASETS[datasetId].table;
   const table = db.tables[tableName];
   // Which table **Edit data** opens (plan.md §27.5 S2): the main one, unless a multi-table preset's picker says another.
@@ -399,7 +398,8 @@ export function PlaygroundPage() {
 
   const run = useCallback(
     (database: Database = db) => {
-      const next = ran(sql, runQuery(sql, database, options));
+      const logOn = durability && durability.kit.inSync(durability.log, database) ? { engineLog: { log: durability.log, kit: durability.kit } } : {};
+      const next = ran(sql, runQuery(sql, database, options, logOn));
       setResult(next);
       if (next.error) {
         setTraceDiff({ sql, diff: null });
@@ -424,10 +424,8 @@ export function PlaygroundPage() {
             tables: { ...database.tables, [next.write.table]: { ...target, rows: next.write.rows } },
           });
           markEdited(next.write.table);
-          const write = next.write;
-          setDurable((log) =>
-            recordWrite(log, database, sql, { table: write.table, kind: write.kind, rows: write.rows }),
-          );
+          const leftLog = next.engineLog;
+          if (leftLog) setDurability((d) => (d ? { ...d, log: leftLog } : d));
         }
       }
 
@@ -443,7 +441,7 @@ export function PlaygroundPage() {
         }
       }
     },
-    [sql, db, options, playback, predictOn],
+    [sql, db, options, playback, predictOn, durability],
   );
 
   function applyRows(rows: Row[]) {
@@ -719,7 +717,7 @@ export function PlaygroundPage() {
               </>
             )}
             <button type="button" onClick={() => { setDurabilityOpen(true); }} className={btnSecondary}>
-              Durability{durable.statements.length > 0 ? ` (${String(durable.statements.length)})` : ''}
+              Durability{durability && durability.log.statements.length > 0 ? ` (${String(durability.log.statements.length)})` : ''}
             </button>
             <label className="ml-auto flex items-center gap-2 text-label text-ink-dim">
               Eviction
@@ -974,16 +972,16 @@ export function PlaygroundPage() {
         <Suspense fallback={null}>
           <DurabilityDialog
             db={db}
-            log={durable}
-            onAppend={(step) => { setDurable((log) => appendStep(log, step)); }}
-            onRestart={() => { setDurable(openLog(db, options.rowsPerPage)); }}
-            onUse={(recovered, heap) => {
+            options={options}
+            durability={durability}
+            onChange={(next, recovered) => {
+              setDurability(next);
+              if (!recovered) return;
+              // What the log holds is what the Playground holds: a rollback, a crash or a recovery changes the rows.
               setDb(recovered);
-              // Recovery rewrites whichever tables the log touched; carrying every one in the link is the safe reading.
+              // It may rewrite whichever tables the log touched; carrying every one in the link is the safe reading.
               setEditedTables(new Set(Object.keys(recovered.tables)));
-              setDurable((log) => carryOn(log, recovered, heap));
-              setDurabilityOpen(false);
-              // A read can show the recovered rows at once; a write must not be run a second time.
+              // A read can show the rows at once; a write must not be run a second time.
               const again = ran(sql, runQuery(sql, recovered, options));
               if (!again.write) {
                 setResult(again);

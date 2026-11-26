@@ -21,6 +21,7 @@ import type { ExecContext } from './operators.ts';
 import { indexLookupMatches, indexRangeMatches } from './writeScan.ts';
 import type { Match, WriteVerb } from './writeScan.ts';
 import { passes } from './evaluate.ts';
+import { ridOf } from './operators.ts';
 import { deleteKey, entryFor, indexNameOf, indexSpecsOf, keyText, keyValuesOf } from '../index/index.ts';
 import type { DeleteStep, RowPointer } from '../index/index.ts';
 
@@ -113,6 +114,7 @@ export function executeDelete(plan: Plan, ctx: ExecContext): DeleteOutcome {
 
   let produced = 0;
   for (const { row, pointer } of matched) {
+    ctx.log?.change(pointer.pageId, ridOf(ctx, pointer), row, null);
     const indexDetails = deleteFromIndex(ctx, row, pointer);
     produced += 1;
     ctx.emit(

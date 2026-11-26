@@ -68,6 +68,9 @@ export function eventKey(e: StepEvent): EventKey {
           };
         case 'sweep':
           return { key: 'buffer.sweep', params: { frame: e.frameId, usage: e.usageCountAfter, hand: e.clockHand } };
+        case 'log':
+        case 'flush':
+          return { key: `buffer.${e.action}`, params: { page: e.pageId, lsn: e.lsn } };
         default:
           return { key: `buffer.${e.action}`, params: { page: e.pageId, frame: e.frameId } };
       }

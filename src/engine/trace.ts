@@ -62,6 +62,8 @@ export function countBufferStep(stats: BufferStats, event: BufferBody): BufferSt
       return { ...stats, evictions: stats.evictions + 1, writes: stats.writes + (event.writtenBack ? 1 : 0) };
     case 'load':
     case 'sweep':
+    case 'log':
+    case 'flush':
       return stats;
   }
 }

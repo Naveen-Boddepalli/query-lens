@@ -347,9 +347,10 @@ export const TRANSACTION_STEPS: Record<string, LessonStep[]> = {
       heading: 'The same machine, behind a real UPDATE',
       body: (
         <>
-          In the Playground, a write you run is also a transaction in a log over the table&apos;s own pages — one row to
-          a cell. Open the {code('UPDATE')}, press <strong>Run</strong> to make the edit, then press{' '}
-          <strong>Durability</strong> to commit it or leave it open, write a page, crash, and recover.
+          The Playground can log its writes on the engine&apos;s own buffer pool — one row to a cell of the table&apos;s own
+          pages. Open the {code('UPDATE')}, press <strong>Durability</strong> and turn the log on, close it and press{' '}
+          <strong>Run</strong> to make the edit, then open <strong>Durability</strong> again to commit it or leave it
+          open, write a page, crash, and recover.
         </>
       ),
       open: {

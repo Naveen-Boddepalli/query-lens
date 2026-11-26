@@ -24,6 +24,15 @@ Work toward **v4** (plan.md §28), on `version/v4`.
   checked against the engine again in `exchangePresets.test.ts` instead of being skipped. The `optimal` policy's
   rehearsal sees every page read, kept or not, so what it evicts never changes. The ceiling is twenty times the
   longest preset trace (9,749 steps), so no preset, lesson or challenge is cut.
+- **The engine logs** (plan.md §28.5 I2). The Playground's *Durability* dialog now turns on a write-ahead log on the
+  engine's own buffer pool, off until you do. With it on, each `INSERT`, `UPDATE` and `DELETE` logs every row it
+  changes before its page changes; the page takes a pageLSN and its frame is dirty; and a dirty page the pool evicts is
+  written only after the log is flushed through it, each shown as a step of the trace. Steal and force are pool
+  options. A checkpoint truncates the log behind the oldest record a restart could need. Each statement is a
+  transaction left open, to commit, roll back, crash and recover in the dialog, and a crash or a recovery hands the
+  Playground its database. A row keeps its slot and a table grows new pages, so the old log's eight spare slots and
+  sixty-row cap are gone. `/tools/wal` and `/tools/recovery` keep their four-page model as the oracle:
+  `engineLog.test.ts` runs the same scripts through both and holds that they agree.
 
 ### Changed
 

@@ -4,6 +4,8 @@ import { describe, expect, it } from 'vitest';
 import { eventKey } from '../../engine/eventKey.ts';
 import { createTraceProjector, DATASETS, DEFAULT_ENGINE_OPTIONS, runQuery } from '../../engine/index.ts';
 import type { DatasetId, EngineOptions, RunResult } from '../../engine/index.ts';
+import { openEngineLog } from '../../engine/recovery/engineLogOps.ts';
+import { loggedRun } from '../../engine/recovery/engineLog.ts';
 import { readDetailParam } from '../detailLevel.ts';
 import { expertLine, firstOfEachKind, narrationAt, NOVICE_LINES, noviceLine } from '../narrationDetail.ts';
 
@@ -30,10 +32,21 @@ const CORPUS: [DatasetId, string, Partial<EngineOptions>?][] = [
   ['shop', 'SELECT customerId FROM orders UNION SELECT id FROM customers'],
 ];
 
-const runs: { sql: string; options: EngineOptions; result: RunResult }[] = CORPUS.map(([dataset, sql, extra]) => {
-  const options = { ...DEFAULT_ENGINE_OPTIONS, ...extra };
-  return { sql, options, result: runQuery(sql, DATASETS[dataset].make(), options) };
-});
+/** A logged write (plan.md §28.5 I2), on a pool small enough that a dirty page is evicted: its log records and flushes. */
+const logged = (): { sql: string; options: EngineOptions; result: RunResult } => {
+  const sql = 'UPDATE users SET age = age + 1';
+  const options = { ...DEFAULT_ENGINE_OPTIONS, bufferFrames: 2 };
+  const db = DATASETS.users.make();
+  return { sql, options, result: runQuery(sql, db, options, { engineLog: loggedRun(openEngineLog(db, options, { steal: true, force: false })) }) };
+};
+
+const runs: { sql: string; options: EngineOptions; result: RunResult }[] = [
+  ...CORPUS.map(([dataset, sql, extra]) => {
+    const options = { ...DEFAULT_ENGINE_OPTIONS, ...extra };
+    return { sql, options, result: runQuery(sql, DATASETS[dataset].make(), options) };
+  }),
+  logged(),
+];
 
 describe('narration detail levels (plan.md §27.5 L2)', () => {
   it('the corpus runs', () => {

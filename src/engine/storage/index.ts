@@ -1,7 +1,7 @@
 export { buildHeap, pageById, pageOfRow, rowsOnPage } from './page.ts';
 export type { Heap, Page } from './page.ts';
 export { createBufferPool, DISK_READ_DWELL, PoolExhausted, scanUsesRing } from './bufferPool.ts';
-export type { BufferPool, FetchResult, ScanRing } from './bufferPool.ts';
+export type { BufferPool, FetchResult, PoolAttachment, ScanRing } from './bufferPool.ts';
 export {
   policyFor,
   REPLACEMENT_POLICY_LABELS,

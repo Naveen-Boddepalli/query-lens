@@ -7,6 +7,8 @@
  *     worker-ready even though v0 runs it on the main thread
  */
 
+import type { EngineLog } from './recovery/engineLog.ts';
+
 export type SqlValue = string | number | boolean | null;
 export type Row = Record<string, SqlValue>;
 
@@ -191,6 +193,13 @@ export type StepEventBody =
   | { stage: 'buffer'; action: 'miss'; pageId: number }
   /** A page a `Sort` produced (a run, or a merge-pass output) rather than read off disk. */
   | { stage: 'buffer'; action: 'write'; pageId: number; frameId: number }
+  /**
+   * A write-ahead log's record (plan.md §28.5 I2): a change to a row on `pageId`, appended to the log buffer before the
+   * page is changed, at log sequence number `lsn`. The page takes that pageLSN and is dirty in the pool.
+   */
+  | { stage: 'buffer'; action: 'log'; pageId: number; lsn: number }
+  /** The log forced to disk through `lsn` before dirty page `pageId` may be written: the write-ahead rule. */
+  | { stage: 'buffer'; action: 'flush'; pageId: number; lsn: number }
   | {
       stage: 'buffer';
       action: 'evict';
@@ -519,6 +528,11 @@ export interface RunResult {
    * a caller never re-attaches has no effect beyond its own trace and `rows`' one-time printout.
    */
   analyze?: { table: string; stats: TableStats };
+  /**
+   * The write-ahead log a logged write leaves (plan.md §28.5 I2), present only when the caller attached one
+   * (`RunHooks.engineLog`) and the write succeeded. The caller keeps it for the next statement, as it keeps `write.rows`.
+   */
+  engineLog?: EngineLog;
 }
 
 export type WriteOutcome =

@@ -132,6 +132,8 @@ function detail(event: StepEvent): string {
       if (event.action === 'sweep') return `sweep frame ${String(event.frameId)} -> usage ${String(event.usageCountAfter)}`;
       if (event.action === 'evict') return `evict page ${String(event.victimPageId)} from frame ${String(event.frameId)}`;
       if (event.action === 'miss') return `miss page ${String(event.pageId)}`;
+      if (event.action === 'log') return `log LSN ${String(event.lsn)} page ${String(event.pageId)}`;
+      if (event.action === 'flush') return `flush log through LSN ${String(event.lsn)} before page ${String(event.pageId)}`;
       return `${event.action} page ${String(event.pageId)} @ frame ${String(event.frameId)}`;
     case 'index':
       return event.action === 'open'

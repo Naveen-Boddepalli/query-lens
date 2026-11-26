@@ -50,6 +50,27 @@ export function scanUsesRing(pages: number, options: EngineOptions): boolean {
   return (options.scanRing ?? 0) > 0 && pages > Math.floor(options.bufferFrames / 4);
 }
 
+/**
+ * What a write-ahead log (plan.md §28.5 I2) needs from the pool it logs. Without one the pool is what it always was:
+ * cold at the start of a query, with its own record of which pages a write dirtied. With one, the pool starts with
+ * the frames the previous statement left, the log decides which pages are dirty (a page is dirty while it carries a
+ * logged change not yet on disk), and a dirty page leaving its frame is written by the log — after the log itself has
+ * been flushed far enough, which is the rule.
+ */
+export interface PoolAttachment {
+  /** The frames a previous run left, used in place: the pool starts warm, and the caller reads them back after. */
+  initial?: BufferState;
+  /** Whether a page is dirty, instead of the pool's own record. */
+  isDirty?: (pageId: number) => boolean;
+  /** A page has just been read from disk into a frame (`fresh` false), or claimed for a page with nothing on disk yet. */
+  onLoad?: (pageId: number, fresh: boolean) => void;
+  /**
+   * A page is leaving its frame. When it is dirty the attachment writes it — flushing the log first if it must, and
+   * emitting that step — and returns the sentence the evict step says about the write instead of the pool's own.
+   */
+  onEvict?: (pageId: number, dirty: boolean) => string | undefined;
+}
+
 export interface BufferPool {
   /**
    * With a `ring`, a miss is placed by the scan's own ring rather than by the replacement policy alone. `until` is the
@@ -166,8 +187,10 @@ export function createBufferPool(
    * anywhere; a query's is only its record of demand reads, and read-ahead stays inside a scan's own pages there.
    */
   lookaheadFrom: 'reference-string' | 'query' = 'reference-string',
+  /** A write-ahead log's hold on this pool (plan.md §28.5 I2). */
+  attach?: PoolAttachment,
 ): BufferPool {
-  const state = emptyState(options.bufferFrames);
+  const state = attach?.initial ?? emptyState(options.bufferFrames);
   if (lookahead !== undefined) state.lookahead = lookahead;
   const policy: ReplacementPolicy = policyFor(options.policy);
   const stats = { hits: 0, misses: 0, evictions: 0, writes: 0, prefetches: 0 };
@@ -223,8 +246,10 @@ export function createBufferPool(
     // A clean page's eviction is free — the disk already holds the same
     // bytes. A dirty one costs a write first, charged and narrated here,
     // at the moment it is actually paid, not when the page was marked.
-    const writtenBack = dirty.delete(evicted);
+    const ownDirty = dirty.delete(evicted);
+    const writtenBack = attach?.isDirty ? attach.isDirty(evicted) : ownDirty;
     if (writtenBack) stats.writes += 1;
+    const logged = attach?.onEvict?.(evicted, writtenBack);
 
     // The eviction question is asked once regardless of which path triggers
     // it — a write can just as easily be the first eviction a trace shows. A
@@ -238,9 +263,11 @@ export function createBufferPool(
       `The pool is full, so page ${evicted} is evicted from frame ${victimId} to make room${
         forWrite ? ' for a freshly written page' : ''
       }. ${
-        writtenBack
-          ? `Page ${evicted} is dirty — a row was deleted from it — so evicting it costs a write back to disk first. `
-          : ''
+        logged !== undefined
+          ? `${logged} `
+          : writtenBack
+            ? `Page ${evicted} is dirty — a row was deleted from it — so evicting it costs a write back to disk first. `
+            : ''
       }${how.ring ? ringReason(how.ring.size) : evictionReason(options.policy)}`,
       {
         stage: 'buffer',
@@ -332,6 +359,7 @@ export function createBufferPool(
       target.usageCount = 0;
       target.loadedAt = state.now;
       (policy.onLoad ?? policy.onAccess)(state, target.frameId);
+      attach?.onLoad?.(next, false);
       emit(
         `Read page ${next} from disk into frame ${target.frameId} ahead of the scan. Nothing has asked for it yet, but the scan is sequential, so the pool reads it early — and the request, when it comes, is a hit.`,
         { stage: 'buffer', action: 'prefetch', pageId: next, frameId: target.frameId },
@@ -390,6 +418,7 @@ export function createBufferPool(
     // A load is a miss, not a hit: `onLoad` (default `onAccess`) lets a policy
     // treat the two differently — midpoint-LRU inserts at the old sublist.
     (policy.onLoad ?? policy.onAccess)(state, target.frameId);
+    attach?.onLoad?.(pageId, false);
 
     // Said once per slot, the first time the scan fills the ring — after that the evictions carry the explanation.
     const fillingRing = ring?.active === true && ring.cursor <= ring.size;
@@ -424,6 +453,7 @@ export function createBufferPool(
     target.loadedAt = state.now;
     target.pinCount += 1;
     (policy.onLoad ?? policy.onAccess)(state, target.frameId);
+    attach?.onLoad?.(pageId, true);
 
     emit(`Write page ${pageId} into frame ${target.frameId} — a fresh page, not a disk read.`, {
       stage: 'buffer',

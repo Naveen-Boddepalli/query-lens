@@ -77,8 +77,11 @@ test('the recovery lesson’s UPDATE opens the Playground, where Run makes the e
   await page.goto('/learn/recovery');
   await page.getByRole('link', { name: /Open the UPDATE in the Playground/ }).click();
   await expect(page).toHaveURL(/\/playground\?/);
-  // Opened at the end of the trace; the write is made, and logged, when Run is pressed.
-  await expect(page.getByRole('button', { name: 'Durability', exact: true })).toBeVisible();
+  // Opened at the end of the trace; with the log turned on, the write is made, and logged, when Run is pressed.
+  await page.getByRole('button', { name: 'Durability', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Durability' });
+  await dialog.getByRole('button', { name: 'Turn the log on' }).click();
+  await dialog.getByRole('button', { name: 'Close' }).click();
   await page.getByRole('button', { name: /^Run/ }).click();
   await expect(page.getByRole('button', { name: /^Durability \(1\)$/ })).toBeVisible();
 });

@@ -3,7 +3,9 @@ import { compareProtocols } from '../../../engine/concurrencyCompare.ts';
 import type { ProtocolId } from '../../../engine/concurrencyCompare.ts';
 import { DOCUMENTED, KNOWN_DIFFERENCES, hermitageMatrix } from '../../../engine/hermitage.ts';
 import type { EngineKind } from '../../../engine/hermitage.ts';
-import { databaseFromCells } from '../../../engine/recovery/heap.ts';
+import { applyLogOp, databaseOfLog, openEngineLog } from '../../../engine/recovery/engineLogOps.ts';
+import { loggedRun } from '../../../engine/recovery/engineLog.ts';
+import type { LogOp } from '../../../engine/recovery/engineLogOps.ts';
 import { DEFAULT_PAGES, committedCells, databaseCells, parseWalStep, runWal } from '../../../engine/recovery/wal.ts';
 import type { WalRun } from '../../../engine/recovery/wal.ts';
 import { runQuery } from '../../../engine/runQuery.ts';
@@ -12,7 +14,7 @@ import type { LockingOptions, ScheduleResult, ScheduleStepResult } from '../../.
 import { createAccountsDatabase, createSeedDatabase } from '../../../engine/index.ts';
 import { serialCheck } from '../../../engine/serialCheck.ts';
 import type { IsolationLevel } from '../../../engine/transactionControl.ts';
-import { LOG_MAX_STEPS, appendStep, openLog, recordWrite } from '../../../ui/durableLog.ts';
+import { DEFAULT_ENGINE_OPTIONS } from '../../../engine/types.ts';
 import { decodeSchedule } from '../../../ui/scheduleUrl.ts';
 import { decodeWalSteps } from '../../../ui/walUrl.ts';
 import { LESSON_GROUPS } from '../lessonIndex.ts';
@@ -398,23 +400,19 @@ describe('lesson: survive a crash', () => {
   it('behind a real UPDATE: committed and crashed, the edit is back; left open and crashed, it is gone', () => {
     const sql = "UPDATE users SET name = 'edited' WHERE id = 5;";
     const db = createSeedDatabase();
-    const result = runQuery(sql, db);
-    expect(result.write).toBeDefined();
-    const log = recordWrite(openLog(db, 4), db, sql, {
-      table: result.write!.table,
-      kind: result.write!.kind,
-      rows: result.write!.rows,
-    });
-    const nameAfter = (finishWith: 'commit' | 'open'): unknown => {
-      let l = log;
-      if (finishWith === 'commit') l = appendStep(l, { op: 'commit', txn: 'Q1' });
-      l = appendStep(l, { op: 'crash' });
-      l = appendStep(l, { op: 'recover' });
-      const run = runWal(l.steps, { pages: l.pages, frames: 4, maxSteps: LOG_MAX_STEPS });
-      const recovered = databaseFromCells(l.base, l.heap, databaseCells(run.final));
-      return recovered.tables.users!.rows.find((row) => row.id === 5)!.name;
+    const options = DEFAULT_ENGINE_OPTIONS;
+    // The Playground's log (plan.md §28.5 I2), turned on in Durability before the UPDATE is run.
+    const result = runQuery(sql, db, options, { engineLog: loggedRun(openEngineLog(db, options, { steal: true, force: false })) });
+    expect(result.engineLog).toBeDefined();
+    const nameAfter = (ops: LogOp[]): unknown => {
+      let log = result.engineLog!;
+      for (const op of [...ops, { op: 'crash' } as const, { op: 'recover' } as const]) log = applyLogOp(log, op, options).log;
+      return databaseOfLog(log).tables.users!.rows.find((row) => row.id === 5)!.name;
     };
-    expect(nameAfter('commit')).toBe('edited');
-    expect(nameAfter('open')).not.toBe('edited');
+    expect(nameAfter([{ op: 'commit', txn: 'Q1' }])).toBe('edited');
+    expect(nameAfter([])).not.toBe('edited');
+    // Whether or not its page had reached the disk: written there (the log flushed first), it is undone.
+    const page = result.engineLog!.tables.users!.pages[1]!;
+    expect(nameAfter([{ op: 'write-page', page }])).not.toBe('edited');
   });
 });

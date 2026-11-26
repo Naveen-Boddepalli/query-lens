@@ -563,12 +563,14 @@ index entries of the rows it touches.
 
 ## Durability
 
-- **[The write-ahead log](/tools/wal) is its own model, not the engine's.** It has a disk of four pages, a buffer
-  pool of two to four frames, and a log, and a page is a few named integer cells (`a = 10`), not a slotted heap page
-  or a row. The SQL pipeline itself does not log, and its buffer pool — a read cache whose only "dirty" is a marked
-  page — is not the one the log-before-data rule is enforced on. The Playground's *Durability* dialog (below) feeds
-  this model the statements you run, so that a crash and a recovery can be tried on a real table; the engine's
-  statistics are still its own.
+- **There are two logs, and one is the other's oracle.** [The write-ahead log](/tools/wal) and
+  [crash recovery](/tools/recovery) run on a model of their own: a disk of four pages, a pool of two to four frames,
+  and pages of a few named integer cells (`a = 10`), small enough to step through by hand. The Playground's
+  *Durability* dialog (below) turns on the **engine's own log**: its `INSERT`, `UPDATE` and `DELETE` are logged on the
+  engine's buffer pool, on the table's real heap pages (plan.md §28.5 I2). The two share their rules and their
+  wording, and a differential test runs the same scripts through both — statements, commits, rollbacks, flushes, page
+  writes, checkpoints, crashes and recoveries under every steal/force choice — and holds that they give the same
+  log, the same pool, the same disk and the same recovered database.
 - **What it models.** Every change appends a log record with a **LSN** (strictly increasing) and a **prevLSN**, the
   transaction's previous record, so each transaction's records chain backwards. A record is in the *log buffer*
   until it is flushed and *durable* after, and `flushedLSN` is the last durable one. A page remembers the LSN of the
@@ -619,25 +621,35 @@ index entries of the rows it touches.
 - **With the rule off, recovery can be wrong, and says so.** A page that reached disk ahead of its log record has
   nothing durable that says how to undo it, so the restart leaves the uncommitted value in place. The page's *Is the
   database right?* panel names the cell. This is the only way the model's recovery produces a wrong database.
-- **The Playground can crash and recover** (plan.md §25.4 E4, the *Durability* button by *Edit data*). Each
-  `INSERT`, `UPDATE` and `DELETE` run there is kept as the log steps a write-ahead log would have made of it — one
-  transaction per statement, left open, since the Playground shows its own changes at once — and the dialog is where
-  you decide: commit it, roll it back, write a page, take a checkpoint, **crash**, **recover**. A table's rows are laid
-  out as the engine lays out its heap (four to a page, in table order), one row per cell, as its JSON; a deleted row
-  leaves a tombstone, so the rows after it keep their slots, and an update changes one cell. After a recovery the
-  dialog lists each row whose value differs between the database the Playground held before the crash, the
-  database recovery rebuilt, and what committed — and can replace the Playground's table with the rebuilt one. The
-  tests run a table through commits, a lost uncommitted delete and a lost insert, and recovery gives back exactly
-  what committed.
-- **What the Playground's log cannot do:** a heap cannot grow a page it did not start with, so each table has **eight
-  spare slots** for inserted rows, and a ninth is refused with the reason; a statement that changes more than sixty
-  rows is refused (a log of every row of a large table is not something to step through); the log keeps up to four
-  hundred steps; a table whose data is edited, reloaded or switched starts a new log, and the dialog says when the one
-  it holds is of a database the Playground no longer has; and only `INSERT`/`UPDATE`/`DELETE` are logged — an index is
-  rebuilt from the rows after a recovery, not recovered itself.
-- **Not yet, and not modelled:** log truncation, so the log only grows; concurrent transactions *during* recovery
-  (the machine is down until it finishes); the engine's own buffer pool as the pool the rule is enforced on; and
-  any storage but whole-page writes. There are no savepoints.
+- **The Playground's writes can be logged** (plan.md §28.5 I2, the *Durability* button by *Edit data*). The log is
+  **off** until you turn it on there, because a logged write reads each page again to change it and logs every row, so
+  its trace has more steps and different counters. With it on, each `INSERT`, `UPDATE` and `DELETE` runs on the
+  engine's buffer pool — the Playground's frames and replacement policy, kept warm from one statement to the next —
+  and every row it changes is a log record before its page changes: the record goes to the log buffer, the page takes
+  the record's LSN as its **pageLSN**, and the frame is **dirty**, with a recLSN. When the pool evicts a dirty page it
+  first **flushes the log** through that pageLSN and then writes the page; the trace shows both steps. Steal and force
+  are the pool's options, chosen when the log is turned on: under no-steal a page with an uncommitted change is pinned
+  in its frame until its transaction ends, and a statement that needs a frame when every one is pinned is refused,
+  with the reason. Each statement is a transaction of its own, left open, and the dialog is where you commit it or roll
+  it back, write a page, flush the log, take a checkpoint, **crash** and **recover**. A crash leaves the Playground what
+  the disk holds; recovery gives it back the database the log rebuilt, and the dialog lists each row that differs
+  between the database before the crash, now, and what committed.
+- **A row keeps its slot for as long as the log runs.** A row is a cell of its page, named by its slot (its *rid*); a
+  delete empties the slot rather than sliding the later rows down, so a change touches one cell of one page, as in a
+  slotted page. An insert takes the next slot, and a full last page means a new page, so a table grows as far as it
+  needs to: there is no cap on rows inserted or changed.
+- **A checkpoint truncates the log.** After its end record, the log is cut before the oldest record a restart could
+  need — the oldest of the checkpoint's begin record, the oldest recLSN in the dirty page table, and the first record of
+  each running transaction — and the dialog says how many records went. The model on `/tools/wal` keeps its whole log.
+- **What the engine's log does not do:** index pages are not logged — the engine builds a table's indexes from its
+  heap for each statement, so the heap is the whole durable state, and an index is rebuilt from the rows after a
+  recovery, not recovered itself; a clustered table, whose rows move to stay in key order, is refused; a row changed by a
+  transaction that has not ended is its alone, and a second statement that would change it is refused, not made to
+  wait; a database that is edited, reloaded or switched is not the one the log holds, and writes are not logged until
+  you start the log again from it; and the pool's size and page size are the log's own once it starts, so changing them
+  refuses writes until it is started again. The Playground has no `BEGIN`: one statement is one transaction.
+- **Not yet, and not modelled:** concurrent transactions *during* recovery (the machine is down until it finishes);
+  a transaction of more than one statement in the Playground; and any storage but whole-page writes. There are no savepoints.
 
 ## SQL
 

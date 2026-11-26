@@ -95,6 +95,10 @@ function detailOf(e: StepEvent): string {
           return `evict · frame ${e.frameId} drops page ${e.victimPageId} for ${e.pageId}${e.clockHand === undefined ? '' : ` · hand ${e.clockHand}`}`;
         case 'sweep':
           return `sweep · frame ${e.frameId} → usage ${e.usageCountAfter} · hand ${e.clockHand}`;
+        case 'log':
+          return `log · LSN ${e.lsn} · page ${e.pageId}`;
+        case 'flush':
+          return `flush · log through LSN ${e.lsn} before page ${e.pageId}`;
         default:
           return `${e.action} · page ${e.pageId} → frame ${e.frameId}`;
       }

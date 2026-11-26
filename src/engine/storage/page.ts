@@ -19,6 +19,11 @@ export interface Page {
   pageId: number;
   table: string;
   rows: Row[];
+  /**
+   * Each row's slot, when the heap keeps rows in fixed slots — a logged heap (plan.md §28.5 I2), where a delete leaves
+   * its slot empty. Absent on the engine's ordinary heap, where a row's slot is its place in `rows`.
+   */
+  rids?: number[];
 }
 
 export interface Heap {

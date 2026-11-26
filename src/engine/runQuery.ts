@@ -35,6 +35,7 @@ import {
 } from './planner/index.ts';
 import type { CompoundMember, Plan } from './planner/index.ts';
 import { buildHeap, createBufferPool, PoolExhausted } from './storage/index.ts';
+import type { LogRefusal, LoggedRun, StatementLog } from './recovery/engineLog.ts';
 import { controlKindOf } from './transactionControl.ts';
 import { buildIndexes, describeUniqueKey, findIndexSpec, indexNameOf, indexSpecsOf, pageCountFor } from './index/index.ts';
 import type { BPlusTree } from './index/index.ts';
@@ -85,6 +86,18 @@ export interface RunHooks {
   traceBudget?: number;
   /** Sees every step as it is emitted, kept or not — how the `optimal` rehearsal reads a run it does not keep. */
   observe?: (body: StepEventBody) => void;
+  /**
+   * A write-ahead log to run a write on (plan.md §28.5 I2): the engine's pool starts with the frames it left, each
+   * changed row is logged before it is made, and the result carries the log the write leaves (`RunResult.engineLog`).
+   * A `SELECT` ignores it. Off unless a caller attaches one, so no other run's counters move.
+   */
+  engineLog?: LoggedRun;
+}
+
+/** A logged write refused (plan.md §28.5 I2): nothing changed, and the log stays as it was. */
+function logRefused(e: LogRefusal, emit: ReturnType<typeof createTracer>['emit'], drain: () => RunResult['events']): RunResult {
+  emit(`The write is refused — ${e.message} Nothing was changed.`, { stage: 'result', rows: [] });
+  return { events: drain(), rows: [], error: { message: e.message, ...(e.hint === undefined ? {} : { hint: e.hint }) } };
 }
 
 /**
@@ -216,6 +229,8 @@ export function runQuery(
       observe: (e) => {
         if (e.stage === 'buffer' && (e.action === 'hit' || e.action === 'miss')) references.push(e.pageId);
       },
+      // A logged write reads its pages again to change them, so its rehearsal runs logged too, on a copy.
+      ...(hooks.engineLog ? { engineLog: hooks.engineLog } : {}),
     });
     return runQuery(sql, db, options, { ...hooks, rehearsedReferences: references });
   }
@@ -310,10 +325,32 @@ export function runQuery(
     };
   }
 
+  // A logged write (plan.md §28.5 I2) reads the log's own heap, whose rows keep their slots, on the pool the log kept.
+  let logged: StatementLog | undefined;
+  if (hooks.engineLog && (ast.kind === 'insert' || ast.kind === 'update' || ast.kind === 'delete')) {
+    try {
+      logged = new hooks.engineLog.kit.StatementLog(hooks.engineLog.log, storedTable(table, db), emit, options);
+    } catch (e) {
+      if (hooks.engineLog.kit.isRefusal(e)) return logRefused(e, emit, drain);
+      throw e;
+    }
+  }
   // Laid out as the stored table: an alias reads that table's own pages (plan.md §27.5 S7).
-  const heap = buildHeap(storedTable(table, db), options.rowsPerPage);
-  const trees = buildIndexes(heap, indexSpecsOf(table), undefined, undefined, options.indexBuild, table.clusteredKey);
+  const heap = logged ? logged.heap() : buildHeap(storedTable(table, db), options.rowsPerPage);
+  const trees = buildIndexes(heap, indexSpecsOf(table), undefined, logged?.firstIndexPage(), options.indexBuild, table.clusteredKey);
   const locks = createLockManager(emit);
+  /** A write's pool: on a logged write, the log's own, warm, over every heap page the log has and this table's index. */
+  const writePool = (pageCount: number) => {
+    if (!logged) return poolFor(pageCount);
+    const count = Math.max(logged.firstIndexPage(), ...Object.values(trees).map((t) => t.nextPageId));
+    const pool = createBufferPool(count, options, emit, hooks.rehearsedReferences, 'query', logged.machine.attachment());
+    logged.bind(pool);
+    return pool;
+  };
+  const log = logged ? { log: logged } : {};
+  /** The log a successful logged write leaves, and what its result step says of it. */
+  const leave = (kind: 'insert' | 'update' | 'delete', rows: Row[]) =>
+    logged && hooks.engineLog ? { note: hooks.engineLog.kit.loggedNote(logged), engineLog: logged.finish(sql, kind, rows) } : { note: '', engineLog: undefined };
 
   if (ast.kind === 'insert') {
     emitInsertParseEvents(emit, ast);
@@ -321,12 +358,13 @@ export function runQuery(
 
     const lastPage = heap.pages[heap.pages.length - 1]!;
     const insertNeedsNewPage = lastPage.rows.length >= options.rowsPerPage;
-    const pool = poolFor(pageCountFor(heap, trees) + (insertNeedsNewPage ? 1 : 0));
+    const pool = writePool(pageCountFor(heap, trees) + (insertNeedsNewPage ? 1 : 0));
 
     let inserted: Row;
     try {
-      inserted = executeInsert(row, { emit, pool, locks, heap, trees, table, options }).row;
+      inserted = executeInsert(row, { emit, pool, locks, heap, trees, table, options, ...log }).row;
     } catch (e) {
+      if (hooks.engineLog?.kit.isRefusal(e)) return logRefused(e, emit, drain);
       if (e instanceof UniqueViolation) {
         const error = uniqueError(e, heap, ast.values.span);
         emit(`INSERT is rejected — ${error.message} Nothing was changed.`, { stage: 'result', rows: [] });
@@ -336,13 +374,14 @@ export function runQuery(
     }
     hooks.afterWrite?.(trees);
     const rows = [...table.rows, inserted];
+    const left = leave('insert', rows);
 
     emit(
       `1 row inserted, from ${diskReads(pool)} disk read${diskReads(pool) === 1 ? '' : 's'} and ${
         pool.stats.writes
       } write${pool.stats.writes === 1 ? '' : 's'}. ${table.name} now has ${rows.length} row${
         rows.length === 1 ? '' : 's'
-      }.`,
+      }.${left.note}`,
       { stage: 'result', rows: [inserted] },
     );
 
@@ -350,6 +389,7 @@ export function runQuery(
       events: drain(),
       rows: [inserted],
       write: { kind: 'insert', table: table.name, insertedCount: 1, rows },
+      ...(left.engineLog ? { engineLog: left.engineLog } : {}),
     };
   }
 
@@ -361,19 +401,26 @@ export function runQuery(
     if (!resolved.ok) return { events: drain(), rows: [], error: resolved.error };
     const deleteAst = resolved.value;
     const plan = emitDeletePlanEvents(emit, deleteAst, table, options.rowsPerPage);
-    const pool = poolFor(pageCountFor(heap, trees));
+    const pool = writePool(pageCountFor(heap, trees));
 
-    const { deleted } = executeDelete(plan, { emit, pool, locks, heap, trees, table, options });
+    let deleted: Row[];
+    try {
+      deleted = executeDelete(plan, { emit, pool, locks, heap, trees, table, options, ...log }).deleted;
+    } catch (e) {
+      if (hooks.engineLog?.kit.isRefusal(e)) return logRefused(e, emit, drain);
+      throw e;
+    }
     hooks.afterWrite?.(trees);
     const removed = new Set(deleted);
     const rows = table.rows.filter((r) => !removed.has(r));
+    const left = leave('delete', rows);
 
     emit(
       `${deleted.length} row${deleted.length === 1 ? '' : 's'} deleted, from ${diskReads(pool)} disk read${
         diskReads(pool) === 1 ? '' : 's'
       } and ${pool.stats.evictions} eviction${pool.stats.evictions === 1 ? '' : 's'}. ${table.name} now has ${
         rows.length
-      } row${rows.length === 1 ? '' : 's'}.`,
+      } row${rows.length === 1 ? '' : 's'}.${left.note}`,
       { stage: 'result', rows: deleted },
     );
 
@@ -381,6 +428,7 @@ export function runQuery(
       events: drain(),
       rows: deleted,
       write: { kind: 'delete', table: table.name, deletedCount: deleted.length, rows },
+      ...(left.engineLog ? { engineLog: left.engineLog } : {}),
     };
   }
 
@@ -392,12 +440,13 @@ export function runQuery(
     if (!resolved.ok) return { events: drain(), rows: [], error: resolved.error };
     const updateAst = resolved.value;
     const plan = emitUpdatePlanEvents(emit, updateAst, table, options.rowsPerPage);
-    const pool = poolFor(pageCountFor(heap, trees));
+    const pool = writePool(pageCountFor(heap, trees));
 
     let changed: ReturnType<typeof executeUpdate>;
     try {
-      changed = executeUpdate(plan, updateAst.set.assignments, { emit, pool, locks, heap, trees, table, options });
+      changed = executeUpdate(plan, updateAst.set.assignments, { emit, pool, locks, heap, trees, table, options, ...log });
     } catch (e) {
+      if (hooks.engineLog?.kit.isRefusal(e)) return logRefused(e, emit, drain);
       if (e instanceof UniqueViolation) {
         const error = uniqueError(e, heap, ast.set.span);
         emit(`UPDATE is rejected — ${error.message} Nothing was changed.`, { stage: 'result', rows: [] });
@@ -409,11 +458,12 @@ export function runQuery(
     hooks.afterWrite?.(trees);
     const replacements = new Map(before.map((row, i) => [row, after[i]!]));
     const rows = table.rows.map((r) => replacements.get(r) ?? r);
+    const left = leave('update', rows);
 
     emit(
       `${after.length} row${after.length === 1 ? '' : 's'} updated, from ${diskReads(pool)} disk read${
         diskReads(pool) === 1 ? '' : 's'
-      } and ${pool.stats.evictions} eviction${pool.stats.evictions === 1 ? '' : 's'}.`,
+      } and ${pool.stats.evictions} eviction${pool.stats.evictions === 1 ? '' : 's'}.${left.note}`,
       { stage: 'result', rows: after },
     );
 
@@ -421,6 +471,7 @@ export function runQuery(
       events: drain(),
       rows: after,
       write: { kind: 'update', table: table.name, updatedCount: after.length, rows },
+      ...(left.engineLog ? { engineLog: left.engineLog } : {}),
     };
   }
 

@@ -58,6 +58,8 @@ export const NOVICE_LINES: Record<string, string> = {
   'buffer.write': 'A sort writes its batches to fresh pages. They take a frame in the pool like any page read from disk.',
   'buffer.evict': 'The pool has a fixed number of frames. To make room for a new page, one already there has to go, and the replacement policy chooses which.',
   'buffer.sweep': 'The clock policy’s hand moves round the frames, lowering each one’s count, until it reaches a frame at zero to evict.',
+  'buffer.log': 'Before a row on a page changes, a note of the change goes into the log: the row as it was and as it will be. With that, a crash can always be put right.',
+  'buffer.flush': 'A changed page may only go to disk after the log notes that describe its changes are on disk. Otherwise a crash could leave a change nothing can undo.',
   index: 'An index is a sorted structure of keys, each pointing at the row it came from.',
   'index.open': 'A B+Tree is a short, wide tree of sorted keys. Every lookup goes from the root down to a leaf, one node per level.',
   'index.traverse': 'A node’s keys say which child to follow, the way a dictionary’s page headings tell you which way to turn.',
@@ -109,6 +111,10 @@ export function expertLine({ key, params: p }: EventKey, sql: string, stats: Vie
       return `evict · ${page(p.victim)} from ${frame(p.frame)} for ${page(p.page)}${p.writtenBack ? ', written back' : ''}${p.ring ? ', ring' : ''}${p.hand === undefined ? '' : `, hand at ${String(p.hand)}`}`;
     case 'buffer.sweep':
       return `sweep · ${frame(p.frame)} usage → ${String(p.usage)}, hand at ${String(p.hand)}`;
+    case 'buffer.log':
+      return `log · LSN ${String(p.lsn)}, ${page(p.page)} pageLSN → ${String(p.lsn)}`;
+    case 'buffer.flush':
+      return `flush · log through LSN ${String(p.lsn)} before ${page(p.page)} is written`;
     case 'index.open':
       return `B+Tree · root ${String(p.node)}, height ${String(p.height)}`;
     case 'index.traverse':

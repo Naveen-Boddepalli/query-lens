@@ -20,7 +20,9 @@ export interface InsertOutcome {
 }
 
 /** Where the new row lands: the last heap page, if it has room, or a fresh one. */
-function targetPage(ctx: ExecContext): { pageId: number; slot: number; isNewPage: boolean } {
+function targetPage(ctx: ExecContext): { pageId: number; slot: number; isNewPage: boolean; rid?: number } {
+  // A logged heap keeps rows in fixed slots, so the row goes to the table's next slot (plan.md §28.5 I2).
+  if (ctx.log) return ctx.log.insertTarget();
   const lastPage = ctx.heap.pages[ctx.heap.pages.length - 1]!;
   const hasRoom = lastPage.rows.length < ctx.options.rowsPerPage;
   return hasRoom
@@ -68,7 +70,7 @@ export function executeInsert(row: Row, ctx: ExecContext): InsertOutcome {
   // A UNIQUE index is asked first — a rejected INSERT must not have touched the heap or any other tree.
   enforceUniqueOnInsert(ctx, row);
 
-  const { pageId, slot, isNewPage } = targetPage(ctx);
+  const { pageId, slot, isNewPage, rid } = targetPage(ctx);
 
   ctx.locks.acquire(
     pageId,
@@ -87,6 +89,7 @@ export function executeInsert(row: Row, ctx: ExecContext): InsertOutcome {
     ctx.pool.markDirty(pageId);
   }
 
+  if (ctx.log) ctx.log.change(pageId, rid ?? slot, null, row);
   ctx.emit(
     isNewPage
       ? `Insert writes the new row onto a fresh page, ${pageId} — the last page was full.`
