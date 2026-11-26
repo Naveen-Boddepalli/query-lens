@@ -34,7 +34,9 @@ plan.md §25.4 A4. Two rules, both learned the hard way on the first deploy (CHA
 8. **Deploy that tag** and run the [post-deploy check](#after-a-deploy).
 
 Semantic versioning: `2.x` is the v2 plan's releases (plan.md §25.3); a `2.0.0` is the first release that ships
-the whole of §25.8's 2.0 checklist. Anything before that on `version/v2` is unreleased work.
+the whole of §25.8's 2.0 checklist. Anything before that on `version/v2` is unreleased work. `3.x` is the v3 plan's
+(plan.md §27): `3.0.0` ships every buildable §27 item at once — its five releases, 3.0–3.4, were built before
+any was cut, so they share one version.
 
 ## Releasing the packages
 

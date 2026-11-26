@@ -47,7 +47,6 @@ interface NodeData extends Record<string, unknown> {
   tone: string;
   wide: boolean;
   relation: TreeRelation;
-  accessibleName: string;
 }
 
 type TreeFlowNode = Node<NodeData, 'tree'>;
@@ -72,7 +71,6 @@ function NodeView({ id, data }: NodeProps<TreeFlowNode>) {
       aria-level={data.relation.level}
       aria-posinset={data.relation.position}
       aria-setsize={data.relation.setSize}
-      aria-label={data.accessibleName}
       ref={(el) => { focus?.register(id, el); }}
       onFocus={() => { focus?.setTabStop(id); }}
       onKeyDown={(event) => {
@@ -235,14 +233,6 @@ function build(
       tone: props.tones[d.data.kind] ?? 'border-edge bg-surface-3 text-ink',
       wide: props.wide,
       relation: relations.get(d.data.id)!,
-      accessibleName: [
-        d.data.label,
-        d.data.kind,
-        d.data.detail,
-        d.data.estRows === undefined ? undefined : `about ${String(d.data.estRows)} rows`,
-      ]
-        .filter((part): part is string => part !== undefined)
-        .join(', '),
     },
     handles: TREE_HANDLES,
     draggable: false,
