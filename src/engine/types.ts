@@ -200,6 +200,11 @@ export type StepEventBody =
   | { stage: 'buffer'; action: 'log'; pageId: number; lsn: number }
   /** The log forced to disk through `lsn` before dirty page `pageId` may be written: the write-ahead rule. */
   | { stage: 'buffer'; action: 'flush'; pageId: number; lsn: number }
+  /**
+   * A `ROLLBACK`'s undo of one change (plan.md §28.5 I3): compensation record `lsn`, logged before page `pageId` takes
+   * back the value record `undoes` replaced. The page takes that pageLSN.
+   */
+  | { stage: 'buffer'; action: 'undo'; pageId: number; lsn: number; undoes: number }
   | {
       stage: 'buffer';
       action: 'evict';
@@ -530,9 +535,16 @@ export interface RunResult {
   analyze?: { table: string; stats: TableStats };
   /**
    * The write-ahead log a logged write leaves (plan.md §28.5 I2), present only when the caller attached one
-   * (`RunHooks.engineLog`) and the write succeeded. The caller keeps it for the next statement, as it keeps `write.rows`.
+   * (`RunHooks.engineLog`) and the write succeeded — or a `BEGIN`, `COMMIT` or `ROLLBACK` did. The caller keeps it for
+   * the next statement, as it keeps `write.rows`.
    */
   engineLog?: EngineLog;
+  /**
+   * A `BEGIN`, `COMMIT` or `ROLLBACK` run on that log (plan.md §28.5 I3): which, and the transaction it began or ended.
+   * After a `ROLLBACK`, `database` is what the log holds now — the rows as they were before `BEGIN` — and the caller
+   * holds it, as it holds a write's rows.
+   */
+  transaction?: { kind: 'begin' | 'commit' | 'rollback'; txn: string; database?: Database };
 }
 
 export type WriteOutcome =

@@ -59,6 +59,7 @@ export const NOVICE_LINES: Record<string, string> = {
   'buffer.evict': 'The pool has a fixed number of frames. To make room for a new page, one already there has to go, and the replacement policy chooses which.',
   'buffer.sweep': 'The clock policy’s hand moves round the frames, lowering each one’s count, until it reaches a frame at zero to evict.',
   'buffer.log': 'Before a row on a page changes, a note of the change goes into the log: the row as it was and as it will be. With that, a crash can always be put right.',
+  'buffer.undo': 'Rolling back puts each change back, newest first. The undo is noted in the log before the page changes back, so a crash in the middle never undoes anything twice.',
   'buffer.flush': 'A changed page may only go to disk after the log notes that describe its changes are on disk. Otherwise a crash could leave a change nothing can undo.',
   index: 'An index is a sorted structure of keys, each pointing at the row it came from.',
   'index.open': 'A B+Tree is a short, wide tree of sorted keys. Every lookup goes from the root down to a leaf, one node per level.',
@@ -115,6 +116,8 @@ export function expertLine({ key, params: p }: EventKey, sql: string, stats: Vie
       return `log · LSN ${String(p.lsn)}, ${page(p.page)} pageLSN → ${String(p.lsn)}`;
     case 'buffer.flush':
       return `flush · log through LSN ${String(p.lsn)} before ${page(p.page)} is written`;
+    case 'buffer.undo':
+      return `undo · LSN ${String(p.undoes)} as CLR ${String(p.lsn)}, ${page(p.page)} pageLSN → ${String(p.lsn)}`;
     case 'index.open':
       return `B+Tree · root ${String(p.node)}, height ${String(p.height)}`;
     case 'index.traverse':

@@ -134,6 +134,7 @@ function detail(event: StepEvent): string {
       if (event.action === 'miss') return `miss page ${String(event.pageId)}`;
       if (event.action === 'log') return `log LSN ${String(event.lsn)} page ${String(event.pageId)}`;
       if (event.action === 'flush') return `flush log through LSN ${String(event.lsn)} before page ${String(event.pageId)}`;
+      if (event.action === 'undo') return `undo LSN ${String(event.undoes)} as CLR ${String(event.lsn)} page ${String(event.pageId)}`;
       return `${event.action} page ${String(event.pageId)} @ frame ${String(event.frameId)}`;
     case 'index':
       return event.action === 'open'

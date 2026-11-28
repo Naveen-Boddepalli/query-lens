@@ -46,10 +46,10 @@ describe('isolation level clauses', () => {
 });
 
 describe('outside a schedule', () => {
-  it('runQuery refuses BEGIN, COMMIT and ROLLBACK, and says where they work', () => {
+  it('runQuery refuses BEGIN, COMMIT and ROLLBACK without a write-ahead log, and says where they work', () => {
     for (const sql of ['BEGIN', 'commit;', 'ROLLBACK WORK']) {
       const result = runQuery(sql, createAccountsDatabase());
-      expect(result.error?.message).toContain('need two sessions');
+      expect(result.error?.message).toContain('run on the write-ahead log');
       expect(result.error?.hint).toContain('/tools/schedule');
       expect(result.write).toBeUndefined();
     }

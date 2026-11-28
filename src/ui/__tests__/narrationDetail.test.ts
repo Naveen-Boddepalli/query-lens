@@ -4,8 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { eventKey } from '../../engine/eventKey.ts';
 import { createTraceProjector, DATASETS, DEFAULT_ENGINE_OPTIONS, runQuery } from '../../engine/index.ts';
 import type { DatasetId, EngineOptions, RunResult } from '../../engine/index.ts';
-import { openEngineLog } from '../../engine/recovery/engineLogOps.ts';
-import { loggedRun } from '../../engine/recovery/engineLog.ts';
+import { loggedRun, openEngineLog } from '../../engine/recovery/engineLogOps.ts';
 import { readDetailParam } from '../detailLevel.ts';
 import { expertLine, firstOfEachKind, narrationAt, NOVICE_LINES, noviceLine } from '../narrationDetail.ts';
 
@@ -40,12 +39,23 @@ const logged = (): { sql: string; options: EngineOptions; result: RunResult } =>
   return { sql, options, result: runQuery(sql, db, options, { engineLog: loggedRun(openEngineLog(db, options, { steal: true, force: false })) }) };
 };
 
+/** A `ROLLBACK` from the SQL box (plan.md §28.5 I3): its undo steps, after `BEGIN` and an `UPDATE`. */
+const rolledBack = (): { sql: string; options: EngineOptions; result: RunResult } => {
+  const options = DEFAULT_ENGINE_OPTIONS;
+  const db = DATASETS.users.make();
+  const begun = runQuery('BEGIN', db, options, { engineLog: loggedRun(openEngineLog(db, options, { steal: true, force: false })) });
+  const update = runQuery('UPDATE users SET age = 1 WHERE id <= 2', db, options, { engineLog: loggedRun(begun.engineLog!) });
+  const after = { tables: { users: { ...db.tables.users!, rows: update.write!.rows } } };
+  return { sql: 'ROLLBACK', options, result: runQuery('ROLLBACK', after, options, { engineLog: loggedRun(update.engineLog!) }) };
+};
+
 const runs: { sql: string; options: EngineOptions; result: RunResult }[] = [
   ...CORPUS.map(([dataset, sql, extra]) => {
     const options = { ...DEFAULT_ENGINE_OPTIONS, ...extra };
     return { sql, options, result: runQuery(sql, DATASETS[dataset].make(), options) };
   }),
   logged(),
+  rolledBack(),
 ];
 
 describe('narration detail levels (plan.md §27.5 L2)', () => {

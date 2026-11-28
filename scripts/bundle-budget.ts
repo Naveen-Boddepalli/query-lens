@@ -469,6 +469,11 @@ const T = (name: string): string => `src/pages/tools/${name}.tsx`;
  *    /tools/isolation 0.1–0.4 kB over; limits.mdx's longer Durability section put the docs chunk 0.5 kB over. Each
  *    is set to measured + 3, rounded up. The Durability chunk now carries the engine-side log as well as the
  *    dialog's ARIES operations: 23.8 kB, so 17 → 27.
+ *  - 2026-11-28, transactions in the Playground (plan.md §28.5 I3): `BEGIN`, `COMMIT` and `ROLLBACK` run in the
+ *    Durability chunk, handed to `runQuery` with the log (24.8 kB, under its 27). The engine carries only their
+ *    dispatch, the refusals while the log is off, and the new `undo` buffer step and its narration. Those put /gallery,
+ *    /assignments/new, /tools/schedule, /tools/join-order and /docs/concepts/btree 0.1–0.2 kB over, after the refusals
+ *    were cut to one shared hint. Each is set to measured + 3, rounded up.
  */
 export const ROUTES: readonly RouteBudget[] = [
   { route: '/', roots: [P('LandingPage')], kb: 188, note: 'the landing page' },
@@ -478,7 +483,7 @@ export const ROUTES: readonly RouteBudget[] = [
   { route: '/learn', roots: [P('LearnPage')], kb: 120, note: 'the lesson track' },
   { route: '/learn/:id', roots: [P('LessonPage')], kb: 222, note: 'one lesson' },
   { route: '/examples', roots: [P('ExamplesPage')], kb: 117, note: 'preset queries' },
-  { route: '/gallery', roots: [P('GalleryPage')], kb: 185, note: 'named moments' },
+  { route: '/gallery', roots: [P('GalleryPage')], kb: 189, note: 'named moments' },
   { route: '/compare', roots: [P('ComparePage')], kb: 199, note: 'index vs scan, policy vs policy, hash vs sort, join algorithms, B+Tree vs. LSM' },
   { route: '/trace', roots: [P('TracePage')], kb: 192, note: 'the trace inspector' },
   { route: '/progress', roots: [P('ProgressPage')], kb: 122, note: 'the progress dashboard' },
@@ -487,7 +492,7 @@ export const ROUTES: readonly RouteBudget[] = [
   { route: '/challenges/:id', roots: [P('ChallengePage')], kb: 330, note: 'one challenge' },
   { route: '/settings', roots: [P('SettingsPage')], kb: 117, note: 'preferences' },
   { route: '/study', roots: [P('StudyPage')], kb: 122, note: 'the §9 study runner (unlisted); the instrument travels in the link, not the bundle (§25.4 A2)' },
-  { route: '/assignments/new', roots: [P('AssignmentsNewPage')], kb: 186, note: 'assignment-link builder' },
+  { route: '/assignments/new', roots: [P('AssignmentsNewPage')], kb: 190, note: 'assignment-link builder' },
   { route: '/tools', roots: [P('ToolsIndexPage')], kb: 119, note: 'the tools index' },
   { route: '/tools/buffer-pool', roots: [T('BufferPoolToolPage')], kb: 199, note: 'buffer-pool sandbox' },
   { route: '/tools/parser', roots: [T('ParserToolPage')], kb: 218, note: 'tokenizer + parser sandbox' },
@@ -500,10 +505,10 @@ export const ROUTES: readonly RouteBudget[] = [
   { route: '/tools/recovery', roots: [T('RecoveryToolPage')], kb: 132, note: 'crash recovery: checkpoints, a crash, and ARIES analysis, redo and undo' },
   { route: '/tools/wal', roots: [T('WalToolPage')], kb: 132, note: 'write-ahead log: a pool, a disk, a log and the rule between them' },
   { route: '/tools/concurrency', roots: [T('ConcurrencyToolPage')], kb: 203, note: 'one schedule under five concurrency-control protocols, each really run' },
-  { route: '/tools/schedule', roots: [T('ScheduleToolPage')], kb: 212, note: 'transaction schedules (the engine, a shared database, two sessions)' },
+  { route: '/tools/schedule', roots: [T('ScheduleToolPage')], kb: 216, note: 'transaction schedules (the engine, a shared database, two sessions)' },
   { route: '/tools/grammar', roots: [T('GrammarToolPage')], kb: 117, note: 'the SQL grammar diagram' },
   { route: '/tools/hash-join', roots: [T('HashJoinToolPage')], kb: 129, note: 'Grace hash join' },
-  { route: '/tools/join-order', roots: [T('JoinOrderToolPage')], kb: 189, note: 'Selinger join-order search over the subset lattice' },
+  { route: '/tools/join-order', roots: [T('JoinOrderToolPage')], kb: 193, note: 'Selinger join-order search over the subset lattice' },
   { route: '/tools/raft', roots: [T('RaftToolPage')], kb: 135, note: 'Raft: election and replication over a scripted schedule, its safety properties checked (plan.md §27.5 X3)' },
   { route: '/tools/2pc', roots: [T('TwoPhaseCommitToolPage')], kb: 132, note: 'two-phase commit with presumed abort; crashes and lost messages scripted (plan.md §27.5 X2)' },
   { route: '/tools/partitioning', roots: [T('PartitioningToolPage')], kb: 136, note: 'partitioning by hash, range and consistent hashing; rows moved when a node joins or leaves (plan.md §27.5 X1)' },
@@ -515,7 +520,7 @@ export const ROUTES: readonly RouteBudget[] = [
   { route: '/tools/vector-index', roots: [T('VectorIndexToolPage')], kb: 129, note: 'brute force vs. IVF vs. HNSW vector search' },
   { route: '/tools/latch-crabbing', roots: [T('LatchCrabbingToolPage')], kb: 197, note: 'latch crabbing: naive vs. lock coupling vs. optimistic coupling on a scripted B+Tree workload' },
   { route: '/docs', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 196, note: 'the docs shell and every prose page (one shared chunk)' },
-  { route: '/docs/concepts/btree', roots: ['src/ui/DocsLayout.tsx', 'src/pages/DocsContent/concepts/btree.mdx'], kb: 213, note: 'a concept page with a live B+Tree widget' },
+  { route: '/docs/concepts/btree', roots: ['src/ui/DocsLayout.tsx', 'src/pages/DocsContent/concepts/btree.mdx'], kb: 217, note: 'a concept page with a live B+Tree widget' },
   { route: '/docs/essays/index-write-tax', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 196, note: 'an essay: prose, with links into the B+Tree sandbox (plan.md §25.4 H2)' },
   { route: '/docs/essays/repeatable-read', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 196, note: 'an essay: prose, with links into the isolation matrix and the schedule tool (plan.md §25.4 H2)' },
   { route: '/docs/essays/scan-resistance', roots: ['src/ui/DocsLayout.tsx', '_docs'], kb: 196, note: 'an essay: prose, with links into the buffer-pool sandbox under LRU and LRU-2 (plan.md §25.4 H2)' },

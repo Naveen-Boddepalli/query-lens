@@ -71,6 +71,8 @@ export function eventKey(e: StepEvent): EventKey {
         case 'log':
         case 'flush':
           return { key: `buffer.${e.action}`, params: { page: e.pageId, lsn: e.lsn } };
+        case 'undo':
+          return { key: 'buffer.undo', params: { page: e.pageId, lsn: e.lsn, undoes: e.undoes } };
         default:
           return { key: `buffer.${e.action}`, params: { page: e.pageId, frame: e.frameId } };
       }

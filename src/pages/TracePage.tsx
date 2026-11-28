@@ -99,6 +99,8 @@ function detailOf(e: StepEvent): string {
           return `log · LSN ${e.lsn} · page ${e.pageId}`;
         case 'flush':
           return `flush · log through LSN ${e.lsn} before page ${e.pageId}`;
+        case 'undo':
+          return `undo · LSN ${e.undoes} as CLR ${e.lsn} · page ${e.pageId}`;
         default:
           return `${e.action} · page ${e.pageId} → frame ${e.frameId}`;
       }

@@ -93,3 +93,56 @@ test('a logged write says what it logged, and the pool’s dirty pages wait for 
   await page.getByRole('button', { name: /^Durability \(1\)/ }).click();
   await expect(page.getByRole('dialog', { name: 'Durability' })).toContainText('UPDATE users SET age = age + 1');
 });
+
+// plan.md §28.5 I3: BEGIN, COMMIT and ROLLBACK in the SQL box, on that log.
+test('BEGIN with the log off says where it runs', async ({ page }) => {
+  await page.goto('/playground');
+  await run(page, 'BEGIN');
+  await expect(page.getByText('run on the write-ahead log, and none is on for this database').first()).toBeVisible();
+});
+
+test('a ROLLBACK typed in the SQL box undoes the transaction’s writes, newest first, in its trace', async ({ page }) => {
+  await page.goto('/playground');
+  await logOn(page);
+  const edit = page.getByRole('button', { name: /^Edit data/ });
+  const rows = Number((await edit.innerText()).match(/\((\d+)\)/)![1]);
+  await run(page, 'BEGIN');
+  await expect(page.getByRole('button', { name: /^Durability/ })).toContainText('T1 open');
+  await run(page, 'DELETE FROM users WHERE id = 6');
+  await run(page, 'UPDATE users SET age = 99 WHERE id = 5');
+  await expect(edit).toContainText(`(${String(rows - 1)})`);
+  await run(page, 'ROLLBACK');
+  await expect(edit).toContainText(`(${String(rows)})`);
+  await expect(page.getByRole('button', { name: /^Durability/ })).not.toContainText('open');
+  await page.getByLabel('Scrub to step').press('End');
+  await expect(page.getByText(/ROLLBACK: T1 rolls back: its abort record is LSN 3\./).first()).toBeVisible();
+  // One step back is the oldest change's undo: the DELETE's, LSN 1.
+  await page.getByLabel('Scrub to step').press('ArrowLeft');
+  await expect(page.getByText(/Undo LSN 1: T1's change to slot \d+ of/).first()).toBeVisible();
+  await page.getByRole('button', { name: /^Durability/ }).click();
+  const statements = page.getByRole('dialog', { name: 'Durability' }).getByRole('region', { name: 'The statements' });
+  await expect(statements.getByRole('row', { name: /^T1 DELETE/ })).toContainText('rolled back');
+  await expect(statements.getByRole('row', { name: /^T1 UPDATE/ })).toContainText('rolled back');
+});
+
+test('a crash in the middle of a BEGIN makes its transaction a loser, and recovery undoes it', async ({ page }) => {
+  await page.goto('/playground');
+  await logOn(page);
+  const edit = page.getByRole('button', { name: /^Edit data/ });
+  const rows = Number((await edit.innerText()).match(/\((\d+)\)/)![1]);
+  await run(page, 'BEGIN');
+  await run(page, 'DELETE FROM users WHERE id = 6');
+  await page.getByRole('button', { name: /^Durability/ }).click();
+  const dialog = page.getByRole('dialog', { name: 'Durability' });
+  const statements = dialog.getByRole('region', { name: 'The statements' });
+  await expect(statements.getByRole('row', { name: /^T1 DELETE/ })).toContainText('open, after BEGIN');
+  await dialog.getByRole('button', { name: 'Flush log' }).click();
+  await dialog.getByRole('button', { name: 'Crash', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Recover', exact: true }).click();
+  await expect(statements.getByRole('row', { name: /^T1 DELETE/ })).toContainText('rolled back');
+  await expect(dialog.getByRole('region', { name: 'The three passes of recovery' })).toContainText('T1');
+  await expect(edit).toContainText(`(${String(rows)})`);
+  await dialog.getByRole('button', { name: 'Close' }).click();
+  await run(page, 'COMMIT');
+  await expect(page.getByText('No transaction is open, so there is nothing to commit.').first()).toBeVisible();
+});

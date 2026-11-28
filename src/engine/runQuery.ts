@@ -35,8 +35,9 @@ import {
 } from './planner/index.ts';
 import type { CompoundMember, Plan } from './planner/index.ts';
 import { buildHeap, createBufferPool, PoolExhausted } from './storage/index.ts';
-import type { LogRefusal, LoggedRun, StatementLog } from './recovery/engineLog.ts';
-import { controlKindOf } from './transactionControl.ts';
+import type { LogRefusal, StatementLog } from './recovery/engineLog.ts';
+import type { LoggedRun } from './recovery/engineLogOps.ts';
+import { controlKindOf, isolationLevelOf } from './transactionControl.ts';
 import { buildIndexes, describeUniqueKey, findIndexSpec, indexNameOf, indexSpecsOf, pageCountFor } from './index/index.ts';
 import type { BPlusTree } from './index/index.ts';
 import type { Heap } from './storage/index.ts';
@@ -89,7 +90,8 @@ export interface RunHooks {
   /**
    * A write-ahead log to run a write on (plan.md §28.5 I2): the engine's pool starts with the frames it left, each
    * changed row is logged before it is made, and the result carries the log the write leaves (`RunResult.engineLog`).
-   * A `SELECT` ignores it. Off unless a caller attaches one, so no other run's counters move.
+   * A `SELECT` ignores it. Off unless a caller attaches one, so no other run's counters move. With one, `BEGIN`,
+   * `COMMIT` and `ROLLBACK` run on it too (plan.md §28.5 I3).
    */
   engineLog?: LoggedRun;
 }
@@ -242,14 +244,32 @@ export function runQuery(
   const poolFor = (pageCount: number) =>
     createBufferPool(pageCount, options, emit, hooks.rehearsedReferences, 'query');
 
-  // `BEGIN`, `COMMIT` and `ROLLBACK` mean nothing to a single statement: say where they do (plan.md §25.4 D1).
-  if (controlKindOf(sql) !== null) {
+  // `BEGIN`, `COMMIT` and `ROLLBACK` (plan.md §25.4 D1) run on the write-ahead log, when there is one (§28.5 I3): it is
+  // what keeps a transaction's changes and undoes them. Without one, say where they do run.
+  const control = controlKindOf(sql);
+  if (control !== null) {
+    if (control !== 'malformed' && isolationLevelOf(sql) === null && hooks.engineLog) {
+      const done = hooks.engineLog.kit.control(control, hooks.engineLog.log, options, emit);
+      if (done.error) return { events: drain(), rows: [], error: done.error };
+      emit(done.label, { stage: 'result', rows: [] });
+      return {
+        events: drain(),
+        rows: [],
+        engineLog: done.log,
+        transaction: { kind: control, txn: done.txn, ...(done.database ? { database: done.database } : {}) },
+      };
+    }
     return {
       events: drain(),
       rows: [],
       error: {
-        message: '`BEGIN`, `COMMIT` and `ROLLBACK` need two sessions to mean anything, and the Playground runs one statement at a time.',
-        hint: 'Open Transaction schedules (/tools/schedule), where two sessions share a table and you choose the interleaving.',
+        message:
+          control === 'malformed'
+            ? 'This engine runs `BEGIN`, `COMMIT` and `ROLLBACK` alone: no savepoints, no `END`.'
+            : isolationLevelOf(sql) !== null
+              ? 'The Playground is one session: an isolation level has no other transaction to isolate it from.'
+              : '`BEGIN`, `COMMIT` and `ROLLBACK` run on the write-ahead log, and none is on for this database.',
+        hint: 'Turn the log on (or start it again) in the Playground’s Durability dialog. Two sessions sharing a table are in Transaction schedules (/tools/schedule).',
       },
     };
   }

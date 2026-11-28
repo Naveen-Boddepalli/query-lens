@@ -5,8 +5,9 @@
  * written to disk only after the log has been flushed through its pageLSN. That is ARIES's write-ahead rule, here on
  * the pages the engine reads, not on a model of its own.
  *
- * This file holds what a statement needs, so the engine carries only that. `engineLogOps.ts` holds what the
- * *Durability* dialog does between statements: commit, roll back, flush, write a page, checkpoint, crash and recover.
+ * This file holds what a statement needs. `engineLogOps.ts` holds what the *Durability* dialog does between
+ * statements — commit, roll back, flush, write a page, checkpoint, crash and recover — and what `BEGIN`, `COMMIT` and
+ * `ROLLBACK` in the SQL box do (plan.md §28.5 I3), with the kit `runQuery` is handed.
  * Both work on one `EngineLog`, plain data a statement copies and hands back, so a statement that fails leaves the
  * log as it was.
  *
@@ -102,6 +103,11 @@ export interface EngineLog {
   committed: Record<string, Cell>;
   statements: LoggedStatement[];
   counter: number;
+  /**
+   * The transaction a `BEGIN` in the SQL box opened (plan.md §28.5 I3), until its `COMMIT` or `ROLLBACK`: every write
+   * in between is its, not a transaction of its own. Null when none is open. A crash ends it, as a loser.
+   */
+  session: string | null;
   /** The database the log began with, for its tables' shapes. */
   base: Database;
   /** The tables as the log believes the Playground holds them: a different database means the log is stale. */
@@ -181,6 +187,20 @@ export class LogRefusal extends Error {
     this.name = 'LogRefusal';
     this.hint = hint;
   }
+}
+
+/** Why nothing may run on `log` now — the engine's settings moved since it began, or it has crashed — or null. */
+export function settingsRefusal(log: EngineLog, options: { bufferFrames: number; rowsPerPage: number }): LogRefusal | null {
+  if (options.bufferFrames !== log.frames || options.rowsPerPage !== log.rowsPerPage) {
+    return new LogRefusal(
+      `The log began on a pool of ${String(log.frames)} frames and pages of ${String(log.rowsPerPage)} rows, and the engine now has ${String(options.bufferFrames)} and ${String(options.rowsPerPage)}: its pages and frames are not these.`,
+      'Start the log again in Durability, or put the settings back.',
+    );
+  }
+  if (log.crashed) {
+    return new LogRefusal('The machine is down: the log has crashed and nothing runs until it has recovered.', 'Open Durability and press Recover.');
+  }
+  return null;
 }
 
 const rowText = (cell: Cell): string => (cell === null ? 'an empty slot' : String(cell));
@@ -367,18 +387,8 @@ export class StatementLog {
   private readonly inserted: number[] = [];
 
   constructor(log: EngineLog, table: Table, emit: Emit, options: { bufferFrames: number; rowsPerPage: number }) {
-    if (options.bufferFrames !== log.frames || options.rowsPerPage !== log.rowsPerPage) {
-      throw new LogRefusal(
-        `The log began on a pool of ${String(log.frames)} frames and pages of ${String(log.rowsPerPage)} rows, and the engine now has ${String(options.bufferFrames)} and ${String(options.rowsPerPage)}: its pages and frames are not these.`,
-        'Start the log again in Durability, or put the settings back.',
-      );
-    }
-    if (log.crashed) {
-      throw new LogRefusal(
-        'The machine is down: the log has crashed and nothing runs until it has recovered.',
-        'Open Durability and press Recover.',
-      );
-    }
+    const refused = settingsRefusal(log, options);
+    if (refused) throw refused;
     if (table.clusteredKey) {
       throw new LogRefusal(
         `\`${table.name}\` is a clustered table, whose rows move to stay in key order; the log keeps each row in a fixed slot, so it cannot log a write to it.`,
@@ -389,7 +399,8 @@ export class StatementLog {
       throw new LogRefusal(`The log has no heap for \`${table.name}\`.`, 'Start the log again from this database in Durability.');
     }
     this.machine = new LogMachine(log, emit);
-    this.txn = `Q${String(log.counter + 1)}`;
+    // Inside a `BEGIN`, a write is the open transaction's; outside one, a transaction of its own.
+    this.txn = log.session ?? `Q${String(log.counter + 1)}`;
     this.table = table;
   }
 
@@ -473,7 +484,7 @@ export class StatementLog {
     if (before === null) this.inserted.push(rid);
     const what = before === null ? 'puts a new row in' : after === null ? 'empties' : 'changes';
     this.machine.say(
-      `Log record LSN ${String(record.lsn)}: ${this.txn} ${what} slot ${String(rid)} of \`${this.table.name}\` on page ${String(pageId)} (${rowText(beforeCell)} → ${rowText(afterCell)}). The record goes to the log buffer before the page is changed${wasEmpty ? `, and it is ${this.txn}'s first, so ${this.txn} begins here` : ''}; page ${String(pageId)} takes pageLSN ${String(record.lsn)} and is dirty in the pool. Neither is on disk yet.`,
+      `Log record LSN ${String(record.lsn)}: ${this.txn} ${what} slot ${String(rid)} of \`${this.table.name}\` on page ${String(pageId)} (${rowText(beforeCell)} → ${rowText(afterCell)}). The record goes to the log buffer before the page is changed${wasEmpty ? (this.state.session === this.txn ? `, and it is ${this.txn}'s first` : `, and it is ${this.txn}'s first, so ${this.txn} begins here`) : ''}; page ${String(pageId)} takes pageLSN ${String(record.lsn)} and is dirty in the pool. Neither is on disk yet.`,
       { stage: 'buffer', action: 'log', pageId, lsn: record.lsn },
     );
   }
@@ -487,7 +498,8 @@ export class StatementLog {
     const s = this.state;
     s.expected = { tables: { ...s.expected.tables, [this.table.name]: { ...this.table, rows: [...rows] } } };
     if (this.changed > 0) {
-      s.counter += 1;
+      // A `BEGIN`'s transaction took its number when it began.
+      if (s.session !== this.txn) s.counter += 1;
       s.statements.push({ txn: this.txn, sql, table: this.table.name, kind, rows: this.changed });
     }
     return s;
@@ -499,24 +511,9 @@ export function loggedNote(statement: StatementLog): string {
   if (statement.changed === 0) return ' Nothing changed, so nothing was logged.';
   const s = statement.state;
   const inBuffer = s.logBuffer.length;
-  return ` Logged as ${statement.txn}: ${String(statement.records)} ${statement.records === 1 ? 'record' : 'records'}, and ${String(inBuffer)} in the log buffer, durable through LSN ${String(s.flushedLSN)}. ${statement.txn} stays open until you commit or roll it back in Durability.`;
+  const open = s.session === statement.txn ? 'until `COMMIT` or `ROLLBACK`' : 'until you commit or roll it back in Durability';
+  return ` Logged as ${statement.txn}: ${String(statement.records)} ${statement.records === 1 ? 'record' : 'records'}, and ${String(inBuffer)} in the log buffer, durable through LSN ${String(s.flushedLSN)}. ${statement.txn} stays open ${open}.`;
 }
 
-/**
- * What a logged run needs of this file, handed to `runQuery` with the log (`RunHooks.engineLog`) instead of imported
- * by it: the engine stays as small as it was for every page that never turns the log on, and only the lazy
- * *Durability* dialog, which opens a log, loads this file.
- */
-export const engineLogKit = { StatementLog, loggedNote, inSync, isRefusal: (e: unknown): e is LogRefusal => e instanceof LogRefusal };
-export type EngineLogKit = typeof engineLogKit;
-
-/** A log and the kit that runs a statement on it: what `runQuery` takes to log a write. */
-export interface LoggedRun {
-  log: EngineLog;
-  kit: EngineLogKit;
-}
-
-/** `log`, ready to hand to `runQuery`. */
-export function loggedRun(log: EngineLog): LoggedRun {
-  return { log, kit: engineLogKit };
-}
+/** A statement's refusal, as `runQuery` tests for one without importing this file. */
+export const isRefusal = (e: unknown): e is LogRefusal => e instanceof LogRefusal;

@@ -4,8 +4,7 @@ import { runQuery } from '../runQuery.ts';
 import { DEFAULT_ENGINE_OPTIONS } from '../types.ts';
 import type { Database, EngineOptions, RunResult, StepEvent } from '../types.ts';
 import type { EngineLog } from '../recovery/engineLog.ts';
-import { loggedRun } from '../recovery/engineLog.ts';
-import { applyLogOp, crashImageOf, databaseOfLog, diskDatabase, memoryCells, openEngineLog } from '../recovery/engineLogOps.ts';
+import { applyLogOp, crashImageOf, databaseOfLog, diskDatabase, loggedRun, memoryCells, openEngineLog } from '../recovery/engineLogOps.ts';
 import type { LogOp, LogOpResult } from '../recovery/engineLogOps.ts';
 import { committedCells, crashImage, databaseCells, runWal } from '../recovery/wal.ts';
 import type { Cell, PageId, WalStep } from '../recovery/wal.ts';
@@ -47,6 +46,21 @@ class Session {
     this.last = r;
     if (r.error) return r;
     const after = r.engineLog!;
+    // BEGIN, COMMIT and ROLLBACK in the SQL box (plan.md §28.5 I3) are the model's begin, commit and abort.
+    if (r.transaction) {
+      const { kind, txn, database } = r.transaction;
+      if (kind === 'begin') {
+        this.begun.add(txn);
+        this.steps.push({ op: 'begin', txn });
+      } else {
+        this.steps.push({ op: kind === 'commit' ? 'commit' : 'abort', txn });
+      }
+      for (const e of r.events) if (e.stage === 'buffer' && e.action === 'evict' && e.writtenBack) this.steps.push({ op: 'write-page', page: e.victimPageId });
+      this.log = after;
+      if (database) this.db = database;
+      return r;
+    }
+    if (!r.write) return r;
     const records = new Map([...after.log, ...after.logBuffer].map((x) => [x.lsn, x]));
     for (const e of r.events) {
       if (e.stage !== 'buffer') continue;
@@ -67,7 +81,7 @@ class Session {
       if (!(page in this.initial)) this.initial[Number(page)] = Object.fromEntries(Object.keys(img.cells).map((k) => [k, null]));
     }
     this.log = after;
-    this.db = { tables: { ...this.db.tables, [r.write!.table]: { ...this.db.tables[r.write!.table]!, rows: r.write!.rows } } };
+    this.db = { tables: { ...this.db.tables, [r.write.table]: { ...this.db.tables[r.write.table]!, rows: r.write.rows } } };
     return r;
   }
 
@@ -337,3 +351,137 @@ describe('the engine logs (plan.md §28.5 I2)', () => {
     expect(databaseOfLog(back.log).tables.transactions!.rows).toEqual(db.tables.transactions!.rows);
   });
 });
+
+describe('transactions in the SQL box (plan.md §28.5 I3)', () => {
+  it('makes every write between BEGIN and COMMIT one transaction, which sees its own changes', () => {
+    const s = new Session(users(), 8);
+    expect(s.run('BEGIN').transaction).toEqual({ kind: 'begin', txn: 'T1' });
+    expect(s.log.session).toBe('T1');
+    s.run("UPDATE users SET name = 'x' WHERE id = 1");
+    // The same row again: it is T1's own, not another transaction's.
+    expect(s.run("UPDATE users SET name = 'y' WHERE id = 1").error).toBeUndefined();
+    s.run('DELETE FROM users WHERE id = 2');
+    expect(s.run('SELECT name FROM users WHERE id = 1').rows).toEqual([{ name: 'y' }]);
+    expect(s.log.statements.map((x) => x.txn)).toEqual(['T1', 'T1', 'T1']);
+    expect(s.log.txns.map((t) => t.txn)).toEqual(['T1']);
+    expect(s.last!.events.at(-1)!.label).not.toContain('Durability');
+    const c = s.run('COMMIT');
+    expect(c.transaction).toEqual({ kind: 'commit', txn: 'T1' });
+    expect(c.events.at(-1)!.label).toMatch(/^COMMIT: T1 commits: record LSN 4\./);
+    expect(s.log.session).toBeNull();
+    expect(s.log.committed['users#0']).toContain('"name":"y"');
+    expect(s.log.committed['users#1']).toBeNull();
+    s.agreesExactly();
+    // The next write outside BEGIN is a transaction of its own again, numbered after T1.
+    s.run("UPDATE users SET name = 'z' WHERE id = 3");
+    expect(s.log.statements.at(-1)!.txn).toBe('Q2');
+  });
+
+  it('rolls back newest first, one compensation record a step, and gives back the rows as they were', () => {
+    const start = users();
+    const s = new Session(start, 8);
+    s.run("UPDATE users SET name = 'outside' WHERE id = 12");
+    s.run('BEGIN');
+    s.run("UPDATE users SET name = 'x' WHERE id <= 3");
+    s.run('DELETE FROM users WHERE id = 7');
+    s.run("INSERT INTO users VALUES (99, 'new', 'new@example.com', 40)");
+    expect(s.db.tables.users!.rows).toHaveLength(12);
+    const r = s.run('ROLLBACK');
+    expect(r.error).toBeUndefined();
+    const undo = r.events.filter((e): e is Extract<StepEvent, { action: 'undo' }> => e.stage === 'buffer' && e.action === 'undo');
+    // Q1 has LSN 1 and T2 wrote 2–6; T2's abort is 7, so the undo records are 8–12, for 6, 5, 4, 3, 2.
+    expect(undo.map((e) => [e.undoes, e.lsn])).toEqual([[6, 8], [5, 9], [4, 10], [3, 11], [2, 12]]);
+    expect(r.events.at(-1)!.label).toMatch(/^ROLLBACK: T2 rolls back: its abort record is LSN 7\. Its 5 changes were undone .* end record is LSN 13\. The rows are as they were before BEGIN\.$/);
+    expect(r.transaction?.txn).toBe('T2');
+    expect(r.transaction?.kind).toBe('rollback');
+    // Q1's change, made before BEGIN, is not T2's to undo.
+    const expected = start.tables.users!.rows.map((row) => (row.id === 12 ? { ...row, name: 'outside' } : row));
+    expect(s.db.tables.users!.rows).toEqual(expected);
+    expect(s.log.session).toBeNull();
+    s.agreesExactly();
+  });
+
+  it('undoes through the engine’s pool: a small pool reads and evicts in the ROLLBACK’s own trace', () => {
+    const start = users();
+    const s = new Session(start, 2);
+    s.run('BEGIN');
+    s.run('UPDATE users SET age = age + 1');
+    const r = s.run('ROLLBACK');
+    const steps = r.events.filter((e) => e.stage === 'buffer').map((e) => (e.stage === 'buffer' ? e.action : ''));
+    expect(steps.filter((a) => a === 'undo')).toHaveLength(12);
+    expect(steps).toContain('miss');
+    expect(steps).toContain('evict');
+    expect(s.db.tables.users!.rows).toEqual(start.tables.users!.rows);
+    s.agrees();
+  });
+
+  it('makes a transaction a crash cuts off a loser, and ARIES undoes it on the engine’s own heap pages', () => {
+    const start = users();
+    const s = new Session(start, 8);
+    s.run('BEGIN');
+    s.run("UPDATE users SET name = 'lost' WHERE id = 5");
+    // Steal: the uncommitted change goes to disk, so recovery has real undo to do there.
+    const page = s.log.tables.users!.pages[1]!;
+    s.op({ op: 'write-page', page });
+    expect(s.log.disk[page]!.cells['users#4']).toContain('"name":"lost"');
+    s.agreesExactly();
+    s.op({ op: 'crash' });
+    expect(s.log.session).toBeNull();
+    expect(s.db.tables.users!.rows[4]!.name).toBe('lost');
+    const r = s.op({ op: 'recover' });
+    expect(r.recovery!.analysis.losers).toEqual(['T1']);
+    expect(r.recovery!.undo.filter((u) => u.action === 'undo').map((u) => u.txn)).toEqual(['T1']);
+    expect(s.db.tables.users!.rows).toEqual(start.tables.users!.rows);
+    s.agreesExactly();
+    // The session's transaction is gone with the crash: COMMIT has nothing to end.
+    expect(s.run('COMMIT').error?.message).toBe('No transaction is open, so there is nothing to commit.');
+  });
+
+  it('lets the dialog end the session’s transaction too', () => {
+    const s = new Session(users(), 8);
+    s.run('BEGIN');
+    s.run("UPDATE users SET name = 'x' WHERE id = 1");
+    s.op({ op: 'commit', txn: 'T1' });
+    expect(s.log.session).toBeNull();
+    expect(s.run('ROLLBACK').error?.message).toBe('No transaction is open, so there is nothing to roll back.');
+    s.agreesExactly();
+  });
+
+  it('commits or rolls back a transaction that changed nothing without a record', () => {
+    const s = new Session(users(), 8);
+    s.run('BEGIN');
+    expect(s.run('COMMIT').events.at(-1)!.label).toBe('COMMIT: T1 changed nothing, so there is nothing to make durable.');
+    s.run('BEGIN');
+    s.run("UPDATE users SET name = 'x' WHERE id = 99");
+    expect(s.run('ROLLBACK').error).toBeUndefined();
+    expect(s.log.log).toEqual([]);
+    expect(s.log.logBuffer).toEqual([]);
+  });
+
+  it('keeps the transaction open when one of its statements fails', () => {
+    const s = new Session(users(), 8);
+    s.run('BEGIN');
+    s.run("UPDATE users SET name = 'x' WHERE id = 1");
+    const before = s.log;
+    expect(s.run('UPDATE users SET nope = 1').error).toBeDefined();
+    expect(s.log).toBe(before);
+    expect(s.log.session).toBe('T1');
+    s.run('ROLLBACK');
+    expect(s.db.tables.users!.rows).toEqual(users().tables.users!.rows);
+  });
+
+  it('refuses what one session without savepoints cannot do, and changes nothing', () => {
+    const s = new Session(users(), 8);
+    expect(s.run('COMMIT').error?.message).toBe('No transaction is open, so there is nothing to commit.');
+    s.run('BEGIN');
+    const log = s.log;
+    expect(s.run('BEGIN').error?.message).toMatch(/^T1 is already open, and transactions do not nest/);
+    expect(s.run('BEGIN ISOLATION LEVEL SERIALIZABLE').error?.message).toMatch(/^The Playground is one session/);
+    expect(s.run('SAVEPOINT a').error?.message).toMatch(/no savepoints/);
+    expect(s.log).toBe(log);
+    s.op({ op: 'crash' });
+    expect(s.run('BEGIN').error?.message).toMatch(/^The machine is down/);
+    expect(runQuery('BEGIN', users()).error?.message).toBe('`BEGIN`, `COMMIT` and `ROLLBACK` run on the write-ahead log, and none is on for this database.');
+  });
+});
+

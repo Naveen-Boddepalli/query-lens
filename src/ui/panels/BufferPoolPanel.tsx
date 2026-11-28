@@ -14,8 +14,8 @@ type FrameMood = 'hit' | 'load' | 'prefetch' | 'write' | 'evict' | 'sweep' | nul
 
 function moodOf(frame: BufferFrame, lastEvent: StepEvent | null): FrameMood {
   if (lastEvent?.stage !== 'buffer') return null;
-  // A miss has not chosen a frame yet, so it highlights nothing; a log record or a log flush is the log's, not a frame's.
-  if (lastEvent.action === 'miss' || lastEvent.action === 'log' || lastEvent.action === 'flush') return null;
+  // A miss has not chosen a frame yet, so it highlights nothing; a log record, a log flush or an undo is the log's, not a frame's.
+  if (lastEvent.action === 'miss' || lastEvent.action === 'log' || lastEvent.action === 'flush' || lastEvent.action === 'undo') return null;
   return lastEvent.frameId === frame.frameId ? lastEvent.action : null;
 }
 

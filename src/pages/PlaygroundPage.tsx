@@ -429,6 +429,20 @@ export function PlaygroundPage() {
         }
       }
 
+      // BEGIN, COMMIT and ROLLBACK (plan.md §28.5 I3) change the log, and a ROLLBACK the rows: it gives back what the
+      // transaction changed, so the Playground holds what the log now holds.
+      if (next.transaction) {
+        const leftLog = next.engineLog;
+        if (leftLog) setDurability((d) => (d ? { ...d, log: leftLog } : d));
+        const restored = next.transaction.database;
+        if (restored) {
+          setDb(restored);
+          for (const [name, t] of Object.entries(restored.tables)) {
+            if (JSON.stringify(t.rows) !== JSON.stringify(database.tables[name]?.rows)) markEdited(name);
+          }
+        }
+      }
+
       // ANALYZE (plan.md §25.4 C1) is the same story for statistics: the engine never holds state between calls,
       // so persisting them here is what lets the *next* query actually read them instead of scanning the live
       // rows. Unlike a write, the rows themselves have not changed — no `rowsEdited`.
@@ -718,6 +732,7 @@ export function PlaygroundPage() {
             )}
             <button type="button" onClick={() => { setDurabilityOpen(true); }} className={btnSecondary}>
               Durability{durability && durability.log.statements.length > 0 ? ` (${String(durability.log.statements.length)})` : ''}
+              {durability?.log.session && <span className="ml-1 font-mono text-ink-dim">· {durability.log.session} open</span>}
             </button>
             <label className="ml-auto flex items-center gap-2 text-label text-ink-dim">
               Eviction

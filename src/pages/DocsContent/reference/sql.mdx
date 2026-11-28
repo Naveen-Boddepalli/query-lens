@@ -394,7 +394,7 @@ with a generic syntax error:
 | A subquery used as a value that returns two rows | *The subquery … returned 2 rows, but a subquery used as a value must return at most one.* — add an aggregate, a WHERE on a unique column, or `ORDER BY … LIMIT 1`. |
 | A subquery used as a value that reads the outer query's table | *There is no table called `customers` in this query.* — it runs once, on its own; for a per-row test, use `EXISTS`. |
 | `EXISTS` under `OR`, or in `HAVING`, `DELETE` or `UPDATE` | *EXISTS has to be one of the conditions WHERE joins with AND* — it runs as a semi-join, which keeps or drops whole rows. |
-| `BEGIN` / `COMMIT` / `ROLLBACK` | *`BEGIN`, `COMMIT` and `ROLLBACK` need two sessions to mean anything, and the Playground runs one statement at a time.* They run in [Transaction schedules](/tools/schedule). |
+| `BEGIN` / `COMMIT` / `ROLLBACK` | In the Playground with the write-ahead log on (*Durability*): one session, one transaction at a time — see [the limits](/docs/reference/limits#transactions). Without the log: *`BEGIN`, `COMMIT` and `ROLLBACK` run on the write-ahead log, and none is on for this database.* Two sessions sharing a table run in [Transaction schedules](/tools/schedule). |
 | `CREATE` / `DROP` | *QueryLens only runs SELECT, DELETE, INSERT and UPDATE. Edit the seed data to change the table.* |
 
 ## The seed tables

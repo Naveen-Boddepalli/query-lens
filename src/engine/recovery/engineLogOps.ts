@@ -7,16 +7,22 @@
  *
  * The rules are `wal.ts`'s, record for record: the same records in the same order with the same LSNs, the same
  * three passes, the same reports. That is what lets the four-page model be this log's oracle (plan.md §28.6 rule 11).
- * Imported only by the dialog, which is fetched when it is opened.
+ *
+ * `BEGIN`, `COMMIT` and `ROLLBACK` typed in the SQL box (plan.md §28.5 I3) are the same commit and rollback, run by
+ * `runQuery` through the kit at the end of this file: `BEGIN` opens the session's one transaction, every write until it
+ * ends is that transaction's, and its `ROLLBACK` undoes them newest first, one compensation record each, as steps of the
+ * statement's trace. Imported only by the dialog, which is fetched when it is opened — and which hands the kit over.
  */
 
 import { createBufferPool } from '../storage/bufferPool.ts';
 import type { BufferPool } from '../storage/bufferPool.ts';
 import type { BufferState } from '../storage/policy.ts';
+import type { Emit } from '../trace.ts';
+import type { ControlKind } from '../transactionControl.ts';
 import type { Database, EngineOptions, Row, StepEventBody } from '../types.ts';
 import { cellText } from './wal.ts';
 import type { Cell, CrashCell, CrashImage, FrameState, LogRecord, PageId, RecoveryReport, WalEffect, WalState } from './wal.ts';
-import { LogMachine, cellKey, cellNow, parseCellKey } from './engineLog.ts';
+import { LogMachine, StatementLog, cellKey, cellNow, inSync, isRefusal, loggedNote, parseCellKey, settingsRefusal } from './engineLog.ts';
 import type { EngineLog, EngineTxn, PageImage } from './engineLog.ts';
 
 export type LogOp =
@@ -98,6 +104,7 @@ export function openEngineLog(db: Database, options: Pick<EngineOptions, 'rowsPe
     committed,
     statements: [],
     counter: 0,
+    session: null,
     base: db,
     expected: db,
   };
@@ -204,7 +211,11 @@ function lastCommitterOf(log: EngineLog, key: string): string | undefined {
   return by;
 }
 
-/** An operation's working copy: the log machine, and the engine's pool over it, built when a page is first needed. */
+/**
+ * An operation's working copy: the log machine, and the engine's pool over it, built when a page is first needed. Run
+ * from the SQL box (`trace`), its page reads and compensation records are steps of the statement's trace; run from the
+ * dialog, they are notes.
+ */
 class Operation {
   readonly machine: LogMachine;
   readonly effects: WalEffect[] = [];
@@ -213,11 +224,19 @@ class Operation {
   private flushedSeen: number;
 
   private readonly options: EngineOptions;
+  private readonly trace: Emit | undefined;
 
-  constructor(log: EngineLog, options: EngineOptions) {
+  constructor(log: EngineLog, options: EngineOptions, trace?: Emit) {
     this.options = options;
-    this.machine = new LogMachine(log);
+    this.trace = trace;
+    this.machine = new LogMachine(log, trace);
     this.flushedSeen = log.flushedLSN;
+  }
+
+  /** A sentence: a step of the trace when there is one and `body` says what step, a note otherwise. */
+  say(label: string, body?: StepEventBody): void {
+    if (this.trace && body) this.trace(label, body);
+    else this.machine.notes.push(label);
   }
 
   private flushed(to: number, reason: Extract<WalEffect, { kind: 'log-flush' }>['reason']): void {
@@ -232,9 +251,11 @@ class Operation {
 
   /** Steps the pool takes, as the model's effects and as notes. */
   private onStep = (label: string, body: StepEventBody): void => {
+    // In the SQL box every step the pool takes is the trace's, as a query's are.
+    if (this.trace) this.trace(label, body);
     if (body.stage !== 'buffer') return;
     // A disk read, an eviction or a log flush is worth a sentence; a hit, or the miss before a read, is not.
-    if (body.action === 'load' || body.action === 'evict' || body.action === 'flush') this.machine.notes.push(label);
+    if (!this.trace && (body.action === 'load' || body.action === 'evict' || body.action === 'flush')) this.machine.notes.push(label);
     if (body.action === 'hit' || body.action === 'load') {
       this.effects.push({ kind: 'page-fetch', page: body.pageId, hit: body.action === 'hit', slot: body.frameId });
     } else if (body.action === 'evict') {
@@ -343,6 +364,80 @@ class Operation {
     }
   }
 
+  /** Commits `t`: its commit record, the log forced through it, its end record — and under force, its pages written. */
+  commit(t: EngineTxn): void {
+    const notes = this.machine.notes;
+    const s = this.state;
+    if (s.session === t.txn) s.session = null;
+    if (t.lastLSN === null) {
+      t.status = 'ended';
+      t.outcome = 'committed';
+      notes.push(`${t.txn} changed nothing, so there is nothing to make durable.`);
+      return;
+    }
+    const commit = this.append({ type: 'commit', txn: t.txn });
+    notes.push(`${t.txn} commits: record LSN ${String(commit.lsn)}.`);
+    this.flush(commit.lsn, 'commit');
+    notes.push(
+      s.force
+        ? `The log is forced through LSN ${String(commit.lsn)} — that is what makes the commit durable.`
+        : `The log is forced through LSN ${String(commit.lsn)} — that is what makes the commit durable. No data page is written: the log already holds everything needed to redo it.`,
+    );
+    this.append({ type: 'end', txn: t.txn });
+    t.status = 'ended';
+    t.outcome = 'committed';
+    this.commitValues(t);
+    this.finish(t.txn, true);
+  }
+
+  /**
+   * Rolls `t` back: its abort record, then each of its changes undone newest first, each as a compensation record
+   * logged before the page changes back, then its end record. A refusal (no frame under no-steal) is returned.
+   */
+  abort(t: EngineTxn): string | undefined {
+    const notes = this.machine.notes;
+    const s = this.state;
+    if (t.lastLSN === null) {
+      if (s.session === t.txn) s.session = null;
+      t.status = 'ended';
+      t.outcome = 'rolled-back';
+      notes.push(`${t.txn} changed nothing, so there is nothing to undo.`);
+      return undefined;
+    }
+    const abort = this.append({ type: 'abort', txn: t.txn });
+    notes.push(
+      this.trace
+        ? `${t.txn} rolls back: its abort record is LSN ${String(abort.lsn)}.`
+        : `${t.txn} rolls back: record LSN ${String(abort.lsn)}, then its changes are undone newest first.`,
+    );
+    const updates: Extract<LogRecord, { type: 'update' }>[] = [];
+    for (let lsn: number | null = abort.prevLSN; lsn !== null; ) {
+      const r = this.record(lsn)!;
+      if (r.type === 'update') updates.push(r);
+      lsn = r.prevLSN;
+    }
+    for (const u of updates) {
+      if (!this.fetch(u.page)) return `No-steal: there is no frame to bring page ${String(u.page)} back into.`;
+      const clr = this.append({ type: 'clr', txn: t.txn, page: u.page, key: u.key, after: u.before, undoNextLSN: u.prevLSN });
+      this.machine.apply(u.page, u.key, u.before, clr.lsn, t.txn);
+      const { table, rid } = parseCellKey(u.key);
+      this.say(
+        this.trace
+          ? `Undo LSN ${String(u.lsn)}: ${t.txn}'s change to slot ${String(rid)} of \`${table}\` on page ${String(u.page)} is reversed — ${cellText(u.after)} goes back to ${cellText(u.before)}. The undo is logged first, as compensation record LSN ${String(clr.lsn)}, which points on to ${u.prevLSN === null ? 'nothing older' : `LSN ${String(u.prevLSN)}`}: a recovery redoes an undo like any change, and never undoes it twice. Page ${String(u.page)} takes pageLSN ${String(clr.lsn)}.`
+          : `Undo LSN ${String(u.lsn)}: ${u.key} goes back to ${cellText(u.before)}, logged as a compensation record (LSN ${String(clr.lsn)}) so that the undo is itself redoable and is never done twice.`,
+        { stage: 'buffer', action: 'undo', pageId: u.page, lsn: clr.lsn, undoes: u.lsn },
+      );
+    }
+    const end = this.append({ type: 'end', txn: t.txn });
+    if (this.trace) notes.push(`Its ${String(updates.length)} ${updates.length === 1 ? 'change was' : 'changes were'} undone in the steps above, newest first, each as a compensation record; its end record is LSN ${String(end.lsn)}.`);
+    if (s.session === t.txn) s.session = null;
+    t.status = 'ended';
+    t.outcome = 'rolled-back';
+    this.finish(t.txn, false);
+    reslot(s, updates.map((u) => u.key));
+    return undefined;
+  }
+
   /** The machine stops: pool, log buffer, transactions gone; disk, durable log and master record kept. */
   stop(): { frames: number; dirty: number; records: number; txns: number } {
     const s = this.state;
@@ -358,6 +453,8 @@ class Operation {
     s.txns = [];
     s.owners = {};
     s.deferred = [];
+    // A `BEGIN`'s transaction goes with the rest: if it changed anything, recovery finds it a loser.
+    s.session = null;
     s.nextLSN = (s.log.at(-1)?.lsn ?? s.logStart - 1) + 1;
     s.crashed = true;
     this.pool = null;
@@ -389,58 +486,15 @@ export function applyLogOp(log: EngineLog, op: LogOp, options: EngineOptions): L
     case 'commit': {
       const t = need(op.txn);
       if (typeof t === 'string') return refuse(t);
-      if (t.lastLSN === null) {
-        t.status = 'ended';
-        t.outcome = 'committed';
-        notes.push(`${op.txn} changed nothing, so there is nothing to make durable.`);
-        break;
-      }
-      const commit = run.append({ type: 'commit', txn: op.txn });
-      notes.push(`${op.txn} commits: record LSN ${String(commit.lsn)}.`);
-      run.flush(commit.lsn, 'commit');
-      notes.push(
-        s.force
-          ? `The log is forced through LSN ${String(commit.lsn)} — that is what makes the commit durable.`
-          : `The log is forced through LSN ${String(commit.lsn)} — that is what makes the commit durable. No data page is written: the log already holds everything needed to redo it.`,
-      );
-      run.append({ type: 'end', txn: op.txn });
-      t.status = 'ended';
-      t.outcome = 'committed';
-      run.commitValues(t);
-      run.finish(op.txn, true);
+      run.commit(t);
       break;
     }
 
     case 'abort': {
       const t = need(op.txn);
       if (typeof t === 'string') return refuse(t);
-      if (t.lastLSN === null) {
-        t.status = 'ended';
-        t.outcome = 'rolled-back';
-        notes.push(`${op.txn} changed nothing, so there is nothing to undo.`);
-        break;
-      }
-      const abort = run.append({ type: 'abort', txn: op.txn });
-      notes.push(`${op.txn} rolls back: record LSN ${String(abort.lsn)}, then its changes are undone newest first.`);
-      const updates: Extract<LogRecord, { type: 'update' }>[] = [];
-      for (let lsn: number | null = abort.prevLSN; lsn !== null; ) {
-        const r = run.record(lsn)!;
-        if (r.type === 'update') updates.push(r);
-        lsn = r.prevLSN;
-      }
-      for (const u of updates) {
-        if (!run.fetch(u.page)) return refuse(`No-steal: there is no frame to bring page ${String(u.page)} back into.`);
-        const clr = run.append({ type: 'clr', txn: op.txn, page: u.page, key: u.key, after: u.before, undoNextLSN: u.prevLSN });
-        run.machine.apply(u.page, u.key, u.before, clr.lsn, op.txn);
-        notes.push(
-          `Undo LSN ${String(u.lsn)}: ${u.key} goes back to ${cellText(u.before)}, logged as a compensation record (LSN ${String(clr.lsn)}) so that the undo is itself redoable and is never done twice.`,
-        );
-      }
-      run.append({ type: 'end', txn: op.txn });
-      t.status = 'ended';
-      t.outcome = 'rolled-back';
-      run.finish(op.txn, false);
-      reslot(s, updates.map((u) => u.key));
+      const refused = run.abort(t);
+      if (refused !== undefined) return refuse(refused);
       break;
     }
 
@@ -706,3 +760,92 @@ function restart(run: Operation, crashAfter: number | undefined): RecoveryReport
 
 /** What a page's disk copy holds, for a caller that only reads. */
 export const diskPage = (log: EngineLog, page: PageId): PageImage | undefined => log.disk[page];
+
+/** What `BEGIN`, `COMMIT` or `ROLLBACK` did to the log: refused (the log as it was), or done, and what to say of it. */
+export interface ControlOutcome {
+  log: EngineLog;
+  /** The transaction it began or ended. */
+  txn: string;
+  /** The result step's sentence. */
+  label: string;
+  /** After a `ROLLBACK`: the database the log now holds. */
+  database?: Database;
+  error?: { message: string; hint?: string };
+}
+
+/**
+ * `BEGIN`, `COMMIT` or `ROLLBACK` from the SQL box (plan.md §28.5 I3), on a copy of `log`, its steps in `emit`'s trace.
+ * One session: `BEGIN` opens its transaction (no nesting, no savepoints), `COMMIT` and `ROLLBACK` end it as the
+ * dialog's buttons do — the same records, so the four-page model stays the oracle.
+ */
+export function runControl(kind: ControlKind, log: EngineLog, options: EngineOptions, emit: Emit): ControlOutcome {
+  const refuse = (message: string, hint?: string): ControlOutcome => ({
+    log,
+    txn: log.session ?? '',
+    label: '',
+    error: { message, ...(hint === undefined ? {} : { hint }) },
+  });
+  const settings = settingsRefusal(log, options);
+  if (settings) return refuse(settings.message, settings.hint);
+
+  if (kind === 'begin') {
+    if (log.session !== null) {
+      return refuse(
+        `${log.session} is already open, and transactions do not nest: the Playground is one session, with one transaction at a time.`,
+        `COMMIT or ROLLBACK ${log.session} first. Savepoints are not part of this engine.`,
+      );
+    }
+    const run = new Operation(log, options, emit);
+    const name = `T${String(log.counter + 1)}`;
+    run.state.counter += 1;
+    run.machine.begin(name);
+    run.state.session = name;
+    return {
+      log: run.state,
+      txn: name,
+      label: `BEGIN: ${name} starts. Every INSERT, UPDATE and DELETE from here on is ${name}'s — its changes logged as its records, the rows it changes its own — until COMMIT makes them durable or ROLLBACK undoes them. Nothing is logged yet: a transaction's first record is its first change.`,
+    };
+  }
+
+  const verb = kind === 'commit' ? 'commit' : 'roll back';
+  if (log.session === null) {
+    return refuse(
+      `No transaction is open, so there is nothing to ${verb}.`,
+      'Run BEGIN first. A write outside BEGIN is a transaction of its own, left open for Durability to commit or roll back.',
+    );
+  }
+  const run = new Operation(log, options, emit);
+  const t = run.machine.txn(log.session);
+  if (!t || t.status === 'ended') return refuse(`${log.session} is not a running transaction.`);
+  if (kind === 'commit') {
+    run.commit(t);
+    return { log: run.state, txn: t.txn, label: `COMMIT: ${run.machine.notes.join(' ')}` };
+  }
+  const refused = run.abort(t);
+  if (refused !== undefined) return refuse(refused, 'Under no-steal, undo needs a frame for each page it changes back. Free one in Durability, or start the log with steal.');
+  return {
+    log: run.state,
+    txn: t.txn,
+    label: `ROLLBACK: ${run.machine.notes.join(' ')} The rows are as they were before BEGIN.`,
+    database: databaseOfLog(run.state),
+  };
+}
+
+/**
+ * What a logged run needs of the log, handed to `runQuery` with it (`RunHooks.engineLog`) instead of imported by it:
+ * the engine stays as small as it was for every page that never turns the log on, and only the lazy *Durability*
+ * dialog, which opens a log, loads these files.
+ */
+export const engineLogKit = { StatementLog, loggedNote, inSync, isRefusal, control: runControl };
+export type EngineLogKit = typeof engineLogKit;
+
+/** A log and the kit that runs a statement on it: what `runQuery` takes to log a write. */
+export interface LoggedRun {
+  log: EngineLog;
+  kit: EngineLogKit;
+}
+
+/** `log`, ready to hand to `runQuery`. */
+export function loggedRun(log: EngineLog): LoggedRun {
+  return { log, kit: engineLogKit };
+}

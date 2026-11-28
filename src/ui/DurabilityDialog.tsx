@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { applyLogOp, crashImageOf, databaseOfLog, diskDatabase, memoryCells, openEngineLog, walStateOf } from '../engine/recovery/engineLogOps.ts';
-import type { LogOp, LogOpResult } from '../engine/recovery/engineLogOps.ts';
-import { engineLogKit, inSync } from '../engine/recovery/engineLog.ts';
-import type { EngineLog, EngineLogKit } from '../engine/recovery/engineLog.ts';
+import { applyLogOp, crashImageOf, databaseOfLog, diskDatabase, engineLogKit, memoryCells, openEngineLog, walStateOf } from '../engine/recovery/engineLogOps.ts';
+import type { EngineLogKit, LogOp, LogOpResult } from '../engine/recovery/engineLogOps.ts';
+import { inSync } from '../engine/recovery/engineLog.ts';
+import type { EngineLog } from '../engine/recovery/engineLog.ts';
 import { cellText } from '../engine/recovery/wal.ts';
 import type { Cell } from '../engine/recovery/wal.ts';
 import type { Database, EngineOptions } from '../engine/types.ts';
@@ -124,8 +124,10 @@ export function DurabilityDialog({ db, options, durability, onChange, onClose }:
             With the log on, every <code>INSERT</code>, <code>UPDATE</code> and <code>DELETE</code> you run here goes
             through a write-ahead log on the engine&rsquo;s own buffer pool: each row it changes is logged before its page
             changes, and a dirty page goes to disk only after its log records have. Each statement is a transaction of its
-            own, left open; here you commit it or roll it back, and then <strong>crash</strong> — the pool, the log buffer
-            and every open transaction are gone — and <strong>recover</strong> from the disk and the durable log alone.
+            own, left open, unless you type <code>BEGIN</code> first: then every write until <code>COMMIT</code> or{' '}
+            <code>ROLLBACK</code> is one transaction, and <code>ROLLBACK</code> undoes it in the trace. Here you commit or
+            roll back what is open, and then <strong>crash</strong> — the pool, the log buffer and every open transaction
+            are gone — and <strong>recover</strong> from the disk and the durable log alone.
           </p>
 
           {!log && (
@@ -222,16 +224,18 @@ export function DurabilityDialog({ db, options, durability, onChange, onClose }:
                       </tr>
                     </thead>
                     <tbody>
-                      {log.statements.map((s) => {
+                      {log.statements.map((s, i) => {
                         const st = status(s.txn);
+                        // A BEGIN's transaction has several statements; it is decided once, on its newest.
+                        const newest = !log.statements.slice(i + 1).some((later) => later.txn === s.txn);
                         return (
-                          <tr key={s.txn} className={st.startsWith('lost') ? 'text-evict' : 'text-ink'}>
+                          <tr key={i} className={st.startsWith('lost') ? 'text-evict' : 'text-ink'}>
                             <td className="pr-3 font-mono">{s.txn}</td>
                             <td className="max-w-[20rem] break-words pr-3 font-mono">{s.sql}</td>
                             <td className="pr-3 tabular-nums">{s.rows}</td>
-                            <td className="pr-3">{st}</td>
+                            <td className="pr-3">{st === 'open' && log.session === s.txn ? 'open, after BEGIN' : st}</td>
                             <td>
-                              {st === 'open' && !log.crashed && (
+                              {st === 'open' && newest && !log.crashed && (
                                 <span className="flex gap-1">
                                   <button
                                     type="button"

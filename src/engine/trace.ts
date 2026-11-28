@@ -64,6 +64,7 @@ export function countBufferStep(stats: BufferStats, event: BufferBody): BufferSt
     case 'sweep':
     case 'log':
     case 'flush':
+    case 'undo':
       return stats;
   }
 }

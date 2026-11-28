@@ -33,6 +33,16 @@ Work toward **v4** (plan.md §28), on `version/v4`.
   Playground its database. A row keeps its slot and a table grows new pages, so the old log's eight spare slots and
   sixty-row cap are gone. `/tools/wal` and `/tools/recovery` keep their four-page model as the oracle:
   `engineLog.test.ts` runs the same scripts through both and holds that they agree.
+- **Transactions in the Playground** (plan.md §28.5 I3). With the log on, `BEGIN`, `COMMIT` and `ROLLBACK` run in the
+  SQL box. `BEGIN` opens the session's one transaction, `T1`, `T2` and so on. Every write until it ends belongs to
+  it, and a statement inside it sees its own changes. `COMMIT` forces the log through its commit record. `ROLLBACK`
+  undoes the changes newest first, each as a compensation record and a new `undo` step of its trace, and gives the
+  Playground its rows back. A crash in the middle makes the transaction a loser that recovery undoes. A second
+  `BEGIN`, `COMMIT` or `ROLLBACK` with none open, an isolation level, savepoints and `END` are refused, and so are
+  all three while the log is off (`runQuery` used to send every `BEGIN` to Transaction schedules). A new SQLite
+  oracle, `oracle/transactions.test.ts`, runs 1,000 generated scripts on both engines: they must accept the same
+  statements and hold the same table after every step. The four-page model agrees on each new script in
+  `engineLog.test.ts`. The *Durability* button says when a transaction is open.
 
 ### Changed
 

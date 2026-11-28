@@ -430,9 +430,9 @@ index entries of the rows it touches.
 
 ## Transactions
 
-- **`BEGIN`, `COMMIT` and `ROLLBACK` exist only in [Transaction schedules](/tools/schedule)**, not the
-  Playground — they mean nothing to one statement on its own, and the Playground runs one at a time.
-  A schedule is a list of statements, each tagged with the session that runs it, in an order you choose;
+- **Two transactions sharing a table run in [Transaction schedules](/tools/schedule).** The Playground is one
+  session: its `BEGIN`, `COMMIT` and `ROLLBACK` run on the engine's write-ahead log (below), one transaction at a
+  time. A schedule is a list of statements, each tagged with the session that runs it, in an order you choose;
   two sessions, `A` and `B`, share one `accounts` table (up to 40 steps).
 - **With no locking** a statement sees and changes whatever the table holds, another session's
   uncommitted changes included. `ROLLBACK` is real: each transaction keeps an undo log of the rows it
@@ -630,10 +630,23 @@ index entries of the rows it touches.
   first **flushes the log** through that pageLSN and then writes the page; the trace shows both steps. Steal and force
   are the pool's options, chosen when the log is turned on: under no-steal a page with an uncommitted change is pinned
   in its frame until its transaction ends, and a statement that needs a frame when every one is pinned is refused,
-  with the reason. Each statement is a transaction of its own, left open, and the dialog is where you commit it or roll
-  it back, write a page, flush the log, take a checkpoint, **crash** and **recover**. A crash leaves the Playground what
+  with the reason. Each statement is a transaction of its own, left open — unless a `BEGIN` came first (next) — and the
+  dialog is where you commit it or roll it back, write a page, flush the log, take a checkpoint, **crash** and
+  **recover**. A crash leaves the Playground what
   the disk holds; recovery gives it back the database the log rebuilt, and the dialog lists each row that differs
   between the database before the crash, now, and what committed.
+- **`BEGIN`, `COMMIT` and `ROLLBACK` in the SQL box** (plan.md §28.5 I3) run on that log, and are refused, with where
+  they do run, while it is off. `BEGIN` opens the session's transaction, named `T` and a number: every write until it
+  ends is that transaction's, and a statement inside it sees its own changes. `COMMIT` writes its commit record and
+  forces the log through it (and under force writes its pages), as the dialog's *Commit* does. `ROLLBACK` writes an
+  abort record and undoes each change newest first, each as a **compensation record** logged before the page changes
+  back; each undo is a step of the `ROLLBACK`'s trace, through the same pool, so a page no longer in memory is read
+  back in. The rows are then what they were before `BEGIN`. One transaction at a time: a second `BEGIN` is refused,
+  as are `COMMIT` and `ROLLBACK` with none open, an isolation level (there is no other session to isolate it from),
+  savepoints and `END`. A statement that fails inside it changes nothing and leaves it open, as SQLite does. A crash
+  ends it with the rest: if any of its records reached the durable log, recovery finds it a loser and undoes it. The
+  same scripts are run on SQLite (`oracle/transactions.test.ts`, which must accept and refuse the same statements and
+  hold the same table after every step) and on the four-page model of `/tools/wal`, which must keep the same log.
 - **A row keeps its slot for as long as the log runs.** A row is a cell of its page, named by its slot (its *rid*); a
   delete empties the slot rather than sliding the later rows down, so a change touches one cell of one page, as in a
   slotted page. An insert takes the next slot, and a full last page means a new page, so a table grows as far as it
@@ -647,9 +660,9 @@ index entries of the rows it touches.
   transaction that has not ended is its alone, and a second statement that would change it is refused, not made to
   wait; a database that is edited, reloaded or switched is not the one the log holds, and writes are not logged until
   you start the log again from it; and the pool's size and page size are the log's own once it starts, so changing them
-  refuses writes until it is started again. The Playground has no `BEGIN`: one statement is one transaction.
+  refuses writes until it is started again.
 - **Not yet, and not modelled:** concurrent transactions *during* recovery (the machine is down until it finishes);
-  a transaction of more than one statement in the Playground; and any storage but whole-page writes. There are no savepoints.
+  a second Playground session; and any storage but whole-page writes. There are no savepoints.
 
 ## SQL
 
